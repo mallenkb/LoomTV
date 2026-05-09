@@ -2095,11 +2095,43 @@ ipcMain.handle('media:play-mpv', async (_event, filePath: string, startSecs?: nu
 ipcMain.handle('media:query-mpv', async () => {
   const state = await mpvController.getPlaybackState();
   if (!state) return null;
-  return { position: state.position, duration: state.duration };
+  return state;
 });
 
 ipcMain.handle('media:close-mpv', async () => {
   await mpvController.stop();
+});
+
+ipcMain.handle('media:mpv-toggle-pause', async () => {
+  await mpvController.togglePause();
+});
+
+ipcMain.handle('media:mpv-seek', async (_event, seconds: number, mode: 'relative' | 'absolute' = 'relative') => {
+  await mpvController.seek(Number(seconds) || 0, mode);
+});
+
+ipcMain.handle('media:mpv-set-volume', async (_event, value: number) => {
+  await mpvController.setVolume(Number(value) || 0);
+});
+
+ipcMain.handle('media:mpv-toggle-mute', async () => {
+  await mpvController.toggleMute();
+});
+
+ipcMain.handle('media:mpv-set-speed', async (_event, value: number) => {
+  await mpvController.setSpeed(Number(value) || 1);
+});
+
+ipcMain.handle('media:mpv-cycle-audio', async () => {
+  await mpvController.cycleAudio();
+});
+
+ipcMain.handle('media:mpv-cycle-subtitle', async () => {
+  await mpvController.cycleSubtitle();
+});
+
+ipcMain.handle('media:mpv-disable-subtitles', async () => {
+  await mpvController.disableSubtitles();
 });
 
 // ── VideoPlayer uses HTML5 <video> + the HTTP media server directly.

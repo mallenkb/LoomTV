@@ -32,6 +32,9 @@ export interface MpvPlaybackState {
   position: number;
   duration: number;
   paused: boolean;
+  volume: number;
+  muted: boolean;
+  speed: number;
 }
 
 export class MpvController {
@@ -73,6 +76,10 @@ export class MpvController {
     this.proc = spawn(mpvBin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: false,
+    });
+
+    this.proc.once('error', (error) => {
+      console.error('[mpv] spawn error:', error);
     });
 
     this.proc.stdout?.on('data', (chunk: Buffer) => {
@@ -192,10 +199,46 @@ export class MpvController {
         this.getDuration(),
         this.isPaused(),
       ]);
-      return { position, duration, paused };
+      const [volume, muted, speed] = await Promise.all([
+        this.getNumberProperty('volume', 100),
+        this.getBooleanProperty('mute', false),
+        this.getNumberProperty('speed', 1),
+      ]);
+      return { position, duration, paused, volume, muted, speed };
     } catch {
       return null;
     }
+  }
+
+  async setVolume(value: number): Promise<void> {
+    const safeValue = Math.max(0, Math.min(100, value));
+    await this.ipc?.setProperty('volume', safeValue);
+    await this.ipc?.setProperty('mute', safeValue === 0);
+  }
+
+  async toggleMute(): Promise<void> {
+    const muted = await this.getBooleanProperty('mute', false);
+    await this.ipc?.setProperty('mute', !muted);
+  }
+
+  async setSpeed(value: number): Promise<void> {
+    await this.ipc?.setProperty('speed', Math.max(0.25, Math.min(4, value)));
+  }
+
+  async cycleAudio(): Promise<void> {
+    await this.ipc?.command(['cycle', 'audio']);
+  }
+
+  async cycleSubtitle(): Promise<void> {
+    await this.ipc?.command(['cycle', 'sub']);
+  }
+
+  async disableSubtitles(): Promise<void> {
+    await this.ipc?.setProperty('sid', 'no');
+  }
+
+  async setFullscreen(fullscreen: boolean): Promise<void> {
+    await this.ipc?.setProperty('fullscreen', fullscreen);
   }
 
   /**
@@ -223,6 +266,10 @@ export class MpvController {
     this.proc = spawn(mpvBin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+    });
+
+    this.proc.once('error', (error) => {
+      console.error('[mpv-embedded] spawn error:', error);
     });
 
     this.proc.stdout?.on('data', (chunk: Buffer) => {
@@ -318,6 +365,16 @@ export class MpvController {
 
     args.push(filePath);
     return args;
+  }
+
+  private async getNumberProperty(name: string, fallback: number): Promise<number> {
+    const val = await this.ipc?.getProperty(name);
+    return typeof val === 'number' && Number.isFinite(val) ? val : fallback;
+  }
+
+  private async getBooleanProperty(name: string, fallback: boolean): Promise<boolean> {
+    const val = await this.ipc?.getProperty(name);
+    return typeof val === 'boolean' ? val : fallback;
   }
 }
 
