@@ -1,0 +1,59 @@
+export type MediaBackend = 'mpv' | 'html5' | 'hls';
+
+export interface MediaTrack {
+  index: number;
+  type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
+  codec?: string;
+  language?: string;
+  title?: string;
+  channels?: number;
+  width?: number;
+  height?: number;
+  profile?: string;
+  pixelFormat?: string;
+}
+
+export interface ProbeResult {
+  filePath: string;
+  container?: string;
+  durationSeconds?: number;
+  bitrateKbps?: number;
+  videoCodec?: string;
+  audioCodec?: string;
+  resolution?: { width?: number; height?: number };
+  subtitleStreams: MediaTrack[];
+  tracks: MediaTrack[];
+}
+
+export interface ApiResult<T> {
+  ok: boolean;
+  data?: T;
+  error?: string;
+}
+
+export interface PlaybackState {
+  backend: MediaBackend;
+  filePath?: string;
+  state: 'loading' | 'playing' | 'paused' | 'stopped' | 'error';
+  positionSeconds?: number | null;
+  durationSeconds?: number | null;
+  volume?: number | null;
+  error?: string;
+}
+
+export interface TranscodeOptions {
+  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
+  startSeconds?: number;
+  videoTrackIndex?: number;
+  audioTrackIndex?: number;
+  subtitleTrackIndex?: number;
+  subtitleStreamOrdinal?: number;
+  subtitleCodec?: string;
+}
+
+export interface TranscodeSession {
+  sessionId: string;
+  filePath: string;
+  playlistUrl: string;
+  outputDir: string;
+}

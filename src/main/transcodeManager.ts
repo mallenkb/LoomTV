@@ -1,0 +1,330 @@
+import { app } from 'electron';
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import type { ChildProcess } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { findFFmpeg } from './mediaBinaries';
+import { assertLocalMediaPath } from './mediaProbe';
+import type { TranscodeOptions, TranscodeSession } from './mediaTypes';
+
+interface ActiveSession extends TranscodeSession {
+  process: ChildProcess;
+}
+
+const sessions = new Map<string, ActiveSession>();
+const TRANSCODE_READY_TIMEOUT_MS = 15000;
+const TRANSCODE_READY_POLL_MS = 150;
+const encoderSupport = new Map<string, boolean>();
+
+export function transcodeRoot(): string {
+  return path.join(app.getPath('userData'), 'transcodes');
+}
+
+export function cleanupOldTranscodes(): void {
+  try {
+    fs.rmSync(transcodeRoot(), { recursive: true, force: true });
+    fs.mkdirSync(transcodeRoot(), { recursive: true });
+  } catch (error) {
+    console.error('[transcode] cleanup failed:', error);
+  }
+}
+
+function hasEncoder(ffmpegPath: string, encoder: string): boolean {
+  const key = `${ffmpegPath}:${encoder}`;
+  const cached = encoderSupport.get(key);
+  if (typeof cached === 'boolean') return cached;
+
+  try {
+    const output = execFileSync(ffmpegPath, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+    const supported = output.includes(encoder);
+    encoderSupport.set(key, supported);
+    return supported;
+  } catch {
+    encoderSupport.set(key, false);
+    return false;
+  }
+}
+
+function selectedPreset(ffmpegPath: string, options: TranscodeOptions): TranscodeOptions['preset'] {
+  const preset = options.preset || 'auto';
+  if (preset !== 'auto') return preset;
+  if (process.platform === 'darwin' && hasEncoder(ffmpegPath, 'h264_videotoolbox')) return 'videotoolbox';
+  return 'software';
+}
+
+function streamMap(type: 'v' | 'a', selectedIndex?: number, optional = false): string {
+  const suffix = optional ? '?' : '';
+  return typeof selectedIndex === 'number' && selectedIndex >= 0
+    ? `0:${selectedIndex}${suffix}`
+    : `0:${type}:0${suffix}`;
+}
+
+function filterStream(selectedIndex?: number, fallback = '0:v:0'): string {
+  return typeof selectedIndex === 'number' && selectedIndex >= 0 ? `0:${selectedIndex}` : fallback;
+}
+
+function escapeSubtitleFilterPath(filePath: string): string {
+  return filePath
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'");
+}
+
+function isBitmapSubtitle(codec?: string): boolean {
+  const normalized = (codec || '').toLowerCase();
+  return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
+}
+
+function textSubtitleFilter(filePath: string, subtitleOrdinal: number): string {
+  return `subtitles='${escapeSubtitleFilterPath(filePath)}':si=${subtitleOrdinal},format=yuv420p`;
+}
+
+function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions, ffmpegPath: string): string[] {
+  const args: string[] = [];
+  const preset = selectedPreset(ffmpegPath, options);
+  const hasAudio = options.audioTrackIndex !== -1;
+  const hasSubtitle = typeof options.subtitleTrackIndex === 'number' && options.subtitleTrackIndex >= 0;
+  const bitmapSubtitle = hasSubtitle && isBitmapSubtitle(options.subtitleCodec);
+
+  if (typeof options.startSeconds === 'number' && options.startSeconds > 0) {
+    args.push('-ss', String(Math.floor(options.startSeconds)));
+  }
+
+  if (preset === 'nvenc') {
+    args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
+  } else if (preset === 'qsv') {
+    args.push('-hwaccel', 'qsv');
+  }
+
+  args.push('-i', filePath);
+
+  if (bitmapSubtitle) {
+    args.push(
+      '-filter_complex',
+      `[${filterStream(options.videoTrackIndex)}][0:${options.subtitleTrackIndex}]overlay,format=yuv420p[v]`,
+      '-map',
+      '[v]',
+    );
+  } else {
+    args.push('-map', streamMap('v', options.videoTrackIndex));
+  }
+
+  if (hasAudio) {
+    args.push('-map', streamMap('a', options.audioTrackIndex, true));
+  }
+
+  args.push('-sn', '-dn');
+
+  if (hasSubtitle && !bitmapSubtitle) {
+    const subtitleOrdinal = typeof options.subtitleStreamOrdinal === 'number'
+      ? options.subtitleStreamOrdinal
+      : 0;
+    args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal));
+  } else if (!bitmapSubtitle) {
+    args.push('-vf', 'format=yuv420p');
+  }
+
+  if (preset === 'nvenc') {
+    args.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-b:v', '0');
+  } else if (preset === 'qsv') {
+    args.push('-c:v', 'h264_qsv', '-global_quality', '23', '-look_ahead', '0');
+  } else if (preset === 'videotoolbox') {
+    args.push(
+      '-c:v', 'h264_videotoolbox',
+      '-allow_sw', '1',
+      '-realtime', '1',
+      '-b:v', '6500k',
+      '-maxrate', '8500k',
+      '-bufsize', '12000k',
+      '-profile:v', 'main',
+    );
+  } else {
+    args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main');
+  }
+
+  if (hasAudio) {
+    args.push('-c:a', 'aac', '-b:a', '160k', '-ac', '2');
+  } else {
+    args.push('-an');
+  }
+
+  args.push(
+    '-f', 'hls',
+    '-hls_time', '1',
+    '-hls_list_size', '0',
+    '-hls_playlist_type', 'event',
+    '-hls_flags', 'append_list+independent_segments',
+    '-hls_segment_filename', path.join(path.dirname(outputPath), 'segment-%05d.ts'),
+    '-force_key_frames', 'expr:gte(t,n_forced*1)',
+    outputPath,
+  );
+
+  return args;
+}
+
+function waitForPlaylist(playlistPath: string, ffmpegProc: ChildProcess, stderrTail: () => string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
+    const check = () => {
+      if (fs.existsSync(playlistPath) && fs.statSync(playlistPath).size > 0) {
+        resolve();
+        return;
+      }
+
+      if (ffmpegProc.exitCode !== null) {
+        const detail = stderrTail();
+        reject(new Error(detail ? `Transcode process exited before the playlist was ready: ${detail}` : 'Transcode process exited before the playlist was ready.'));
+        return;
+      }
+
+      if (Date.now() - startedAt > TRANSCODE_READY_TIMEOUT_MS) {
+        reject(new Error('Timed out waiting for the transcode playlist.'));
+        return;
+      }
+
+      setTimeout(check, TRANSCODE_READY_POLL_MS);
+    };
+
+    check();
+  });
+}
+
+async function launchTranscode(
+  ffmpeg: string,
+  filePath: string,
+  options: TranscodeOptions,
+  serverBase: string,
+): Promise<TranscodeSession> {
+  const sessionId = randomUUID();
+  const outputDir = path.join(transcodeRoot(), sessionId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const playlistPath = path.join(outputDir, 'index.m3u8');
+  let stderr = '';
+  let ffmpegProc: ChildProcess;
+  try {
+    ffmpegProc = spawn(ffmpeg, hlsArgs(filePath, playlistPath, options, ffmpeg), { stdio: ['ignore', 'ignore', 'pipe'] });
+  } catch (error) {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+    throw new Error(`Unable to start FFmpeg: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  ffmpegProc.once('error', (error) => {
+    stderr = `${stderr}\n${error.message}`.slice(-2400);
+  });
+  ffmpegProc.stderr.on('data', (chunk: Buffer) => {
+    const text = chunk.toString().trim();
+    stderr = `${stderr}\n${text}`.slice(-2400);
+    if (process.env.DEBUG_TRANSCODE) console.debug('[transcode]', text);
+  });
+  ffmpegProc.once('exit', () => sessions.delete(sessionId));
+
+  const session: ActiveSession = {
+    sessionId,
+    filePath,
+    outputDir,
+    playlistUrl: `${serverBase}/hls/${sessionId}/index.m3u8`,
+    process: ffmpegProc,
+  };
+  sessions.set(sessionId, session);
+  try {
+    await waitForPlaylist(playlistPath, ffmpegProc, () => stderr.split('\n').filter(Boolean).slice(-4).join(' '));
+  } catch (error) {
+    if (!ffmpegProc.killed) ffmpegProc.kill('SIGKILL');
+    sessions.delete(sessionId);
+    fs.rmSync(outputDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  return {
+    sessionId,
+    filePath,
+    outputDir,
+    playlistUrl: session.playlistUrl,
+  };
+}
+
+function shouldFallbackTranscode(options: TranscodeOptions): boolean {
+  return options.preset !== 'software'
+    || typeof options.videoTrackIndex === 'number'
+    || typeof options.audioTrackIndex === 'number'
+    || typeof options.subtitleTrackIndex === 'number';
+}
+
+function cleanSoftwareOptions(options: TranscodeOptions, includeAudio: boolean): TranscodeOptions {
+  return {
+    preset: 'software',
+    startSeconds: options.startSeconds,
+    audioTrackIndex: includeAudio ? undefined : -1,
+  };
+}
+
+export async function startTranscode(filePath: string, options: TranscodeOptions, serverBase: string): Promise<TranscodeSession> {
+  assertLocalMediaPath(filePath);
+  const ffmpeg = findFFmpeg();
+  if (!ffmpeg) throw new Error('FFmpeg is not available.');
+
+  let firstError: unknown;
+  try {
+    return await launchTranscode(ffmpeg, filePath, options, serverBase);
+  } catch (error) {
+    firstError = error;
+    if (!shouldFallbackTranscode(options)) throw error;
+  }
+
+  try {
+    return await launchTranscode(ffmpeg, filePath, cleanSoftwareOptions(options, true), serverBase);
+  } catch (error) {
+    try {
+      return await launchTranscode(ffmpeg, filePath, cleanSoftwareOptions(options, false), serverBase);
+    } catch (finalError) {
+      const initialMessage = firstError instanceof Error ? firstError.message : String(firstError);
+      const finalMessage = finalError instanceof Error ? finalError.message : String(finalError);
+      throw new Error(`Unable to start transcoding. Initial error: ${initialMessage}. Final fallback error: ${finalMessage}`);
+    }
+  }
+}
+
+export function stopTranscode(sessionId: string): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  if (!session.process.killed) session.process.kill('SIGKILL');
+  sessions.delete(sessionId);
+  fs.rmSync(session.outputDir, { recursive: true, force: true });
+  return true;
+}
+
+export function stopAllTranscodes(): void {
+  for (const sessionId of [...sessions.keys()]) {
+    stopTranscode(sessionId);
+  }
+}
+
+export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
+  const match = reqUrl.pathname.match(/^\/hls\/([^/]+)\/(.+)$/);
+  if (!match) return false;
+
+  const [, sessionId, relativeFile] = match;
+  const session = sessions.get(sessionId);
+  if (!session) {
+    res.writeHead(404);
+    res.end('HLS session not found');
+    return true;
+  }
+
+  const filePath = path.join(session.outputDir, relativeFile);
+  if (!filePath.startsWith(session.outputDir) || !fs.existsSync(filePath)) {
+    res.writeHead(404);
+    res.end('HLS file not found');
+    return true;
+  }
+
+  const contentType = filePath.endsWith('.m3u8')
+    ? 'application/vnd.apple.mpegurl'
+    : 'video/mp2t';
+  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+}
