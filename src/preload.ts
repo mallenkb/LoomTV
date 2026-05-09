@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
   playWithMPV: (filePath: string, startSecs?: number) => ipcRenderer.invoke('media:play-mpv', filePath, startSecs),
   queryMPV: () => ipcRenderer.invoke('media:query-mpv'),
   closeMPV: () => ipcRenderer.invoke('media:close-mpv'),
+  toggleMPVPause: () => ipcRenderer.invoke('media:mpv-toggle-pause'),
+  seekMPV: (seconds: number, mode: 'relative' | 'absolute' = 'relative') => ipcRenderer.invoke('media:mpv-seek', seconds, mode),
+  setMPVVolume: (value: number) => ipcRenderer.invoke('media:mpv-set-volume', value),
+  toggleMPVMute: () => ipcRenderer.invoke('media:mpv-toggle-mute'),
+  setMPVSpeed: (value: number) => ipcRenderer.invoke('media:mpv-set-speed', value),
+  cycleMPVAudio: () => ipcRenderer.invoke('media:mpv-cycle-audio'),
+  cycleMPVSubtitle: () => ipcRenderer.invoke('media:mpv-cycle-subtitle'),
+  disableMPVSubtitles: () => ipcRenderer.invoke('media:mpv-disable-subtitles'),
   onMPVEvent: (callback: (event: string) => void) => {
     const handler = (_: Electron.IpcRendererEvent, event: string) => callback(event);
     ipcRenderer.on('mpv:event', handler);
@@ -82,8 +90,23 @@ declare global {
         metadataApiKeys?: Record<string, string>;
       }) => Promise<boolean>;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<{ ok?: boolean; error?: string }>;
-      queryMPV: () => Promise<{ position: number | null; duration: number | null } | null>;
+      queryMPV: () => Promise<{
+        position: number;
+        duration: number;
+        paused: boolean;
+        volume: number;
+        muted: boolean;
+        speed: number;
+      } | null>;
       closeMPV: () => Promise<void>;
+      toggleMPVPause: () => Promise<void>;
+      seekMPV: (seconds: number, mode?: 'relative' | 'absolute') => Promise<void>;
+      setMPVVolume: (value: number) => Promise<void>;
+      toggleMPVMute: () => Promise<void>;
+      setMPVSpeed: (value: number) => Promise<void>;
+      cycleMPVAudio: () => Promise<void>;
+      cycleMPVSubtitle: () => Promise<void>;
+      disableMPVSubtitles: () => Promise<void>;
       onMPVEvent: (callback: (event: string) => void) => () => void;
       media: {
         probe: (filePath: string) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
