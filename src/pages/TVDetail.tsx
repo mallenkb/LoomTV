@@ -24,6 +24,7 @@ interface TVDetailProps {
     episodeFiles?: EpisodeFile[],
     currentSeason?: number,
     currentEpisode?: number,
+    mediaId?: string,
   ) => void;
 }
 
@@ -367,7 +368,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const filePath = findEpisodeFile(season, episode);
     if (!filePath) return;
     if (onPlay) {
-      onPlay(filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season, episode);
+      onPlay(filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season, episode, show.id);
     }
   };
 
@@ -422,6 +423,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       show.episodeFiles,
       heroEpisode.season,
       heroEpisode.episode,
+      show.id,
     );
   };
 
@@ -452,6 +454,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       show.episodeFiles,
       seasonNum,
       targetEpisode.episode,
+      show.id,
     );
   };
 
@@ -814,7 +817,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                                 seasonNum={season.number}
                                 progressTick={progressTick}
                                 durationHint={ef.localMetadata?.durationSeconds}
-                                onPlay={() => onPlay && onPlay(ef.filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season.number, ef.episode)}
+                                onPlay={() => onPlay && onPlay(ef.filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season.number, ef.episode, show.id)}
                               />
                             ))
                         )}

@@ -13,6 +13,7 @@ import VideoPlayer from './components/VideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
 
 interface NowPlaying {
+  mediaId?: string;
   filePath: string;
   title: string;
   subtitles?: MediaItem['subtitles'];
@@ -46,8 +47,9 @@ function AppShell() {
     episodeFiles?: EpisodeFile[],
     currentSeason?: number,
     currentEpisode?: number,
+    mediaId?: string,
   ) => {
-    setNowPlaying({ filePath, title, subtitles, episodes, episodeFiles, currentSeason, currentEpisode });
+    setNowPlaying({ mediaId, filePath, title, subtitles, episodes, episodeFiles, currentSeason, currentEpisode });
   }, []);
 
   /** Called when the user picks a different episode from the panel. */
@@ -82,6 +84,7 @@ function AppShell() {
       </main>
       {nowPlaying && (
         <VideoPlayer
+          mediaId={nowPlaying.mediaId}
           filePath={nowPlaying.filePath}
           title={nowPlaying.title}
           subtitles={nowPlaying.subtitles}

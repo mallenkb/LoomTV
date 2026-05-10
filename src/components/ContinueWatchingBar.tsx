@@ -24,6 +24,7 @@ type ContinueCandidate = {
     episodeFiles?: EpisodeFile[],
     currentSeason?: number,
     currentEpisode?: number,
+    mediaId?: string,
   ];
 };
 
@@ -37,6 +38,7 @@ interface ContinueWatchingBarProps {
     episodeFiles?: EpisodeFile[],
     currentSeason?: number,
     currentEpisode?: number,
+    mediaId?: string,
   ) => void;
 }
 
@@ -135,7 +137,7 @@ function findLatestCandidate(
       duration: details.duration,
       fraction: details.fraction,
       updatedAt: details.updatedAt || movie.lastPlayed || 0,
-      onPlayArgs: [movie.filePath, movie.title, movie.subtitles],
+      onPlayArgs: [movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id],
     });
   });
 
@@ -162,6 +164,7 @@ function findLatestCandidate(
           show.episodeFiles,
           episodeFile.season,
           episodeFile.episode,
+          show.id,
         ],
       });
     });

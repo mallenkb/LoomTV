@@ -36,6 +36,7 @@ import {
 
 const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
 const SUBTITLE_STYLE_KEY = 'subtitleStyleSettings';
+const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
 const WATCHED_THRESHOLD = 0.9;
 const CONTROLS_HIDE_MS = 3000;
 const REPLAY_FROM_START_REMAINING_SECONDS = 8;
@@ -51,6 +52,7 @@ type ControlTab = 'video' | 'audio' | 'subtitles';
 type SubtitleStyleTarget = 'primary' | 'secondary';
 type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
 type PlaybackEngine = 'mpv' | 'html5';
+type TrackPreferenceType = 'audio' | 'subtitle';
 
 type SubtitleStyleSettings = {
   delaySeconds: number;
@@ -77,6 +79,18 @@ interface MediaTrack {
 }
 
 type ProbeData = { durationSeconds?: number; tracks?: MediaTrack[] };
+type TrackPreference = {
+  enabled: boolean;
+  index?: number;
+  language?: string;
+  title?: string;
+  codec?: string;
+};
+
+type PlaybackTrackPreferences = {
+  audio?: TrackPreference;
+  subtitle?: TrackPreference;
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +114,7 @@ interface EpisodeFile {
 }
 
 export interface VideoPlayerProps {
+  mediaId?: string;
   filePath: string;
   title: string;
   subtitles?: { lang: string; label: string; url: string }[];
@@ -204,6 +219,79 @@ function externalSubtitleOrdinal(tracks: MediaTrack[], streamIndex: number): num
 
 function firstTrackIndex(tracks: MediaTrack[], type: MediaTrack['type']): number {
   return tracks.find((track) => track.type === type)?.index ?? -1;
+}
+
+function normalizeTrackField(value?: string): string {
+  return (value || '').trim().toLowerCase();
+}
+
+function trackPreferenceScope(mediaId: string | undefined, filePath: string): string {
+  return mediaId ? `media:${mediaId}` : `file:${filePath}`;
+}
+
+function loadTrackPreferences(scope: string): PlaybackTrackPreferences {
+  try {
+    const all = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) || '{}') as Record<string, PlaybackTrackPreferences>;
+    return all[scope] || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTrackPreference(scope: string, type: TrackPreferenceType, track: MediaTrack | undefined, enabled: boolean): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) || '{}') as Record<string, PlaybackTrackPreferences>;
+    all[scope] = {
+      ...(all[scope] || {}),
+      [type]: {
+        enabled,
+        index: track?.index,
+        language: normalizeTrackField(track?.language),
+        title: normalizeTrackField(track?.title),
+        codec: normalizeTrackField(track?.codec),
+      },
+    };
+    localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify(all));
+  } catch (_error) {
+    // Track selection still applies for the current session.
+  }
+}
+
+function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceType, preference?: TrackPreference): number | null {
+  if (!preference) return null;
+  if (!preference.enabled) return -1;
+
+  const candidates = tracks.filter((track) => track.type === type);
+  if (candidates.length === 0) return null;
+
+  const language = normalizeTrackField(preference.language);
+  const title = normalizeTrackField(preference.title);
+  const codec = normalizeTrackField(preference.codec);
+
+  const exact = candidates.find((track) =>
+    language && normalizeTrackField(track.language) === language
+    && normalizeTrackField(track.title) === title
+    && normalizeTrackField(track.codec) === codec,
+  );
+  if (exact) return exact.index;
+
+  const languageAndTitle = candidates.find((track) =>
+    language && normalizeTrackField(track.language) === language
+    && title && normalizeTrackField(track.title) === title,
+  );
+  if (languageAndTitle) return languageAndTitle.index;
+
+  const languageMatch = candidates.find((track) =>
+    language && normalizeTrackField(track.language) === language,
+  );
+  if (languageMatch) return languageMatch.index;
+
+  const titleMatch = candidates.find((track) =>
+    title && normalizeTrackField(track.title) === title,
+  );
+  if (titleMatch) return titleMatch.index;
+
+  return candidates.find((track) => track.index === preference.index)?.index ?? null;
 }
 
 function subtitleSource(url: string, serverBase: string): string {
@@ -342,6 +430,7 @@ function transcodeErrorMessage(error: unknown): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function VideoPlayer({
+  mediaId,
   filePath,
   title,
   subtitles = EMPTY_SUBTITLES,
@@ -403,6 +492,7 @@ export default function VideoPlayer({
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [tick, setTick] = useState(0); // force episode list re-render
+  const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
 
   useEffect(() => {
     void hydrateProgressFromDatabase().then(() => setTick((value) => value + 1));
@@ -509,22 +599,27 @@ export default function VideoPlayer({
   const applyProbeData = useCallback((data: unknown) => {
     const nextDuration = probeDurationSeconds(data);
     const nextTracks = [...probeTracks(data), ...externalSubtitleTracks];
+    const preferences = loadTrackPreferences(trackPreferenceScopeKey);
     const firstVideo = firstTrackIndex(nextTracks, 'video');
-    const firstAudio = firstTrackIndex(nextTracks, 'audio');
-    const firstSubtitle = subtitlesDefaultEnabledRef.current ? firstTrackIndex(nextTracks, 'subtitle') : -1;
+    const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
+    const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
+    const firstAudio = preferredAudio ?? firstTrackIndex(nextTracks, 'audio');
+    const firstSubtitle = preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstTrackIndex(nextTracks, 'subtitle') : -1);
 
     probedDurationRef.current = nextDuration;
     probeTracksRef.current = nextTracks;
     selectedVideoTrackIndexRef.current = firstVideo >= 0 ? firstVideo : undefined;
     selectedAudioTrackIndexRef.current = firstAudio >= 0 ? firstAudio : undefined;
     selectedSubtitleTrackIndexRef.current = firstSubtitle;
+    subtitlesDefaultEnabledRef.current = firstSubtitle >= 0;
 
     if (nextDuration > 0) setDuration(nextDuration);
     setMediaTracks(nextTracks);
     setSelectedVideoTrackIndex(firstVideo);
     setSelectedAudioTrackIndex(firstAudio);
     setSelectedSubtitleTrackIndex(firstSubtitle);
-  }, [externalSubtitleTracks]);
+    setSubtitlesDefaultEnabled(firstSubtitle >= 0);
+  }, [externalSubtitleTracks, trackPreferenceScopeKey]);
 
   // ─── Episode navigation ────────────────────────────────────────────────────
 
@@ -1235,6 +1330,8 @@ export default function VideoPlayer({
   }, [playbackEngine, restartForTrackChange]);
 
   const selectAudioTrack = useCallback((trackIndex: number) => {
+    const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'audio');
+    saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
     if (playbackEngine === 'mpv') {
@@ -1242,10 +1339,12 @@ export default function VideoPlayer({
       return;
     }
     restartForTrackChange();
-  }, [playbackEngine, restartForTrackChange]);
+  }, [playbackEngine, restartForTrackChange, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
     const enabled = trackIndex >= 0;
+    const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'subtitle');
+    saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
     subtitlesDefaultEnabledRef.current = enabled;
     setSubtitlesDefaultEnabled(enabled);
     saveSubtitlesDefaultEnabled(enabled);
@@ -1260,7 +1359,7 @@ export default function VideoPlayer({
       return;
     }
     restartForTrackChange();
-  }, [applyNativeTextTrackVisibility, playbackEngine, restartForTrackChange]);
+  }, [applyNativeTextTrackVisibility, playbackEngine, restartForTrackChange, trackPreferenceScopeKey]);
 
   const changeVolume = useCallback((delta: number) => {
     const currentVolume = playbackEngine === 'mpv'

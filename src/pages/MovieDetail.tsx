@@ -15,7 +15,7 @@ import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
 import { loadCustomArtwork, saveCustomArtwork } from '@/lib/customArtwork';
 
 interface MovieDetailProps {
-  onPlay?: (filePath: string, title: string, subtitles?: MediaItem['subtitles']) => void;
+  onPlay?: (filePath: string, title: string, subtitles?: MediaItem['subtitles'], episodes?: undefined, episodeFiles?: undefined, currentSeason?: undefined, currentEpisode?: undefined, mediaId?: string) => void;
 }
 
 type ArtworkTarget = 'cover' | 'poster';
@@ -364,7 +364,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
   const handlePlay = async () => {
     if (onPlay) {
-      onPlay(movie.filePath, movie.title, movie.subtitles);
+      onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id);
     }
   };
 
