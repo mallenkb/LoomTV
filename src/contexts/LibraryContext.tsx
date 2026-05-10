@@ -218,23 +218,20 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const fullRescanLibrary = () => runLibraryScan('full');
 
   const addLibraryFolder = async (kind: LibraryFolderKind = 'movies') => {
-    dispatch({ type: 'SET_SCANNING', payload: true });
     try {
       const data = await desktopApi.addLibraryFolder(kind);
       if (data) applyLibraryData(data);
-      else await refreshLibrary();
     } catch (error) {
       console.error('Failed to add library folder:', error);
     } finally {
-      dispatch({ type: 'SET_SCANNING', payload: false });
       dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
   const removeLibraryFolder = async (folder: string) => {
     try {
-      await desktopApi.removeLibraryFolder(folder);
-      await refreshLibrary();
+      const data = await desktopApi.removeLibraryFolder(folder);
+      applyLibraryData(data);
     } catch (error) {
       console.error('Failed to remove library folder:', error);
     }
