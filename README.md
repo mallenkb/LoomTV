@@ -4,6 +4,8 @@ LoomTV is a desktop media library app for browsing and playing a local collectio
 
 This project is for organizing and playing media files that you own, have created, or are otherwise authorized to use. LoomTV does not provide movies, TV shows, anime, streaming subscriptions, or copyrighted media.
 
+![LoomTV empty library home screen](docs/screenshots/loomtv-home-empty-library.svg)
+
 ## Features
 
 - Browse separate Movies, TV Shows, and Anime libraries.
@@ -23,6 +25,10 @@ Prebuilt desktop releases, when available, are published from the repository rel
 https://github.com/mallenkb/LoomTV/releases
 
 Download the installer or archive for your operating system, then run it like any other desktop app. If no release is available for your platform, build the app locally from source using the instructions below.
+
+## Release Notes
+
+- [LoomTV 1.0.5](docs/releases/v1.0.5.md): fixes installed-app library add and sync stalls by keeping library payloads lightweight and moving artwork caching out of the blocking scan path.
 
 ## Tech Stack
 
