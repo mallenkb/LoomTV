@@ -1,8 +1,13 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { Play } from 'lucide-react';
 import { useLibrary, TVShow } from '@/contexts/LibraryContext';
 import { Skeleton } from '@/components/ui/skeleton';
+import { desktopApi } from '@/lib/desktopApi';
+import LibrarySearch from '@/components/LibrarySearch';
+import { matchesMediaItem, searchQuery } from '@/lib/search';
+import SafeArtwork from '@/components/SafeArtwork';
+import { posterSources, routeArtworkState } from '@/lib/artwork';
 
 interface TVShowsProps {
   kind?: 'series' | 'anime';
@@ -14,42 +19,81 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const tvShows = kind === 'anime' ? state.animeShows : state.tvShows;
   const title = kind === 'anime' ? 'Anime' : 'TV Shows';
   const emptyLabel = kind === 'anime' ? 'No anime found' : 'No TV shows found';
+  const location = useLocation();
+  const currentRoute = `${location.pathname}${location.search}`;
+  const [query, setQuery] = useState('');
+  const normalizedQuery = searchQuery(query);
+  const filteredShows = tvShows.filter((item) => matchesMediaItem(item, normalizedQuery));
 
   return (
-    <div className="h-full overflow-y-auto bg-[#1a1a1a] p-6">
-      <h2 className="text-2xl font-bold text-white mb-6">{title}</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        {isLoading
-          ? Array.from({ length: 12 }).map((_, i) => (
-              <Skeleton key={i} className="h-[330px] w-[220px] rounded-lg" />
-            ))
-          : tvShows.map((item) => (
-              <TVShowCard key={item.id} show={item} />
-            ))}
-      </div>
-      {tvShows.length === 0 && !isLoading && (
-        <div className="text-center py-12">
-          <p className="text-[#a8a8a8] mb-4">{emptyLabel}</p>
-          <Link to="/settings" className="text-[#eba865] hover:underline">
-            Add a library folder in Settings
-          </Link>
+    <div className="h-full overflow-y-auto bg-[#1a1a1a]">
+      <LibrarySearch value={query} onChange={setQuery} placeholder={`Search ${title}`} />
+      <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
+        <h2 className="text-2xl font-bold text-white mb-6">{title}</h2>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
+          {isLoading
+            ? Array.from({ length: 12 }).map((_, i) => (
+                <Skeleton key={i} className="h-[300px] w-full max-w-[200px] rounded-lg" />
+              ))
+            : filteredShows.map((item) => (
+                <TVShowCard key={item.id} show={item} from={currentRoute} />
+              ))}
         </div>
-      )}
+        {tvShows.length === 0 && !isLoading && (
+          <div className="text-center py-12">
+            <p className="text-[#a8a8a8] mb-4">{emptyLabel}</p>
+            <Link to="/settings" className="text-[#eba865] hover:underline">
+              Add a library folder in Settings
+            </Link>
+          </div>
+        )}
+        {tvShows.length > 0 && filteredShows.length === 0 && !isLoading && (
+          <div className="py-12 text-center text-[#a8a8a8]">No local matches found</div>
+        )}
+      </div>
     </div>
   );
 }
 
-function TVShowCard({ show }: { show: TVShow }) {
+function TVShowCard({ show, from }: { show: TVShow; from: string }) {
   const routeBase = show.type === 'anime' ? '/anime' : '/tv';
+  const [fallbackThumbnail, setFallbackThumbnail] = useState('');
+  const fallbackFilePath = show.episodeFiles
+    ?.slice()
+    .sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
+  const imageSources = posterSources(show, undefined, fallbackThumbnail ? [fallbackThumbnail] : []);
+
+  useEffect(() => {
+    setFallbackThumbnail('');
+    if (!fallbackFilePath) return;
+
+    let isMounted = true;
+    void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
+      .then(({ url }) => {
+        if (isMounted) setFallbackThumbnail(url);
+      })
+      .catch(() => {
+        if (isMounted) setFallbackThumbnail('');
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fallbackFilePath]);
+
   return (
-    <Link to={`${routeBase}/${show.id}`} className="group">
+    <Link
+      to={`${routeBase}/${show.id}`}
+      state={{ from, artwork: routeArtworkState(show, imageSources) }}
+      className="group block w-full max-w-[200px]"
+    >
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden">
-        {show.poster ? (
-          <img
-            src={show.poster}
+        {imageSources.length > 0 ? (
+          <SafeArtwork
+            src={imageSources}
             alt={show.title}
-            className="w-full h-full object-cover transition-transform group-hover:scale-105"
-            loading="lazy"
+            className="h-full w-full transition-transform group-hover:scale-105"
+            imgClassName="object-cover"
           />
         ) : (
           <div className="w-full h-full bg-[#232323] flex flex-col items-center justify-center gap-2 p-3">

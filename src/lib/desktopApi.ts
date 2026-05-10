@@ -1,14 +1,43 @@
-type LibraryPayload = { movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[] };
+type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
+type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[] };
+type LibraryPayload = {
+  movies: any[];
+  tvShows: any[];
+  animeShows?: any[];
+  libraryFolders: string[];
+  libraryFolderGroups?: LibraryFolderGroups;
+};
 type MetadataApiKeys = Record<string, string>;
 type SettingsPayload = {
   omdbApiKey?: string;
   tmdbApiKey?: string;
   metadataApiKeys?: MetadataApiKeys;
+  autoSyncIntervalHours?: number;
+  sidebarNavOrder?: string[];
 };
 type FFmpegStatus = { available: boolean; path: string | null };
 type MPVPlayResult = { ok?: boolean; error?: string };
-type MPVStatus = { position: number | null; duration: number | null };
+type MPVStatus = {
+  position: number | null;
+  duration: number | null;
+  paused?: boolean;
+  volume?: number;
+  muted?: boolean;
+  speed?: number;
+};
+type MPVTrackType = 'video' | 'audio' | 'sub';
+type MPVAspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
 type ApiResult<T> = { ok: boolean; data?: T; error?: string };
+type SubtitleStyleOptions = {
+  delaySeconds?: number;
+  position?: number;
+  scale?: number;
+  fontSize?: number;
+  fontColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
+  backgroundColor?: string;
+};
 type PlaybackState = {
   backend: 'mpv' | 'html5' | 'hls';
   filePath?: string;
@@ -26,27 +55,50 @@ type TranscodeOptions = {
   subtitleTrackIndex?: number;
   subtitleStreamOrdinal?: number;
   subtitleCodec?: string;
+  subtitleStyle?: SubtitleStyleOptions;
+  forceTranscode?: boolean;
 };
 type TranscodeSession = { sessionId: string; filePath: string; playlistUrl: string; outputDir: string };
+type StreamUrlOptions = Pick<TranscodeOptions,
+  'startSeconds' | 'videoTrackIndex' | 'audioTrackIndex' | 'subtitleTrackIndex' | 'subtitleStreamOrdinal' | 'subtitleCodec' | 'forceTranscode'
+> & { subtitleStyle?: SubtitleStyleOptions };
+type StreamUrlResult = { url: string; contentType: string; fileName: string; isTranscoded?: boolean };
+export type StoredProgress = { position: number; duration: number; updatedAt: number; watched: boolean };
 
 declare global {
   interface Window {
     desktopApi?: {
       getLibrary: () => Promise<LibraryPayload>;
-      scanLibrary: () => Promise<LibraryPayload>;
-      addLibraryFolder: () => Promise<LibraryPayload | null>;
+      scanLibrary: (options?: { force?: boolean }) => Promise<LibraryPayload>;
+      addLibraryFolder: (kind?: LibraryFolderKind) => Promise<LibraryPayload | null>;
       removeLibraryFolder: (folderPath: string) => Promise<LibraryPayload>;
       playMedia: (filePath: string) => Promise<boolean>;
-      getStreamUrl: (filePath: string) => Promise<{ url: string; contentType: string; fileName: string }>;
+      getStreamUrl: (filePath: string, options?: StreamUrlOptions) => Promise<StreamUrlResult>;
       getThumbnail: (filePath: string, time?: string) => Promise<{ url: string }>;
       getFileInfo: (filePath: string) => Promise<{ size: number; path: string; exists: boolean }>;
       getServerBase: () => Promise<string>;
       checkFFmpeg: () => Promise<FFmpegStatus>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
+      getProgress?: (filePath?: string) => Promise<Record<string, StoredProgress> | StoredProgress | null>;
+      saveProgress?: (filePath: string, position: number, duration: number) => Promise<StoredProgress>;
+      importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
+      getCustomArtwork?: (mediaId: string) => Promise<Record<string, string>>;
+      saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
+      importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
+      backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<MPVPlayResult>;
       queryMPV: () => Promise<MPVStatus | null>;
       closeMPV: () => Promise<void>;
+      toggleMPVPause?: () => Promise<void>;
+      seekMPV?: (seconds: number, mode?: 'relative' | 'absolute') => Promise<void>;
+      setMPVVolume?: (value: number) => Promise<void>;
+      toggleMPVMute?: () => Promise<void>;
+      setMPVSpeed?: (value: number) => Promise<void>;
+      setMPVFullscreen?: (fullscreen: boolean) => Promise<void>;
+      setMPVAspectMode?: (mode: MPVAspectMode) => Promise<void>;
+      selectMPVTrack?: (type: MPVTrackType, ffIndex: number) => Promise<void>;
+      setMPVSubtitleStyle?: (style: SubtitleStyleOptions) => Promise<void>;
       onMPVEvent: (callback: (event: string) => void) => () => void;
       media?: {
         probe: (filePath: string) => Promise<ApiResult<unknown>>;
@@ -109,9 +161,9 @@ export const desktopApi = {
     return fetchJson<LibraryPayload>('/api/library');
   },
 
-  async getStreamUrl(filePath: string): Promise<{ url: string; contentType: string; fileName: string }> {
+  async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {
     if (window.desktopApi) {
-      return window.desktopApi.getStreamUrl(filePath);
+      return window.desktopApi.getStreamUrl(filePath, options);
     }
     const base = await discoverServerBase();
     const ext = filePath.split('.').pop()?.toLowerCase() || '';
@@ -119,10 +171,20 @@ export const desktopApi = {
       mp4: 'video/mp4', webm: 'video/webm', mov: 'video/mp4', m4v: 'video/mp4',
       mkv: 'video/mp4', avi: 'video/mp4', wmv: 'video/mp4',
     };
+    const params = new URLSearchParams({ path: filePath });
+    if (options.startSeconds && options.startSeconds > 0) params.set('t', String(Math.floor(options.startSeconds)));
+    if (typeof options.videoTrackIndex === 'number') params.set('video', String(options.videoTrackIndex));
+    if (typeof options.audioTrackIndex === 'number') params.set('audio', String(options.audioTrackIndex));
+    if (typeof options.subtitleTrackIndex === 'number') params.set('subtitle', String(options.subtitleTrackIndex));
+    if (typeof options.subtitleStreamOrdinal === 'number') params.set('subtitleOrdinal', String(options.subtitleStreamOrdinal));
+    if (options.subtitleCodec) params.set('subtitleCodec', options.subtitleCodec);
+    if (options.subtitleStyle) params.set('subtitleStyle', JSON.stringify(options.subtitleStyle));
+    if (options.forceTranscode) params.set('forceTranscode', '1');
     return {
-      url: `${base}/stream?path=${encodeURIComponent(filePath)}`,
+      url: `${base}/stream?${params.toString()}`,
       contentType: contentTypeMap[ext] || 'video/mp4',
       fileName: filePath.split('/').pop() || '',
+      isTranscoded: options.forceTranscode || ['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts'].includes(ext),
     };
   },
 
@@ -138,14 +200,20 @@ export const desktopApi = {
     return { url };
   },
 
-  async scanLibrary(): Promise<LibraryPayload> {
-    if (window.desktopApi) return window.desktopApi.scanLibrary();
-    return fetchJson<LibraryPayload>('/api/library/scan', { method: 'POST' });
+  async scanLibrary(force = false): Promise<LibraryPayload> {
+    if (window.desktopApi) return window.desktopApi.scanLibrary({ force });
+    return fetchJson<LibraryPayload>('/api/library/scan', {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    });
   },
 
-  async addLibraryFolder(): Promise<LibraryPayload | null> {
-    if (window.desktopApi) return window.desktopApi.addLibraryFolder();
-    return fetchJson<LibraryPayload | null>('/api/library/add-folder', { method: 'POST' });
+  async addLibraryFolder(kind: LibraryFolderKind = 'movies'): Promise<LibraryPayload | null> {
+    if (window.desktopApi) return window.desktopApi.addLibraryFolder(kind);
+    return fetchJson<LibraryPayload | null>('/api/library/add-folder', {
+      method: 'POST',
+      body: JSON.stringify({ kind }),
+    });
   },
 
   async removeLibraryFolder(folderPath: string): Promise<LibraryPayload> {
@@ -185,6 +253,56 @@ export const desktopApi = {
     return response.ok;
   },
 
+  async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
+    if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
+    const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
+    return fetchJson<Record<string, StoredProgress> | StoredProgress | null>(`/api/progress${query}`);
+  },
+
+  async saveProgress(filePath: string, position: number, duration: number): Promise<StoredProgress> {
+    if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration);
+    return fetchJson<StoredProgress>('/api/progress', {
+      method: 'POST',
+      body: JSON.stringify({ filePath, position, duration }),
+    });
+  },
+
+  async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>): Promise<boolean> {
+    if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress);
+    const response = await fetchJson<{ ok: boolean }>('/api/progress/import', {
+      method: 'POST',
+      body: JSON.stringify({ progress }),
+    });
+    return response.ok;
+  },
+
+  async getCustomArtwork(mediaId: string): Promise<Record<string, string>> {
+    if (window.desktopApi?.getCustomArtwork) return window.desktopApi.getCustomArtwork(mediaId);
+    return fetchJson<Record<string, string>>(`/api/artwork?mediaId=${encodeURIComponent(mediaId)}`);
+  },
+
+  async saveCustomArtwork(mediaId: string, target: string, dataUrl: string): Promise<Record<string, string>> {
+    if (window.desktopApi?.saveCustomArtwork) return window.desktopApi.saveCustomArtwork(mediaId, target, dataUrl);
+    return fetchJson<Record<string, string>>('/api/artwork', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId, target, dataUrl }),
+    });
+  },
+
+  async importCustomArtwork(entries: Record<string, Record<string, string>>): Promise<boolean> {
+    if (window.desktopApi?.importCustomArtwork) return window.desktopApi.importCustomArtwork(entries);
+    const response = await fetchJson<{ ok: boolean }>('/api/artwork/import', {
+      method: 'POST',
+      body: JSON.stringify({ entries }),
+    });
+    return response.ok;
+  },
+
+  async backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
+    if (window.desktopApi?.backupDatabase) return window.desktopApi.backupDatabase();
+    return fetchJson<{ ok: boolean; path?: string; error?: string }>('/api/database/backup', { method: 'POST' });
+  },
+
   async playMedia(filePath: string): Promise<boolean> {
     if (window.desktopApi) return window.desktopApi.playMedia(filePath);
     const response = await fetchJson<{ ok: boolean }>('/api/play-media', {
@@ -206,6 +324,42 @@ export const desktopApi = {
 
   async closeMPV(): Promise<void> {
     if (window.desktopApi) return window.desktopApi.closeMPV();
+  },
+
+  async toggleMPVPause(): Promise<void> {
+    if (window.desktopApi?.toggleMPVPause) return window.desktopApi.toggleMPVPause();
+  },
+
+  async seekMPV(seconds: number, mode: 'relative' | 'absolute' = 'relative'): Promise<void> {
+    if (window.desktopApi?.seekMPV) return window.desktopApi.seekMPV(seconds, mode);
+  },
+
+  async setMPVVolume(value: number): Promise<void> {
+    if (window.desktopApi?.setMPVVolume) return window.desktopApi.setMPVVolume(value);
+  },
+
+  async toggleMPVMute(): Promise<void> {
+    if (window.desktopApi?.toggleMPVMute) return window.desktopApi.toggleMPVMute();
+  },
+
+  async setMPVSpeed(value: number): Promise<void> {
+    if (window.desktopApi?.setMPVSpeed) return window.desktopApi.setMPVSpeed(value);
+  },
+
+  async setMPVFullscreen(fullscreen: boolean): Promise<void> {
+    if (window.desktopApi?.setMPVFullscreen) return window.desktopApi.setMPVFullscreen(fullscreen);
+  },
+
+  async setMPVAspectMode(mode: MPVAspectMode): Promise<void> {
+    if (window.desktopApi?.setMPVAspectMode) return window.desktopApi.setMPVAspectMode(mode);
+  },
+
+  async selectMPVTrack(type: MPVTrackType, ffIndex: number): Promise<void> {
+    if (window.desktopApi?.selectMPVTrack) return window.desktopApi.selectMPVTrack(type, ffIndex);
+  },
+
+  async setMPVSubtitleStyle(style: SubtitleStyleOptions): Promise<void> {
+    if (window.desktopApi?.setMPVSubtitleStyle) return window.desktopApi.setMPVSubtitleStyle(style);
   },
 
   onMPVEvent(callback: (event: string) => void): () => void {

@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode } from 'react';
 import { desktopApi } from '@/lib/desktopApi';
+import { migrateLegacyArtwork } from '@/lib/customArtwork';
+import { hydrateProgressFromDatabase } from '@/lib/progress';
 
 export interface MediaItem {
   id: string;
@@ -8,6 +10,8 @@ export interface MediaItem {
   year: number;
   poster: string;
   backdrop: string;
+  posterCandidates?: string[];
+  backdropCandidates?: string[];
   summary: string;
   rating: number;
   genres: string[];
@@ -56,14 +60,24 @@ export interface TVShow extends MediaItem {
   episodeFiles?: EpisodeFile[];
 }
 
+export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
+
+export interface LibraryFolderGroups {
+  movies: string[];
+  tvShows: string[];
+  anime: string[];
+}
+
 export interface LibraryState {
   movies: MediaItem[];
   tvShows: TVShow[];
   animeShows: TVShow[];
   libraryFolders: string[];
+  libraryFolderGroups: LibraryFolderGroups;
   isScanning: boolean;
   scanProgress: number;
   isLoading: boolean;
+  autoSyncIntervalHours: number;
 }
 
 type LibraryAction =
@@ -71,18 +85,22 @@ type LibraryAction =
   | { type: 'SET_TV_SHOWS'; payload: TVShow[] }
   | { type: 'SET_ANIME_SHOWS'; payload: TVShow[] }
   | { type: 'SET_LIBRARY_FOLDERS'; payload: string[] }
+  | { type: 'SET_LIBRARY_FOLDER_GROUPS'; payload: LibraryFolderGroups }
   | { type: 'SET_SCANNING'; payload: boolean }
   | { type: 'SET_SCAN_PROGRESS'; payload: number }
-  | { type: 'SET_LOADING'; payload: boolean };
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_AUTO_SYNC_INTERVAL_HOURS'; payload: number };
 
 const initialState: LibraryState = {
   movies: [],
   tvShows: [],
   animeShows: [],
   libraryFolders: [],
+  libraryFolderGroups: { movies: [], tvShows: [], anime: [] },
   isScanning: false,
   scanProgress: 0,
   isLoading: true,
+  autoSyncIntervalHours: 12,
 };
 
 function libraryReducer(state: LibraryState, action: LibraryAction): LibraryState {
@@ -95,12 +113,16 @@ function libraryReducer(state: LibraryState, action: LibraryAction): LibraryStat
       return { ...state, animeShows: action.payload };
     case 'SET_LIBRARY_FOLDERS':
       return { ...state, libraryFolders: action.payload };
+    case 'SET_LIBRARY_FOLDER_GROUPS':
+      return { ...state, libraryFolderGroups: action.payload };
     case 'SET_SCANNING':
       return { ...state, isScanning: action.payload };
     case 'SET_SCAN_PROGRESS':
       return { ...state, scanProgress: action.payload };
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
+    case 'SET_AUTO_SYNC_INTERVAL_HOURS':
+      return { ...state, autoSyncIntervalHours: action.payload };
     default:
       return state;
   }
@@ -110,23 +132,54 @@ interface LibraryContextType {
   state: LibraryState;
   dispatch: React.Dispatch<LibraryAction>;
   scanLibrary: () => Promise<void>;
-  addLibraryFolder: () => Promise<void>;
+  addLibraryFolder: (kind?: LibraryFolderKind) => Promise<void>;
   removeLibraryFolder: (folder: string) => Promise<void>;
   refreshLibrary: () => Promise<void>;
+  setAutoSyncIntervalHours: (hours: number) => Promise<void>;
 }
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
 
+const emptyFolderGroups: LibraryFolderGroups = { movies: [], tvShows: [], anime: [] };
+
+function hasConfiguredFolders(data: {
+  libraryFolders?: string[];
+  libraryFolderGroups?: Partial<LibraryFolderGroups>;
+}): boolean {
+  return Boolean(
+    data.libraryFolders?.length
+    || data.libraryFolderGroups?.movies?.length
+    || data.libraryFolderGroups?.tvShows?.length
+    || data.libraryFolderGroups?.anime?.length,
+  );
+}
+
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(libraryReducer, initialState);
+  const isScanningRef = useRef(false);
+  const hasConfiguredFoldersRef = useRef(false);
+
+  const applyLibraryData = (data: {
+    movies?: MediaItem[];
+    tvShows?: TVShow[];
+    animeShows?: TVShow[];
+    libraryFolders?: string[];
+    libraryFolderGroups?: LibraryFolderGroups;
+  }) => {
+    dispatch({ type: 'SET_MOVIES', payload: data.movies || [] });
+    dispatch({ type: 'SET_TV_SHOWS', payload: data.tvShows || [] });
+    dispatch({ type: 'SET_ANIME_SHOWS', payload: data.animeShows || [] });
+    dispatch({ type: 'SET_LIBRARY_FOLDERS', payload: data.libraryFolders || [] });
+    dispatch({
+      type: 'SET_LIBRARY_FOLDER_GROUPS',
+      payload: data.libraryFolderGroups || emptyFolderGroups,
+    });
+  };
 
   const refreshLibrary = async () => {
     try {
       const data = await desktopApi.getLibrary();
-      dispatch({ type: 'SET_MOVIES', payload: data.movies || [] });
-      dispatch({ type: 'SET_TV_SHOWS', payload: data.tvShows || [] });
-      dispatch({ type: 'SET_ANIME_SHOWS', payload: data.animeShows || [] });
-      dispatch({ type: 'SET_LIBRARY_FOLDERS', payload: data.libraryFolders || [] });
+      applyLibraryData(data);
     } catch (error) {
       console.error('Failed to load library:', error);
     } finally {
@@ -135,24 +188,31 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   };
 
   const scanLibrary = async () => {
+    if (isScanningRef.current) return;
     dispatch({ type: 'SET_SCANNING', payload: true });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
-      await desktopApi.scanLibrary();
+      const data = await desktopApi.scanLibrary(true);
+      applyLibraryData(data);
     } catch (error) {
       console.error('Failed to scan library:', error);
     } finally {
       dispatch({ type: 'SET_SCANNING', payload: false });
-      await refreshLibrary();
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
-  const addLibraryFolder = async () => {
+  const addLibraryFolder = async (kind: LibraryFolderKind = 'movies') => {
+    dispatch({ type: 'SET_SCANNING', payload: true });
     try {
-      await desktopApi.addLibraryFolder();
-      await refreshLibrary();
+      const data = await desktopApi.addLibraryFolder(kind);
+      if (data) applyLibraryData(data);
+      else await refreshLibrary();
     } catch (error) {
       console.error('Failed to add library folder:', error);
+    } finally {
+      dispatch({ type: 'SET_SCANNING', payload: false });
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
@@ -165,12 +225,88 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const setAutoSyncIntervalHours = async (hours: number) => {
+    const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 12;
+    dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: normalizedHours });
+    try {
+      await desktopApi.saveSettings({ autoSyncIntervalHours: normalizedHours });
+    } catch (error) {
+      console.error('Failed to save auto sync interval:', error);
+    }
+  };
+
   useEffect(() => {
-    refreshLibrary();
+    isScanningRef.current = state.isScanning;
+    hasConfiguredFoldersRef.current = hasConfiguredFolders(state);
+  }, [state]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadFromDevice = async () => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        await migrateLegacyArtwork();
+        await hydrateProgressFromDatabase();
+        const cached = await desktopApi.getLibrary();
+        if (cancelled) return;
+        applyLibraryData(cached);
+
+        const settings = await desktopApi.getSettings().catch(() => null);
+        if (!cancelled && settings?.autoSyncIntervalHours) {
+          dispatch({
+            type: 'SET_AUTO_SYNC_INTERVAL_HOURS',
+            payload: settings.autoSyncIntervalHours,
+          });
+        }
+
+        if (hasConfiguredFolders(cached)) {
+          dispatch({ type: 'SET_SCANNING', payload: true });
+          const scanned = await desktopApi.scanLibrary(false);
+          if (cancelled) return;
+          applyLibraryData(scanned);
+        }
+      } catch (error) {
+        console.error('Failed to load library:', error);
+      } finally {
+        if (!cancelled) {
+          dispatch({ type: 'SET_SCANNING', payload: false });
+          dispatch({ type: 'SET_LOADING', payload: false });
+        }
+      }
+    };
+
+    void loadFromDevice();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  useEffect(() => {
+    const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
+    const intervalId = window.setInterval(() => {
+      if (isScanningRef.current || !hasConfiguredFoldersRef.current) return;
+
+      void (async () => {
+        dispatch({ type: 'SET_SCANNING', payload: true });
+        dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
+        try {
+          const data = await desktopApi.scanLibrary(false);
+          applyLibraryData(data);
+        } catch (error) {
+          console.error('Failed to auto sync library:', error);
+        } finally {
+          dispatch({ type: 'SET_SCANNING', payload: false });
+          dispatch({ type: 'SET_LOADING', payload: false });
+        }
+      })();
+    }, intervalMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [state.autoSyncIntervalHours]);
+
   return (
-    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, addLibraryFolder, removeLibraryFolder, refreshLibrary }}>
+    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, addLibraryFolder, removeLibraryFolder, refreshLibrary, setAutoSyncIntervalHours }}>
       {children}
     </LibraryContext.Provider>
   );

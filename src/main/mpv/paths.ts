@@ -116,10 +116,10 @@ function getBundledMpvPath(): string {
   }
 
   if (process.platform === 'win32') {
-    return path.join(resourcesPath, 'mpv', 'windows', 'mpv.exe');
+    return path.join(resourcesPath, 'mpv', 'win', 'mpv.exe');
   }
   if (process.platform === 'darwin') {
-    return path.join(resourcesPath, 'mpv', 'macos', 'mpv');
+    return path.join(resourcesPath, 'mpv', 'mac', 'mpv');
   }
   return path.join(resourcesPath, 'mpv', 'linux', 'mpv');
 }

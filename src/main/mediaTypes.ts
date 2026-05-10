@@ -41,6 +41,17 @@ export interface PlaybackState {
   error?: string;
 }
 
+export interface SubtitleStyleOptions {
+  delaySeconds?: number;
+  position?: number;
+  scale?: number;
+  fontSize?: number;
+  fontColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
+  backgroundColor?: string;
+}
+
 export interface TranscodeOptions {
   preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
   startSeconds?: number;
@@ -49,6 +60,8 @@ export interface TranscodeOptions {
   subtitleTrackIndex?: number;
   subtitleStreamOrdinal?: number;
   subtitleCodec?: string;
+  subtitleStyle?: SubtitleStyleOptions;
+  forceTranscode?: boolean;
 }
 
 export interface TranscodeSession {

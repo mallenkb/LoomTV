@@ -5,7 +5,7 @@
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Events, Hls, isSupported } from 'hls.js';
+import { ErrorTypes, Events, Hls, isSupported } from 'hls.js';
 import {
   CheckCircle,
   ChevronLeft,
@@ -23,13 +23,24 @@ import {
 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { desktopApi } from '@/lib/desktopApi';
+import {
+  getPlayableStartPosition,
+  getProgressState,
+  hydrateProgressFromDatabase,
+  isWatched,
+  progressFraction,
+  saveProgress as savePlaybackProgress,
+} from '@/lib/progress';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PROGRESS_KEY = 'videoProgress';
 const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
+const SUBTITLE_STYLE_KEY = 'subtitleStyleSettings';
 const WATCHED_THRESHOLD = 0.9;
 const CONTROLS_HIDE_MS = 3000;
+const REPLAY_FROM_START_REMAINING_SECONDS = 8;
+const HLS_RECOVERY_ATTEMPTS = 3;
+const HLS_TRANSCODE_RESTART_ATTEMPTS = 2;
 const HLS_FIRST_EXTENSIONS = new Set(['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts']);
 const DEFAULT_EPISODE_PANEL_WIDTH = 288;
 const DEFAULT_MEDIA_PANEL_WIDTH = 360;
@@ -37,7 +48,20 @@ const MIN_SIDE_PANEL_WIDTH = 260;
 const MAX_SIDE_PANEL_RATIO = 0.4;
 type PlayerState = 'loading' | 'ready' | 'error';
 type ControlTab = 'video' | 'audio' | 'subtitles';
+type SubtitleStyleTarget = 'primary' | 'secondary';
 type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
+type PlaybackEngine = 'mpv' | 'html5';
+
+type SubtitleStyleSettings = {
+  delaySeconds: number;
+  position: number;
+  scale: number;
+  fontSize: number;
+  fontColor: string;
+  borderColor: string;
+  borderWidth: number;
+  backgroundColor: string;
+};
 
 interface MediaTrack {
   index: number;
@@ -78,6 +102,7 @@ interface EpisodeFile {
 export interface VideoPlayerProps {
   filePath: string;
   title: string;
+  subtitles?: { lang: string; label: string; url: string }[];
   episodes?: EpisodeMeta[];
   episodeFiles?: EpisodeFile[];
   currentSeason?: number;
@@ -85,6 +110,21 @@ export interface VideoPlayerProps {
   onClose: () => void;
   onEpisodeChange?: (filePath: string, season: number, episode: number) => void;
 }
+
+const EMPTY_EPISODES: EpisodeMeta[] = [];
+const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
+const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
+const subtitleCueTiming = new WeakMap<TextTrackCue, { startTime: number; endTime: number }>();
+const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
+  delaySeconds: 0,
+  position: 92,
+  scale: 1,
+  fontSize: 55,
+  fontColor: '#ffffff',
+  borderColor: '#000000',
+  borderWidth: 3,
+  backgroundColor: '#000000',
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -158,43 +198,63 @@ function subtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
   return tracks.filter((track) => track.type === 'subtitle').findIndex((track) => track.index === streamIndex);
 }
 
+function externalSubtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
+  return tracks.findIndex((track) => track.index === streamIndex);
+}
+
 function firstTrackIndex(tracks: MediaTrack[], type: MediaTrack['type']): number {
   return tracks.find((track) => track.type === type)?.index ?? -1;
 }
 
-// ─── Progress storage ─────────────────────────────────────────────────────────
-
-type StoredProgress = number | { position: number; duration?: number };
-
-function loadProgress(): Record<string, StoredProgress> {
-  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
+function subtitleSource(url: string, serverBase: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (!serverBase) return url;
+  return `${serverBase}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
-function saveProgress(filePath: string, position: number, duration: number): void {
-  try {
-    const all = loadProgress();
-    if (position > 10) all[filePath] = { position, duration };
-    if (duration > 0 && position / duration >= WATCHED_THRESHOLD) all[filePath] = { position: duration, duration };
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
-  } catch (_e) { /* ignore */ }
+function hlsResponseCode(data: unknown): number | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const response = (data as { response?: { code?: unknown } }).response;
+  return typeof response?.code === 'number' ? response.code : undefined;
+}
+
+function hlsErrorSummary(data: unknown): string {
+  if (!data || typeof data !== 'object') return String(data);
+  const value = data as {
+    type?: unknown;
+    details?: unknown;
+    fatal?: unknown;
+    reason?: unknown;
+    error?: { message?: unknown };
+    response?: { code?: unknown; text?: unknown; url?: unknown };
+  };
+  return JSON.stringify({
+    type: value.type,
+    details: value.details,
+    fatal: value.fatal,
+    reason: value.reason,
+    message: value.error?.message,
+    response: value.response,
+  });
+}
+
+function shouldRestartMissingLocalHls(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const detail = String((data as { details?: unknown }).details || '');
+  const statusCode = hlsResponseCode(data);
+  return statusCode === 404 && /manifest|level/i.test(detail);
+}
+
+function mpvTrackType(type: 'video' | 'audio' | 'subtitle'): 'video' | 'audio' | 'sub' {
+  return type === 'subtitle' ? 'sub' : type;
 }
 
 function getStoredPosition(filePath: string): number {
-  const stored = loadProgress()[filePath];
-  if (typeof stored === 'number') return stored;
-  return stored?.position ?? 0;
+  return getProgressState(filePath).position;
 }
 
 function getStoredDuration(filePath: string): number {
-  const stored = loadProgress()[filePath];
-  return typeof stored === 'object' && stored?.duration ? stored.duration : 0;
-}
-
-function progressFraction(filePath: string, duration?: number): number {
-  const position = getStoredPosition(filePath);
-  const total = duration && duration > 0 ? duration : getStoredDuration(filePath);
-  if (!position || !total || total <= 0) return 0;
-  return Math.min(1, Math.max(0, position / total));
+  return getProgressState(filePath).duration;
 }
 
 function loadSubtitlesDefaultEnabled(): boolean {
@@ -213,19 +273,46 @@ function saveSubtitlesDefaultEnabled(enabled: boolean): void {
   }
 }
 
-function isWatched(filePath: string, duration?: number): boolean {
-  const pos = getStoredPosition(filePath);
-  const total = duration && duration > 0 ? duration : getStoredDuration(filePath);
-  if (!pos || !total || total <= 0) return false;
-  return pos / total >= WATCHED_THRESHOLD;
+function sanitizeSubtitleStyle(value: Partial<SubtitleStyleSettings> | null | undefined): SubtitleStyleSettings {
+  const source = value || {};
+  const numberValue = (candidate: unknown, fallback: number, min: number, max: number) => {
+    const parsed = Number(candidate);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  };
+  const colorValue = (candidate: unknown, fallback: string) =>
+    typeof candidate === 'string' && /^#[0-9a-f]{6}$/i.test(candidate) ? candidate : fallback;
+
+  return {
+    delaySeconds: numberValue(source.delaySeconds, DEFAULT_SUBTITLE_STYLE.delaySeconds, -5, 5),
+    position: numberValue(source.position, DEFAULT_SUBTITLE_STYLE.position, 0, 100),
+    scale: numberValue(source.scale, DEFAULT_SUBTITLE_STYLE.scale, 0.5, 2),
+    fontSize: numberValue(source.fontSize, DEFAULT_SUBTITLE_STYLE.fontSize, 24, 96),
+    fontColor: colorValue(source.fontColor, DEFAULT_SUBTITLE_STYLE.fontColor),
+    borderColor: colorValue(source.borderColor, DEFAULT_SUBTITLE_STYLE.borderColor),
+    borderWidth: numberValue(source.borderWidth, DEFAULT_SUBTITLE_STYLE.borderWidth, 0, 10),
+    backgroundColor: colorValue(source.backgroundColor, DEFAULT_SUBTITLE_STYLE.backgroundColor),
+  };
+}
+
+function loadSubtitleStyleSettings(): SubtitleStyleSettings {
+  try {
+    return sanitizeSubtitleStyle(JSON.parse(localStorage.getItem(SUBTITLE_STYLE_KEY) || 'null') as Partial<SubtitleStyleSettings> | null);
+  } catch {
+    return DEFAULT_SUBTITLE_STYLE;
+  }
+}
+
+function saveSubtitleStyleSettings(style: SubtitleStyleSettings): void {
+  try {
+    localStorage.setItem(SUBTITLE_STYLE_KEY, JSON.stringify(style));
+  } catch (_error) {
+    // Ignore storage failures; the controls still apply for this playback session.
+  }
 }
 
 function isInProgress(filePath: string, duration?: number): boolean {
-  const pos = getStoredPosition(filePath);
-  if (!pos || pos <= 10) return false;
-  const total = duration && duration > 0 ? duration : getStoredDuration(filePath);
-  if (total && total > 0 && pos / total >= WATCHED_THRESHOLD) return false;
-  return true;
+  return getProgressState(filePath, duration).inProgress;
 }
 
 function mediaErrorMessage(error: MediaError | null): string {
@@ -257,8 +344,9 @@ function transcodeErrorMessage(error: unknown): string {
 export default function VideoPlayer({
   filePath,
   title,
-  episodes = [],
-  episodeFiles = [],
+  subtitles = EMPTY_SUBTITLES,
+  episodes = EMPTY_EPISODES,
+  episodeFiles = EMPTY_EPISODE_FILES,
   currentSeason = 1,
   currentEpisode = 1,
   onClose,
@@ -273,7 +361,10 @@ export default function VideoPlayer({
   const loadTokenRef = useRef(0);
   const sourceLoadTokenRef = useRef(0);
   const didTryTranscodeRef = useRef(false);
+  const hasPlayableDataRef = useRef(false);
   const transcodeStartSecondsRef = useRef(0);
+  const hlsRecoveryAttemptsRef = useRef(0);
+  const hlsTranscodeRestartAttemptsRef = useRef(0);
   const probedDurationRef = useRef(0);
   const probeTracksRef = useRef<MediaTrack[]>([]);
   const selectedVideoTrackIndexRef = useRef<number | undefined>(undefined);
@@ -283,6 +374,7 @@ export default function VideoPlayer({
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
+  const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>('html5');
   const [playerState, setPlayerState] = useState<PlayerState>('loading');
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -295,23 +387,40 @@ export default function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
   const [episodePanelWidth, setEpisodePanelWidth] = useState(DEFAULT_EPISODE_PANEL_WIDTH);
   const [mediaPanelWidth, setMediaPanelWidth] = useState(DEFAULT_MEDIA_PANEL_WIDTH);
   const [mediaPanelTab, setMediaPanelTab] = useState<ControlTab>('video');
   const [mediaTracks, setMediaTracks] = useState<MediaTrack[]>([]);
+  const [serverBase, setServerBase] = useState('');
   const [selectedVideoTrackIndex, setSelectedVideoTrackIndex] = useState(-1);
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
+  const [subtitleStyleTarget, setSubtitleStyleTarget] = useState<SubtitleStyleTarget>('primary');
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => loadSubtitleStyleSettings());
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [tick, setTick] = useState(0); // force episode list re-render
 
+  useEffect(() => {
+    void hydrateProgressFromDatabase().then(() => setTick((value) => value + 1));
+  }, []);
+
   const hasEpisodes = episodes.length > 0 && episodeFiles.length > 0;
   const videoTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'video'), [mediaTracks]);
   const audioTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'audio'), [mediaTracks]);
+  const externalSubtitleTracks = useMemo<MediaTrack[]>(
+    () => subtitles.map((subtitle, index) => ({
+      index: -1000 - index,
+      type: 'subtitle',
+      codec: 'external',
+      language: subtitle.lang,
+      title: subtitle.label,
+    })),
+    [subtitles],
+  );
   const subtitleTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'subtitle'), [mediaTracks]);
 
   const groupedEpisodes = useMemo(() =>
@@ -338,6 +447,20 @@ export default function VideoPlayer({
     }
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    void desktopApi.getServerBase()
+      .then((base) => {
+        if (!cancelled) setServerBase(base);
+      })
+      .catch(() => {
+        if (!cancelled) setServerBase('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const clearHls = useCallback(() => {
     const hls = hlsRef.current;
     if (!hls) return;
@@ -355,18 +478,37 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
     const tracks = Array.from(video.textTracks);
-    const selectedSubtitleOrdinal = subtitleOrdinal(probeTracksRef.current, selectedSubtitleTrackIndexRef.current);
+    const selectedIndex = selectedSubtitleTrackIndexRef.current;
+    const selectedSubtitleOrdinal = selectedIndex <= -1000
+      ? externalSubtitleOrdinal(externalSubtitleTracks, selectedIndex)
+      : subtitleOrdinal(probeTracksRef.current, selectedIndex);
 
     tracks.forEach((track, index) => {
       const shouldShow = subtitlesDefaultEnabledRef.current
         && (selectedSubtitleOrdinal >= 0 ? index === selectedSubtitleOrdinal : index === 0);
       track.mode = shouldShow ? 'showing' : 'disabled';
+
+      const cues = Array.from(track.cues || []);
+      cues.forEach((cue) => {
+        const originalTiming = subtitleCueTiming.get(cue) || {
+          startTime: cue.startTime,
+          endTime: cue.endTime,
+        };
+        subtitleCueTiming.set(cue, originalTiming);
+        const delayedStart = Math.max(0, originalTiming.startTime + subtitleStyle.delaySeconds);
+        cue.startTime = delayedStart;
+        cue.endTime = Math.max(delayedStart + 0.1, originalTiming.endTime + subtitleStyle.delaySeconds);
+
+        if ('line' in cue) {
+          (cue as VTTCue).line = Math.round(100 - subtitleStyle.position);
+        }
+      });
     });
-  }, []);
+  }, [externalSubtitleTracks, subtitleStyle.delaySeconds, subtitleStyle.position]);
 
   const applyProbeData = useCallback((data: unknown) => {
     const nextDuration = probeDurationSeconds(data);
-    const nextTracks = probeTracks(data);
+    const nextTracks = [...probeTracks(data), ...externalSubtitleTracks];
     const firstVideo = firstTrackIndex(nextTracks, 'video');
     const firstAudio = firstTrackIndex(nextTracks, 'audio');
     const firstSubtitle = subtitlesDefaultEnabledRef.current ? firstTrackIndex(nextTracks, 'subtitle') : -1;
@@ -382,7 +524,7 @@ export default function VideoPlayer({
     setSelectedVideoTrackIndex(firstVideo);
     setSelectedAudioTrackIndex(firstAudio);
     setSelectedSubtitleTrackIndex(firstSubtitle);
-  }, []);
+  }, [externalSubtitleTracks]);
 
   // ─── Episode navigation ────────────────────────────────────────────────────
 
@@ -423,12 +565,20 @@ export default function VideoPlayer({
     if (didTryTranscodeRef.current && !options.force) return;
     didTryTranscodeRef.current = true;
     const token = loadTokenRef.current;
-    const safeStartSeconds = Math.floor(clampSeconds(startSeconds, probedDurationRef.current));
+    const durationHint = probedDurationRef.current || getStoredDuration(filePath);
+    const clampedStartSeconds = clampSeconds(startSeconds, durationHint || undefined);
+    const safeStartSeconds = durationHint > 0
+      && (clampedStartSeconds / durationHint >= WATCHED_THRESHOLD
+        || durationHint - clampedStartSeconds <= REPLAY_FROM_START_REMAINING_SECONDS)
+      ? 0
+      : Math.floor(clampedStartSeconds);
+    hlsRecoveryAttemptsRef.current = 0;
     transcodeStartSecondsRef.current = safeStartSeconds;
     setPosition(safeStartSeconds);
     setPlayerState('loading');
     setStatusMessage(safeStartSeconds > 0 ? 'Seeking local stream...' : 'Starting local compatible stream...');
     setErrorMessage(null);
+    clearHls();
     await stopTranscodeSession();
 
     try {
@@ -440,24 +590,23 @@ export default function VideoPlayer({
 
       const subtitleIndex = selectedSubtitleTrackIndexRef.current;
       const selectedSubtitle = probeTracksRef.current.find((track) => track.index === subtitleIndex);
-      const result = await desktopApi.media.startTranscode(filePath, {
-        preset: 'auto',
+      const { url } = await desktopApi.getStreamUrl(filePath, {
+        forceTranscode: true,
         startSeconds: safeStartSeconds,
         ...(typeof selectedVideoTrackIndexRef.current === 'number' ? { videoTrackIndex: selectedVideoTrackIndexRef.current } : {}),
         ...(typeof selectedAudioTrackIndexRef.current === 'number' ? { audioTrackIndex: selectedAudioTrackIndexRef.current } : {}),
-        subtitleTrackIndex: subtitleIndex,
-        subtitleStreamOrdinal: subtitleIndex >= 0 ? subtitleOrdinal(probeTracksRef.current, subtitleIndex) : undefined,
-        subtitleCodec: selectedSubtitle?.codec,
+        ...(subtitleIndex >= 0 ? {
+          subtitleTrackIndex: subtitleIndex,
+          subtitleStreamOrdinal: subtitleOrdinal(probeTracksRef.current, subtitleIndex),
+          subtitleCodec: selectedSubtitle?.codec,
+        } : {}),
+        subtitleStyle,
       });
       if (token !== loadTokenRef.current) return;
 
-      if (!result.ok || !result.data?.playlistUrl) {
-        throw new Error(result.error || 'Failed to start transcode session');
-      }
-
-      transcodeSessionIdRef.current = result.data.sessionId;
+      transcodeSessionIdRef.current = null;
       setStreamIsTranscoded(true);
-      setStreamUrl(result.data.playlistUrl);
+      setStreamUrl(url);
       setPlayerState('loading');
       setStatusMessage('Loading local stream...');
     } catch (error) {
@@ -467,10 +616,12 @@ export default function VideoPlayer({
       setErrorMessage(transcodeErrorMessage(error));
       setStreamIsTranscoded(false);
     }
-  }, [applyProbeData, filePath, stopTranscodeSession]);
+  }, [applyProbeData, clearHls, filePath, stopTranscodeSession, subtitleStyle]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
+    hlsRecoveryAttemptsRef.current = 0;
+    hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
     setPlayerState('loading');
     setStatusMessage('Retrying playback...');
@@ -482,28 +633,37 @@ export default function VideoPlayer({
   useEffect(() => {
     let cancelled = false;
     probedDurationRef.current = 0;
-    probeTracksRef.current = [];
-    setMediaTracks([]);
+    probeTracksRef.current = externalSubtitleTracks;
+    setMediaTracks(externalSubtitleTracks);
+    const firstExternalSubtitle = subtitlesDefaultEnabledRef.current ? firstTrackIndex(externalSubtitleTracks, 'subtitle') : -1;
+    selectedSubtitleTrackIndexRef.current = firstExternalSubtitle;
+    setSelectedSubtitleTrackIndex(firstExternalSubtitle);
     setDuration(0);
 
     void desktopApi.media.probe(filePath).then((result) => {
       if (cancelled || !result.ok) return;
       applyProbeData(result.data);
     }).catch(() => {
-      if (!cancelled) probedDurationRef.current = 0;
+      if (!cancelled) {
+        probedDurationRef.current = 0;
+        applyNativeTextTrackVisibility();
+      }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [applyProbeData, filePath]);
+  }, [applyNativeTextTrackVisibility, applyProbeData, externalSubtitleTracks, filePath]);
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
     const loadToken = ++loadTokenRef.current;
     didTryTranscodeRef.current = false;
     transcodeStartSecondsRef.current = 0;
+    hlsRecoveryAttemptsRef.current = 0;
+    hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
+    setPlaybackEngine('html5');
     setPosition(0);
     setPlayerState('loading');
     setStatusMessage('Preparing stream...');
@@ -514,13 +674,16 @@ export default function VideoPlayer({
 
     (async () => {
       try {
+        const startSeconds = getPlayableStartPosition(filePath, probedDurationRef.current);
+
         if (shouldStartWithTranscode(filePath)) {
-          await startTranscodedFallback(getStoredPosition(filePath), { force: true });
+          await startTranscodedFallback(startSeconds, { force: true });
           return;
         }
 
-        const { url } = await desktopApi.getStreamUrl(filePath);
+        const { url, isTranscoded } = await desktopApi.getStreamUrl(filePath);
         if (loadToken !== loadTokenRef.current) return;
+        setStreamIsTranscoded(Boolean(isTranscoded));
         setStreamUrl(url);
       } catch (error) {
         if (loadToken !== loadTokenRef.current) return;
@@ -531,20 +694,66 @@ export default function VideoPlayer({
     })();
 
     return () => {
+      void desktopApi.closeMPV();
       void stopTranscodeSession();
     };
   }, [filePath, reloadToken, startTranscodedFallback, stopTranscodeSession]);
 
+  useEffect(() => {
+    if (playbackEngine !== 'mpv') return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const state = await desktopApi.queryMPV();
+        if (cancelled || !state) return;
+
+        const nextPosition = Number.isFinite(state.position) ? state.position : 0;
+        const nextDuration = Number.isFinite(state.duration) ? state.duration : duration;
+        setPosition(nextPosition);
+        if (nextDuration > 0) setDuration(nextDuration);
+        setPaused(Boolean(state.paused));
+        setMuted(Boolean(state.muted));
+        setVolume(Math.max(0, Math.min(1, (state.volume ?? 100) / 100)));
+        if (state.speed && Number.isFinite(state.speed)) setPlaybackRate(state.speed);
+
+        if (nextPosition > 10 && nextDuration > 0) {
+          void savePlaybackProgress(filePath, nextPosition, nextDuration);
+          setTick((n) => n + 1);
+        }
+      } catch {
+        // mpv may be closing; the exit event closes the player.
+      }
+    };
+
+    void poll();
+    const interval = setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [duration, filePath, playbackEngine]);
+
+  useEffect(() => {
+    if (playbackEngine !== 'mpv') return () => undefined;
+    return desktopApi.onMPVEvent((event) => {
+      if (event === 'closed') onClose();
+    });
+  }, [onClose, playbackEngine]);
+
   // ─── Player binding, events, and fallback ────────────────────────────────
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !streamUrl) return;
+    if (playbackEngine !== 'html5' || !video || !streamUrl) return;
 
     const sourceToken = ++sourceLoadTokenRef.current;
     const isHlsSource = /\.m3u8(\?|$)/i.test(streamUrl);
-    const resumeSeconds = getStoredPosition(filePath);
+    let isManagedHls = false;
+    const resumeSeconds = getPlayableStartPosition(filePath, probedDurationRef.current);
 
     clearHls();
+    hlsRecoveryAttemptsRef.current = 0;
+    hasPlayableDataRef.current = false;
     setPlayerState('loading');
     setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Loading stream...');
     setErrorMessage(null);
@@ -553,20 +762,79 @@ export default function VideoPlayer({
     if (isHlsSource) {
       if (isSupported()) {
         const hls = new Hls({
+          autoStartLoad: false,
+          startPosition: 0,
           manifestLoadingMaxRetry: 20,
           manifestLoadingRetryDelay: 500,
           fragLoadingMaxRetry: 20,
           fragLoadingRetryDelay: 500,
         });
+        isManagedHls = true;
         hlsRef.current = hls;
+        const markHlsPlayable = () => {
+          if (sourceToken !== sourceLoadTokenRef.current) return;
+          hlsRecoveryAttemptsRef.current = 0;
+          hasPlayableDataRef.current = true;
+          setPlayerState('ready');
+          setStatusMessage('');
+          void video.play().catch(() => setPaused(true));
+        };
+        hls.on(Events.MEDIA_ATTACHED, () => {
+          if (sourceToken !== sourceLoadTokenRef.current) return;
+          hls.loadSource(streamUrl);
+        });
+        hls.on(Events.MANIFEST_PARSED, () => {
+          if (sourceToken !== sourceLoadTokenRef.current) return;
+          hls.startLoad(0);
+        });
+        hls.on(Events.FRAG_BUFFERED, markHlsPlayable);
         hls.attachMedia(video);
-        hls.loadSource(streamUrl);
         hls.on(Events.ERROR, (_event, data) => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
+          console.warn(`[player] HLS error ${hlsErrorSummary(data)}`);
+          const restartLocalHls = () => {
+            if (!streamIsTranscoded || hlsTranscodeRestartAttemptsRef.current >= HLS_TRANSCODE_RESTART_ATTEMPTS) {
+              return false;
+            }
+
+            hlsTranscodeRestartAttemptsRef.current += 1;
+            hlsRecoveryAttemptsRef.current = 0;
+            const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+            const restartAt = transcodeStartSecondsRef.current + currentTime;
+            setPlayerState('loading');
+            setStatusMessage('Restarting local stream...');
+            setErrorMessage(null);
+            void startTranscodedFallback(restartAt, { force: true });
+            return true;
+          };
+
           if (!data.fatal) return;
+          if (shouldRestartMissingLocalHls(data) && !hasPlayableDataRef.current && restartLocalHls()) return;
+
+          if (data.type === ErrorTypes.NETWORK_ERROR && hlsRecoveryAttemptsRef.current < HLS_RECOVERY_ATTEMPTS) {
+            hlsRecoveryAttemptsRef.current += 1;
+            setPlayerState('loading');
+            setStatusMessage('Reconnecting stream...');
+            setErrorMessage(null);
+            const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+            hls.startLoad(Math.max(0, currentTime - 1));
+            return;
+          }
+
+          if (data.type === ErrorTypes.MEDIA_ERROR && hlsRecoveryAttemptsRef.current < HLS_RECOVERY_ATTEMPTS) {
+            hlsRecoveryAttemptsRef.current += 1;
+            setPlayerState('loading');
+            setStatusMessage('Recovering playback...');
+            setErrorMessage(null);
+            hls.recoverMediaError();
+            return;
+          }
+
+          if (restartLocalHls()) return;
+
           if (!didTryTranscodeRef.current && !streamIsTranscoded) {
             setStatusMessage('Trying local compatible stream...');
-            void startTranscodedFallback(getStoredPosition(filePath), { force: true });
+            void startTranscodedFallback(getPlayableStartPosition(filePath, probedDurationRef.current), { force: true });
           } else {
             setPlayerState('error');
             setErrorMessage(data.details ? `HLS playback error: ${data.details}` : 'Unable to play HLS stream.');
@@ -583,9 +851,6 @@ export default function VideoPlayer({
       video.src = streamUrl;
     }
 
-    video.preload = 'auto';
-    video.load();
-
     const onLoadStart = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
       setPlayerState('loading');
@@ -595,6 +860,7 @@ export default function VideoPlayer({
 
     const onWaiting = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
+      if (hasPlayableDataRef.current || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
       setPlayerState('loading');
       setStatusMessage('Buffering...');
     };
@@ -617,7 +883,7 @@ export default function VideoPlayer({
       const nextPosition = clampSeconds(absolutePosition, totalDuration || undefined);
       setPosition(nextPosition);
       if (nextPosition > 10 && totalDuration > 0) {
-        saveProgress(filePath, nextPosition, totalDuration);
+        void savePlaybackProgress(filePath, nextPosition, totalDuration);
         setTick((n) => n + 1);
       }
     };
@@ -637,11 +903,22 @@ export default function VideoPlayer({
       }
     };
 
-    const onCanPlay = () => {
+    const onPlayable = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
+      hlsRecoveryAttemptsRef.current = 0;
+      hasPlayableDataRef.current = true;
       setPlayerState('ready');
       setStatusMessage('');
       void video.play().catch(() => setPaused(true));
+    };
+
+    const onPlaying = () => {
+      if (sourceToken !== sourceLoadTokenRef.current) return;
+      hlsRecoveryAttemptsRef.current = 0;
+      hasPlayableDataRef.current = true;
+      setPlayerState('ready');
+      setStatusMessage('');
+      setPaused(false);
     };
 
     const onEnded = () => {
@@ -654,7 +931,9 @@ export default function VideoPlayer({
       setPaused(true);
       if (!isHlsSource && !didTryTranscodeRef.current) {
         setStatusMessage('Trying local compatible stream...');
-        const fallbackStart = video.currentTime > 0 ? video.currentTime : getStoredPosition(filePath);
+        const fallbackStart = video.currentTime > 0
+          ? video.currentTime
+          : getPlayableStartPosition(filePath, probedDurationRef.current);
         void startTranscodedFallback(fallbackStart, { force: true });
         return;
       }
@@ -664,7 +943,9 @@ export default function VideoPlayer({
 
     video.addEventListener('loadstart', onLoadStart);
     video.addEventListener('waiting', onWaiting);
-    video.addEventListener('canplay', onCanPlay);
+    video.addEventListener('loadeddata', onPlayable);
+    video.addEventListener('canplay', onPlayable);
+    video.addEventListener('playing', onPlaying);
     video.addEventListener('durationchange', onDuration);
     video.addEventListener('loadedmetadata', onLoadedMetadata);
     video.addEventListener('timeupdate', onTime);
@@ -673,10 +954,23 @@ export default function VideoPlayer({
     video.addEventListener('volumechange', onVolumeChange);
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
+    video.preload = 'auto';
+    video.autoplay = true;
+    if (!isManagedHls) {
+      video.load();
+      void video.play().catch(() => setPaused(true));
+    }
+
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      onPlayable();
+    }
+
     return () => {
       video.removeEventListener('loadstart', onLoadStart);
       video.removeEventListener('waiting', onWaiting);
-      video.removeEventListener('canplay', onCanPlay);
+      video.removeEventListener('loadeddata', onPlayable);
+      video.removeEventListener('canplay', onPlayable);
+      video.removeEventListener('playing', onPlaying);
       video.removeEventListener('durationchange', onDuration);
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       video.removeEventListener('timeupdate', onTime);
@@ -692,6 +986,7 @@ export default function VideoPlayer({
     filePath,
     streamUrl,
     streamIsTranscoded,
+    playbackEngine,
     hasEpisodes,
     clearHls,
     clearVideoElement,
@@ -706,9 +1001,9 @@ export default function VideoPlayer({
     setShowControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      if (!videoRef.current?.paused) setShowControls(false);
+      if (playbackEngine === 'mpv' ? !paused : !videoRef.current?.paused) setShowControls(false);
     }, CONTROLS_HIDE_MS);
-  }, []);
+  }, [paused, playbackEngine]);
 
   useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }, []);
 
@@ -725,19 +1020,26 @@ export default function VideoPlayer({
   // Stop transcode session when component closes.
   useEffect(() => () => {
     void stopTranscodeSession();
+    void desktopApi.closeMPV();
   }, [stopTranscodeSession]);
 
   // ─── Controls ──────────────────────────────────────────────────────────────
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
+    if (playbackEngine === 'mpv') {
+      void desktopApi.toggleMPVPause();
+      setPaused((value) => !value);
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.paused ? void video.play() : video.pause();
-  }, [playerState]);
+  }, [playbackEngine, playerState]);
 
   const handleClose = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
+    void desktopApi.closeMPV();
     onClose();
   }, [onClose]);
 
@@ -751,6 +1053,13 @@ export default function VideoPlayer({
   }, [onClose]);
 
   const toggleFullscreen = useCallback(() => {
+    if (playbackEngine === 'mpv') {
+      const nextFullscreen = !fullscreen;
+      setFullscreen(nextFullscreen);
+      void desktopApi.setMPVFullscreen(nextFullscreen);
+      return;
+    }
+
     const el = containerRef.current;
     if (!el) return;
     if (!document.fullscreenElement) {
@@ -758,7 +1067,7 @@ export default function VideoPlayer({
     } else {
       void document.exitFullscreen();
     }
-  }, []);
+  }, [fullscreen, playbackEngine]);
 
   const openMediaPanel = useCallback(() => {
     if (showMediaPanel) {
@@ -812,14 +1121,37 @@ export default function VideoPlayer({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (video) video.playbackRate = playbackRate;
-  }, [playbackRate, streamUrl]);
+    if (playbackEngine === 'mpv') {
+      void desktopApi.setMPVSpeed(playbackRate);
+    } else if (video) {
+      video.playbackRate = playbackRate;
+    }
+  }, [playbackEngine, playbackRate, streamUrl]);
+
+  useEffect(() => {
+    if (playbackEngine !== 'mpv') return;
+    void desktopApi.setMPVAspectMode(aspectMode);
+  }, [aspectMode, playbackEngine]);
+
+  useEffect(() => {
+    saveSubtitleStyleSettings(subtitleStyle);
+    applyNativeTextTrackVisibility();
+    if (playbackEngine === 'mpv') {
+      void desktopApi.setMPVSubtitleStyle(subtitleStyle);
+    }
+  }, [applyNativeTextTrackVisibility, playbackEngine, subtitleStyle]);
 
   const seekTo = useCallback((targetSeconds: number) => {
     const nextPosition = clampSeconds(targetSeconds, duration || undefined);
     setPosition(nextPosition);
 
+    if (playbackEngine === 'mpv') {
+      void desktopApi.seekMPV(nextPosition, 'absolute');
+      return;
+    }
+
     if (streamIsTranscoded) {
+      hlsTranscodeRestartAttemptsRef.current = 0;
       void startTranscodedFallback(nextPosition, { force: true });
       return;
     }
@@ -828,7 +1160,7 @@ export default function VideoPlayer({
     if (!video) return;
     const directDuration = Number.isFinite(video.duration) ? video.duration : duration;
     video.currentTime = clampSeconds(nextPosition, directDuration || undefined);
-  }, [duration, startTranscodedFallback, streamIsTranscoded]);
+  }, [duration, playbackEngine, startTranscodedFallback, streamIsTranscoded]);
 
   const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!duration) return;
@@ -837,36 +1169,80 @@ export default function VideoPlayer({
   }, [duration, seekTo]);
 
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat(e.target.value);
+    setVolume(v);
+    setMuted(v === 0);
+    if (playbackEngine === 'mpv') {
+      void desktopApi.setMPVVolume(v * 100);
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
-    const v = parseFloat(e.target.value);
     video.volume = v;
     video.muted = v === 0;
-  }, []);
+  }, [playbackEngine]);
 
   const toggleMute = useCallback(() => {
+    if (playbackEngine === 'mpv') {
+      void desktopApi.toggleMPVMute();
+      setMuted((value) => !value);
+      return;
+    }
     const video = videoRef.current;
     if (video) video.muted = !video.muted;
+  }, [playbackEngine]);
+
+  const updateSubtitleStyle = useCallback(<K extends keyof SubtitleStyleSettings>(
+    key: K,
+    value: SubtitleStyleSettings[K],
+  ) => {
+    setSubtitleStyle((current) => sanitizeSubtitleStyle({ ...current, [key]: value }));
   }, []);
+
+  const resetSubtitleStyle = useCallback(() => {
+    setSubtitleStyle(DEFAULT_SUBTITLE_STYLE);
+  }, []);
+
+  const applySubtitleStyleToStream = useCallback(() => {
+    if (selectedSubtitleTrackIndexRef.current < 0) return;
+    if (playbackEngine === 'mpv') {
+      void desktopApi.setMPVSubtitleStyle(subtitleStyle);
+      return;
+    }
+    applyNativeTextTrackVisibility();
+    if (streamUrl) {
+      hlsTranscodeRestartAttemptsRef.current = 0;
+      void startTranscodedFallback(position, { force: true });
+    }
+  }, [applyNativeTextTrackVisibility, playbackEngine, position, startTranscodedFallback, streamUrl, subtitleStyle]);
 
   const restartForTrackChange = useCallback(() => {
     if (!streamUrl) return;
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
+    hlsTranscodeRestartAttemptsRef.current = 0;
     void startTranscodedFallback(position, { force: true });
   }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamUrl]);
 
   const selectVideoTrack = useCallback((trackIndex: number) => {
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
+    if (playbackEngine === 'mpv') {
+      void desktopApi.selectMPVTrack(mpvTrackType('video'), trackIndex);
+      return;
+    }
     restartForTrackChange();
-  }, [restartForTrackChange]);
+  }, [playbackEngine, restartForTrackChange]);
 
   const selectAudioTrack = useCallback((trackIndex: number) => {
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
+    if (playbackEngine === 'mpv') {
+      void desktopApi.selectMPVTrack(mpvTrackType('audio'), trackIndex);
+      return;
+    }
     restartForTrackChange();
-  }, [restartForTrackChange]);
+  }, [playbackEngine, restartForTrackChange]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
     const enabled = trackIndex >= 0;
@@ -875,16 +1251,35 @@ export default function VideoPlayer({
     saveSubtitlesDefaultEnabled(enabled);
     selectedSubtitleTrackIndexRef.current = trackIndex;
     setSelectedSubtitleTrackIndex(trackIndex);
+    if (trackIndex <= -1000) {
+      applyNativeTextTrackVisibility();
+      return;
+    }
+    if (playbackEngine === 'mpv') {
+      void desktopApi.selectMPVTrack(mpvTrackType('subtitle'), trackIndex);
+      return;
+    }
     restartForTrackChange();
-  }, [restartForTrackChange]);
+  }, [applyNativeTextTrackVisibility, playbackEngine, restartForTrackChange]);
 
   const changeVolume = useCallback((delta: number) => {
+    const currentVolume = playbackEngine === 'mpv'
+      ? volume
+      : videoRef.current?.volume ?? volume;
+    const nextVolume = Math.min(1, Math.max(0, currentVolume + delta));
+    setVolume(nextVolume);
+    setMuted(nextVolume === 0);
+
+    if (playbackEngine === 'mpv') {
+      void desktopApi.setMPVVolume(nextVolume * 100);
+      return;
+    }
+
     const video = videoRef.current;
     if (!video) return;
-    const nextVolume = Math.min(1, Math.max(0, video.volume + delta));
     video.volume = nextVolume;
-    video.muted = nextVolume === 0 ? true : false;
-  }, []);
+    video.muted = nextVolume === 0;
+  }, [playbackEngine, volume]);
 
   const changePlaybackRate = useCallback((delta: number) => {
     setPlaybackRate((value) => Math.min(3, Math.max(0.25, value + delta)));
@@ -918,8 +1313,6 @@ export default function VideoPlayer({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement) return;
-      const video = videoRef.current;
-      if (!video) return;
 
       switch (e.key) {
         case 'Escape':
@@ -928,7 +1321,7 @@ export default function VideoPlayer({
           break;
         case ' ':
           e.preventDefault();
-          video.paused ? void video.play() : video.pause();
+          togglePlay();
           break;
         case 'ArrowLeft':
           e.preventDefault();
@@ -949,7 +1342,7 @@ export default function VideoPlayer({
         case 'm':
         case 'M':
           e.preventDefault();
-          video.muted = !video.muted;
+          toggleMute();
           break;
         case 'Backspace':
           e.preventDefault();
@@ -1000,12 +1393,18 @@ export default function VideoPlayer({
     position,
     resetPlaybackRate,
     seekTo,
+    toggleMute,
     toggleFullscreen,
+    togglePlay,
   ]);
 
   // ─── Derived ───────────────────────────────────────────────────────────────
 
   const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
+  const subtitleCueFontSize = Math.round(subtitleStyle.fontSize * subtitleStyle.scale);
+  const subtitleCueShadow = subtitleStyle.borderWidth > 0
+    ? `-${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, -${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}`
+    : 'none';
 
   const currentEpLabel = useMemo(() => {
     if (!hasEpisodes) return null;
@@ -1017,6 +1416,14 @@ export default function VideoPlayer({
 
   return (
     <div className="fixed inset-0 z-50 flex bg-black" ref={containerRef}>
+      <style>
+        {`video::cue {
+          color: ${subtitleStyle.fontColor};
+          font-size: ${subtitleCueFontSize}px;
+          background-color: ${subtitleStyle.backgroundColor};
+          text-shadow: ${subtitleCueShadow};
+        }`}
+      </style>
       <div
         className="relative flex-1 flex items-center justify-center bg-black overflow-hidden"
         onMouseMove={resetHideTimer}
@@ -1045,7 +1452,21 @@ export default function VideoPlayer({
           className={`w-full h-full ${aspectMode === 'fill' ? 'object-cover' : 'object-contain'}`}
           style={aspectMode.includes('/') ? { aspectRatio: aspectMode } : undefined}
           preload="auto"
-        />
+        >
+          {subtitles.map((subtitle, index) => {
+            const trackIndex = -1000 - index;
+            return (
+              <track
+                key={`${subtitle.url}-${index}`}
+                kind="subtitles"
+                src={subtitleSource(subtitle.url, serverBase)}
+                srcLang={subtitle.lang || 'en'}
+                label={subtitle.label || subtitle.lang || `Subtitle ${index + 1}`}
+                default={subtitlesDefaultEnabled && selectedSubtitleTrackIndex === trackIndex}
+              />
+            );
+          })}
+        </video>
 
         {playerState === 'loading' && (
           <div className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center">
@@ -1093,17 +1514,18 @@ export default function VideoPlayer({
             />
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={togglePlay}
-              className="rounded-full p-1.5 text-white hover:text-[#eba865] transition-colors"
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-white transition-colors hover:bg-white/10 hover:text-[#eba865]"
+              title={paused ? 'Play' : 'Pause'}
             >
-              {paused ? <Play className="w-5 h-5 fill-current" /> : <Pause className="w-5 h-5 fill-current" />}
+              {paused ? <Play className="h-6 w-6 fill-current" /> : <Pause className="h-6 w-6 fill-current" />}
             </button>
 
             <button
               onClick={() => seekTo(position - 10)}
-              className="text-white/70 hover:text-white transition-colors"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
               title="Back 10s"
             >
               <RotateCcw className="w-4 h-4" />
@@ -1111,7 +1533,7 @@ export default function VideoPlayer({
 
             <button
               onClick={() => seekTo(position + 30)}
-              className="text-white/70 hover:text-white transition-colors"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
               title="Forward 30s"
             >
               <RotateCw className="w-4 h-4" />
@@ -1125,16 +1547,28 @@ export default function VideoPlayer({
 
             {hasEpisodes && (
               <>
-                <button onClick={handlePrevEpisode} className="text-white/70 hover:text-white transition-colors" title="Previous episode">
+                <button
+                  onClick={handlePrevEpisode}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  title="Previous episode"
+                >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <button onClick={handleNextEpisode} className="text-white/70 hover:text-white transition-colors" title="Next episode">
+                <button
+                  onClick={handleNextEpisode}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  title="Next episode"
+                >
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </>
             )}
 
-            <button onClick={toggleMute} className="text-white/70 hover:text-white transition-colors">
+            <button
+              onClick={toggleMute}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              title={muted || volume === 0 ? 'Unmute' : 'Mute'}
+            >
               {muted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
             <input
@@ -1149,7 +1583,7 @@ export default function VideoPlayer({
 
             <button
               onClick={openMediaPanel}
-              className={`text-white/70 hover:text-white transition-colors ${showMediaPanel ? 'text-[#eba865]' : ''}`}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showMediaPanel ? 'text-[#eba865]' : ''}`}
               title="Video, audio, and subtitle controls"
             >
               <SlidersHorizontal className="w-4 h-4" />
@@ -1158,7 +1592,7 @@ export default function VideoPlayer({
             {hasEpisodes && (
               <button
                 onClick={openEpisodePanel}
-                className={`text-white/70 hover:text-white transition-colors ${showSidebar ? 'text-[#eba865]' : ''}`}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showSidebar ? 'text-[#eba865]' : ''}`}
                 title="Episode list"
               >
                 <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -1168,11 +1602,19 @@ export default function VideoPlayer({
               </button>
             )}
 
-            <button onClick={toggleFullscreen} className="text-white/70 hover:text-white transition-colors">
+            <button
+              onClick={toggleFullscreen}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
               {fullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
 
-            <button onClick={handleClose} className="text-white/70 hover:text-white transition-colors" title="Close player">
+            <button
+              onClick={handleClose}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              title="Close player"
+            >
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -1347,6 +1789,181 @@ export default function VideoPlayer({
                   <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/55">
                     Subtitles now load automatically when available. Choose Off once to keep them off by default until you pick a subtitle again.
                   </p>
+
+                  <div className="rounded-xl bg-white/[0.06] p-3">
+                    <div className="grid grid-cols-2 rounded-lg bg-white/10 p-1 text-xs">
+                      {(['primary', 'secondary'] as SubtitleStyleTarget[]).map((target) => (
+                        <button
+                          key={target}
+                          type="button"
+                          onClick={() => setSubtitleStyleTarget(target)}
+                          disabled={target === 'secondary'}
+                          className={`rounded-md px-3 py-2 capitalize transition-colors ${
+                            subtitleStyleTarget === target
+                              ? 'bg-[#eba865] text-black'
+                              : 'text-white/70 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-45'
+                          }`}
+                          title={target === 'secondary' ? 'Secondary subtitles are not available for this file yet' : 'Primary subtitle controls'}
+                        >
+                          {target} Subtitles
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 space-y-4">
+                      <div>
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs font-semibold text-white">Subtitle delay</p>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={-5}
+                              max={5}
+                              step={0.1}
+                              value={subtitleStyle.delaySeconds}
+                              onChange={(event) => updateSubtitleStyle('delaySeconds', Number(event.target.value))}
+                              className="h-8 w-16 rounded-lg border border-white/10 bg-white/10 px-2 text-right text-xs text-white outline-none focus:border-[#eba865]"
+                            />
+                            <span className="text-xs text-white/70">s</span>
+                          </div>
+                        </div>
+                        <input
+                          type="range"
+                          min={-5}
+                          max={5}
+                          step={0.1}
+                          value={subtitleStyle.delaySeconds}
+                          onChange={(event) => updateSubtitleStyle('delaySeconds', Number(event.target.value))}
+                          className="w-full accent-[#eba865]"
+                        />
+                        <div className="mt-1 flex justify-between text-[10px] text-white/45">
+                          <span>-5s</span>
+                          <span>0s</span>
+                          <span>+5s</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs font-semibold text-white">Position</p>
+                          <span className="text-xs text-[#eba865]">{Math.round(subtitleStyle.position)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={subtitleStyle.position}
+                          onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
+                          className="w-full accent-[#eba865]"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs font-semibold text-white">Scale</p>
+                          <button
+                            type="button"
+                            onClick={resetSubtitleStyle}
+                            className="rounded-full p-1 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                            title="Reset subtitle style"
+                            aria-label="Reset subtitle style"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={2}
+                          step={0.05}
+                          value={subtitleStyle.scale}
+                          onChange={(event) => updateSubtitleStyle('scale', Number(event.target.value))}
+                          className="w-full accent-[#eba865]"
+                        />
+                      </div>
+
+                      <div>
+                        <p className="mb-2 text-xs font-semibold text-white">Text Style</p>
+                        <div className="space-y-3 rounded-xl bg-black/20 p-3">
+                          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-white/75">Font</p>
+                            <label className="flex items-center gap-2 text-xs text-white/70">
+                              Colour:
+                              <input
+                                type="color"
+                                value={subtitleStyle.fontColor}
+                                onChange={(event) => updateSubtitleStyle('fontColor', event.target.value)}
+                                className="h-8 w-10 cursor-pointer rounded-lg border border-white/10 bg-transparent"
+                                title="Subtitle text colour"
+                              />
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-white/70">
+                              Size:
+                              <input
+                                type="number"
+                                min={24}
+                                max={96}
+                                step={1}
+                                value={subtitleStyle.fontSize}
+                                onChange={(event) => updateSubtitleStyle('fontSize', Number(event.target.value))}
+                                className="h-8 w-16 rounded-lg border border-white/10 bg-white/10 px-2 text-xs text-white outline-none focus:border-[#eba865]"
+                              />
+                            </label>
+                          </div>
+
+                          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-white/75">Border</p>
+                            <label className="flex items-center gap-2 text-xs text-white/70">
+                              Colour:
+                              <input
+                                type="color"
+                                value={subtitleStyle.borderColor}
+                                onChange={(event) => updateSubtitleStyle('borderColor', event.target.value)}
+                                className="h-8 w-10 cursor-pointer rounded-lg border border-white/10 bg-transparent"
+                                title="Subtitle border colour"
+                              />
+                            </label>
+                            <label className="flex items-center gap-2 text-xs text-white/70">
+                              Width:
+                              <input
+                                type="number"
+                                min={0}
+                                max={10}
+                                step={0.5}
+                                value={subtitleStyle.borderWidth}
+                                onChange={(event) => updateSubtitleStyle('borderWidth', Number(event.target.value))}
+                                className="h-8 w-16 rounded-lg border border-white/10 bg-white/10 px-2 text-xs text-white outline-none focus:border-[#eba865]"
+                              />
+                            </label>
+                          </div>
+
+                          <div className="grid grid-cols-[auto_1fr] items-center gap-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-white/75">Background</p>
+                            <label className="flex items-center gap-2 text-xs text-white/70">
+                              Colour:
+                              <input
+                                type="color"
+                                value={subtitleStyle.backgroundColor}
+                                onChange={(event) => updateSubtitleStyle('backgroundColor', event.target.value)}
+                                className="h-8 w-10 cursor-pointer rounded-lg border border-white/10 bg-transparent"
+                                title="Subtitle background colour"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={applySubtitleStyleToStream}
+                        disabled={selectedSubtitleTrackIndex < 0}
+                        className="w-full rounded-lg bg-[#eba865] px-3 py-2 text-xs font-semibold text-black transition-colors hover:bg-[#d4964f] disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        Apply to Stream
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

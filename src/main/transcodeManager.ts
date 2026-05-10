@@ -7,15 +7,19 @@ import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { findFFmpeg } from './mediaBinaries';
 import { assertLocalMediaPath } from './mediaProbe';
-import type { TranscodeOptions, TranscodeSession } from './mediaTypes';
+import type { SubtitleStyleOptions, TranscodeOptions, TranscodeSession } from './mediaTypes';
 
 interface ActiveSession extends TranscodeSession {
   process: ChildProcess;
+  exitedAt?: number;
+  exitCode?: number | null;
+  exitSignal?: NodeJS.Signals | null;
 }
 
 const sessions = new Map<string, ActiveSession>();
-const TRANSCODE_READY_TIMEOUT_MS = 15000;
+const TRANSCODE_READY_TIMEOUT_MS = 30000;
 const TRANSCODE_READY_POLL_MS = 150;
+const TRANSCODE_READY_SEGMENTS = 3;
 const encoderSupport = new Map<string, boolean>();
 
 export function transcodeRoot(): string {
@@ -23,9 +27,17 @@ export function transcodeRoot(): string {
 }
 
 export function cleanupOldTranscodes(): void {
+  const root = transcodeRoot();
   try {
-    fs.rmSync(transcodeRoot(), { recursive: true, force: true });
-    fs.mkdirSync(transcodeRoot(), { recursive: true });
+    fs.mkdirSync(root, { recursive: true });
+    for (const entry of fs.readdirSync(root)) {
+      fs.rmSync(path.join(root, entry), {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      });
+    }
   } catch (error) {
     console.error('[transcode] cleanup failed:', error);
   }
@@ -77,8 +89,40 @@ function isBitmapSubtitle(codec?: string): boolean {
   return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
 }
 
-function textSubtitleFilter(filePath: string, subtitleOrdinal: number): string {
-  return `subtitles='${escapeSubtitleFilterPath(filePath)}':si=${subtitleOrdinal},format=yuv420p`;
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function assColor(value: unknown, fallback: string): string {
+  const hex = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+  const red = hex.slice(1, 3);
+  const green = hex.slice(3, 5);
+  const blue = hex.slice(5, 7);
+  return `&H00${blue}${green}${red}`.toUpperCase();
+}
+
+function subtitleForceStyle(style?: SubtitleStyleOptions): string {
+  const fontSize = clampNumber(style?.fontSize, 55, 24, 96) * clampNumber(style?.scale, 1, 0.5, 2);
+  const position = clampNumber(style?.position, 92, 0, 100);
+  const marginV = Math.round((100 - position) * 6);
+  const borderWidth = clampNumber(style?.borderWidth, 3, 0, 10);
+
+  return [
+    `Fontsize=${Math.round(fontSize)}`,
+    `PrimaryColour=${assColor(style?.fontColor, '#ffffff')}`,
+    `OutlineColour=${assColor(style?.borderColor, '#000000')}`,
+    `BackColour=${assColor(style?.backgroundColor, '#000000')}`,
+    `Outline=${borderWidth}`,
+    'Shadow=0',
+    'Alignment=2',
+    `MarginV=${marginV}`,
+  ].join(',');
+}
+
+function textSubtitleFilter(filePath: string, subtitleOrdinal: number, style?: SubtitleStyleOptions): string {
+  return `subtitles='${escapeSubtitleFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style)}',format=yuv420p`;
 }
 
 function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions, ffmpegPath: string): string[] {
@@ -121,7 +165,7 @@ function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions
     const subtitleOrdinal = typeof options.subtitleStreamOrdinal === 'number'
       ? options.subtitleStreamOrdinal
       : 0;
-    args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal));
+    args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal, options.subtitleStyle));
   } else if (!bitmapSubtitle) {
     args.push('-vf', 'format=yuv420p');
   }
@@ -151,6 +195,10 @@ function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions
   }
 
   args.push(
+    '-fflags', '+genpts',
+    '-avoid_negative_ts', 'make_zero',
+    '-muxdelay', '0',
+    '-muxpreload', '0',
     '-f', 'hls',
     '-hls_time', '1',
     '-hls_list_size', '0',
@@ -164,12 +212,34 @@ function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions
   return args;
 }
 
+function firstReadySegmentFromPlaylist(playlistPath: string): boolean {
+  try {
+    const content = fs.readFileSync(playlistPath, 'utf8');
+    if (!content.includes('#EXTINF')) return false;
+
+    const segments = content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'));
+    if (segments.length < TRANSCODE_READY_SEGMENTS && !content.includes('#EXT-X-ENDLIST')) return false;
+
+    const playlistDir = path.resolve(path.dirname(playlistPath));
+    return segments.slice(0, TRANSCODE_READY_SEGMENTS).every((segment) => {
+      const segmentPath = path.resolve(playlistDir, segment);
+      if (!segmentPath.startsWith(`${playlistDir}${path.sep}`)) return false;
+      return fs.existsSync(segmentPath) && fs.statSync(segmentPath).size > 0;
+    });
+  } catch {
+    return false;
+  }
+}
+
 function waitForPlaylist(playlistPath: string, ffmpegProc: ChildProcess, stderrTail: () => string): Promise<void> {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
 
     const check = () => {
-      if (fs.existsSync(playlistPath) && fs.statSync(playlistPath).size > 0) {
+      if (fs.existsSync(playlistPath) && fs.statSync(playlistPath).size > 0 && firstReadySegmentFromPlaylist(playlistPath)) {
         resolve();
         return;
       }
@@ -205,7 +275,9 @@ async function launchTranscode(
   let stderr = '';
   let ffmpegProc: ChildProcess;
   try {
-    ffmpegProc = spawn(ffmpeg, hlsArgs(filePath, playlistPath, options, ffmpeg), { stdio: ['ignore', 'ignore', 'pipe'] });
+    const args = hlsArgs(filePath, playlistPath, options, ffmpeg);
+    console.log(`[transcode] ${path.basename(filePath)} | ffmpeg:${ffmpeg} preset:${selectedPreset(ffmpeg, options)}`);
+    ffmpegProc = spawn(ffmpeg, args, { stdio: ['ignore', 'ignore', 'pipe'] });
   } catch (error) {
     fs.rmSync(outputDir, { recursive: true, force: true });
     throw new Error(`Unable to start FFmpeg: ${error instanceof Error ? error.message : String(error)}`);
@@ -219,8 +291,6 @@ async function launchTranscode(
     stderr = `${stderr}\n${text}`.slice(-2400);
     if (process.env.DEBUG_TRANSCODE) console.debug('[transcode]', text);
   });
-  ffmpegProc.once('exit', () => sessions.delete(sessionId));
-
   const session: ActiveSession = {
     sessionId,
     filePath,
@@ -229,6 +299,13 @@ async function launchTranscode(
     process: ffmpegProc,
   };
   sessions.set(sessionId, session);
+  ffmpegProc.once('exit', (code, signal) => {
+    const activeSession = sessions.get(sessionId);
+    if (!activeSession) return;
+    activeSession.exitedAt = Date.now();
+    activeSession.exitCode = code;
+    activeSession.exitSignal = signal;
+  });
   try {
     await waitForPlaylist(playlistPath, ffmpegProc, () => stderr.split('\n').filter(Boolean).slice(-4).join(' '));
   } catch (error) {
@@ -290,7 +367,7 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
 export function stopTranscode(sessionId: string): boolean {
   const session = sessions.get(sessionId);
   if (!session) return false;
-  if (!session.process.killed) session.process.kill('SIGKILL');
+  if (session.process.exitCode === null && !session.process.killed) session.process.kill('SIGKILL');
   sessions.delete(sessionId);
   fs.rmSync(session.outputDir, { recursive: true, force: true });
   return true;
@@ -314,8 +391,9 @@ export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
     return true;
   }
 
-  const filePath = path.join(session.outputDir, relativeFile);
-  if (!filePath.startsWith(session.outputDir) || !fs.existsSync(filePath)) {
+  const outputRoot = path.resolve(session.outputDir);
+  const filePath = path.resolve(outputRoot, relativeFile);
+  if ((!filePath.startsWith(`${outputRoot}${path.sep}`) && filePath !== outputRoot) || !fs.existsSync(filePath)) {
     res.writeHead(404);
     res.end('HLS file not found');
     return true;
@@ -323,7 +401,13 @@ export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
 
   const contentType = filePath.endsWith('.m3u8')
     ? 'application/vnd.apple.mpegurl'
-    : 'video/mp2t';
+    : filePath.endsWith('.mp4')
+      ? 'video/mp4'
+      : filePath.endsWith('.m4s')
+        ? 'video/iso.segment'
+        : filePath.endsWith('.ts')
+          ? 'video/mp2t'
+          : 'application/octet-stream';
   res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
   fs.createReadStream(filePath).pipe(res);
   return true;

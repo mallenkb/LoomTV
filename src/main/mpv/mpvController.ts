@@ -12,6 +12,7 @@ import type { ChildProcess } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import { getMpvPath, getIpcPath } from './paths';
 import { MpvIpc } from './mpvIpc';
+import type { SubtitleStyleOptions } from '../mediaTypes';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -35,6 +36,20 @@ export interface MpvPlaybackState {
   volume: number;
   muted: boolean;
   speed: number;
+}
+
+type MpvTrackType = 'video' | 'audio' | 'sub';
+type MpvTrackProperty = 'vid' | 'aid' | 'sid';
+type MpvAspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
+
+interface MpvTrack {
+  id?: number | string;
+  type?: string;
+  title?: string;
+  lang?: string;
+  codec?: string;
+  selected?: boolean;
+  'ff-index'?: number;
 }
 
 export class MpvController {
@@ -241,6 +256,60 @@ export class MpvController {
     await this.ipc?.setProperty('fullscreen', fullscreen);
   }
 
+  async selectTrack(type: MpvTrackType, ffIndex: number): Promise<void> {
+    const property = this.trackProperty(type);
+    if (ffIndex < 0) {
+      await this.ipc?.setProperty(property, 'no');
+      return;
+    }
+
+    const trackList = await this.getTrackList();
+    const track = trackList.find((candidate) =>
+      candidate.type === type && candidate['ff-index'] === ffIndex,
+    ) ?? trackList.find((candidate) =>
+      candidate.type === type && Number(candidate.id) === ffIndex,
+    );
+
+    if (!track?.id) {
+      throw new Error(`Unable to find ${type} track for stream index ${ffIndex}.`);
+    }
+
+    await this.ipc?.setProperty(property, track.id);
+  }
+
+  async setAspectMode(mode: MpvAspectMode): Promise<void> {
+    if (mode === 'fill') {
+      await this.ipc?.setProperty('video-aspect-override', 'no');
+      await this.ipc?.setProperty('panscan', 1);
+      return;
+    }
+
+    await this.ipc?.setProperty('panscan', 0);
+    if (mode === '4 / 3' || mode === '16 / 9' || mode === '21 / 9') {
+      await this.ipc?.setProperty('video-aspect-override', mode.replace(/\s/g, ''));
+      return;
+    }
+
+    await this.ipc?.setProperty('video-aspect-override', 'no');
+  }
+
+  async setSubtitleStyle(style: SubtitleStyleOptions): Promise<void> {
+    const delay = Number.isFinite(style.delaySeconds) ? Number(style.delaySeconds) : 0;
+    const position = Number.isFinite(style.position) ? Number(style.position) : 92;
+    const scale = Number.isFinite(style.scale) ? Number(style.scale) : 1;
+    const fontSize = Number.isFinite(style.fontSize) ? Number(style.fontSize) : 55;
+    const borderWidth = Number.isFinite(style.borderWidth) ? Number(style.borderWidth) : 3;
+
+    await this.ipc?.setProperty('sub-delay', Math.max(-5, Math.min(5, delay)));
+    await this.ipc?.setProperty('sub-pos', Math.max(0, Math.min(100, position)));
+    await this.ipc?.setProperty('sub-scale', Math.max(0.5, Math.min(2, scale)));
+    await this.ipc?.setProperty('sub-font-size', Math.max(24, Math.min(96, fontSize)));
+    await this.ipc?.setProperty('sub-border-size', Math.max(0, Math.min(10, borderWidth)));
+    if (style.fontColor) await this.ipc?.setProperty('sub-color', style.fontColor);
+    if (style.borderColor) await this.ipc?.setProperty('sub-border-color', style.borderColor);
+    if (style.backgroundColor) await this.ipc?.setProperty('sub-back-color', style.backgroundColor);
+  }
+
   /**
    * Launch mpv embedded inside a native window specified by `wid`.
    * The caller is responsible for creating a frameless BrowserWindow and
@@ -375,6 +444,17 @@ export class MpvController {
   private async getBooleanProperty(name: string, fallback: boolean): Promise<boolean> {
     const val = await this.ipc?.getProperty(name);
     return typeof val === 'boolean' ? val : fallback;
+  }
+
+  private async getTrackList(): Promise<MpvTrack[]> {
+    const val = await this.ipc?.getProperty('track-list');
+    return Array.isArray(val) ? (val as MpvTrack[]) : [];
+  }
+
+  private trackProperty(type: MpvTrackType): MpvTrackProperty {
+    if (type === 'video') return 'vid';
+    if (type === 'audio') return 'aid';
+    return 'sid';
   }
 }
 

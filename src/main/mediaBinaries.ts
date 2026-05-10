@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 
@@ -34,34 +34,94 @@ function bundledBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
   return null;
 }
 
+function isCompatibleDarwinBinary(binaryPath: string): boolean {
+  if (process.platform !== 'darwin') return true;
+
+  try {
+    const description = execFileSync('file', [binaryPath], { encoding: 'utf8' });
+    if (process.arch === 'arm64') return description.includes('arm64');
+    if (process.arch === 'x64') return description.includes('x86_64');
+  } catch {
+    return true;
+  }
+
+  return true;
+}
+
+function existingCompatibleBinary(candidate?: string | null): string | null {
+  if (!candidate) return null;
+  try {
+    if (fs.existsSync(candidate) && isCompatibleDarwinBinary(candidate)) return candidate;
+  } catch {
+    // Continue through fallback candidates.
+  }
+  return null;
+}
+
+function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe'): string[] {
+  const executable = binaryName(name);
+  const candidates = [
+    `/opt/homebrew/bin/${executable}`,
+    `/usr/local/bin/${executable}`,
+    `/opt/local/bin/${executable}`,
+    `/usr/bin/${executable}`,
+    `/snap/bin/${executable}`,
+  ];
+
+  try {
+    const whichResult = execFileSync('which', ['-a', executable], { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    candidates.push(...whichResult);
+  } catch {
+    // Some app launches do not have shell PATH configured.
+  }
+
+  return [...new Set(candidates)];
+}
+
+function hasEncoder(binaryPath: string, encoder: string): boolean {
+  try {
+    const output = execFileSync(binaryPath, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+    return output.includes(encoder);
+  } catch {
+    return false;
+  }
+}
+
+function firstExistingBinary(candidates: Array<string | null | undefined>): string | null {
+  for (const candidate of candidates) {
+    const binary = existingCompatibleBinary(candidate);
+    if (binary) return binary;
+  }
+  return null;
+}
+
 export function findFFmpeg(): string | null {
   const bundled = bundledBinary('ffmpeg');
-  if (bundled) return bundled;
+  const appNodeModule = path.join(
+    app.getAppPath(),
+    'node_modules',
+    'ffmpeg-static',
+    process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
+  );
 
-  try {
-    if (ffmpegStatic && fs.existsSync(ffmpegStatic)) return ffmpegStatic;
-  } catch {
-    // Fall through.
+  const candidates = [
+    bundled,
+    ffmpegStatic,
+    appNodeModule,
+    ...systemBinaryCandidates('ffmpeg'),
+  ];
+
+  if (process.platform === 'darwin') {
+    for (const candidate of candidates) {
+      const binary = existingCompatibleBinary(candidate);
+      if (binary && hasEncoder(binary, 'h264_videotoolbox')) return binary;
+    }
   }
 
-  try {
-    const candidate = path.join(
-      app.getAppPath(),
-      'node_modules',
-      'ffmpeg-static',
-      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
-    );
-    if (fs.existsSync(candidate)) return candidate;
-  } catch {
-    // Fall through.
-  }
-
-  try {
-    const result = execSync('which ffmpeg', { encoding: 'utf8' }).trim();
-    return result || null;
-  } catch {
-    return null;
-  }
+  return firstExistingBinary(candidates);
 }
 
 export function findFFprobe(): string | null {
@@ -98,12 +158,7 @@ export function findFFprobe(): string | null {
     // Fall through.
   }
 
-  try {
-    const result = execSync('which ffprobe', { encoding: 'utf8' }).trim();
-    return result || null;
-  } catch {
-    return null;
-  }
+  return firstExistingBinary(systemBinaryCandidates('ffprobe'));
 }
 
 export function findMPV(): string | null {

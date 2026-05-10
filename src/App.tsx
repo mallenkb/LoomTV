@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import Home from './pages/Home';
@@ -10,6 +10,7 @@ import TVDetail from './pages/TVDetail';
 import Settings from './pages/Settings';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer';
+import ContinueWatchingBar from './components/ContinueWatchingBar';
 
 interface NowPlaying {
   filePath: string;
@@ -22,7 +23,20 @@ interface NowPlaying {
 }
 
 export default function App() {
+  return (
+    <LibraryProvider>
+      <BrowserRouter>
+        <AppShell />
+      </BrowserRouter>
+    </LibraryProvider>
+  );
+}
+
+function AppShell() {
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const location = useLocation();
+  const hideContinueBar = Boolean(nowPlaying) || location.pathname === '/settings';
+  const reserveContinueBarSpace = !hideContinueBar;
 
   const handlePlayMedia = useCallback((
     filePath: string,
@@ -48,37 +62,38 @@ export default function App() {
   }, []);
 
   return (
-    <LibraryProvider>
-      <BrowserRouter>
-        <div className="flex h-screen bg-[#1a1a1a]">
-          <Sidebar />
-          <main className="flex-1 overflow-hidden">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/movies" element={<Movies />} />
-              <Route path="/tv" element={<TVShows kind="series" />} />
-              <Route path="/anime" element={<TVShows kind="anime" />} />
-              <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
-              <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
-              <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </main>
-          {nowPlaying && (
-            <VideoPlayer
-              filePath={nowPlaying.filePath}
-              title={nowPlaying.title}
-              episodes={nowPlaying.episodes}
-              episodeFiles={nowPlaying.episodeFiles}
-              currentSeason={nowPlaying.currentSeason}
-              currentEpisode={nowPlaying.currentEpisode}
-              onEpisodeChange={handleEpisodeSelect}
-              onClose={handleClose}
-            />
-          )}
-        </div>
-      </BrowserRouter>
-    </LibraryProvider>
+    <div className="flex h-screen bg-[#1a1a1a]">
+      <Sidebar />
+      <main
+        className="flex-1 overflow-hidden"
+        style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '8rem' : '0px' } as React.CSSProperties}
+      >
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/movies" element={<Movies />} />
+          <Route path="/tv" element={<TVShows kind="series" />} />
+          <Route path="/anime" element={<TVShows kind="anime" />} />
+          <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
+          <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
+          <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+      {nowPlaying && (
+        <VideoPlayer
+          filePath={nowPlaying.filePath}
+          title={nowPlaying.title}
+          subtitles={nowPlaying.subtitles}
+          episodes={nowPlaying.episodes}
+          episodeFiles={nowPlaying.episodeFiles}
+          currentSeason={nowPlaying.currentSeason}
+          currentEpisode={nowPlaying.currentEpisode}
+          onEpisodeChange={handleEpisodeSelect}
+          onClose={handleClose}
+        />
+      )}
+      <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
+    </div>
   );
 }

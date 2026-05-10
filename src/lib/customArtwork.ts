@@ -1,0 +1,52 @@
+import { desktopApi } from '@/lib/desktopApi';
+
+const MOVIE_ARTWORK_KEY = 'loomtvCustomMovieArtwork';
+const SHOW_ARTWORK_KEY = 'loomtvCustomShowArtwork';
+
+type ArtworkById = Record<string, Record<string, string>>;
+
+function readLegacy(key: string): ArtworkById {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '{}') as ArtworkById;
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function migrateLegacyArtwork(): Promise<void> {
+  const movies = readLegacy(MOVIE_ARTWORK_KEY);
+  const shows = readLegacy(SHOW_ARTWORK_KEY);
+  const entries = { ...movies, ...shows };
+  if (Object.keys(entries).length === 0) return;
+  try {
+    await desktopApi.importCustomArtwork(entries);
+  } catch {
+    // The localStorage copy remains as a fallback.
+  }
+}
+
+export async function loadCustomArtwork(mediaId: string, legacyKey: string): Promise<Record<string, string>> {
+  const legacy = readLegacy(legacyKey)[mediaId] || {};
+  try {
+    return { ...legacy, ...(await desktopApi.getCustomArtwork(mediaId)) };
+  } catch {
+    return legacy;
+  }
+}
+
+export async function saveCustomArtwork(mediaId: string, target: string, dataUrl: string, legacyKey: string): Promise<Record<string, string>> {
+  const legacy = readLegacy(legacyKey);
+  legacy[mediaId] = { ...(legacy[mediaId] || {}), [target]: dataUrl };
+  try {
+    localStorage.setItem(legacyKey, JSON.stringify(legacy));
+  } catch {
+    // The database save below is the durable path.
+  }
+
+  try {
+    return await desktopApi.saveCustomArtwork(mediaId, target, dataUrl);
+  } catch {
+    return legacy[mediaId];
+  }
+}

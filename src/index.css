@@ -35,6 +35,14 @@ body {
   overflow: hidden;
 }
 
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
 #root {
   height: 100vh;
   width: 100vw;
@@ -45,6 +53,21 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.page-bottom-safe {
+  padding-bottom: calc(1.5rem + var(--loom-page-bottom-safe, 0px));
+}
+
+.page-bottom-safe-lg {
+  padding-bottom: calc(2rem + var(--loom-page-bottom-safe, 0px));
 }
 
 @keyframes player-flash {
