@@ -3724,11 +3724,14 @@ function removeFolderFromLibrary(data: LibraryData, folderPath: string): Library
 // ─── Window ───────────────────────────────────────────────────────────────────
 
 function getWindowIconPath(): string | null {
+  const iconFileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
   const candidates = [
+    path.join(process.resourcesPath, iconFileName),
+    path.join(process.resourcesPath, 'icon', iconFileName),
+    path.join(app.getAppPath(), 'resources', iconFileName),
+    path.join(__dirname, '../resources', iconFileName),
     path.join(process.resourcesPath, 'icon.png'),
-    path.join(process.resourcesPath, 'icon', 'icon.png'),
     path.join(app.getAppPath(), 'resources', 'icon.png'),
-    path.join(__dirname, '../resources/icon.png'),
   ];
 
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
