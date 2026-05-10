@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronRight, Play } from 'lucide-react';
+import { ChevronRight, Film, FolderPlus, Play, Tv } from 'lucide-react';
 import { useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -11,12 +11,13 @@ import SafeArtwork from '@/components/SafeArtwork';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
 
 export default function Home() {
-  const { state } = useLibrary();
-  const { movies, tvShows, animeShows, isLoading } = state;
+  const { state, addLibraryFolder } = useLibrary();
+  const { movies, tvShows, animeShows, isLoading, isScanning } = state;
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const normalizedQuery = searchQuery(query);
+  const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
 
   const continueWatching = [...movies, ...tvShows, ...animeShows]
     .filter((item) => item.lastPlayed)
@@ -25,14 +26,18 @@ export default function Home() {
   const filteredAnime = animeShows.filter((item) => matchesMediaItem(item, normalizedQuery));
   const filteredTVShows = tvShows.filter((item) => matchesMediaItem(item, normalizedQuery));
   const filteredMovies = movies.filter((item) => matchesMediaItem(item, normalizedQuery));
-  const showAnimeSection = !normalizedQuery || isLoading || filteredAnime.length > 0;
-  const showTVSection = !normalizedQuery || isLoading || filteredTVShows.length > 0;
-  const showMoviesSection = !normalizedQuery || isLoading || filteredMovies.length > 0;
+  const showAnimeSection = isLoading || filteredAnime.length > 0;
+  const showTVSection = isLoading || filteredTVShows.length > 0;
+  const showMoviesSection = isLoading || filteredMovies.length > 0;
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
       <LibrarySearch value={query} onChange={setQuery} placeholder="Search Home" />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
+        {!normalizedQuery && !isLoading && !hasLibraryItems && (
+          <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
+        )}
+
         {!normalizedQuery && continueWatching.length > 0 && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
@@ -89,6 +94,42 @@ export default function Home() {
         {normalizedQuery && !isLoading && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
           <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function HomeEmptyState({
+  isScanning,
+  onAddFolder,
+}: {
+  isScanning: boolean;
+  onAddFolder: (kind?: 'movies' | 'tvShows' | 'anime') => Promise<void>;
+}) {
+  return (
+    <div className="flex min-h-[calc(100vh-220px)] items-center justify-center px-4">
+      <div className="w-full max-w-[620px] text-center">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-border)] bg-[var(--loom-surface)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
+          <FolderPlus className="h-9 w-9 text-[var(--loom-accent)]" />
+        </div>
+        <h2 className="text-2xl font-semibold text-white">Add your first library folder</h2>
+        <p className="mx-auto mt-3 max-w-[460px] text-sm leading-6 text-[var(--loom-muted)]">
+          Choose where LoomTV should look for your movies, TV shows, or anime. The folder will be scanned right away.
+        </p>
+        <div className="mt-8 grid gap-3 sm:grid-cols-3">
+          <Button onClick={() => onAddFolder('movies')} disabled={isScanning} className="h-12 gap-2">
+            <Film className="h-4 w-4" />
+            Movies
+          </Button>
+          <Button onClick={() => onAddFolder('tvShows')} disabled={isScanning} variant="outline" className="h-12 gap-2">
+            <Tv className="h-4 w-4" />
+            TV Shows
+          </Button>
+          <Button onClick={() => onAddFolder('anime')} disabled={isScanning} variant="outline" className="h-12 gap-2">
+            <FolderPlus className="h-4 w-4" />
+            Anime
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -73,6 +73,7 @@ let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const SCAN_CACHE_VERSION = 7;
+let libraryMutationVersion = 0;
 
 let mediaServerPort = 3847;
 let mediaServer: http.Server | null = null;
@@ -1189,6 +1190,7 @@ function startMediaServer(): Promise<number> {
       }
 
       if (reqUrl.pathname === '/api/library/scan' && req.method === 'POST') {
+        const scanVersion = libraryMutationVersion;
         readJsonBody(req)
           .catch(() => ({}))
           .then((body) => scanLibrary(loadLibrary(), {
@@ -1196,7 +1198,7 @@ function startMediaServer(): Promise<number> {
             mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
           }))
           .then((scanned) => {
-            saveLibrary(scanned);
+            saveLibraryFromScan(scanned, scanVersion);
             writeJson(res, 200, loadLibrary());
           })
           .catch((error) => {
@@ -1225,8 +1227,10 @@ function startMediaServer(): Promise<number> {
             const data = loadLibrary();
             const newFolder = result.result.filePaths[0];
             const updated = addFolderToLibrary(data, newFolder, result.kind);
+            saveLibraryMutation(updated);
+            const scanVersion = libraryMutationVersion;
             const scanned = await scanLibrary(updated, { mode: 'quick' });
-            saveLibrary(scanned);
+            saveLibraryFromScan(scanned, scanVersion);
             writeJson(res, 200, loadLibrary());
           })
           .catch((error) => {
@@ -1241,7 +1245,7 @@ function startMediaServer(): Promise<number> {
           .then((body) => {
             const data = loadLibrary();
             const updated = removeFolderFromLibrary(data, String(body.folderPath || ''));
-            saveLibrary(updated);
+            saveLibraryMutation(updated);
             writeJson(res, 200, loadLibrary());
           })
           .catch((error) => {
@@ -3474,6 +3478,17 @@ function saveLibrary(data: LibraryData): void {
   }
 }
 
+function saveLibraryMutation(data: LibraryData): void {
+  libraryMutationVersion++;
+  saveLibrary(data);
+}
+
+function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
+  if (scanVersion !== libraryMutationVersion) return false;
+  saveLibrary(data);
+  return true;
+}
+
 type OfficialArtworkRefreshResult = {
   thumbnail?: string;
   cover?: string;
@@ -3743,6 +3758,7 @@ ipcMain.handle('library:get', () => loadLibrary());
 
 ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?: LibraryScanMode }) => {
   const data = loadLibrary();
+  const scanVersion = libraryMutationVersion;
   const mode: LibraryScanMode = options?.force
     ? 'full'
     : options?.mode === 'metadata' || options?.mode === 'full'
@@ -3751,7 +3767,7 @@ ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?:
   const scanned = await scanLibrary(data, {
     mode,
     onProgress: (snapshot) => {
-      saveLibrary(snapshot);
+      saveLibraryFromScan(snapshot, scanVersion);
       event.sender.send('library:scan-progress', loadLibrary(), {
         isComplete: snapshot.isComplete,
         scannedFolders: snapshot.scannedFolders,
@@ -3759,21 +3775,27 @@ ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?:
       });
     },
   });
-  saveLibrary(scanned);
+  saveLibraryFromScan(scanned, scanVersion);
   return loadLibrary();
 });
 
 ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'movies') => {
-  const result = await dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] });
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory'],
+    buttonLabel: 'Add Folder',
+    message: 'Select a folder to add to your LoomTV library.',
+  });
   if (!result.canceled && result.filePaths.length > 0) {
     const data = loadLibrary();
     const newFolder = result.filePaths[0];
     const safeKind: LibraryFolderKind = kind === 'tvShows' || kind === 'anime' || kind === 'movies' ? kind : 'movies';
     const updated = addFolderToLibrary(data, newFolder, safeKind);
+    saveLibraryMutation(updated);
+    const scanVersion = libraryMutationVersion;
     const scanned = await scanLibrary(updated, {
       mode: 'quick',
       onProgress: (snapshot) => {
-        saveLibrary(snapshot);
+        saveLibraryFromScan(snapshot, scanVersion);
         BrowserWindow.getAllWindows().forEach((window) => {
           window.webContents.send('library:scan-progress', loadLibrary(), {
             isComplete: snapshot.isComplete,
@@ -3783,7 +3805,7 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
         });
       },
     });
-    saveLibrary(scanned);
+    saveLibraryFromScan(scanned, scanVersion);
     return loadLibrary();
   }
   return null;
@@ -3792,7 +3814,7 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
 ipcMain.handle('library:remove-folder', (_event, folderPath: string) => {
   const data = loadLibrary();
   const updated = removeFolderFromLibrary(data, folderPath);
-  saveLibrary(updated);
+  saveLibraryMutation(updated);
   return loadLibrary();
 });
 
