@@ -44,7 +44,9 @@ const unpacked = path.join(resources, 'app.asar.unpacked');
 if (!exists(resources)) fail(`Missing resources directory: ${resources}`);
 if (!exists(appAsar)) fail(`Missing app.asar: ${appAsar}`);
 
-const appFiles = exists(appAsar) ? new Set(asar.listPackage(appAsar)) : new Set();
+const appFiles = exists(appAsar)
+  ? new Set(asar.listPackage(appAsar).map((entry) => entry.replace(/\\/g, '/')))
+  : new Set();
 const requiredAsarEntries = [
   '/node_modules/better-sqlite3/lib/index.js',
   '/node_modules/bindings/bindings.js',
