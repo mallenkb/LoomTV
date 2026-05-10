@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell, autoUpdater } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -84,6 +84,38 @@ let libraryMutationVersion = 0;
 
 let mediaServerPort = 3847;
 let mediaServer: http.Server | null = null;
+const UPDATE_OWNER = 'mallenkb';
+const UPDATE_REPO = 'LoomTV';
+
+type UpdateStatus =
+  | 'idle'
+  | 'disabled'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'not-available'
+  | 'error';
+
+interface UpdateState {
+  status: UpdateStatus;
+  currentVersion: string;
+  platform: NodeJS.Platform;
+  arch: string;
+  supported: boolean;
+  message?: string;
+  checkedAt?: string;
+}
+
+let updateState: UpdateState = {
+  status: 'idle',
+  currentVersion: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  supported: process.platform === 'darwin' || process.platform === 'win32',
+};
+let updaterConfigured = false;
+let updateCheckInFlight = false;
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -4676,6 +4708,112 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+// ─── App updates ─────────────────────────────────────────────────────────────
+
+function emitUpdateState() {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    window.webContents.send('updates:state', updateState);
+  });
+}
+
+function setUpdateState(nextState: Partial<UpdateState>) {
+  updateState = {
+    ...updateState,
+    ...nextState,
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    supported: process.platform === 'darwin' || process.platform === 'win32',
+  };
+  emitUpdateState();
+  return updateState;
+}
+
+function getUpdateFeedUrl() {
+  const platform = process.platform === 'win32' ? 'win32' : process.platform;
+  return `https://update.electronjs.org/${UPDATE_OWNER}/${UPDATE_REPO}/${platform}-${process.arch}/${app.getVersion()}`;
+}
+
+function configureAutoUpdater() {
+  if (updaterConfigured) return;
+  updaterConfigured = true;
+
+  if (!updateState.supported) {
+    setUpdateState({
+      status: 'disabled',
+      message: 'Automatic updates are available on macOS and Windows builds.',
+    });
+    return;
+  }
+
+  if (!app.isPackaged) {
+    setUpdateState({
+      status: 'disabled',
+      message: 'Automatic updates are enabled after LoomTV is packaged and published.',
+    });
+    return;
+  }
+
+  autoUpdater.setFeedURL({ url: getUpdateFeedUrl() });
+
+  autoUpdater.on('checking-for-update', () => {
+    setUpdateState({ status: 'checking', message: 'Checking for updates...' });
+  });
+
+  autoUpdater.on('update-available', () => {
+    setUpdateState({ status: 'downloading', message: 'Downloading the latest LoomTV update...' });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    setUpdateState({
+      status: 'not-available',
+      message: 'LoomTV is up to date.',
+      checkedAt: new Date().toISOString(),
+    });
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    setUpdateState({
+      status: 'downloaded',
+      message: 'Update ready. Restart LoomTV to install it.',
+      checkedAt: new Date().toISOString(),
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    setUpdateState({
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+      checkedAt: new Date().toISOString(),
+    });
+  });
+}
+
+function checkForUpdates() {
+  configureAutoUpdater();
+  if (!updateState.supported || !app.isPackaged) return updateState;
+  if (updateCheckInFlight || updateState.status === 'downloading' || updateState.status === 'downloaded') {
+    return updateState;
+  }
+
+  updateCheckInFlight = true;
+  setUpdateState({ status: 'checking', message: 'Checking for updates...' });
+  try {
+    autoUpdater.checkForUpdates();
+  } catch (error) {
+    setUpdateState({
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+      checkedAt: new Date().toISOString(),
+    });
+  } finally {
+    setTimeout(() => {
+      updateCheckInFlight = false;
+    }, 1000);
+  }
+  return updateState;
+}
+
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
 ipcMain.handle('library:get', () => libraryForRenderer());
@@ -4840,6 +4978,13 @@ ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string,
 ipcMain.handle('database:backup', () => backupDatabase());
 ipcMain.handle('database:clear', () => libraryForRenderer(clearAppData()));
 ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url));
+ipcMain.handle('updates:get-state', () => updateState);
+ipcMain.handle('updates:check', () => checkForUpdates());
+ipcMain.handle('updates:install', () => {
+  if (updateState.status !== 'downloaded') return updateState;
+  setImmediate(() => autoUpdater.quitAndInstall());
+  return updateState;
+});
 
 ipcMain.handle('media:ffmpeg-available', () => {
   return { available: findFFmpeg() !== null, path: findFFmpeg() };
@@ -4984,6 +5129,10 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+  configureAutoUpdater();
+  setTimeout(() => {
+    checkForUpdates();
+  }, 5000);
 }).catch((error) => {
   console.error('Failed to start LoomTV:', error);
   app.quit();

@@ -20,6 +20,15 @@ type LibraryPayload = {
 };
 type LibraryScanMode = 'quick' | 'metadata' | 'full';
 type LibraryScanProgress = { isComplete: boolean; scannedFolders: number; totalFolders: number };
+type UpdateState = {
+  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error';
+  currentVersion: string;
+  platform: NodeJS.Platform;
+  arch: string;
+  supported: boolean;
+  message?: string;
+  checkedAt?: string;
+};
 
 // ─── desktopApi — existing library/media/settings surface ────────────────────
 
@@ -82,6 +91,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
   clearAppData: () => ipcRenderer.invoke('database:clear'),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
+  getUpdateState: () => ipcRenderer.invoke('updates:get-state'),
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  onUpdateState: (callback: (state: UpdateState) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, state: UpdateState) => callback(state);
+    ipcRenderer.on('updates:state', handler);
+    return () => ipcRenderer.removeListener('updates:state', handler);
+  },
 
   // Legacy MPV handlers (still used by existing VideoPlayer)
   playWithMPV: (filePath: string, startSecs?: number) => ipcRenderer.invoke('media:play-mpv', filePath, startSecs),
@@ -251,6 +268,10 @@ declare global {
       backupDatabase: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       clearAppData: () => Promise<LibraryPayload>;
       openExternal: (url: string) => Promise<void>;
+      getUpdateState: () => Promise<UpdateState>;
+      checkForUpdates: () => Promise<UpdateState>;
+      installUpdate: () => Promise<UpdateState>;
+      onUpdateState: (callback: (state: UpdateState) => void) => () => void;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<{ ok?: boolean; error?: string }>;
       queryMPV: () => Promise<{
         position: number;

@@ -26,6 +26,15 @@ type SettingsPayload = {
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;
 };
+export type UpdateState = {
+  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error';
+  currentVersion: string;
+  platform: NodeJS.Platform;
+  arch: string;
+  supported: boolean;
+  message?: string;
+  checkedAt?: string;
+};
 type FFmpegStatus = { available: boolean; path: string | null };
 type MPVPlayResult = { ok?: boolean; error?: string };
 type MPVStatus = {
@@ -145,6 +154,11 @@ declare global {
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       clearAppData?: () => Promise<LibraryPayload>;
+      openExternal?: (url: string) => Promise<void>;
+      getUpdateState?: () => Promise<UpdateState>;
+      checkForUpdates?: () => Promise<UpdateState>;
+      installUpdate?: () => Promise<UpdateState>;
+      onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<MPVPlayResult>;
       queryMPV: () => Promise<MPVStatus | null>;
       closeMPV: () => Promise<void>;
@@ -487,6 +501,33 @@ export const desktopApi = {
     } else {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
+  },
+
+  async getUpdateState(): Promise<UpdateState> {
+    if (window.desktopApi?.getUpdateState) return window.desktopApi.getUpdateState();
+    return {
+      status: 'disabled',
+      currentVersion: 'dev',
+      platform: 'browser' as NodeJS.Platform,
+      arch: 'unknown',
+      supported: false,
+      message: 'Automatic updates are only available in the desktop app.',
+    };
+  },
+
+  async checkForUpdates(): Promise<UpdateState> {
+    if (window.desktopApi?.checkForUpdates) return window.desktopApi.checkForUpdates();
+    return this.getUpdateState();
+  },
+
+  async installUpdate(): Promise<UpdateState> {
+    if (window.desktopApi?.installUpdate) return window.desktopApi.installUpdate();
+    return this.getUpdateState();
+  },
+
+  onUpdateState(callback: (state: UpdateState) => void): () => void {
+    if (window.desktopApi?.onUpdateState) return window.desktopApi.onUpdateState(callback);
+    return () => undefined;
   },
 
   async playMedia(filePath: string): Promise<boolean> {
