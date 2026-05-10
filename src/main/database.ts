@@ -181,23 +181,31 @@ function flattenFolders(groups: { movies: string[]; tvShows: string[]; anime: st
   return [...groups.movies, ...groups.tvShows, ...groups.anime];
 }
 
-function mapArtworkSource(source: string, cache: Map<string, string>): string {
-  return source && cache.has(source) ? cache.get(source)! : source;
+function isInlineArtworkSource(source?: string | null): boolean {
+  return /^data:/i.test(source || '');
 }
 
-function applyDurableState(item: any, progress: Map<string, StoredProgress>, custom: Map<string, Map<string, string>>, cache: Map<string, string>): any {
+function durableArtworkSource(source?: string | null): string {
+  return isInlineArtworkSource(source) ? '' : (source || '').trim();
+}
+
+function durableArtworkSources(sources?: string[]): string[] {
+  return Array.from(new Set((sources || []).map(durableArtworkSource).filter(Boolean)));
+}
+
+function applyDurableState(item: any, progress: Map<string, StoredProgress>, custom: Map<string, Map<string, string>>): any {
   const next = { ...item };
   const itemCustom = custom.get(item.id);
   const itemProgress = progress.get(item.filePath);
   let lastPlayed = itemProgress?.updatedAt || item.lastPlayed || 0;
 
-  next.poster = mapArtworkSource(next.poster || '', cache);
-  next.backdrop = mapArtworkSource(next.backdrop || '', cache);
-  next.posterCandidates = (next.posterCandidates || []).map((source: string) => mapArtworkSource(source, cache));
-  next.backdropCandidates = (next.backdropCandidates || []).map((source: string) => mapArtworkSource(source, cache));
+  next.poster = durableArtworkSource(next.poster);
+  next.backdrop = durableArtworkSource(next.backdrop);
+  next.posterCandidates = durableArtworkSources(next.posterCandidates);
+  next.backdropCandidates = durableArtworkSources(next.backdropCandidates);
   next.episodes = (next.episodes || []).map((episode: any) => ({
     ...episode,
-    still: mapArtworkSource(episode.still || '', cache),
+    still: durableArtworkSource(episode.still),
   }));
 
   if (Array.isArray(next.episodeFiles)) {
@@ -236,7 +244,6 @@ export function loadLibraryFromDatabase(): LibraryData | null {
   const folderGroups = folderGroupsFromRows(folderRows);
   const progress = getProgressMap();
   const custom = getCustomArtworkMap();
-  const cache = getArtworkCacheMap();
   const rows = database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').all() as any[];
 
   const seasonsByMedia = new Map<string, any[]>();
@@ -316,7 +323,7 @@ export function loadLibraryFromDatabase(): LibraryData | null {
       seasons: seasonsByMedia.get(row.id) || undefined,
       episodes: episodesByMedia.get(row.id) || undefined,
       episodeFiles: episodeFilesByMedia.get(row.id) || undefined,
-    }, progress, custom, cache);
+    }, progress, custom);
 
     if (item.type === 'movie') data.movies.push(item);
     else if (item.type === 'anime') data.animeShows.push(item);
@@ -360,8 +367,8 @@ export function saveLibraryToDatabase(data: LibraryData): void {
         item.type,
         item.title || '',
         item.year || 0,
-        item.poster || '',
-        item.backdrop || '',
+        durableArtworkSource(item.poster),
+        durableArtworkSource(item.backdrop),
         item.summary || '',
         item.rating || 0,
         item.filePath || '',
@@ -371,8 +378,8 @@ export function saveLibraryToDatabase(data: LibraryData): void {
         jsonString(item.cast || []),
         jsonString(item.subtitles || []),
         item.localMetadata ? jsonString(item.localMetadata) : null,
-        jsonString(item.posterCandidates || []),
-        jsonString(item.backdropCandidates || []),
+        jsonString(durableArtworkSources(item.posterCandidates || [])),
+        jsonString(durableArtworkSources(item.backdropCandidates || [])),
         now,
       );
 
@@ -386,7 +393,7 @@ export function saveLibraryToDatabase(data: LibraryData): void {
           episode.number,
           episode.title || '',
           episode.summary || '',
-          episode.still || '',
+          durableArtworkSource(episode.still),
           episode.rating || 0,
           episode.airDate || '',
           episode.localMetadata ? jsonString(episode.localMetadata) : null,
@@ -506,19 +513,28 @@ function getCustomArtworkMap(): Map<string, Map<string, string>> {
   return result;
 }
 
-function getArtworkCacheMap(): Map<string, string> {
-  return new Map((getDb().prepare('SELECT source_url, data_url FROM artwork_cache').all() as any[])
-    .map((row) => [row.source_url, row.data_url]));
+export function getCachedArtwork(sourceUrl: string): { dataUrl: string; mimeType: string } | null {
+  const row = getDb().prepare('SELECT data_url, mime_type FROM artwork_cache WHERE source_url = ?').get(sourceUrl) as
+    | { data_url: string; mime_type: string }
+    | undefined;
+  return row ? { dataUrl: row.data_url, mimeType: row.mime_type } : null;
 }
 
-function isRemoteArtworkSource(source: string): boolean {
-  return /^https?:\/\//i.test(source);
+function isCacheableArtworkSource(source: string): boolean {
+  try {
+    const parsed = new URL(source);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
+  } catch {
+    return false;
+  }
 }
 
 function collectArtworkSources(data: LibraryData): string[] {
   const sources = new Set<string>();
   const add = (source?: string) => {
-    if (source && isRemoteArtworkSource(source)) sources.add(source);
+    if (source && isCacheableArtworkSource(source)) sources.add(source);
   };
 
   for (const item of [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]) {

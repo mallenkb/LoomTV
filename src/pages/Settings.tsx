@@ -105,7 +105,7 @@ const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
 
 const APP_LICENSE = {
   name: 'LoomTV',
-  version: '1.0.4',
+  version: '1.0.5',
   license: 'MIT',
   copyright: 'Copyright (c) 2026 malllenkb',
 };
