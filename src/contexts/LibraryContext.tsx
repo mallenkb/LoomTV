@@ -132,6 +132,8 @@ interface LibraryContextType {
   state: LibraryState;
   dispatch: React.Dispatch<LibraryAction>;
   scanLibrary: () => Promise<void>;
+  fullRescanLibrary: () => Promise<void>;
+  refreshMetadata: () => Promise<void>;
   addLibraryFolder: (kind?: LibraryFolderKind) => Promise<void>;
   removeLibraryFolder: (folder: string) => Promise<void>;
   refreshLibrary: () => Promise<void>;
@@ -176,6 +178,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const applyScanProgress = (progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
+    if (!progress) return;
+    const percent = progress.totalFolders > 0
+      ? Math.round((progress.scannedFolders / progress.totalFolders) * 100)
+      : progress.isComplete ? 100 : 0;
+    dispatch({ type: 'SET_SCANNING', payload: !progress.isComplete });
+    dispatch({ type: 'SET_SCAN_PROGRESS', payload: Math.min(100, Math.max(0, percent)) });
+  };
+
   const refreshLibrary = async () => {
     try {
       const data = await desktopApi.getLibrary();
@@ -187,12 +198,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const scanLibrary = async () => {
+  const runLibraryScan = async (mode: 'quick' | 'metadata' | 'full') => {
     if (isScanningRef.current) return;
     dispatch({ type: 'SET_SCANNING', payload: true });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
-      const data = await desktopApi.scanLibrary(true);
+      const data = await desktopApi.scanLibrary(mode);
       applyLibraryData(data);
     } catch (error) {
       console.error('Failed to scan library:', error);
@@ -201,6 +212,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
+
+  const scanLibrary = () => runLibraryScan('quick');
+  const refreshMetadata = () => runLibraryScan('metadata');
+  const fullRescanLibrary = () => runLibraryScan('full');
 
   const addLibraryFolder = async (kind: LibraryFolderKind = 'movies') => {
     dispatch({ type: 'SET_SCANNING', payload: true });
@@ -241,6 +256,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   useEffect(() => {
+    return desktopApi.onLibraryScanProgress((library, progress) => {
+      applyLibraryData(library);
+      applyScanProgress(progress);
+      dispatch({ type: 'SET_LOADING', payload: false });
+    });
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     const loadFromDevice = async () => {
@@ -262,7 +285,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
         if (hasConfiguredFolders(cached)) {
           dispatch({ type: 'SET_SCANNING', payload: true });
-          const scanned = await desktopApi.scanLibrary(false);
+          const scanned = await desktopApi.scanLibrary('quick');
           if (cancelled) return;
           applyLibraryData(scanned);
         }
@@ -291,7 +314,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SCANNING', payload: true });
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
         try {
-          const data = await desktopApi.scanLibrary(false);
+          const data = await desktopApi.scanLibrary('quick');
           applyLibraryData(data);
         } catch (error) {
           console.error('Failed to auto sync library:', error);
@@ -306,7 +329,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [state.autoSyncIntervalHours]);
 
   return (
-    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, addLibraryFolder, removeLibraryFolder, refreshLibrary, setAutoSyncIntervalHours }}>
+    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, setAutoSyncIntervalHours }}>
       {children}
     </LibraryContext.Provider>
   );

@@ -7,6 +7,12 @@ type LibraryPayload = {
   libraryFolders: string[];
   libraryFolderGroups?: LibraryFolderGroups;
 };
+type LibraryScanProgress = {
+  isComplete: boolean;
+  scannedFolders: number;
+  totalFolders: number;
+};
+export type LibraryScanMode = 'quick' | 'metadata' | 'full';
 type MetadataApiKeys = Record<string, string>;
 type SettingsPayload = {
   omdbApiKey?: string;
@@ -14,6 +20,9 @@ type SettingsPayload = {
   metadataApiKeys?: MetadataApiKeys;
   autoSyncIntervalHours?: number;
   sidebarNavOrder?: string[];
+  appThemeMode?: 'dark' | 'light';
+  appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+  appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
 };
 type FFmpegStatus = { available: boolean; path: string | null };
 type MPVPlayResult = { ok?: boolean; error?: string };
@@ -55,21 +64,41 @@ type TranscodeOptions = {
   subtitleTrackIndex?: number;
   subtitleStreamOrdinal?: number;
   subtitleCodec?: string;
+  secondarySubtitleTrackIndex?: number;
+  secondarySubtitleStreamOrdinal?: number;
+  secondarySubtitleCodec?: string;
   subtitleStyle?: SubtitleStyleOptions;
   forceTranscode?: boolean;
 };
 type TranscodeSession = { sessionId: string; filePath: string; playlistUrl: string; outputDir: string };
 type StreamUrlOptions = Pick<TranscodeOptions,
-  'startSeconds' | 'videoTrackIndex' | 'audioTrackIndex' | 'subtitleTrackIndex' | 'subtitleStreamOrdinal' | 'subtitleCodec' | 'forceTranscode'
+  | 'startSeconds'
+  | 'videoTrackIndex'
+  | 'audioTrackIndex'
+  | 'subtitleTrackIndex'
+  | 'subtitleStreamOrdinal'
+  | 'subtitleCodec'
+  | 'secondarySubtitleTrackIndex'
+  | 'secondarySubtitleStreamOrdinal'
+  | 'secondarySubtitleCodec'
+  | 'forceTranscode'
 > & { subtitleStyle?: SubtitleStyleOptions };
 type StreamUrlResult = { url: string; contentType: string; fileName: string; isTranscoded?: boolean };
 export type StoredProgress = { position: number; duration: number; updatedAt: number; watched: boolean };
+export type OfficialArtworkResult = {
+  thumbnail?: string;
+  cover?: string;
+  summary?: string;
+  posterCandidates?: string[];
+  backdropCandidates?: string[];
+};
 
 declare global {
   interface Window {
     desktopApi?: {
       getLibrary: () => Promise<LibraryPayload>;
-      scanLibrary: (options?: { force?: boolean }) => Promise<LibraryPayload>;
+      scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryPayload>;
+      onLibraryScanProgress?: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => () => void;
       addLibraryFolder: (kind?: LibraryFolderKind) => Promise<LibraryPayload | null>;
       removeLibraryFolder: (folderPath: string) => Promise<LibraryPayload>;
       playMedia: (filePath: string) => Promise<boolean>;
@@ -85,6 +114,7 @@ declare global {
       importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
       getCustomArtwork?: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
+      refreshOfficialArtwork?: (mediaId: string) => Promise<OfficialArtworkResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<MPVPlayResult>;
@@ -98,6 +128,7 @@ declare global {
       setMPVFullscreen?: (fullscreen: boolean) => Promise<void>;
       setMPVAspectMode?: (mode: MPVAspectMode) => Promise<void>;
       selectMPVTrack?: (type: MPVTrackType, ffIndex: number) => Promise<void>;
+      selectMPVSecondarySubtitleTrack?: (ffIndex: number) => Promise<void>;
       setMPVSubtitleStyle?: (style: SubtitleStyleOptions) => Promise<void>;
       onMPVEvent: (callback: (event: string) => void) => () => void;
       media?: {
@@ -178,6 +209,9 @@ export const desktopApi = {
     if (typeof options.subtitleTrackIndex === 'number') params.set('subtitle', String(options.subtitleTrackIndex));
     if (typeof options.subtitleStreamOrdinal === 'number') params.set('subtitleOrdinal', String(options.subtitleStreamOrdinal));
     if (options.subtitleCodec) params.set('subtitleCodec', options.subtitleCodec);
+    if (typeof options.secondarySubtitleTrackIndex === 'number') params.set('secondarySubtitle', String(options.secondarySubtitleTrackIndex));
+    if (typeof options.secondarySubtitleStreamOrdinal === 'number') params.set('secondarySubtitleOrdinal', String(options.secondarySubtitleStreamOrdinal));
+    if (options.secondarySubtitleCodec) params.set('secondarySubtitleCodec', options.secondarySubtitleCodec);
     if (options.subtitleStyle) params.set('subtitleStyle', JSON.stringify(options.subtitleStyle));
     if (options.forceTranscode) params.set('forceTranscode', '1');
     return {
@@ -200,12 +234,16 @@ export const desktopApi = {
     return { url };
   },
 
-  async scanLibrary(force = false): Promise<LibraryPayload> {
-    if (window.desktopApi) return window.desktopApi.scanLibrary({ force });
+  async scanLibrary(mode: LibraryScanMode = 'quick'): Promise<LibraryPayload> {
+    if (window.desktopApi) return window.desktopApi.scanLibrary({ force: mode === 'full', mode });
     return fetchJson<LibraryPayload>('/api/library/scan', {
       method: 'POST',
-      body: JSON.stringify({ force }),
+      body: JSON.stringify({ force: mode === 'full', mode }),
     });
+  },
+
+  onLibraryScanProgress(callback: (library: LibraryPayload, progress: LibraryScanProgress) => void): () => void {
+    return window.desktopApi?.onLibraryScanProgress?.(callback) || (() => undefined);
   },
 
   async addLibraryFolder(kind: LibraryFolderKind = 'movies'): Promise<LibraryPayload | null> {
@@ -289,6 +327,14 @@ export const desktopApi = {
     });
   },
 
+  async refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkResult> {
+    if (window.desktopApi?.refreshOfficialArtwork) return window.desktopApi.refreshOfficialArtwork(mediaId);
+    return fetchJson<OfficialArtworkResult>('/api/artwork/refresh-official', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId }),
+    });
+  },
+
   async importCustomArtwork(entries: Record<string, Record<string, string>>): Promise<boolean> {
     if (window.desktopApi?.importCustomArtwork) return window.desktopApi.importCustomArtwork(entries);
     const response = await fetchJson<{ ok: boolean }>('/api/artwork/import', {
@@ -301,6 +347,14 @@ export const desktopApi = {
   async backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
     if (window.desktopApi?.backupDatabase) return window.desktopApi.backupDatabase();
     return fetchJson<{ ok: boolean; path?: string; error?: string }>('/api/database/backup', { method: 'POST' });
+  },
+
+  openExternal(url: string): void {
+    if (window.desktopApi?.openExternal) {
+      void window.desktopApi.openExternal(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
   },
 
   async playMedia(filePath: string): Promise<boolean> {
@@ -356,6 +410,10 @@ export const desktopApi = {
 
   async selectMPVTrack(type: MPVTrackType, ffIndex: number): Promise<void> {
     if (window.desktopApi?.selectMPVTrack) return window.desktopApi.selectMPVTrack(type, ffIndex);
+  },
+
+  async selectMPVSecondarySubtitleTrack(ffIndex: number): Promise<void> {
+    if (window.desktopApi?.selectMPVSecondarySubtitleTrack) return window.desktopApi.selectMPVSecondarySubtitleTrack(ffIndex);
   },
 
   async setMPVSubtitleStyle(style: SubtitleStyleOptions): Promise<void> {

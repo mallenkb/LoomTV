@@ -19,7 +19,7 @@ export default function Movies() {
   const filteredMovies = movies.filter((item) => matchesMediaItem(item, normalizedQuery));
 
   return (
-    <div className="h-full overflow-y-auto bg-[#1a1a1a]">
+    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
       <LibrarySearch value={query} onChange={setQuery} placeholder="Search Movies" />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
         <h2 className="text-2xl font-bold text-white mb-6">Movies</h2>
@@ -34,14 +34,14 @@ export default function Movies() {
         </div>
         {movies.length === 0 && !isLoading && (
           <div className="text-center py-12">
-            <p className="text-[#a8a8a8] mb-4">No movies found</p>
-            <Link to="/settings" className="text-[#eba865] hover:underline">
+            <p className="text-[var(--loom-muted)] mb-4">No movies found</p>
+            <Link to="/settings" className="text-[var(--loom-accent)] hover:underline">
               Add a library folder in Settings
             </Link>
           </div>
         )}
         {movies.length > 0 && filteredMovies.length === 0 && !isLoading && (
-          <div className="py-12 text-center text-[#a8a8a8]">No local matches found</div>
+          <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
         )}
       </div>
     </div>
@@ -76,29 +76,28 @@ function MovieCard({ movie, from }: { movie: MediaItem; from: string }) {
       className="group block w-full max-w-[200px]"
     >
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden">
-        {imageSources.length > 0 ? (
-          <SafeArtwork
-            src={imageSources}
-            alt={movie.title}
-            className="h-full w-full transition-transform group-hover:scale-105"
-            imgClassName="object-cover"
-          />
-        ) : (
-          <div className="w-full h-full bg-[#232323] flex flex-col items-center justify-center gap-2 p-3">
-            <Play className="w-8 h-8 text-[#eba865] shrink-0" />
-            <p className="text-[#a8a8a8] text-xs text-center leading-tight line-clamp-4">{movie.title}</p>
+        <SafeArtwork
+          src={imageSources}
+          alt={movie.title}
+          className="h-full w-full transition-transform group-hover:scale-105"
+          imgClassName="object-cover"
+          fallback={
+          <div className="w-full h-full bg-[var(--loom-surface)] flex flex-col items-center justify-center gap-2 p-3">
+            <Play className="w-8 h-8 text-[var(--loom-accent)] shrink-0" />
+            <p className="text-[var(--loom-muted)] text-xs text-center leading-tight line-clamp-4">{movie.title}</p>
           </div>
-        )}
+          }
+        />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-12 h-12 rounded-full bg-[#eba865] flex items-center justify-center">
-            <Play className="w-6 h-6 text-black ml-1" />
+          <div className="w-12 h-12 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
+            <Play className="w-6 h-6 text-[var(--loom-accent-foreground)] ml-1" />
           </div>
         </div>
       </div>
       <div className="mt-2">
         <h4 className="text-sm font-medium text-white truncate">{movie.title}</h4>
-        {movie.year > 0 && <p className="text-xs text-[#a8a8a8]">{movie.year}</p>}
+        {movie.year > 0 && <p className="text-xs text-[var(--loom-muted)]">{movie.year}</p>}
       </div>
     </Link>
   );

@@ -249,18 +249,18 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   const thumbnailSrc = thumbnailFailed ? thumbnailFallbackUrl : thumbnailUrl;
 
   return (
-    <div className="pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-4 pb-4">
-      <div className="pointer-events-auto mx-auto max-w-[1440px] overflow-hidden rounded-lg border border-white/10 bg-[#202020]/95 shadow-2xl backdrop-blur-md">
+    <div className="pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-5 pb-5">
+      <div className="pointer-events-auto mx-auto max-w-[1440px] overflow-hidden rounded-lg border border-white/15 bg-[#202020]/95 shadow-[0_18px_60px_rgba(0,0,0,0.48)] ring-1 ring-[var(--loom-accent)]/20 backdrop-blur-md">
         <button
           type="button"
           onClick={playCandidate}
-          className="relative flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-white/[0.03]"
+          className="relative flex w-full items-center gap-5 px-5 py-4 text-left transition-colors hover:bg-white/[0.04]"
         >
           <span
-            className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[#eba865]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-[var(--loom-accent)]"
             style={{ width: `${Math.min(100, Math.max(0, candidate.fraction * 100))}%` }}
           />
-          <span className="h-14 w-24 shrink-0 overflow-hidden rounded bg-black">
+          <span className="h-20 w-36 shrink-0 overflow-hidden rounded-md bg-black shadow-lg">
             {thumbnailSrc ? (
               <img
                 src={thumbnailSrc}
@@ -273,11 +273,11 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
             )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold text-white">{candidate.title}</span>
-            <span className="mt-1 block truncate text-xs text-[#a8a8a8]">{candidate.subtitle}</span>
+            <span className="block truncate text-base font-semibold text-white">{candidate.title}</span>
+            <span className="mt-1.5 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
           </span>
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#eba865] text-black shadow-lg">
-            <Play className="h-5 w-5 fill-current" />
+          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] shadow-xl shadow-black/30">
+            <Play className="h-7 w-7 fill-current" />
           </span>
           <span
             role="button"

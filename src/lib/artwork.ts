@@ -22,16 +22,14 @@ export function posterSources(item: MediaItem, routeArtwork?: RouteArtworkState,
 }
 
 export function backdropSources(item: MediaItem, routeArtwork?: RouteArtworkState, generated: string[] = []): string[] {
+  const resolvedPosterSources = posterSources(item, routeArtwork, generated);
+
   return uniqueArtworkSources(
     routeArtwork?.backdropCandidates,
     routeArtwork?.backdrop,
     item.backdropCandidates,
     item.backdrop,
-    routeArtwork?.posterCandidates,
-    routeArtwork?.poster,
-    item.posterCandidates,
-    item.poster,
-    generated,
+    resolvedPosterSources,
   );
 }
 
@@ -40,6 +38,6 @@ export function routeArtworkState(item: MediaItem, visiblePosterSources: string[
     poster: visiblePosterSources[0] || item.poster,
     backdrop: item.backdrop,
     posterCandidates: posterSources(item, { posterCandidates: visiblePosterSources }),
-    backdropCandidates: backdropSources(item),
+    backdropCandidates: uniqueArtworkSources(item.backdropCandidates, item.backdrop),
   };
 }

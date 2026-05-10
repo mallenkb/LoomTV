@@ -4,15 +4,16 @@ import { cn } from '@/lib/utils';
 interface DialogProps extends React.HTMLAttributes<HTMLDivElement> {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  contentClassName?: string;
 }
 
 const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
-  ({ className, open, onOpenChange, ...props }, ref) => {
+  ({ className, contentClassName, open, onOpenChange, ...props }, ref) => {
     if (!open) return null;
     return (
       <div ref={ref} className={cn('fixed inset-0 z-50 flex items-center justify-center bg-black/80', className)} onClick={() => onOpenChange?.(false)} {...props}>
         <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-          <div className="relative z-50 max-h-[85vh] w-full max-w-4xl overflow-auto rounded-lg border bg-card p-6 shadow-lg">
+          <div className={cn('relative z-50 max-h-[85vh] w-full max-w-4xl overflow-auto rounded-lg border bg-card p-6 shadow-lg', contentClassName)}>
             {props.children}
           </div>
         </div>

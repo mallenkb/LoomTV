@@ -11,11 +11,30 @@ type SubtitleStyleOptions = {
   backgroundColor?: string;
 };
 
+type LibraryPayload = {
+  movies: unknown[];
+  tvShows: unknown[];
+  animeShows?: unknown[];
+  libraryFolders: string[];
+  libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] };
+};
+type LibraryScanMode = 'quick' | 'metadata' | 'full';
+type LibraryScanProgress = { isComplete: boolean; scannedFolders: number; totalFolders: number };
+
 // ─── desktopApi — existing library/media/settings surface ────────────────────
 
 contextBridge.exposeInMainWorld('desktopApi', {
   getLibrary: () => ipcRenderer.invoke('library:get'),
-  scanLibrary: (options?: { force?: boolean }) => ipcRenderer.invoke('library:scan', options),
+  scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
+  onLibraryScanProgress: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      library: LibraryPayload,
+      progress: LibraryScanProgress,
+    ) => callback(library, progress);
+    ipcRenderer.on('library:scan-progress', handler);
+    return () => ipcRenderer.removeListener('library:scan-progress', handler);
+  },
   addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime') => ipcRenderer.invoke('library:add-folder', kind),
   removeLibraryFolder: (folderPath: string) => ipcRenderer.invoke('library:remove-folder', folderPath),
   playMedia: (filePath: string) => ipcRenderer.invoke('media:play', filePath),
@@ -26,6 +45,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     subtitleTrackIndex?: number;
     subtitleStreamOrdinal?: number;
     subtitleCodec?: string;
+    secondarySubtitleTrackIndex?: number;
+    secondarySubtitleStreamOrdinal?: number;
+    secondarySubtitleCodec?: string;
     subtitleStyle?: SubtitleStyleOptions;
     forceTranscode?: boolean;
   }) => ipcRenderer.invoke('media:get-stream-url', filePath, options || {}),
@@ -40,6 +62,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     metadataApiKeys?: Record<string, string>;
     autoSyncIntervalHours?: number;
     sidebarNavOrder?: string[];
+    appThemeMode?: 'dark' | 'light';
+    appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+    appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   }) => ipcRenderer.invoke('settings:save', settings),
   getProgress: (filePath?: string) => ipcRenderer.invoke('progress:get', filePath),
   saveProgress: (filePath: string, position: number, duration: number) => ipcRenderer.invoke('progress:save', filePath, position, duration),
@@ -47,8 +72,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     ipcRenderer.invoke('progress:import', progress),
   getCustomArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:get', mediaId),
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => ipcRenderer.invoke('artwork:save', mediaId, target, dataUrl),
+  refreshOfficialArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:refresh-official', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
+  openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
 
   // Legacy MPV handlers (still used by existing VideoPlayer)
   playWithMPV: (filePath: string, startSecs?: number) => ipcRenderer.invoke('media:play-mpv', filePath, startSecs),
@@ -64,6 +91,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     ipcRenderer.invoke('media:mpv-set-aspect-mode', mode),
   selectMPVTrack: (type: 'video' | 'audio' | 'sub', ffIndex: number) =>
     ipcRenderer.invoke('media:mpv-select-track', type, ffIndex),
+  selectMPVSecondarySubtitleTrack: (ffIndex: number) =>
+    ipcRenderer.invoke('media:mpv-select-secondary-subtitle-track', ffIndex),
   setMPVSubtitleStyle: (style: SubtitleStyleOptions) =>
     ipcRenderer.invoke('media:mpv-set-subtitle-style', style),
   cycleMPVAudio: () => ipcRenderer.invoke('media:mpv-cycle-audio'),
@@ -93,6 +122,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
       subtitleTrackIndex?: number;
       subtitleStreamOrdinal?: number;
       subtitleCodec?: string;
+      secondarySubtitleTrackIndex?: number;
+      secondarySubtitleStreamOrdinal?: number;
+      secondarySubtitleCodec?: string;
       subtitleStyle?: SubtitleStyleOptions;
     }) =>
       ipcRenderer.invoke('media:start-transcode', filePath, options || {}),
@@ -108,7 +140,8 @@ declare global {
   interface Window {
     desktopApi: {
       getLibrary: () => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
-      scanLibrary: (options?: { force?: boolean }) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
+      scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
+      onLibraryScanProgress?: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => () => void;
       addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime') => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } } | null>;
       removeLibraryFolder: (folderPath: string) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
       playMedia: (filePath: string) => Promise<boolean>;
@@ -119,6 +152,9 @@ declare global {
         subtitleTrackIndex?: number;
         subtitleStreamOrdinal?: number;
         subtitleCodec?: string;
+        secondarySubtitleTrackIndex?: number;
+        secondarySubtitleStreamOrdinal?: number;
+        secondarySubtitleCodec?: string;
         subtitleStyle?: SubtitleStyleOptions;
         forceTranscode?: boolean;
       }) => Promise<{ url: string; contentType: string; fileName: string; isTranscoded?: boolean }>;
@@ -132,6 +168,9 @@ declare global {
         metadataApiKeys?: Record<string, string>;
         autoSyncIntervalHours?: number;
         sidebarNavOrder?: string[];
+        appThemeMode?: 'dark' | 'light';
+        appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+        appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
       }>;
       saveSettings: (settings: {
         omdbApiKey?: string;
@@ -139,14 +178,25 @@ declare global {
         metadataApiKeys?: Record<string, string>;
         autoSyncIntervalHours?: number;
         sidebarNavOrder?: string[];
+        appThemeMode?: 'dark' | 'light';
+        appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+        appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
       }) => Promise<boolean>;
       getProgress: (filePath?: string) => Promise<Record<string, { position: number; duration: number; updatedAt: number; watched: boolean }> | { position: number; duration: number; updatedAt: number; watched: boolean } | null>;
       saveProgress: (filePath: string, position: number, duration: number) => Promise<{ position: number; duration: number; updatedAt: number; watched: boolean }>;
       importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
       getCustomArtwork: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
+      refreshOfficialArtwork: (mediaId: string) => Promise<{
+        thumbnail?: string;
+        cover?: string;
+        summary?: string;
+        posterCandidates?: string[];
+        backdropCandidates?: string[];
+      }>;
       importCustomArtwork: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+      openExternal: (url: string) => Promise<void>;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<{ ok?: boolean; error?: string }>;
       queryMPV: () => Promise<{
         position: number;
@@ -165,6 +215,7 @@ declare global {
       setMPVFullscreen: (fullscreen: boolean) => Promise<void>;
       setMPVAspectMode: (mode: 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9') => Promise<void>;
       selectMPVTrack: (type: 'video' | 'audio' | 'sub', ffIndex: number) => Promise<void>;
+      selectMPVSecondarySubtitleTrack: (ffIndex: number) => Promise<void>;
       setMPVSubtitleStyle?: (style: SubtitleStyleOptions) => Promise<void>;
       cycleMPVAudio: () => Promise<void>;
       cycleMPVSubtitle: () => Promise<void>;
@@ -188,6 +239,9 @@ declare global {
           subtitleTrackIndex?: number;
           subtitleStreamOrdinal?: number;
           subtitleCodec?: string;
+          secondarySubtitleTrackIndex?: number;
+          secondarySubtitleStreamOrdinal?: number;
+          secondarySubtitleCodec?: string;
           subtitleStyle?: SubtitleStyleOptions;
         }) => Promise<{ ok: boolean; data?: { sessionId: string; playlistUrl: string }; error?: string }>;
         stopTranscode: (sessionId: string) => Promise<{ ok: boolean; data?: boolean; error?: string }>;

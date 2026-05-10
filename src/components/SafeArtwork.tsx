@@ -22,28 +22,26 @@ export default function SafeArtwork({
   fallback,
   onError,
 }: SafeArtworkProps) {
-  const [loaded, setLoaded] = useState(false);
   const [sourceIndex, setSourceIndex] = useState(0);
   const sources = normalizeSources(src);
   const currentSource = sources[sourceIndex] || '';
 
   useEffect(() => {
-    setLoaded(false);
     setSourceIndex(0);
   }, [sources.join('|')]);
 
   return (
-    <div className={`relative overflow-hidden bg-gradient-to-br from-[#232323] via-[#1f2933] to-[#1a1a1a] ${className}`}>
+    <div className={`relative overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)] ${className}`}>
       {fallback}
       {currentSource && (
         <img
           src={currentSource}
           alt={alt}
-          className={`absolute inset-0 h-full w-full transition-opacity ${loaded ? 'opacity-100' : 'opacity-0'} ${imgClassName}`}
-          onLoad={() => setLoaded(true)}
+          loading="eager"
+          decoding="async"
+          className={`absolute inset-0 h-full w-full ${imgClassName}`}
           onError={() => {
             onError?.();
-            setLoaded(false);
             setSourceIndex((index) => Math.min(index + 1, sources.length));
           }}
         />

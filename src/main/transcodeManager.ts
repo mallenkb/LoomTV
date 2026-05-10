@@ -62,7 +62,20 @@ function hasEncoder(ffmpegPath: string, encoder: string): boolean {
 function selectedPreset(ffmpegPath: string, options: TranscodeOptions): TranscodeOptions['preset'] {
   const preset = options.preset || 'auto';
   if (preset !== 'auto') return preset;
-  if (process.platform === 'darwin' && hasEncoder(ffmpegPath, 'h264_videotoolbox')) return 'videotoolbox';
+  const candidates: Array<'videotoolbox' | 'nvenc' | 'qsv'> =
+    process.platform === 'darwin'
+      ? ['videotoolbox', 'nvenc', 'qsv']
+      : process.platform === 'win32'
+        ? ['nvenc', 'qsv', 'videotoolbox']
+        : ['nvenc', 'qsv', 'videotoolbox'];
+  const encoderForPreset: Record<'videotoolbox' | 'nvenc' | 'qsv', string> = {
+    videotoolbox: 'h264_videotoolbox',
+    nvenc: 'h264_nvenc',
+    qsv: 'h264_qsv',
+  };
+  for (const candidate of candidates) {
+    if (hasEncoder(ffmpegPath, encoderForPreset[candidate])) return candidate;
+  }
   return 'software';
 }
 
@@ -87,6 +100,52 @@ function escapeSubtitleFilterPath(filePath: string): string {
 function isBitmapSubtitle(codec?: string): boolean {
   const normalized = (codec || '').toLowerCase();
   return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
+}
+
+type SubtitlePlacement = 'primary' | 'secondary';
+
+interface SubtitleSelection {
+  trackIndex: number;
+  streamOrdinal: number;
+  codec?: string;
+  placement: SubtitlePlacement;
+}
+
+function subtitleSelections(options: TranscodeOptions): SubtitleSelection[] {
+  const selections: SubtitleSelection[] = [];
+  if (typeof options.subtitleTrackIndex === 'number' && options.subtitleTrackIndex >= 0) {
+    selections.push({
+      trackIndex: options.subtitleTrackIndex,
+      streamOrdinal: typeof options.subtitleStreamOrdinal === 'number' ? options.subtitleStreamOrdinal : 0,
+      codec: options.subtitleCodec,
+      placement: 'primary',
+    });
+  }
+
+  if (
+    typeof options.secondarySubtitleTrackIndex === 'number'
+    && options.secondarySubtitleTrackIndex >= 0
+    && options.secondarySubtitleTrackIndex !== options.subtitleTrackIndex
+  ) {
+    selections.push({
+      trackIndex: options.secondarySubtitleTrackIndex,
+      streamOrdinal: typeof options.secondarySubtitleStreamOrdinal === 'number'
+        ? options.secondarySubtitleStreamOrdinal
+        : 0,
+      codec: options.secondarySubtitleCodec,
+      placement: 'secondary',
+    });
+  }
+
+  return selections;
+}
+
+function hasSubtitleSelection(options: TranscodeOptions): boolean {
+  return subtitleSelections(options).length > 0;
+}
+
+function hasBitmapSubtitleSelection(options: TranscodeOptions): boolean {
+  return subtitleSelections(options).some((selection) => isBitmapSubtitle(selection.codec));
 }
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -121,8 +180,17 @@ function subtitleForceStyle(style?: SubtitleStyleOptions): string {
   ].join(',');
 }
 
-function textSubtitleFilter(filePath: string, subtitleOrdinal: number, style?: SubtitleStyleOptions): string {
-  return `subtitles='${escapeSubtitleFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style)}',format=yuv420p`;
+function textSubtitleFilter(
+  filePath: string,
+  subtitleOrdinal: number,
+  style?: SubtitleStyleOptions,
+  startSeconds = 0,
+): string {
+  const subtitleFilter = `subtitles='${escapeSubtitleFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style)}'`;
+  const seekOffset = Number.isFinite(startSeconds) && startSeconds > 0 ? Math.floor(startSeconds) : 0;
+  if (seekOffset <= 0) return `${subtitleFilter},format=yuv420p`;
+
+  return `setpts=PTS+${seekOffset}/TB,${subtitleFilter},setpts=PTS-${seekOffset}/TB,format=yuv420p`;
 }
 
 function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions, ffmpegPath: string): string[] {
@@ -165,7 +233,7 @@ function hlsArgs(filePath: string, outputPath: string, options: TranscodeOptions
     const subtitleOrdinal = typeof options.subtitleStreamOrdinal === 'number'
       ? options.subtitleStreamOrdinal
       : 0;
-    args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal, options.subtitleStyle));
+    args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal, options.subtitleStyle, options.startSeconds));
   } else if (!bitmapSubtitle) {
     args.push('-vf', 'format=yuv420p');
   }

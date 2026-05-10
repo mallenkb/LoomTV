@@ -250,6 +250,7 @@ export class MpvController {
 
   async disableSubtitles(): Promise<void> {
     await this.ipc?.setProperty('sid', 'no');
+    await this.ipc?.setProperty('secondary-sid', 'no');
   }
 
   async setFullscreen(fullscreen: boolean): Promise<void> {
@@ -263,18 +264,26 @@ export class MpvController {
       return;
     }
 
-    const trackList = await this.getTrackList();
-    const track = trackList.find((candidate) =>
-      candidate.type === type && candidate['ff-index'] === ffIndex,
-    ) ?? trackList.find((candidate) =>
-      candidate.type === type && Number(candidate.id) === ffIndex,
-    );
-
-    if (!track?.id) {
+    const track = await this.findTrack(type, ffIndex);
+    if (track?.id === undefined || track?.id === null) {
       throw new Error(`Unable to find ${type} track for stream index ${ffIndex}.`);
     }
 
     await this.ipc?.setProperty(property, track.id);
+  }
+
+  async selectSecondarySubtitleTrack(ffIndex: number): Promise<void> {
+    if (ffIndex < 0) {
+      await this.ipc?.setProperty('secondary-sid', 'no');
+      return;
+    }
+
+    const track = await this.findTrack('sub', ffIndex);
+    if (track?.id === undefined || track?.id === null) {
+      throw new Error(`Unable to find secondary subtitle track for stream index ${ffIndex}.`);
+    }
+
+    await this.ipc?.setProperty('secondary-sid', track.id);
   }
 
   async setAspectMode(mode: MpvAspectMode): Promise<void> {
@@ -449,6 +458,15 @@ export class MpvController {
   private async getTrackList(): Promise<MpvTrack[]> {
     const val = await this.ipc?.getProperty('track-list');
     return Array.isArray(val) ? (val as MpvTrack[]) : [];
+  }
+
+  private async findTrack(type: MpvTrackType, ffIndex: number): Promise<MpvTrack | undefined> {
+    const trackList = await this.getTrackList();
+    return trackList.find((candidate) =>
+      candidate.type === type && candidate['ff-index'] === ffIndex,
+    ) ?? trackList.find((candidate) =>
+      candidate.type === type && Number(candidate.id) === ffIndex,
+    );
   }
 
   private trackProperty(type: MpvTrackType): MpvTrackProperty {

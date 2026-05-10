@@ -37,7 +37,15 @@ export async function loadCustomArtwork(mediaId: string, legacyKey: string): Pro
 
 export async function saveCustomArtwork(mediaId: string, target: string, dataUrl: string, legacyKey: string): Promise<Record<string, string>> {
   const legacy = readLegacy(legacyKey);
-  legacy[mediaId] = { ...(legacy[mediaId] || {}), [target]: dataUrl };
+  const targets = target === 'thumbnail'
+    ? ['thumbnail', 'poster']
+    : target === 'poster'
+      ? ['poster', 'thumbnail']
+      : [target];
+  legacy[mediaId] = {
+    ...(legacy[mediaId] || {}),
+    ...Object.fromEntries(targets.map((targetName) => [targetName, dataUrl])),
+  };
   try {
     localStorage.setItem(legacyKey, JSON.stringify(legacy));
   } catch {
@@ -45,7 +53,11 @@ export async function saveCustomArtwork(mediaId: string, target: string, dataUrl
   }
 
   try {
-    return await desktopApi.saveCustomArtwork(mediaId, target, dataUrl);
+    let saved: Record<string, string> = {};
+    for (const targetName of targets) {
+      saved = await desktopApi.saveCustomArtwork(mediaId, targetName, dataUrl);
+    }
+    return saved;
   } catch {
     return legacy[mediaId];
   }

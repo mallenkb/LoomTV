@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -72,7 +72,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 6;
+const SCAN_CACHE_VERSION = 7;
 
 let mediaServerPort = 3847;
 let mediaServer: http.Server | null = null;
@@ -144,6 +144,12 @@ interface LibraryData {
   scanCache?: LibraryScanCache;
 }
 
+type LibraryScanProgress = LibraryData & {
+  isComplete: boolean;
+  scannedFolders: number;
+  totalFolders: number;
+};
+
 interface TVMetadata extends Partial<MediaItem> {
   language?: string;
   country?: string;
@@ -152,6 +158,7 @@ interface TVMetadata extends Partial<MediaItem> {
 
 type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
 type ScanFolderKind = 'movies' | 'tv' | 'anime';
+type LibraryScanMode = 'quick' | 'metadata' | 'full';
 
 interface LibraryFolderGroups {
   movies: string[];
@@ -194,6 +201,9 @@ interface AppSettings {
   metadataApiKeys?: Record<string, string>;
   autoSyncIntervalHours?: number;
   sidebarNavOrder?: string[];
+  appThemeMode?: 'dark' | 'light';
+  appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+  appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
 }
 
 const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' | 'tmdbApiKey'>> = {
@@ -234,6 +244,13 @@ function normalizeSettings(raw: AppSettings): AppSettings {
       ? autoSyncIntervalHours
       : 12,
     sidebarNavOrder,
+    appThemeMode: 'dark',
+    appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
+      ? raw.appThemeColor
+      : 'yellow',
+    appLoaderStyle: raw.appLoaderStyle === 'logo-mark' || raw.appLoaderStyle === 'horizontal-logo' || raw.appLoaderStyle === 'play-mark'
+      ? raw.appLoaderStyle
+      : 'play-mark',
   };
 }
 
@@ -387,6 +404,40 @@ function hasFFmpegEncoder(binaryPath: string, encoder: string): boolean {
   }
 }
 
+type H264HardwareEncoder = 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv';
+
+function preferredH264HardwareEncoder(binaryPath: string): H264HardwareEncoder | null {
+  const candidates: H264HardwareEncoder[] =
+    process.platform === 'darwin'
+      ? ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv']
+      : process.platform === 'win32'
+        ? ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox']
+        : ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox'];
+
+  return candidates.find((encoder) => hasFFmpegEncoder(binaryPath, encoder)) || null;
+}
+
+function appendH264EncoderOptions(args: string[], encoder: H264HardwareEncoder): void {
+  if (encoder === 'h264_videotoolbox') {
+    args.push(
+      '-allow_sw', '1',
+      '-realtime', '1',
+      '-b:v', '6500k',
+      '-maxrate', '8500k',
+      '-bufsize', '12000k',
+      '-profile:v', 'main',
+    );
+    return;
+  }
+
+  if (encoder === 'h264_nvenc') {
+    args.push('-preset', 'p4', '-cq', '23', '-b:v', '0');
+    return;
+  }
+
+  args.push('-global_quality', '23', '-look_ahead', '0');
+}
+
 function firstExistingBinary(candidates: Array<string | null | undefined>): string | null {
   for (const candidate of candidates) {
     const binary = existingCompatibleBinary(candidate);
@@ -410,11 +461,9 @@ function findFFmpeg(): string | null {
     ...systemBinaryCandidates('ffmpeg'),
   ];
 
-  if (process.platform === 'darwin') {
-    for (const candidate of candidates) {
-      const binary = existingCompatibleBinary(candidate);
-      if (binary && hasFFmpegEncoder(binary, 'h264_videotoolbox')) return binary;
-    }
+  for (const candidate of candidates) {
+    const binary = existingCompatibleBinary(candidate);
+    if (binary && preferredH264HardwareEncoder(binary)) return binary;
   }
 
   return firstExistingBinary(candidates);
@@ -508,6 +557,52 @@ function isBitmapSubtitleCodec(codec?: string): boolean {
   return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
 }
 
+type SubtitlePlacement = 'primary' | 'secondary';
+
+interface SubtitleSelection {
+  trackIndex: number;
+  streamOrdinal: number;
+  codec?: string;
+  placement: SubtitlePlacement;
+}
+
+function subtitleSelections(options: TranscodeOptions): SubtitleSelection[] {
+  const selections: SubtitleSelection[] = [];
+  if (typeof options.subtitleTrackIndex === 'number' && options.subtitleTrackIndex >= 0) {
+    selections.push({
+      trackIndex: options.subtitleTrackIndex,
+      streamOrdinal: typeof options.subtitleStreamOrdinal === 'number' ? options.subtitleStreamOrdinal : 0,
+      codec: options.subtitleCodec,
+      placement: 'primary',
+    });
+  }
+
+  if (
+    typeof options.secondarySubtitleTrackIndex === 'number'
+    && options.secondarySubtitleTrackIndex >= 0
+    && options.secondarySubtitleTrackIndex !== options.subtitleTrackIndex
+  ) {
+    selections.push({
+      trackIndex: options.secondarySubtitleTrackIndex,
+      streamOrdinal: typeof options.secondarySubtitleStreamOrdinal === 'number'
+        ? options.secondarySubtitleStreamOrdinal
+        : 0,
+      codec: options.secondarySubtitleCodec,
+      placement: 'secondary',
+    });
+  }
+
+  return selections;
+}
+
+function hasSubtitleSelection(options: TranscodeOptions): boolean {
+  return subtitleSelections(options).length > 0;
+}
+
+function hasBitmapSubtitleSelection(options: TranscodeOptions): boolean {
+  return subtitleSelections(options).some((selection) => isBitmapSubtitleCodec(selection.codec));
+}
+
 function clampStyleNumber(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
@@ -522,10 +617,12 @@ function assColor(value: unknown, fallback: string): string {
   return `&H00${blue}${green}${red}`.toUpperCase();
 }
 
-function subtitleForceStyle(style?: SubtitleStyleOptions): string {
+function subtitleForceStyle(style?: SubtitleStyleOptions, placement: SubtitlePlacement = 'primary'): string {
   const fontSize = clampStyleNumber(style?.fontSize, 55, 24, 96) * clampStyleNumber(style?.scale, 1, 0.5, 2);
-  const position = clampStyleNumber(style?.position, 92, 0, 100);
-  const marginV = Math.round((100 - position) * 6);
+  const position = placement === 'secondary' ? 8 : clampStyleNumber(style?.position, 92, 0, 100);
+  const marginV = placement === 'secondary'
+    ? Math.round(position * 6)
+    : Math.round((100 - position) * 6);
   const borderWidth = clampStyleNumber(style?.borderWidth, 3, 0, 10);
 
   return [
@@ -535,13 +632,60 @@ function subtitleForceStyle(style?: SubtitleStyleOptions): string {
     `BackColour=${assColor(style?.backgroundColor, '#000000')}`,
     `Outline=${borderWidth}`,
     'Shadow=0',
-    'Alignment=2',
+    `Alignment=${placement === 'secondary' ? 8 : 2}`,
     `MarginV=${marginV}`,
   ].join(',');
 }
 
-function textSubtitleFilter(filePath: string, subtitleOrdinal: number, style?: SubtitleStyleOptions): string {
-  return `subtitles='${escapeFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style)}',format=yuv420p`;
+function subtitleFilterSegment(
+  filePath: string,
+  subtitleOrdinal: number,
+  style?: SubtitleStyleOptions,
+  placement: SubtitlePlacement = 'primary',
+): string {
+  return `subtitles='${escapeFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style, placement)}'`;
+}
+
+function textSubtitleFilter(
+  filePath: string,
+  subtitleOrdinal: number,
+  style?: SubtitleStyleOptions,
+  startSeconds = 0,
+  secondarySubtitleOrdinal?: number,
+): string {
+  const subtitleFilters = [subtitleFilterSegment(filePath, subtitleOrdinal, style, 'primary')];
+  if (typeof secondarySubtitleOrdinal === 'number' && secondarySubtitleOrdinal >= 0) {
+    subtitleFilters.push(subtitleFilterSegment(filePath, secondarySubtitleOrdinal, style, 'secondary'));
+  }
+  const subtitleFilter = subtitleFilters.join(',');
+  const seekOffset = Number.isFinite(startSeconds) && startSeconds > 0 ? Math.floor(startSeconds) : 0;
+  if (seekOffset <= 0) return `${subtitleFilter},format=yuv420p`;
+
+  // FFmpeg fast input seeking resets video PTS to zero, but the subtitles
+  // filter matches cues against the original file timeline. Temporarily shift
+  // frames back to the original timeline while rendering subtitles, then shift
+  // them back for playback output.
+  return `setpts=PTS+${seekOffset}/TB,${subtitleFilter},setpts=PTS-${seekOffset}/TB,format=yuv420p`;
+}
+
+function subtitleFilterComplex(filePath: string, options: TranscodeOptions): { filter: string; output: string } {
+  const selections = subtitleSelections(options);
+  let currentLabel = filterStream(options.videoTrackIndex);
+  const filters: string[] = [];
+
+  selections.forEach((selection, index) => {
+    const output = `vsub${index}`;
+    if (isBitmapSubtitleCodec(selection.codec)) {
+      filters.push(`[${currentLabel}][0:${selection.trackIndex}]overlay,format=yuv420p[${output}]`);
+    } else {
+      filters.push(
+        `[${currentLabel}]${subtitleFilterSegment(filePath, selection.streamOrdinal, options.subtitleStyle, selection.placement)},format=yuv420p[${output}]`,
+      );
+    }
+    currentLabel = output;
+  });
+
+  return { filter: filters.join(';'), output: currentLabel };
 }
 
 function parseSubtitleStyle(value: string | null): SubtitleStyleOptions | undefined {
@@ -572,6 +716,9 @@ function appendStreamOptionParams(params: URLSearchParams, options?: TranscodeOp
   if (typeof options.subtitleTrackIndex === 'number') params.set('subtitle', String(options.subtitleTrackIndex));
   if (typeof options.subtitleStreamOrdinal === 'number') params.set('subtitleOrdinal', String(options.subtitleStreamOrdinal));
   if (options.subtitleCodec) params.set('subtitleCodec', options.subtitleCodec);
+  if (typeof options.secondarySubtitleTrackIndex === 'number') params.set('secondarySubtitle', String(options.secondarySubtitleTrackIndex));
+  if (typeof options.secondarySubtitleStreamOrdinal === 'number') params.set('secondarySubtitleOrdinal', String(options.secondarySubtitleStreamOrdinal));
+  if (options.secondarySubtitleCodec) params.set('secondarySubtitleCodec', options.secondarySubtitleCodec);
   if (options.subtitleStyle) params.set('subtitleStyle', JSON.stringify(options.subtitleStyle));
   if (options.forceTranscode) params.set('forceTranscode', '1');
 }
@@ -734,6 +881,25 @@ function uniqueLocalTitles(candidates: Array<string | null | undefined>): string
 
 function remoteMatchesAnyLocalTitle(localTitles: string[], remoteTitle?: string): boolean {
   return localTitles.some((localTitle) => titleMatchesLocal(localTitle, remoteTitle));
+}
+
+function mediaItemHasUsableArtwork(item: MediaItem): boolean {
+  return Boolean(
+    item.poster?.trim()
+    || item.backdrop?.trim()
+    || item.posterCandidates?.some((source) => source.trim())
+    || item.backdropCandidates?.some((source) => source.trim()),
+  );
+}
+
+function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
+  const isSeries = item.type === 'tv' || item.type === 'anime' || Boolean(item.episodeFiles?.length);
+  if (isSeries && (!item.year || item.year <= 0)) return true;
+  return !mediaItemHasUsableArtwork(item);
+}
+
+function cachedItemsAreComplete(items: MediaItem[]): boolean {
+  return items.length > 0 && items.every((item) => !cachedItemNeedsMetadataRefresh(item));
 }
 
 function yearFromDateString(value?: string): number {
@@ -1025,7 +1191,10 @@ function startMediaServer(): Promise<number> {
       if (reqUrl.pathname === '/api/library/scan' && req.method === 'POST') {
         readJsonBody(req)
           .catch(() => ({}))
-          .then((body) => scanLibrary(loadLibrary(), { force: Boolean(body.force) }))
+          .then((body) => scanLibrary(loadLibrary(), {
+            force: Boolean(body.force),
+            mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
+          }))
           .then((scanned) => {
             saveLibrary(scanned);
             writeJson(res, 200, loadLibrary());
@@ -1056,7 +1225,7 @@ function startMediaServer(): Promise<number> {
             const data = loadLibrary();
             const newFolder = result.result.filePaths[0];
             const updated = addFolderToLibrary(data, newFolder, result.kind);
-            const scanned = await scanLibrary(updated);
+            const scanned = await scanLibrary(updated, { mode: 'quick' });
             saveLibrary(scanned);
             writeJson(res, 200, loadLibrary());
           })
@@ -1150,6 +1319,17 @@ function startMediaServer(): Promise<number> {
           .catch((error) => {
             console.error('save artwork API error:', error);
             writeJson(res, 500, { error: 'Failed to save artwork' });
+          });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/artwork/refresh-official' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => refreshOfficialArtwork(String(body.mediaId || '')))
+          .then((artwork) => writeJson(res, 200, artwork))
+          .catch((error) => {
+            console.error('refresh official artwork API error:', error);
+            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to refresh official artwork' });
           });
         return;
       }
@@ -1347,12 +1527,16 @@ function startMediaServer(): Promise<number> {
         subtitleTrackIndex: queryNumber(reqUrl.searchParams.get('subtitle')),
         subtitleStreamOrdinal: queryNumber(reqUrl.searchParams.get('subtitleOrdinal')),
         subtitleCodec: reqUrl.searchParams.get('subtitleCodec') || undefined,
+        secondarySubtitleTrackIndex: queryNumber(reqUrl.searchParams.get('secondarySubtitle')),
+        secondarySubtitleStreamOrdinal: queryNumber(reqUrl.searchParams.get('secondarySubtitleOrdinal')),
+        secondarySubtitleCodec: reqUrl.searchParams.get('secondarySubtitleCodec') || undefined,
         subtitleStyle: parseSubtitleStyle(reqUrl.searchParams.get('subtitleStyle')),
         forceTranscode: reqUrl.searchParams.get('forceTranscode') === '1',
       };
       const hasSelectedTracks = typeof streamOptions.videoTrackIndex === 'number'
         || typeof streamOptions.audioTrackIndex === 'number'
-        || typeof streamOptions.subtitleTrackIndex === 'number';
+        || typeof streamOptions.subtitleTrackIndex === 'number'
+        || typeof streamOptions.secondarySubtitleTrackIndex === 'number';
 
       if ((streamOptions.forceTranscode || hasSelectedTracks || needsBrowserTranscoding(filePath)) && ffmpegPath) {
         // ── Smart remux/transcode ────────────────────────────────────────────
@@ -1365,18 +1549,16 @@ function startMediaServer(): Promise<number> {
         const audioCodec = (probe.localMetadata?.audioCodec || '').toLowerCase();
 
         // Keep browser-safe streams; everything else becomes H264/AAC.
-        const hasSubtitle = typeof streamOptions.subtitleTrackIndex === 'number' && streamOptions.subtitleTrackIndex >= 0;
-        const bitmapSubtitle = hasSubtitle && isBitmapSubtitleCodec(streamOptions.subtitleCodec);
+        const hasSubtitle = hasSubtitleSelection(streamOptions);
+        const bitmapSubtitle = hasBitmapSubtitleSelection(streamOptions);
         const copyVideo = !hasSubtitle
           && videoCodec === 'h264'
           && pixelFormat === 'yuv420p'
           && !videoProfile.includes('10');
         const copyAudio = audioCodec === 'aac' || audioCodec === 'mp3';
-        const hardwareEncodeVideo = !copyVideo
-          && process.platform === 'darwin'
-          && hasFFmpegEncoder(ffmpegPath, 'h264_videotoolbox');
+        const hardwareEncoder = copyVideo ? null : preferredH264HardwareEncoder(ffmpegPath);
 
-        console.log(`[stream] ${path.basename(filePath)} | video:${videoCodec}/${pixelFormat || 'unknown'}(${copyVideo ? 'copy' : hardwareEncodeVideo ? 'h264_videotoolbox' : 'libx264'}) audio:${audioCodec}(${copyAudio ? 'copy' : 'encode'})`);
+        console.log(`[stream] ${path.basename(filePath)} | video:${videoCodec}/${pixelFormat || 'unknown'}(${copyVideo ? 'copy' : hardwareEncoder || 'libx264'}) audio:${audioCodec}(${copyAudio ? 'copy' : 'encode'})`);
 
         res.writeHead(200, {
           'Content-Type': 'video/mp4',
@@ -1391,13 +1573,9 @@ function startMediaServer(): Promise<number> {
         }
         args.push('-i', filePath);
 
-        if (bitmapSubtitle) {
-          args.push(
-            '-filter_complex',
-            `[${filterStream(streamOptions.videoTrackIndex)}][0:${streamOptions.subtitleTrackIndex}]overlay,format=yuv420p[v]`,
-            '-map',
-            '[v]',
-          );
+        if (hasSubtitle && bitmapSubtitle) {
+          const subtitleFilter = subtitleFilterComplex(filePath, streamOptions);
+          args.push('-filter_complex', subtitleFilter.filter, '-map', `[${subtitleFilter.output}]`);
         } else {
           args.push('-map', streamMap('v', streamOptions.videoTrackIndex));
         }
@@ -1409,24 +1587,23 @@ function startMediaServer(): Promise<number> {
         args.push('-sn', '-dn', '-map_chapters', '-1', '-map_metadata', '-1');
 
         if (hasSubtitle && !bitmapSubtitle) {
-          const subtitleOrdinal = typeof streamOptions.subtitleStreamOrdinal === 'number'
-            ? streamOptions.subtitleStreamOrdinal
-            : 0;
-          args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal, streamOptions.subtitleStyle));
+          const textSelections = subtitleSelections(streamOptions);
+          const primarySubtitle = textSelections.find((selection) => selection.placement === 'primary') || textSelections[0];
+          const secondarySubtitle = textSelections.find((selection) => selection !== primarySubtitle);
+          args.push('-vf', textSubtitleFilter(
+            filePath,
+            primarySubtitle.streamOrdinal,
+            streamOptions.subtitleStyle,
+            streamOptions.startSeconds,
+            secondarySubtitle?.streamOrdinal,
+          ));
         } else if (!copyVideo && !bitmapSubtitle) {
           args.push('-vf', 'format=yuv420p');
         }
 
-        args.push('-c:v', copyVideo ? 'copy' : hardwareEncodeVideo ? 'h264_videotoolbox' : 'libx264');
-        if (hardwareEncodeVideo) {
-          args.push(
-            '-allow_sw', '1',
-            '-realtime', '1',
-            '-b:v', '6500k',
-            '-maxrate', '8500k',
-            '-bufsize', '12000k',
-            '-profile:v', 'main',
-          );
+        args.push('-c:v', copyVideo ? 'copy' : hardwareEncoder || 'libx264');
+        if (hardwareEncoder) {
+          appendH264EncoderOptions(args, hardwareEncoder);
         } else if (!copyVideo) {
           args.push('-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main');
         }
@@ -1613,8 +1790,9 @@ async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMet
     const posterUrl = details.image?.original || details.image?.medium || '';
 
     return {
+      title: details.name || show.name || title,
       poster: posterUrl,
-      backdrop: posterUrl,
+      backdrop: '',
       summary: details.summary ? details.summary.replace(/<[^>]*>/g, '') : '',
       rating: details.rating?.average || 0,
       genres: details.genres || [],
@@ -1711,7 +1889,7 @@ function tmdbMovieResult(d: any, fallbackTitle: string): Partial<MediaItem> | nu
   return {
     title: d.title || fallbackTitle,
     poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path) || tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdrop(d.backdrop_path),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
     genres: ((d.genres ?? []) as any[]).map((g: any) => g.name as string),
@@ -1812,7 +1990,7 @@ async function tmdbTVResultFromDetails(d: any, fallbackTitle: string, tmdbCreden
   return {
     title: (d.name as string) || fallbackTitle,
     poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path) || tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdrop(d.backdrop_path),
     summary: (d.overview as string) || '',
     rating: (d.vote_average as number) ?? 0,
     genres: ((d.genres ?? []) as any[]).map((g: any) => g.name as string),
@@ -1937,7 +2115,7 @@ async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | nul
       malId,
       title: (hit.title_english as string) || (hit.title as string) || title,
       poster,
-      backdrop: poster,
+      backdrop: '',
       summary: (hit.synopsis as string) || '',
       rating: (hit.score as number) ?? 0,
       genres: ((hit.genres ?? []) as any[]).map((g: any) => g.name as string),
@@ -2390,8 +2568,8 @@ async function buildTVItemFromFolder(
       : 'tv';
 
   // ── Poster / backdrop ──────────────────────────────────────────────────────
-  // Manual/local artwork first, provider artwork second, embedded cover third,
-  // generated frame only as the final fallback.
+  // Posters can fall through to embedded/generated thumbnails. Backdrops stay
+  // limited to true local/API cover art; the renderer falls back to poster art.
   const localPoster = getLocalFolderArtworkUrl(fullPath, 'poster');
   const embeddedPoster = episodeFiles[0] ? getEmbeddedArtworkUrl(episodeFiles[0].filePath, representativeProbe) : '';
   const localBackdrop = getLocalFolderArtworkUrl(fullPath, 'backdrop');
@@ -2414,25 +2592,17 @@ async function buildTVItemFromFolder(
     generatedThumbnail,
   );
 
-  const backdrop =
-    localBackdrop
-    || matchedTmdbTVMeta?.backdrop
-    || matchedTmdbTVMeta?.poster
+  const officialBackdrop =
+    matchedTmdbTVMeta?.backdrop
     || (finalType === 'anime' ? (matchedJikanMeta?.backdrop || '') : '')
     || matchedTVMeta?.backdrop
-    || officialPoster
-    || embeddedPoster
-    || poster;
+    || '';
+  const backdrop =
+    localBackdrop
+    || officialBackdrop;
   const backdropCandidates = orderedArtworkCandidates(
     localBackdrop,
-    matchedTmdbTVMeta?.backdrop,
-    matchedTmdbTVMeta?.poster,
-    finalType === 'anime' ? matchedJikanMeta?.backdrop : '',
-    matchedTVMeta?.backdrop,
-    officialPoster,
-    embeddedPoster,
-    generatedThumbnail,
-    poster,
+    officialBackdrop,
   );
 
   // ── Summary / rating / genres / cast ──────────────────────────────────────
@@ -2614,8 +2784,8 @@ async function buildMovieItemFromFile(
         ? 'tv'
         : 'movie');
 
-  // Poster / backdrop: manual/local artwork first, provider artwork second,
-  // embedded cover third, and generated frame only if every artwork source fails.
+  // Posters can fall through to embedded/generated thumbnails. Backdrops stay
+  // limited to true local/API cover art; the renderer falls back to poster art.
   const localThumbnail = getLocalThumbnailUrl(fullPath);
   const localPoster = getLocalMovieArtworkUrl(fullPath, 'poster');
   const embeddedPoster = getEmbeddedArtworkUrl(fullPath, probe);
@@ -2628,13 +2798,12 @@ async function buildMovieItemFromFile(
     || matchedTVMeta?.poster
     || omdbPoster;
   const officialPoster = shouldUseShowProviders ? officialShowPoster : officialMoviePoster;
-  const officialMovieBackdrop = matchedTmdbData?.backdrop || matchedTmdbData?.poster || officialMoviePoster;
+  const officialMovieBackdrop = matchedTmdbData?.backdrop || '';
   const officialShowBackdrop =
     matchedTmdbTVMeta?.backdrop
-    || matchedTmdbTVMeta?.poster
     || (finalType === 'anime' ? (matchedJikanMeta?.backdrop || '') : '')
     || matchedTVMeta?.backdrop
-    || officialShowPoster;
+    || '';
   const officialBackdrop = shouldUseShowProviders ? officialShowBackdrop : officialMovieBackdrop;
   const poster =
     localPoster
@@ -2649,15 +2818,10 @@ async function buildMovieItemFromFile(
   );
   const backdrop =
     localBackdrop
-    || officialBackdrop
-    || embeddedPoster
-    || localThumbnail;
+    || officialBackdrop;
   const backdropCandidates = orderedArtworkCandidates(
     localBackdrop,
     officialBackdrop,
-    officialPoster,
-    embeddedPoster,
-    localThumbnail,
   );
 
   const summary =
@@ -2873,9 +3037,18 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
   );
 }
 
-async function scanFolder(folderPath: string, ctx: ScanContext): Promise<MediaItem[]> {
+async function scanFolder(
+  folderPath: string,
+  ctx: ScanContext,
+  onItems?: (items: MediaItem[]) => void | Promise<void>,
+): Promise<MediaItem[]> {
   const items: MediaItem[] = [];
   if (!fs.existsSync(folderPath)) return items;
+
+  const addItems = async (nextItems: MediaItem[]) => {
+    items.push(...nextItems);
+    if (nextItems.length > 0) await onItems?.(nextItems);
+  };
 
   try {
     const rootEntries = fs.readdirSync(folderPath, { withFileTypes: true });
@@ -2904,14 +3077,14 @@ async function scanFolder(folderPath: string, ctx: ScanContext): Promise<MediaIt
           : ctx.folderKind === 'tv'
             ? 'tv'
             : undefined;
-      items.push(await buildMovieItemFromFile(
+      await addItems([await buildMovieItemFromFile(
         fullVideoPath, videoFile,
         cleanMediaTitle(videoFile).title,
         createSubtitleRecords(folderPath, matchingSubtitles),
         cleanMediaTitle(videoFile).year,
         ctx.omdbApiKey, ctx.tmdbApiKey,
         forcedMovieType,
-      ));
+      )]);
     }
 
     for (const entry of rootEntries) {
@@ -2951,12 +3124,12 @@ async function scanFolder(folderPath: string, ctx: ScanContext): Promise<MediaIt
               ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
               ctx.tmdbApiKey,
             );
-            if (tvItem) items.push(tvItem);
+            if (tvItem) await addItems([tvItem]);
             continue;
           }
         }
 
-        items.push(...await scanFolder(fullPath, ctx));
+        items.push(...await scanFolder(fullPath, ctx, onItems));
         continue;
       }
 
@@ -2975,15 +3148,15 @@ async function scanFolder(folderPath: string, ctx: ScanContext): Promise<MediaIt
           ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
           ctx.tmdbApiKey,
         );
-        if (tvItem) items.push(tvItem);
+        if (tvItem) await addItems([tvItem]);
       } else if (videoFiles.length > 0) {
-        items.push(await buildMovieItemFromFile(
+        await addItems([await buildMovieItemFromFile(
           path.join(fullPath, videoFiles[0]),
           videoFiles[0], parsedFolder.title,
           subtitles, parsedFolder.year,
           ctx.omdbApiKey, ctx.tmdbApiKey,
           ctx.folderKind === 'movies' ? 'movie' : undefined,
-        ));
+        )]);
       }
     }
   } catch (error) {
@@ -2993,7 +3166,11 @@ async function scanFolder(folderPath: string, ctx: ScanContext): Promise<MediaIt
   return items;
 }
 
-async function scanLibrary(data: LibraryData, options: { force?: boolean } = {}): Promise<LibraryData> {
+async function scanLibrary(
+  data: LibraryData,
+  options: { force?: boolean; mode?: LibraryScanMode; onProgress?: (snapshot: LibraryScanProgress) => void | Promise<void> } = {},
+): Promise<LibraryData> {
+  const mode: LibraryScanMode = options.force ? 'full' : options.mode || 'quick';
   const settings = loadSettings();
   const ctx: ScanContext = {
     omdbApiKey: getMetadataApiKey(settings, 'omdb'),
@@ -3005,6 +3182,9 @@ async function scanLibrary(data: LibraryData, options: { force?: boolean } = {})
   const animeShows: MediaItem[] = [];
   const previousScanCache = data.scanCache || {};
   const nextScanCache: LibraryScanCache = {};
+  const totalFolders = flattenLibraryFolders(folderGroups).length;
+  const processedFolders = new Set<string>();
+  let scannedFolders = 0;
 
   const appendItems = (items: MediaItem[], folderKind: ScanFolderKind) => {
     for (const item of items) {
@@ -3027,6 +3207,41 @@ async function scanLibrary(data: LibraryData, options: { force?: boolean } = {})
       .filter((item) => itemBelongsToFolder(item, folder));
   };
 
+  const mergeFreshWithCached = (freshItems: MediaItem[], cachedItems: MediaItem[], isComplete: boolean) => {
+    if (isComplete) return freshItems;
+    const freshIds = new Set(freshItems.map((item) => item.id));
+    const processed = [...processedFolders];
+    return [
+      ...freshItems,
+      ...cachedItems.filter((item) => (
+        !freshIds.has(item.id)
+        && !processed.some((folder) => itemBelongsToFolder(item, folder))
+      )),
+    ];
+  };
+
+  const currentLibrarySnapshot = (isComplete: boolean): LibraryScanProgress => ({
+    movies: mergeFreshWithCached(movies, data.movies || [], isComplete),
+    tvShows: mergeFreshWithCached(tvShows, data.tvShows || [], isComplete),
+    animeShows: mergeFreshWithCached(animeShows, data.animeShows || [], isComplete),
+    libraryFolders: flattenLibraryFolders(folderGroups),
+    libraryFolderGroups: folderGroups,
+    scanCache: isComplete ? nextScanCache : {
+      ...Object.fromEntries(
+        Object.entries(previousScanCache).filter(([folder]) => !processedFolders.has(folder)),
+      ),
+      ...nextScanCache,
+    },
+    isComplete,
+    scannedFolders,
+    totalFolders,
+  });
+
+  const publishProgress = async (isComplete = false) => {
+    if (!options.onProgress) return;
+    await options.onProgress(currentLibrarySnapshot(isComplete));
+  };
+
   const scanGroup = async (
     folders: string[],
     folderKind: NonNullable<ScanContext['folderKind']>,
@@ -3036,25 +3251,34 @@ async function scanLibrary(data: LibraryData, options: { force?: boolean } = {})
       const cachedEntry = previousScanCache[folder];
 
       if (
-        !options.force
+        mode !== 'full'
         && folderSignature
         && cachedEntry?.version === SCAN_CACHE_VERSION
         && cachedEntry?.folderKind === folderKind
         && cachedEntry.signature === folderSignature.signature
       ) {
         const cachedItems = cachedItemsForFolder(folder, folderKind);
-        if (cachedItems.length === cachedEntry.itemCount) {
+        const metadataIsFresh = mode !== 'metadata' || Date.now() - (cachedEntry.scannedAt || 0) < 7 * 24 * 60 * 60 * 1000;
+        if (metadataIsFresh && cachedItems.length === cachedEntry.itemCount && cachedItemsAreComplete(cachedItems)) {
           appendItems(cachedItems, folderKind);
           nextScanCache[folder] = cachedEntry;
+          processedFolders.add(folder);
+          scannedFolders++;
+          await publishProgress(false);
           continue;
         }
       }
 
       const folderCtx: ScanContext = { ...ctx, folderKind };
       const directItem = await scanDirectoryAsItem(folder, folderCtx);
-      const items = directItem ? [directItem] : await scanFolder(folder, folderCtx);
+      const items = directItem
+        ? [directItem]
+        : await scanFolder(folder, folderCtx, async (partialItems) => {
+          appendItems(partialItems, folderKind);
+          await publishProgress(false);
+        });
 
-      appendItems(items, folderKind);
+      if (directItem) appendItems(items, folderKind);
       if (folderSignature) {
         nextScanCache[folder] = {
           version: SCAN_CACHE_VERSION,
@@ -3065,6 +3289,9 @@ async function scanLibrary(data: LibraryData, options: { force?: boolean } = {})
           scannedAt: Date.now(),
         };
       }
+      processedFolders.add(folder);
+      scannedFolders++;
+      await publishProgress(false);
     }
   };
 
@@ -3081,6 +3308,7 @@ async function scanLibrary(data: LibraryData, options: { force?: boolean } = {})
     scanCache: nextScanCache,
   };
   await cacheLibraryArtwork(nextLibrary);
+  await publishProgress(true);
   return nextLibrary;
 }
 
@@ -3246,6 +3474,170 @@ function saveLibrary(data: LibraryData): void {
   }
 }
 
+type OfficialArtworkRefreshResult = {
+  thumbnail?: string;
+  cover?: string;
+  summary?: string;
+  posterCandidates: string[];
+  backdropCandidates: string[];
+};
+
+function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
+  return orderedArtworkCandidates(...urls).filter((url) => {
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      return host.includes('image.tmdb.org')
+        || host.includes('media-amazon.com')
+        || host.includes('m.media-amazon.com')
+        || host.includes('cdn.myanimelist.net')
+        || host.includes('static.tvmaze.com');
+    } catch {
+      return false;
+    }
+  });
+}
+
+function itemArtworkLookupData(item: MediaItem): {
+  title: string;
+  year?: number;
+  localTitles: string[];
+  providerIds: MetadataProviderIds;
+} {
+  const representativePath = item.episodeFiles?.[0]?.filePath || item.filePath;
+  const probe = representativePath && fs.existsSync(representativePath) ? probeMediaFile(representativePath) : {};
+  const parsedPathTitle = representativePath ? cleanMediaTitle(path.basename(representativePath)).title : '';
+  const folderTitle = item.filePath ? cleanMediaTitle(path.basename(item.filePath)).title : '';
+  const embeddedTitle = item.type === 'movie' ? probe.embeddedTitle : probe.embeddedShowTitle;
+  const searchTitle =
+    usefulLocalTitle(item.title)
+    || usefulLocalTitle(embeddedTitle)
+    || usefulLocalTitle(folderTitle)
+    || usefulLocalTitle(parsedPathTitle)
+    || item.title;
+  const localTitles = uniqueLocalTitles([
+    searchTitle,
+    item.title,
+    embeddedTitle,
+    folderTitle,
+    parsedPathTitle,
+    localTitleFromPath(representativePath || item.filePath) || '',
+  ]);
+  const providerIds = mergeProviderIds(
+    probe.providerIds || {},
+    parseMetadataProviderIds(`${item.filePath || ''} ${representativePath || ''} ${item.title || ''}`),
+  );
+
+  return {
+    title: searchTitle,
+    year: item.year || probe.year || parseYearFromText(representativePath || item.filePath),
+    localTitles,
+    providerIds,
+  };
+}
+
+async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
+  const settings = loadSettings();
+  const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
+  const omdbApiKey = getMetadataApiKey(settings, 'omdb');
+  const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
+
+  if (item.type === 'movie') {
+    const [tmdbById, tmdbBySearch, omdbById, omdbBySearch] = await Promise.all([
+      providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
+      fetchTMDBMovieMetadata(title, year, tmdbApiKey),
+      providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
+      fetchOMDbMetadata(title, year, omdbApiKey),
+    ]);
+    const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
+    const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
+    const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
+    const posterCandidates = officialArtworkOnly([tmdbMeta?.poster, omdbPoster]);
+    const backdropCandidates = officialArtworkOnly([tmdbMeta?.backdrop]);
+    return {
+      thumbnail: posterCandidates[0] || '',
+      cover: backdropCandidates[0] || posterCandidates[0] || '',
+      summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
+      posterCandidates,
+      backdropCandidates,
+    };
+  }
+
+  const likelyAnime = item.type === 'anime';
+  const [omdbById, omdbBySearch, jikanMeta, tmdbById, tmdbBySearch, tvMeta] = await Promise.all([
+    providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
+    fetchOMDbMetadata(title, year, omdbApiKey),
+    likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null),
+    providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
+    fetchTMDBTVMetadata(title, year, tmdbApiKey),
+    !likelyAnime ? fetchTVMetadata(title, year) : Promise.resolve(null),
+  ]);
+  const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
+  const matchedJikan = remoteMatchesAnyLocalTitle(localTitles, jikanMeta?.title) ? jikanMeta : null;
+  const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
+  const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
+  const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
+  const posterCandidates = officialArtworkOnly([
+    tmdbMeta?.poster,
+    omdbPoster,
+    matchedTV?.poster,
+    likelyAnime ? matchedJikan?.poster : '',
+  ]);
+  const backdropCandidates = officialArtworkOnly([
+    tmdbMeta?.backdrop,
+    likelyAnime ? matchedJikan?.backdrop : '',
+    matchedTV?.backdrop,
+  ]);
+
+  return {
+    thumbnail: posterCandidates[0] || '',
+    cover: backdropCandidates[0] || posterCandidates[0] || '',
+    summary: tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
+    posterCandidates,
+    backdropCandidates,
+  };
+}
+
+async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkRefreshResult> {
+  const library = loadLibrary();
+  const collections: Array<{ items: MediaItem[] }> = [
+    { items: library.movies },
+    { items: library.tvShows },
+    { items: library.animeShows },
+  ];
+  const target = collections
+    .flatMap((collection) => collection.items)
+    .find((item) => item.id === mediaId);
+
+  if (!target) {
+    throw new Error('Media item was not found in the library.');
+  }
+
+  const refreshed = await fetchOfficialArtworkForItem(target);
+  if (refreshed.thumbnail || refreshed.cover || refreshed.summary) {
+    if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
+    if (refreshed.cover) target.backdrop = refreshed.cover;
+    if (refreshed.summary) target.summary = refreshed.summary;
+    target.posterCandidates = orderedArtworkCandidates(
+      ...refreshed.posterCandidates,
+      ...officialArtworkOnly(target.posterCandidates || []),
+      target.poster,
+    );
+    target.backdropCandidates = orderedArtworkCandidates(
+      ...refreshed.backdropCandidates,
+      ...officialArtworkOnly(target.backdropCandidates || []),
+      target.backdrop,
+    );
+    saveLibrary(library);
+  }
+
+  return {
+    ...refreshed,
+    posterCandidates: target.posterCandidates || refreshed.posterCandidates,
+    backdropCandidates: target.backdropCandidates || refreshed.backdropCandidates,
+  };
+}
+
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
   if (!candidatePath) return false;
   const relative = path.relative(path.resolve(folderPath), path.resolve(candidatePath));
@@ -3335,9 +3727,24 @@ function createWindow() {
 
 ipcMain.handle('library:get', () => loadLibrary());
 
-ipcMain.handle('library:scan', async (_event, options?: { force?: boolean }) => {
+ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?: LibraryScanMode }) => {
   const data = loadLibrary();
-  const scanned = await scanLibrary(data, { force: Boolean(options?.force) });
+  const mode: LibraryScanMode = options?.force
+    ? 'full'
+    : options?.mode === 'metadata' || options?.mode === 'full'
+      ? options.mode
+      : 'quick';
+  const scanned = await scanLibrary(data, {
+    mode,
+    onProgress: (snapshot) => {
+      saveLibrary(snapshot);
+      event.sender.send('library:scan-progress', loadLibrary(), {
+        isComplete: snapshot.isComplete,
+        scannedFolders: snapshot.scannedFolders,
+        totalFolders: snapshot.totalFolders,
+      });
+    },
+  });
   saveLibrary(scanned);
   return loadLibrary();
 });
@@ -3349,7 +3756,19 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
     const newFolder = result.filePaths[0];
     const safeKind: LibraryFolderKind = kind === 'tvShows' || kind === 'anime' || kind === 'movies' ? kind : 'movies';
     const updated = addFolderToLibrary(data, newFolder, safeKind);
-    const scanned = await scanLibrary(updated);
+    const scanned = await scanLibrary(updated, {
+      mode: 'quick',
+      onProgress: (snapshot) => {
+        saveLibrary(snapshot);
+        BrowserWindow.getAllWindows().forEach((window) => {
+          window.webContents.send('library:scan-progress', loadLibrary(), {
+            isComplete: snapshot.isComplete,
+            scannedFolders: snapshot.scannedFolders,
+            totalFolders: snapshot.totalFolders,
+          });
+        });
+      },
+    });
     saveLibrary(scanned);
     return loadLibrary();
   }
@@ -3386,6 +3805,7 @@ ipcMain.handle('media:get-stream-url', (_event, filePath: string, options?: Tran
     || typeof options?.videoTrackIndex === 'number'
     || typeof options?.audioTrackIndex === 'number'
     || typeof options?.subtitleTrackIndex === 'number'
+    || typeof options?.secondarySubtitleTrackIndex === 'number'
     || needsBrowserTranscoding(filePath);
   const url = `http://127.0.0.1:${mediaServerPort}/stream?${params.toString()}`;
   return {
@@ -3431,11 +3851,13 @@ ipcMain.handle('artwork:save', (_event, mediaId: string, target: string, dataUrl
   saveCustomArtwork(mediaId, target, dataUrl);
   return getCustomArtwork(mediaId);
 });
+ipcMain.handle('artwork:refresh-official', (_event, mediaId: string) => refreshOfficialArtwork(mediaId));
 ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
   importCustomArtwork(entries || {});
   return true;
 });
 ipcMain.handle('database:backup', () => backupDatabase());
+ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url));
 
 ipcMain.handle('media:ffmpeg-available', () => {
   return { available: findFFmpeg() !== null, path: findFFmpeg() };
@@ -3527,6 +3949,10 @@ ipcMain.handle('media:mpv-select-track', async (_event, type: 'video' | 'audio' 
   await mpvController.selectTrack(type, Number(ffIndex));
 });
 
+ipcMain.handle('media:mpv-select-secondary-subtitle-track', async (_event, ffIndex: number) => {
+  await mpvController.selectSecondarySubtitleTrack(Number(ffIndex));
+});
+
 ipcMain.handle('media:mpv-set-subtitle-style', async (_event, style: SubtitleStyleOptions) => {
   await mpvController.setSubtitleStyle(style || {});
 });
@@ -3548,7 +3974,7 @@ ipcMain.handle('media:mpv-disable-subtitles', async () => {
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
-app.on('ready', async () => {
+app.whenReady().then(async () => {
   cleanupOldTranscodes();
   await startMediaServer();
 
@@ -3575,6 +4001,9 @@ app.on('ready', async () => {
   });
 
   createWindow();
+}).catch((error) => {
+  console.error('Failed to start LoomTV:', error);
+  app.quit();
 });
 
 app.on('window-all-closed', () => {

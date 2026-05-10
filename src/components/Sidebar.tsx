@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
+import LoomLogo from '@/components/LoomLogo';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies';
 type NavItemId = 'home' | SidebarNavItemId;
@@ -104,17 +105,17 @@ export default function Sidebar() {
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
 
   return (
-    <aside className="w-48 bg-[#232323] h-full flex flex-col">
-      <div className="p-4 border-b border-[#2d2d2d]">
-        <Link to="/" className="inline-block text-xl font-bold text-[#eba865] transition-colors hover:text-[#f0bd82]">
-          LoomTV
+    <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col border-r border-[var(--loom-border)]">
+      <div className="p-4 border-b border-[var(--loom-border)]">
+        <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
+          <LoomLogo className="h-8 w-auto" />
         </Link>
       </div>
       <nav className="flex-1 p-3 flex flex-col">
         <div className="relative">
           {activeNavIndex >= 0 && (
             <motion.span
-              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[#2d2d2d]"
+              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-surface-3)]"
               initial={false}
               animate={{ y: activeNavIndex * (navItemHeight + navItemGap) }}
               transition={{ type: 'spring', stiffness: 420, damping: 40, mass: 0.9 }}
@@ -133,7 +134,7 @@ export default function Sidebar() {
                   'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors',
                   isActive
                     ? 'text-white'
-                    : 'text-[#a8a8a8] hover:bg-[#2d2d2d]/55 hover:text-white',
+                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/55 hover:text-[var(--loom-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -149,8 +150,8 @@ export default function Sidebar() {
             className={cn(
               'flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
               isSettingsActive
-                ? 'bg-[#2d2d2d] text-white'
-                : 'text-[#a8a8a8] hover:bg-[#2d2d2d] hover:text-white',
+                ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
+                : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]',
             )}
           >
             <Settings className="w-5 h-5 shrink-0" />
@@ -162,7 +163,7 @@ export default function Sidebar() {
             disabled={state.isScanning}
             aria-label="Refresh library"
             title="Refresh library"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[#a8a8a8] transition-colors hover:bg-[#2d2d2d] hover:text-white disabled:cursor-wait disabled:opacity-60"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:cursor-wait disabled:opacity-60"
           >
             <RefreshCw className={cn('h-5 w-5', state.isScanning && 'animate-spin')} />
           </button>

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import Home from './pages/Home';
@@ -11,6 +11,8 @@ import Settings from './pages/Settings';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
+import { ToastProvider } from './components/ToastProvider';
+import { ThemeProvider } from './components/ThemeProvider';
 
 interface NowPlaying {
   mediaId?: string;
@@ -26,9 +28,13 @@ interface NowPlaying {
 export default function App() {
   return (
     <LibraryProvider>
-      <BrowserRouter>
-        <AppShell />
-      </BrowserRouter>
+      <ThemeProvider>
+        <ToastProvider>
+          <HashRouter>
+            <AppShell />
+          </HashRouter>
+        </ToastProvider>
+      </ThemeProvider>
     </LibraryProvider>
   );
 }
@@ -64,7 +70,7 @@ function AppShell() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-[#1a1a1a]">
+    <div className="flex h-screen bg-[var(--loom-bg)] text-[var(--loom-text)]">
       <Sidebar />
       <main
         className="flex-1 overflow-hidden"

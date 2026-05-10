@@ -1,18 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { CheckCircle, Play, Star, ChevronRight, ChevronDown, Image, MoreHorizontal } from 'lucide-react';
+import { CheckCircle, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
-import { loadCustomArtwork, saveCustomArtwork } from '@/lib/customArtwork';
+import { loadCustomArtwork } from '@/lib/customArtwork';
+import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -46,70 +46,7 @@ function formatThumbnailTime(seconds: number, duration = 0): string {
   return [hours, minutes, secs].map((part) => String(part).padStart(2, '0')).join(':');
 }
 
-type ArtworkTarget = 'cover' | 'thumbnail';
-type ArtworkPreview = {
-  target: ArtworkTarget;
-  url: string;
-  name: string;
-  width: number;
-  height: number;
-  zoom: number;
-  offsetX: number;
-  offsetY: number;
-};
 const CUSTOM_ARTWORK_KEY = 'loomtvCustomShowArtwork';
-const ARTWORK_TARGETS: Record<ArtworkTarget, { label: string; aspectClass: string; outputWidth: number; outputHeight: number }> = {
-  cover: {
-    label: 'Cover photo',
-    aspectClass: 'aspect-[16/6] w-full',
-    outputWidth: 1600,
-    outputHeight: 600,
-  },
-  thumbnail: {
-    label: 'Thumbnail',
-    aspectClass: 'mx-auto aspect-[2/3] w-56',
-    outputWidth: 800,
-    outputHeight: 1200,
-  },
-};
-
-function clampPercent(value: number): number {
-  return Math.max(0, Math.min(100, value));
-}
-
-function cropArtworkToDataUrl(preview: ArtworkPreview): Promise<string> {
-  const target = ARTWORK_TARGETS[preview.target];
-  const targetAspect = target.outputWidth / target.outputHeight;
-
-  return new Promise((resolve, reject) => {
-    const image = new window.Image();
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = target.outputWidth;
-      canvas.height = target.outputHeight;
-      const context = canvas.getContext('2d');
-      if (!context) {
-        reject(new Error('Unable to prepare artwork crop.'));
-        return;
-      }
-
-      const imageAspect = image.naturalWidth / image.naturalHeight;
-      const baseCropWidth = imageAspect > targetAspect ? image.naturalHeight * targetAspect : image.naturalWidth;
-      const baseCropHeight = imageAspect > targetAspect ? image.naturalHeight : image.naturalWidth / targetAspect;
-      const cropWidth = Math.min(image.naturalWidth, baseCropWidth / preview.zoom);
-      const cropHeight = Math.min(image.naturalHeight, baseCropHeight / preview.zoom);
-      const positionX = clampPercent(50 + preview.offsetX) / 100;
-      const positionY = clampPercent(50 + preview.offsetY) / 100;
-      const cropX = Math.max(0, Math.min(image.naturalWidth - cropWidth, (image.naturalWidth - cropWidth) * positionX));
-      const cropY = Math.max(0, Math.min(image.naturalHeight - cropHeight, (image.naturalHeight - cropHeight) * positionY));
-
-      context.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, target.outputWidth, target.outputHeight);
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
-    };
-    image.onerror = () => reject(new Error('Unable to load selected artwork.'));
-    image.src = preview.url;
-  });
-}
 
 export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const { id } = useParams<{ id: string }>();
@@ -120,15 +57,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
   const [progressTick, setProgressTick] = useState(0);
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
-  const [artworkMenuOpen, setArtworkMenuOpen] = useState(false);
-  const [customArtwork, setCustomArtwork] = useState<Partial<Record<ArtworkTarget, string>>>({});
-  const [artworkPreview, setArtworkPreview] = useState<ArtworkPreview | null>(null);
-  const [isSavingArtwork, setIsSavingArtwork] = useState(false);
-  const [artworkSaveError, setArtworkSaveError] = useState('');
-  const artworkMenuRef = useRef<HTMLDivElement | null>(null);
-  const coverInputRef = useRef<HTMLInputElement | null>(null);
-  const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
-  const createdArtworkUrlsRef = useRef<string[]>([]);
+  const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
 
   useEffect(() => {
     const collection = kind === 'anime' ? state.animeShows : state.tvShows;
@@ -160,17 +89,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
   useEffect(() => {
     setFallbackThumbnails([]);
-    setArtworkMenuOpen(false);
     setCustomArtwork({});
     if (show?.id) {
       void loadCustomArtwork(show.id, CUSTOM_ARTWORK_KEY)
-        .then((artwork) => setCustomArtwork(artwork as Partial<Record<ArtworkTarget, string>>));
+        .then((artwork) => setCustomArtwork(artwork as CustomArtworkState));
     }
-    setArtworkPreview(null);
-    setArtworkSaveError('');
-    setIsSavingArtwork(false);
-    createdArtworkUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    createdArtworkUrlsRef.current = [];
 
     const episodeFiles = show?.episodeFiles
       ?.slice()
@@ -202,100 +125,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     };
   }, [show?.id, show?.episodeFiles]);
 
-  useEffect(() => {
-    return () => {
-      createdArtworkUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!artworkMenuOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!artworkMenuRef.current?.contains(event.target as Node)) {
-        setArtworkMenuOpen(false);
-      }
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setArtworkMenuOpen(false);
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [artworkMenuOpen]);
-
-  const openArtworkPicker = (target: ArtworkTarget) => {
-    setArtworkMenuOpen(false);
-    const input = target === 'cover' ? coverInputRef.current : thumbnailInputRef.current;
-    input?.click();
-  };
-
-  const handleArtworkFileChange = (target: ArtworkTarget, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || !file.type.startsWith('image/')) return;
-
-    const url = URL.createObjectURL(file);
-    createdArtworkUrlsRef.current.push(url);
-    const image = new window.Image();
-    image.onload = () => {
-      setArtworkPreview({
-        target,
-        url,
-        name: file.name,
-        width: image.naturalWidth,
-        height: image.naturalHeight,
-        zoom: 1,
-        offsetX: 0,
-        offsetY: 0,
-      });
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      createdArtworkUrlsRef.current = createdArtworkUrlsRef.current.filter((createdUrl) => createdUrl !== url);
-    };
-    image.src = url;
-  };
-
-  const closeArtworkPreview = () => {
-    if (artworkPreview?.url) {
-      URL.revokeObjectURL(artworkPreview.url);
-      createdArtworkUrlsRef.current = createdArtworkUrlsRef.current.filter((url) => url !== artworkPreview.url);
-    }
-    setArtworkPreview(null);
-    setArtworkSaveError('');
-    setIsSavingArtwork(false);
-  };
-
-  const updateArtworkPreview = (updates: Partial<Pick<ArtworkPreview, 'zoom' | 'offsetX' | 'offsetY'>>) => {
-    setArtworkPreview((current) => current ? { ...current, ...updates } : current);
-  };
-
-  const applyArtworkPreview = async () => {
-    if (!artworkPreview || !show?.id) return;
-    setIsSavingArtwork(true);
-    setArtworkSaveError('');
-    try {
-      const { target } = artworkPreview;
-      const croppedArtwork = await cropArtworkToDataUrl(artworkPreview);
-      await saveCustomArtwork(show.id, target, croppedArtwork, CUSTOM_ARTWORK_KEY);
-      setCustomArtwork((current) => ({ ...current, [target]: croppedArtwork }));
-      void refreshLibrary();
-      closeArtworkPreview();
-    } catch (error) {
-      setArtworkSaveError(error instanceof Error ? error.message : 'Unable to save artwork.');
-      setIsSavingArtwork(false);
-    }
-  };
-
   if (!show) {
     return (
-      <div className="h-full overflow-y-auto bg-[#1a1a1a]">
+      <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
         <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
           <Skeleton className="h-[400px] w-full rounded-lg" />
           <div className="mt-4 space-y-2">
@@ -407,11 +239,21 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     backdropSources(show, sourceArtwork, generatedArtwork),
   );
   const posterArtwork = uniqueArtworkSources(
-    customArtwork.thumbnail || '',
+    customArtwork.thumbnail || customArtwork.poster || '',
     posterSources(show, sourceArtwork, generatedArtwork),
   );
-  const previewConfig = artworkPreview ? ARTWORK_TARGETS[artworkPreview.target] : null;
-  const previewLabel = previewConfig?.label || 'Artwork';
+  const officialPosterArtwork = uniqueArtworkSources(
+    show.posterCandidates,
+    show.poster,
+    sourceArtwork?.posterCandidates,
+    sourceArtwork?.poster,
+  );
+  const officialCoverArtwork = uniqueArtworkSources(
+    show.backdropCandidates,
+    show.backdrop,
+    sourceArtwork?.backdropCandidates,
+    sourceArtwork?.backdrop,
+  );
 
   const handlePlayShow = () => {
     if (!heroEpisode || !onPlay) return;
@@ -466,7 +308,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const handleBack = () => navigate(backTarget);
 
   return (
-    <div className="h-full overflow-y-auto bg-[#1a1a1a]">
+    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
       <div className="mx-auto max-w-[1440px]">
       {/* Hero backdrop */}
       <div className="relative h-[45vh] w-full">
@@ -477,69 +319,23 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           imgClassName="object-cover"
           fallback={<div className="h-full w-full" />}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#1a1a1a] via-[#1a1a1a]/40 to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-[#1a1a1a] to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[#1a1a1a] to-transparent" />
-        <div
-          ref={artworkMenuRef}
-          className="fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50"
-        >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="More artwork options"
-            aria-haspopup="menu"
-            aria-expanded={artworkMenuOpen}
-            onClick={() => setArtworkMenuOpen((open) => !open)}
-            className="h-9 w-9 rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md hover:bg-white/10 hover:text-[#eba865]"
-          >
-            <MoreHorizontal className="h-5 w-5" />
-          </Button>
-          {artworkMenuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 mt-2 w-52 overflow-hidden rounded-lg border border-white/10 bg-[#232323]/95 py-1 shadow-2xl backdrop-blur-md"
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => openArtworkPicker('cover')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[#eba865]"
-              >
-                <Image className="h-4 w-4" />
-                Edit cover photo
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => openArtworkPicker('thumbnail')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[#eba865]"
-              >
-                <Image className="h-4 w-4" />
-                Edit thumbnail
-              </button>
-            </div>
-          )}
-          <input
-            ref={coverInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => handleArtworkFileChange('cover', event)}
-          />
-          <input
-            ref={thumbnailInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => handleArtworkFileChange('thumbnail', event)}
-          />
-        </div>
+        <div className="absolute inset-0 bg-gradient-to-t from-[var(--loom-bg)] via-[var(--loom-bg)]/40 to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-[var(--loom-bg)] to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[var(--loom-bg)] to-transparent" />
+        <ArtworkEditorControls
+          mediaId={show.id}
+          legacyStorageKey={CUSTOM_ARTWORK_KEY}
+          onCustomArtworkChange={setCustomArtwork}
+          onSaved={refreshLibrary}
+          officialThumbnailSources={officialPosterArtwork}
+          officialCoverSources={officialCoverArtwork}
+          fallbackFrameSource={generatedArtwork[0] || ''}
+          onFetchOfficialArtwork={() => desktopApi.refreshOfficialArtwork(show.id)}
+        />
         <button
           type="button"
           onClick={handleBack}
-          className="fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-9 items-center gap-1 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:text-[#eba865]"
+          className="fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           Back
@@ -561,9 +357,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           />
           <div className="flex-1 min-w-0">
             <h1 className="text-4xl font-bold text-white mb-2">{show.title}</h1>
-            <div className="flex flex-wrap items-center gap-4 text-[#a8a8a8] text-sm mb-3">
-              <span className="flex items-center gap-1">
-                <Star className="w-4 h-4 text-[#eba865]" fill="currentColor" />
+            <div className="flex flex-wrap items-center gap-4 text-[var(--loom-muted)] text-sm mb-3">
+              <span className="flex items-center gap-1 text-[#F5C451]">
+                <Star className="w-4 h-4" fill="currentColor" />
                 {show.rating ? show.rating.toFixed(1) : 'N/A'}
               </span>
               {show.year > 0 && <span>{show.year}</span>}
@@ -582,7 +378,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           {heroEpisode && (
             <Button
               onClick={handlePlayShow}
-              className="relative h-16 shrink-0 overflow-hidden rounded-lg bg-[#eba865] px-6 text-base font-semibold text-black shadow-xl hover:bg-[#d4964f] gap-3"
+              className="relative h-16 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-xl hover:bg-[var(--loom-accent-hover)] gap-3"
             >
               {heroProgressPercent > 0 && (
                 <span
@@ -594,7 +390,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 <Play className="h-7 w-7" />
                 <span className="flex min-w-28 flex-col items-start leading-tight">
                   <span>{heroIsResume ? 'Resume' : 'Play'}</span>
-                  <span className="text-[11px] font-medium text-black/65">
+                  <span className="text-[11px] font-medium text-[var(--loom-accent-foreground-muted)]">
                     {heroIsResume && heroProgressCopy ? `${heroEpisodeLabel} · ${heroProgressCopy}` : heroEpisodeLabel}
                   </span>
                 </span>
@@ -603,109 +399,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           )}
         </div>
       </div>
-
-      <Dialog open={Boolean(artworkPreview)} onOpenChange={(open) => { if (!open) closeArtworkPreview(); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{previewLabel}</DialogTitle>
-          </DialogHeader>
-          {artworkPreview && (
-            <div className="mt-5 space-y-5">
-              <div
-                className={`${previewConfig?.aspectClass || ''} overflow-hidden rounded-lg border border-white/10 bg-black`}
-              >
-                <img
-                  src={artworkPreview.url}
-                  alt={artworkPreview.name}
-                  className="h-full w-full object-cover transition-transform"
-                  style={{
-                    objectPosition: `${clampPercent(50 + artworkPreview.offsetX)}% ${clampPercent(50 + artworkPreview.offsetY)}%`,
-                    transform: `scale(${artworkPreview.zoom})`,
-                  }}
-                />
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-[#a8a8a8]">
-                <span className="min-w-0 truncate">{artworkPreview.name}</span>
-                <span>{artworkPreview.width} x {artworkPreview.height}</span>
-              </div>
-              <div className="grid gap-4 rounded-lg bg-white/[0.06] p-4">
-                <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-white/65">
-                  Zoom
-                  <input
-                    type="range"
-                    min={1}
-                    max={3}
-                    step={0.01}
-                    value={artworkPreview.zoom}
-                    onChange={(event) => updateArtworkPreview({ zoom: Number(event.target.value) })}
-                    className="w-full accent-[#eba865]"
-                  />
-                </label>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-white/65">
-                    Horizontal
-                    <input
-                      type="range"
-                      min={-50}
-                      max={50}
-                      step={1}
-                      value={artworkPreview.offsetX}
-                      onChange={(event) => updateArtworkPreview({ offsetX: Number(event.target.value) })}
-                      className="w-full accent-[#eba865]"
-                    />
-                  </label>
-                  <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-white/65">
-                    Vertical
-                    <input
-                      type="range"
-                      min={-50}
-                      max={50}
-                      step={1}
-                      value={artworkPreview.offsetY}
-                      onChange={(event) => updateArtworkPreview({ offsetY: Number(event.target.value) })}
-                      className="w-full accent-[#eba865]"
-                    />
-                  </label>
-                </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => updateArtworkPreview({ zoom: 1, offsetX: 0, offsetY: 0 })}
-                    className="h-8 px-3 text-xs text-white/70 hover:bg-white/10 hover:text-white"
-                  >
-                    Reset Crop
-                  </Button>
-                </div>
-              </div>
-              {artworkSaveError && (
-                <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-                  {artworkSaveError}
-                </p>
-              )}
-              <div className="flex justify-end gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={closeArtworkPreview}
-                  disabled={isSavingArtwork}
-                  className="border-white/15 bg-transparent text-white hover:bg-white/10"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={applyArtworkPreview}
-                  disabled={isSavingArtwork}
-                  className="bg-[#eba865] text-black hover:bg-[#d4964f]"
-                >
-                  {isSavingArtwork ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       <div className="page-bottom-safe-lg p-8">
         {show.summary && (
@@ -719,7 +412,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <section className="mb-8">
           <h3 className="text-lg font-semibold text-white mb-3">Seasons & Episodes</h3>
           {visibleSeasons.length === 0 ? (
-            <p className="text-[#a8a8a8]">No season information available. Try scanning the library.</p>
+            <p className="text-[var(--loom-muted)]">No season information available. Try scanning the library.</p>
           ) : (
             <div className="space-y-2">
               {visibleSeasons.map((season) => {
@@ -741,18 +434,18 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                     {/* Season header - click anywhere to expand/collapse */}
                     <div 
                       onClick={() => setExpandedSeason(isExpanded ? null : season.number)}
-                      className="flex items-center justify-between p-4 bg-[#232323] cursor-pointer hover:bg-[#2a2a2a] transition-colors"
+                      className="flex items-center justify-between p-4 bg-[var(--loom-surface)] cursor-pointer hover:bg-[#2a2a2a] transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-white">
                           {isExpanded ? (
-                            <ChevronDown className="w-4 h-4 text-[#a8a8a8]" />
+                            <ChevronDown className="w-4 h-4 text-[var(--loom-muted)]" />
                           ) : (
-                            <ChevronRight className="w-4 h-4 text-[#a8a8a8]" />
+                            <ChevronRight className="w-4 h-4 text-[var(--loom-muted)]" />
                           )}
                         </span>
                         <span className="font-medium text-white">{season.title}</span>
-                        <span className="text-[#a8a8a8] text-sm">
+                        <span className="text-[var(--loom-muted)] text-sm">
                           {seasonEps.length > 0 ? `${seasonEps.length} episodes` : `${season.episodeCount || fileCount} episodes`}
                         </span>
                       </div>
@@ -761,7 +454,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                           <Button
                             size="sm"
                             onClick={(e) => { e.stopPropagation(); handlePlaySeason(season.number); }}
-                            className="relative h-7 overflow-hidden rounded-lg bg-[#eba865] px-3 text-xs text-black hover:bg-[#d4964f] gap-1"
+                            className="relative h-7 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] gap-1"
                           >
                             {seasonIsResume && seasonProgressPercent > 0 && (
                               <span
@@ -841,13 +534,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                     {actor.image ? (
                       <AvatarImage src={actor.image} alt={actor.name} />
                     ) : (
-                      <AvatarFallback className="bg-[#2d2d2d] text-white text-xs">
+                      <AvatarFallback className="bg-[var(--loom-surface-3)] text-white text-xs">
                         {actor.name.charAt(0)}
                       </AvatarFallback>
                     )}
                   </Avatar>
                   <p className="text-xs text-white truncate">{actor.name}</p>
-                  <p className="text-xs text-[#a8a8a8] truncate">{actor.character}</p>
+                  <p className="text-xs text-[var(--loom-muted)] truncate">{actor.character}</p>
                 </div>
               ))}
             </div>
@@ -867,7 +560,7 @@ function ExpandableSummary({ summary }: { summary: string }) {
     <motion.div
       layout
       onClick={toggleSummary}
-      className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eba865]/70"
+      className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70"
       whileTap={{ scale: 0.998 }}
     >
       <motion.div
@@ -877,7 +570,7 @@ function ExpandableSummary({ summary }: { summary: string }) {
       >
         <motion.p
           key={isExpanded ? 'expanded' : 'collapsed'}
-          className={`text-[#a8a8a8] leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}
+          className={`text-[var(--loom-muted)] leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}
           initial={{ opacity: 0.72, y: isExpanded ? -3 : 3 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
@@ -893,7 +586,7 @@ function ExpandableSummary({ summary }: { summary: string }) {
           event.stopPropagation();
           toggleSummary();
         }}
-        className="mt-2 text-sm font-medium text-[#eba865] transition-colors group-hover:text-[#f0bd86] hover:text-[#f0bd86]"
+        className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
         whileTap={{ scale: 0.98 }}
       >
         {isExpanded ? 'Show Less' : 'Show More'}
@@ -955,12 +648,12 @@ function EpisodeRow({
     <div className={`relative flex items-start gap-4 p-4 transition-colors group cursor-pointer ${progress.watched ? 'opacity-55' : 'hover:bg-white/5'}`} onClick={onPlay}>
       {(progress.inProgress || progress.watched) && progress.fraction > 0 && (
         <span
-          className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${progress.watched ? 'bg-green-500' : 'bg-[#eba865]'}`}
+          className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${progress.watched ? 'bg-green-500' : 'bg-[var(--loom-accent)]'}`}
           style={{ width: `${Math.min(100, progress.fraction * 100)}%` }}
         />
       )}
       {/* Thumbnail */}
-      <div className="shrink-0 w-28 h-16 rounded overflow-hidden bg-[#2d2d2d] relative">
+      <div className="shrink-0 w-28 h-16 rounded overflow-hidden bg-[var(--loom-surface-3)] relative">
         {(thumbnailUrl || ep.still) && !imgError ? (
           <img
             src={thumbnailUrl || ep.still}
@@ -975,19 +668,19 @@ function EpisodeRow({
           </div>
         )}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100">
-          <button onClick={handlePlay} className="w-8 h-8 rounded-full bg-[#eba865] flex items-center justify-center">
-            <Play className="w-4 h-4 text-black" />
+          <button onClick={handlePlay} className="w-8 h-8 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
+            <Play className="w-4 h-4 text-[var(--loom-accent-foreground)]" />
           </button>
         </div>
       </div>
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${progress.watched ? 'text-[#777]' : 'text-white'}`}>{epLabel} - {ep.title || `Episode ${ep.number}`}</p>
+        <p className={`text-sm font-medium ${progress.watched ? 'text-[var(--loom-faint)]' : 'text-white'}`}>{epLabel} - {ep.title || `Episode ${ep.number}`}</p>
         {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">
-        {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[#eba865]">resume</span>}
+        {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--loom-accent)]">resume</span>}
         {progress.watched && <CheckCircle className="h-4 w-4 text-green-500" />}
       </div>
     </div>

@@ -42,6 +42,7 @@ export function probeMedia(filePath: string): ProbeResult {
       width?: number;
       height?: number;
       channels?: number;
+      disposition?: Record<string, number>;
       tags?: Record<string, string>;
     }>;
   };
@@ -57,6 +58,8 @@ export function probeMedia(filePath: string): ProbeResult {
     height: stream.height,
     profile: stream.profile,
     pixelFormat: stream.pix_fmt,
+    default: stream.disposition?.default === 1,
+    forced: stream.disposition?.forced === 1,
   }));
 
   const video = tracks.find((track) => track.type === 'video');

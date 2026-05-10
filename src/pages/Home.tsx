@@ -19,7 +19,6 @@ export default function Home() {
   const normalizedQuery = searchQuery(query);
 
   const continueWatching = [...movies, ...tvShows, ...animeShows]
-    .filter((item) => matchesMediaItem(item, normalizedQuery))
     .filter((item) => item.lastPlayed)
     .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))
     .slice(0, 30);
@@ -31,14 +30,14 @@ export default function Home() {
   const showMoviesSection = !normalizedQuery || isLoading || filteredMovies.length > 0;
 
   return (
-    <div className="h-full overflow-y-auto bg-[#1a1a1a]">
+    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
       <LibrarySearch value={query} onChange={setQuery} placeholder="Search Home" />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
-        {continueWatching.length > 0 && (
+        {!normalizedQuery && continueWatching.length > 0 && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-white">Continue Watching</h3>
-              <Button variant="ghost" size="sm" className="text-[#a8a8a8]">
+              <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                 See All <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
             </div>
@@ -51,7 +50,7 @@ export default function Home() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-white">Anime</h3>
               <Link to="/anime">
-                <Button variant="ghost" size="sm" className="text-[#a8a8a8]">
+                <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </Link>
@@ -65,7 +64,7 @@ export default function Home() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-white">TV Shows</h3>
               <Link to="/tv">
-                <Button variant="ghost" size="sm" className="text-[#a8a8a8]">
+                <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </Link>
@@ -79,7 +78,7 @@ export default function Home() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold text-white">Movies</h3>
               <Link to="/movies">
-                <Button variant="ghost" size="sm" className="text-[#a8a8a8]">
+                <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </Link>
@@ -87,8 +86,8 @@ export default function Home() {
             <MediaRail items={filteredMovies.slice(0, 30)} isLoading={isLoading} from={currentRoute} />
           </section>
         )}
-        {normalizedQuery && !isLoading && continueWatching.length === 0 && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
-          <div className="py-12 text-center text-[#a8a8a8]">No local matches found</div>
+        {normalizedQuery && !isLoading && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
+          <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
         )}
       </div>
     </div>
@@ -117,6 +116,12 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
   const fallbackFilePath = item.type === 'movie'
     ? item.filePath
     : (item as TVShow).episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
+  const seasonCount = item.type === 'movie' ? 0 : ((item as TVShow).seasons || []).length;
+  const metaLine = item.year > 0
+    ? String(item.year)
+    : seasonCount > 0
+      ? `${seasonCount} ${seasonCount === 1 ? 'Season' : 'Seasons'}`
+      : '';
 
   useEffect(() => {
     setFallbackThumbnail('');
@@ -144,29 +149,28 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
       className="group block w-[200px] flex-none"
     >
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden">
-        {imageSources.length > 0 ? (
-          <SafeArtwork
-            src={imageSources}
-            alt={item.title}
-            className="h-full w-full transition-transform group-hover:scale-105"
-            imgClassName="object-cover"
-          />
-        ) : (
-          <div className="w-full h-full bg-[#232323] flex flex-col items-center justify-center gap-2 p-3">
-            <Play className="w-8 h-8 text-[#eba865] shrink-0" />
-            <p className="text-[#a8a8a8] text-xs text-center leading-tight line-clamp-4">{item.title}</p>
+        <SafeArtwork
+          src={imageSources}
+          alt={item.title}
+          className="h-full w-full transition-transform group-hover:scale-105"
+          imgClassName="object-cover"
+          fallback={
+          <div className="w-full h-full bg-[var(--loom-surface)] flex flex-col items-center justify-center gap-2 p-3">
+            <Play className="w-8 h-8 text-[var(--loom-accent)] shrink-0" />
+            <p className="text-[var(--loom-muted)] text-xs text-center leading-tight line-clamp-4">{item.title}</p>
           </div>
-        )}
+          }
+        />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-12 h-12 rounded-full bg-[#eba865] flex items-center justify-center">
-            <Play className="w-6 h-6 text-black ml-1" />
+          <div className="w-12 h-12 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
+            <Play className="w-6 h-6 text-[var(--loom-accent-foreground)] ml-1" />
           </div>
         </div>
       </div>
       <div className="mt-2">
         <h4 className="text-sm font-medium text-white truncate">{item.title}</h4>
-        <p className="text-xs text-[#a8a8a8]">{item.year}</p>
+        {metaLine && <p className="text-xs text-[var(--loom-muted)]">{metaLine}</p>}
       </div>
     </LinkComponent>
   );

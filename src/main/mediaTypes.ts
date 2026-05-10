@@ -11,6 +11,8 @@ export interface MediaTrack {
   height?: number;
   profile?: string;
   pixelFormat?: string;
+  default?: boolean;
+  forced?: boolean;
 }
 
 export interface ProbeResult {
@@ -60,6 +62,9 @@ export interface TranscodeOptions {
   subtitleTrackIndex?: number;
   subtitleStreamOrdinal?: number;
   subtitleCodec?: string;
+  secondarySubtitleTrackIndex?: number;
+  secondarySubtitleStreamOrdinal?: number;
+  secondarySubtitleCodec?: string;
   subtitleStyle?: SubtitleStyleOptions;
   forceTranscode?: boolean;
 }

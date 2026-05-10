@@ -22,6 +22,8 @@ import {
   X,
 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
+import LoomLoader from '@/components/LoomLoader';
+import { useTheme } from '@/components/ThemeProvider';
 import { desktopApi } from '@/lib/desktopApi';
 import {
   getPlayableStartPosition,
@@ -35,7 +37,6 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
-const SUBTITLE_STYLE_KEY = 'subtitleStyleSettings';
 const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
 const WATCHED_THRESHOLD = 0.9;
 const CONTROLS_HIDE_MS = 3000;
@@ -49,7 +50,6 @@ const MIN_SIDE_PANEL_WIDTH = 260;
 const MAX_SIDE_PANEL_RATIO = 0.4;
 type PlayerState = 'loading' | 'ready' | 'error';
 type ControlTab = 'video' | 'audio' | 'subtitles';
-type SubtitleStyleTarget = 'primary' | 'secondary';
 type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
 type PlaybackEngine = 'mpv' | 'html5';
 type TrackPreferenceType = 'audio' | 'subtitle';
@@ -76,6 +76,8 @@ interface MediaTrack {
   height?: number;
   profile?: string;
   pixelFormat?: string;
+  default?: boolean;
+  forced?: boolean;
 }
 
 type ProbeData = { durationSeconds?: number; tracks?: MediaTrack[] };
@@ -85,6 +87,7 @@ type TrackPreference = {
   language?: string;
   title?: string;
   codec?: string;
+  forced?: boolean;
 };
 
 type PlaybackTrackPreferences = {
@@ -201,11 +204,15 @@ function clampSidePanelWidth(value: number): number {
 function trackLabel(track: MediaTrack, ordinal: number): string {
   const language = track.language ? `[${track.language}] ` : '';
   const title = track.title ? `${track.title} ` : '';
+  const flags = [
+    track.default ? 'default' : undefined,
+    track.forced ? 'forced' : undefined,
+  ].filter(Boolean).join(', ');
   const details = track.type === 'video'
     ? [track.codec, track.width && track.height ? `${track.width}x${track.height}` : undefined, track.pixelFormat].filter(Boolean).join(', ')
     : track.type === 'audio'
       ? [track.codec, track.channels ? `${track.channels}ch` : undefined].filter(Boolean).join(', ')
-      : track.codec || 'subtitle';
+      : [track.codec || 'subtitle', flags].filter(Boolean).join(', ');
   return `#${ordinal + 1} ${language}${title}${details}`.trim();
 }
 
@@ -219,6 +226,17 @@ function externalSubtitleOrdinal(tracks: MediaTrack[], streamIndex: number): num
 
 function firstTrackIndex(tracks: MediaTrack[], type: MediaTrack['type']): number {
   return tracks.find((track) => track.type === type)?.index ?? -1;
+}
+
+function firstSubtitleTrackIndex(tracks: MediaTrack[]): number {
+  const candidates = tracks.filter((track) => track.type === 'subtitle');
+  if (candidates.length === 0) return -1;
+
+  const fullSubtitle = candidates.find((track) => track.default && !track.forced)
+    || candidates.find((track) => normalizeTrackField(track.language).startsWith('en') && !track.forced)
+    || candidates.find((track) => !track.forced);
+
+  return (fullSubtitle || candidates[0]).index;
 }
 
 function normalizeTrackField(value?: string): string {
@@ -249,6 +267,7 @@ function saveTrackPreference(scope: string, type: TrackPreferenceType, track: Me
         language: normalizeTrackField(track?.language),
         title: normalizeTrackField(track?.title),
         codec: normalizeTrackField(track?.codec),
+        forced: track?.forced,
       },
     };
     localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify(all));
@@ -263,35 +282,42 @@ function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceType, pr
 
   const candidates = tracks.filter((track) => track.type === type);
   if (candidates.length === 0) return null;
+  const scopedCandidates = type === 'subtitle'
+    && candidates.some((track) => !track.forced)
+    ? candidates.filter((track) => !track.forced)
+    : candidates;
 
   const language = normalizeTrackField(preference.language);
   const title = normalizeTrackField(preference.title);
   const codec = normalizeTrackField(preference.codec);
 
-  const exact = candidates.find((track) =>
+  const sameIndex = scopedCandidates.find((track) => track.index === preference.index);
+  if (sameIndex) return sameIndex.index;
+
+  const exact = scopedCandidates.find((track) =>
     language && normalizeTrackField(track.language) === language
     && normalizeTrackField(track.title) === title
     && normalizeTrackField(track.codec) === codec,
   );
   if (exact) return exact.index;
 
-  const languageAndTitle = candidates.find((track) =>
+  const languageAndTitle = scopedCandidates.find((track) =>
     language && normalizeTrackField(track.language) === language
     && title && normalizeTrackField(track.title) === title,
   );
   if (languageAndTitle) return languageAndTitle.index;
 
-  const languageMatch = candidates.find((track) =>
+  const languageMatch = scopedCandidates.find((track) =>
     language && normalizeTrackField(track.language) === language,
   );
   if (languageMatch) return languageMatch.index;
 
-  const titleMatch = candidates.find((track) =>
+  const titleMatch = scopedCandidates.find((track) =>
     title && normalizeTrackField(track.title) === title,
   );
   if (titleMatch) return titleMatch.index;
 
-  return candidates.find((track) => track.index === preference.index)?.index ?? null;
+  return scopedCandidates.find((track) => track.index === preference.index)?.index ?? null;
 }
 
 function subtitleSource(url: string, serverBase: string): string {
@@ -337,10 +363,6 @@ function mpvTrackType(type: 'video' | 'audio' | 'subtitle'): 'video' | 'audio' |
   return type === 'subtitle' ? 'sub' : type;
 }
 
-function getStoredPosition(filePath: string): number {
-  return getProgressState(filePath).position;
-}
-
 function getStoredDuration(filePath: string): number {
   return getProgressState(filePath).duration;
 }
@@ -358,44 +380,6 @@ function saveSubtitlesDefaultEnabled(enabled: boolean): void {
     localStorage.setItem(SUBTITLES_DEFAULT_KEY, enabled ? 'true' : 'false');
   } catch (_error) {
     // Ignore storage failures; subtitles still work for this session.
-  }
-}
-
-function sanitizeSubtitleStyle(value: Partial<SubtitleStyleSettings> | null | undefined): SubtitleStyleSettings {
-  const source = value || {};
-  const numberValue = (candidate: unknown, fallback: number, min: number, max: number) => {
-    const parsed = Number(candidate);
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.max(min, Math.min(max, parsed));
-  };
-  const colorValue = (candidate: unknown, fallback: string) =>
-    typeof candidate === 'string' && /^#[0-9a-f]{6}$/i.test(candidate) ? candidate : fallback;
-
-  return {
-    delaySeconds: numberValue(source.delaySeconds, DEFAULT_SUBTITLE_STYLE.delaySeconds, -5, 5),
-    position: numberValue(source.position, DEFAULT_SUBTITLE_STYLE.position, 0, 100),
-    scale: numberValue(source.scale, DEFAULT_SUBTITLE_STYLE.scale, 0.5, 2),
-    fontSize: numberValue(source.fontSize, DEFAULT_SUBTITLE_STYLE.fontSize, 24, 96),
-    fontColor: colorValue(source.fontColor, DEFAULT_SUBTITLE_STYLE.fontColor),
-    borderColor: colorValue(source.borderColor, DEFAULT_SUBTITLE_STYLE.borderColor),
-    borderWidth: numberValue(source.borderWidth, DEFAULT_SUBTITLE_STYLE.borderWidth, 0, 10),
-    backgroundColor: colorValue(source.backgroundColor, DEFAULT_SUBTITLE_STYLE.backgroundColor),
-  };
-}
-
-function loadSubtitleStyleSettings(): SubtitleStyleSettings {
-  try {
-    return sanitizeSubtitleStyle(JSON.parse(localStorage.getItem(SUBTITLE_STYLE_KEY) || 'null') as Partial<SubtitleStyleSettings> | null);
-  } catch {
-    return DEFAULT_SUBTITLE_STYLE;
-  }
-}
-
-function saveSubtitleStyleSettings(style: SubtitleStyleSettings): void {
-  try {
-    localStorage.setItem(SUBTITLE_STYLE_KEY, JSON.stringify(style));
-  } catch (_error) {
-    // Ignore storage failures; the controls still apply for this playback session.
   }
 }
 
@@ -442,6 +426,7 @@ export default function VideoPlayer({
   onEpisodeChange,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -476,6 +461,7 @@ export default function VideoPlayer({
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [showTopControls, setShowTopControls] = useState(true);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
   const [episodePanelWidth, setEpisodePanelWidth] = useState(DEFAULT_EPISODE_PANEL_WIDTH);
@@ -487,8 +473,7 @@ export default function VideoPlayer({
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
-  const [subtitleStyleTarget, setSubtitleStyleTarget] = useState<SubtitleStyleTarget>('primary');
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => loadSubtitleStyleSettings());
+  const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [tick, setTick] = useState(0); // force episode list re-render
@@ -508,6 +493,8 @@ export default function VideoPlayer({
       codec: 'external',
       language: subtitle.lang,
       title: subtitle.label,
+      default: false,
+      forced: false,
     })),
     [subtitles],
   );
@@ -600,25 +587,27 @@ export default function VideoPlayer({
     const nextDuration = probeDurationSeconds(data);
     const nextTracks = [...probeTracks(data), ...externalSubtitleTracks];
     const preferences = loadTrackPreferences(trackPreferenceScopeKey);
+    const hasSubtitlePreference = preferences.subtitle !== undefined;
     const firstVideo = firstTrackIndex(nextTracks, 'video');
     const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
     const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
     const firstAudio = preferredAudio ?? firstTrackIndex(nextTracks, 'audio');
-    const firstSubtitle = preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstTrackIndex(nextTracks, 'subtitle') : -1);
+    const firstSubtitle = preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(nextTracks) : -1);
+    const subtitlesEnabled = hasSubtitlePreference ? firstSubtitle >= 0 : subtitlesDefaultEnabledRef.current;
 
     probedDurationRef.current = nextDuration;
     probeTracksRef.current = nextTracks;
     selectedVideoTrackIndexRef.current = firstVideo >= 0 ? firstVideo : undefined;
     selectedAudioTrackIndexRef.current = firstAudio >= 0 ? firstAudio : undefined;
     selectedSubtitleTrackIndexRef.current = firstSubtitle;
-    subtitlesDefaultEnabledRef.current = firstSubtitle >= 0;
+    subtitlesDefaultEnabledRef.current = subtitlesEnabled;
 
     if (nextDuration > 0) setDuration(nextDuration);
     setMediaTracks(nextTracks);
     setSelectedVideoTrackIndex(firstVideo);
     setSelectedAudioTrackIndex(firstAudio);
     setSelectedSubtitleTrackIndex(firstSubtitle);
-    setSubtitlesDefaultEnabled(firstSubtitle >= 0);
+    setSubtitlesDefaultEnabled(subtitlesEnabled);
   }, [externalSubtitleTracks, trackPreferenceScopeKey]);
 
   // ─── Episode navigation ────────────────────────────────────────────────────
@@ -730,9 +719,14 @@ export default function VideoPlayer({
     probedDurationRef.current = 0;
     probeTracksRef.current = externalSubtitleTracks;
     setMediaTracks(externalSubtitleTracks);
-    const firstExternalSubtitle = subtitlesDefaultEnabledRef.current ? firstTrackIndex(externalSubtitleTracks, 'subtitle') : -1;
+    const preferences = loadTrackPreferences(trackPreferenceScopeKey);
+    const preferredExternalSubtitle = preferredTrackIndex(externalSubtitleTracks, 'subtitle', preferences.subtitle);
+    const firstExternalSubtitle = preferredExternalSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(externalSubtitleTracks) : -1);
+    const externalSubtitlesEnabled = preferences.subtitle !== undefined ? firstExternalSubtitle >= 0 : subtitlesDefaultEnabledRef.current;
+    subtitlesDefaultEnabledRef.current = externalSubtitlesEnabled;
     selectedSubtitleTrackIndexRef.current = firstExternalSubtitle;
     setSelectedSubtitleTrackIndex(firstExternalSubtitle);
+    setSubtitlesDefaultEnabled(externalSubtitlesEnabled);
     setDuration(0);
 
     void desktopApi.media.probe(filePath).then((result) => {
@@ -748,7 +742,7 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [applyNativeTextTrackVisibility, applyProbeData, externalSubtitleTracks, filePath]);
+  }, [applyNativeTextTrackVisibility, applyProbeData, externalSubtitleTracks, filePath, trackPreferenceScopeKey]);
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
@@ -1094,11 +1088,29 @@ export default function VideoPlayer({
 
   const resetHideTimer = useCallback(() => {
     setShowControls(true);
+    setShowTopControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      if (playbackEngine === 'mpv' ? !paused : !videoRef.current?.paused) setShowControls(false);
+      if (playbackEngine === 'mpv' ? !paused : !videoRef.current?.paused) {
+        setShowControls(false);
+        setShowTopControls(false);
+      }
     }, CONTROLS_HIDE_MS);
   }, [paused, playbackEngine]);
+
+  const handlePointerMove = useCallback(() => {
+    resetHideTimer();
+  }, [resetHideTimer]);
+
+  useEffect(() => {
+    if (paused) {
+      setShowControls(true);
+      setShowTopControls(true);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      return;
+    }
+    resetHideTimer();
+  }, [paused, resetHideTimer]);
 
   useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }, []);
 
@@ -1229,7 +1241,6 @@ export default function VideoPlayer({
   }, [aspectMode, playbackEngine]);
 
   useEffect(() => {
-    saveSubtitleStyleSettings(subtitleStyle);
     applyNativeTextTrackVisibility();
     if (playbackEngine === 'mpv') {
       void desktopApi.setMPVSubtitleStyle(subtitleStyle);
@@ -1286,30 +1297,6 @@ export default function VideoPlayer({
     const video = videoRef.current;
     if (video) video.muted = !video.muted;
   }, [playbackEngine]);
-
-  const updateSubtitleStyle = useCallback(<K extends keyof SubtitleStyleSettings>(
-    key: K,
-    value: SubtitleStyleSettings[K],
-  ) => {
-    setSubtitleStyle((current) => sanitizeSubtitleStyle({ ...current, [key]: value }));
-  }, []);
-
-  const resetSubtitleStyle = useCallback(() => {
-    setSubtitleStyle(DEFAULT_SUBTITLE_STYLE);
-  }, []);
-
-  const applySubtitleStyleToStream = useCallback(() => {
-    if (selectedSubtitleTrackIndexRef.current < 0) return;
-    if (playbackEngine === 'mpv') {
-      void desktopApi.setMPVSubtitleStyle(subtitleStyle);
-      return;
-    }
-    applyNativeTextTrackVisibility();
-    if (streamUrl) {
-      hlsTranscodeRestartAttemptsRef.current = 0;
-      void startTranscodedFallback(position, { force: true });
-    }
-  }, [applyNativeTextTrackVisibility, playbackEngine, position, startTranscodedFallback, streamUrl, subtitleStyle]);
 
   const restartForTrackChange = useCallback(() => {
     if (!streamUrl) return;
@@ -1524,8 +1511,8 @@ export default function VideoPlayer({
         }`}
       </style>
       <div
-        className="relative flex-1 flex items-center justify-center bg-black overflow-hidden"
-        onMouseMove={resetHideTimer}
+        className={`relative flex-1 flex items-center justify-center bg-black overflow-hidden ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
+        onMouseMove={handlePointerMove}
         onClick={handleSurfaceClick}
         onDoubleClick={handleSurfaceDoubleClick}
       >
@@ -1535,16 +1522,29 @@ export default function VideoPlayer({
             handleBack(event);
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className="absolute top-3 left-3 z-40 rounded border border-white/25 bg-black/40 px-3 py-1.5 text-xs text-white/90 hover:bg-black/70 hover:text-white transition-colors flex items-center gap-1.5"
+          className={`absolute top-3 left-3 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
           aria-label="Back"
         >
           <ChevronLeft className="w-4 h-4" />
           Back
         </button>
 
-        <div className="pointer-events-none absolute top-3 left-1/2 z-40 max-w-[60%] -translate-x-1/2 rounded-full border border-white/10 bg-black/35 px-4 py-1.5 text-center text-xs font-medium text-white/80 shadow-lg backdrop-blur-md">
+        <div className={`pointer-events-none absolute top-3 left-1/2 z-40 max-w-[60%] -translate-x-1/2 rounded-full border border-white/10 bg-black/35 px-4 py-1.5 text-center text-xs font-medium text-white/80 shadow-lg backdrop-blur-md transition-opacity duration-200 ${showTopControls ? 'opacity-100' : 'opacity-0'}`}>
           <span className="block truncate">{currentEpLabel ?? title}</span>
         </div>
+
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            handleClose();
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+          className={`absolute right-3 top-3 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+          title="Close player"
+          aria-label="Close player"
+        >
+          <X className="h-4 w-4" />
+        </button>
 
         <video
           ref={videoRef}
@@ -1569,7 +1569,12 @@ export default function VideoPlayer({
 
         {playerState === 'loading' && (
           <div className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center">
-            <div className="h-10 w-10 rounded-full border-4 border-white/35 border-t-[#eba865] animate-spin" />
+            <LoomLoader
+              style={theme.loaderStyle}
+              className="grid h-16 w-16 place-items-center rounded-full bg-white/10 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur-md"
+              markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-6 w-auto' : 'h-9 w-9'}
+              color="currentColor"
+            />
             <p className="text-sm text-white/80">{statusMessage || 'Loading...'}</p>
           </div>
         )}
@@ -1581,7 +1586,7 @@ export default function VideoPlayer({
             <div className="flex gap-3">
               <button
                 onClick={handleRetry}
-                className="px-3 py-1.5 rounded bg-[#eba865] text-black text-sm hover:bg-[#d4964f]"
+                className="px-3 py-1.5 rounded bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] text-sm hover:bg-[var(--loom-accent-hover)]"
               >
                 Retry
               </button>
@@ -1606,7 +1611,7 @@ export default function VideoPlayer({
             className="relative h-1.5 rounded-full bg-white/20 cursor-pointer mb-3 group"
             onClick={handleSeek}
           >
-            <div className="h-full rounded-full bg-[#eba865] pointer-events-none" style={{ width: `${progressPct}%` }} />
+            <div className="h-full rounded-full bg-[var(--loom-accent)] pointer-events-none" style={{ width: `${progressPct}%` }} />
             <div
               className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3.5 w-3.5 rounded-full bg-white shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
               style={{ left: `${progressPct}%` }}
@@ -1616,7 +1621,7 @@ export default function VideoPlayer({
           <div className="flex items-center gap-2">
             <button
               onClick={togglePlay}
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-white transition-colors hover:bg-white/10 hover:text-[#eba865]"
+              className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
               title={paused ? 'Play' : 'Pause'}
             >
               {paused ? <Play className="h-6 w-6 fill-current" /> : <Pause className="h-6 w-6 fill-current" />}
@@ -1677,12 +1682,12 @@ export default function VideoPlayer({
               step={0.05}
               value={muted ? 0 : volume}
               onChange={handleVolume}
-              className="w-20 accent-[#eba865] cursor-pointer"
+              className="w-20 accent-[var(--loom-accent)] cursor-pointer"
             />
 
             <button
               onClick={openMediaPanel}
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showMediaPanel ? 'text-[#eba865]' : ''}`}
+              className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showMediaPanel ? 'text-[var(--loom-accent)]' : ''}`}
               title="Video, audio, and subtitle controls"
             >
               <SlidersHorizontal className="w-4 h-4" />
@@ -1691,7 +1696,7 @@ export default function VideoPlayer({
             {hasEpisodes && (
               <button
                 onClick={openEpisodePanel}
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showSidebar ? 'text-[#eba865]' : ''}`}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showSidebar ? 'text-[var(--loom-accent)]' : ''}`}
                 title="Episode list"
               >
                 <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -1709,13 +1714,6 @@ export default function VideoPlayer({
               {fullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
 
-            <button
-              onClick={handleClose}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              title="Close player"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
         </div>
       </div>
@@ -1732,17 +1730,17 @@ export default function VideoPlayer({
             onMouseDown={(event) => startSidePanelResize(event, mediaPanelWidth, setMediaPanelWidth)}
             title="Drag to resize"
           >
-            <span className="h-12 w-1 rounded-full bg-white/10 transition-colors group-hover:bg-[#eba865]/70" />
+            <span className="h-12 w-1 rounded-full bg-white/10 transition-colors group-hover:bg-[var(--loom-accent)]/70" />
           </div>
 
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-white truncate">Playback Settings</p>
-              <p className="text-[10px] uppercase tracking-widest text-[#eba865]/75">Video, Audio, Subtitles</p>
+              <p className="text-[10px] uppercase tracking-widest text-[var(--loom-accent)]/75">Video, Audio, Subtitles</p>
             </div>
             <button
               onClick={() => setShowMediaPanel(false)}
-              className="text-[#a8a8a8] hover:text-white ml-2 shrink-0"
+              className="text-[var(--loom-muted)] hover:text-white ml-2 shrink-0"
               aria-label="Close playback settings"
             >
               <X className="w-4 h-4" />
@@ -1773,9 +1771,9 @@ export default function VideoPlayer({
                         <button
                           key={track.index}
                           onClick={() => selectVideoTrack(track.index)}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedVideoTrackIndex === track.index ? 'bg-[#eba865]/25 text-white' : 'hover:bg-white/10'}`}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedVideoTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                         >
-                          <span className={`h-2.5 w-2.5 rounded-full ${selectedVideoTrackIndex === track.index ? 'bg-[#eba865]' : 'bg-white/60'}`} />
+                          <span className={`h-2.5 w-2.5 rounded-full ${selectedVideoTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
                           <span className="truncate">{trackLabel(track, index)}</span>
                         </button>
                       ))}
@@ -1789,7 +1787,7 @@ export default function VideoPlayer({
                         <button
                           key={mode}
                           onClick={() => setAspectMode(mode)}
-                          className={`rounded-md px-3 py-1.5 text-xs transition-colors ${aspectMode === mode ? 'bg-[#eba865] text-black' : 'bg-white/10 text-white/75 hover:bg-white/15'}`}
+                          className={`rounded-md px-3 py-1.5 text-xs transition-colors ${aspectMode === mode ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/75 hover:bg-white/15'}`}
                         >
                           {mode === 'fill' ? 'Crop' : mode}
                         </button>
@@ -1800,7 +1798,7 @@ export default function VideoPlayer({
                   <div>
                     <div className="mb-2 flex items-center justify-between text-xs font-semibold text-white">
                       <span>Speed</span>
-                      <span className="text-[#eba865]">{playbackRate.toFixed(2)}x</span>
+                      <span className="text-[var(--loom-accent)]">{playbackRate.toFixed(2)}x</span>
                     </div>
                     <input
                       type="range"
@@ -1809,7 +1807,7 @@ export default function VideoPlayer({
                       step={0.05}
                       value={playbackRate}
                       onChange={(event) => setPlaybackRate(Number(event.target.value))}
-                      className="w-full accent-[#eba865]"
+                      className="w-full accent-[var(--loom-accent)]"
                     />
                     <div className="mt-1 flex justify-between text-[10px] text-white/45">
                       <span>0.25x</span>
@@ -1827,18 +1825,18 @@ export default function VideoPlayer({
                     <div className="overflow-hidden rounded-lg bg-white/10">
                       <button
                         onClick={() => selectAudioTrack(-1)}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedAudioTrackIndex === -1 ? 'bg-[#eba865]/25 text-white' : 'hover:bg-white/10'}`}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedAudioTrackIndex === -1 ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                       >
-                        <span className={`h-2.5 w-2.5 rounded-full ${selectedAudioTrackIndex === -1 ? 'bg-[#eba865]' : 'bg-white/60'}`} />
+                        <span className={`h-2.5 w-2.5 rounded-full ${selectedAudioTrackIndex === -1 ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
                         <span>&lt;None&gt;</span>
                       </button>
                       {audioTracks.map((track, index) => (
                         <button
                           key={track.index}
                           onClick={() => selectAudioTrack(track.index)}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedAudioTrackIndex === track.index ? 'bg-[#eba865]/25 text-white' : 'hover:bg-white/10'}`}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedAudioTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                         >
-                          <span className={`h-2.5 w-2.5 rounded-full ${selectedAudioTrackIndex === track.index ? 'bg-[#eba865]' : 'bg-white/60'}`} />
+                          <span className={`h-2.5 w-2.5 rounded-full ${selectedAudioTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
                           <span className="truncate">{trackLabel(track, index)}</span>
                         </button>
                       ))}
@@ -1866,9 +1864,9 @@ export default function VideoPlayer({
                     <div className="overflow-hidden rounded-lg bg-white/10">
                       <button
                         onClick={() => selectSubtitleTrack(-1)}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === -1 ? 'bg-[#eba865]/25 text-white' : 'hover:bg-white/10'}`}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                       >
-                        <span className={`h-2.5 w-2.5 rounded-full ${selectedSubtitleTrackIndex === -1 ? 'bg-[#eba865]' : 'bg-white/60'}`} />
+                        <span className={`h-2.5 w-2.5 rounded-full ${selectedSubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
                         <span>Off</span>
                       </button>
                       {subtitleTracks.length === 0 && <p className="px-3 py-2 text-xs text-white/50">No subtitle tracks found</p>}
@@ -1876,193 +1874,53 @@ export default function VideoPlayer({
                         <button
                           key={track.index}
                           onClick={() => selectSubtitleTrack(track.index)}
-                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === track.index ? 'bg-[#eba865]/25 text-white' : 'hover:bg-white/10'}`}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                         >
-                          <span className={`h-2.5 w-2.5 rounded-full ${selectedSubtitleTrackIndex === track.index ? 'bg-[#eba865]' : 'bg-white/60'}`} />
+                          <span className={`h-2.5 w-2.5 rounded-full ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
                           <span className="truncate">{trackLabel(track, index)}</span>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/55">
-                    Subtitles now load automatically when available. Choose Off once to keep them off by default until you pick a subtitle again.
-                  </p>
-
-                  <div className="rounded-xl bg-white/[0.06] p-3">
-                    <div className="grid grid-cols-2 rounded-lg bg-white/10 p-1 text-xs">
-                      {(['primary', 'secondary'] as SubtitleStyleTarget[]).map((target) => (
-                        <button
-                          key={target}
-                          type="button"
-                          onClick={() => setSubtitleStyleTarget(target)}
-                          disabled={target === 'secondary'}
-                          className={`rounded-md px-3 py-2 capitalize transition-colors ${
-                            subtitleStyleTarget === target
-                              ? 'bg-[#eba865] text-black'
-                              : 'text-white/70 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-45'
-                          }`}
-                          title={target === 'secondary' ? 'Secondary subtitles are not available for this file yet' : 'Primary subtitle controls'}
-                        >
-                          {target} Subtitles
-                        </button>
-                      ))}
+                  <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold text-white">Position</p>
+                        <span className="text-xs text-[var(--loom-accent)]">{Math.round(subtitleStyle.position)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={subtitleStyle.position}
+                        onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
+                        onMouseUp={applySubtitleStyleToStream}
+                        onTouchEnd={applySubtitleStyleToStream}
+                        className="w-full accent-[var(--loom-accent)]"
+                      />
                     </div>
 
-                    <div className="mt-4 space-y-4">
-                      <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-semibold text-white">Subtitle delay</p>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={-5}
-                              max={5}
-                              step={0.1}
-                              value={subtitleStyle.delaySeconds}
-                              onChange={(event) => updateSubtitleStyle('delaySeconds', Number(event.target.value))}
-                              className="h-8 w-16 rounded-lg border border-white/10 bg-white/10 px-2 text-right text-xs text-white outline-none focus:border-[#eba865]"
-                            />
-                            <span className="text-xs text-white/70">s</span>
-                          </div>
-                        </div>
-                        <input
-                          type="range"
-                          min={-5}
-                          max={5}
-                          step={0.1}
-                          value={subtitleStyle.delaySeconds}
-                          onChange={(event) => updateSubtitleStyle('delaySeconds', Number(event.target.value))}
-                          className="w-full accent-[#eba865]"
-                        />
-                        <div className="mt-1 flex justify-between text-[10px] text-white/45">
-                          <span>-5s</span>
-                          <span>0s</span>
-                          <span>+5s</span>
-                        </div>
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold text-white">Size</p>
+                        <span className="text-xs text-[var(--loom-accent)]">{subtitleCueFontSize}px</span>
                       </div>
-
-                      <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-semibold text-white">Position</p>
-                          <span className="text-xs text-[#eba865]">{Math.round(subtitleStyle.position)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          step={1}
-                          value={subtitleStyle.position}
-                          onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
-                          className="w-full accent-[#eba865]"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-semibold text-white">Scale</p>
-                          <button
-                            type="button"
-                            onClick={resetSubtitleStyle}
-                            className="rounded-full p-1 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
-                            title="Reset subtitle style"
-                            aria-label="Reset subtitle style"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                        <input
-                          type="range"
-                          min={0.5}
-                          max={2}
-                          step={0.05}
-                          value={subtitleStyle.scale}
-                          onChange={(event) => updateSubtitleStyle('scale', Number(event.target.value))}
-                          className="w-full accent-[#eba865]"
-                        />
-                      </div>
-
-                      <div>
-                        <p className="mb-2 text-xs font-semibold text-white">Text Style</p>
-                        <div className="space-y-3 rounded-xl bg-black/20 p-3">
-                          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-white/75">Font</p>
-                            <label className="flex items-center gap-2 text-xs text-white/70">
-                              Colour:
-                              <input
-                                type="color"
-                                value={subtitleStyle.fontColor}
-                                onChange={(event) => updateSubtitleStyle('fontColor', event.target.value)}
-                                className="h-8 w-10 cursor-pointer rounded-lg border border-white/10 bg-transparent"
-                                title="Subtitle text colour"
-                              />
-                            </label>
-                            <label className="flex items-center gap-2 text-xs text-white/70">
-                              Size:
-                              <input
-                                type="number"
-                                min={24}
-                                max={96}
-                                step={1}
-                                value={subtitleStyle.fontSize}
-                                onChange={(event) => updateSubtitleStyle('fontSize', Number(event.target.value))}
-                                className="h-8 w-16 rounded-lg border border-white/10 bg-white/10 px-2 text-xs text-white outline-none focus:border-[#eba865]"
-                              />
-                            </label>
-                          </div>
-
-                          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-white/75">Border</p>
-                            <label className="flex items-center gap-2 text-xs text-white/70">
-                              Colour:
-                              <input
-                                type="color"
-                                value={subtitleStyle.borderColor}
-                                onChange={(event) => updateSubtitleStyle('borderColor', event.target.value)}
-                                className="h-8 w-10 cursor-pointer rounded-lg border border-white/10 bg-transparent"
-                                title="Subtitle border colour"
-                              />
-                            </label>
-                            <label className="flex items-center gap-2 text-xs text-white/70">
-                              Width:
-                              <input
-                                type="number"
-                                min={0}
-                                max={10}
-                                step={0.5}
-                                value={subtitleStyle.borderWidth}
-                                onChange={(event) => updateSubtitleStyle('borderWidth', Number(event.target.value))}
-                                className="h-8 w-16 rounded-lg border border-white/10 bg-white/10 px-2 text-xs text-white outline-none focus:border-[#eba865]"
-                              />
-                            </label>
-                          </div>
-
-                          <div className="grid grid-cols-[auto_1fr] items-center gap-3">
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-white/75">Background</p>
-                            <label className="flex items-center gap-2 text-xs text-white/70">
-                              Colour:
-                              <input
-                                type="color"
-                                value={subtitleStyle.backgroundColor}
-                                onChange={(event) => updateSubtitleStyle('backgroundColor', event.target.value)}
-                                className="h-8 w-10 cursor-pointer rounded-lg border border-white/10 bg-transparent"
-                                title="Subtitle background colour"
-                              />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={applySubtitleStyleToStream}
-                        disabled={selectedSubtitleTrackIndex < 0}
-                        className="w-full rounded-lg bg-[#eba865] px-3 py-2 text-xs font-semibold text-black transition-colors hover:bg-[#d4964f] disabled:cursor-not-allowed disabled:opacity-45"
-                      >
-                        Apply to Stream
-                      </button>
+                      <input
+                        type="range"
+                        min={24}
+                        max={96}
+                        step={1}
+                        value={subtitleStyle.fontSize}
+                        onChange={(event) => updateSubtitleStyle('fontSize', Number(event.target.value))}
+                        onMouseUp={applySubtitleStyleToStream}
+                        onTouchEnd={applySubtitleStyleToStream}
+                        className="w-full accent-[var(--loom-accent)]"
+                      />
                     </div>
                   </div>
+
                 </div>
               )}
             </div>
@@ -2080,13 +1938,13 @@ export default function VideoPlayer({
             onMouseDown={(event) => startSidePanelResize(event, episodePanelWidth, setEpisodePanelWidth)}
             title="Drag to resize"
           >
-            <span className="h-12 w-1 rounded-full bg-white/10 transition-colors group-hover:bg-[#eba865]/70" />
+            <span className="h-12 w-1 rounded-full bg-white/10 transition-colors group-hover:bg-[var(--loom-accent)]/70" />
           </div>
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <p className="text-sm font-semibold text-white truncate">{title}</p>
             <button
               onClick={() => setShowSidebar(false)}
-              className="text-[#a8a8a8] hover:text-white ml-2 shrink-0"
+              className="text-[var(--loom-muted)] hover:text-white ml-2 shrink-0"
             >
               <X className="w-4 h-4" />
             </button>
@@ -2095,7 +1953,7 @@ export default function VideoPlayer({
           <ScrollArea className="flex-1">
             {tick >= 0 && sortedSeasons.map((season) => (
               <div key={season}>
-                <p className="sticky top-0 z-10 bg-[#111] px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[#eba865]">
+                <p className="sticky top-0 z-10 bg-[#111] px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--loom-accent)]">
                   Season {season}
                 </p>
                 {(groupedEpisodes[season] || []).map((ep) => {
@@ -2117,20 +1975,20 @@ export default function VideoPlayer({
                       disabled={!file}
                       onClick={() => file && goToEpisode(ep.season, ep.number)}
                       className={`relative w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors
-                        ${isCurrent ? 'bg-[#eba865]/15' : 'hover:bg-white/5'}
+                        ${isCurrent ? 'bg-[var(--loom-accent)]/15' : 'hover:bg-white/5'}
                         ${!file ? 'cursor-not-allowed opacity-30' : ''}
                         ${watched && !isCurrent ? 'opacity-50' : ''}`}
                     >
                       {(inProgress || isCurrent) && progFrac > 0 && (
                         <span
-                          className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${isCurrent ? 'bg-[#eba865]' : 'bg-amber-400'}`}
+                          className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${isCurrent ? 'bg-[var(--loom-accent)]' : 'bg-amber-400'}`}
                           style={{ width: `${Math.min(100, progFrac * 100)}%` }}
                         />
                       )}
-                      <span className={`w-12 shrink-0 font-mono text-[10px] ${isCurrent ? 'text-[#eba865]' : 'text-[#555]'}`}>
+                      <span className={`w-12 shrink-0 font-mono text-[10px] ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-[#555]'}`}>
                         {epCode(ep.season, ep.number)}
                       </span>
-                      <span className={`min-w-0 flex-1 truncate text-xs leading-snug ${isCurrent ? 'font-medium text-[#eba865]' : watched ? 'text-[#555]' : 'text-white'}`}>
+                      <span className={`min-w-0 flex-1 truncate text-xs leading-snug ${isCurrent ? 'font-medium text-[var(--loom-accent)]' : watched ? 'text-[#555]' : 'text-white'}`}>
                         {ep.title ? cleanEpisodeTitle(ep.title, ep.season, ep.number) : `Episode ${ep.number}`}
                       </span>
                       {watched && !isCurrent && <CheckCircle className="h-3 w-3 shrink-0 text-green-500 opacity-70" />}
