@@ -1,0 +1,63 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+    tags:
+      - 'v*'
+
+jobs:
+  make:
+    name: Make ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-latest
+            artifact: loomtv-macos
+          - platform: Windows
+            os: windows-latest
+            artifact: loomtv-windows
+          - platform: Linux
+            os: ubuntu-latest
+            artifact: loomtv-linux
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux maker dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build installers
+        run: npm run make
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            out/make/**/*.dmg
+            out/make/**/*.zip
+            out/make/**/*.exe
+            out/make/**/*.deb
+            out/make/**/*.rpm
+          if-no-files-found: error
