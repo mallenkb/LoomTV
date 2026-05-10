@@ -28,6 +28,7 @@ import {
 import {
   backupDatabase,
   cacheLibraryArtwork,
+  clearDatabase,
   getAllProgress,
   getCustomArtwork,
   getProgress,
@@ -72,26 +73,6 @@ protocol.registerSchemesAsPrivileged([
 app.setName('LoomTV');
 const USER_DATA_DIR = path.join(app.getPath('appData'), 'LoomTV');
 app.setPath('userData', USER_DATA_DIR);
-
-function prepareFreshInstallUserData(): void {
-  if (!app.isPackaged) return;
-
-  const markerPath = path.join(USER_DATA_DIR, '.loomtv-userdata-ready');
-  if (fs.existsSync(markerPath)) return;
-
-  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
-  for (const fileName of ['loomtv.sqlite', 'loomtv.sqlite-shm', 'loomtv.sqlite-wal', 'library.json', 'settings.json']) {
-    try {
-      fs.rmSync(path.join(USER_DATA_DIR, fileName), { force: true });
-    } catch (error) {
-      console.warn(`[startup] Failed to reset ${fileName}:`, error);
-    }
-  }
-
-  fs.writeFileSync(markerPath, JSON.stringify({ version: app.getVersion(), createdAt: Date.now() }));
-}
-
-prepareFreshInstallUserData();
 
 let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
@@ -427,6 +408,19 @@ function hasFFmpegEncoder(binaryPath: string, encoder: string): boolean {
   } catch (e) {
     return false;
   }
+}
+
+function clearAppData(): LibraryData {
+  clearDatabase();
+  for (const filePath of [LIBRARY_FILE, SETTINGS_FILE]) {
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch (error) {
+      console.warn(`[data] Failed to remove legacy file ${filePath}:`, error);
+    }
+  }
+  libraryMutationVersion++;
+  return loadLibrary();
 }
 
 type H264HardwareEncoder = 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv';
@@ -1382,6 +1376,16 @@ function startMediaServer(): Promise<number> {
             console.error('database backup API error:', error);
             writeJson(res, 500, { ok: false, error: 'Failed to back up database' });
           });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/database/clear' && req.method === 'POST') {
+        try {
+          writeJson(res, 200, clearAppData());
+        } catch (error) {
+          console.error('database clear API error:', error);
+          writeJson(res, 500, { error: 'Failed to clear app data' });
+        }
         return;
       }
 
@@ -3917,6 +3921,7 @@ ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string,
   return true;
 });
 ipcMain.handle('database:backup', () => backupDatabase());
+ipcMain.handle('database:clear', () => clearAppData());
 ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url));
 
 ipcMain.handle('media:ffmpeg-available', () => {

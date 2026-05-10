@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   refreshOfficialArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:refresh-official', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
+  clearAppData: () => ipcRenderer.invoke('database:clear'),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
 
   // Legacy MPV handlers (still used by existing VideoPlayer)
@@ -196,6 +197,7 @@ declare global {
       }>;
       importCustomArtwork: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+      clearAppData: () => Promise<LibraryPayload>;
       openExternal: (url: string) => Promise<void>;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<{ ok?: boolean; error?: string }>;
       queryMPV: () => Promise<{
