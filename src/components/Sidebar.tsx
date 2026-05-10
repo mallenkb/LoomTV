@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Film, Home, RefreshCw, Settings, Tv } from 'lucide-react';
+import { Download, Film, Home, RefreshCw, Settings, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
-import { desktopApi } from '@/lib/desktopApi';
+import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
 import LoomLogo from '@/components/LoomLogo';
 
@@ -103,6 +103,24 @@ export default function Sidebar() {
     [navOrder],
   );
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    desktopApi.getUpdateState().then((nextState) => {
+      if (mounted) setUpdateState(nextState);
+    });
+    const unsubscribe = desktopApi.onUpdateState((nextState) => {
+      setUpdateState(nextState);
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading';
+  const updateButtonLabel = updateState?.status === 'downloaded' ? 'Update' : 'Updating';
 
   return (
     <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col border-r border-[var(--loom-border)]">
@@ -145,6 +163,23 @@ export default function Sidebar() {
         </div>
 
         <div className="mt-auto flex items-center gap-1">
+          {showUpdateButton && (
+            <button
+              type="button"
+              onClick={() => {
+                if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
+              }}
+              disabled={updateState?.status !== 'downloaded'}
+              className="mb-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm shadow-blue-950/20 transition-colors hover:bg-blue-500 disabled:cursor-wait disabled:bg-blue-600/70"
+              title={updateState?.message || 'Update LoomTV'}
+            >
+              <Download className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
+              <span>{updateButtonLabel}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
           <Link
             to="/settings"
             className={cn(
