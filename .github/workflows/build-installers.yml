@@ -53,6 +53,9 @@ jobs:
       - name: Build installers
         run: npm run make
 
+      - name: Verify packaged runtime dependencies
+        run: npm run verify:runtime
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:

@@ -10,6 +10,7 @@
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
     "package": "npm run clean:out && electron-forge package",
     "make": "npm run clean:out && electron-forge make",
+    "verify:runtime": "node scripts/verify-packaged-runtime.cjs",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx ."
   },
