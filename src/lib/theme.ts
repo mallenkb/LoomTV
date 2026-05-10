@@ -15,10 +15,10 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
 };
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
+  yellow: { label: 'Yellow', hex: '#FFC53D', hover: '#e6b236', foreground: '#000000', foregroundMuted: '#000000' },
   red: { label: 'Red', hex: '#931116', hover: '#820D11', foreground: '#ffffff', foregroundMuted: '#ffffff' },
   blue: { label: 'Pastel Blue', hex: '#8FB8FF', hover: '#A9C9FF', foreground: '#071322', foregroundMuted: '#071322' },
   orange: { label: 'Orange', hex: '#FF9900', hover: '#FFB000', foreground: '#000000', foregroundMuted: '#000000' },
-  yellow: { label: 'Yellow', hex: '#FFC53D', hover: '#e6b236', foreground: '#000000', foregroundMuted: '#000000' },
 };
 
 export function normalizeThemeMode(_value?: string): AppThemeMode {
