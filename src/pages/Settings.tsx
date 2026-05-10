@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
-import { ArrowDown, ArrowUp, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette, Wifi, Copy } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -79,15 +79,46 @@ function normalizeProviderId(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-type SettingsSection = 'library' | 'metadata' | 'theme' | 'about';
+type SettingsSection = 'library' | 'network' | 'metadata' | 'theme' | 'about';
 type SidebarNavItemId = 'anime' | 'tv' | 'movies';
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'library', label: 'Library' },
+  { id: 'network', label: 'Network' },
   { id: 'metadata', label: 'Metadata API Keys' },
   { id: 'theme', label: 'Theme' },
   { id: 'about', label: 'About' },
 ];
+
+const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';
+
+function isSettingsSection(value: string | null): value is SettingsSection {
+  return value === 'library'
+    || value === 'network'
+    || value === 'metadata'
+    || value === 'theme'
+    || value === 'about';
+}
+
+type LocalNetworkStatus = {
+  sharingEnabled: boolean;
+  token: string;
+  networkName: string;
+  port: number;
+  addresses: string[];
+  baseUrl: string | null;
+  libraryUrl: string | null;
+};
+
+type SharedLibrarySnapshot = {
+  baseUrl: string;
+  connectedAt: number;
+  library: {
+    movies?: { title?: string; year?: number }[];
+    tvShows?: { title?: string; year?: number }[];
+    animeShows?: { title?: string; year?: number }[];
+  };
+};
 
 const DEFAULT_SIDEBAR_NAV_ORDER: SidebarNavItemId[] = ['anime', 'tv', 'movies'];
 
@@ -169,14 +200,34 @@ export default function Settings() {
   const [newProviderKey, setNewProviderKey] = useState('');
   const [savedKey, setSavedKey] = useState(false);
   const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; path: string | null } | null>(null);
-  const [activeSection, setActiveSection] = useState<SettingsSection>('library');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
+    const savedSection = localStorage.getItem(SETTINGS_SECTION_STORAGE_KEY);
+    return isSettingsSection(savedSection) ? savedSection : 'library';
+  });
   const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
+  const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
+  const [networkStatusMessage, setNetworkStatusMessage] = useState('');
+  const [remoteLibraryAddress, setRemoteLibraryAddress] = useState('');
+  const [remoteShareCode, setRemoteShareCode] = useState('');
+  const [isConnectingRemoteLibrary, setIsConnectingRemoteLibrary] = useState(false);
+  const [remoteLibraryStatus, setRemoteLibraryStatus] = useState('');
+  const [showManualNetworkAddress, setShowManualNetworkAddress] = useState(false);
+  const [sharedLibrarySnapshot, setSharedLibrarySnapshot] = useState<SharedLibrarySnapshot | null>(null);
   const { theme, setTheme } = useTheme();
   const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
+
+  const refreshLocalNetworkStatus = async () => {
+    try {
+      setLocalNetworkStatus(await desktopApi.getLocalNetworkStatus());
+    } catch (error) {
+      console.error('Failed to load local network status:', error);
+      setNetworkStatusMessage('Could not read local network status.');
+    }
+  };
 
   useEffect(() => {
     desktopApi.getSettings().then((s) => {
@@ -194,6 +245,16 @@ export default function Settings() {
       setSidebarNavOrder(normalizeSidebarNavOrder(s.sidebarNavOrder));
     });
     desktopApi.checkFFmpeg().then(setFfmpegStatus);
+    void refreshLocalNetworkStatus();
+    try {
+      const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string; code?: string } | null;
+      if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
+      if (savedRemoteLibrary?.code) setRemoteShareCode(savedRemoteLibrary.code);
+      const savedSharedLibrary = JSON.parse(localStorage.getItem('loomtv:shared-library') || 'null') as SharedLibrarySnapshot | null;
+      if (savedSharedLibrary?.library) setSharedLibrarySnapshot(savedSharedLibrary);
+    } catch {
+      // Ignore invalid saved pairing data.
+    }
   }, []);
 
   const setMetadataKey = (providerId: string, value: string) => {
@@ -320,6 +381,50 @@ export default function Settings() {
     }
   };
 
+  const setLocalNetworkSharing = async (enabled: boolean) => {
+    setNetworkStatusMessage('');
+    await desktopApi.saveSettings({ localNetworkSharingEnabled: enabled });
+    await refreshLocalNetworkStatus();
+    setNetworkStatusMessage(enabled ? 'Local network sharing is on.' : 'Local network sharing is off.');
+  };
+
+  const copyNetworkValue = async (value?: string | null) => {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setNetworkStatusMessage('Copied.');
+    setTimeout(() => setNetworkStatusMessage(''), 1600);
+  };
+
+  const connectRemoteLibrary = async () => {
+    setIsConnectingRemoteLibrary(true);
+    setRemoteLibraryStatus('');
+    try {
+      const connection = await desktopApi.connectToLocalNetworkLibrary(showManualNetworkAddress ? remoteLibraryAddress : '', remoteShareCode);
+      const itemCount = (connection.library.movies?.length || 0)
+        + (connection.library.tvShows?.length || 0)
+        + (connection.library.animeShows?.length || 0);
+      localStorage.setItem('loomtv:last-remote-library', JSON.stringify({
+        baseUrl: connection.baseUrl,
+        code: connection.code,
+        connectedAt: Date.now(),
+      }));
+      const snapshot = {
+        baseUrl: connection.baseUrl,
+        connectedAt: Date.now(),
+        library: connection.library,
+      };
+      localStorage.setItem('loomtv:shared-library', JSON.stringify(snapshot));
+      setSharedLibrarySnapshot(snapshot);
+      setRemoteLibraryAddress(connection.baseUrl);
+      setRemoteShareCode(connection.code);
+      setRemoteLibraryStatus(`Connected. Found ${itemCount} shared item${itemCount === 1 ? '' : 's'}.`);
+    } catch (error) {
+      setRemoteLibraryStatus(error instanceof Error ? error.message : 'Could not connect to that shared library.');
+    } finally {
+      setIsConnectingRemoteLibrary(false);
+    }
+  };
+
   const customProviders = Object.keys(metadataKeys)
     .filter((providerId) => !METADATA_PROVIDERS.some((provider) => provider.id === providerId))
     .sort();
@@ -345,6 +450,14 @@ export default function Settings() {
     },
   ];
 
+  const sharedLibrarySections = sharedLibrarySnapshot ? [
+    { title: 'Movies', items: sharedLibrarySnapshot.library.movies || [] },
+    { title: 'TV Shows', items: sharedLibrarySnapshot.library.tvShows || [] },
+    { title: 'Anime', items: sharedLibrarySnapshot.library.animeShows || [] },
+  ] : [];
+  const isNetworkSharingOn = Boolean(localNetworkStatus?.sharingEnabled);
+  const currentNetworkName = localNetworkStatus?.networkName || 'Connected locally';
+
   return (
     <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
@@ -357,7 +470,10 @@ export default function Settings() {
                   <button
                     key={section.id}
                     type="button"
-                    onClick={() => setActiveSection(section.id)}
+                    onClick={() => {
+                      setActiveSection(section.id);
+                      localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, section.id);
+                    }}
                     className={`relative h-9 rounded-lg px-4 text-sm font-medium transition-colors ${
                       isActive
                         ? 'text-[var(--loom-accent-foreground)]'
@@ -617,6 +733,232 @@ export default function Settings() {
             </div>
           </CardContent>
         </Card>
+          </>
+        )}
+
+        {activeSection === 'network' && (
+          <>
+            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <Wifi className="h-4 w-4 text-[var(--loom-accent)]" />
+                  Local Network Sharing
+                </CardTitle>
+                <CardDescription className="text-[var(--loom-muted)]">
+                  Share this device's library with nearby LoomTV apps without internet.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Sharing device</p>
+                    <p className="mt-1 text-sm text-[var(--loom-muted)]">Turn on sharing, then give the other person this 6-digit share code.</p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Connecting device</p>
+                    <p className="mt-1 text-sm text-[var(--loom-muted)]">Join the same Wi-Fi network, enter the code below, then connect.</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      {isNetworkSharingOn ? 'Sharing is on' : 'Sharing is off'}
+                    </p>
+                    <p className="text-xs text-[var(--loom-muted)]">
+                      {isNetworkSharingOn
+                        ? 'Only devices with this 6-digit code can read the network library or stream files.'
+                        : 'Turn on sharing to reveal this device address, library URL, and share code.'}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={() => void setLocalNetworkSharing(!isNetworkSharingOn)}
+                    className="gap-2"
+                    variant={isNetworkSharingOn ? 'outline' : 'default'}
+                  >
+                    <Wifi className="h-4 w-4" />
+                    {isNetworkSharingOn ? 'Turn Off' : 'Turn On'}
+                  </Button>
+                </div>
+
+                <AnimatePresence initial={false}>
+                  {isNetworkSharingOn && (
+                    <motion.div
+                      className="space-y-5"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Device Address</p>
+                          <div className="flex items-center gap-2">
+                            <code className="min-w-0 flex-1 truncate text-sm text-white">
+                              {localNetworkStatus?.baseUrl || 'No local network address found'}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => void copyNetworkValue(localNetworkStatus?.baseUrl)}
+                              disabled={!localNetworkStatus?.baseUrl}
+                              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
+                              aria-label="Copy device address"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Share Code</p>
+                          <div className="flex items-center gap-2">
+                            <code className="min-w-0 flex-1 truncate text-sm text-white">
+                              {localNetworkStatus?.token || 'Loading...'}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => void copyNetworkValue(localNetworkStatus?.token)}
+                              disabled={!localNetworkStatus?.token}
+                              className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
+                              aria-label="Copy share code"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                        <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Network Library URL</p>
+                        <div className="flex items-center gap-2">
+                          <code className="min-w-0 flex-1 truncate text-sm text-white">
+                            {localNetworkStatus?.libraryUrl || 'Turn on sharing to expose the network library'}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => void copyNetworkValue(localNetworkStatus?.libraryUrl)}
+                            disabled={!localNetworkStatus?.libraryUrl}
+                            className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
+                            aria-label="Copy network library URL"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {localNetworkStatus?.addresses?.length ? (
+                        <p className="text-xs text-[var(--loom-faint)]">
+                          Network: {currentNetworkName} · Visible addresses: {localNetworkStatus.addresses.join(', ')}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-[var(--loom-faint)]">
+                          Connect this device to Wi-Fi or Ethernet to make it visible to other devices.
+                        </p>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                {networkStatusMessage && <p className="text-sm text-[var(--loom-muted)]">{networkStatusMessage}</p>}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <Key className="h-4 w-4 text-[var(--loom-accent)]" />
+                  Connect to Shared Library
+                </CardTitle>
+                <CardDescription className="text-[var(--loom-muted)]">
+                  Use the 6-digit code from the sharing device. LoomTV will find it on the same network.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-400">
+                    <Wifi className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Current Network</p>
+                    <p className="truncate text-sm font-semibold text-white">{currentNetworkName}</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={remoteShareCode}
+                    onChange={(event) => setRemoteShareCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="000000"
+                    aria-label="Share code"
+                    className="h-10 w-44 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-sm font-semibold tracking-[0.28em] text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => void connectRemoteLibrary()}
+                    disabled={isConnectingRemoteLibrary || !/^\d{6}$/.test(remoteShareCode)}
+                    className="ml-auto gap-2 px-5"
+                  >
+                    <Wifi className="h-4 w-4" />
+                    {isConnectingRemoteLibrary ? 'Connecting...' : 'Connect'}
+                  </Button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowManualNetworkAddress((current) => !current)}
+                  className="rounded-md text-xs font-medium text-[var(--loom-accent)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-surface)]"
+                >
+                  {showManualNetworkAddress ? 'Hide manual address' : 'Advanced: enter address manually'}
+                </button>
+
+                {showManualNetworkAddress && (
+                  <input
+                    type="text"
+                    value={remoteLibraryAddress}
+                    onChange={(event) => setRemoteLibraryAddress(event.target.value)}
+                    placeholder="192.168.1.50:3847"
+                    className="h-10 w-full min-w-0 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-sm text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+                  />
+                )}
+                {remoteLibraryStatus && <p className="text-sm text-[var(--loom-muted)]">{remoteLibraryStatus}</p>}
+              </CardContent>
+            </Card>
+
+            {sharedLibrarySnapshot && (
+              <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+                <CardHeader>
+                  <CardTitle className="text-white">Shared Library</CardTitle>
+                  <CardDescription className="text-[var(--loom-muted)]">
+                    Connected from {sharedLibrarySnapshot.baseUrl}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {sharedLibrarySections.map((section) => (
+                      <div key={section.title} className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                        <p className="text-sm font-semibold text-white">{section.title}</p>
+                        <p className="mb-3 text-xs text-[var(--loom-muted)]">{section.items.length} item{section.items.length === 1 ? '' : 's'}</p>
+                        <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+                          {section.items.length === 0 ? (
+                            <p className="text-xs text-[var(--loom-faint)]">Nothing shared here yet.</p>
+                          ) : (
+                            section.items.map((item, index) => (
+                              <p key={`${section.title}-${item.title || index}`} className="truncate text-xs text-[var(--loom-muted)]">
+                                {item.title || 'Untitled'}{item.year ? ` (${item.year})` : ''}
+                              </p>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </>
         )}
 
