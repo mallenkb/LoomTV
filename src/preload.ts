@@ -65,7 +65,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     appThemeMode?: 'dark' | 'light';
     appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
     appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
+    localNetworkSharingEnabled?: boolean;
+    localNetworkShareToken?: string;
   }) => ipcRenderer.invoke('settings:save', settings),
+  getLocalNetworkStatus: () => ipcRenderer.invoke('network:status'),
   getProgress: (filePath?: string) => ipcRenderer.invoke('progress:get', filePath),
   saveProgress: (filePath: string, position: number, duration: number) => ipcRenderer.invoke('progress:save', filePath, position, duration),
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) =>
@@ -172,6 +175,8 @@ declare global {
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
         appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
+        localNetworkSharingEnabled?: boolean;
+        localNetworkShareToken?: string;
       }>;
       saveSettings: (settings: {
         omdbApiKey?: string;
@@ -182,7 +187,18 @@ declare global {
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
         appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
+        localNetworkSharingEnabled?: boolean;
+        localNetworkShareToken?: string;
       }) => Promise<boolean>;
+      getLocalNetworkStatus: () => Promise<{
+        sharingEnabled: boolean;
+        token: string;
+        networkName: string;
+        port: number;
+        addresses: string[];
+        baseUrl: string | null;
+        libraryUrl: string | null;
+      }>;
       getProgress: (filePath?: string) => Promise<Record<string, { position: number; duration: number; updatedAt: number; watched: boolean }> | { position: number; duration: number; updatedAt: number; watched: boolean } | null>;
       saveProgress: (filePath: string, position: number, duration: number) => Promise<{ position: number; duration: number; updatedAt: number; watched: boolean }>;
       importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;

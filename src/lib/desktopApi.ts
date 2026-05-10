@@ -23,6 +23,8 @@ type SettingsPayload = {
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
+  localNetworkSharingEnabled?: boolean;
+  localNetworkShareToken?: string;
 };
 type FFmpegStatus = { available: boolean; path: string | null };
 type MPVPlayResult = { ok?: boolean; error?: string };
@@ -84,6 +86,20 @@ type StreamUrlOptions = Pick<TranscodeOptions,
   | 'forceTranscode'
 > & { subtitleStyle?: SubtitleStyleOptions };
 type StreamUrlResult = { url: string; contentType: string; fileName: string; isTranscoded?: boolean };
+export type LocalNetworkStatus = {
+  sharingEnabled: boolean;
+  token: string;
+  networkName: string;
+  port: number;
+  addresses: string[];
+  baseUrl: string | null;
+  libraryUrl: string | null;
+};
+export type RemoteLibraryConnection = {
+  baseUrl: string;
+  code: string;
+  library: LibraryPayload;
+};
 export type StoredProgress = { position: number; duration: number; updatedAt: number; watched: boolean };
 export type OfficialArtworkResult = {
   thumbnail?: string;
@@ -109,6 +125,7 @@ declare global {
       checkFFmpeg: () => Promise<FFmpegStatus>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
+      getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
       getProgress?: (filePath?: string) => Promise<Record<string, StoredProgress> | StoredProgress | null>;
       saveProgress?: (filePath: string, position: number, duration: number) => Promise<StoredProgress>;
       importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
@@ -187,6 +204,63 @@ async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function normalizeLocalNetworkBaseUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) throw new Error('Enter the other device address.');
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const parsed = new URL(withProtocol);
+  return parsed.origin;
+}
+
+function subnetCandidates(addresses: string[]): string[] {
+  const hosts = new Set<string>();
+  addresses.forEach((address) => {
+    const parts = address.split('.');
+    if (parts.length !== 4) return;
+    const prefix = parts.slice(0, 3).join('.');
+    for (let host = 1; host <= 254; host += 1) {
+      const candidate = `${prefix}.${host}`;
+      if (candidate !== address) hosts.add(candidate);
+    }
+  });
+  return [...hosts];
+}
+
+async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function discoverLocalNetworkLibraryBaseUrl(code: string): Promise<string> {
+  const status = await desktopApi.getLocalNetworkStatus();
+  const ports = Array.from({ length: 8 }, (_, index) => status.port + index);
+  const candidates = subnetCandidates(status.addresses);
+  const urls = candidates.flatMap((address) => ports.map((port) => `http://${address}:${port}`));
+  const batchSize = 32;
+
+  for (let index = 0; index < urls.length; index += batchSize) {
+    const batch = urls.slice(index, index + batchSize);
+    const results = await Promise.all(batch.map(async (baseUrl) => {
+      try {
+        const response = await fetchWithTimeout(`${baseUrl}/api/lan/library?token=${encodeURIComponent(code)}`, 900);
+        return response.ok ? baseUrl : null;
+      } catch {
+        return null;
+      }
+    }));
+    const found = results.find(Boolean);
+
+    if (found) return found;
+  }
+
+  throw new Error('No shared LoomTV library was found on this network for that code.');
+}
+
 export const desktopApi = {
   async getLibrary(): Promise<LibraryPayload> {
     if (window.desktopApi) return window.desktopApi.getLibrary();
@@ -226,6 +300,32 @@ export const desktopApi = {
   async getServerBase(): Promise<string> {
     if (window.desktopApi) return window.desktopApi.getServerBase();
     return discoverServerBase();
+  },
+
+  async getLocalNetworkStatus(): Promise<LocalNetworkStatus> {
+    if (window.desktopApi?.getLocalNetworkStatus) return window.desktopApi.getLocalNetworkStatus();
+    return fetchJson<LocalNetworkStatus>('/api/lan/status');
+  },
+
+  async connectToLocalNetworkLibrary(baseUrl: string, code: string): Promise<RemoteLibraryConnection> {
+    const normalizedCode = code.replace(/\D/g, '').slice(0, 6);
+    if (!/^\d{6}$/.test(normalizedCode)) {
+      throw new Error('Enter a 6-digit sharing code.');
+    }
+
+    const normalizedBaseUrl = baseUrl.trim()
+      ? normalizeLocalNetworkBaseUrl(baseUrl)
+      : await discoverLocalNetworkLibraryBaseUrl(normalizedCode);
+    const response = await fetch(`${normalizedBaseUrl}/api/lan/library?token=${encodeURIComponent(normalizedCode)}`);
+    if (!response.ok) {
+      throw new Error(response.status === 401 ? 'The sharing code was not accepted.' : 'Could not connect to that LoomTV library.');
+    }
+
+    return {
+      baseUrl: normalizedBaseUrl,
+      code: normalizedCode,
+      library: await response.json() as LibraryPayload,
+    };
   },
 
   async getThumbnail(filePath: string, time?: string): Promise<{ url: string }> {
