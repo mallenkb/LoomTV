@@ -588,3 +588,21 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
   fs.copyFileSync(source, result.filePath);
   return { ok: true, path: result.filePath };
 }
+
+export function clearDatabase(): void {
+  const database = getDb();
+  database.exec(`
+    DELETE FROM artwork_cache;
+    DELETE FROM custom_artwork;
+    DELETE FROM playback_progress;
+    DELETE FROM episode_files;
+    DELETE FROM episodes;
+    DELETE FROM seasons;
+    DELETE FROM media_items;
+    DELETE FROM library_folders;
+    DELETE FROM scan_cache;
+    DELETE FROM app_settings;
+  `);
+  database.pragma('wal_checkpoint(TRUNCATE)');
+  database.exec('VACUUM;');
+}
