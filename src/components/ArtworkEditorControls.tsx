@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Loader2, MoreHorizontal } from 'lucide-react';
+import { Image, Loader2, MoreHorizontal, RefreshCw, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
 import { useToast } from '@/components/ToastProvider';
+import type { OfficialMetadataCandidate } from '@/lib/desktopApi';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
 export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster', string>>;
@@ -28,6 +29,7 @@ export type OfficialArtworkResult = {
   thumbnail?: string;
   cover?: string;
   summary?: string;
+  rating?: number;
   posterCandidates?: string[];
   backdropCandidates?: string[];
 };
@@ -104,6 +106,8 @@ interface ArtworkEditorControlsProps {
   officialCoverSources?: string[];
   fallbackFrameSource?: string;
   onFetchOfficialArtwork?: () => Promise<OfficialArtworkResult>;
+  onFetchOfficialArtworkCandidates?: () => Promise<OfficialMetadataCandidate[]>;
+  onApplyOfficialArtworkCandidate?: (candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
 }
 
 export default function ArtworkEditorControls({
@@ -115,12 +119,18 @@ export default function ArtworkEditorControls({
   officialCoverSources = [],
   fallbackFrameSource = '',
   onFetchOfficialArtwork,
+  onFetchOfficialArtworkCandidates,
+  onApplyOfficialArtworkCandidate,
 }: ArtworkEditorControlsProps) {
   const [artworkMenuOpen, setArtworkMenuOpen] = useState(false);
   const [artworkPreview, setArtworkPreview] = useState<ArtworkPreview | null>(null);
   const [artworkPrepareState, setArtworkPrepareState] = useState<ArtworkPrepareState | null>(null);
   const [isSavingArtwork, setIsSavingArtwork] = useState(false);
   const [isFetchingArtwork, setIsFetchingArtwork] = useState(false);
+  const [metadataCandidates, setMetadataCandidates] = useState<OfficialMetadataCandidate[]>([]);
+  const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
+  const [applyingCandidateId, setApplyingCandidateId] = useState('');
+  const [metadataError, setMetadataError] = useState('');
   const [artworkSaveError, setArtworkSaveError] = useState('');
   const artworkMenuRef = useRef<HTMLDivElement | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
@@ -154,6 +164,10 @@ export default function ArtworkEditorControls({
     setArtworkPrepareState(null);
     setArtworkSaveError('');
     setIsSavingArtwork(false);
+    setMetadataCandidates([]);
+    setMetadataDialogOpen(false);
+    setApplyingCandidateId('');
+    setMetadataError('');
   }, [mediaId]);
 
   const openArtworkPicker = (target: ArtworkTarget) => {
@@ -162,63 +176,96 @@ export default function ArtworkEditorControls({
     setArtworkMenuOpen(false);
   };
 
-  const applyAutomaticArtwork = async () => {
+  const saveOfficialArtwork = async (refreshedArtwork: OfficialArtworkResult | null) => {
+    const thumbnailSource =
+      refreshedArtwork?.thumbnail
+      || refreshedArtwork?.posterCandidates?.find(Boolean)
+      || officialThumbnailSources.find(Boolean)
+      || fallbackFrameSource;
+    const coverSource =
+      refreshedArtwork?.cover
+      || refreshedArtwork?.backdropCandidates?.find(Boolean)
+      || refreshedArtwork?.thumbnail
+      || officialCoverSources.find(Boolean)
+      || officialThumbnailSources.find(Boolean)
+      || fallbackFrameSource;
+
+    if (!thumbnailSource && !coverSource) {
+      setArtworkMenuOpen(false);
+      await onSaved?.();
+      return true;
+    }
+
+    if (thumbnailSource) await saveCustomArtwork(mediaId, 'thumbnail', thumbnailSource, legacyStorageKey);
+    if (coverSource) await saveCustomArtwork(mediaId, 'cover', coverSource, legacyStorageKey);
+    onCustomArtworkChange((current) => ({
+      ...current,
+      ...(thumbnailSource ? { thumbnail: thumbnailSource, poster: thumbnailSource } : {}),
+      ...(coverSource ? { cover: coverSource } : {}),
+    }));
+    setArtworkMenuOpen(false);
+    await onSaved?.();
+    return true;
+  };
+
+  const openMetadataCandidates = async () => {
     if (!mediaId || isFetchingArtwork) return;
 
     setIsFetchingArtwork(true);
     setArtworkSaveError('');
+    setMetadataError('');
     try {
-      let refreshedArtwork: OfficialArtworkResult | null = null;
-      let officialFetchFailed = false;
-      try {
-        refreshedArtwork = onFetchOfficialArtwork ? await onFetchOfficialArtwork() : null;
-      } catch (error) {
-        officialFetchFailed = true;
-        console.error('Official artwork refresh failed:', error);
+      if (onFetchOfficialArtworkCandidates) {
+        const candidates = await onFetchOfficialArtworkCandidates();
+        setMetadataCandidates(candidates);
+        setMetadataDialogOpen(true);
+        if (candidates.length === 0) {
+          showToast({
+            title: 'No metadata matches found',
+            description: 'I could not find matching metadata from the connected metadata APIs.',
+            tone: 'warning',
+          });
+        }
+        return;
       }
+
+      const refreshedArtwork = onFetchOfficialArtwork ? await onFetchOfficialArtwork() : null;
       const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
-      if (onFetchOfficialArtwork && (!hasFreshOfficialArtwork || officialFetchFailed)) {
+      if (onFetchOfficialArtwork && !hasFreshOfficialArtwork) {
         showToast({
           title: 'Official artwork was not found',
           description: fallbackFrameSource
             ? 'I could not get a matching poster or cover from the metadata APIs, so I used a video frame for now.'
             : 'I could not get a matching poster or cover from the metadata APIs. Check your metadata keys and try again.',
-          tone: officialFetchFailed ? 'error' : 'warning',
+          tone: 'warning',
         });
       }
-
-      const thumbnailSource =
-        refreshedArtwork?.thumbnail
-        || refreshedArtwork?.posterCandidates?.find(Boolean)
-        || officialThumbnailSources.find(Boolean)
-        || fallbackFrameSource;
-      const coverSource =
-        refreshedArtwork?.cover
-        || refreshedArtwork?.backdropCandidates?.find(Boolean)
-        || refreshedArtwork?.thumbnail
-        || officialCoverSources.find(Boolean)
-        || officialThumbnailSources.find(Boolean)
-        || fallbackFrameSource;
-
-      if (!thumbnailSource && !coverSource) {
-        setArtworkSaveError('No official artwork or video frame is available yet.');
-        setArtworkMenuOpen(false);
-        return;
-      }
-
-      if (thumbnailSource) await saveCustomArtwork(mediaId, 'thumbnail', thumbnailSource, legacyStorageKey);
-      if (coverSource) await saveCustomArtwork(mediaId, 'cover', coverSource, legacyStorageKey);
-      onCustomArtworkChange((current) => ({
-        ...current,
-        ...(thumbnailSource ? { thumbnail: thumbnailSource, poster: thumbnailSource } : {}),
-        ...(coverSource ? { cover: coverSource } : {}),
-      }));
-      setArtworkMenuOpen(false);
-      await onSaved?.();
+      await saveOfficialArtwork(refreshedArtwork);
     } catch (error) {
-      setArtworkSaveError(error instanceof Error ? error.message : 'Unable to update artwork.');
+      setMetadataError(error instanceof Error ? error.message : 'Unable to refresh metadata.');
+      setMetadataDialogOpen(true);
     } finally {
       setIsFetchingArtwork(false);
+    }
+  };
+
+  const applyMetadataCandidate = async (candidate: OfficialMetadataCandidate) => {
+    if (!onApplyOfficialArtworkCandidate || applyingCandidateId) return;
+    setApplyingCandidateId(candidate.id);
+    setMetadataError('');
+    try {
+      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidate);
+      await saveOfficialArtwork(refreshedArtwork);
+      setMetadataDialogOpen(false);
+      showToast({
+        title: 'Metadata updated',
+        description: `${candidate.title} from ${candidate.source} was applied.`,
+        tone: 'success',
+      });
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : 'Unable to apply metadata.');
+    } finally {
+      setApplyingCandidateId('');
     }
   };
 
@@ -308,66 +355,67 @@ export default function ArtworkEditorControls({
     <>
       <div
         ref={artworkMenuRef}
-        className="fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50"
+        className="fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex items-center gap-2"
       >
         <Button
           type="button"
           variant="ghost"
-          size="icon"
-          aria-label="More artwork options"
-          aria-haspopup="menu"
-          aria-expanded={artworkMenuOpen}
-          onClick={() => setArtworkMenuOpen((open) => !open)}
-          className="h-10 w-10 rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md hover:bg-white/10 hover:text-[var(--loom-accent)]"
+          aria-label="Refresh metadata"
+          title="Refresh metadata"
+          onClick={openMetadataCandidates}
+          disabled={isFetchingArtwork}
+          className="h-10 rounded-lg border border-white/20 bg-black/55 px-3 text-white shadow-lg backdrop-blur-md hover:bg-white/10 hover:text-[var(--loom-accent)] disabled:cursor-wait disabled:opacity-70"
         >
           {isFetchingArtwork ? (
-            <Loader2 className="h-5 w-5 animate-spin text-[var(--loom-accent)]" />
+            <Loader2 className="mr-2 h-4 w-4 animate-spin text-[var(--loom-accent)]" />
           ) : (
-            <MoreHorizontal className="h-5 w-5" />
+            <RefreshCw className="mr-2 h-4 w-4" />
           )}
+          <span className="text-sm font-medium">Refresh metadata</span>
         </Button>
-        {artworkMenuOpen && (
-          <div
-            role="menu"
-            className="absolute right-0 mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-[var(--loom-surface)]/95 py-1 shadow-2xl backdrop-blur-md"
+        <div className="relative">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="More artwork options"
+            aria-haspopup="menu"
+            aria-expanded={artworkMenuOpen}
+            onClick={() => setArtworkMenuOpen((open) => !open)}
+            className="h-10 w-10 rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md hover:bg-white/10 hover:text-[var(--loom-accent)]"
           >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => openArtworkPicker('thumbnail')}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+            {isFetchingArtwork ? (
+              <Loader2 className="h-5 w-5 animate-spin text-[var(--loom-accent)]" />
+            ) : (
+              <MoreHorizontal className="h-5 w-5" />
+            )}
+          </Button>
+          {artworkMenuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-[var(--loom-surface)]/95 py-1 shadow-2xl backdrop-blur-md"
             >
-              <Image className="h-4 w-4" />
-              {ARTWORK_TARGETS.thumbnail.menuLabel}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => openArtworkPicker('cover')}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
-            >
-              <Image className="h-4 w-4" />
-              {ARTWORK_TARGETS.cover.menuLabel}
-            </button>
-            <div className="my-1 h-px bg-white/10" />
-            <button
-              type="button"
-              role="menuitem"
-              onClick={applyAutomaticArtwork}
-              disabled={isFetchingArtwork}
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)] disabled:cursor-wait disabled:opacity-60"
-            >
-              {isFetchingArtwork ? (
-                <Loader2 className="h-4 w-4 animate-spin text-[var(--loom-accent)]" />
-              ) : (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openArtworkPicker('thumbnail')}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+              >
                 <Image className="h-4 w-4" />
-              )}
-              <span className="min-w-0 flex-1 truncate">
-                {isFetchingArtwork ? 'Fetching official artwork...' : 'Fetch official artwork'}
-              </span>
-            </button>
-          </div>
-        )}
+                {ARTWORK_TARGETS.thumbnail.menuLabel}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => openArtworkPicker('cover')}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+              >
+                <Image className="h-4 w-4" />
+                {ARTWORK_TARGETS.cover.menuLabel}
+              </button>
+            </div>
+          )}
+        </div>
         <input
           ref={thumbnailInputRef}
           type="file"
@@ -502,6 +550,114 @@ export default function ArtworkEditorControls({
                 className="bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]"
               >
                 {isSavingArtwork ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={metadataDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !applyingCandidateId) setMetadataDialogOpen(false);
+        }}
+        contentClassName="max-w-[560px]"
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Choose Metadata</DialogTitle>
+          </DialogHeader>
+          <div className="mt-5 space-y-4">
+            <p className="text-sm text-[var(--loom-muted)]">
+              Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, and genres from that source.
+            </p>
+            {metadataCandidates.length === 0 ? (
+              <div className="rounded-lg border border-white/10 bg-white/[0.04] p-6 text-sm text-[var(--loom-muted)]">
+                No matching metadata was found from the connected metadata APIs.
+              </div>
+            ) : (
+              <div className="grid max-h-[62vh] gap-2 overflow-y-auto pr-1">
+                {metadataCandidates.map((candidate) => {
+                  const posterImage = candidate.thumbnail || candidate.posterCandidates?.[0] || '';
+                  const coverImage = candidate.cover || candidate.backdropCandidates?.[0] || posterImage;
+                  const isApplying = applyingCandidateId === candidate.id;
+                  return (
+                    <div
+                      key={candidate.id}
+                      className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3"
+                    >
+                      <div className="grid min-w-0 grid-cols-[58px_1fr] gap-3">
+                        <div className="h-[86px] w-[58px] overflow-hidden rounded-md bg-black/50">
+                          {posterImage ? (
+                            <img src={posterImage} alt={candidate.title} className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="grid h-full place-items-center text-white/30">
+                              <Image className="h-5 w-5" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex min-w-0 items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h3 className="truncate text-sm font-semibold text-white">{candidate.title}</h3>
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
+                                <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-white/70">{candidate.source}</span>
+                                {candidate.rating ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--loom-accent)]">
+                                    <Star className="h-3 w-3 fill-current" />
+                                    {candidate.rating.toFixed(1)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                          {candidate.summary ? (
+                            <p className="line-clamp-1 text-xs leading-5 text-[var(--loom-muted)]">{candidate.summary}</p>
+                          ) : (
+                            <p className="text-xs text-[var(--loom-muted)]">No summary provided.</p>
+                          )}
+                          <div className="h-12 overflow-hidden rounded-md bg-black/40">
+                            {coverImage ? (
+                              <img src={coverImage} alt={`${candidate.title} cover`} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="grid h-full place-items-center text-[11px] text-white/30">No cover</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        {candidate.genres?.length ? (
+                          <p className="min-w-0 flex-1 truncate text-[11px] text-white/45">{candidate.genres.slice(0, 3).join(' • ')}</p>
+                        ) : <span />}
+                        <Button
+                          type="button"
+                          onClick={() => applyMetadataCandidate(candidate)}
+                          disabled={Boolean(applyingCandidateId)}
+                          className="h-8 bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]"
+                        >
+                          {isApplying ? 'Applying...' : 'Apply'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {metadataError && (
+              <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                {metadataError}
+              </p>
+            )}
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setMetadataDialogOpen(false)}
+                disabled={Boolean(applyingCandidateId)}
+                className="border-white/15 bg-transparent text-white hover:bg-white/10"
+              >
+                Close
               </Button>
             </div>
           </div>
