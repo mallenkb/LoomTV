@@ -11,6 +11,7 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import { PublisherGithub } from '@electron-forge/publisher-github';
 
 function hasBinary(binary: string): boolean {
   try {
@@ -110,6 +111,16 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: makeTargets(),
+  publishers: [
+    new PublisherGithub({
+      repository: {
+        owner: 'mallenkb',
+        name: 'LoomTV',
+      },
+      prerelease: false,
+      draft: true,
+    }),
+  ],
   plugins: [
     new AutoUnpackNativesPlugin({}),
     new VitePlugin({

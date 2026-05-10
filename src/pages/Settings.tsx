@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, FolderPlus, RefreshCw, X, Key, CheckCircle, Externa
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { desktopApi } from '@/lib/desktopApi';
+import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { useTheme } from '@/components/ThemeProvider';
 import LoomLogo from '@/components/LoomLogo';
 import LoomLoader from '@/components/LoomLoader';
@@ -175,6 +175,21 @@ const METADATA_ATTRIBUTIONS = [
   { name: 'OMDb API', details: 'Fallback movie and TV metadata.', url: 'https://www.omdbapi.com/' },
 ];
 
+function getUpdateButtonLabel(updateState: UpdateState | null): string {
+  if (!updateState) return 'Check for updates';
+  if (updateState.status === 'checking') return 'Checking...';
+  if (updateState.status === 'downloading') return 'Downloading...';
+  if (updateState.status === 'downloaded') return 'Update now';
+  return 'Check for updates';
+}
+
+function getUpdateStatusText(updateState: UpdateState | null): string {
+  if (!updateState) return 'Update status is loading.';
+  if (updateState.message) return updateState.message;
+  if (updateState.status === 'idle') return 'LoomTV will check for updates automatically.';
+  return 'Use the button to check for the latest release.';
+}
+
 function isBundledFFmpegPath(pathValue?: string | null): boolean {
   if (!pathValue) return false;
   return /[\\/]ffmpeg[\\/](mac|win|linux)[\\/]/i.test(pathValue);
@@ -217,6 +232,7 @@ export default function Settings() {
   const [remoteLibraryStatus, setRemoteLibraryStatus] = useState('');
   const [showManualNetworkAddress, setShowManualNetworkAddress] = useState(false);
   const [sharedLibrarySnapshot, setSharedLibrarySnapshot] = useState<SharedLibrarySnapshot | null>(null);
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const { theme, setTheme } = useTheme();
   const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
 
@@ -246,6 +262,8 @@ export default function Settings() {
     });
     desktopApi.checkFFmpeg().then(setFfmpegStatus);
     void refreshLocalNetworkStatus();
+    desktopApi.getUpdateState().then(setUpdateState);
+    const unsubscribeUpdates = desktopApi.onUpdateState(setUpdateState);
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string; code?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
@@ -255,6 +273,7 @@ export default function Settings() {
     } catch {
       // Ignore invalid saved pairing data.
     }
+    return unsubscribeUpdates;
   }, []);
 
   const setMetadataKey = (providerId: string, value: string) => {
@@ -1271,33 +1290,58 @@ export default function Settings() {
                 </div>
 
                 {/* FFmpeg status pill */}
-                <div className={`flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-medium ring-1 ${
-                  ffmpegStatus === null
-                    ? 'bg-[var(--loom-surface-2)] text-[var(--loom-faint)] ring-[var(--loom-border)]'
-                    : ffmpegStatus.available
-                    ? 'bg-green-500/8 text-green-400 ring-green-500/20'
-                    : 'bg-yellow-500/8 text-yellow-400 ring-yellow-500/20'
-                }`}>
-                  {ffmpegStatus === null ? (
-                    <>
-                      <span className="h-2 w-2 rounded-full bg-[#555]" />
-                      Checking FFmpeg…
-                    </>
-                  ) : ffmpegStatus.available ? (
-                    <>
-                      <CheckCircle className="h-3.5 w-3.5" />
-                      {isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled FFmpeg' : 'System FFmpeg'}
-                    </>
-                  ) : (
-                    <>
-                      <span className="h-2 w-2 rounded-full bg-yellow-400" />
-                      FFmpeg not found
-                    </>
-                  )}
+                <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (updateState?.status === 'downloaded') {
+                        void desktopApi.installUpdate();
+                      } else {
+                        void desktopApi.checkForUpdates().then(setUpdateState);
+                      }
+                    }}
+                    disabled={updateState?.status === 'checking' || updateState?.status === 'downloading'}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-wait disabled:bg-blue-600/65"
+                  >
+                    {updateState?.status === 'checking' || updateState?.status === 'downloading' ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    {getUpdateButtonLabel(updateState)}
+                  </button>
+                  <div className={`flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-medium ring-1 ${
+                    ffmpegStatus === null
+                      ? 'bg-[var(--loom-surface-2)] text-[var(--loom-faint)] ring-[var(--loom-border)]'
+                      : ffmpegStatus.available
+                      ? 'bg-green-500/8 text-green-400 ring-green-500/20'
+                      : 'bg-yellow-500/8 text-yellow-400 ring-yellow-500/20'
+                  }`}>
+                    {ffmpegStatus === null ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-[#555]" />
+                        Checking FFmpeg...
+                      </>
+                    ) : ffmpegStatus.available ? (
+                      <>
+                        <CheckCircle className="h-3.5 w-3.5" />
+                        {isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled FFmpeg' : 'System FFmpeg'}
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-yellow-400" />
+                        FFmpeg not found
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <p className="mt-4 text-xs leading-5 text-[#666] border-t border-[#2a2a2a] pt-4">
+                {getUpdateStatusText(updateState)}
+              </p>
+
+              <p className="mt-3 text-xs leading-5 text-[#666] border-t border-[#2a2a2a] pt-4">
                 LoomTV's own source code is licensed under the MIT License. Third-party libraries,
                 services, and bundled tools remain owned by their respective copyright holders and
                 are provided under their own licenses.
