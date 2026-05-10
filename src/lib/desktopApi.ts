@@ -105,6 +105,7 @@ export type OfficialArtworkResult = {
   thumbnail?: string;
   cover?: string;
   summary?: string;
+  rating?: number;
   posterCandidates?: string[];
   backdropCandidates?: string[];
 };

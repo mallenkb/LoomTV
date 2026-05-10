@@ -2215,7 +2215,7 @@ async function fetchMovieMetadata(title: string, year?: number, omdbApiKey?: str
       poster: data.Poster && data.Poster !== 'N/A' ? data.Poster : '',
       backdrop: data.Poster && data.Poster !== 'N/A' ? data.Poster : '',
       summary: data.Plot || '',
-      rating: data.imdbRating ? parseFloat(data.imdbRating) : 0,
+      rating: numericRating(data.imdbRating),
       genres: data.Genre ? data.Genre.split(', ') : [],
       cast: [],
       year: data.Year ? parseInt(data.Year, 10) : year || 0,
@@ -3006,11 +3006,7 @@ async function buildTVItemFromFolder(
     || matchedOmdbData?.Plot
     || '';
 
-  const rating =
-    (finalType === 'anime' ? (matchedJikanMeta?.rating ?? 0) : 0)
-    || (matchedTmdbTVMeta?.rating ?? 0)
-    || (matchedTVMeta?.rating ?? 0)
-    || (matchedOmdbData?.imdbRating ? parseFloat(matchedOmdbData.imdbRating) : 0);
+  const rating = showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
 
   const genres: string[] =
     (finalType === 'anime' ? matchedJikanMeta?.genres : null)
@@ -3155,12 +3151,10 @@ async function buildMovieItemFromFile(
     shouldUseShowProviders
       ? fetchTMDBTVMetadata(searchTitle, searchYear, tmdbApiKey)
       : Promise.resolve(null),
-    shouldUseShowProviders && !likelyAnime ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
+    !likelyAnime ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
   ]);
-  const matchedTmdbData = [tmdbById, tmdbBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.title)) || null;
-  const matchedOmdbData = [omdbById, omdbBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.Title)) || null;
+  const matchedTmdbData = tmdbById || tmdbBySearch || null;
+  const matchedOmdbData = omdbById || omdbBySearch || null;
   const matchedJikanMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, jikanMeta?.title) ? jikanMeta : null;
   const matchedTmdbTVMeta = [tmdbTVById, tmdbTVBySearch]
     .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.title)) || null;
@@ -3224,12 +3218,9 @@ async function buildMovieItemFromFile(
     || matchedTmdbData?.summary
     || matchedOmdbData?.Plot
     || '';
-  const rating =
-    (finalType === 'anime' ? (matchedJikanMeta?.rating ?? 0) : 0)
-    || (matchedTmdbTVMeta?.rating ?? 0)
-    || (matchedTVMeta?.rating ?? 0)
-    || (matchedTmdbData?.rating ?? 0)
-    || (matchedOmdbData?.imdbRating ? parseFloat(matchedOmdbData.imdbRating) : 0);
+  const rating = finalType === 'movie'
+    ? movieMetadataRating(matchedTmdbData, matchedOmdbData, matchedTVMeta)
+    : showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
   const genres: string[] =
     (finalType === 'anime' ? matchedJikanMeta?.genres : null)
     ?? matchedTmdbTVMeta?.genres
@@ -3986,9 +3977,38 @@ type OfficialArtworkRefreshResult = {
   thumbnail?: string;
   cover?: string;
   summary?: string;
+  rating?: number;
   posterCandidates: string[];
   backdropCandidates: string[];
 };
+
+function numericRating(value: unknown): number {
+  const rating = typeof value === 'number' ? value : parseFloat(String(value || ''));
+  return Number.isFinite(rating) && rating > 0 ? rating : 0;
+}
+
+function movieMetadataRating(
+  tmdbMeta?: Partial<MediaItem> | null,
+  omdbMeta?: Record<string, any> | null,
+  tvMeta?: { rating?: number } | null,
+): number {
+  return numericRating(tmdbMeta?.rating)
+    || numericRating(omdbMeta?.imdbRating)
+    || numericRating(tvMeta?.rating);
+}
+
+function showMetadataRating(
+  type: 'tv' | 'anime',
+  jikanMeta?: { rating?: number } | null,
+  tmdbMeta?: Partial<MediaItem> | null,
+  tvMeta?: { rating?: number } | null,
+  omdbMeta?: Record<string, any> | null,
+): number {
+  return (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
+    || numericRating(tmdbMeta?.rating)
+    || numericRating(tvMeta?.rating)
+    || numericRating(omdbMeta?.imdbRating);
+}
 
 function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
   return orderedArtworkCandidates(...urls).filter((url) => {
@@ -4051,14 +4071,16 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
   const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
 
   if (item.type === 'movie') {
-    const [tmdbById, tmdbBySearch, omdbById, omdbBySearch] = await Promise.all([
+    const [tmdbById, tmdbBySearch, omdbById, omdbBySearch, tvMeta] = await Promise.all([
       providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
       fetchTMDBMovieMetadata(title, year, tmdbApiKey),
       providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
       fetchOMDbMetadata(title, year, omdbApiKey),
+      fetchTVMetadata(title, year),
     ]);
-    const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
-    const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
+    const tmdbMeta = tmdbById || tmdbBySearch || null;
+    const omdbMeta = omdbById || omdbBySearch || null;
+    const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
     const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
     const posterCandidates = officialArtworkOnly([tmdbMeta?.poster, omdbPoster]);
     const backdropCandidates = officialArtworkOnly([tmdbMeta?.backdrop]);
@@ -4066,6 +4088,7 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
       thumbnail: posterCandidates[0] || '',
       cover: backdropCandidates[0] || posterCandidates[0] || '',
       summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
+      rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
       posterCandidates,
       backdropCandidates,
     };
@@ -4101,6 +4124,7 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     thumbnail: posterCandidates[0] || '',
     cover: backdropCandidates[0] || posterCandidates[0] || '',
     summary: tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
+    rating: showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
     posterCandidates,
     backdropCandidates,
   };
@@ -4122,10 +4146,11 @@ async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkR
   }
 
   const refreshed = await fetchOfficialArtworkForItem(target);
-  if (refreshed.thumbnail || refreshed.cover || refreshed.summary) {
+  if (refreshed.thumbnail || refreshed.cover || refreshed.summary || refreshed.rating) {
     if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
     if (refreshed.cover) target.backdrop = refreshed.cover;
     if (refreshed.summary) target.summary = refreshed.summary;
+    if (refreshed.rating) target.rating = refreshed.rating;
     target.posterCandidates = orderedArtworkCandidates(
       ...refreshed.posterCandidates,
       ...officialArtworkOnly(target.posterCandidates || []),

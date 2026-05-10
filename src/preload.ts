@@ -208,6 +208,7 @@ declare global {
         thumbnail?: string;
         cover?: string;
         summary?: string;
+        rating?: number;
         posterCandidates?: string[];
         backdropCandidates?: string[];
       }>;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Play } from 'lucide-react';
+import { Play, Star } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { Skeleton } from '@/components/ui/skeleton';
 import { desktopApi } from '@/lib/desktopApi';
@@ -88,6 +88,7 @@ function MovieCard({ movie, from }: { movie: MediaItem; from: string }) {
           </div>
           }
         />
+        <RatingBadge rating={movie.rating} />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-12 h-12 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
@@ -100,5 +101,15 @@ function MovieCard({ movie, from }: { movie: MediaItem; from: string }) {
         {movie.year > 0 && <p className="text-xs text-[var(--loom-muted)]">{movie.year}</p>}
       </div>
     </Link>
+  );
+}
+
+function RatingBadge({ rating }: { rating?: number }) {
+  if (!rating || rating <= 0) return null;
+  return (
+    <div className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md bg-black/72 px-2 text-xs font-semibold text-[#F5C451] shadow-lg backdrop-blur-md">
+      <Star className="h-3.5 w-3.5" fill="currentColor" />
+      {rating.toFixed(1)}
+    </div>
   );
 }
