@@ -70,6 +70,28 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.setName('LoomTV');
+const USER_DATA_DIR = path.join(app.getPath('appData'), 'LoomTV');
+app.setPath('userData', USER_DATA_DIR);
+
+function prepareFreshInstallUserData(): void {
+  if (!app.isPackaged) return;
+
+  const markerPath = path.join(USER_DATA_DIR, '.loomtv-userdata-ready');
+  if (fs.existsSync(markerPath)) return;
+
+  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+  for (const fileName of ['loomtv.sqlite', 'loomtv.sqlite-shm', 'loomtv.sqlite-wal', 'library.json', 'settings.json']) {
+    try {
+      fs.rmSync(path.join(USER_DATA_DIR, fileName), { force: true });
+    } catch (error) {
+      console.warn(`[startup] Failed to reset ${fileName}:`, error);
+    }
+  }
+
+  fs.writeFileSync(markerPath, JSON.stringify({ version: app.getVersion(), createdAt: Date.now() }));
+}
+
+prepareFreshInstallUserData();
 
 let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
