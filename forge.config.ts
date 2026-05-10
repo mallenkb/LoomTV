@@ -1,4 +1,5 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
@@ -12,6 +13,22 @@ import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
+  hooks: {
+    postPackage: async (_config, packageResult) => {
+      if (packageResult.platform !== 'darwin') {
+        return;
+      }
+
+      for (const outputPath of packageResult.outputPaths) {
+        const appPath = path.join(outputPath, 'LoomTV.app');
+        if (fs.existsSync(appPath)) {
+          execFileSync('codesign', ['--force', '--deep', '--sign', '-', appPath], {
+            stdio: 'inherit',
+          });
+        }
+      }
+    },
+  },
   packagerConfig: {
     asar: {
       unpack: '**/{*.node,ffmpeg,ffmpeg.exe,ffprobe,ffprobe.exe}',
