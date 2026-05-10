@@ -14,7 +14,7 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
-      unpack: '**/*.node',
+      unpack: '**/{*.node,ffmpeg,ffmpeg.exe,ffprobe,ffprobe.exe}',
     },
     osxSign: {
       identity: '-',
@@ -31,7 +31,7 @@ const config: ForgeConfig = {
     afterPrune: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
         try {
-          const runtimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path'];
+          const runtimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path', 'ffmpeg-static', 'ffprobe-static'];
           const targetNodeModules = path.join(buildPath, 'node_modules');
           fs.mkdirSync(targetNodeModules, { recursive: true });
 
