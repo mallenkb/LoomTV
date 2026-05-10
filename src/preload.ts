@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     ipcRenderer.invoke('progress:import', progress),
   getCustomArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:get', mediaId),
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => ipcRenderer.invoke('artwork:save', mediaId, target, dataUrl),
+  getOfficialMetadataCandidates: (mediaId: string) => ipcRenderer.invoke('artwork:official-candidates', mediaId),
+  applyOfficialMetadata: (mediaId: string, candidate: unknown) => ipcRenderer.invoke('artwork:apply-official', mediaId, candidate),
   refreshOfficialArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:refresh-official', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
@@ -204,6 +206,39 @@ declare global {
       importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
       getCustomArtwork: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
+      getOfficialMetadataCandidates: (mediaId: string) => Promise<Array<{
+        id: string;
+        source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+        title: string;
+        year?: number;
+        thumbnail?: string;
+        cover?: string;
+        summary?: string;
+        rating?: number;
+        genres?: string[];
+        posterCandidates?: string[];
+        backdropCandidates?: string[];
+      }>>;
+      applyOfficialMetadata: (mediaId: string, candidate: {
+        id: string;
+        source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+        title: string;
+        year?: number;
+        thumbnail?: string;
+        cover?: string;
+        summary?: string;
+        rating?: number;
+        genres?: string[];
+        posterCandidates?: string[];
+        backdropCandidates?: string[];
+      }) => Promise<{
+        thumbnail?: string;
+        cover?: string;
+        summary?: string;
+        rating?: number;
+        posterCandidates?: string[];
+        backdropCandidates?: string[];
+      }>;
       refreshOfficialArtwork: (mediaId: string) => Promise<{
         thumbnail?: string;
         cover?: string;

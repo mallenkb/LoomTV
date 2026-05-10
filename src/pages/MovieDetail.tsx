@@ -209,6 +209,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={fallbackThumbnails[0] || ''}
           onFetchOfficialArtwork={() => desktopApi.refreshOfficialArtwork(movie.id)}
+          onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(movie.id)}
+          onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(movie.id, candidate)}
         />
         <button
           type="button"

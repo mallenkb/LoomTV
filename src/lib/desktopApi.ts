@@ -109,6 +109,13 @@ export type OfficialArtworkResult = {
   posterCandidates?: string[];
   backdropCandidates?: string[];
 };
+export type OfficialMetadataCandidate = OfficialArtworkResult & {
+  id: string;
+  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+  title: string;
+  year?: number;
+  genres?: string[];
+};
 
 declare global {
   interface Window {
@@ -132,6 +139,8 @@ declare global {
       importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
       getCustomArtwork?: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
+      getOfficialMetadataCandidates?: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
+      applyOfficialMetadata?: (mediaId: string, candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
       refreshOfficialArtwork?: (mediaId: string) => Promise<OfficialArtworkResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
@@ -434,6 +443,22 @@ export const desktopApi = {
     return fetchJson<OfficialArtworkResult>('/api/artwork/refresh-official', {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
+    });
+  },
+
+  async getOfficialMetadataCandidates(mediaId: string): Promise<OfficialMetadataCandidate[]> {
+    if (window.desktopApi?.getOfficialMetadataCandidates) return window.desktopApi.getOfficialMetadataCandidates(mediaId);
+    return fetchJson<OfficialMetadataCandidate[]>('/api/artwork/official-candidates', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId }),
+    });
+  },
+
+  async applyOfficialMetadata(mediaId: string, candidate: OfficialMetadataCandidate): Promise<OfficialArtworkResult> {
+    if (window.desktopApi?.applyOfficialMetadata) return window.desktopApi.applyOfficialMetadata(mediaId, candidate);
+    return fetchJson<OfficialArtworkResult>('/api/artwork/apply-official', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId, candidate }),
     });
   },
 
