@@ -117,6 +117,7 @@ declare global {
       refreshOfficialArtwork?: (mediaId: string) => Promise<OfficialArtworkResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+      clearAppData?: () => Promise<LibraryPayload>;
       playWithMPV: (filePath: string, startSecs?: number) => Promise<MPVPlayResult>;
       queryMPV: () => Promise<MPVStatus | null>;
       closeMPV: () => Promise<void>;
@@ -347,6 +348,11 @@ export const desktopApi = {
   async backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
     if (window.desktopApi?.backupDatabase) return window.desktopApi.backupDatabase();
     return fetchJson<{ ok: boolean; path?: string; error?: string }>('/api/database/backup', { method: 'POST' });
+  },
+
+  async clearAppData(): Promise<LibraryPayload> {
+    if (window.desktopApi?.clearAppData) return window.desktopApi.clearAppData();
+    return fetchJson<LibraryPayload>('/api/database/clear', { method: 'POST' });
   },
 
   openExternal(url: string): void {

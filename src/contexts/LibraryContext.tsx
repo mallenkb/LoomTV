@@ -137,6 +137,7 @@ interface LibraryContextType {
   addLibraryFolder: (kind?: LibraryFolderKind) => Promise<void>;
   removeLibraryFolder: (folder: string) => Promise<void>;
   refreshLibrary: () => Promise<void>;
+  clearAppData: () => Promise<void>;
   setAutoSyncIntervalHours: (hours: number) => Promise<void>;
 }
 
@@ -237,6 +238,22 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const clearAppData = async () => {
+    dispatch({ type: 'SET_LOADING', payload: true });
+    dispatch({ type: 'SET_SCANNING', payload: false });
+    dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
+    try {
+      const data = await desktopApi.clearAppData();
+      applyLibraryData(data);
+      dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: initialState.autoSyncIntervalHours });
+    } catch (error) {
+      console.error('Failed to clear app data:', error);
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
   const setAutoSyncIntervalHours = async (hours: number) => {
     const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 12;
     dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: normalizedHours });
@@ -326,7 +343,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [state.autoSyncIntervalHours]);
 
   return (
-    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, setAutoSyncIntervalHours }}>
+    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours }}>
       {children}
     </LibraryContext.Provider>
   );

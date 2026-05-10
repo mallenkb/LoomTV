@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
-import { FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette } from 'lucide-react';
+import { ArrowDown, ArrowUp, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -159,7 +159,7 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
 }
 
 export default function Settings() {
-  const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, refreshLibrary, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
+  const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, refreshLibrary, clearAppData, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
   const { libraryFolderGroups, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
@@ -173,6 +173,8 @@ export default function Settings() {
   const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
+  const [clearDataStatus, setClearDataStatus] = useState('');
+  const [isClearingData, setIsClearingData] = useState(false);
   const { theme, setTheme } = useTheme();
   const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
 
@@ -279,6 +281,16 @@ export default function Settings() {
     void saveSidebarNavOrder(nextOrder);
   };
 
+  const moveSidebarItem = (itemId: SidebarNavItemId, direction: -1 | 1) => {
+    const index = sidebarNavOrder.indexOf(itemId);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= sidebarNavOrder.length) return;
+
+    const nextOrder = [...sidebarNavOrder];
+    [nextOrder[index], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[index]];
+    void saveSidebarNavOrder(nextOrder);
+  };
+
   const handleBackupDatabase = async () => {
     setBackupStatus('');
     const result = await desktopApi.backupDatabase();
@@ -286,6 +298,25 @@ export default function Settings() {
       setBackupStatus(`Saved to ${result.path}`);
     } else if (result.error !== 'cancelled') {
       setBackupStatus('Backup failed. Try another location.');
+    }
+  };
+
+  const handleClearAppData = async () => {
+    const confirmed = window.confirm(
+      'Clear all LoomTV library folders, metadata, artwork, watch progress, and settings from this device?',
+    );
+    if (!confirmed) return;
+
+    setIsClearingData(true);
+    setClearDataStatus('');
+    try {
+      await clearAppData();
+      setClearDataStatus('App data cleared. Add a library folder to start fresh.');
+    } catch (error) {
+      console.error('Failed to clear app data:', error);
+      setClearDataStatus('Clear failed. Close playback and try again.');
+    } finally {
+      setIsClearingData(false);
     }
   };
 
@@ -436,7 +467,26 @@ export default function Settings() {
                   <span className="min-w-0 flex-1 text-sm font-medium text-white">
                     {SIDEBAR_NAV_LABELS[itemId]}
                   </span>
-                  <span className="text-xs text-[var(--loom-faint)]">Drag</span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => moveSidebarItem(itemId, -1)}
+                      disabled={index === 0}
+                      aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} up`}
+                      className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveSidebarItem(itemId, 1)}
+                      disabled={index === sidebarNavOrder.length - 1}
+                      aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} down`}
+                      className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -485,6 +535,33 @@ export default function Settings() {
                   Refresh
                 </Button>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-red-500/20 bg-[var(--loom-surface)]">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <Trash2 className="h-4 w-4 text-red-400" />
+              Clear App Data
+            </CardTitle>
+            <CardDescription className="text-[var(--loom-muted)]">
+              Removes this device's saved library folders, scanned metadata, artwork, watch progress, and settings.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                onClick={handleClearAppData}
+                disabled={isClearingData}
+                variant="outline"
+                className="gap-2 border-red-500/30 text-red-200 hover:border-red-400/60 hover:bg-red-500/10 hover:text-red-100"
+              >
+                <Trash2 className="h-4 w-4" />
+                {isClearingData ? 'Clearing...' : 'Clear Data'}
+              </Button>
+              {clearDataStatus && <p className="text-sm text-[var(--loom-muted)]">{clearDataStatus}</p>}
             </div>
           </CardContent>
         </Card>
