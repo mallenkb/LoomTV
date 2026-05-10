@@ -12,6 +12,48 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
+function hasBinary(binary: string): boolean {
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'which', [binary], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function makeTargets() {
+  const makers = [
+    new MakerZIP({}, ['darwin', 'win32', 'linux']),
+    new MakerDMG({
+      icon: 'resources/icon.icns',
+    }, ['darwin']),
+  ];
+
+  if (process.platform === 'win32' || (hasBinary('wine') && hasBinary('mono'))) {
+    makers.push(new MakerSquirrel({
+      setupIcon: 'resources/icon.ico',
+    }));
+  }
+
+  if (process.platform === 'linux' || hasBinary('rpmbuild')) {
+    makers.push(new MakerRpm({
+      options: {
+        bin: 'LoomTV',
+      },
+    }));
+  }
+
+  if (process.platform === 'linux' || (hasBinary('dpkg') && hasBinary('fakeroot'))) {
+    makers.push(new MakerDeb({
+      options: {
+        bin: 'LoomTV',
+      },
+    }));
+  }
+
+  return makers;
+}
+
 const config: ForgeConfig = {
   hooks: {
     postPackage: async (_config, packageResult) => {
@@ -67,25 +109,7 @@ const config: ForgeConfig = {
     ],
   },
   rebuildConfig: {},
-  makers: [
-    new MakerSquirrel({
-      setupIcon: 'resources/icon.ico',
-    }),
-    new MakerZIP({}, ['darwin']),
-    new MakerDMG({
-      icon: 'resources/icon.icns',
-    }, ['darwin']),
-    new MakerRpm({
-      options: {
-        bin: 'LoomTV',
-      },
-    }),
-    new MakerDeb({
-      options: {
-        bin: 'LoomTV',
-      },
-    }),
-  ],
+  makers: makeTargets(),
   plugins: [
     new AutoUnpackNativesPlugin({}),
     new VitePlugin({
