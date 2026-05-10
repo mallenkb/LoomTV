@@ -1,4 +1,6 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
+import fs from 'node:fs';
+import path from 'node:path';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDMG } from '@electron-forge/maker-dmg';
@@ -10,7 +12,12 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpack: '**/*.node',
+    },
+    osxSign: {
+      identity: '-',
+    },
     icon: 'resources/icon',
     executableName: 'LoomTV',
     extraResource: [
@@ -19,6 +26,26 @@ const config: ForgeConfig = {
       'resources/icon.png',
       'resources/icon.ico',
       'resources/icon.icns',
+    ],
+    afterPrune: [
+      (buildPath, _electronVersion, _platform, _arch, callback) => {
+        try {
+          const runtimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path'];
+          const targetNodeModules = path.join(buildPath, 'node_modules');
+          fs.mkdirSync(targetNodeModules, { recursive: true });
+
+          for (const moduleName of runtimeModules) {
+            fs.cpSync(
+              path.join(process.cwd(), 'node_modules', moduleName),
+              path.join(targetNodeModules, moduleName),
+              { recursive: true, force: true },
+            );
+          }
+          callback();
+        } catch (error) {
+          callback(error as Error);
+        }
+      },
     ],
   },
   rebuildConfig: {},

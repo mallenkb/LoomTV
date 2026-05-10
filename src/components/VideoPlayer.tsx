@@ -220,6 +220,14 @@ function subtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
   return tracks.filter((track) => track.type === 'subtitle').findIndex((track) => track.index === streamIndex);
 }
 
+function selectedEmbeddedSubtitle(tracks: MediaTrack[], streamIndex: number): { track: MediaTrack; ordinal: number } | null {
+  if (streamIndex < 0) return null;
+  const track = tracks.find((candidate) => candidate.type === 'subtitle' && candidate.index === streamIndex);
+  if (!track) return null;
+  const ordinal = subtitleOrdinal(tracks, streamIndex);
+  return ordinal >= 0 ? { track, ordinal } : null;
+}
+
 function externalSubtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
   return tracks.findIndex((track) => track.index === streamIndex);
 }
@@ -473,7 +481,7 @@ export default function VideoPlayer({
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
-  const subtitleStyle = DEFAULT_SUBTITLE_STYLE;
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [tick, setTick] = useState(0); // force episode list re-render
@@ -563,21 +571,34 @@ export default function VideoPlayer({
     tracks.forEach((track, index) => {
       const shouldShow = subtitlesDefaultEnabledRef.current
         && (selectedSubtitleOrdinal >= 0 ? index === selectedSubtitleOrdinal : index === 0);
-      track.mode = shouldShow ? 'showing' : 'disabled';
+      try {
+        track.mode = shouldShow ? 'showing' : 'disabled';
+      } catch (_error) {
+        return;
+      }
 
-      const cues = Array.from(track.cues || []);
+      let cues: TextTrackCue[] = [];
+      try {
+        cues = Array.from(track.cues || []);
+      } catch (_error) {
+        return;
+      }
       cues.forEach((cue) => {
-        const originalTiming = subtitleCueTiming.get(cue) || {
-          startTime: cue.startTime,
-          endTime: cue.endTime,
-        };
-        subtitleCueTiming.set(cue, originalTiming);
-        const delayedStart = Math.max(0, originalTiming.startTime + subtitleStyle.delaySeconds);
-        cue.startTime = delayedStart;
-        cue.endTime = Math.max(delayedStart + 0.1, originalTiming.endTime + subtitleStyle.delaySeconds);
+        try {
+          const originalTiming = subtitleCueTiming.get(cue) || {
+            startTime: cue.startTime,
+            endTime: cue.endTime,
+          };
+          subtitleCueTiming.set(cue, originalTiming);
+          const delayedStart = Math.max(0, originalTiming.startTime + subtitleStyle.delaySeconds);
+          cue.startTime = delayedStart;
+          cue.endTime = Math.max(delayedStart + 0.1, originalTiming.endTime + subtitleStyle.delaySeconds);
 
-        if ('line' in cue) {
-          (cue as VTTCue).line = Math.round(100 - subtitleStyle.position);
+          if ('line' in cue) {
+            (cue as VTTCue).line = Math.round(100 - subtitleStyle.position);
+          }
+        } catch (_error) {
+          // Browser cue implementations can reject runtime mutations.
         }
       });
     });
@@ -673,16 +694,16 @@ export default function VideoPlayer({
       }
 
       const subtitleIndex = selectedSubtitleTrackIndexRef.current;
-      const selectedSubtitle = probeTracksRef.current.find((track) => track.index === subtitleIndex);
+      const embeddedSubtitle = selectedEmbeddedSubtitle(probeTracksRef.current, subtitleIndex);
       const { url } = await desktopApi.getStreamUrl(filePath, {
         forceTranscode: true,
         startSeconds: safeStartSeconds,
         ...(typeof selectedVideoTrackIndexRef.current === 'number' ? { videoTrackIndex: selectedVideoTrackIndexRef.current } : {}),
         ...(typeof selectedAudioTrackIndexRef.current === 'number' ? { audioTrackIndex: selectedAudioTrackIndexRef.current } : {}),
-        ...(subtitleIndex >= 0 ? {
+        ...(embeddedSubtitle ? {
           subtitleTrackIndex: subtitleIndex,
-          subtitleStreamOrdinal: subtitleOrdinal(probeTracksRef.current, subtitleIndex),
-          subtitleCodec: selectedSubtitle?.codec,
+          subtitleStreamOrdinal: embeddedSubtitle.ordinal,
+          subtitleCodec: embeddedSubtitle.track.codec,
         } : {}),
         subtitleStyle,
       });
@@ -1306,6 +1327,25 @@ export default function VideoPlayer({
     void startTranscodedFallback(position, { force: true });
   }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamUrl]);
 
+  const applySubtitleStyleToStream = useCallback(() => {
+    applyNativeTextTrackVisibility();
+    if (playbackEngine === 'mpv') {
+      void desktopApi.setMPVSubtitleStyle(subtitleStyle);
+      return;
+    }
+    if (streamIsTranscoded && selectedSubtitleTrackIndexRef.current >= 0) {
+      hlsTranscodeRestartAttemptsRef.current = 0;
+      void startTranscodedFallback(position, { force: true });
+    }
+  }, [applyNativeTextTrackVisibility, playbackEngine, position, startTranscodedFallback, streamIsTranscoded, subtitleStyle]);
+
+  const updateSubtitleStyle = useCallback((key: keyof SubtitleStyleSettings, value: number | string) => {
+    setSubtitleStyle((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }, []);
+
   const selectVideoTrack = useCallback((trackIndex: number) => {
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
@@ -1329,7 +1369,7 @@ export default function VideoPlayer({
   }, [playbackEngine, restartForTrackChange, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
-    const enabled = trackIndex >= 0;
+    const enabled = trackIndex >= 0 || trackIndex <= -1000;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'subtitle');
     saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
     subtitlesDefaultEnabledRef.current = enabled;
