@@ -22,7 +22,7 @@ jobs:
       matrix:
         include:
           - platform: macOS
-            os: macos-latest
+            os: macos-26
             artifact: loomtv-macos
           - platform: Windows
             os: windows-latest
