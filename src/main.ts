@@ -2,7 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell 
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
-import { createHash } from 'node:crypto';
+import os from 'node:os';
+import { createHash, randomInt } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { mpvController } from './main/mpv/mpvController';
 import ffmpegStatic from 'ffmpeg-static';
@@ -211,6 +212,8 @@ interface AppSettings {
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
+  localNetworkSharingEnabled?: boolean;
+  localNetworkShareToken?: string;
 }
 
 const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' | 'tmdbApiKey'>> = {
@@ -258,6 +261,10 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     appLoaderStyle: raw.appLoaderStyle === 'logo-mark' || raw.appLoaderStyle === 'horizontal-logo' || raw.appLoaderStyle === 'play-mark'
       ? raw.appLoaderStyle
       : 'play-mark',
+    localNetworkSharingEnabled: Boolean(raw.localNetworkSharingEnabled),
+    localNetworkShareToken: raw.localNetworkShareToken && /^\d{6}$/.test(raw.localNetworkShareToken)
+      ? raw.localNetworkShareToken
+      : createLanShareCode(),
   };
 }
 
@@ -316,6 +323,10 @@ function redirectToArtworkSource(res: http.ServerResponse, sourceUrl: string): v
 
 function safeEndResponse(res: http.ServerResponse): void {
   if (!res.writableEnded) res.end();
+}
+
+function createLanShareCode(): string {
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
@@ -835,6 +846,176 @@ function isLoopbackHost(hostname: string): boolean {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
+function getLocalNetworkAddresses(): string[] {
+  return Object.values(os.networkInterfaces())
+    .flatMap((entries) => entries || [])
+    .filter((entry) => entry.family === 'IPv4' && !entry.internal)
+    .map((entry) => entry.address);
+}
+
+function getPrimaryLocalNetworkAddress(): string | null {
+  return getLocalNetworkAddresses()[0] || null;
+}
+
+function cleanNetworkName(value?: string | null): string | null {
+  const name = (value || '').trim();
+  if (!name || /^<redacted>$/i.test(name) || /not associated/i.test(name)) return null;
+  return name;
+}
+
+function getWifiDeviceName(): string {
+  try {
+    const hardwarePorts = execFileSync('networksetup', ['-listallhardwareports'], { encoding: 'utf8', timeout: 1000 });
+    return hardwarePorts.match(/Hardware Port: Wi-Fi[\s\S]*?Device: (\S+)/)?.[1] || 'en0';
+  } catch {
+    return 'en0';
+  }
+}
+
+function getMacWifiSsid(wifiDevice: string): string | null {
+  try {
+    const airportNetwork = execFileSync('networksetup', ['-getairportnetwork', wifiDevice], { encoding: 'utf8', timeout: 1000 });
+    const match = airportNetwork.match(/Current Wi-Fi Network: (.+)$/m);
+    const name = cleanNetworkName(match?.[1]);
+    if (name) return name;
+  } catch {
+    // Try the next source.
+  }
+
+  try {
+    const summary = execFileSync('ipconfig', ['getsummary', wifiDevice], { encoding: 'utf8', timeout: 1000 });
+    const name = cleanNetworkName(summary.match(/^\s*SSID\s*:\s*(.+)$/m)?.[1]);
+    if (name) return name;
+  } catch {
+    // Try the next source.
+  }
+
+  try {
+    const profiler = execFileSync('system_profiler', ['SPAirPortDataType', '-detailLevel', 'mini'], { encoding: 'utf8', timeout: 2500 });
+    const currentNetworkBlock = profiler.match(/Current Network Information:\s*\n\s*([^:\n]+):/);
+    const name = cleanNetworkName(currentNetworkBlock?.[1] || profiler.match(/^\s*SSID:\s*(.+)$/m)?.[1]);
+    if (name) return name;
+  } catch {
+    // Fall through to interface-based labels.
+  }
+
+  return null;
+}
+
+function getWindowsWifiSsid(): string | null {
+  try {
+    const output = execFileSync('netsh', ['wlan', 'show', 'interfaces'], { encoding: 'utf8', timeout: 1500 });
+    const connectedBlocks = output.split(/\r?\n\r?\n/).filter((block) => /State\s*:\s*connected/i.test(block));
+    const source = connectedBlocks[0] || output;
+    const name = cleanNetworkName(source.match(/^\s*SSID\s*:\s*(.+)$/m)?.[1]);
+    return name;
+  } catch {
+    return null;
+  }
+}
+
+function getLinuxWifiSsid(): string | null {
+  try {
+    const output = execFileSync('iwgetid', ['-r'], { encoding: 'utf8', timeout: 1000 });
+    const name = cleanNetworkName(output);
+    if (name) return name;
+  } catch {
+    // Try NetworkManager below.
+  }
+
+  try {
+    const output = execFileSync('nmcli', ['-t', '-f', 'active,ssid', 'dev', 'wifi'], { encoding: 'utf8', timeout: 1500 });
+    const activeLine = output.split(/\r?\n/).find((line) => line.startsWith('yes:'));
+    const name = cleanNetworkName(activeLine?.slice('yes:'.length).replace(/\\:/g, ':'));
+    if (name) return name;
+  } catch {
+    // Try iw below.
+  }
+
+  try {
+    const output = execFileSync('iw', ['dev'], { encoding: 'utf8', timeout: 1000 });
+    const interfaces = [...output.matchAll(/Interface\s+(\S+)/g)].map((match) => match[1]);
+    for (const networkInterface of interfaces) {
+      try {
+        const link = execFileSync('iw', ['dev', networkInterface, 'link'], { encoding: 'utf8', timeout: 1000 });
+        const name = cleanNetworkName(link.match(/^\s*SSID:\s*(.+)$/m)?.[1]);
+        if (name) return name;
+      } catch {
+        // Try the next interface.
+      }
+    }
+  } catch {
+    // Fall through to the generic local label.
+  }
+
+  return null;
+}
+
+function getLocalNetworkName(): string {
+  if (process.platform === 'darwin') {
+    const wifiDevice = getWifiDeviceName();
+    const ssid = getMacWifiSsid(wifiDevice);
+    if (ssid) return ssid;
+  } else if (process.platform === 'win32') {
+    const ssid = getWindowsWifiSsid();
+    if (ssid) return ssid;
+  } else if (process.platform === 'linux') {
+    const ssid = getLinuxWifiSsid();
+    if (ssid) return ssid;
+  }
+
+  return getPrimaryLocalNetworkAddress() ? 'Connected locally' : 'No local network detected';
+}
+
+function getRequestRemoteAddress(req: http.IncomingMessage): string {
+  return (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+}
+
+function isLoopbackRequest(req: http.IncomingMessage): boolean {
+  const address = getRequestRemoteAddress(req);
+  return address === '127.0.0.1' || address === '::1' || address === 'localhost';
+}
+
+function getLanServerBase(): string | null {
+  const address = getPrimaryLocalNetworkAddress();
+  return address ? `http://${address}:${mediaServerPort}` : null;
+}
+
+function isLanSharingEnabled(): boolean {
+  return Boolean(loadSettings().localNetworkSharingEnabled);
+}
+
+function getLanShareToken(): string {
+  const settings = loadSettings();
+  if (settings.localNetworkShareToken && /^\d{6}$/.test(settings.localNetworkShareToken)) {
+    return settings.localNetworkShareToken;
+  }
+
+  const token = createLanShareCode();
+  saveSettings({ ...settings, localNetworkShareToken: token });
+  return token;
+}
+
+function requestToken(reqUrl: URL, req: http.IncomingMessage): string {
+  const authHeader = req.headers.authorization || '';
+  const bearer = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  if (bearer?.startsWith('Bearer ')) return bearer.slice('Bearer '.length).trim();
+  return reqUrl.searchParams.get('token') || '';
+}
+
+function isAuthorizedLanRequest(reqUrl: URL, req: http.IncomingMessage): boolean {
+  return isLanSharingEnabled() && requestToken(reqUrl, req) === getLanShareToken();
+}
+
+function requireLocalOrLanAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (isLoopbackRequest(req)) return true;
+  if (isAuthorizedLanRequest(reqUrl, req)) return true;
+
+  res.writeHead(isLanSharingEnabled() ? 401 : 403, { 'Content-Type': 'text/plain' });
+  res.end(isLanSharingEnabled() ? 'Local network pairing is required.' : 'Local network sharing is disabled.');
+  return false;
+}
+
 function isLocalMediaServerArtworkUrl(source: string): boolean {
   try {
     const parsed = new URL(source);
@@ -871,6 +1052,27 @@ function artworkDeliveryUrl(source?: string | null): string {
   }
 
   return durableSource;
+}
+
+function rewriteLocalServerUrl(source: string, base: string, token?: string): string {
+  try {
+    const parsed = new URL(source);
+    const next = new URL(`${parsed.pathname}${parsed.search}`, base);
+    if (token) next.searchParams.set('token', token);
+    return next.toString();
+  } catch {
+    return source;
+  }
+}
+
+function remoteArtworkDeliveryUrl(source: string, base: string, token: string): string {
+  if (!source) return '';
+  if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrl(source, base, token);
+  if (isExternalArtworkUrl(source)) {
+    const params = new URLSearchParams({ source, token });
+    return `${base}/api/cached-artwork?${params.toString()}`;
+  }
+  return source;
 }
 
 function artworkDeliveryUrls(sources?: string[]): string[] {
@@ -1283,6 +1485,49 @@ function startMediaServer(): Promise<number> {
         writeJson(res, 200, { ok: true, port: mediaServerPort });
         return;
       }
+
+      if (reqUrl.pathname === '/api/lan/info') {
+        const settings = loadSettings();
+        writeJson(res, 200, {
+          ok: true,
+          app: 'LoomTV',
+          deviceName: os.hostname(),
+          sharingEnabled: Boolean(settings.localNetworkSharingEnabled),
+          networkName: getLocalNetworkName(),
+          port: mediaServerPort,
+          addresses: getLocalNetworkAddresses(),
+        });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/lan/status') {
+        if (!isLoopbackRequest(req)) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' });
+          res.end('LAN status is only available on this device.');
+          return;
+        }
+
+        const token = getLanShareToken();
+        const base = getLanServerBase();
+        writeJson(res, 200, {
+          sharingEnabled: isLanSharingEnabled(),
+          token,
+          networkName: getLocalNetworkName(),
+          port: mediaServerPort,
+          addresses: getLocalNetworkAddresses(),
+          baseUrl: base,
+          libraryUrl: base ? `${base}/api/lan/library?token=${encodeURIComponent(token)}` : null,
+        });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/lan/library') {
+        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+        writeJson(res, 200, libraryForLocalNetwork());
+        return;
+      }
+
+      if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
 
       if (reqUrl.pathname === '/api/library' && req.method === 'GET') {
         writeJson(res, 200, libraryForRenderer());
@@ -1836,7 +2081,7 @@ function startMediaServer(): Promise<number> {
     mediaServer = http.createServer(requestHandler);
 
     const tryListen = (port: number) => {
-      mediaServer!.listen(port, '127.0.0.1', () => {
+      mediaServer!.listen(port, '0.0.0.0', () => {
         mediaServerPort = port;
         console.log(`Media server on port ${port}`);
         resolve(port);
@@ -3653,6 +3898,48 @@ function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
   };
 }
 
+function itemForLocalNetwork(item: MediaItem, base: string, token: string): MediaItem {
+  const streamParams = new URLSearchParams({ path: item.filePath, token });
+  const poster = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.poster), base, token);
+  const backdrop = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.backdrop), base, token);
+  const posterCandidates = artworkDeliveryUrls(item.posterCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
+  const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
+
+  return {
+    ...item,
+    filePath: `${base}/stream?${streamParams.toString()}`,
+    poster,
+    backdrop,
+    posterCandidates,
+    backdropCandidates,
+    episodes: item.episodes?.map((episode) => ({
+      ...episode,
+      still: remoteArtworkDeliveryUrl(artworkDeliveryUrl(episode.still), base, token),
+    })),
+    episodeFiles: item.episodeFiles?.map((episodeFile) => {
+      const episodeParams = new URLSearchParams({ path: episodeFile.filePath, token });
+      return {
+        ...episodeFile,
+        filePath: `${base}/stream?${episodeParams.toString()}`,
+      };
+    }),
+  };
+}
+
+function libraryForLocalNetwork(): LibraryData {
+  const base = getLanServerBase() || `http://127.0.0.1:${mediaServerPort}`;
+  const token = getLanShareToken();
+  const data = loadLibrary();
+  return {
+    ...data,
+    libraryFolders: [],
+    libraryFolderGroups: { movies: [], tvShows: [], anime: [] },
+    movies: (data.movies || []).map((item) => itemForLocalNetwork(item, base, token)),
+    tvShows: (data.tvShows || []).map((item) => itemForLocalNetwork(item, base, token)),
+    animeShows: (data.animeShows || []).map((item) => itemForLocalNetwork(item, base, token)),
+  };
+}
+
 let artworkCacheQueue: Promise<void> = Promise.resolve();
 
 function cacheArtworkInBackground(data: LibraryData): void {
@@ -4086,6 +4373,20 @@ ipcMain.handle('settings:get', () => loadSettings());
 ipcMain.handle('settings:save', (_event, settings: AppSettings) => {
   saveSettings({ ...loadSettings(), ...settings });
   return true;
+});
+
+ipcMain.handle('network:status', () => {
+  const token = getLanShareToken();
+  const base = getLanServerBase();
+  return {
+    sharingEnabled: isLanSharingEnabled(),
+    token,
+    networkName: getLocalNetworkName(),
+    port: mediaServerPort,
+    addresses: getLocalNetworkAddresses(),
+    baseUrl: base,
+    libraryUrl: base ? `${base}/api/lan/library?token=${encodeURIComponent(token)}` : null,
+  };
 });
 
 ipcMain.handle('progress:get', (_event, filePath?: string) => filePath ? getProgress(filePath) : getAllProgress());
