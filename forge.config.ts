@@ -28,8 +28,16 @@ const config: ForgeConfig = {
     new MakerDMG({
       icon: 'resources/icon.icns',
     }, ['darwin']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({
+      options: {
+        bin: 'LoomTV',
+      },
+    }),
+    new MakerDeb({
+      options: {
+        bin: 'LoomTV',
+      },
+    }),
   ],
   plugins: [
     new VitePlugin({
