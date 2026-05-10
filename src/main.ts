@@ -1216,6 +1216,16 @@ function yearsMatch(localYear?: number, remoteYear?: number): boolean {
   return Math.abs(localYear - remoteYear) <= 1;
 }
 
+function uniqueMetadataSearchHits<T>(hits: T[], keyForHit: (hit: T) => string): T[] {
+  const seen = new Set<string>();
+  return hits.filter((hit) => {
+    const key = keyForHit(hit);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function movieHitMatchesLocal(
   hit: { title?: string; original_title?: string; release_date?: string },
   localTitles: string[],
@@ -1683,6 +1693,28 @@ function startMediaServer(): Promise<number> {
           .catch((error) => {
             console.error('refresh official artwork API error:', error);
             writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to refresh official artwork' });
+          });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/artwork/official-candidates' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => getOfficialMetadataCandidates(String(body.mediaId || '')))
+          .then((candidates) => writeJson(res, 200, candidates))
+          .catch((error) => {
+            console.error('official metadata candidates API error:', error);
+            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to fetch official metadata candidates' });
+          });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/artwork/apply-official' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => applyOfficialMetadataCandidate(String(body.mediaId || ''), body.candidate as OfficialMetadataCandidate))
+          .then((artwork) => writeJson(res, 200, artwork))
+          .catch((error) => {
+            console.error('apply official metadata API error:', error);
+            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to apply official metadata' });
           });
         return;
       }
@@ -2202,6 +2234,34 @@ async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMet
   }
 }
 
+async function fetchTVMetadataCandidates(title: string, localYear?: number): Promise<TVMetadata[]> {
+  try {
+    const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`);
+    const searchData: any[] = await searchRes.json();
+    if (!Array.isArray(searchData) || searchData.length === 0) return [];
+
+    return searchData.slice(0, 6).map((result: any) => {
+      const show = result.show || {};
+      return {
+        title: show.name || title,
+        poster: show.image?.original || show.image?.medium || '',
+        backdrop: '',
+        summary: show.summary ? String(show.summary).replace(/<[^>]*>/g, '') : '',
+        rating: show.rating?.average || 0,
+        genres: show.genres || [],
+        cast: [],
+        year: show.premiered ? yearFromDateString(show.premiered) : (localYear || 0),
+        language: show.language || '',
+        country: show.network?.country?.name || show.webChannel?.country?.name || '',
+        showType: show.type || '',
+      };
+    });
+  } catch (error) {
+    console.error('TVmaze candidates fetch error:', error);
+    return [];
+  }
+}
+
 async function fetchMovieMetadata(title: string, year?: number, omdbApiKey?: string): Promise<Partial<MediaItem> | null> {
   if (!omdbApiKey) return null;
   try {
@@ -2288,6 +2348,46 @@ function tmdbMovieResult(d: any, fallbackTitle: string): Partial<MediaItem> | nu
     year: d.release_date ? new Date(d.release_date).getFullYear() : 0,
     cast,
   };
+}
+
+function tmdbMovieSearchResult(d: any, fallbackTitle: string): Partial<MediaItem> | null {
+  if (!d) return null;
+  return {
+    title: d.title || fallbackTitle,
+    poster: tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdrop(d.backdrop_path),
+    summary: d.overview || '',
+    rating: d.vote_average ?? 0,
+    genres: [],
+    year: d.release_date ? yearFromDateString(d.release_date) : 0,
+    cast: [],
+  };
+}
+
+async function fetchTMDBMovieMetadataCandidates(
+  title: string,
+  year?: number,
+  tmdbCredential?: string,
+): Promise<Partial<MediaItem>[]> {
+  if (!tmdbCredential) return [];
+  try {
+    const searchPaths = [
+      `search/movie?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`,
+      year ? `search/movie?query=${encodeURIComponent(title)}` : '',
+    ].filter(Boolean);
+    const hits: any[] = [];
+    for (const searchPath of searchPaths) {
+      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
+      const results = Array.isArray(searchData?.results) ? searchData.results : [];
+      hits.push(...results.slice(0, 6));
+    }
+    return uniqueMetadataSearchHits(hits, (hit) => `tmdb-movie:${hit.id}`)
+      .map((hit) => tmdbMovieSearchResult(hit, title))
+      .filter((result): result is Partial<MediaItem> => Boolean(result));
+  } catch (err) {
+    console.error('[TMDB movie candidates]', err);
+    return [];
+  }
 }
 
 async function fetchTMDBMovieMetadata(
@@ -2391,6 +2491,46 @@ async function tmdbTVResultFromDetails(d: any, fallbackTitle: string, tmdbCreden
     episodes,
     tmdbSeasons,
   };
+}
+
+function tmdbTVSearchResult(d: any, fallbackTitle: string): TMDBTVResult | null {
+  if (!d) return null;
+  return {
+    title: d.name || fallbackTitle,
+    poster: tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdrop(d.backdrop_path),
+    summary: d.overview || '',
+    rating: d.vote_average ?? 0,
+    genres: [],
+    year: d.first_air_date ? yearFromDateString(d.first_air_date) : 0,
+    cast: [],
+  };
+}
+
+async function fetchTMDBTVMetadataCandidates(
+  title: string,
+  year?: number,
+  tmdbCredential?: string,
+): Promise<TMDBTVResult[]> {
+  if (!tmdbCredential) return [];
+  try {
+    const searchPaths = [
+      `search/tv?query=${encodeURIComponent(title)}${year ? `&first_air_date_year=${year}` : ''}`,
+      year ? `search/tv?query=${encodeURIComponent(title)}` : '',
+    ].filter(Boolean);
+    const hits: any[] = [];
+    for (const searchPath of searchPaths) {
+      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
+      const results = Array.isArray(searchData?.results) ? searchData.results : [];
+      hits.push(...results.slice(0, 6));
+    }
+    return uniqueMetadataSearchHits(hits, (hit) => `tmdb-tv:${hit.id}`)
+      .map((hit) => tmdbTVSearchResult(hit, title))
+      .filter((result): result is TMDBTVResult => Boolean(result));
+  } catch (err) {
+    console.error('[TMDB TV candidates]', err);
+    return [];
+  }
 }
 
 async function fetchTMDBTVMetadata(
@@ -2518,6 +2658,28 @@ async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | nul
   } catch (err) {
     console.error('[Jikan]', err);
     return null;
+  }
+}
+
+async function fetchJikanMetadataCandidates(title: string): Promise<JikanAnimeResult[]> {
+  try {
+    const searchData: any = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=8&sfw`);
+    const hits: any[] = Array.isArray(searchData.data) ? searchData.data : [];
+    return hits.map((hit) => ({
+      malId: hit.mal_id,
+      title: (hit.title_english as string) || (hit.title as string) || title,
+      poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '',
+      backdrop: '',
+      summary: (hit.synopsis as string) || '',
+      rating: (hit.score as number) ?? 0,
+      genres: ((hit.genres ?? []) as any[]).map((genre: any) => genre.name as string),
+      year: (hit.year as number) ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
+      cast: [],
+      episodes: [],
+    }));
+  } catch (err) {
+    console.error('[Jikan candidates]', err);
+    return [];
   }
 }
 
@@ -3717,6 +3879,30 @@ function localTitleFromPath(filePath?: string): string | null {
   return null;
 }
 
+function seriesTitleFromEpisodeName(value?: string): string | null {
+  if (!value) return null;
+  const withoutExt = value.replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts)$/i, '');
+  const withoutReleaseGroups = withoutExt.replace(/\[[^\]]*]/g, ' ');
+  const beforeEpisodeMarker = withoutReleaseGroups
+    .replace(/\s+-\s+S\d{1,2}E\d{1,3}\s+-\s+.*$/i, ' ')
+    .replace(/\s+[Ss]\d{1,2}[Ee]\d{1,3}\s+.*$/i, ' ')
+    .replace(/\s+-\s+\d{1,3}\s*$/i, ' ')
+    .replace(/\s+\d{1,3}\s*$/i, ' ');
+  const title = cleanMediaTitle(beforeEpisodeMarker).title;
+  if (!title || isGenericGroupingFolderTitle(title)) return null;
+  return title;
+}
+
+function bestSeriesTitleFromEpisodes(item: MediaItem): string | null {
+  const candidates = (item.episodeFiles || []).flatMap((episodeFile) => [
+    seriesTitleFromEpisodeName(path.basename(episodeFile.filePath)),
+    seriesTitleFromEpisodeName(episodeFile.title || ''),
+  ]);
+  const titles = uniqueLocalTitles(candidates);
+  if (titles.length === 0) return null;
+  return titles.sort((a, b) => normalizeTitleForMatch(b).length - normalizeTitleForMatch(a).length)[0];
+}
+
 function pathExists(candidatePath?: string): boolean {
   if (!candidatePath) return false;
   try {
@@ -3982,6 +4168,14 @@ type OfficialArtworkRefreshResult = {
   backdropCandidates: string[];
 };
 
+type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
+  id: string;
+  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+  title: string;
+  year?: number;
+  genres?: string[];
+};
+
 function numericRating(value: unknown): number {
   const rating = typeof value === 'number' ? value : parseFloat(String(value || ''));
   return Number.isFinite(rating) && rating > 0 ? rating : 0;
@@ -4019,10 +4213,121 @@ function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
         || host.includes('media-amazon.com')
         || host.includes('m.media-amazon.com')
         || host.includes('cdn.myanimelist.net')
+        || host.includes('myanimelist.net')
         || host.includes('static.tvmaze.com');
     } catch {
       return false;
     }
+  });
+}
+
+function metadataCandidateId(candidate: Omit<OfficialMetadataCandidate, 'id'>): string {
+  return createHash('sha1')
+    .update(JSON.stringify({
+      source: candidate.source,
+      title: candidate.title,
+      year: candidate.year || 0,
+      thumbnail: candidate.thumbnail || '',
+      cover: candidate.cover || '',
+    }))
+    .digest('hex')
+    .slice(0, 12);
+}
+
+function metadataCandidate(
+  source: OfficialMetadataCandidate['source'],
+  metadata: Partial<MediaItem> | null | undefined,
+  fallbackTitle: string,
+): OfficialMetadataCandidate | null {
+  if (!metadata) return null;
+  const posterCandidates = officialArtworkOnly([metadata.poster, ...(metadata.posterCandidates || [])]);
+  const backdropCandidates = officialArtworkOnly([metadata.backdrop, ...(metadata.backdropCandidates || [])]);
+  const title = String(metadata.title || fallbackTitle || '').trim();
+  const candidateWithoutId: Omit<OfficialMetadataCandidate, 'id'> = {
+    source,
+    title,
+    year: metadata.year || undefined,
+    thumbnail: posterCandidates[0] || '',
+    cover: backdropCandidates[0] || posterCandidates[0] || '',
+    summary: metadata.summary || '',
+    rating: numericRating(metadata.rating),
+    genres: Array.isArray(metadata.genres) ? metadata.genres.filter(Boolean) : [],
+    posterCandidates,
+    backdropCandidates,
+  };
+  if (!candidateWithoutId.title && !candidateWithoutId.thumbnail && !candidateWithoutId.cover) return null;
+  return { ...candidateWithoutId, id: metadataCandidateId(candidateWithoutId) };
+}
+
+function omdbMetadataCandidate(metadata: Record<string, any> | null | undefined, fallbackTitle: string): OfficialMetadataCandidate | null {
+  if (!metadata) return null;
+  const poster = metadata.Poster && metadata.Poster !== 'N/A' ? metadata.Poster : '';
+  return metadataCandidate('OMDb', {
+    title: metadata.Title || fallbackTitle,
+    year: metadata.Year ? parseInt(String(metadata.Year), 10) : 0,
+    poster,
+    backdrop: poster,
+    summary: metadata.Plot && metadata.Plot !== 'N/A' ? metadata.Plot : '',
+    rating: numericRating(metadata.imdbRating),
+    genres: metadata.Genre && metadata.Genre !== 'N/A' ? String(metadata.Genre).split(',').map((genre) => genre.trim()) : [],
+  }, fallbackTitle);
+}
+
+function uniqueMetadataCandidates(candidates: Array<OfficialMetadataCandidate | null>): OfficialMetadataCandidate[] {
+  const seen = new Set<string>();
+  return candidates.filter((candidate): candidate is OfficialMetadataCandidate => {
+    if (!candidate) return false;
+    const key = `${candidate.source}:${candidate.title.toLowerCase()}:${candidate.year || ''}:${candidate.thumbnail || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function metadataCandidateScore(candidate: OfficialMetadataCandidate, preferredTitle: string, localTitles: string[]): number {
+  const normalizedCandidate = normalizeTitleForMatch(candidate.title);
+  const normalizedPreferred = normalizeTitleForMatch(preferredTitle);
+  const normalizedLocals = localTitles.map(normalizeTitleForMatch).filter(Boolean);
+  let score = 0;
+
+  if (normalizedCandidate === normalizedPreferred) score += 100;
+  if (normalizedLocals.some((title) => normalizedCandidate === title)) score += 80;
+  if (normalizedPreferred && normalizedCandidate.includes(normalizedPreferred)) score += 45;
+  if (normalizedPreferred && normalizedPreferred.includes(normalizedCandidate)) score += 35;
+
+  const preferredTokens = new Set(normalizedPreferred.split(' ').filter((token) => token.length > 2));
+  const candidateTokens = new Set(normalizedCandidate.split(' ').filter((token) => token.length > 2));
+  let sharedTokens = 0;
+  preferredTokens.forEach((token) => {
+    if (candidateTokens.has(token)) sharedTokens++;
+  });
+  if (preferredTokens.size > 0) score += (sharedTokens / preferredTokens.size) * 30;
+
+  if (candidate.thumbnail) score += 8;
+  if (candidate.cover && candidate.cover !== candidate.thumbnail) score += 6;
+  if (candidate.summary) score += 4;
+  if (candidate.rating) score += 2;
+
+  const sequelArcWords = /\b(mugen|entertainment|district|swordsmith|hashira|training|infinity|castle|arc)\b/i;
+  if (sequelArcWords.test(candidate.title)) {
+    score -= 140;
+  } else {
+    score += 60;
+  }
+  return score;
+}
+
+function sortMetadataCandidates(
+  candidates: OfficialMetadataCandidate[],
+  preferredTitle: string,
+  localTitles: string[],
+): OfficialMetadataCandidate[] {
+  const sequelArcWords = /\b(mugen|entertainment|district|swordsmith|hashira|training|infinity|castle|arc)\b/i;
+  return [...candidates].sort((a, b) => {
+    const aIsArc = sequelArcWords.test(a.title);
+    const bIsArc = sequelArcWords.test(b.title);
+    if (aIsArc !== bIsArc) return aIsArc ? 1 : -1;
+    return metadataCandidateScore(b, preferredTitle, localTitles) - metadataCandidateScore(a, preferredTitle, localTitles);
   });
 }
 
@@ -4037,14 +4342,17 @@ function itemArtworkLookupData(item: MediaItem): {
   const parsedPathTitle = representativePath ? cleanMediaTitle(path.basename(representativePath)).title : '';
   const folderTitle = item.filePath ? cleanMediaTitle(path.basename(item.filePath)).title : '';
   const embeddedTitle = item.type === 'movie' ? probe.embeddedTitle : probe.embeddedShowTitle;
+  const episodeSeriesTitle = item.type === 'movie' ? null : bestSeriesTitleFromEpisodes(item);
   const searchTitle =
-    usefulLocalTitle(item.title)
+    usefulLocalTitle(episodeSeriesTitle || '')
     || usefulLocalTitle(embeddedTitle)
     || usefulLocalTitle(folderTitle)
     || usefulLocalTitle(parsedPathTitle)
+    || usefulLocalTitle(item.title)
     || item.title;
   const localTitles = uniqueLocalTitles([
     searchTitle,
+    episodeSeriesTitle,
     item.title,
     embeddedTitle,
     folderTitle,
@@ -4062,6 +4370,60 @@ function itemArtworkLookupData(item: MediaItem): {
     localTitles,
     providerIds,
   };
+}
+
+function findLibraryMediaItem(library: LibraryData, mediaId: string): MediaItem | null {
+  return [...library.movies, ...library.tvShows, ...library.animeShows].find((item) => item.id === mediaId) || null;
+}
+
+async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<OfficialMetadataCandidate[]> {
+  const settings = loadSettings();
+  const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
+  const omdbApiKey = getMetadataApiKey(settings, 'omdb');
+  const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
+
+  if (item.type === 'movie') {
+    const [tmdbById, tmdbBySearch, tmdbCandidates, omdbById, omdbBySearch, tvMeta, tvCandidates] = await Promise.all([
+      providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
+      fetchTMDBMovieMetadata(title, year, tmdbApiKey),
+      fetchTMDBMovieMetadataCandidates(title, year, tmdbApiKey),
+      providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
+      fetchOMDbMetadata(title, year, omdbApiKey),
+      fetchTVMetadata(title, year),
+      fetchTVMetadataCandidates(title, year),
+    ]);
+    return sortMetadataCandidates(uniqueMetadataCandidates([
+      metadataCandidate('TMDB', tmdbById, title),
+      metadataCandidate('TMDB', tmdbBySearch, title),
+      ...tmdbCandidates.map((candidate) => metadataCandidate('TMDB', candidate, title)),
+      omdbMetadataCandidate(omdbById, title),
+      omdbMetadataCandidate(omdbBySearch, title),
+      metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
+      ...tvCandidates.map((candidate) => metadataCandidate('TVmaze', candidate, title)),
+    ]), title, localTitles);
+  }
+
+  const likelyAnime = item.type === 'anime';
+  const [omdbById, omdbBySearch, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvMeta, tvCandidates] = await Promise.all([
+    providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
+    fetchOMDbMetadata(title, year, omdbApiKey),
+    likelyAnime ? fetchJikanMetadataCandidates(title) : Promise.resolve([]),
+    providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
+    fetchTMDBTVMetadata(title, year, tmdbApiKey),
+    fetchTMDBTVMetadataCandidates(title, year, tmdbApiKey),
+    fetchTVMetadata(title, year),
+    fetchTVMetadataCandidates(title, year),
+  ]);
+  return sortMetadataCandidates(uniqueMetadataCandidates([
+    ...jikanCandidates.map((candidate) => metadataCandidate('Jikan', candidate, title)),
+    metadataCandidate('TMDB', tmdbById, title),
+    metadataCandidate('TMDB', remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null, title),
+    ...tmdbCandidates.map((candidate) => metadataCandidate('TMDB', candidate, title)),
+    omdbMetadataCandidate(omdbById, title),
+    omdbMetadataCandidate(remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null, title),
+    metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
+    ...tvCandidates.map((candidate) => metadataCandidate('TVmaze', candidate, title)),
+  ]), title, localTitles);
 }
 
 async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
@@ -4130,16 +4492,57 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
   };
 }
 
+function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMetadataCandidate): OfficialArtworkRefreshResult {
+  const library = loadLibrary();
+  const target = findLibraryMediaItem(library, mediaId);
+
+  if (!target) {
+    throw new Error('Media item was not found in the library.');
+  }
+
+  if (candidate.title) target.title = candidate.title;
+  if (candidate.year) target.year = candidate.year;
+  if (candidate.thumbnail) target.poster = candidate.thumbnail;
+  if (candidate.cover) target.backdrop = candidate.cover;
+  if (candidate.summary) target.summary = candidate.summary;
+  if (candidate.rating) target.rating = candidate.rating;
+  if (candidate.genres?.length) target.genres = candidate.genres;
+  target.posterCandidates = orderedArtworkCandidates(
+    ...(candidate.posterCandidates || []),
+    candidate.thumbnail,
+    ...officialArtworkOnly(target.posterCandidates || []),
+    target.poster,
+  );
+  target.backdropCandidates = orderedArtworkCandidates(
+    ...(candidate.backdropCandidates || []),
+    candidate.cover,
+    ...officialArtworkOnly(target.backdropCandidates || []),
+    target.backdrop,
+  );
+  saveLibrary(library);
+
+  return {
+    thumbnail: candidate.thumbnail || target.poster || '',
+    cover: candidate.cover || target.backdrop || candidate.thumbnail || target.poster || '',
+    summary: candidate.summary || target.summary || '',
+    rating: candidate.rating || target.rating || 0,
+    posterCandidates: target.posterCandidates || [],
+    backdropCandidates: target.backdropCandidates || [],
+  };
+}
+
+async function getOfficialMetadataCandidates(mediaId: string): Promise<OfficialMetadataCandidate[]> {
+  const library = loadLibrary();
+  const target = findLibraryMediaItem(library, mediaId);
+  if (!target) {
+    throw new Error('Media item was not found in the library.');
+  }
+  return fetchOfficialMetadataCandidatesForItem(target);
+}
+
 async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkRefreshResult> {
   const library = loadLibrary();
-  const collections: Array<{ items: MediaItem[] }> = [
-    { items: library.movies },
-    { items: library.tvShows },
-    { items: library.animeShows },
-  ];
-  const target = collections
-    .flatMap((collection) => collection.items)
-    .find((item) => item.id === mediaId);
+  const target = findLibraryMediaItem(library, mediaId);
 
   if (!target) {
     throw new Error('Media item was not found in the library.');
@@ -4426,6 +4829,9 @@ ipcMain.handle('artwork:save', (_event, mediaId: string, target: string, dataUrl
   saveCustomArtwork(mediaId, target, dataUrl);
   return getCustomArtwork(mediaId);
 });
+ipcMain.handle('artwork:official-candidates', (_event, mediaId: string) => getOfficialMetadataCandidates(mediaId));
+ipcMain.handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) =>
+  applyOfficialMetadataCandidate(mediaId, candidate));
 ipcMain.handle('artwork:refresh-official', (_event, mediaId: string) => refreshOfficialArtwork(mediaId));
 ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
   importCustomArtwork(entries || {});

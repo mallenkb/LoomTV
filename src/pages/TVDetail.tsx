@@ -331,6 +331,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={generatedArtwork[0] || ''}
           onFetchOfficialArtwork={() => desktopApi.refreshOfficialArtwork(show.id)}
+          onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(show.id)}
+          onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(show.id, candidate)}
         />
         <button
           type="button"
