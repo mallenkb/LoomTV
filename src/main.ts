@@ -30,6 +30,7 @@ import {
   cacheLibraryArtwork,
   clearDatabase,
   getAllProgress,
+  getCachedArtwork,
   getCustomArtwork,
   getProgress,
   importCustomArtwork,
@@ -77,7 +78,7 @@ app.setPath('userData', USER_DATA_DIR);
 let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 7;
+const SCAN_CACHE_VERSION = 8;
 let libraryMutationVersion = 0;
 
 let mediaServerPort = 3847;
@@ -294,6 +295,23 @@ async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, a
 function writeJson(res: http.ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(payload));
+}
+
+function decodeDataUrl(dataUrl: string): { buffer: Buffer; mimeType: string } | null {
+  const match = dataUrl.match(/^data:([^;,]+)?;base64,(.+)$/s);
+  if (!match) return null;
+  return {
+    mimeType: match[1] || 'application/octet-stream',
+    buffer: Buffer.from(match[2], 'base64'),
+  };
+}
+
+function redirectToArtworkSource(res: http.ServerResponse, sourceUrl: string): void {
+  res.writeHead(302, {
+    Location: sourceUrl,
+    'Cache-Control': 'public, max-age=3600',
+  });
+  res.end();
 }
 
 function safeEndResponse(res: http.ServerResponse): void {
@@ -795,6 +813,70 @@ function getEmbeddedThumbnailUrl(filePath: string, streamIndex?: number): string
   return `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
 }
 
+function isInlineArtworkSource(source?: string | null): boolean {
+  return /^data:/i.test(source || '');
+}
+
+function hasDurableArtworkSource(source?: string | null): boolean {
+  return Boolean(source?.trim()) && !isInlineArtworkSource(source);
+}
+
+function durableArtworkSource(source?: string | null): string {
+  if (!hasDurableArtworkSource(source)) return '';
+  return String(source).trim();
+}
+
+function durableArtworkSources(sources?: string[]): string[] {
+  return Array.from(new Set((sources || []).map(durableArtworkSource).filter(Boolean)));
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function isLocalMediaServerArtworkUrl(source: string): boolean {
+  try {
+    const parsed = new URL(source);
+    return isLoopbackHost(parsed.hostname)
+      && ['/api/thumbnail', '/api/local-image', '/api/cached-artwork'].includes(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isExternalArtworkUrl(source: string): boolean {
+  try {
+    const parsed = new URL(source);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function artworkDeliveryUrl(source?: string | null): string {
+  if (isInlineArtworkSource(source)) return String(source).trim();
+
+  const durableSource = durableArtworkSource(source);
+  if (!durableSource) return '';
+
+  if (isLocalMediaServerArtworkUrl(durableSource)) {
+    const parsed = new URL(durableSource);
+    return `http://127.0.0.1:${mediaServerPort}${parsed.pathname}${parsed.search}`;
+  }
+
+  if (isExternalArtworkUrl(durableSource)) {
+    const params = new URLSearchParams({ source: durableSource });
+    return `http://127.0.0.1:${mediaServerPort}/api/cached-artwork?${params.toString()}`;
+  }
+
+  return durableSource;
+}
+
+function artworkDeliveryUrls(sources?: string[]): string[] {
+  return Array.from(new Set((sources || []).map(artworkDeliveryUrl).filter(Boolean)));
+}
+
 function orderedArtworkCandidates(...urls: Array<string | null | undefined>): string[] {
   return Array.from(new Set(urls.filter((url): url is string => Boolean(url?.trim()))));
 }
@@ -904,10 +986,10 @@ function remoteMatchesAnyLocalTitle(localTitles: string[], remoteTitle?: string)
 
 function mediaItemHasUsableArtwork(item: MediaItem): boolean {
   return Boolean(
-    item.poster?.trim()
-    || item.backdrop?.trim()
-    || item.posterCandidates?.some((source) => source.trim())
-    || item.backdropCandidates?.some((source) => source.trim()),
+    durableArtworkSource(item.poster)
+    || durableArtworkSource(item.backdrop)
+    || item.posterCandidates?.some((source) => durableArtworkSource(source))
+    || item.backdropCandidates?.some((source) => durableArtworkSource(source)),
   );
 }
 
@@ -1203,7 +1285,7 @@ function startMediaServer(): Promise<number> {
       }
 
       if (reqUrl.pathname === '/api/library' && req.method === 'GET') {
-        writeJson(res, 200, loadLibrary());
+        writeJson(res, 200, libraryForRenderer());
         return;
       }
 
@@ -1216,8 +1298,10 @@ function startMediaServer(): Promise<number> {
             mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
           }))
           .then((scanned) => {
-            saveLibraryFromScan(scanned, scanVersion);
-            writeJson(res, 200, loadLibrary());
+            if (saveLibraryFromScan(scanned, scanVersion)) {
+              cacheArtworkInBackground(scanned);
+            }
+            writeJson(res, 200, libraryForRenderer());
           })
           .catch((error) => {
             console.error('scan library API error:', error);
@@ -1248,8 +1332,10 @@ function startMediaServer(): Promise<number> {
             saveLibraryMutation(updated);
             const scanVersion = libraryMutationVersion;
             const scanned = await scanLibrary(updated, { mode: 'quick' });
-            saveLibraryFromScan(scanned, scanVersion);
-            writeJson(res, 200, loadLibrary());
+            if (saveLibraryFromScan(scanned, scanVersion)) {
+              cacheArtworkInBackground(scanned);
+            }
+            writeJson(res, 200, libraryForRenderer());
           })
           .catch((error) => {
             console.error('add folder API error:', error);
@@ -1264,7 +1350,7 @@ function startMediaServer(): Promise<number> {
             const data = loadLibrary();
             const updated = removeFolderFromLibrary(data, String(body.folderPath || ''));
             saveLibraryMutation(updated);
-            writeJson(res, 200, loadLibrary());
+            writeJson(res, 200, libraryForRenderer());
           })
           .catch((error) => {
             console.error('remove folder API error:', error);
@@ -1381,7 +1467,7 @@ function startMediaServer(): Promise<number> {
 
       if (reqUrl.pathname === '/api/database/clear' && req.method === 'POST') {
         try {
-          writeJson(res, 200, clearAppData());
+          writeJson(res, 200, libraryForRenderer(clearAppData()));
         } catch (error) {
           console.error('database clear API error:', error);
           writeJson(res, 500, { error: 'Failed to clear app data' });
@@ -1391,6 +1477,35 @@ function startMediaServer(): Promise<number> {
 
       if (reqUrl.pathname === '/api/ffmpeg') {
         writeJson(res, 200, { available: findFFmpeg() !== null, path: findFFmpeg() });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/cached-artwork') {
+        const sourceUrl = reqUrl.searchParams.get('source') || '';
+        if (!sourceUrl || !isExternalArtworkUrl(sourceUrl)) {
+          res.writeHead(400);
+          res.end('Invalid artwork source');
+          return;
+        }
+
+        const cachedArtwork = getCachedArtwork(sourceUrl);
+        if (!cachedArtwork) {
+          redirectToArtworkSource(res, sourceUrl);
+          return;
+        }
+
+        const decoded = decodeDataUrl(cachedArtwork.dataUrl);
+        if (!decoded) {
+          redirectToArtworkSource(res, sourceUrl);
+          return;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': cachedArtwork.mimeType || decoded.mimeType,
+          'Cache-Control': 'public, max-age=86400',
+          'Content-Length': decoded.buffer.byteLength,
+        });
+        res.end(decoded.buffer);
         return;
       }
 
@@ -3339,7 +3454,6 @@ async function scanLibrary(
     libraryFolderGroups: folderGroups,
     scanCache: nextScanCache,
   };
-  await cacheLibraryArtwork(nextLibrary);
   await publishProgress(true);
   return nextLibrary;
 }
@@ -3488,15 +3602,79 @@ function loadLibrary(): LibraryData {
   return { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups, scanCache: {} };
 }
 
+function stripInlineArtworkFromItem(item: MediaItem): MediaItem {
+  return {
+    ...item,
+    poster: durableArtworkSource(item.poster),
+    backdrop: durableArtworkSource(item.backdrop),
+    posterCandidates: durableArtworkSources(item.posterCandidates),
+    backdropCandidates: durableArtworkSources(item.backdropCandidates),
+    episodes: item.episodes?.map((episode) => ({
+      ...episode,
+      still: durableArtworkSource(episode.still),
+    })),
+  };
+}
+
+function stripInlineArtworkFromLibrary(data: LibraryData): LibraryData {
+  return {
+    ...data,
+    movies: (data.movies || []).map(stripInlineArtworkFromItem),
+    tvShows: (data.tvShows || []).map(stripInlineArtworkFromItem),
+    animeShows: (data.animeShows || []).map(stripInlineArtworkFromItem),
+  };
+}
+
+function itemWithArtworkDeliveryUrls(item: MediaItem): MediaItem {
+  const poster = artworkDeliveryUrl(item.poster);
+  const backdrop = artworkDeliveryUrl(item.backdrop);
+  const posterCandidates = artworkDeliveryUrls(item.posterCandidates);
+  const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates);
+
+  return {
+    ...item,
+    poster,
+    backdrop,
+    posterCandidates,
+    backdropCandidates,
+    episodes: item.episodes?.map((episode) => ({
+      ...episode,
+      still: artworkDeliveryUrl(episode.still),
+    })),
+  };
+}
+
+function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
+  return {
+    ...data,
+    movies: (data.movies || []).map(itemWithArtworkDeliveryUrls),
+    tvShows: (data.tvShows || []).map(itemWithArtworkDeliveryUrls),
+    animeShows: (data.animeShows || []).map(itemWithArtworkDeliveryUrls),
+  };
+}
+
+let artworkCacheQueue: Promise<void> = Promise.resolve();
+
+function cacheArtworkInBackground(data: LibraryData): void {
+  const snapshot = stripInlineArtworkFromLibrary(data);
+  artworkCacheQueue = artworkCacheQueue
+    .catch(() => undefined)
+    .then(() => cacheLibraryArtwork(snapshot))
+    .catch((error) => {
+      console.warn('[artwork-cache] Failed to cache library artwork:', error);
+    });
+}
+
 function saveLibrary(data: LibraryData): void {
   try {
+    const durableData = stripInlineArtworkFromLibrary(data);
     const libraryFolderGroups = normalizeLibraryFolderGroups(data);
     const activeFolders = new Set(flattenLibraryFolders(libraryFolderGroups));
     const scanCache = Object.fromEntries(
-      Object.entries(data.scanCache || {}).filter(([folder]) => activeFolders.has(folder)),
+      Object.entries(durableData.scanCache || {}).filter(([folder]) => activeFolders.has(folder)),
     );
     saveLibraryToDatabase({
-      ...data,
+      ...durableData,
       libraryFolderGroups,
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       scanCache,
@@ -3785,7 +3963,7 @@ function createWindow() {
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
-ipcMain.handle('library:get', () => loadLibrary());
+ipcMain.handle('library:get', () => libraryForRenderer());
 
 ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?: LibraryScanMode }) => {
   const data = loadLibrary();
@@ -3799,15 +3977,17 @@ ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?:
     mode,
     onProgress: (snapshot) => {
       saveLibraryFromScan(snapshot, scanVersion);
-      event.sender.send('library:scan-progress', loadLibrary(), {
+      event.sender.send('library:scan-progress', libraryForRenderer(), {
         isComplete: snapshot.isComplete,
         scannedFolders: snapshot.scannedFolders,
         totalFolders: snapshot.totalFolders,
       });
     },
   });
-  saveLibraryFromScan(scanned, scanVersion);
-  return loadLibrary();
+  if (saveLibraryFromScan(scanned, scanVersion)) {
+    cacheArtworkInBackground(scanned);
+  }
+  return libraryForRenderer();
 });
 
 ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'movies') => {
@@ -3828,7 +4008,7 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
       onProgress: (snapshot) => {
         saveLibraryFromScan(snapshot, scanVersion);
         BrowserWindow.getAllWindows().forEach((window) => {
-          window.webContents.send('library:scan-progress', loadLibrary(), {
+          window.webContents.send('library:scan-progress', libraryForRenderer(), {
             isComplete: snapshot.isComplete,
             scannedFolders: snapshot.scannedFolders,
             totalFolders: snapshot.totalFolders,
@@ -3836,8 +4016,10 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
         });
       },
     });
-    saveLibraryFromScan(scanned, scanVersion);
-    return loadLibrary();
+    if (saveLibraryFromScan(scanned, scanVersion)) {
+      cacheArtworkInBackground(scanned);
+    }
+    return libraryForRenderer();
   }
   return null;
 });
@@ -3846,7 +4028,7 @@ ipcMain.handle('library:remove-folder', (_event, folderPath: string) => {
   const data = loadLibrary();
   const updated = removeFolderFromLibrary(data, folderPath);
   saveLibraryMutation(updated);
-  return loadLibrary();
+  return libraryForRenderer();
 });
 
 ipcMain.handle('media:play', async (_event, filePath: string) => {
@@ -3924,7 +4106,7 @@ ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string,
   return true;
 });
 ipcMain.handle('database:backup', () => backupDatabase());
-ipcMain.handle('database:clear', () => clearAppData());
+ipcMain.handle('database:clear', () => libraryForRenderer(clearAppData()));
 ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url));
 
 ipcMain.handle('media:ffmpeg-available', () => {
