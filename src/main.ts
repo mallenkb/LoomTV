@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -3691,6 +3691,20 @@ function getWindowIconPath(): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
+function applyAppIcon() {
+  const iconPath = getWindowIconPath();
+  if (!iconPath) return;
+
+  app.setName('LoomTV');
+
+  if (process.platform === 'darwin' && app.dock) {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      app.dock.setIcon(icon);
+    }
+  }
+}
+
 function createWindow() {
   const windowOptions: ConstructorParameters<typeof BrowserWindow>[0] = {
     width: 1280,
@@ -3975,6 +3989,7 @@ ipcMain.handle('media:mpv-disable-subtitles', async () => {
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  applyAppIcon();
   cleanupOldTranscodes();
   await startMediaServer();
 
