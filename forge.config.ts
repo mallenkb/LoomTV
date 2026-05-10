@@ -12,6 +12,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     icon: 'resources/icon',
+    executableName: 'LoomTV',
     extraResource: [
       'resources/ffmpeg',
       'resources/mpv',
