@@ -2,7 +2,11 @@ name: Build installers
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
+    branches:
+      - main
+      - 'codex/**'
     tags:
       - 'v*'
 
