@@ -92,9 +92,9 @@ const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
 const DEFAULT_SIDEBAR_NAV_ORDER: SidebarNavItemId[] = ['anime', 'tv', 'movies'];
 
 const LOADER_OPTIONS: { id: AppLoaderStyle; label: string; description: string }[] = [
-  { id: 'play-mark', label: 'Compact Logo', description: 'Small branded loader for tight playback surfaces.' },
-  { id: 'logo-mark', label: 'App Logo', description: 'Balanced logo loader for general app surfaces.' },
-  { id: 'horizontal-logo', label: 'Large Logo', description: 'Larger branded loader for preview and splash-style surfaces.' },
+  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the LoomTV logo.' },
+  { id: 'logo-mark', label: 'Logo Only', description: 'Compact logo-only loader for tighter surfaces.' },
+  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full LoomTV wordmark animation for branded screens.' },
 ];
 
 const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
@@ -741,12 +741,12 @@ export default function Settings() {
                   Theme
                 </CardTitle>
                 <CardDescription className="text-[var(--loom-muted)]">
-                  LoomTV is using the dark theme for now. Pick an accent color for controls and highlights.
+                  LoomTV is using the dark theme for now. Pick a logo color and the app accent adjusts to match it.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
-                  <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Accent Colour</p>
+                  <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Logo Colour</p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     {(Object.keys(THEME_COLORS) as AppThemeColor[]).map((color) => {
                       const palette = THEME_COLORS[color];
@@ -770,20 +770,20 @@ export default function Settings() {
                             <span className="block text-sm font-semibold text-[var(--loom-text)]">{palette.label}</span>
                             <span className="block text-xs text-[var(--loom-muted)]">{palette.hex}</span>
                           </span>
-                          <LoomLogo accent={palette.hex} className="h-9 w-9" />
+                          <LoomLogo accent={palette.hex} className="h-6 w-auto" />
                         </button>
                       );
                     })}
                   </div>
                   <p className="mt-3 text-xs text-[var(--loom-muted)]">
-                    Yellow is the default LoomTV accent.
+                    Yellow is the default LoomTV branding.
                   </p>
                 </div>
 
                 <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-5">
                   <p className="mb-4 text-sm font-semibold text-[var(--loom-text)]">Preview</p>
                   <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] p-4">
-                    <LoomLogo className="h-16 w-16" />
+                    <LoomLogo className="h-7 w-auto" />
                     <Button className="gap-2">
                       <Palette className="h-4 w-4" />
                       Accent Action
@@ -810,7 +810,7 @@ export default function Settings() {
                           <LoomLoader
                             style={option.id}
                             className="h-14 w-14 rounded-full bg-white/10 text-white ring-1 ring-white/10"
-                            markClassName={option.id === 'horizontal-logo' ? 'h-10 w-10' : 'h-8 w-8'}
+                            markClassName={option.id === 'horizontal-logo' ? 'h-5 w-auto' : 'h-8 w-8'}
                             color="currentColor"
                           />
                           <span>

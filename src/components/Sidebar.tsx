@@ -106,9 +106,9 @@ export default function Sidebar() {
 
   return (
     <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col border-r border-[var(--loom-border)]">
-      <div className="p-3 border-b border-[var(--loom-border)]">
-        <Link to="/" className="inline-flex h-14 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
-          <LoomLogo className="h-14 w-14" />
+      <div className="p-4 border-b border-[var(--loom-border)]">
+        <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
+          <LoomLogo className="h-8 w-auto" />
         </Link>
       </div>
       <nav className="flex-1 p-3 flex flex-col">
