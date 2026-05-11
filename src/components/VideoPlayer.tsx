@@ -966,20 +966,8 @@ export default function VideoPlayer({
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
 
         if (html5DirectPlay?.ok && html5DirectPlay.data === false) {
-          const mpvResult = await desktopApi.playWithMPV(filePath, startSeconds);
-          if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-          if (mpvResult.ok) {
-            setPlaybackEngine('mpv');
-            setStreamIsTranscoded(false);
-            setStreamUrl('');
-            setPlayerState('ready');
-            setStatusMessage('');
-            setPaused(false);
-            const durationHint = probedDurationRef.current || getStoredDuration(filePath);
-            if (durationHint > 0) setDuration(durationHint);
-            return;
-          }
-          console.warn('[player] mpv unavailable, falling back to browser playback:', mpvResult.error);
+          await startTranscodedFallback(startSeconds, { force: true });
+          return;
         }
 
         if (shouldStartWithTranscode(filePath)) {

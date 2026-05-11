@@ -319,72 +319,6 @@ export class MpvController {
     if (style.backgroundColor) await this.ipc?.setProperty('sub-back-color', style.backgroundColor);
   }
 
-  /**
-   * Launch mpv embedded inside a native window specified by `wid`.
-   * The caller is responsible for creating a frameless BrowserWindow and
-   * passing its native handle as `wid` (decimal string).
-   */
-  async launchEmbedded(filePath: string, wid: string, options: MpvLaunchOptions = {}): Promise<void> {
-    await this.stop({ suppressEvent: true });
-
-    this.ipcPath = getIpcPath();
-    if (process.platform !== 'win32') {
-      try { fs.unlinkSync(this.ipcPath); } catch (_e) { /* stale socket may not exist */ }
-    }
-
-    const mpvBin = getMpvPath();
-    if (!mpvBin) {
-      throw new Error(
-        'mpv could not be found. Install mpv or set the MPV_PATH environment variable to the mpv executable.',
-      );
-    }
-
-    const args = this.buildEmbeddedArgs(filePath, wid, options);
-
-    this.proc = spawn(mpvBin, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-
-    this.proc.once('error', (error) => {
-      console.error('[mpv-embedded] spawn error:', error);
-    });
-
-    this.proc.stdout?.on('data', (chunk: Buffer) => {
-      if (process.env['DEBUG_MPV']) console.debug('[mpv-embedded]', chunk.toString().trim());
-    });
-    this.proc.stderr?.on('data', (chunk: Buffer) => {
-      if (process.env['DEBUG_MPV']) console.debug('[mpv-embedded stderr]', chunk.toString().trim());
-    });
-
-    this.proc.on('exit', (code) => {
-      console.log(`[mpv-embedded] exited with code ${code}`);
-      this.proc = undefined;
-      this.ipc?.close();
-      this.ipc = undefined;
-
-      if (!this.suppressExitEvent) {
-        for (const listener of this.exitListeners) listener();
-      }
-      this.suppressExitEvent = false;
-    });
-
-    for (let attempt = 0; attempt < 50; attempt++) {
-      try {
-        const ipc = new MpvIpc(this.ipcPath);
-        await ipc.connect();
-        this.ipc = ipc;
-        return;
-      } catch {
-        await sleep(100);
-      }
-    }
-
-    this.proc?.kill();
-    this.proc = undefined;
-    throw new Error('Timed out waiting for mpv IPC socket.');
-  }
-
   // ─── Private helpers ─────────────────────────────────────────────────────────
 
   private buildArgs(filePath: string, options: MpvLaunchOptions): string[] {
@@ -408,33 +342,6 @@ export class MpvController {
 
     if (options.title) {
       args.push(`--title=${options.title}`);
-    }
-
-    for (const sub of options.subtitles ?? []) {
-      args.push('--sub-file', sub);
-    }
-
-    args.push(filePath);
-    return args;
-  }
-
-  private buildEmbeddedArgs(filePath: string, wid: string, options: MpvLaunchOptions): string[] {
-    const args: string[] = [
-      `--input-ipc-server=${this.ipcPath}`,
-      `--wid=${wid}`,
-      '--idle=no',
-      '--force-window=no',
-      '--keep-open=yes',
-      '--save-position-on-quit=no',
-      '--hwdec=auto-safe',
-      '--osd-level=0',
-      '--no-border',
-      '--no-osc',
-      '--no-terminal',
-    ];
-
-    if (options.startSeconds && options.startSeconds > 5) {
-      args.push(`--start=${Math.floor(options.startSeconds)}`);
     }
 
     for (const sub of options.subtitles ?? []) {
