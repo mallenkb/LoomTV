@@ -37,9 +37,11 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
+const AUTOPLAY_NEXT_EPISODE_KEY = 'loomtvAutoplayNextEpisode';
 const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
 const WATCHED_THRESHOLD = 0.9;
 const CONTROLS_HIDE_MS = 3000;
+const NEXT_EPISODE_COUNTDOWN_SECONDS = 3;
 const REPLAY_FROM_START_REMAINING_SECONDS = 8;
 const HLS_RECOVERY_ATTEMPTS = 3;
 const HLS_TRANSCODE_RESTART_ATTEMPTS = 2;
@@ -135,9 +137,9 @@ const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
 const subtitleCueTiming = new WeakMap<TextTrackCue, { startTime: number; endTime: number }>();
 const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   delaySeconds: 0,
-  position: 92,
+  position: 96,
   scale: 1,
-  fontSize: 55,
+  fontSize: 32,
   fontColor: '#ffffff',
   borderColor: '#000000',
   borderWidth: 3,
@@ -391,6 +393,22 @@ function saveSubtitlesDefaultEnabled(enabled: boolean): void {
   }
 }
 
+function loadAutoplayNextEpisode(): boolean {
+  try {
+    return localStorage.getItem(AUTOPLAY_NEXT_EPISODE_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
+function saveAutoplayNextEpisode(enabled: boolean): void {
+  try {
+    localStorage.setItem(AUTOPLAY_NEXT_EPISODE_KEY, enabled ? 'true' : 'false');
+  } catch (_error) {
+    // Autoplay still applies for the current session.
+  }
+}
+
 function isInProgress(filePath: string, duration?: number): boolean {
   return getProgressState(filePath, duration).inProgress;
 }
@@ -453,6 +471,7 @@ export default function VideoPlayer({
   const selectedAudioTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
+  const nextEpisodeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
@@ -481,6 +500,8 @@ export default function VideoPlayer({
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
+  const [autoplayNextEnabled, setAutoplayNextEnabled] = useState(loadAutoplayNextEpisode);
+  const [nextCountdown, setNextCountdown] = useState<number | null>(null);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -520,6 +541,22 @@ export default function VideoPlayer({
     () => Object.keys(groupedEpisodes).map(Number).sort((a, b) => a - b),
     [groupedEpisodes],
   );
+
+  const playableEpisodeFiles = useMemo(
+    () => episodeFiles
+      .filter((item) => Boolean(item.filePath))
+      .slice()
+      .sort((a, b) => a.season - b.season || a.episode - b.episode),
+    [episodeFiles],
+  );
+
+  const nextEpisodeFile = useMemo(() => {
+    if (!hasEpisodes) return null;
+    const currentIndex = playableEpisodeFiles.findIndex((item) =>
+      item.season === currentSeason && item.episode === currentEpisode,
+    );
+    return currentIndex >= 0 ? playableEpisodeFiles[currentIndex + 1] || null : null;
+  }, [currentEpisode, currentSeason, hasEpisodes, playableEpisodeFiles]);
 
   const stopTranscodeSession = useCallback(async () => {
     const sessionId = transcodeSessionIdRef.current;
@@ -633,35 +670,49 @@ export default function VideoPlayer({
 
   // ─── Episode navigation ────────────────────────────────────────────────────
 
+  const clearNextEpisodeCountdown = useCallback(() => {
+    if (nextEpisodeTimerRef.current) {
+      clearInterval(nextEpisodeTimerRef.current);
+      nextEpisodeTimerRef.current = null;
+    }
+    setNextCountdown(null);
+  }, []);
+
   const goToEpisode = useCallback((season: number, episode: number) => {
     const next = episodeFiles.find((item) => item.season === season && item.episode === episode);
-    if (next && onEpisodeChange) onEpisodeChange(next.filePath, season, episode);
-  }, [episodeFiles, onEpisodeChange]);
+    if (next && onEpisodeChange) {
+      clearNextEpisodeCountdown();
+      onEpisodeChange(next.filePath, season, episode);
+    }
+  }, [clearNextEpisodeCountdown, episodeFiles, onEpisodeChange]);
 
   const handlePrevEpisode = useCallback(() => {
-    let season = currentSeason;
-    let episode = currentEpisode - 1;
-    if (episode < 1) {
-      const idx = sortedSeasons.indexOf(currentSeason);
-      if (idx <= 0) return;
-      season = sortedSeasons[idx - 1];
-      episode = groupedEpisodes[season]?.length || 1;
-    }
-    goToEpisode(season, episode);
-  }, [currentEpisode, currentSeason, goToEpisode, groupedEpisodes, sortedSeasons]);
+    const currentIndex = playableEpisodeFiles.findIndex((item) =>
+      item.season === currentSeason && item.episode === currentEpisode,
+    );
+    const previous = currentIndex > 0 ? playableEpisodeFiles[currentIndex - 1] : null;
+    if (previous) goToEpisode(previous.season, previous.episode);
+  }, [currentEpisode, currentSeason, goToEpisode, playableEpisodeFiles]);
 
   const handleNextEpisode = useCallback(() => {
-    let season = currentSeason;
-    let episode = currentEpisode + 1;
-    const eps = groupedEpisodes[currentSeason] || [];
-    if (episode > eps.length) {
-      const idx = sortedSeasons.indexOf(currentSeason);
-      if (idx >= sortedSeasons.length - 1) return;
-      season = sortedSeasons[idx + 1];
-      episode = 1;
-    }
-    goToEpisode(season, episode);
-  }, [currentEpisode, currentSeason, goToEpisode, groupedEpisodes, sortedSeasons]);
+    if (nextEpisodeFile) goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
+  }, [goToEpisode, nextEpisodeFile]);
+
+  const scheduleNextEpisode = useCallback(() => {
+    if (!nextEpisodeFile || !onEpisodeChange) return;
+    clearNextEpisodeCountdown();
+    let remainingSeconds = NEXT_EPISODE_COUNTDOWN_SECONDS;
+    setNextCountdown(remainingSeconds);
+    nextEpisodeTimerRef.current = setInterval(() => {
+      remainingSeconds -= 1;
+      if (remainingSeconds <= 0) {
+        clearNextEpisodeCountdown();
+        onEpisodeChange(nextEpisodeFile.filePath, nextEpisodeFile.season, nextEpisodeFile.episode);
+        return;
+      }
+      setNextCountdown(remainingSeconds);
+    }, 1000);
+  }, [clearNextEpisodeCountdown, nextEpisodeFile, onEpisodeChange]);
 
   const startTranscodedFallback = useCallback(async (
     startSeconds = 0,
@@ -1033,7 +1084,7 @@ export default function VideoPlayer({
 
     const onEnded = () => {
       setPaused(true);
-      if (hasEpisodes) handleNextEpisode();
+      if (autoplayNextEnabled && nextEpisodeFile) scheduleNextEpisode();
     };
 
     const onError = () => {
@@ -1098,11 +1149,13 @@ export default function VideoPlayer({
     streamIsTranscoded,
     playbackEngine,
     hasEpisodes,
+    autoplayNextEnabled,
+    nextEpisodeFile,
     clearHls,
     clearVideoElement,
     applyNativeTextTrackVisibility,
     startTranscodedFallback,
-    handleNextEpisode,
+    scheduleNextEpisode,
   ]);
 
   // ─── Auto-hide controls ────────────────────────────────────────────────────
@@ -1144,6 +1197,11 @@ export default function VideoPlayer({
   useEffect(() => () => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    clearNextEpisodeCountdown();
+    return clearNextEpisodeCountdown;
+  }, [clearNextEpisodeCountdown, filePath]);
 
   // Stop transcode session when component closes.
   useEffect(() => () => {
@@ -1346,6 +1404,15 @@ export default function VideoPlayer({
     }));
   }, []);
 
+  const toggleAutoplayNext = useCallback(() => {
+    setAutoplayNextEnabled((current) => {
+      const next = !current;
+      saveAutoplayNextEpisode(next);
+      if (!next) clearNextEpisodeCountdown();
+      return next;
+    });
+  }, [clearNextEpisodeCountdown]);
+
   const selectVideoTrack = useCallback((trackIndex: number) => {
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
@@ -1540,6 +1607,16 @@ export default function VideoPlayer({
       : epCode(currentSeason, currentEpisode);
   }, [currentEpisode, currentSeason, episodes, hasEpisodes]);
 
+  const nextEpLabel = useMemo(() => {
+    if (!nextEpisodeFile) return null;
+    const ep = episodes.find((item) =>
+      item.season === nextEpisodeFile.season && item.number === nextEpisodeFile.episode,
+    );
+    return ep?.title
+      ? `${epCode(nextEpisodeFile.season, nextEpisodeFile.episode)} - ${cleanEpisodeTitle(ep.title, nextEpisodeFile.season, nextEpisodeFile.episode)}`
+      : epCode(nextEpisodeFile.season, nextEpisodeFile.episode);
+  }, [episodes, nextEpisodeFile]);
+
   return (
     <div className="fixed inset-0 z-50 flex bg-black" ref={containerRef}>
       <style>
@@ -1636,6 +1713,34 @@ export default function VideoPlayer({
               >
                 Close
               </button>
+            </div>
+          </div>
+        )}
+
+        {nextCountdown !== null && nextEpisodeFile && (
+          <div
+            className="absolute inset-0 z-30 flex items-end justify-end bg-gradient-to-t from-black/85 via-black/20 to-transparent p-6"
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <div className="w-full max-w-sm rounded-lg border border-white/15 bg-black/70 p-4 text-white shadow-2xl backdrop-blur-md">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--loom-accent)]">Up next</p>
+              <p className="mt-1 truncate text-sm font-semibold">{nextEpLabel || epCode(nextEpisodeFile.season, nextEpisodeFile.episode)}</p>
+              <p className="mt-2 text-xs text-white/65">Playing in {nextCountdown}</p>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode)}
+                  className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-white/85"
+                >
+                  Play now
+                </button>
+                <button
+                  onClick={clearNextEpisodeCountdown}
+                  className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1803,6 +1908,21 @@ export default function VideoPlayer({
             <div className="p-5 text-sm text-white/85">
               {mediaPanelTab === 'video' && (
                 <div className="space-y-5">
+                  {hasEpisodes && (
+                    <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2.5 text-xs transition-colors hover:bg-white/15">
+                      <span>
+                        <span className="block font-semibold text-white">Autoplay next episode</span>
+                        <span className="mt-0.5 block text-white/50">Follow season order after a 3 second countdown.</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={autoplayNextEnabled}
+                        onChange={toggleAutoplayNext}
+                        className="h-4 w-4 shrink-0 accent-[var(--loom-accent)]"
+                      />
+                    </label>
+                  )}
+
                   <div>
                     <p className="mb-2 text-xs font-semibold text-white">Video track</p>
                     <div className="overflow-hidden rounded-lg bg-white/10">

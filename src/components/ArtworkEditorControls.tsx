@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Loader2, MoreHorizontal, RefreshCw, Star } from 'lucide-react';
+import { Image, Loader2, MoreHorizontal, RefreshCw, Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
@@ -577,18 +577,29 @@ export default function ArtworkEditorControls({
         onOpenChange={(open) => {
           if (!open && !applyingCandidateId) setMetadataDialogOpen(false);
         }}
-        contentClassName="max-w-[560px]"
+        contentClassName="max-w-[560px] border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
       >
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Choose Metadata</DialogTitle>
+          <DialogHeader className="border-b border-[var(--loom-panel-border)] px-5 py-4 pr-14">
+            <DialogTitle className="text-base text-[var(--loom-text)]">Choose Metadata</DialogTitle>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setMetadataDialogOpen(false)}
+              disabled={Boolean(applyingCandidateId)}
+              aria-label="Close metadata picker"
+              className="absolute right-3 top-3 h-9 w-9 rounded-lg text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
+            >
+              <X className="h-4 w-4" />
+            </Button>
           </DialogHeader>
-          <div className="mt-5 space-y-4">
+          <div className="space-y-4 p-5">
             <p className="text-sm text-[var(--loom-muted)]">
               Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, and genres from that source.
             </p>
             {metadataCandidates.length === 0 ? (
-              <div className="rounded-lg border border-white/10 bg-white/[0.04] p-6 text-sm text-[var(--loom-muted)]">
+              <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
                 No matching metadata was found from the connected metadata APIs.
               </div>
             ) : (
@@ -600,10 +611,10 @@ export default function ArtworkEditorControls({
                   return (
                     <div
                       key={candidate.id}
-                      className="grid gap-3 rounded-lg border border-white/10 bg-white/[0.04] p-3"
+                      className="grid gap-3 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-3"
                     >
                       <div className="grid min-w-0 grid-cols-[58px_1fr] gap-3">
-                        <div className="h-[86px] w-[58px] overflow-hidden rounded-md bg-black/50">
+                        <div className="h-[86px] w-[58px] overflow-hidden rounded-md bg-[var(--loom-surface)]">
                           {posterImage ? (
                             <img src={posterImage} alt={candidate.title} className="h-full w-full object-cover" />
                           ) : (
@@ -618,9 +629,9 @@ export default function ArtworkEditorControls({
                               <h3 className="truncate text-sm font-semibold text-white">{candidate.title}</h3>
                               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                                 {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
-                                <span className="rounded-full border border-white/10 px-2 py-0.5 text-[11px] text-white/70">{candidate.source}</span>
+                                <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
                                 {candidate.rating ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-[11px] font-medium text-[var(--loom-accent)]">
+                                  <span className="loom-rating inline-flex items-center gap-1 rounded-full bg-[#f5c451]/15 px-2 py-0.5 text-[11px] font-medium">
                                     <Star className="h-3 w-3 fill-current" />
                                     {candidate.rating.toFixed(1)}
                                   </span>
@@ -633,7 +644,7 @@ export default function ArtworkEditorControls({
                           ) : (
                             <p className="text-xs text-[var(--loom-muted)]">No summary provided.</p>
                           )}
-                          <div className="h-12 overflow-hidden rounded-md bg-black/40">
+                          <div className="h-12 overflow-hidden rounded-md bg-[var(--loom-surface)]">
                             {coverImage ? (
                               <img src={coverImage} alt={`${candidate.title} cover`} className="h-full w-full object-cover" />
                             ) : (
@@ -644,7 +655,7 @@ export default function ArtworkEditorControls({
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         {candidate.genres?.length ? (
-                          <p className="min-w-0 flex-1 truncate text-[11px] text-white/45">{candidate.genres.slice(0, 3).join(' • ')}</p>
+                          <p className="min-w-0 flex-1 truncate text-[11px] text-[var(--loom-faint)]">{candidate.genres.slice(0, 3).join(' • ')}</p>
                         ) : <span />}
                         <Button
                           type="button"
@@ -665,17 +676,6 @@ export default function ArtworkEditorControls({
                 {metadataError}
               </p>
             )}
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setMetadataDialogOpen(false)}
-                disabled={Boolean(applyingCandidateId)}
-                className="border-white/15 bg-transparent text-white hover:bg-white/10"
-              >
-                Close
-              </Button>
-            </div>
           </div>
         </DialogContent>
       </Dialog>

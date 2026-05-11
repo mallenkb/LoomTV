@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Download, Film, Home, RefreshCw, Settings, Tv } from 'lucide-react';
+import { Download, Film, Folder, Home, RefreshCw, Settings, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
 import LoomLogo from '@/components/LoomLogo';
 
-type SidebarNavItemId = 'anime' | 'tv' | 'movies';
+type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | SidebarNavItemId;
 
-const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies'];
+const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 const navItemHeight = 40;
 const navItemGap = 4;
 
@@ -20,6 +20,7 @@ const sidebarNavItems: Record<SidebarNavItemId, { id: SidebarNavItemId; path: st
   anime: { id: 'anime', path: '/anime', label: 'Anime', icon: AnimeIcon },
   tv: { id: 'tv', path: '/tv', label: 'TV Shows', icon: Tv },
   movies: { id: 'movies', path: '/movies', label: 'Movies', icon: Film },
+  others: { id: 'others', path: '/others', label: 'Others', icon: Folder },
 };
 
 function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | null {
@@ -30,6 +31,7 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   if (activePath === '/movies' || activePath.startsWith('/movies/') || activePath.startsWith('/movie/')) return 'movies';
   if (activePath === '/tv' || activePath.startsWith('/tv/')) return 'tv';
   if (activePath === '/anime' || activePath.startsWith('/anime/')) return 'anime';
+  if (activePath === '/others' || activePath.startsWith('/others/')) return 'others';
 
   if (pathname.startsWith('/movie/')) return 'movies';
   if (pathname.startsWith('/tv/')) return 'tv';

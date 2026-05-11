@@ -1,5 +1,5 @@
-type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
-type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[] };
+type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
+type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
 type LibraryPayload = {
   movies: any[];
   tvShows: any[];
