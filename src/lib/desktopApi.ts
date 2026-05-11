@@ -1,5 +1,5 @@
-type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
-type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[] };
+type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
+type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
 type LibraryPayload = {
   movies: any[];
   tvShows: any[];
@@ -22,6 +22,7 @@ type SettingsPayload = {
   sidebarNavOrder?: string[];
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+  appDarkTheme?: 'default' | 'justwatch' | 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;
