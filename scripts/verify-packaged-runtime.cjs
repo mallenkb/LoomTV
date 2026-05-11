@@ -8,10 +8,6 @@ const root = process.cwd();
 const outDir = path.join(root, 'out');
 const platform = process.platform;
 const arch = process.arch;
-const packageDir = path.join(
-  outDir,
-  `LoomTV-${platform === 'win32' ? 'win32' : platform}-${arch}`,
-);
 
 function exists(candidate) {
   return fs.existsSync(candidate);
@@ -22,11 +18,36 @@ function fail(message) {
   process.exitCode = 1;
 }
 
-function resourcesDir() {
+function resourcesDir(packageDir) {
   if (platform === 'darwin') {
     return path.join(packageDir, 'LoomTV.app', 'Contents', 'Resources');
   }
   return path.join(packageDir, 'resources');
+}
+
+function packageDirCandidates() {
+  const builderDir = path.join(outDir, 'builder');
+  const forgePlatform = platform === 'win32' ? 'win32' : platform;
+
+  if (platform === 'darwin') {
+    return [
+      path.join(outDir, `LoomTV-${forgePlatform}-${arch}`),
+      path.join(builderDir, `mac-${arch}`),
+      path.join(builderDir, 'mac'),
+    ];
+  }
+
+  if (platform === 'win32') {
+    return [
+      path.join(outDir, `LoomTV-${forgePlatform}-${arch}`),
+      path.join(builderDir, 'win-unpacked'),
+    ];
+  }
+
+  return [
+    path.join(outDir, `LoomTV-${forgePlatform}-${arch}`),
+    path.join(builderDir, 'linux-unpacked'),
+  ];
 }
 
 function platformFolder() {
@@ -39,7 +60,8 @@ function binaryName(name) {
   return platform === 'win32' ? `${name}.exe` : name;
 }
 
-const resources = resourcesDir();
+const packageDir = packageDirCandidates().find((candidate) => exists(resourcesDir(candidate))) || packageDirCandidates()[0];
+const resources = resourcesDir(packageDir);
 const appAsar = path.join(resources, 'app.asar');
 const unpacked = path.join(resources, 'app.asar.unpacked');
 

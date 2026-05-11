@@ -121,8 +121,15 @@ export default function Sidebar() {
     };
   }, []);
 
-  const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading';
-  const updateButtonLabel = updateState?.status === 'downloaded' ? 'Update' : 'Updating';
+  const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const updateButtonLabel =
+    updateState?.status === 'downloaded'
+      ? 'Update ready'
+      : updateState?.status === 'installing'
+        ? 'Restarting'
+        : updateState?.downloadPercent
+          ? `${updateState.downloadPercent}%`
+          : 'Updating';
 
   return (
     <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
@@ -172,7 +179,7 @@ export default function Sidebar() {
                 if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
               }}
               disabled={updateState?.status !== 'downloaded'}
-              className="mb-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm shadow-blue-950/20 transition-colors hover:bg-blue-500 disabled:cursor-wait disabled:bg-blue-600/70"
+              className="mb-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
               title={updateState?.message || 'Update LoomTV'}
             >
               <Download className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
