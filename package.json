@@ -1,7 +1,7 @@
 {
   "name": "loomtv",
   "productName": "LoomTV",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "private": true,
@@ -12,9 +12,10 @@
   "scripts": {
     "start": "electron-forge start",
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
-    "package": "npm run clean:out && electron-forge package",
-    "make": "npm run clean:out && electron-forge make",
-    "make:all": "npm run clean:out && electron-forge make --platform=darwin --arch=arm64 && electron-forge make --platform=win32 --arch=x64 && electron-forge make --platform=linux --arch=x64",
+    "rebuild:natives": "electron-rebuild -f -w better-sqlite3",
+    "package": "npm run rebuild:natives && npm run clean:out && electron-forge package",
+    "make": "npm run rebuild:natives && npm run clean:out && electron-forge make",
+    "make:all": "npm run rebuild:natives && npm run clean:out && electron-forge make --platform=darwin --arch=arm64 && electron-forge make --platform=win32 --arch=x64 && electron-forge make --platform=linux --arch=x64",
     "verify:runtime": "node scripts/verify-packaged-runtime.cjs",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx ."
