@@ -1,10 +1,11 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell, autoUpdater } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import { createHash, randomInt } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
+import { autoUpdater } from 'electron-updater';
 import { mpvController } from './main/mpv/mpvController';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
@@ -118,6 +119,8 @@ let updateState: UpdateState = {
 let updaterConfigured = false;
 let updateCheckInFlight = false;
 let updateInstallStarted = false;
+let updateCheckTimer: NodeJS.Timeout | null = null;
+const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -4991,11 +4994,6 @@ function setUpdateState(nextState: Partial<UpdateState>) {
   return updateState;
 }
 
-function getUpdateFeedUrl() {
-  const platform = process.platform === 'win32' ? 'win32' : process.platform;
-  return `https://update.electronjs.org/${UPDATE_OWNER}/${UPDATE_REPO}/${platform}-${process.arch}/${app.getVersion()}`;
-}
-
 function installDownloadedUpdate() {
   if (updateInstallStarted) return updateState;
   updateInstallStarted = true;
@@ -5037,14 +5035,29 @@ function configureAutoUpdater() {
     return;
   }
 
-  autoUpdater.setFeedURL({ url: getUpdateFeedUrl() });
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
+  autoUpdater.setFeedURL({
+    provider: 'github',
+    owner: UPDATE_OWNER,
+    repo: UPDATE_REPO,
+  });
 
   autoUpdater.on('checking-for-update', () => {
     setUpdateState({ status: 'checking', message: 'Checking for updates...' });
   });
 
   autoUpdater.on('update-available', () => {
-    setUpdateState({ status: 'downloading', message: 'Downloading the latest LoomTV update...' });
+    setUpdateState({ status: 'available', message: 'Update available, downloading...' });
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    if (!progress?.percent) return;
+    setUpdateState({
+      status: 'downloading',
+      message: `Downloading update ${Math.round(progress.percent)}%`,
+    });
   });
 
   autoUpdater.on('update-not-available', () => {
@@ -5071,6 +5084,12 @@ function configureAutoUpdater() {
       checkedAt: new Date().toISOString(),
     });
   });
+
+  updateCheckTimer = setInterval(() => {
+    if (!updateCheckInFlight && updateState.supported && app.isPackaged) {
+      void checkForUpdates();
+    }
+  }, AUTO_UPDATE_CHECK_INTERVAL_MS);
 }
 
 function checkForUpdates() {
@@ -5082,19 +5101,17 @@ function checkForUpdates() {
 
   updateCheckInFlight = true;
   setUpdateState({ status: 'checking', message: 'Checking for updates...' });
-  try {
-    autoUpdater.checkForUpdates();
-  } catch (error) {
-    setUpdateState({
-      status: 'error',
-      message: error instanceof Error ? error.message : String(error),
-      checkedAt: new Date().toISOString(),
-    });
-  } finally {
-    setTimeout(() => {
+  void autoUpdater.checkForUpdates()
+    .catch((error) => {
+      setUpdateState({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        checkedAt: new Date().toISOString(),
+      });
+    })
+    .finally(() => {
       updateCheckInFlight = false;
-    }, 1000);
-  }
+    });
   return updateState;
 }
 
@@ -5435,4 +5452,8 @@ app.on('before-quit', () => {
   stopAllTranscodes();
   void stopLocal(mainWindow);
   void mpvController.stop({ suppressEvent: true });
+  if (updateCheckTimer) {
+    clearInterval(updateCheckTimer);
+    updateCheckTimer = null;
+  }
 });

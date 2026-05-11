@@ -28,6 +28,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.10](docs/releases/v1.0.10.md): fixes auto-update detection/install flow for packaged apps using GitHub-hosted releases.
 - [LoomTV 1.0.8](docs/releases/v1.0.8.md): fixes installed macOS builds so adding library folders no longer crashes on the packaged SQLite native module.
 - [LoomTV 1.0.7](docs/releases/v1.0.7.md): fixes library folder updates so scans no longer overwrite saved library data mid-progress, and clarifies update installation restart state.
 - [LoomTV 1.0.6](docs/releases/v1.0.6.md): adds the new theming system, black/default/navy themes, an Others library section, and several playback, metadata, and settings UX fixes.
@@ -41,7 +42,7 @@ Download the installer or archive for your operating system, then run it like an
 - TypeScript for application code.
 - Tailwind CSS and local UI components for styling.
 - better-sqlite3 for local persistence.
-- FFmpeg, FFprobe, HLS.js, Plyr, and MPV integration for media playback workflows.
+- FFmpeg, FFprobe, HLS.js, and MPV integration for media playback workflows.
 
 ## Getting Started
 
@@ -142,7 +143,7 @@ The Forge configuration packages the app with ASAR enabled and includes media to
 
 ## Third-Party Notices
 
-LoomTV depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Plyr, Video.js, Motion, Lucide React, ffmpeg-static, ffprobe-static, and fluent-ffmpeg.
+LoomTV depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, Lucide React, ffmpeg-static, and ffprobe-static.
 
 The application also includes local UI component patterns inspired by shadcn/ui.
 
