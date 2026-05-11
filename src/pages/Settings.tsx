@@ -495,7 +495,10 @@ export default function Settings() {
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
         <div className="mx-auto max-w-5xl pt-16">
           <LayoutGroup>
-            <div className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md">
+            <div
+              className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
+              style={{ borderRadius: 12 }}
+            >
               {SETTINGS_SECTIONS.map((section) => {
                 const isActive = activeSection === section.id;
                 return (
@@ -506,16 +509,18 @@ export default function Settings() {
                       setActiveSection(section.id);
                       localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, section.id);
                     }}
-                    className={`relative h-9 rounded-lg px-4 text-sm font-medium transition-colors ${
+                    className={`relative h-9 rounded-[8px] px-4 text-sm font-medium transition-colors ${
                       isActive
                         ? 'text-[var(--loom-accent-foreground)]'
                         : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
                     }`}
+                    style={{ borderRadius: 8 }}
                   >
                     {isActive && (
                       <motion.span
                         layoutId="settings-active-tab"
-                        className="absolute inset-0 rounded-lg bg-[var(--loom-accent)]"
+                        className="absolute inset-0 rounded-[8px] bg-[var(--loom-accent)]"
+                        style={{ borderRadius: 8 }}
                         transition={{ type: 'spring', stiffness: 460, damping: 36, mass: 0.8 }}
                       />
                     )}
