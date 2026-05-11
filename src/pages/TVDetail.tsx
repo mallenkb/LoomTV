@@ -13,6 +13,7 @@ import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources
 import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
+import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -29,7 +30,11 @@ interface TVDetailProps {
 }
 
 function epCode(season: number, episode: number): string {
-  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+  return episodeCode(season, episode);
+}
+
+function episodeTitleDisplay(title: string | undefined, seriesTitle: string, season: number, episode: number): string {
+  return cleanEpisodeTitleForDisplay(title, seriesTitle, season, episode);
 }
 
 function formatShortMinutes(seconds: number): string {
@@ -483,6 +488,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                               <EpisodeRow
                                 key={ep.number}
                                 ep={ep}
+                                seriesTitle={show.title}
                                 filePath={filePath}
                                 seasonNum={season.number}
                                 progressTick={progressTick}
@@ -508,6 +514,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                                   rating: 0,
                                   airDate: '',
                                 }}
+                                seriesTitle={show.title}
                                 filePath={ef.filePath}
                                 seasonNum={season.number}
                                 progressTick={progressTick}
@@ -599,6 +606,7 @@ function ExpandableSummary({ summary }: { summary: string }) {
 
 function EpisodeRow({
   ep,
+  seriesTitle,
   filePath,
   onPlay,
   seasonNum = 1,
@@ -606,6 +614,7 @@ function EpisodeRow({
   progressTick,
 }: {
   ep: EpisodeMeta;
+  seriesTitle: string;
   filePath: string | null;
   onPlay: () => void;
   seasonNum?: number;
@@ -643,6 +652,7 @@ function EpisodeRow({
   };
 
   const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
+  const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
   const progress = getProgressState(filePath, durationHint);
   void progressTick;
 
@@ -678,7 +688,7 @@ function EpisodeRow({
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${progress.watched ? 'text-[var(--loom-faint)]' : 'text-white'}`}>{epLabel} - {ep.title || `Episode ${ep.number}`}</p>
+        <p className={`text-sm font-medium ${progress.watched ? 'text-[var(--loom-faint)]' : 'text-white'}`}>{epLabel} - {displayTitle}</p>
         {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">

@@ -116,6 +116,8 @@ export type OfficialArtworkResult = {
   cover?: string;
   summary?: string;
   rating?: number;
+  episodes?: unknown[];
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
   posterCandidates?: string[];
   backdropCandidates?: string[];
 };
@@ -125,6 +127,8 @@ export type OfficialMetadataCandidate = OfficialArtworkResult & {
   title: string;
   year?: number;
   genres?: string[];
+  episodeCount?: number;
+  episodePreview?: string[];
 };
 
 declare global {

@@ -139,7 +139,6 @@ const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
 
 const APP_LICENSE = {
   name: 'LoomTV',
-  version: '1.0.8',
   license: 'MIT',
   copyright: 'Copyright (c) 2026 malllenkb',
 };
@@ -1353,7 +1352,7 @@ export default function Settings() {
                   <div className="flex items-center gap-3 mb-2">
                     <h2 className="text-2xl font-bold tracking-tight text-white">{APP_LICENSE.name}</h2>
                     <span className="rounded-full bg-[var(--loom-accent)]/15 px-2.5 py-0.5 text-xs font-semibold text-[var(--loom-accent)] ring-1 ring-[var(--loom-accent)]/25">
-                      v{APP_LICENSE.version}
+                      v{updateState?.currentVersion ?? 'dev'}
                     </span>
                     <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--loom-faint)] ring-1 ring-white/10">
                       {APP_LICENSE.license}

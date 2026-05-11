@@ -117,6 +117,7 @@ let updateState: UpdateState = {
 };
 let updaterConfigured = false;
 let updateCheckInFlight = false;
+let updateInstallStarted = false;
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -1150,6 +1151,8 @@ function cleanMediaTitle(name: string): { title: string; year: number } {
     .replace(/\b(yts|rarbg|ettv|eztv|tgx|galaxyrg|psa|pahe|ntb|successfulcrab)\b/gi, ' ')
     .replace(/\b(19\d{2}|20\d{2})\b/g, ' ')
     .replace(/\s+[Ss]\d{1,2}[Ee]\d{1,3}.*$/, '')
+    .replace(/\s+[Ss]\d{1,2}\s*$/, '')
+    .replace(/\s+season\s+\d{1,2}\s*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -1234,9 +1237,35 @@ function mediaItemHasUsableArtwork(item: MediaItem): boolean {
   );
 }
 
+function looksLikeLocalEpisodeFileTitle(title?: string, seriesTitle?: string): boolean {
+  const value = (title || '').trim();
+  if (!value) return true;
+  const normalized = value.toLowerCase();
+  const normalizedSeries = (seriesTitle || '').trim().toLowerCase();
+  return /\bS\d{1,2}E\d{1,3}\b/i.test(value)
+    || /^episode\s+\d{1,3}$/i.test(value)
+    || /^ep\s+\d{1,3}$/i.test(value)
+    || /\.(?:720p|1080p|2160p|4k|amzn|nf|web|webrip|web-dl|hdtv|bluray|x264|x265|galaxytv)\b/i.test(value)
+    || /\b(720p|1080p|2160p|4k|amzn|web[- .]?rip|web[- .]?dl|hdtv|bluray|x264|x265|galaxytv)\b/i.test(value)
+    || /\b(visit|support|subscribe|telegram|downloaded|encoded|uploaded|released)\b/i.test(value)
+    || /\b(anikaizoku|pahe|rarbg|eztv|yts|tgx|galaxyrg)\b/i.test(value)
+    || /\bwww\.|\.com\b|\.net\b|\.org\b/i.test(value)
+    || (Boolean(normalizedSeries) && normalized === normalizedSeries);
+}
+
+function seriesHasGenericEpisodeTitles(item: MediaItem): boolean {
+  if (item.type === 'movie' || !item.episodeFiles?.length) return false;
+  const byKey = new Map((item.episodes || []).map((episode) => [`${episode.season}-${episode.number}`, episode]));
+  return item.episodeFiles.some((file) => {
+    const title = byKey.get(`${file.season}-${file.episode}`)?.title || file.title || '';
+    return looksLikeLocalEpisodeFileTitle(title, item.title);
+  });
+}
+
 function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
   const isSeries = item.type === 'tv' || item.type === 'anime' || Boolean(item.episodeFiles?.length);
   if (isSeries && (!item.year || item.year <= 0)) return true;
+  if (isSeries && seriesHasGenericEpisodeTitles(item)) return true;
   return !mediaItemHasUsableArtwork(item);
 }
 
@@ -1494,11 +1523,13 @@ function probeMediaFile(filePath: string): ProbeMediaFileResult {
   }
 }
 
-function makeLocalEpisodeMeta(files: EpisodeFile[]): EpisodeMeta[] {
+function makeLocalEpisodeMeta(files: EpisodeFile[], seriesTitle?: string): EpisodeMeta[] {
   return files.map((file) => ({
     season: file.season,
     number: file.episode,
-    title: file.title || path.basename(file.filePath, path.extname(file.filePath))
+    title: !looksLikeLocalEpisodeFileTitle(file.title, seriesTitle)
+      ? file.title
+      : path.basename(file.filePath, path.extname(file.filePath))
       .replace(/[._-]+/g, ' ')
       .replace(/\s+/g, ' ')
       .trim() || `Episode ${file.episode}`,
@@ -2203,6 +2234,69 @@ async function fetchOMDbMetadataById(imdbId: string | undefined, omdbApiKey?: st
 
 // ─── Metadata — TVmaze (TV shows, free, no API key) ─────────────────────────
 
+function tvmazeEpisodeToMeta(episode: any): EpisodeMeta {
+  return {
+    season: episode.season,
+    number: episode.number,
+    title: episode.name || '',
+    summary: episode.summary ? episode.summary.replace(/<[^>]*>/g, '') : '',
+    still: episode.image?.medium || episode.image?.original || '',
+    rating: episode.rating?.average || 0,
+    airDate: episode.airdate || '',
+  };
+}
+
+async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
+  const episodesRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
+  if (!episodesRes.ok) return [];
+  const episodes: any[] = await episodesRes.json();
+  if (!Array.isArray(episodes)) return [];
+  return episodes.map(tvmazeEpisodeToMeta).filter((episode) => episode.season > 0 && episode.number > 0);
+}
+
+async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
+  const detailRes = await fetch(
+    `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
+  );
+  if (!detailRes.ok) return null;
+  const [details, episodes] = await Promise.all([
+    detailRes.json(),
+    fetchTVEpisodesById(showId),
+  ]);
+
+  const seasons = (details._embedded?.seasons || [])
+    .filter((s: any) => s.number > 0)
+    .map((s: any) => ({
+      number: s.number,
+      title: s.name || `Season ${s.number}`,
+        episodeCount: s.episodeOrder || 0,
+      }));
+
+  const cast = (details._embedded?.cast || []).slice(0, 6).map((c: any) => ({
+    name: c.person?.name || '',
+    character: c.character?.name || '',
+    image: c.person?.image?.medium || '',
+  }));
+
+  const posterUrl = details.image?.original || details.image?.medium || '';
+
+  return {
+    title: details.name || fallbackTitle,
+    poster: posterUrl,
+    backdrop: '',
+    summary: details.summary ? details.summary.replace(/<[^>]*>/g, '') : '',
+    rating: details.rating?.average || 0,
+    genres: details.genres || [],
+    cast,
+    year: details.premiered ? new Date(details.premiered).getFullYear() : (localYear || 0),
+    language: details.language || '',
+    country: details.network?.country?.name || details.webChannel?.country?.name || '',
+    showType: details.type || '',
+    seasons: seasons.length > 0 ? seasons : undefined,
+    episodes,
+  };
+}
+
 async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMetadata | null> {
   try {
     const searchRes = await fetch(
@@ -2221,52 +2315,7 @@ async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMet
       if (yearMatch) show = yearMatch.show;
     }
 
-    const detailRes = await fetch(
-      `https://api.tvmaze.com/shows/${show.id}?embed[]=seasons&embed[]=episodes&embed[]=cast`,
-    );
-    const details: any = await detailRes.json();
-
-    const seasons = (details._embedded?.seasons || [])
-      .filter((s: any) => s.number > 0)
-      .map((s: any) => ({
-        number: s.number,
-        title: s.name || `Season ${s.number}`,
-        episodeCount: s.episodeOrder || 0,
-      }));
-
-    const episodes: EpisodeMeta[] = (details._embedded?.episodes || []).map((e: any) => ({
-      season: e.season,
-      number: e.number,
-      title: e.name || '',
-      summary: e.summary ? e.summary.replace(/<[^>]*>/g, '') : '',
-      still: e.image?.medium || '',
-      rating: e.rating?.average || 0,
-      airDate: e.airdate || '',
-    }));
-
-    const cast = (details._embedded?.cast || []).slice(0, 6).map((c: any) => ({
-      name: c.person?.name || '',
-      character: c.character?.name || '',
-      image: c.person?.image?.medium || '',
-    }));
-
-    const posterUrl = details.image?.original || details.image?.medium || '';
-
-    return {
-      title: details.name || show.name || title,
-      poster: posterUrl,
-      backdrop: '',
-      summary: details.summary ? details.summary.replace(/<[^>]*>/g, '') : '',
-      rating: details.rating?.average || 0,
-      genres: details.genres || [],
-      cast,
-      year: details.premiered ? new Date(details.premiered).getFullYear() : (localYear || 0),
-      language: details.language || '',
-      country: details.network?.country?.name || details.webChannel?.country?.name || '',
-      showType: details.type || '',
-      seasons: seasons.length > 0 ? seasons : undefined,
-      episodes,
-    };
+    return fetchTVMetadataById(show.id, show.name || title, localYear);
   } catch (error) {
     console.error('TVmaze fetch error:', error);
     return null;
@@ -2279,8 +2328,12 @@ async function fetchTVMetadataCandidates(title: string, localYear?: number): Pro
     const searchData: any[] = await searchRes.json();
     if (!Array.isArray(searchData) || searchData.length === 0) return [];
 
-    return searchData.slice(0, 6).map((result: any) => {
+    return await Promise.all(searchData.slice(0, 6).map(async (result: any) => {
       const show = result.show || {};
+      if (show.id) {
+        const details = await fetchTVMetadataById(show.id, show.name || title, localYear);
+        if (details) return details;
+      }
       return {
         title: show.name || title,
         poster: show.image?.original || show.image?.medium || '',
@@ -2294,7 +2347,7 @@ async function fetchTVMetadataCandidates(title: string, localYear?: number): Pro
         country: show.network?.country?.name || show.webChannel?.country?.name || '',
         showType: show.type || '',
       };
-    });
+    }));
   } catch (error) {
     console.error('TVmaze candidates fetch error:', error);
     return [];
@@ -2629,6 +2682,52 @@ async function jikanFetch(path: string): Promise<any> {
 interface JikanAnimeResult extends Partial<MediaItem> {
   episodes?: EpisodeMeta[];
   malId?: number;
+  aliases?: string[];
+}
+
+function isGenericEpisodeTitle(value: unknown, episodeNumber: number): boolean {
+  if (typeof value !== 'string') return true;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+  return normalized === `episode ${episodeNumber}`
+    || normalized === `ep ${episodeNumber}`
+    || normalized === `episode ${String(episodeNumber).padStart(2, '0')}`
+    || normalized === `ep ${String(episodeNumber).padStart(2, '0')}`;
+}
+
+function resolveJikanEpisodeTitle(episode: any): string {
+  const episodeNumber = Number(episode?.mal_id) || 0;
+  const candidates = [
+    episode?.title,
+    episode?.title_romanji,
+    episode?.title_japanese,
+  ];
+  const specificTitle = candidates.find((candidate) => !isGenericEpisodeTitle(candidate, episodeNumber));
+  return typeof specificTitle === 'string' ? specificTitle.trim() : `Episode ${episodeNumber}`;
+}
+
+async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<EpisodeMeta[]> {
+  const episodes: EpisodeMeta[] = [];
+  let page = 1;
+  let hasNextPage = true;
+  while (hasNextPage && page <= maxPages) {
+    const epData: any = await jikanFetch(`/anime/${malId}/episodes?page=${page}`);
+    const epList: any[] = epData.data ?? [];
+    episodes.push(
+      ...epList.map((e: any) => ({
+        season: 1,
+        number: e.mal_id as number,
+        title: resolveJikanEpisodeTitle(e),
+        summary: '',
+        still: '',
+        rating: (e.score as number) || 0,
+        airDate: e.aired ? String(e.aired).split('T')[0] : '',
+      })),
+    );
+    hasNextPage = epData.pagination?.has_next_page === true;
+    page++;
+  }
+  return episodes;
 }
 
 async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | null> {
@@ -2661,30 +2760,18 @@ async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | nul
     // ── 3. Episodes (paginated, cap at 3 pages = 75 episodes for performance) ─
     let episodes: EpisodeMeta[] = [];
     try {
-      let page = 1;
-      let hasNextPage = true;
-      while (hasNextPage && page <= 3) {
-        const epData: any = await jikanFetch(`/anime/${malId}/episodes?page=${page}`);
-        const epList: any[] = epData.data ?? [];
-        episodes.push(
-          ...epList.map((e: any) => ({
-            season: 1, // MAL doesn't separate seasons; treat as single season
-            number: e.mal_id as number,
-            title: (e.title_romanji as string) || (e.title as string) || `Episode ${e.mal_id}`,
-            summary: '',
-            still: '',
-            rating: (e.score as number) || 0,
-            airDate: e.aired ? String(e.aired).split('T')[0] : '',
-          })),
-        );
-        hasNextPage = epData.pagination?.has_next_page === true;
-        page++;
-      }
+      episodes = await fetchJikanEpisodes(malId, 3);
     } catch { /* episodes are optional */ }
 
     return {
       malId,
       title: (hit.title_english as string) || (hit.title as string) || title,
+      aliases: [
+        hit.title,
+        hit.title_english,
+        hit.title_japanese,
+        ...(Array.isArray(hit.title_synonyms) ? hit.title_synonyms : []),
+      ].filter(Boolean),
       poster,
       backdrop: '',
       summary: (hit.synopsis as string) || '',
@@ -2704,22 +2791,83 @@ async function fetchJikanMetadataCandidates(title: string): Promise<JikanAnimeRe
   try {
     const searchData: any = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=8&sfw`);
     const hits: any[] = Array.isArray(searchData.data) ? searchData.data : [];
-    return hits.map((hit) => ({
-      malId: hit.mal_id,
-      title: (hit.title_english as string) || (hit.title as string) || title,
-      poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '',
-      backdrop: '',
-      summary: (hit.synopsis as string) || '',
-      rating: (hit.score as number) ?? 0,
-      genres: ((hit.genres ?? []) as any[]).map((genre: any) => genre.name as string),
-      year: (hit.year as number) ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
-      cast: [],
-      episodes: [],
-    }));
+    const results: JikanAnimeResult[] = [];
+    for (const hit of hits) {
+      const malId = hit.mal_id as number;
+      let episodes: EpisodeMeta[] = [];
+      try {
+        episodes = await fetchJikanEpisodes(malId, 1);
+      } catch { /* candidate episode names are optional */ }
+      results.push({
+        malId,
+        title: (hit.title_english as string) || (hit.title as string) || title,
+        aliases: [
+          hit.title,
+          hit.title_english,
+          hit.title_japanese,
+          ...(Array.isArray(hit.title_synonyms) ? hit.title_synonyms : []),
+        ].filter(Boolean),
+        poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '',
+        backdrop: '',
+        summary: (hit.synopsis as string) || '',
+        rating: (hit.score as number) ?? 0,
+        genres: ((hit.genres ?? []) as any[]).map((genre: any) => genre.name as string),
+        year: (hit.year as number) ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
+        cast: [],
+        episodes,
+      });
+    }
+    return results;
   } catch (err) {
     console.error('[Jikan candidates]', err);
     return [];
   }
+}
+
+function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle: string): Map<number, string> {
+  const titlesBySeason = new Map<number, Map<string, { title: string; count: number }>>();
+
+  for (const file of episodeFiles) {
+    const title = seriesTitleFromEpisodeFileName(path.basename(file.filePath));
+    if (!title) continue;
+    const seasonTitles = titlesBySeason.get(file.season) || new Map<string, { title: string; count: number }>();
+    const key = title.toLowerCase();
+    const current = seasonTitles.get(key);
+    seasonTitles.set(key, { title, count: (current?.count || 0) + 1 });
+    titlesBySeason.set(file.season, seasonTitles);
+  }
+
+  const result = new Map<number, string>();
+  for (const [season, titles] of titlesBySeason) {
+    const best = [...titles.values()].sort((a, b) => b.count - a.count)[0];
+    result.set(season, best?.title || fallbackTitle);
+  }
+
+  if (!result.has(1)) result.set(1, fallbackTitle);
+  return result;
+}
+
+async function fetchJikanEpisodesForLocalAnimeSeasons(
+  episodeFiles: EpisodeFile[],
+  fallbackTitle: string,
+  firstSeasonMetadata?: JikanAnimeResult | null,
+): Promise<EpisodeMeta[]> {
+  const seasonTitles = inferAnimeSeasonSearchTitles(episodeFiles, fallbackTitle);
+  const results: EpisodeMeta[] = [];
+  const usedMalIds = new Set<number>();
+
+  for (const [season, title] of [...seasonTitles.entries()].sort(([a], [b]) => a - b)) {
+    let metadata = season === 1 ? firstSeasonMetadata : null;
+    if (!metadata || (metadata.malId && usedMalIds.has(metadata.malId))) {
+      metadata = await fetchJikanMetadata(title);
+    }
+    if (!metadata?.episodes?.length) continue;
+    if (metadata.malId) usedMalIds.add(metadata.malId);
+
+    results.push(...metadata.episodes.map((episode) => ({ ...episode, season })));
+  }
+
+  return results;
 }
 
 function mergeLocalSeasonsWithMetadata(
@@ -3098,7 +3246,6 @@ async function buildTVItemFromFolder(
 ): Promise<MediaItem | null> {
   const localSeasons = extractSeasons(fullPath, entryName);
   const episodeFiles = scanEpisodeFiles(fullPath);
-  const localEpisodes = makeLocalEpisodeMeta(episodeFiles);
   const episodeProbes = episodeFiles.map((file) => probeMediaFile(file.filePath));
   const representativeProbe = episodeProbes.find((probe) => probe.localMetadata) || episodeProbes[0] || {};
   const providerIds = mergeProviderIds(
@@ -3130,9 +3277,10 @@ async function buildTVItemFromFolder(
   ]);
   const searchYear = year || episodeProbes.find((probe) => probe.year)?.year;
   const likelyAnime = itemType === 'anime' || isLikelyAnimePath(fullPath, searchTitle);
+  const localEpisodes = makeLocalEpisodeMeta(episodeFiles, searchTitle);
 
   // ── Fetch metadata sources ─────────────────────────────────────────────────
-  // Anime   → Jikan (MAL) primary, TMDB + OMDb as fallbacks
+  // Anime   → Jikan (MAL) primary, TVmaze + TMDB + OMDb as fallbacks
   // TV show → TMDB primary, TVmaze as free fallback, OMDb for extra fields
   const [omdbById, omdbBySearch, jikanMeta, tmdbTVById, tmdbTVBySearch, tvMeta] = await Promise.all([
     providerIds.imdbId
@@ -3144,15 +3292,20 @@ async function buildTVItemFromFolder(
       ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey)
       : Promise.resolve(null),
     fetchTMDBTVMetadata(searchTitle, searchYear, tmdbApiKey),
-    // TVmaze: free fallback for western TV episode titles.
-    !likelyAnime ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
+    // TVmaze often has cleaner named episode lists, including anime seasons.
+    fetchTVMetadata(searchTitle, searchYear),
   ]);
   const matchedOmdbData = [omdbById, omdbBySearch]
     .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.Title)) || null;
   const matchedJikanMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, jikanMeta?.title) ? jikanMeta : null;
+  const localAndAnimeAliasTitles = uniqueLocalTitles([
+    ...localTitleCandidates,
+    ...(matchedJikanMeta?.aliases || []),
+    matchedJikanMeta?.title,
+  ]);
   const matchedTmdbTVMeta = [tmdbTVById, tmdbTVBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.title)) || null;
-  const matchedTVMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, tvMeta?.title) ? tvMeta : null;
+    .find((data) => remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, data?.title)) || null;
+  const matchedTVMeta = remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, tvMeta?.title) ? tvMeta : null;
 
   // ── Resolve type ───────────────────────────────────────────────────────────
   const finalType: 'tv' | 'anime' =
@@ -3232,34 +3385,35 @@ async function buildTVItemFromFolder(
     || (matchedTmdbTVMeta?.year ?? 0)
     || (matchedTVMeta?.year ?? 0)
     || year;
+  const jikanEpisodesForLocalSeasons = finalType === 'anime' && !matchedTVMeta?.episodes?.length
+    ? await fetchJikanEpisodesForLocalAnimeSeasons(episodeFiles, searchTitle, matchedJikanMeta)
+    : [];
 
   // ── Merge episode metadata onto local files ────────────────────────────────
-  // Priority of episode data: Jikan (anime) > TMDB TV > TVmaze
+  // Priority of episode data: TVmaze names > Jikan names for anime > TMDB TV.
   // Remote episode maps are keyed by "season-number" (Jikan uses season=1 for all)
   const remoteEpisodes: EpisodeMeta[] =
-    (finalType === 'anime' ? matchedJikanMeta?.episodes : null)
+    matchedTVMeta?.episodes
+    ?? (finalType === 'anime' && jikanEpisodesForLocalSeasons.length > 0 ? jikanEpisodesForLocalSeasons : null)
     ?? matchedTmdbTVMeta?.episodes
-    ?? matchedTVMeta?.episodes
     ?? [];
 
   let mergedEpisodes = localEpisodes;
   if (remoteEpisodes.length > 0) {
-    // Jikan numbers by episode only (season always 1), so match by episode number alone for anime
-    const useEpKeyOnly = finalType === 'anime' && matchedJikanMeta?.episodes && matchedJikanMeta.episodes.length > 0;
     const remoteEpMap = new Map<string, EpisodeMeta>(
       remoteEpisodes.map((ep) => [
-        useEpKeyOnly ? String(ep.number) : `${ep.season}-${ep.number}`,
+        `${ep.season}-${ep.number}`,
         ep,
       ]),
     );
 
     mergedEpisodes = localEpisodes.map((local) => {
-      const key = useEpKeyOnly ? String(local.episode) : `${local.season}-${local.episode}`;
+      const key = `${local.season}-${local.episode}`;
       const remote = remoteEpMap.get(key);
       if (!remote) return local;
       return {
         ...local,
-        title: local.title || remote.title,
+        title: remote.title || local.title,
         summary: local.summary || remote.summary,
         still: remote.still || local.still,
         rating: remote.rating || local.rating,
@@ -3267,6 +3421,13 @@ async function buildTVItemFromFolder(
       };
     });
   }
+  const mergedEpisodeTitleByKey = new Map(
+    mergedEpisodes.map((episode) => [`${episode.season}-${episode.number}`, episode.title]),
+  );
+  const mergedEpisodeFiles = episodeFiles.map((file) => ({
+    ...file,
+    title: mergedEpisodeTitleByKey.get(`${file.season}-${file.episode}`) || file.title,
+  }));
 
   const remoteSeasons = matchedTmdbTVMeta?.tmdbSeasons ?? matchedTVMeta?.seasons;
   const mergedSeasons = mergeLocalSeasonsWithMetadata(localSeasons, remoteSeasons);
@@ -3287,7 +3448,7 @@ async function buildTVItemFromFolder(
     filePath: fullPath,
     seasons: mergedSeasons,
     episodes: mergedEpisodes,
-    episodeFiles,
+    episodeFiles: mergedEpisodeFiles,
     subtitles,
     localMetadata: representativeProbe.localMetadata,
   };
@@ -3352,14 +3513,19 @@ async function buildMovieItemFromFile(
     shouldUseShowProviders
       ? fetchTMDBTVMetadata(searchTitle, searchYear, tmdbApiKey)
       : Promise.resolve(null),
-    !likelyAnime ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
+    shouldUseShowProviders ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
   ]);
   const matchedTmdbData = tmdbById || tmdbBySearch || null;
   const matchedOmdbData = omdbById || omdbBySearch || null;
   const matchedJikanMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, jikanMeta?.title) ? jikanMeta : null;
+  const localAndAnimeAliasTitles = uniqueLocalTitles([
+    ...localTitleCandidates,
+    ...(matchedJikanMeta?.aliases || []),
+    matchedJikanMeta?.title,
+  ]);
   const matchedTmdbTVMeta = [tmdbTVById, tmdbTVBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.title)) || null;
-  const matchedTVMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, tvMeta?.title) ? tvMeta : null;
+    .find((data) => remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, data?.title)) || null;
+  const matchedTVMeta = remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, tvMeta?.title) ? tvMeta : null;
 
   // Resolve the canonical title (prefer API-confirmed names)
   const resolvedTitle = searchTitle || parsedFile.title;
@@ -3464,29 +3630,36 @@ async function buildMovieItemFromFile(
 
   if (finalType === 'anime' || finalType === 'tv') {
     const remoteEpisodes: EpisodeMeta[] =
-      (finalType === 'anime' ? matchedJikanMeta?.episodes : null)
+      matchedTVMeta?.episodes
+      ?? (finalType === 'anime' ? matchedJikanMeta?.episodes : null)
       ?? matchedTmdbTVMeta?.episodes
-      ?? matchedTVMeta?.episodes
       ?? [];
     const remoteSeasons =
       matchedTmdbTVMeta?.tmdbSeasons
       ?? matchedTVMeta?.seasons
       ?? [{ number: 1, title: finalType === 'anime' ? 'Season 1' : 'Season 1', episodeCount: 1 }];
     const episodeStill = remoteEpisodes.find((episode) => Boolean(episode.still))?.still || officialBackdrop || embeddedPoster || localThumbnail;
+    const firstRemoteEpisode = remoteEpisodes.find((episode) => episode.season === 1 && episode.number === 1) || remoteEpisodes[0];
 
     return {
       ...baseItem,
       seasons: remoteSeasons.length > 0 ? remoteSeasons : [{ number: 1, title: 'Season 1', episodeCount: 1 }],
       episodes: [{
         season: 1, number: 1,
-        title: resolvedTitle,
-        summary,
+        title: firstRemoteEpisode?.title || resolvedTitle,
+        summary: firstRemoteEpisode?.summary || summary,
         still: episodeStill,
-        rating,
-        airDate: '',
+        rating: firstRemoteEpisode?.rating || rating,
+        airDate: firstRemoteEpisode?.airDate || '',
         localMetadata: probe.localMetadata,
       }],
-      episodeFiles: [{ season: 1, episode: 1, filePath: fullPath, title: resolvedTitle, localMetadata: probe.localMetadata }],
+      episodeFiles: [{
+        season: 1,
+        episode: 1,
+        filePath: fullPath,
+        title: firstRemoteEpisode?.title || resolvedTitle,
+        localMetadata: probe.localMetadata,
+      }],
     };
   }
 
@@ -4216,6 +4389,8 @@ type OfficialArtworkRefreshResult = {
   cover?: string;
   summary?: string;
   rating?: number;
+  episodes?: EpisodeMeta[];
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
   posterCandidates: string[];
   backdropCandidates: string[];
 };
@@ -4226,6 +4401,8 @@ type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   title: string;
   year?: number;
   genres?: string[];
+  episodeCount?: number;
+  episodePreview?: string[];
 };
 
 function numericRating(value: unknown): number {
@@ -4295,6 +4472,7 @@ function metadataCandidate(
   const posterCandidates = officialArtworkOnly([metadata.poster, ...(metadata.posterCandidates || [])]);
   const backdropCandidates = officialArtworkOnly([metadata.backdrop, ...(metadata.backdropCandidates || [])]);
   const title = String(metadata.title || fallbackTitle || '').trim();
+  const episodes = (metadata.episodes || []).filter((episode) => episode.title);
   const candidateWithoutId: Omit<OfficialMetadataCandidate, 'id'> = {
     source,
     title,
@@ -4304,6 +4482,12 @@ function metadataCandidate(
     summary: metadata.summary || '',
     rating: numericRating(metadata.rating),
     genres: Array.isArray(metadata.genres) ? metadata.genres.filter(Boolean) : [],
+    episodes,
+    episodeCount: episodes.length || undefined,
+    episodePreview: episodes.slice(0, 4).map((episode) => {
+      const code = `S${String(episode.season || 1).padStart(2, '0')}E${String(episode.number).padStart(2, '0')}`;
+      return `${code} ${episode.title}`;
+    }),
     posterCandidates,
     backdropCandidates,
   };
@@ -4380,6 +4564,46 @@ function sortMetadataCandidates(
     const bIsArc = sequelArcWords.test(b.title);
     if (aIsArc !== bIsArc) return aIsArc ? 1 : -1;
     return metadataCandidateScore(b, preferredTitle, localTitles) - metadataCandidateScore(a, preferredTitle, localTitles);
+  });
+}
+
+function mergeEpisodeMetadataForTarget(
+  target: MediaItem,
+  remoteEpisodes: EpisodeMeta[] | undefined,
+  source: OfficialMetadataCandidate['source'] | 'refresh',
+): void {
+  if (target.type === 'movie' || !remoteEpisodes?.length) return;
+
+  const useEpKeyOnly = source === 'Jikan';
+  const remoteByKey = new Map<string, EpisodeMeta>(
+    remoteEpisodes.map((episode) => [
+      useEpKeyOnly ? String(episode.number) : `${episode.season}-${episode.number}`,
+      episode,
+    ]),
+  );
+  const existingByKey = new Map<string, EpisodeMeta>(
+    (target.episodes || []).map((episode) => [`${episode.season}-${episode.number}`, episode]),
+  );
+
+  if (!target.episodeFiles?.length) {
+    target.episodes = remoteEpisodes;
+    return;
+  }
+
+  target.episodes = target.episodeFiles.map((file) => {
+    const key = `${file.season}-${file.episode}`;
+    const remote = remoteByKey.get(useEpKeyOnly ? String(file.episode) : key);
+    const existing = existingByKey.get(key);
+    return {
+      season: file.season,
+      number: file.episode,
+      title: remote?.title || existing?.title || file.title || '',
+      summary: remote?.summary || existing?.summary || '',
+      still: remote?.still || existing?.still || '',
+      rating: remote?.rating || existing?.rating || 0,
+      airDate: remote?.airDate || existing?.airDate || '',
+      localMetadata: file.localMetadata || existing?.localMetadata,
+    };
   });
 }
 
@@ -4515,7 +4739,7 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null),
     providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
     fetchTMDBTVMetadata(title, year, tmdbApiKey),
-    !likelyAnime ? fetchTVMetadata(title, year) : Promise.resolve(null),
+    fetchTVMetadata(title, year),
   ]);
   const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
   const matchedJikan = remoteMatchesAnyLocalTitle(localTitles, jikanMeta?.title) ? jikanMeta : null;
@@ -4533,12 +4757,22 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     likelyAnime ? matchedJikan?.backdrop : '',
     matchedTV?.backdrop,
   ]);
+  const episodes = matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes;
+  const episodeSource = matchedTV?.episodes?.length
+    ? 'TVmaze'
+    : likelyAnime && matchedJikan?.episodes?.length
+      ? 'Jikan'
+      : tmdbMeta?.episodes?.length
+        ? 'TMDB'
+        : undefined;
 
   return {
     thumbnail: posterCandidates[0] || '',
     cover: backdropCandidates[0] || posterCandidates[0] || '',
     summary: tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
     rating: showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
+    episodes,
+    episodeSource,
     posterCandidates,
     backdropCandidates,
   };
@@ -4559,6 +4793,7 @@ function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMeta
   if (candidate.summary) target.summary = candidate.summary;
   if (candidate.rating) target.rating = candidate.rating;
   if (candidate.genres?.length) target.genres = candidate.genres;
+  mergeEpisodeMetadataForTarget(target, candidate.episodes, candidate.source);
   target.posterCandidates = orderedArtworkCandidates(
     ...(candidate.posterCandidates || []),
     candidate.thumbnail,
@@ -4578,6 +4813,8 @@ function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMeta
     cover: candidate.cover || target.backdrop || candidate.thumbnail || target.poster || '',
     summary: candidate.summary || target.summary || '',
     rating: candidate.rating || target.rating || 0,
+    episodes: target.type === 'movie' ? undefined : target.episodes,
+    episodeSource: candidate.source,
     posterCandidates: target.posterCandidates || [],
     backdropCandidates: target.backdropCandidates || [],
   };
@@ -4601,11 +4838,12 @@ async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkR
   }
 
   const refreshed = await fetchOfficialArtworkForItem(target);
-  if (refreshed.thumbnail || refreshed.cover || refreshed.summary || refreshed.rating) {
+  if (refreshed.thumbnail || refreshed.cover || refreshed.summary || refreshed.rating || refreshed.episodes?.length) {
     if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
     if (refreshed.cover) target.backdrop = refreshed.cover;
     if (refreshed.summary) target.summary = refreshed.summary;
     if (refreshed.rating) target.rating = refreshed.rating;
+    mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
     target.posterCandidates = orderedArtworkCandidates(
       ...refreshed.posterCandidates,
       ...officialArtworkOnly(target.posterCandidates || []),
@@ -4621,6 +4859,8 @@ async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkR
 
   return {
     ...refreshed,
+    episodes: target.type === 'movie' ? undefined : target.episodes,
+    episodeSource: refreshed.episodeSource,
     posterCandidates: target.posterCandidates || refreshed.posterCandidates,
     backdropCandidates: target.backdropCandidates || refreshed.backdropCandidates,
   };
@@ -4756,6 +4996,27 @@ function getUpdateFeedUrl() {
   return `https://update.electronjs.org/${UPDATE_OWNER}/${UPDATE_REPO}/${platform}-${process.arch}/${app.getVersion()}`;
 }
 
+function installDownloadedUpdate() {
+  if (updateInstallStarted) return updateState;
+  updateInstallStarted = true;
+
+  setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
+  setImmediate(() => {
+    try {
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      updateInstallStarted = false;
+      setUpdateState({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        checkedAt: new Date().toISOString(),
+      });
+    }
+  });
+
+  return updateState;
+}
+
 function configureAutoUpdater() {
   if (updaterConfigured) return;
   updaterConfigured = true;
@@ -4797,9 +5058,10 @@ function configureAutoUpdater() {
   autoUpdater.on('update-downloaded', () => {
     setUpdateState({
       status: 'downloaded',
-      message: 'Update ready. Restart LoomTV to install it.',
+      message: 'Update downloaded. Restarting LoomTV to install it...',
       checkedAt: new Date().toISOString(),
     });
+    installDownloadedUpdate();
   });
 
   autoUpdater.on('error', (error) => {
@@ -5002,19 +5264,7 @@ ipcMain.handle('updates:get-state', () => updateState);
 ipcMain.handle('updates:check', () => checkForUpdates());
 ipcMain.handle('updates:install', () => {
   if (updateState.status !== 'downloaded') return updateState;
-  setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
-  setImmediate(() => {
-    try {
-      autoUpdater.quitAndInstall();
-    } catch (error) {
-      setUpdateState({
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-        checkedAt: new Date().toISOString(),
-      });
-    }
-  });
-  return updateState;
+  return installDownloadedUpdate();
 });
 
 ipcMain.handle('media:ffmpeg-available', () => {
