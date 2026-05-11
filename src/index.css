@@ -62,6 +62,14 @@ body {
   overflow: hidden;
 }
 
+:where(button:not(:disabled), a[href], [role="button"]:not([aria-disabled="true"]), summary) {
+  cursor: pointer;
+}
+
+:where(button:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
+}
+
 * {
   scrollbar-width: none;
 }
@@ -151,8 +159,8 @@ body {
 
 .loom-detail-hero-fade {
   background:
-    linear-gradient(180deg, rgba(8, 15, 25, 0.18) 0%, rgba(8, 15, 25, 0.62) 58%, var(--loom-sidebar) 100%),
-    linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.68) 18%, rgba(8, 15, 25, 0.2) 48%, rgba(8, 15, 25, 0.72) 100%);
+    linear-gradient(180deg, rgba(8, 15, 25, 0.14) 0%, rgba(8, 15, 25, 0.44) 58%, var(--loom-sidebar) 100%),
+    linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.52) 18%, rgba(8, 15, 25, 0.08) 48%, rgba(8, 15, 25, 0.58) 100%);
 }
 
 .loom-detail-side-fade-left {
@@ -206,21 +214,21 @@ body {
 }
 
 .settings-panel {
-  border: 1px solid rgba(148, 163, 184, 0.14);
+  border: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
   background: var(--loom-surface);
 }
 
 .settings-panel-soft {
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  background: rgba(11, 20, 32, 0.68);
+  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  background: var(--loom-surface-2);
 }
 
 .settings-action-tile {
-  border: 1px solid rgba(148, 163, 184, 0.12);
-  background: rgba(9, 17, 29, 0.72);
+  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  background: var(--loom-surface-2);
 }
 
 .settings-action-tile:hover {
-  border-color: rgba(251, 197, 0, 0.38);
-  background: rgba(16, 26, 40, 0.92);
+  border-color: color-mix(in srgb, var(--loom-accent) 42%, var(--loom-border));
+  background: var(--loom-surface-3);
 }

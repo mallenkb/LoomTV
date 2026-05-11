@@ -273,8 +273,8 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
             )}
           </span>
           <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate text-sm font-semibold text-white">{candidate.title}</span>
-            <span className="mt-1 block truncate text-xs text-[var(--loom-muted)]">{candidate.subtitle}</span>
+            <span className="block truncate text-[20px] font-semibold text-white">{candidate.title}</span>
+            <span className="mt-1 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
           </span>
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] shadow-[0_0_0_5px_rgba(251,197,0,0.12),0_12px_24px_rgba(0,0,0,0.30)]">
             <Play className="h-5 w-5 fill-current" />

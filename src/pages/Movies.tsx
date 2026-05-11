@@ -20,7 +20,7 @@ export default function Movies() {
 
   return (
     <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch value={query} onChange={setQuery} placeholder="Search Movies" />
+      <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
         <h2 className="loom-section-title mb-6 text-2xl font-bold text-white">Movies</h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
