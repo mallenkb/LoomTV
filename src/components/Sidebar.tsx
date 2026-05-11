@@ -123,8 +123,8 @@ export default function Sidebar() {
   const updateButtonLabel = updateState?.status === 'downloaded' ? 'Update' : 'Updating';
 
   return (
-    <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col border-r border-[var(--loom-border)]">
-      <div className="p-4 border-b border-[var(--loom-border)]">
+    <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
+      <div className="p-4 bg-black/10">
         <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
           <LoomLogo className="h-8 w-auto" />
         </Link>
@@ -133,7 +133,7 @@ export default function Sidebar() {
         <div className="relative">
           {activeNavIndex >= 0 && (
             <motion.span
-              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-surface-3)]"
+              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-surface-3)] shadow-[0_10px_28px_rgba(0,0,0,0.26)]"
               initial={false}
               animate={{ y: activeNavIndex * (navItemHeight + navItemGap) }}
               transition={{ type: 'spring', stiffness: 420, damping: 40, mass: 0.9 }}
@@ -152,7 +152,7 @@ export default function Sidebar() {
                   'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors',
                   isActive
                     ? 'text-white'
-                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/55 hover:text-[var(--loom-text)]',
+                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/70 hover:text-[var(--loom-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />

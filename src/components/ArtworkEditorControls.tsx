@@ -132,6 +132,7 @@ export default function ArtworkEditorControls({
   const [applyingCandidateId, setApplyingCandidateId] = useState('');
   const [metadataError, setMetadataError] = useState('');
   const [artworkSaveError, setArtworkSaveError] = useState('');
+  const [isPageScrolled, setIsPageScrolled] = useState(false);
   const artworkMenuRef = useRef<HTMLDivElement | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
@@ -168,6 +169,21 @@ export default function ArtworkEditorControls({
     setMetadataDialogOpen(false);
     setApplyingCandidateId('');
     setMetadataError('');
+  }, [mediaId]);
+
+  useEffect(() => {
+    const scrollContainer = artworkMenuRef.current?.closest('.overflow-y-auto');
+    if (!scrollContainer) return;
+
+    const updateScrolledState = () => {
+      setIsPageScrolled(scrollContainer.scrollTop > 24);
+    };
+
+    updateScrolledState();
+    scrollContainer.addEventListener('scroll', updateScrolledState, { passive: true });
+    return () => {
+      scrollContainer.removeEventListener('scroll', updateScrolledState);
+    };
   }, [mediaId]);
 
   const openArtworkPicker = (target: ArtworkTarget) => {
@@ -364,14 +380,14 @@ export default function ArtworkEditorControls({
           title="Refresh metadata"
           onClick={openMetadataCandidates}
           disabled={isFetchingArtwork}
-          className="h-10 rounded-lg border border-white/20 bg-black/55 px-3 text-white shadow-lg backdrop-blur-md hover:bg-white/10 hover:text-[var(--loom-accent)] disabled:cursor-wait disabled:opacity-70"
+          className={`${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md transition-all duration-200 hover:border-[var(--loom-accent)]/45 hover:bg-[var(--loom-panel)] hover:text-[var(--loom-accent)] disabled:cursor-wait disabled:opacity-70`}
         >
           {isFetchingArtwork ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin text-[var(--loom-accent)]" />
+            <Loader2 className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4 animate-spin text-[var(--loom-accent)]`} />
           ) : (
-            <RefreshCw className="mr-2 h-4 w-4" />
+            <RefreshCw className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4`} />
           )}
-          <span className="text-sm font-medium">Refresh metadata</span>
+          {!isPageScrolled && <span className="text-sm font-medium">Refresh metadata</span>}
         </Button>
         <div className="relative">
           <Button
@@ -382,7 +398,7 @@ export default function ArtworkEditorControls({
             aria-haspopup="menu"
             aria-expanded={artworkMenuOpen}
             onClick={() => setArtworkMenuOpen((open) => !open)}
-            className="h-10 w-10 rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md hover:bg-white/10 hover:text-[var(--loom-accent)]"
+            className="h-10 w-10 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:bg-[var(--loom-panel)] hover:text-[var(--loom-accent)]"
           >
             {isFetchingArtwork ? (
               <Loader2 className="h-5 w-5 animate-spin text-[var(--loom-accent)]" />
@@ -393,7 +409,7 @@ export default function ArtworkEditorControls({
           {artworkMenuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg border border-white/10 bg-[var(--loom-surface)]/95 py-1 shadow-2xl backdrop-blur-md"
+              className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] py-1 shadow-2xl backdrop-blur-md"
             >
               <button
                 type="button"
