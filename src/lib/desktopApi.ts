@@ -28,7 +28,7 @@ type SettingsPayload = {
   localNetworkShareToken?: string;
 };
 export type UpdateState = {
-  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error';
+  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error';
   currentVersion: string;
   platform: NodeJS.Platform;
   arch: string;

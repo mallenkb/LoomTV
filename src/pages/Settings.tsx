@@ -139,7 +139,7 @@ const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
 
 const APP_LICENSE = {
   name: 'LoomTV',
-  version: '1.0.6',
+  version: '1.0.7',
   license: 'MIT',
   copyright: 'Copyright (c) 2026 malllenkb',
 };
@@ -183,6 +183,7 @@ function getUpdateButtonLabel(updateState: UpdateState | null): string {
   if (updateState.status === 'checking') return 'Checking...';
   if (updateState.status === 'downloading') return 'Downloading...';
   if (updateState.status === 'downloaded') return 'Update now';
+  if (updateState.status === 'installing') return 'Restarting...';
   return 'Check for updates';
 }
 
@@ -1375,10 +1376,10 @@ export default function Settings() {
                           void desktopApi.checkForUpdates().then(setUpdateState);
                         }
                       }}
-                      disabled={updateState?.status === 'checking' || updateState?.status === 'downloading'}
+                      disabled={updateState?.status === 'checking' || updateState?.status === 'downloading' || updateState?.status === 'installing'}
                       className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--loom-accent)] px-4 text-sm font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:cursor-wait disabled:opacity-70"
                     >
-                      {updateState?.status === 'checking' || updateState?.status === 'downloading' ? (
+                      {updateState?.status === 'checking' || updateState?.status === 'downloading' || updateState?.status === 'installing' ? (
                         <RefreshCw className="h-4 w-4 animate-spin" />
                       ) : (
                         <Download className="h-4 w-4" />

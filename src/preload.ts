@@ -21,7 +21,7 @@ type LibraryPayload = {
 type LibraryScanMode = 'quick' | 'metadata' | 'full';
 type LibraryScanProgress = { isComplete: boolean; scannedFolders: number; totalFolders: number };
 type UpdateState = {
-  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'not-available' | 'error';
+  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error';
   currentVersion: string;
   platform: NodeJS.Platform;
   arch: string;

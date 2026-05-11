@@ -94,6 +94,7 @@ type UpdateStatus =
   | 'available'
   | 'downloading'
   | 'downloaded'
+  | 'installing'
   | 'not-available'
   | 'error';
 
@@ -4850,8 +4851,7 @@ ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?:
   const scanned = await scanLibrary(data, {
     mode,
     onProgress: (snapshot) => {
-      saveLibraryFromScan(snapshot, scanVersion);
-      event.sender.send('library:scan-progress', libraryForRenderer(), {
+      event.sender.send('library:scan-progress', libraryForRenderer(snapshot), {
         isComplete: snapshot.isComplete,
         scannedFolders: snapshot.scannedFolders,
         totalFolders: snapshot.totalFolders,
@@ -4880,9 +4880,8 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
     const scanned = await scanLibrary(updated, {
       mode: 'quick',
       onProgress: (snapshot) => {
-        saveLibraryFromScan(snapshot, scanVersion);
         BrowserWindow.getAllWindows().forEach((window) => {
-          window.webContents.send('library:scan-progress', libraryForRenderer(), {
+          window.webContents.send('library:scan-progress', libraryForRenderer(snapshot), {
             isComplete: snapshot.isComplete,
             scannedFolders: snapshot.scannedFolders,
             totalFolders: snapshot.totalFolders,
@@ -5003,7 +5002,18 @@ ipcMain.handle('updates:get-state', () => updateState);
 ipcMain.handle('updates:check', () => checkForUpdates());
 ipcMain.handle('updates:install', () => {
   if (updateState.status !== 'downloaded') return updateState;
-  setImmediate(() => autoUpdater.quitAndInstall());
+  setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
+  setImmediate(() => {
+    try {
+      autoUpdater.quitAndInstall();
+    } catch (error) {
+      setUpdateState({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        checkedAt: new Date().toISOString(),
+      });
+    }
+  });
   return updateState;
 });
 
