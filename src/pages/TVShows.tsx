@@ -27,7 +27,7 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
 
   return (
     <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch value={query} onChange={setQuery} placeholder={`Search ${title}`} />
+      <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
         <h2 className="loom-section-title mb-6 text-2xl font-bold text-white">{title}</h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
@@ -111,11 +111,16 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
       <div className="mt-2">
         <h4 className="truncate text-sm font-semibold text-white">{show.title}</h4>
         <p className="text-xs text-[var(--loom-muted)]">
-          {show.year > 0 ? `${show.year} · ` : ''}{(show.seasons || []).length} {(show.seasons || []).length === 1 ? 'Season' : 'Seasons'}
+          {show.year > 0 ? `${show.year} · ` : ''}{availableSeasonCount(show)} {availableSeasonCount(show) === 1 ? 'Season' : 'Seasons'}
         </p>
       </div>
     </Link>
   );
+}
+
+function availableSeasonCount(show: TVShow): number {
+  const fileSeasons = new Set((show.episodeFiles || []).map((file) => file.season).filter((season) => season > 0));
+  return fileSeasons.size || (show.seasons || []).length;
 }
 
 function RatingBadge({ rating }: { rating?: number }) {

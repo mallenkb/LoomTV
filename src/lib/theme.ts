@@ -13,12 +13,12 @@ export type AppThemeSettings = {
 export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   mode: 'dark',
   color: 'yellow',
-  darkTheme: 'justwatch',
+  darkTheme: 'black',
   loaderStyle: 'play-mark',
 };
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
-  yellow: { label: 'JustWatch Yellow', hex: '#fbc500', hover: '#ffd43b', foreground: '#08101a', foregroundMuted: '#1d2a39' },
+  yellow: { label: 'Yellow', hex: '#fbc500', hover: '#ffd43b', foreground: '#08101a', foregroundMuted: '#1d2a39' },
   red: { label: 'Red', hex: '#931116', hover: '#820D11', foreground: '#ffffff', foregroundMuted: '#ffffff' },
   blue: { label: 'Pastel Blue', hex: '#8FB8FF', hover: '#A9C9FF', foreground: '#071322', foregroundMuted: '#071322' },
   orange: { label: 'Orange', hex: '#FF9900', hover: '#FFB000', foreground: '#000000', foregroundMuted: '#000000' },
@@ -40,6 +40,22 @@ export const DARK_THEMES: Record<AppDarkTheme, {
   bodyStart: string;
   bodyEnd: string;
 }> = {
+  black: {
+    label: 'Black',
+    description: 'True black-style dark mode using #0a0a0a everywhere.',
+    bg: '#0a0a0a',
+    surface: '#141414',
+    surface2: '#101010',
+    surface3: '#1f1f1f',
+    sidebar: '#0a0a0a',
+    muted: '#a3a3a3',
+    faint: '#737373',
+    border: '#262626',
+    panel: 'rgba(20, 20, 20, 0.88)',
+    panelBorder: 'rgba(255, 255, 255, 0.13)',
+    bodyStart: '#0a0a0a',
+    bodyEnd: '#0a0a0a',
+  },
   default: {
     label: 'Default',
     description: 'The original LoomTV charcoal surfaces.',
@@ -57,7 +73,7 @@ export const DARK_THEMES: Record<AppDarkTheme, {
     bodyEnd: '#111111',
   },
   justwatch: {
-    label: 'JustWatch',
+    label: 'Navy Black',
     description: 'Deep navy-black with media-card contrast.',
     bg: '#060d17',
     surface: '#101a28',
@@ -71,22 +87,6 @@ export const DARK_THEMES: Record<AppDarkTheme, {
     panelBorder: 'rgba(148, 163, 184, 0.18)',
     bodyStart: '#08111d',
     bodyEnd: '#050a12',
-  },
-  black: {
-    label: 'Black',
-    description: 'True black-style dark mode using #0a0a0a everywhere.',
-    bg: '#0a0a0a',
-    surface: '#141414',
-    surface2: '#101010',
-    surface3: '#1f1f1f',
-    sidebar: '#0a0a0a',
-    muted: '#a3a3a3',
-    faint: '#737373',
-    border: '#262626',
-    panel: 'rgba(20, 20, 20, 0.88)',
-    panelBorder: 'rgba(255, 255, 255, 0.13)',
-    bodyStart: '#0a0a0a',
-    bodyEnd: '#0a0a0a',
   },
 };
 

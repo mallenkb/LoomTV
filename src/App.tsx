@@ -4,6 +4,7 @@ import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
+import Others from './pages/Others';
 import TVShows from './pages/TVShows';
 import MovieDetail from './pages/MovieDetail';
 import TVDetail from './pages/TVDetail';
@@ -79,6 +80,7 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/movies" element={<Movies />} />
+          <Route path="/others" element={<Others />} />
           <Route path="/tv" element={<TVShows kind="series" />} />
           <Route path="/anime" element={<TVShows kind="anime" />} />
           <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />

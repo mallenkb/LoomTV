@@ -196,14 +196,16 @@ interface TVMetadata extends Partial<MediaItem> {
   showType?: string;
 }
 
-type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
+type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type ScanFolderKind = 'movies' | 'tv' | 'anime';
+type ScanCacheFolderKind = ScanFolderKind | 'auto';
 type LibraryScanMode = 'quick' | 'metadata' | 'full';
 
 interface LibraryFolderGroups {
   movies: string[];
   tvShows: string[];
   anime: string[];
+  others: string[];
 }
 
 interface MetadataProviderIds {
@@ -214,7 +216,7 @@ interface MetadataProviderIds {
 
 interface ScanCacheEntry {
   version?: number;
-  folderKind: ScanFolderKind;
+  folderKind: ScanCacheFolderKind;
   signature: string;
   fileCount: number;
   itemCount: number;
@@ -262,7 +264,7 @@ function normalizeSettings(raw: AppSettings): AppSettings {
   const metadataApiKeys: Record<string, string> = {};
   const rawKeys = raw.metadataApiKeys || {};
   const autoSyncIntervalHours = Number(raw.autoSyncIntervalHours);
-  const defaultSidebarNavOrder = ['anime', 'tv', 'movies'];
+  const defaultSidebarNavOrder = ['anime', 'tv', 'movies', 'others'];
   const rawSidebarNavOrder = Array.isArray(raw.sidebarNavOrder) ? raw.sidebarNavOrder : [];
   const sidebarNavOrder = [
     ...rawSidebarNavOrder.filter((item) => defaultSidebarNavOrder.includes(item)),
@@ -293,7 +295,7 @@ function normalizeSettings(raw: AppSettings): AppSettings {
       : 'yellow',
     appDarkTheme: raw.appDarkTheme === 'default' || raw.appDarkTheme === 'justwatch' || raw.appDarkTheme === 'black'
       ? raw.appDarkTheme
-      : 'justwatch',
+      : 'black',
     appLoaderStyle: raw.appLoaderStyle === 'logo-mark' || raw.appLoaderStyle === 'horizontal-logo' || raw.appLoaderStyle === 'play-mark'
       ? raw.appLoaderStyle
       : 'play-mark',
@@ -702,8 +704,8 @@ function assColor(value: unknown, fallback: string): string {
 }
 
 function subtitleForceStyle(style?: SubtitleStyleOptions, placement: SubtitlePlacement = 'primary'): string {
-  const fontSize = clampStyleNumber(style?.fontSize, 55, 24, 96) * clampStyleNumber(style?.scale, 1, 0.5, 2);
-  const position = placement === 'secondary' ? 8 : clampStyleNumber(style?.position, 92, 0, 100);
+  const fontSize = clampStyleNumber(style?.fontSize, 32, 24, 96) * clampStyleNumber(style?.scale, 1, 0.5, 2);
+  const position = placement === 'secondary' ? 8 : clampStyleNumber(style?.position, 96, 0, 100);
   const marginV = placement === 'secondary'
     ? Math.round(position * 6)
     : Math.round((100 - position) * 6);
@@ -779,9 +781,9 @@ function parseSubtitleStyle(value: string | null): SubtitleStyleOptions | undefi
     if (!parsed || typeof parsed !== 'object') return undefined;
     return {
       delaySeconds: clampStyleNumber(parsed.delaySeconds, 0, -5, 5),
-      position: clampStyleNumber(parsed.position, 92, 0, 100),
+      position: clampStyleNumber(parsed.position, 96, 0, 100),
       scale: clampStyleNumber(parsed.scale, 1, 0.5, 2),
-      fontSize: clampStyleNumber(parsed.fontSize, 55, 24, 96),
+      fontSize: clampStyleNumber(parsed.fontSize, 32, 24, 96),
       fontColor: typeof parsed.fontColor === 'string' ? parsed.fontColor : '#ffffff',
       borderColor: typeof parsed.borderColor === 'string' ? parsed.borderColor : '#000000',
       borderWidth: clampStyleNumber(parsed.borderWidth, 3, 0, 10),
@@ -1606,7 +1608,7 @@ function startMediaServer(): Promise<number> {
           .catch(() => ({}))
           .then((body) => {
             const requestedKind = String(body.kind || '');
-            const kind: LibraryFolderKind = requestedKind === 'tvShows' || requestedKind === 'anime' || requestedKind === 'movies'
+            const kind: LibraryFolderKind = requestedKind === 'tvShows' || requestedKind === 'anime' || requestedKind === 'movies' || requestedKind === 'others'
               ? requestedKind
               : 'movies';
             return dialog.showOpenDialog(mainWindow!, { properties: ['openDirectory'] }).then((result) => ({ result, kind }));
@@ -3497,11 +3499,11 @@ interface ScanContext {
 }
 
 function defaultLibraryFolderGroups(): LibraryFolderGroups {
-  return { movies: [], tvShows: [], anime: [] };
+  return { movies: [], tvShows: [], anime: [], others: [] };
 }
 
 function flattenLibraryFolders(groups: LibraryFolderGroups): string[] {
-  return Array.from(new Set([...groups.movies, ...groups.tvShows, ...groups.anime]));
+  return Array.from(new Set([...groups.movies, ...groups.tvShows, ...groups.anime, ...groups.others]));
 }
 
 function normalizeLibraryFolderGroups(data?: Partial<LibraryData>): LibraryFolderGroups {
@@ -3511,6 +3513,7 @@ function normalizeLibraryFolderGroups(data?: Partial<LibraryData>): LibraryFolde
     normalized.movies = [...(groups.movies || [])];
     normalized.tvShows = [...(groups.tvShows || [])];
     normalized.anime = [...(groups.anime || [])];
+    normalized.others = [...(groups.others || [])];
   }
 
   for (const folder of data?.libraryFolders || []) {
@@ -3519,12 +3522,14 @@ function normalizeLibraryFolderGroups(data?: Partial<LibraryData>): LibraryFolde
     if (detected === 'movies') normalized.movies.push(folder);
     else if (detected === 'tv') normalized.tvShows.push(folder);
     else if (detected === 'anime') normalized.anime.push(folder);
+    else normalized.others.push(folder);
   }
 
   return {
     movies: Array.from(new Set(normalized.movies)),
     tvShows: Array.from(new Set(normalized.tvShows)),
     anime: Array.from(new Set(normalized.anime)),
+    others: Array.from(new Set(normalized.others)),
   };
 }
 
@@ -3767,20 +3772,29 @@ async function scanLibrary(
   const processedFolders = new Set<string>();
   let scannedFolders = 0;
 
-  const appendItems = (items: MediaItem[], folderKind: ScanFolderKind) => {
+  const appendItem = (item: MediaItem) => {
+    if (item.type === 'anime') animeShows.push({ ...item, type: 'anime' });
+    else if (item.type === 'tv') tvShows.push({ ...item, type: 'tv' });
+    else movies.push({ ...item, type: 'movie' });
+  };
+
+  const appendItems = (items: MediaItem[], folderKind: ScanCacheFolderKind) => {
     for (const item of items) {
       if (folderKind === 'movies') movies.push({ ...item, type: 'movie' });
       else if (folderKind === 'anime') animeShows.push({ ...item, type: 'anime' });
-      else tvShows.push({ ...item, type: 'tv' });
+      else if (folderKind === 'tv') tvShows.push({ ...item, type: 'tv' });
+      else appendItem(item);
     }
   };
 
-  const cachedItemsForFolder = (folder: string, folderKind: ScanFolderKind): MediaItem[] => {
-    const source = folderKind === 'movies'
-      ? data.movies || []
-      : folderKind === 'anime'
-        ? data.animeShows || []
-        : data.tvShows || [];
+  const cachedItemsForFolder = (folder: string, folderKind: ScanCacheFolderKind): MediaItem[] => {
+    const source = folderKind === 'auto'
+      ? [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]
+      : folderKind === 'movies'
+        ? data.movies || []
+        : folderKind === 'anime'
+          ? data.animeShows || []
+          : data.tvShows || [];
 
     return source
       .map(sanitizeStoredItem)
@@ -3825,7 +3839,7 @@ async function scanLibrary(
 
   const scanGroup = async (
     folders: string[],
-    folderKind: NonNullable<ScanContext['folderKind']>,
+    folderKind: ScanCacheFolderKind,
   ) => {
     for (const folder of folders) {
       const folderSignature = getLibraryFolderSignature(folder);
@@ -3850,7 +3864,7 @@ async function scanLibrary(
         }
       }
 
-      const folderCtx: ScanContext = { ...ctx, folderKind };
+      const folderCtx: ScanContext = folderKind === 'auto' ? { ...ctx } : { ...ctx, folderKind };
       const directItem = await scanDirectoryAsItem(folder, folderCtx);
       const items = directItem
         ? [directItem]
@@ -3879,6 +3893,7 @@ async function scanLibrary(
   await scanGroup(folderGroups.movies, 'movies');
   await scanGroup(folderGroups.tvShows, 'tv');
   await scanGroup(folderGroups.anime, 'anime');
+  await scanGroup(folderGroups.others, 'auto');
 
   const nextLibrary = {
     movies,
@@ -4146,7 +4161,7 @@ function libraryForLocalNetwork(): LibraryData {
   return {
     ...data,
     libraryFolders: [],
-    libraryFolderGroups: { movies: [], tvShows: [], anime: [] },
+    libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] },
     movies: (data.movies || []).map((item) => itemForLocalNetwork(item, base, token)),
     tvShows: (data.tvShows || []).map((item) => itemForLocalNetwork(item, base, token)),
     animeShows: (data.animeShows || []).map((item) => itemForLocalNetwork(item, base, token)),
@@ -4626,6 +4641,7 @@ function addFolderToLibrary(data: LibraryData, folderPath: string, kind: Library
   libraryFolderGroups.movies = libraryFolderGroups.movies.filter((folder) => folder !== folderPath);
   libraryFolderGroups.tvShows = libraryFolderGroups.tvShows.filter((folder) => folder !== folderPath);
   libraryFolderGroups.anime = libraryFolderGroups.anime.filter((folder) => folder !== folderPath);
+  libraryFolderGroups.others = libraryFolderGroups.others.filter((folder) => folder !== folderPath);
   libraryFolderGroups[kind].push(folderPath);
   const scanCache = { ...(data.scanCache || {}) };
   delete scanCache[folderPath];
@@ -4637,6 +4653,7 @@ function removeFolderFromLibrary(data: LibraryData, folderPath: string): Library
   libraryFolderGroups.movies = libraryFolderGroups.movies.filter((folder) => folder !== folderPath);
   libraryFolderGroups.tvShows = libraryFolderGroups.tvShows.filter((folder) => folder !== folderPath);
   libraryFolderGroups.anime = libraryFolderGroups.anime.filter((folder) => folder !== folderPath);
+  libraryFolderGroups.others = libraryFolderGroups.others.filter((folder) => folder !== folderPath);
   const scanCache = { ...(data.scanCache || {}) };
   delete scanCache[folderPath];
   return {
@@ -4856,7 +4873,7 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
   if (!result.canceled && result.filePaths.length > 0) {
     const data = loadLibrary();
     const newFolder = result.filePaths[0];
-    const safeKind: LibraryFolderKind = kind === 'tvShows' || kind === 'anime' || kind === 'movies' ? kind : 'movies';
+    const safeKind: LibraryFolderKind = kind === 'tvShows' || kind === 'anime' || kind === 'movies' || kind === 'others' ? kind : 'movies';
     const updated = addFolderToLibrary(data, newFolder, safeKind);
     saveLibraryMutation(updated);
     const scanVersion = libraryMutationVersion;

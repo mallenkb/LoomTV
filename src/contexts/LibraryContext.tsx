@@ -60,12 +60,13 @@ export interface TVShow extends MediaItem {
   episodeFiles?: EpisodeFile[];
 }
 
-export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime';
+export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 
 export interface LibraryFolderGroups {
   movies: string[];
   tvShows: string[];
   anime: string[];
+  others: string[];
 }
 
 export interface LibraryState {
@@ -96,7 +97,7 @@ const initialState: LibraryState = {
   tvShows: [],
   animeShows: [],
   libraryFolders: [],
-  libraryFolderGroups: { movies: [], tvShows: [], anime: [] },
+  libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] },
   isScanning: false,
   scanProgress: 0,
   isLoading: true,
@@ -143,7 +144,14 @@ interface LibraryContextType {
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
 
-const emptyFolderGroups: LibraryFolderGroups = { movies: [], tvShows: [], anime: [] };
+function normalizeFolderGroups(groups?: Partial<LibraryFolderGroups>): LibraryFolderGroups {
+  return {
+    movies: [...(groups?.movies || [])],
+    tvShows: [...(groups?.tvShows || [])],
+    anime: [...(groups?.anime || [])],
+    others: [...(groups?.others || [])],
+  };
+}
 
 function hasConfiguredFolders(data: {
   libraryFolders?: string[];
@@ -153,7 +161,8 @@ function hasConfiguredFolders(data: {
     data.libraryFolders?.length
     || data.libraryFolderGroups?.movies?.length
     || data.libraryFolderGroups?.tvShows?.length
-    || data.libraryFolderGroups?.anime?.length,
+    || data.libraryFolderGroups?.anime?.length
+    || data.libraryFolderGroups?.others?.length,
   );
 }
 
@@ -167,15 +176,16 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     tvShows?: TVShow[];
     animeShows?: TVShow[];
     libraryFolders?: string[];
-    libraryFolderGroups?: LibraryFolderGroups;
+    libraryFolderGroups?: Partial<LibraryFolderGroups>;
   }) => {
+    const libraryFolderGroups = normalizeFolderGroups(data.libraryFolderGroups);
     dispatch({ type: 'SET_MOVIES', payload: data.movies || [] });
     dispatch({ type: 'SET_TV_SHOWS', payload: data.tvShows || [] });
     dispatch({ type: 'SET_ANIME_SHOWS', payload: data.animeShows || [] });
     dispatch({ type: 'SET_LIBRARY_FOLDERS', payload: data.libraryFolders || [] });
     dispatch({
       type: 'SET_LIBRARY_FOLDER_GROUPS',
-      payload: data.libraryFolderGroups || emptyFolderGroups,
+      payload: libraryFolderGroups,
     });
   };
 

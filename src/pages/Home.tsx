@@ -32,7 +32,7 @@ export default function Home() {
 
   return (
     <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch value={query} onChange={setQuery} placeholder="Search Home" />
+      <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
         {!normalizedQuery && !isLoading && !hasLibraryItems && (
           <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
@@ -104,7 +104,7 @@ function HomeEmptyState({
   onAddFolder,
 }: {
   isScanning: boolean;
-  onAddFolder: (kind?: 'movies' | 'tvShows' | 'anime') => Promise<void>;
+  onAddFolder: (kind?: 'movies' | 'tvShows' | 'anime' | 'others') => Promise<void>;
 }) {
   return (
     <div className="flex min-h-[calc(100vh-220px)] items-center justify-center px-4">
@@ -157,12 +157,12 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
   const fallbackFilePath = item.type === 'movie'
     ? item.filePath
     : (item as TVShow).episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
-  const seasonCount = item.type === 'movie' ? 0 : ((item as TVShow).seasons || []).length;
-  const metaLine = item.year > 0
-    ? String(item.year)
-    : seasonCount > 0
-      ? `${seasonCount} ${seasonCount === 1 ? 'Season' : 'Seasons'}`
-      : '';
+  const seasonCount = item.type === 'movie' ? 0 : availableSeasonCount(item as TVShow);
+  const metaParts = [
+    item.year > 0 ? String(item.year) : '',
+    seasonCount > 0 ? `${seasonCount} ${seasonCount === 1 ? 'Season' : 'Seasons'}` : '',
+  ].filter(Boolean);
+  const metaLine = metaParts.join(' · ');
 
   useEffect(() => {
     setFallbackThumbnail('');
@@ -216,6 +216,11 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
       </div>
     </LinkComponent>
   );
+}
+
+function availableSeasonCount(show: TVShow): number {
+  const fileSeasons = new Set((show.episodeFiles || []).map((file) => file.season).filter((season) => season > 0));
+  return fileSeasons.size || (show.seasons || []).length;
 }
 
 function RatingBadge({ rating }: { rating?: number }) {
