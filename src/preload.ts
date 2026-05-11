@@ -235,7 +235,11 @@ declare global {
         cover?: string;
         summary?: string;
         rating?: number;
+        episodes?: unknown[];
+        episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
         genres?: string[];
+        episodeCount?: number;
+        episodePreview?: string[];
         posterCandidates?: string[];
         backdropCandidates?: string[];
       }>>;
@@ -248,7 +252,11 @@ declare global {
         cover?: string;
         summary?: string;
         rating?: number;
+        episodes?: unknown[];
+        episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
         genres?: string[];
+        episodeCount?: number;
+        episodePreview?: string[];
         posterCandidates?: string[];
         backdropCandidates?: string[];
       }) => Promise<{
@@ -256,6 +264,8 @@ declare global {
         cover?: string;
         summary?: string;
         rating?: number;
+        episodes?: unknown[];
+        episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
         posterCandidates?: string[];
         backdropCandidates?: string[];
       }>;
