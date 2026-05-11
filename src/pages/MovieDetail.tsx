@@ -145,7 +145,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
   if (!movie) {
     return (
-      <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
+      <div className="loom-page h-full overflow-y-auto">
         <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
           <Skeleton className="h-[400px] w-full rounded-lg" />
           <div className="mt-4 space-y-2">
@@ -186,7 +186,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const handleBack = () => navigate(backTarget);
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
+    <div className="loom-page h-full overflow-y-auto">
       <div className="mx-auto max-w-[1440px]">
       <div className="relative h-[50vh] w-full">
         <SafeArtwork
@@ -197,9 +197,9 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           imgClassName="object-cover"
           fallback={<div className="h-full w-full" />}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[var(--loom-bg)] via-[var(--loom-bg)]/50 to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-[var(--loom-bg)] to-transparent" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-[var(--loom-bg)] to-transparent" />
+        <div className="loom-detail-hero-fade absolute inset-0" />
+        <div className="loom-detail-side-fade-left pointer-events-none absolute inset-y-0 left-0 w-40" />
+        <div className="loom-detail-side-fade-right pointer-events-none absolute inset-y-0 right-0 w-40" />
         <ArtworkEditorControls
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}
@@ -215,7 +215,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+          className="fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:text-[var(--loom-accent)]"
         >
           <ArrowLeft className="w-5 h-5" />
           Back
@@ -226,7 +226,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             key={posterKey}
             src={posterArtwork}
             alt={movie.title}
-            className="hidden aspect-[2/3] w-28 shrink-0 rounded-lg border border-white/10 shadow-xl md:block"
+            className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
             imgClassName="object-cover"
             fallback={
               <div className="flex h-full w-full items-center justify-center p-2">
@@ -239,7 +239,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           <div className="flex-1 min-w-0">
             <h1 className="text-4xl font-bold text-white mb-2">{movie.title}</h1>
             <div className="flex items-center gap-4 text-[var(--loom-muted)] text-sm mb-3">
-              <span className="flex items-center gap-1 text-[#F5C451]">
+              <span className="loom-rating flex items-center gap-1">
                 <Star className="w-4 h-4" fill="currentColor" />
                 {movie.rating ? movie.rating.toFixed(1) : 'N/A'}
               </span>
@@ -270,7 +270,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           </div>
           <Button
             onClick={handlePlay}
-            className="relative h-16 min-w-[9rem] shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-xl hover:bg-[var(--loom-accent-hover)] gap-3"
+            className="relative h-16 min-w-[9rem] shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38),0_0_0_1px_rgba(251,197,0,0.26)] hover:bg-[var(--loom-accent-hover)] gap-3"
           >
             {hasResumeProgress && progressPercent > 0 && (
               <span
@@ -304,25 +304,25 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             <h3 className="text-lg font-semibold text-white mb-3">Local Media Info</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {movie.localMetadata.width && movie.localMetadata.height && (
-                <div className="rounded-lg bg-[var(--loom-surface)] p-3">
+                <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3">
                   <p className="text-[#555] text-xs uppercase tracking-wide">Resolution</p>
                   <p className="text-white text-sm mt-1">{movie.localMetadata.width}x{movie.localMetadata.height}</p>
                 </div>
               )}
               {movie.localMetadata.durationSeconds && (
-                <div className="rounded-lg bg-[var(--loom-surface)] p-3">
+                <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3">
                   <p className="text-[#555] text-xs uppercase tracking-wide">Duration</p>
                   <p className="text-white text-sm mt-1">{formatDuration(movie.localMetadata.durationSeconds)}</p>
                 </div>
               )}
               {movie.localMetadata.videoCodec && (
-                <div className="rounded-lg bg-[var(--loom-surface)] p-3">
+                <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3">
                   <p className="text-[#555] text-xs uppercase tracking-wide">Video</p>
                   <p className="text-white text-sm mt-1">{movie.localMetadata.videoCodec}</p>
                 </div>
               )}
               {movie.localMetadata.audioCodec && (
-                <div className="rounded-lg bg-[var(--loom-surface)] p-3">
+                <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3">
                   <p className="text-[#555] text-xs uppercase tracking-wide">Audio</p>
                   <p className="text-white text-sm mt-1">
                     {movie.localMetadata.audioCodec}

@@ -16,7 +16,7 @@ type LibraryPayload = {
   tvShows: unknown[];
   animeShows?: unknown[];
   libraryFolders: string[];
-  libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] };
+  libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
 };
 type LibraryScanMode = 'quick' | 'metadata' | 'full';
 type LibraryScanProgress = { isComplete: boolean; scannedFolders: number; totalFolders: number };
@@ -44,7 +44,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     ipcRenderer.on('library:scan-progress', handler);
     return () => ipcRenderer.removeListener('library:scan-progress', handler);
   },
-  addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime') => ipcRenderer.invoke('library:add-folder', kind),
+  addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime' | 'others') => ipcRenderer.invoke('library:add-folder', kind),
   removeLibraryFolder: (folderPath: string) => ipcRenderer.invoke('library:remove-folder', folderPath),
   playMedia: (filePath: string) => ipcRenderer.invoke('media:play', filePath),
   getStreamUrl: (filePath: string, options?: {
@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';
     appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+    appDarkTheme?: 'default' | 'justwatch' | 'black';
     appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
     localNetworkSharingEnabled?: boolean;
     localNetworkShareToken?: string;
@@ -162,11 +163,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
 declare global {
   interface Window {
     desktopApi: {
-      getLibrary: () => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
-      scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
+      getLibrary: () => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] } }>;
+      scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] } }>;
       onLibraryScanProgress?: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => () => void;
-      addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime') => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } } | null>;
-      removeLibraryFolder: (folderPath: string) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] } }>;
+      addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime' | 'others') => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] } } | null>;
+      removeLibraryFolder: (folderPath: string) => Promise<{ movies: any[]; tvShows: any[]; animeShows?: any[]; libraryFolders: string[]; libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] } }>;
       playMedia: (filePath: string) => Promise<boolean>;
       getStreamUrl: (filePath: string, options?: {
         startSeconds?: number;
@@ -193,6 +194,7 @@ declare global {
         sidebarNavOrder?: string[];
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+        appDarkTheme?: 'default' | 'justwatch' | 'black';
         appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
         localNetworkSharingEnabled?: boolean;
         localNetworkShareToken?: string;
@@ -205,6 +207,7 @@ declare global {
         sidebarNavOrder?: string[];
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+        appDarkTheme?: 'default' | 'justwatch' | 'black';
         appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
         localNetworkSharingEnabled?: boolean;
         localNetworkShareToken?: string;

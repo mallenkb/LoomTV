@@ -1,16 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Download, Film, Home, RefreshCw, Settings, Tv } from 'lucide-react';
+import { Download, Film, Folder, Home, RefreshCw, Settings, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
 import LoomLogo from '@/components/LoomLogo';
 
-type SidebarNavItemId = 'anime' | 'tv' | 'movies';
+type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | SidebarNavItemId;
 
-const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies'];
+const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 const navItemHeight = 40;
 const navItemGap = 4;
 
@@ -20,6 +20,7 @@ const sidebarNavItems: Record<SidebarNavItemId, { id: SidebarNavItemId; path: st
   anime: { id: 'anime', path: '/anime', label: 'Anime', icon: AnimeIcon },
   tv: { id: 'tv', path: '/tv', label: 'TV Shows', icon: Tv },
   movies: { id: 'movies', path: '/movies', label: 'Movies', icon: Film },
+  others: { id: 'others', path: '/others', label: 'Others', icon: Folder },
 };
 
 function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | null {
@@ -30,6 +31,7 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   if (activePath === '/movies' || activePath.startsWith('/movies/') || activePath.startsWith('/movie/')) return 'movies';
   if (activePath === '/tv' || activePath.startsWith('/tv/')) return 'tv';
   if (activePath === '/anime' || activePath.startsWith('/anime/')) return 'anime';
+  if (activePath === '/others' || activePath.startsWith('/others/')) return 'others';
 
   if (pathname.startsWith('/movie/')) return 'movies';
   if (pathname.startsWith('/tv/')) return 'tv';
@@ -123,8 +125,8 @@ export default function Sidebar() {
   const updateButtonLabel = updateState?.status === 'downloaded' ? 'Update' : 'Updating';
 
   return (
-    <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col border-r border-[var(--loom-border)]">
-      <div className="p-4 border-b border-[var(--loom-border)]">
+    <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
+      <div className="p-4 bg-black/10">
         <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
           <LoomLogo className="h-8 w-auto" />
         </Link>
@@ -133,7 +135,7 @@ export default function Sidebar() {
         <div className="relative">
           {activeNavIndex >= 0 && (
             <motion.span
-              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-surface-3)]"
+              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-surface-3)] shadow-[0_10px_28px_rgba(0,0,0,0.26)]"
               initial={false}
               animate={{ y: activeNavIndex * (navItemHeight + navItemGap) }}
               transition={{ type: 'spring', stiffness: 420, damping: 40, mass: 0.9 }}
@@ -152,7 +154,7 @@ export default function Sidebar() {
                   'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors',
                   isActive
                     ? 'text-white'
-                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/55 hover:text-[var(--loom-text)]',
+                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/70 hover:text-[var(--loom-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />
