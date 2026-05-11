@@ -5,6 +5,10 @@ import { fileURLToPath, URL } from 'node:url';
 // https://vitejs.dev/config
 export default defineConfig({
   plugins: [react()],
+  build: {
+    emptyOutDir: false,
+    outDir: '.vite/renderer/main_window',
+  },
   optimizeDeps: {
     entries: ['index.html'],
   },

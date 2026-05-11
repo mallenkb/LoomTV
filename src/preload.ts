@@ -26,6 +26,7 @@ type UpdateState = {
   platform: NodeJS.Platform;
   arch: string;
   supported: boolean;
+  downloadPercent?: number;
   message?: string;
   checkedAt?: string;
 };
