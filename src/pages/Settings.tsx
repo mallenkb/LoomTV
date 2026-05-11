@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ChevronDown, FolderPlus, RefreshCw, X, Key, CheckCi
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { desktopApi, UpdateState } from '@/lib/desktopApi';
+import { APP_VERSION, desktopApi, UpdateState } from '@/lib/desktopApi';
 import { useTheme } from '@/components/ThemeProvider';
 import LoomBrandLockup from '@/components/LoomBrandLockup';
 import LoomLogo from '@/components/LoomLogo';
@@ -81,11 +81,12 @@ function normalizeProviderId(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-type SettingsSection = 'library' | 'network' | 'metadata' | 'theme' | 'about';
+type SettingsSection = 'library' | 'playback' | 'network' | 'metadata' | 'theme' | 'about';
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 
 const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'library', label: 'Library' },
+  { id: 'playback', label: 'Playback' },
   { id: 'network', label: 'Network' },
   { id: 'metadata', label: 'Metadata API Keys' },
   { id: 'theme', label: 'Theme' },
@@ -96,6 +97,7 @@ const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';
 
 function isSettingsSection(value: string | null): value is SettingsSection {
   return value === 'library'
+    || value === 'playback'
     || value === 'network'
     || value === 'metadata'
     || value === 'theme'
@@ -178,13 +180,15 @@ function getUpdateButtonLabel(updateState: UpdateState | null): string {
   if (updateState.status === 'downloading') return updateState.downloadPercent ? `Downloading ${updateState.downloadPercent}%` : 'Downloading...';
   if (updateState.status === 'downloaded') return 'Update now';
   if (updateState.status === 'installing') return 'Restarting...';
+  if (updateState.status === 'available') return updateState.latestVersion ? `Update ${updateState.latestVersion}` : 'Update available';
   return 'Check for updates';
 }
 
-function getUpdateStatusText(updateState: UpdateState | null): string {
+function getCompactUpdateStatus(updateState: UpdateState | null): string {
   if (!updateState) return 'Update status is loading.';
   if (updateState.message) return updateState.message;
-  if (updateState.status === 'idle') return 'LoomTV will check for updates automatically.';
+  if (updateState.status === 'checking') return 'Checking GitHub releases...';
+  if (updateState.status === 'idle') return 'Ready to check GitHub releases.';
   return 'Use the button to check for the latest release.';
 }
 
@@ -218,6 +222,8 @@ export default function Settings() {
     return isSettingsSection(savedSection) ? savedSection : 'library';
   });
   const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
+  const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
+  const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
@@ -232,6 +238,7 @@ export default function Settings() {
   const [showManualNetworkAddress, setShowManualNetworkAddress] = useState(false);
   const [sharedLibrarySnapshot, setSharedLibrarySnapshot] = useState<SharedLibrarySnapshot | null>(null);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
   const { theme, setTheme } = useTheme();
   const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
 
@@ -258,6 +265,8 @@ export default function Settings() {
         ),
       );
       setSidebarNavOrder(normalizeSidebarNavOrder(s.sidebarNavOrder));
+      setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
+      setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
     });
     desktopApi.checkFFmpeg().then(setFfmpegStatus);
     void refreshLocalNetworkStatus();
@@ -334,6 +343,17 @@ export default function Settings() {
     );
     setSavedKey(true);
     setTimeout(() => setSavedKey(false), 2000);
+  };
+
+  const handleSavePlaybackSettings = async () => {
+    const normalizedBack = Math.max(1, Math.round(Number(playbackSkipBackSeconds) || 0));
+    const normalizedForward = Math.max(1, Math.round(Number(playbackSkipForwardSeconds) || 0));
+    setPlaybackSkipBackSeconds(normalizedBack);
+    setPlaybackSkipForwardSeconds(normalizedForward);
+    await desktopApi.saveSettings({
+      playbackSkipBackSeconds: normalizedBack,
+      playbackSkipForwardSeconds: normalizedForward,
+    });
   };
 
   const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
@@ -489,6 +509,52 @@ export default function Settings() {
   ] : [];
   const isNetworkSharingOn = Boolean(localNetworkStatus?.sharingEnabled);
   const currentNetworkName = localNetworkStatus?.networkName || 'Connected locally';
+  const isUpdateChecking = isCheckingUpdateServer || updateState?.status === 'checking';
+  const isUpdateBusy = isUpdateChecking || updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const updateButtonLabel = isUpdateChecking ? 'Checking...' : getUpdateButtonLabel(updateState);
+  const updateStatusCopy = isUpdateChecking ? 'Checking GitHub releases...' : getCompactUpdateStatus(updateState);
+
+  const handleUpdateAction = async () => {
+    if (isUpdateBusy) return;
+
+    if (updateState?.status === 'downloaded') {
+      setUpdateState((current) => ({
+        ...(current || {
+          currentVersion: APP_VERSION,
+          platform: 'browser' as NodeJS.Platform,
+          arch: 'unknown',
+          supported: false,
+        }),
+        status: 'installing',
+        message: 'Preparing update restart...',
+      }));
+      const nextState = await desktopApi.installUpdate();
+      setUpdateState(nextState);
+      return;
+    }
+
+    setIsCheckingUpdateServer(true);
+    setUpdateState((current) => ({
+      ...(current || {
+        currentVersion: APP_VERSION,
+        platform: 'browser' as NodeJS.Platform,
+        arch: 'unknown',
+        supported: false,
+      }),
+      status: 'checking',
+      downloadPercent: undefined,
+      message: 'Checking GitHub releases...',
+    }));
+    try {
+      const [nextState] = await Promise.all([
+        desktopApi.checkForUpdates(),
+        new Promise((resolve) => setTimeout(resolve, 650)),
+      ]);
+      setUpdateState(nextState);
+    } finally {
+      setIsCheckingUpdateServer(false);
+    }
+  };
 
   return (
     <div className="loom-page h-full overflow-y-auto">
@@ -530,6 +596,46 @@ export default function Settings() {
               })}
             </div>
           </LayoutGroup>
+
+          {activeSection === 'playback' && (
+            <Card className="settings-panel mt-6">
+              <CardHeader>
+                <CardTitle className="text-white">Playback</CardTitle>
+                <CardDescription className="text-[var(--loom-muted)]">
+                  Adjust the default seek distances used by the player controls and keyboard shortcuts.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-white">Back skip seconds</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={playbackSkipBackSeconds}
+                      onChange={(event) => setPlaybackSkipBackSeconds(Number(event.target.value))}
+                      className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none"
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-medium text-white">Forward skip seconds</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={playbackSkipForwardSeconds}
+                      onChange={(event) => setPlaybackSkipForwardSeconds(Number(event.target.value))}
+                      className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none"
+                    />
+                  </label>
+                </div>
+                <div className="mt-4 flex justify-end">
+                  <Button onClick={() => void handleSavePlaybackSettings()}>Save playback settings</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
@@ -1352,7 +1458,7 @@ export default function Settings() {
                   <div className="flex items-center gap-3 mb-2">
                     <h2 className="text-2xl font-bold tracking-tight text-white">{APP_LICENSE.name}</h2>
                     <span className="rounded-full bg-[var(--loom-accent)]/15 px-2.5 py-0.5 text-xs font-semibold text-[var(--loom-accent)] ring-1 ring-[var(--loom-accent)]/25">
-                      v{updateState?.currentVersion ?? 'dev'}
+                      v{updateState?.currentVersion ?? APP_VERSION}
                     </span>
                     <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--loom-faint)] ring-1 ring-white/10">
                       {APP_LICENSE.license}
@@ -1368,24 +1474,33 @@ export default function Settings() {
                   <div className="rounded-lg bg-[var(--loom-surface-2)] p-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (updateState?.status === 'downloaded') {
-                          void desktopApi.installUpdate();
-                        } else {
-                          void desktopApi.checkForUpdates().then(setUpdateState);
-                        }
-                      }}
-                      disabled={updateState?.status === 'checking' || updateState?.status === 'downloading' || updateState?.status === 'installing'}
+                      onClick={() => void handleUpdateAction()}
+                      disabled={isUpdateBusy}
                       className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:cursor-wait disabled:opacity-70"
+                      aria-busy={isUpdateBusy}
                     >
-                      {updateState?.status === 'checking' || updateState?.status === 'downloading' || updateState?.status === 'installing' ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      {isUpdateBusy ? (
+                        <LoomLoader
+                          style={theme.loaderStyle}
+                          className="grid h-4 w-4 place-items-center text-current"
+                          markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-2.5 w-auto' : 'h-3.5 w-3.5'}
+                          color="currentColor"
+                        />
                       ) : (
                         <Download className="h-4 w-4" />
                       )}
-                      {getUpdateButtonLabel(updateState)}
+                      {updateButtonLabel}
                     </button>
                   </div>
+                  <p className="px-1 text-[11px] leading-4 text-[var(--loom-faint)]" aria-live="polite">
+                    {updateStatusCopy}
+                  </p>
+                  {isUpdateChecking && (
+                    <div className="flex items-center gap-2 rounded-lg border border-[var(--loom-accent)]/20 bg-[var(--loom-accent)]/10 px-3 py-2 text-[11px] font-medium text-[var(--loom-accent)]">
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      Contacting the update server
+                    </div>
+                  )}
 
                   <div className="rounded-lg bg-[var(--loom-surface-2)] p-1">
                     <div className={`flex h-9 items-center justify-center gap-2 rounded-md px-3 text-xs font-medium ${
@@ -1416,18 +1531,6 @@ export default function Settings() {
                 </div>
               </div>
 
-              <div className="mt-6 grid gap-3 md:grid-cols-2">
-                <div className="settings-panel-soft rounded-xl p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-faint)]">Update Status</p>
-                  <p className="mt-2 text-sm leading-5 text-[var(--loom-muted)]">{getUpdateStatusText(updateState)}</p>
-                </div>
-                <div className="settings-panel-soft rounded-xl p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-faint)]">License Scope</p>
-                  <p className="mt-2 text-sm leading-5 text-[var(--loom-muted)]">
-                    LoomTV source is MIT licensed. Third-party libraries, services, and bundled tools keep their own licenses.
-                  </p>
-                </div>
-              </div>
             </div>
 
             {/* Metadata sources */}

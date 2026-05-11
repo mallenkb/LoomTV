@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Play, Star } from 'lucide-react';
+import { Film, Play, Star } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { desktopApi } from '@/lib/desktopApi';
 import LibrarySearch from '@/components/LibrarySearch';
@@ -10,8 +11,8 @@ import SafeArtwork from '@/components/SafeArtwork';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
 
 export default function Movies() {
-  const { state } = useLibrary();
-  const { movies, isLoading } = state;
+  const { state, addLibraryFolder } = useLibrary();
+  const { movies, isLoading, isScanning } = state;
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
@@ -33,16 +34,37 @@ export default function Movies() {
               ))}
         </div>
         {movies.length === 0 && !isLoading && (
-          <div className="text-center py-12">
-            <p className="text-[var(--loom-muted)] mb-4">No movies found</p>
-            <Link to="/settings" className="text-[var(--loom-accent)] hover:underline">
-              Add a library folder in Settings
-            </Link>
-          </div>
+          <EmptyMoviesState isScanning={isScanning} onAddFolder={() => addLibraryFolder('movies')} />
         )}
         {movies.length > 0 && filteredMovies.length === 0 && !isLoading && (
           <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyMoviesState({
+  isScanning,
+  onAddFolder,
+}: {
+  isScanning: boolean;
+  onAddFolder: () => Promise<void>;
+}) {
+  return (
+    <div className="flex min-h-[calc(100vh-260px)] items-center justify-center px-4">
+      <div className="w-full max-w-[520px] text-center">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
+          <Film className="h-9 w-9 text-[var(--loom-accent)]" />
+        </div>
+        <h3 className="text-2xl font-semibold text-white">Add a Movies folder</h3>
+        <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
+          Choose a folder containing your films. LoomTV will scan it and build your movie library.
+        </p>
+        <Button onClick={onAddFolder} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">
+          <Film className="h-4 w-4" />
+          Add Movies Folder
+        </Button>
       </div>
     </div>
   );

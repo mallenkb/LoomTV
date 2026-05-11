@@ -27,6 +27,8 @@ type UpdateState = {
   arch: string;
   supported: boolean;
   downloadPercent?: number;
+  latestVersion?: string;
+  releaseUrl?: string;
   message?: string;
   checkedAt?: string;
 };
@@ -71,6 +73,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     tmdbApiKey?: string;
     metadataApiKeys?: Record<string, string>;
     autoSyncIntervalHours?: number;
+    playbackSkipBackSeconds?: number;
+    playbackSkipForwardSeconds?: number;
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';
     appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
@@ -192,6 +196,8 @@ declare global {
         tmdbApiKey?: string;
         metadataApiKeys?: Record<string, string>;
         autoSyncIntervalHours?: number;
+        playbackSkipBackSeconds?: number;
+        playbackSkipForwardSeconds?: number;
         sidebarNavOrder?: string[];
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
@@ -205,6 +211,8 @@ declare global {
         tmdbApiKey?: string;
         metadataApiKeys?: Record<string, string>;
         autoSyncIntervalHours?: number;
+        playbackSkipBackSeconds?: number;
+        playbackSkipForwardSeconds?: number;
         sidebarNavOrder?: string[];
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
