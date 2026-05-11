@@ -1,4 +1,15 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  dialog,
+  nativeImage,
+  ipcMain,
+  protocol,
+  net,
+  shell,
+} from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -105,6 +116,7 @@ interface UpdateState {
   platform: NodeJS.Platform;
   arch: string;
   supported: boolean;
+  downloadPercent?: number;
   message?: string;
   checkedAt?: string;
 }
@@ -114,13 +126,26 @@ let updateState: UpdateState = {
   currentVersion: app.getVersion(),
   platform: process.platform,
   arch: process.arch,
-  supported: process.platform === 'darwin' || process.platform === 'win32',
+  supported: isUpdaterSupportedPlatform(),
 };
 let updaterConfigured = false;
 let updateCheckInFlight = false;
+let updateCheckPromise: Promise<UpdateState> | null = null;
 let updateInstallStarted = false;
+let updatePromptInFlight = false;
 let updateCheckTimer: NodeJS.Timeout | null = null;
+let updateMenu: Menu | null = null;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MAIN_WINDOW_DEV_SERVER_URL =
+  typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
+const MAIN_WINDOW_NAME =
+  typeof MAIN_WINDOW_VITE_NAME === 'string' && MAIN_WINDOW_VITE_NAME ? MAIN_WINDOW_VITE_NAME : 'main_window';
+
+function isUpdaterSupportedPlatform(): boolean {
+  return process.platform === 'darwin'
+    || process.platform === 'win32'
+    || (process.platform === 'linux' && Boolean(process.env.APPIMAGE));
+}
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
@@ -4964,10 +4989,10 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(windowOptions);
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  if (MAIN_WINDOW_DEV_SERVER_URL) {
+    mainWindow.loadURL(MAIN_WINDOW_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`));
   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -4979,6 +5004,7 @@ function emitUpdateState() {
   BrowserWindow.getAllWindows().forEach((window) => {
     window.webContents.send('updates:state', updateState);
   });
+  void refreshUpdateMenu();
 }
 
 function setUpdateState(nextState: Partial<UpdateState>) {
@@ -4988,10 +5014,214 @@ function setUpdateState(nextState: Partial<UpdateState>) {
     currentVersion: app.getVersion(),
     platform: process.platform,
     arch: process.arch,
-    supported: process.platform === 'darwin' || process.platform === 'win32',
+    supported: isUpdaterSupportedPlatform(),
   };
   emitUpdateState();
   return updateState;
+}
+
+function showUpdateDialog(message: string, detail: string, type: 'info' | 'warning' | 'error' = 'info'): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  void dialog.showMessageBox(mainWindow, {
+    type,
+    title: 'LoomTV Updates',
+    message,
+    detail,
+    buttons: ['OK'],
+  });
+}
+
+function showUpdateDownloadedPrompt() {
+  if (updatePromptInFlight || !mainWindow || mainWindow.isDestroyed()) return;
+  updatePromptInFlight = true;
+
+  const stateMessage = updateState.message || 'An update is available.';
+  dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'Update Ready',
+    message: 'LoomTV update downloaded',
+    detail: `${stateMessage} Restart now to apply the update.`,
+    buttons: ['Restart and Update', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+  })
+    .then((response) => {
+      if (response.response === 0) {
+        installDownloadedUpdate();
+      }
+    })
+    .finally(() => {
+      updatePromptInFlight = false;
+    });
+}
+
+function refreshUpdateMenu() {
+  if (!updateMenu) return;
+
+  const installMenuItem = updateMenu.getMenuItemById('loomtv-install-update');
+  if (installMenuItem) {
+    installMenuItem.enabled = updateState.status === 'downloaded';
+    installMenuItem.visible = updateState.status === 'downloaded';
+  }
+
+  const checkMenuItem = updateMenu.getMenuItemById('loomtv-check-updates');
+  if (checkMenuItem) {
+    checkMenuItem.enabled = !updateCheckInFlight;
+    checkMenuItem.label = updateCheckInFlight ? 'Checking for Updates...' : 'Check for Updates...';
+  }
+}
+
+function buildUpdateMenu() {
+  const updateItems: MenuItemConstructorOptions[] = [
+    {
+      id: 'loomtv-check-updates',
+      label: 'Check for Updates...',
+      click: () => {
+        void handleManualUpdateCheck();
+      },
+    },
+    {
+      id: 'loomtv-install-update',
+      label: 'Install Downloaded Update...',
+      visible: updateState.status === 'downloaded',
+      enabled: updateState.status === 'downloaded',
+      click: () => {
+        if (updateState.status === 'downloaded') installDownloadedUpdate();
+      },
+    },
+  ];
+
+  const template: MenuItemConstructorOptions[] = process.platform === 'darwin'
+    ? [
+        {
+          label: app.name,
+          submenu: [
+            { role: 'about' },
+            ...updateItems,
+            { type: 'separator' },
+            { role: 'services' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        },
+        {
+          label: 'Edit',
+          submenu: [
+            { role: 'undo' },
+            { role: 'redo' },
+            { type: 'separator' },
+            { role: 'cut' },
+            { role: 'copy' },
+            { role: 'paste' },
+            { role: 'selectAll' },
+          ],
+        },
+        {
+          label: 'View',
+          submenu: [
+            { role: 'reload' },
+            { role: 'forceReload' },
+            { role: 'toggleDevTools' },
+            { type: 'separator' },
+            { role: 'resetZoom' },
+            { role: 'zoomIn' },
+            { role: 'zoomOut' },
+            { type: 'separator' },
+            { role: 'togglefullscreen' },
+          ],
+        },
+        {
+          label: 'Window',
+          submenu: [
+            { role: 'minimize' },
+            { role: 'zoom' },
+            { type: 'separator' },
+            { role: 'front' },
+          ],
+        },
+      ]
+    : [
+        {
+          label: 'File',
+          submenu: [
+            ...updateItems,
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        },
+        {
+          label: 'Edit',
+          submenu: [
+            { role: 'undo' },
+            { role: 'redo' },
+            { type: 'separator' },
+            { role: 'cut' },
+            { role: 'copy' },
+            { role: 'paste' },
+            { role: 'selectAll' },
+          ],
+        },
+        {
+          label: 'View',
+          submenu: [
+            { role: 'reload' },
+            { role: 'forceReload' },
+            { role: 'toggleDevTools' },
+            { type: 'separator' },
+            { role: 'resetZoom' },
+            { role: 'zoomIn' },
+            { role: 'zoomOut' },
+            { type: 'separator' },
+            { role: 'togglefullscreen' },
+          ],
+        },
+      ];
+
+  updateMenu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(updateMenu);
+}
+
+async function handleManualUpdateCheck() {
+  const checkedState = await checkForUpdates();
+
+  if (checkedState.status === 'checking') {
+    showUpdateDialog(
+      'Checking for updates',
+      'LoomTV is already checking for an update. You’ll get notified when it completes.',
+    );
+    return;
+  }
+
+  if (checkedState.status === 'downloading' || checkedState.status === 'available') {
+    showUpdateDialog(
+      'Update check in progress',
+      'An update is being checked and downloaded in the background.',
+    );
+    return;
+  }
+
+  if (checkedState.status === 'downloaded') {
+    showUpdateDownloadedPrompt();
+    return;
+  }
+
+  if (checkedState.status === 'not-available') {
+    showUpdateDialog('No update found', `You’re already on LoomTV ${checkedState.currentVersion}.`);
+    return;
+  }
+
+  if (checkedState.status === 'disabled') {
+    showUpdateDialog('Updates are not available', checkedState.message || 'Updates are not available in this environment.');
+    return;
+  }
+
+  if (checkedState.status === 'error') {
+    showUpdateDialog('Update check failed', checkedState.message || 'Could not check for updates.', 'warning');
+  }
 }
 
 function installDownloadedUpdate() {
@@ -5022,7 +5252,7 @@ function configureAutoUpdater() {
   if (!updateState.supported) {
     setUpdateState({
       status: 'disabled',
-      message: 'Automatic updates are available on macOS and Windows builds.',
+      message: 'Automatic updates are available in packaged macOS, Windows, and Linux AppImage builds.',
     });
     return;
   }
@@ -5056,6 +5286,7 @@ function configureAutoUpdater() {
     if (!progress?.percent) return;
     setUpdateState({
       status: 'downloading',
+      downloadPercent: Math.round(progress.percent),
       message: `Downloading update ${Math.round(progress.percent)}%`,
     });
   });
@@ -5071,10 +5302,10 @@ function configureAutoUpdater() {
   autoUpdater.on('update-downloaded', () => {
     setUpdateState({
       status: 'downloaded',
-      message: 'Update downloaded. Restarting LoomTV to install it...',
+      message: 'Update downloaded. Restart LoomTV to install it.',
       checkedAt: new Date().toISOString(),
     });
-    installDownloadedUpdate();
+    showUpdateDownloadedPrompt();
   });
 
   autoUpdater.on('error', (error) => {
@@ -5092,27 +5323,31 @@ function configureAutoUpdater() {
   }, AUTO_UPDATE_CHECK_INTERVAL_MS);
 }
 
-function checkForUpdates() {
+async function checkForUpdates(): Promise<UpdateState> {
   configureAutoUpdater();
   if (!updateState.supported || !app.isPackaged) return updateState;
   if (updateCheckInFlight || updateState.status === 'downloading' || updateState.status === 'downloaded') {
-    return updateState;
+    return updateCheckPromise || updateState;
   }
 
   updateCheckInFlight = true;
-  setUpdateState({ status: 'checking', message: 'Checking for updates...' });
-  void autoUpdater.checkForUpdates()
+  setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
+  updateCheckPromise = autoUpdater.checkForUpdates()
+    .then(() => updateState)
     .catch((error) => {
       setUpdateState({
         status: 'error',
         message: error instanceof Error ? error.message : String(error),
         checkedAt: new Date().toISOString(),
       });
+      return updateState;
     })
     .finally(() => {
       updateCheckInFlight = false;
+      updateCheckPromise = null;
+      refreshUpdateMenu();
     });
-  return updateState;
+  return updateCheckPromise;
 }
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
@@ -5403,6 +5638,7 @@ app.whenReady().then(async () => {
   applyAppIcon();
   cleanupOldTranscodes();
   await startMediaServer();
+  buildUpdateMenu();
 
   // ── plexserver:// protocol handler ──────────────────────────────────────────
   // Translates plexserver://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>

@@ -11,7 +11,6 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
-import { PublisherGithub } from '@electron-forge/publisher-github';
 
 function hasBinary(binary: string): boolean {
   try {
@@ -33,6 +32,10 @@ function makeTargets() {
   if (process.platform === 'win32' || (hasBinary('wine') && hasBinary('mono'))) {
     makers.push(new MakerSquirrel({
       setupIcon: 'resources/icon.ico',
+      certificateFile: process.env.WINDOWS_CERTIFICATE_FILE || undefined,
+      certificatePassword: process.env.WINDOWS_CERTIFICATE_PASSWORD || undefined,
+      certificateSubjectName: process.env.WINDOWS_CERTIFICATE_SUBJECT || undefined,
+      certificateSha1: process.env.WINDOWS_CERTIFICATE_SHA1 || undefined,
     }));
   }
 
@@ -77,7 +80,7 @@ const config: ForgeConfig = {
       unpack: '**/{*.node,ffmpeg,ffmpeg.exe,ffprobe,ffprobe.exe}',
     },
     osxSign: {
-      identity: '-',
+      identity: process.env.MACOS_SIGNING_IDENTITY || '-',
     },
     icon: 'resources/icon',
     executableName: 'LoomTV',
@@ -111,16 +114,6 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: makeTargets(),
-    publishers: [
-      new PublisherGithub({
-      repository: {
-        owner: 'mallenkb',
-        name: 'LoomTV',
-      },
-      prerelease: false,
-      draft: false,
-    }),
-  ],
   plugins: [
     new AutoUnpackNativesPlugin({}),
     new VitePlugin({

@@ -175,7 +175,7 @@ const METADATA_ATTRIBUTIONS = [
 function getUpdateButtonLabel(updateState: UpdateState | null): string {
   if (!updateState) return 'Check for updates';
   if (updateState.status === 'checking') return 'Checking...';
-  if (updateState.status === 'downloading') return 'Downloading...';
+  if (updateState.status === 'downloading') return updateState.downloadPercent ? `Downloading ${updateState.downloadPercent}%` : 'Downloading...';
   if (updateState.status === 'downloaded') return 'Update now';
   if (updateState.status === 'installing') return 'Restarting...';
   return 'Check for updates';
@@ -1360,7 +1360,7 @@ export default function Settings() {
                 </div>
 
                 <div className="grid min-w-48 gap-3 sm:w-52">
-                  <div className="rounded-xl bg-[var(--loom-surface-2)] p-1.5">
+                  <div className="rounded-lg bg-[var(--loom-surface-2)] p-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -1371,7 +1371,7 @@ export default function Settings() {
                         }
                       }}
                       disabled={updateState?.status === 'checking' || updateState?.status === 'downloading' || updateState?.status === 'installing'}
-                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[var(--loom-accent)] px-4 text-sm font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:cursor-wait disabled:opacity-70"
+                      className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:cursor-wait disabled:opacity-70"
                     >
                       {updateState?.status === 'checking' || updateState?.status === 'downloading' || updateState?.status === 'installing' ? (
                         <RefreshCw className="h-4 w-4 animate-spin" />
@@ -1382,8 +1382,8 @@ export default function Settings() {
                     </button>
                   </div>
 
-                  <div className="rounded-xl bg-[var(--loom-surface-2)] p-1.5">
-                    <div className={`flex h-10 items-center justify-center gap-2 rounded-lg px-3 text-xs font-medium ${
+                  <div className="rounded-lg bg-[var(--loom-surface-2)] p-1">
+                    <div className={`flex h-9 items-center justify-center gap-2 rounded-md px-3 text-xs font-medium ${
                       ffmpegStatus === null
                         ? 'text-[var(--loom-faint)]'
                       : ffmpegStatus.available
