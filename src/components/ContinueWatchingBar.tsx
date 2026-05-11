@@ -4,6 +4,11 @@ import { useLibrary, EpisodeFile, EpisodeMeta, MediaItem, TVShow } from '@/conte
 import { desktopApi } from '@/lib/desktopApi';
 import type { StoredProgress } from '@/lib/desktopApi';
 import { hydrateProgressFromDatabase, loadProgress } from '@/lib/progress';
+import {
+  cleanEpisodeTitleForDisplay,
+  episodeCode as formatEpisodeCode,
+  looksLikeGenericEpisodeTitle,
+} from '@/lib/episodeTitles';
 
 const WATCHED_THRESHOLD = 0.9;
 
@@ -79,7 +84,7 @@ function formatThumbnailTime(position: number, duration: number): string {
 }
 
 function episodeCode(season: number, episode: number): string {
-  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+  return formatEpisodeCode(season, episode);
 }
 
 function cleanEpisodeTitle(filePath: string, season: number, episode: number): string {
@@ -103,10 +108,11 @@ function playerEpisodesFor(show: TVShow): EpisodeMeta[] {
   (show.episodeFiles || []).forEach((file) => {
     const key = `${file.season}:${file.episode}`;
     if (byKey.has(key)) return;
+    const fileTitle = !looksLikeGenericEpisodeTitle(file.title, show.title, file.episode) ? file.title : '';
     byKey.set(key, {
       season: file.season,
       number: file.episode,
-      title: file.title || cleanEpisodeTitle(file.filePath, file.season, file.episode),
+      title: fileTitle || cleanEpisodeTitle(file.filePath, file.season, file.episode),
       summary: '',
       still: '',
       rating: 0,
@@ -147,11 +153,12 @@ function findLatestCandidate(
       const details = progressDetails(episodeFile.filePath, episodeFile.localMetadata?.durationSeconds, progress);
       if (!details.inProgress) return;
       const episode = playerEpisodes.find((item) => item.season === episodeFile.season && item.number === episodeFile.episode);
+      const episodeTitle = cleanEpisodeTitleForDisplay(episode?.title, show.title, episodeFile.season, episodeFile.episode);
       candidates.push({
         key: `${show.type}:${show.id}:${episodeFile.season}:${episodeFile.episode}`,
         filePath: episodeFile.filePath,
         title: show.title,
-        subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episode?.title ? ` - ${episode.title}` : ''} · ${formatTime(details.position)} / ${formatTime(details.duration)}`,
+        subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` - ${episodeTitle}` : ''} · ${formatTime(details.position)} / ${formatTime(details.duration)}`,
         position: details.position,
         duration: details.duration,
         fraction: details.fraction,

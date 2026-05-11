@@ -33,6 +33,7 @@ import {
   progressFraction,
   saveProgress as savePlaybackProgress,
 } from '@/lib/progress';
+import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -150,6 +151,8 @@ const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
 
 function cleanEpisodeTitle(raw: string, season: number, episode: number): string {
   if (!raw) return `Episode ${episode}`;
+  const officialTitle = cleanEpisodeTitleForDisplay(raw, undefined, season, episode);
+  if (officialTitle !== `Episode ${episode}`) return officialTitle;
   let s = raw;
   s = s.replace(new RegExp(`^.*?[Ss]0*${season}\\s*[Ee]0*${episode}\\s*[-–_.\\s]*`, ''), '');
   s = s.replace(
@@ -161,7 +164,7 @@ function cleanEpisodeTitle(raw: string, season: number, episode: number): string
 }
 
 function epCode(season: number, episode: number): string {
-  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+  return episodeCode(season, episode);
 }
 
 function formatTime(secs: number): string {

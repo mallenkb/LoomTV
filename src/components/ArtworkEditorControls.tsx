@@ -596,7 +596,7 @@ export default function ArtworkEditorControls({
           </DialogHeader>
           <div className="space-y-4 p-5">
             <p className="text-sm text-[var(--loom-muted)]">
-              Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, and genres from that source.
+              Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, genres, and episode names from that source.
             </p>
             {metadataCandidates.length === 0 ? (
               <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
@@ -651,6 +651,18 @@ export default function ArtworkEditorControls({
                               <div className="grid h-full place-items-center text-[11px] text-white/30">No cover</div>
                             )}
                           </div>
+                          {candidate.episodePreview?.length ? (
+                            <div className="rounded-md border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] px-2.5 py-2">
+                              <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--loom-faint)]">
+                                {candidate.episodeCount || candidate.episodePreview.length} episodes
+                              </p>
+                              <div className="space-y-0.5">
+                                {candidate.episodePreview.slice(0, 3).map((episodeName) => (
+                                  <p key={episodeName} className="truncate text-xs text-[var(--loom-muted)]">{episodeName}</p>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                       <div className="flex items-center justify-between gap-2">
