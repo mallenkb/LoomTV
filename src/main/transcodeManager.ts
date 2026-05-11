@@ -20,6 +20,8 @@ const sessions = new Map<string, ActiveSession>();
 const TRANSCODE_READY_TIMEOUT_MS = 30000;
 const TRANSCODE_READY_POLL_MS = 150;
 const TRANSCODE_READY_SEGMENTS = 3;
+const HLS_PENDING_SEGMENT_TIMEOUT_MS = 8000;
+const HLS_PENDING_SEGMENT_POLL_MS = 80;
 const encoderSupport = new Map<string, boolean>();
 
 export function transcodeRoot(): string {
@@ -461,7 +463,7 @@ export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
 
   const outputRoot = path.resolve(session.outputDir);
   const filePath = path.resolve(outputRoot, relativeFile);
-  if ((!filePath.startsWith(`${outputRoot}${path.sep}`) && filePath !== outputRoot) || !fs.existsSync(filePath)) {
+  if ((!filePath.startsWith(`${outputRoot}${path.sep}`) && filePath !== outputRoot)) {
     res.writeHead(404);
     res.end('HLS file not found');
     return true;
@@ -476,7 +478,36 @@ export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
         : filePath.endsWith('.ts')
           ? 'video/mp2t'
           : 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
-  fs.createReadStream(filePath).pipe(res);
+  const serveFile = () => {
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+    fs.createReadStream(filePath).pipe(res);
+  };
+
+  if (fs.existsSync(filePath)) {
+    serveFile();
+    return true;
+  }
+
+  if (!filePath.endsWith('.ts') || session.process.exitCode !== null) {
+    res.writeHead(404);
+    res.end('HLS file not found');
+    return true;
+  }
+
+  const startedAt = Date.now();
+  const waitForSegment = () => {
+    if (res.destroyed || res.writableEnded) return;
+    if (fs.existsSync(filePath)) {
+      serveFile();
+      return;
+    }
+    if (session.process.exitCode !== null || Date.now() - startedAt > HLS_PENDING_SEGMENT_TIMEOUT_MS) {
+      res.writeHead(404);
+      res.end('HLS file not found');
+      return;
+    }
+    setTimeout(waitForSegment, HLS_PENDING_SEGMENT_POLL_MS);
+  };
+  waitForSegment();
   return true;
 }

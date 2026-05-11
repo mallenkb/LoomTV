@@ -123,6 +123,8 @@ interface UpdateState {
   arch: string;
   supported: boolean;
   downloadPercent?: number;
+  latestVersion?: string;
+  releaseUrl?: string;
   message?: string;
   checkedAt?: string;
 }
@@ -278,6 +280,8 @@ interface AppSettings {
   tmdbApiKey?: string;
   metadataApiKeys?: Record<string, string>;
   autoSyncIntervalHours?: number;
+  playbackSkipBackSeconds?: number;
+  playbackSkipForwardSeconds?: number;
   sidebarNavOrder?: string[];
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
@@ -324,6 +328,12 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
       ? autoSyncIntervalHours
       : 12,
+    playbackSkipBackSeconds: Number.isFinite(Number(raw.playbackSkipBackSeconds)) && Number(raw.playbackSkipBackSeconds) > 0
+      ? Number(raw.playbackSkipBackSeconds)
+      : 10,
+    playbackSkipForwardSeconds: Number.isFinite(Number(raw.playbackSkipForwardSeconds)) && Number(raw.playbackSkipForwardSeconds) > 0
+      ? Number(raw.playbackSkipForwardSeconds)
+      : 15,
     sidebarNavOrder,
     appThemeMode: 'dark',
     appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
@@ -5050,6 +5060,61 @@ function showUpdateDialog(message: string, detail: string, type: 'info' | 'warni
   });
 }
 
+function normalizeReleaseVersion(value?: string): string {
+  return String(value || '').trim().replace(/^v/i, '');
+}
+
+function compareReleaseVersions(left?: string, right?: string): number {
+  const leftParts = normalizeReleaseVersion(left).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = normalizeReleaseVersion(right).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index++) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference > 0 ? 1 : -1;
+  }
+
+  return 0;
+}
+
+async function checkLatestGitHubRelease(): Promise<UpdateState> {
+  setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking GitHub releases...' });
+
+  try {
+    const response = await fetch(`https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': `LoomTV/${app.getVersion()}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub returned ${response.status}`);
+    }
+
+    const release = await response.json() as { tag_name?: string; html_url?: string };
+    const latestVersion = normalizeReleaseVersion(release.tag_name);
+    const currentVersion = app.getVersion();
+    const hasUpdate = compareReleaseVersions(latestVersion, currentVersion) > 0;
+
+    return setUpdateState({
+      status: hasUpdate ? 'available' : 'not-available',
+      latestVersion,
+      releaseUrl: release.html_url,
+      checkedAt: new Date().toISOString(),
+      message: hasUpdate
+        ? `LoomTV ${latestVersion} is available. Download it from GitHub Releases.`
+        : `LoomTV is up to date at ${currentVersion}.`,
+    });
+  } catch (error) {
+    return setUpdateState({
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+      checkedAt: new Date().toISOString(),
+    });
+  }
+}
+
 function showUpdateDownloadedPrompt() {
   if (updatePromptInFlight || !mainWindow || mainWindow.isDestroyed()) return;
   updatePromptInFlight = true;
@@ -5344,7 +5409,9 @@ function configureAutoUpdater() {
 
 async function checkForUpdates(): Promise<UpdateState> {
   configureAutoUpdater();
-  if (!updateState.supported || !app.isPackaged) return updateState;
+  if (!updateState.supported || !app.isPackaged) {
+    return checkLatestGitHubRelease();
+  }
   if (updateCheckInFlight || updateState.status === 'downloading' || updateState.status === 'downloaded') {
     return updateCheckPromise || updateState;
   }
