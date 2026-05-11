@@ -17,7 +17,7 @@ type LibraryData = {
   tvShows: any[];
   animeShows: any[];
   libraryFolders: string[];
-  libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[] };
+  libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
   scanCache?: Record<string, any>;
 };
 
@@ -64,7 +64,7 @@ function migrate(database: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS library_folders (
       path TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('movies', 'tvShows', 'anime')),
+      kind TEXT NOT NULL CHECK (kind IN ('movies', 'tvShows', 'anime', 'others')),
       added_at INTEGER NOT NULL
     );
 
@@ -159,6 +159,35 @@ function migrate(database: Database.Database): void {
       updated_at INTEGER NOT NULL
     );
   `);
+
+  migrateLibraryFoldersKind(database);
+}
+
+function migrateLibraryFoldersKind(database: Database.Database): void {
+  const row = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'library_folders'").get() as { sql?: string } | undefined;
+  if (row?.sql?.includes("'others'")) return;
+
+  database.exec(`
+    ALTER TABLE library_folders RENAME TO library_folders_old;
+
+    CREATE TABLE library_folders (
+      path TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('movies', 'tvShows', 'anime', 'others')),
+      added_at INTEGER NOT NULL
+    );
+
+    INSERT OR REPLACE INTO library_folders (path, kind, added_at)
+    SELECT
+      path,
+      CASE
+        WHEN kind IN ('movies', 'tvShows', 'anime', 'others') THEN kind
+        ELSE 'movies'
+      END,
+      added_at
+    FROM library_folders_old;
+
+    DROP TABLE library_folders_old;
+  `);
 }
 
 export function hasLibraryData(): boolean {
@@ -168,17 +197,18 @@ export function hasLibraryData(): boolean {
 }
 
 function folderGroupsFromRows(rows: Array<{ path: string; kind: string }>) {
-  const groups = { movies: [] as string[], tvShows: [] as string[], anime: [] as string[] };
+  const groups = { movies: [] as string[], tvShows: [] as string[], anime: [] as string[], others: [] as string[] };
   for (const row of rows) {
     if (row.kind === 'tvShows') groups.tvShows.push(row.path);
     else if (row.kind === 'anime') groups.anime.push(row.path);
+    else if (row.kind === 'others') groups.others.push(row.path);
     else groups.movies.push(row.path);
   }
   return groups;
 }
 
-function flattenFolders(groups: { movies: string[]; tvShows: string[]; anime: string[] }): string[] {
-  return [...groups.movies, ...groups.tvShows, ...groups.anime];
+function flattenFolders(groups: { movies: string[]; tvShows: string[]; anime: string[]; others?: string[] }): string[] {
+  return [...groups.movies, ...groups.tvShows, ...groups.anime, ...(groups.others || [])];
 }
 
 function isInlineArtworkSource(source?: string | null): boolean {
@@ -336,7 +366,7 @@ export function loadLibraryFromDatabase(): LibraryData | null {
 export function saveLibraryToDatabase(data: LibraryData): void {
   const database = getDb();
   const now = Date.now();
-  const folderGroups = data.libraryFolderGroups || { movies: [], tvShows: [], anime: [] };
+  const folderGroups = data.libraryFolderGroups || { movies: [], tvShows: [], anime: [], others: [] };
   const tx = database.transaction(() => {
     database.exec('DELETE FROM episode_files; DELETE FROM episodes; DELETE FROM seasons; DELETE FROM media_items; DELETE FROM library_folders; DELETE FROM scan_cache;');
 
@@ -344,6 +374,7 @@ export function saveLibraryToDatabase(data: LibraryData): void {
     for (const folder of folderGroups.movies || []) insertFolder.run(folder, 'movies', now);
     for (const folder of folderGroups.tvShows || []) insertFolder.run(folder, 'tvShows', now);
     for (const folder of folderGroups.anime || []) insertFolder.run(folder, 'anime', now);
+    for (const folder of folderGroups.others || []) insertFolder.run(folder, 'others', now);
 
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (

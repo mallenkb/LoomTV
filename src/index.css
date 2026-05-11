@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #1a1a1a;
+  --color-background: #060d17;
   --color-foreground: #ffffff;
-  --color-card: #232323;
+  --color-card: #101a28;
   --color-card-foreground: #ffffff;
-  --color-popover: #232323;
+  --color-popover: #101a28;
   --color-popover-foreground: #ffffff;
-  --color-primary: #931116;
+  --color-primary: #fbc500;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #2d2d2d;
+  --color-secondary: #172235;
   --color-secondary-foreground: #ffffff;
-  --color-muted: #2d2d2d;
-  --color-muted-foreground: #a8a8a8;
-  --color-accent: #2d2d2d;
+  --color-muted: #172235;
+  --color-muted-foreground: #9aa7b8;
+  --color-accent: #172235;
   --color-accent-foreground: #ffffff;
   --color-destructive: #dc2626;
   --color-destructive-foreground: #ffffff;
-  --color-border: #2d2d2d;
-  --color-input: #2d2d2d;
-  --color-ring: #931116;
+  --color-border: #243348;
+  --color-input: #172235;
+  --color-ring: #fbc500;
   
   --radius-sm: 0.25rem;
   --radius: 0.5rem;
@@ -27,20 +27,25 @@
 }
 
 :root {
-  --loom-bg: #1a1a1a;
-  --loom-surface: #232323;
-  --loom-surface-2: #1d1d1d;
-  --loom-surface-3: #2d2d2d;
+  --loom-bg: #060d17;
+  --loom-surface: #101a28;
+  --loom-surface-2: #0b1420;
+  --loom-surface-3: #172235;
   --loom-text: #ffffff;
-  --loom-muted: #a8a8a8;
-  --loom-faint: #777777;
-  --loom-border: #2d2d2d;
-  --loom-sidebar: #232323;
-  --loom-accent: #FFC53D;
-  --loom-accent-hover: #e6b236;
-  --loom-accent-foreground: #000000;
-  --loom-accent-foreground-muted: #000000;
+  --loom-muted: #9aa7b8;
+  --loom-faint: #647287;
+  --loom-border: #243348;
+  --loom-sidebar: #080f19;
+  --loom-accent: #fbc500;
+  --loom-accent-hover: #ffd43b;
+  --loom-accent-foreground: #08101a;
+  --loom-accent-foreground-muted: #1d2a39;
   --loom-logo-word: #ffffff;
+  --loom-panel: rgba(16, 26, 40, 0.82);
+  --loom-panel-border: rgba(148, 163, 184, 0.18);
+  --loom-focus-glow: rgba(251, 197, 0, 0.28);
+  --loom-body-start: #08111d;
+  --loom-body-end: #050a12;
   color-scheme: dark;
 }
 
@@ -55,6 +60,14 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+}
+
+:where(button:not(:disabled), a[href], [role="button"]:not([aria-disabled="true"]), summary) {
+  cursor: pointer;
+}
+
+:where(button:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
 }
 
 * {
@@ -134,4 +147,88 @@ body {
 
 .loomtv-player .plyr__video-wrapper {
   background: #000;
+}
+
+.loom-app-shell {
+  background: var(--loom-bg);
+}
+
+.loom-page {
+  background: var(--loom-bg);
+}
+
+.loom-detail-hero-fade {
+  background:
+    linear-gradient(180deg, rgba(8, 15, 25, 0.14) 0%, rgba(8, 15, 25, 0.44) 58%, var(--loom-sidebar) 100%),
+    linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.52) 18%, rgba(8, 15, 25, 0.08) 48%, rgba(8, 15, 25, 0.58) 100%);
+}
+
+.loom-detail-side-fade-left {
+  background: linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.7) 42%, transparent 100%);
+}
+
+.loom-detail-side-fade-right {
+  background: linear-gradient(270deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.68) 42%, transparent 100%);
+}
+
+.loom-section-title {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.loom-poster-frame {
+  border: 1px solid var(--loom-border);
+  background: var(--loom-surface);
+}
+
+.loom-poster-link:hover .loom-poster-frame {
+  border-color: var(--loom-surface-3);
+  box-shadow: none;
+}
+
+.loom-poster-link:focus-visible {
+  outline: none;
+}
+
+.loom-poster-link:focus-visible .loom-poster-frame {
+  border-color: var(--loom-surface-3);
+  box-shadow: 0 0 0 2px var(--loom-border);
+}
+
+.loom-chip {
+  border-color: rgba(245, 196, 81, 0.38);
+  background: rgba(0, 0, 0, 0.72);
+  color: #F5C451 !important;
+}
+
+.loom-chip svg {
+  color: #F5C451 !important;
+}
+
+.loom-rating {
+  color: #F5C451 !important;
+}
+
+.loom-rating svg {
+  color: #F5C451 !important;
+}
+
+.settings-panel {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
+  background: var(--loom-surface);
+}
+
+.settings-panel-soft {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  background: var(--loom-surface-2);
+}
+
+.settings-action-tile {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  background: var(--loom-surface-2);
+}
+
+.settings-action-tile:hover {
+  border-color: color-mix(in srgb, var(--loom-accent) 42%, var(--loom-border));
+  background: var(--loom-surface-3);
 }

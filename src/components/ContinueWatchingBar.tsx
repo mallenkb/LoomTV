@@ -249,18 +249,18 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   const thumbnailSrc = thumbnailFailed ? thumbnailFallbackUrl : thumbnailUrl;
 
   return (
-    <div className="pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-5 pb-5">
-      <div className="pointer-events-auto mx-auto max-w-[1440px] overflow-hidden rounded-lg border border-white/15 bg-[#202020]/95 shadow-[0_18px_60px_rgba(0,0,0,0.48)] ring-1 ring-[var(--loom-accent)]/20 backdrop-blur-md">
+    <div className="pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-5 pb-4">
+      <div className="pointer-events-auto mx-auto max-w-[1440px] overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] shadow-[0_14px_42px_rgba(0,0,0,0.42)] ring-1 ring-[var(--loom-accent)]/15 backdrop-blur-md">
         <button
           type="button"
           onClick={playCandidate}
-          className="relative flex w-full items-center gap-5 px-5 py-4 text-left transition-colors hover:bg-white/[0.04]"
+          className="relative flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-white/[0.035]"
         >
           <span
-            className="pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-[var(--loom-accent)]"
+            className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[var(--loom-accent)]"
             style={{ width: `${Math.min(100, Math.max(0, candidate.fraction * 100))}%` }}
           />
-          <span className="h-20 w-36 shrink-0 overflow-hidden rounded-md bg-black shadow-lg">
+          <span className="h-16 w-28 shrink-0 overflow-hidden rounded-md bg-black shadow-md">
             {thumbnailSrc ? (
               <img
                 src={thumbnailSrc}
@@ -272,12 +272,12 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
               <span className="flex h-full w-full items-center justify-center text-[10px] text-white/40">LoomTV</span>
             )}
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-base font-semibold text-white">{candidate.title}</span>
-            <span className="mt-1.5 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-[20px] font-semibold text-white">{candidate.title}</span>
+            <span className="mt-1 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
           </span>
-          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] shadow-xl shadow-black/30">
-            <Play className="h-7 w-7 fill-current" />
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] shadow-[0_0_0_5px_rgba(251,197,0,0.12),0_12px_24px_rgba(0,0,0,0.30)]">
+            <Play className="h-5 w-5 fill-current" />
           </span>
           <span
             role="button"
@@ -292,7 +292,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
               event.stopPropagation();
               setDismissedKey(candidate.key);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/55 transition-colors hover:bg-white/10 hover:text-white"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/50 transition-colors hover:bg-white/10 hover:text-white"
             aria-label="Hide continue watching"
           >
             <X className="h-4 w-4" />
