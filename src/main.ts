@@ -88,6 +88,12 @@ app.setName('LoomTV');
 const USER_DATA_DIR = path.join(app.getPath('appData'), 'LoomTV');
 app.setPath('userData', USER_DATA_DIR);
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
@@ -4967,6 +4973,13 @@ function applyAppIcon() {
 }
 
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+
   const windowOptions: ConstructorParameters<typeof BrowserWindow>[0] = {
     width: 1280,
     height: 800,
@@ -4988,6 +5001,12 @@ function createWindow() {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  mainWindow.on('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
   if (MAIN_WINDOW_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_DEV_SERVER_URL);
@@ -5672,16 +5691,20 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
+app.on('second-instance', () => {
+  if (!app.isReady()) return;
+  createWindow();
+});
+
 app.on('window-all-closed', () => {
   stopAllTranscodes();
   void stopLocal(mainWindow);
   void mpvController.stop({ suppressEvent: true });
   if (process.platform !== 'darwin') app.quit();
-  if (mediaServer) mediaServer.close();
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  createWindow();
 });
 
 app.on('before-quit', () => {
@@ -5691,5 +5714,9 @@ app.on('before-quit', () => {
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);
     updateCheckTimer = null;
+  }
+  if (mediaServer) {
+    mediaServer.close();
+    mediaServer = null;
   }
 });
