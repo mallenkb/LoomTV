@@ -111,14 +111,14 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: makeTargets(),
-  publishers: [
-    new PublisherGithub({
+    publishers: [
+      new PublisherGithub({
       repository: {
         owner: 'mallenkb',
         name: 'LoomTV',
       },
       prerelease: false,
-      draft: true,
+      draft: false,
     }),
   ],
   plugins: [

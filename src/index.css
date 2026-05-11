@@ -133,22 +133,6 @@ body {
   animation: player-side-panel-in 220ms cubic-bezier(0.2, 0.85, 0.25, 1) both;
 }
 
-.loomtv-player .plyr,
-.loomtv-player .plyr__video-wrapper,
-.loomtv-player .plyr video {
-  height: 100%;
-  width: 100%;
-}
-
-.loomtv-player .plyr {
-  --plyr-color-main: var(--loom-accent);
-  background: #000;
-}
-
-.loomtv-player .plyr__video-wrapper {
-  background: #000;
-}
-
 .loom-app-shell {
   background: var(--loom-bg);
 }
