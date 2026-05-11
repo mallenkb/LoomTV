@@ -22,6 +22,7 @@ type SettingsPayload = {
   sidebarNavOrder?: string[];
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+  appDarkTheme?: 'default' | 'justwatch' | 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;

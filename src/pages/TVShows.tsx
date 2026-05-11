@@ -26,10 +26,10 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const filteredShows = tvShows.filter((item) => matchesMediaItem(item, normalizedQuery));
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
+    <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} placeholder={`Search ${title}`} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
-        <h2 className="text-2xl font-bold text-white mb-6">{title}</h2>
+        <h2 className="loom-section-title mb-6 text-2xl font-bold text-white">{title}</h2>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
           {isLoading
             ? Array.from({ length: 12 }).map((_, i) => (
@@ -85,9 +85,9 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
     <Link
       to={`${routeBase}/${show.id}`}
       state={{ from, artwork: routeArtworkState(show, imageSources) }}
-      className="group block w-full max-w-[200px]"
+      className="loom-poster-link group block w-full max-w-[200px]"
     >
-      <div className="relative aspect-[2/3] rounded-lg overflow-hidden">
+      <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
           src={imageSources}
           alt={show.title}
@@ -103,13 +103,13 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
         <RatingBadge rating={show.rating} />
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-12 h-12 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_6px_rgba(251,197,0,0.14)]">
             <Play className="w-6 h-6 text-[var(--loom-accent-foreground)] ml-1" />
           </div>
         </div>
       </div>
       <div className="mt-2">
-        <h4 className="text-sm font-medium text-white truncate">{show.title}</h4>
+        <h4 className="truncate text-sm font-semibold text-white">{show.title}</h4>
         <p className="text-xs text-[var(--loom-muted)]">
           {show.year > 0 ? `${show.year} · ` : ''}{(show.seasons || []).length} {(show.seasons || []).length === 1 ? 'Season' : 'Seasons'}
         </p>
@@ -121,7 +121,7 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
 function RatingBadge({ rating }: { rating?: number }) {
   if (!rating || rating <= 0) return null;
   return (
-    <div className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md bg-black/72 px-2 text-xs font-semibold text-[#F5C451] shadow-lg backdrop-blur-md">
+    <div className="loom-chip absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-semibold backdrop-blur-md">
       <Star className="h-3.5 w-3.5" fill="currentColor" />
       {rating.toFixed(1)}
     </div>
