@@ -1,3 +1,5 @@
+import packageJson from '../../package.json';
+
 type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
 type LibraryPayload = {
@@ -19,6 +21,8 @@ type SettingsPayload = {
   tmdbApiKey?: string;
   metadataApiKeys?: MetadataApiKeys;
   autoSyncIntervalHours?: number;
+  playbackSkipBackSeconds?: number;
+  playbackSkipForwardSeconds?: number;
   sidebarNavOrder?: string[];
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
@@ -34,6 +38,8 @@ export type UpdateState = {
   arch: string;
   supported: boolean;
   downloadPercent?: number;
+  latestVersion?: string;
+  releaseUrl?: string;
   message?: string;
   checkedAt?: string;
 };
@@ -97,6 +103,12 @@ type StreamUrlOptions = Pick<TranscodeOptions,
   | 'forceTranscode'
 > & { subtitleStyle?: SubtitleStyleOptions };
 type StreamUrlResult = { url: string; contentType: string; fileName: string; isTranscoded?: boolean };
+declare const __APP_VERSION__: string | undefined;
+
+export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION__
+  ? __APP_VERSION__
+  : packageJson.version || 'dev';
+
 export type LocalNetworkStatus = {
   sharingEnabled: boolean;
   token: string;
@@ -513,7 +525,7 @@ export const desktopApi = {
     if (window.desktopApi?.getUpdateState) return window.desktopApi.getUpdateState();
     return {
       status: 'disabled',
-      currentVersion: 'dev',
+      currentVersion: APP_VERSION,
       platform: 'browser' as NodeJS.Platform,
       arch: 'unknown',
       supported: false,
@@ -523,7 +535,37 @@ export const desktopApi = {
 
   async checkForUpdates(): Promise<UpdateState> {
     if (window.desktopApi?.checkForUpdates) return window.desktopApi.checkForUpdates();
-    return this.getUpdateState();
+    try {
+      const response = await fetch('https://api.github.com/repos/mallenkb/LoomTV/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+      });
+      if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+      const release = await response.json() as { tag_name?: string; html_url?: string };
+      const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
+      return {
+        status: 'available',
+        currentVersion: APP_VERSION,
+        platform: 'browser' as NodeJS.Platform,
+        arch: 'unknown',
+        supported: false,
+        latestVersion,
+        releaseUrl: release.html_url,
+        checkedAt: new Date().toISOString(),
+        message: latestVersion
+          ? `Latest GitHub release is LoomTV ${latestVersion}.`
+          : 'Checked GitHub releases.',
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        currentVersion: APP_VERSION,
+        platform: 'browser' as NodeJS.Platform,
+        arch: 'unknown',
+        supported: false,
+        message: error instanceof Error ? error.message : String(error),
+        checkedAt: new Date().toISOString(),
+      };
+    }
   },
 
   async installUpdate(): Promise<UpdateState> {

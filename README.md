@@ -4,7 +4,23 @@ LoomTV is a desktop media library app for browsing and playing a local collectio
 
 This project is for organizing and playing media files that you own, have created, or are otherwise authorized to use. LoomTV does not provide movies, TV shows, anime, streaming subscriptions, or copyrighted media.
 
-![LoomTV empty library home screen](docs/screenshots/loomtv-home-empty-library.svg)
+![LoomTV empty library home screen](docs/screenshots/loomtv-home-empty-library.png)
+
+## Screenshots
+
+### Empty Library
+
+![LoomTV empty library setup screen](docs/screenshots/loomtv-home-empty-library.png)
+
+### Settings
+
+![LoomTV library folder settings](docs/screenshots/loomtv-settings-library.png)
+
+![LoomTV local network sharing settings](docs/screenshots/loomtv-settings-network.png)
+
+![LoomTV theme customization settings](docs/screenshots/loomtv-settings-theme.png)
+
+![LoomTV about and update settings](docs/screenshots/loomtv-settings-about.png)
 
 ## Features
 

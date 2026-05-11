@@ -61,9 +61,14 @@ function AppShell() {
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {
-    setNowPlaying((prev) =>
-      prev ? { ...prev, filePath, currentSeason: season, currentEpisode: episode } : null,
-    );
+    setNowPlaying((prev) => {
+      if (!prev) return null;
+      const belongsToCurrentSeries = prev.episodeFiles?.some((item) =>
+        item.filePath === filePath && item.season === season && item.episode === episode,
+      );
+      if (!belongsToCurrentSeries) return prev;
+      return { ...prev, filePath, currentSeason: season, currentEpisode: episode };
+    });
   }, []);
 
   const handleClose = useCallback(() => {
@@ -92,6 +97,7 @@ function AppShell() {
       </main>
       {nowPlaying && (
         <VideoPlayer
+          key={`${nowPlaying.mediaId || 'file'}:${nowPlaying.filePath}`}
           mediaId={nowPlaying.mediaId}
           filePath={nowPlaying.filePath}
           title={nowPlaying.title}

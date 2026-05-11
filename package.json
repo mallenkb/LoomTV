@@ -1,7 +1,7 @@
 {
   "name": "loomtv",
   "productName": "LoomTV",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "private": true,

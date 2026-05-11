@@ -43,7 +43,9 @@ const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
 const WATCHED_THRESHOLD = 0.9;
 const CONTROLS_HIDE_MS = 3000;
 const NEXT_EPISODE_COUNTDOWN_SECONDS = 3;
+const NEXT_EPISODE_PROMPT_REMAINING_SECONDS = 30;
 const REPLAY_FROM_START_REMAINING_SECONDS = 8;
+const END_COMPLETION_TOLERANCE_SECONDS = 1.5;
 const HLS_RECOVERY_ATTEMPTS = 3;
 const HLS_TRANSCODE_RESTART_ATTEMPTS = 2;
 const HLS_FIRST_EXTENSIONS = new Set(['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts']);
@@ -51,6 +53,8 @@ const DEFAULT_EPISODE_PANEL_WIDTH = 288;
 const DEFAULT_MEDIA_PANEL_WIDTH = 360;
 const MIN_SIDE_PANEL_WIDTH = 260;
 const MAX_SIDE_PANEL_RATIO = 0.4;
+const DEFAULT_SKIP_BACK_SECONDS = 10;
+const DEFAULT_SKIP_FORWARD_SECONDS = 15;
 type PlayerState = 'loading' | 'ready' | 'error';
 type ControlTab = 'video' | 'audio' | 'subtitles';
 type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
@@ -463,6 +467,8 @@ export default function VideoPlayer({
   const transcodeSessionIdRef = useRef<string | null>(null);
   const loadTokenRef = useRef(0);
   const sourceLoadTokenRef = useRef(0);
+  const playerActiveRef = useRef(true);
+  const userPausedRef = useRef(false);
   const didTryTranscodeRef = useRef(false);
   const hasPlayableDataRef = useRef(false);
   const transcodeStartSecondsRef = useRef(0);
@@ -474,6 +480,8 @@ export default function VideoPlayer({
   const selectedAudioTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
+  const subtitleStyleRef = useRef<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
+  const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
   const nextEpisodeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
@@ -508,11 +516,48 @@ export default function VideoPlayer({
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
+  const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
+  const [dismissedNextPromptKey, setDismissedNextPromptKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // force episode list re-render
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
 
   useEffect(() => {
     void hydrateProgressFromDatabase().then(() => setTick((value) => value + 1));
+  }, []);
+
+  useEffect(() => {
+    subtitleStyleRef.current = subtitleStyle;
+  }, [subtitleStyle]);
+
+  useEffect(() => {
+    setDismissedNextPromptKey(null);
+  }, [filePath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void desktopApi.getSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        setSkipBackSeconds(
+          Number.isFinite(settings.playbackSkipBackSeconds) && (settings.playbackSkipBackSeconds || 0) > 0
+            ? Number(settings.playbackSkipBackSeconds)
+            : DEFAULT_SKIP_BACK_SECONDS,
+        );
+        setSkipForwardSeconds(
+          Number.isFinite(settings.playbackSkipForwardSeconds) && (settings.playbackSkipForwardSeconds || 0) > 0
+            ? Number(settings.playbackSkipForwardSeconds)
+            : DEFAULT_SKIP_FORWARD_SECONDS,
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSkipBackSeconds(DEFAULT_SKIP_BACK_SECONDS);
+        setSkipForwardSeconds(DEFAULT_SKIP_FORWARD_SECONDS);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const hasEpisodes = episodes.length > 0 && episodeFiles.length > 0;
@@ -644,6 +689,10 @@ export default function VideoPlayer({
     });
   }, [externalSubtitleTracks, subtitleStyle.delaySeconds, subtitleStyle.position]);
 
+  useEffect(() => {
+    applyNativeTextTrackVisibilityRef.current = applyNativeTextTrackVisibility;
+  }, [applyNativeTextTrackVisibility]);
+
   const applyProbeData = useCallback((data: unknown) => {
     const nextDuration = probeDurationSeconds(data);
     const nextTracks = [...probeTracks(data), ...externalSubtitleTracks];
@@ -701,6 +750,21 @@ export default function VideoPlayer({
     if (nextEpisodeFile) goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
   }, [goToEpisode, nextEpisodeFile]);
 
+  const markCurrentEpisodeComplete = useCallback(() => {
+    if (duration <= 0) return;
+    setPosition(duration);
+    void savePlaybackProgress(filePath, duration, duration);
+    setTick((n) => n + 1);
+  }, [duration, filePath]);
+
+  const playNextEpisodeNow = useCallback(() => {
+    if (!nextEpisodeFile) return;
+    if (duration > 0 && position / duration >= WATCHED_THRESHOLD) {
+      markCurrentEpisodeComplete();
+    }
+    goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
+  }, [duration, goToEpisode, markCurrentEpisodeComplete, nextEpisodeFile, position]);
+
   const scheduleNextEpisode = useCallback(() => {
     if (!nextEpisodeFile || !onEpisodeChange) return;
     clearNextEpisodeCountdown();
@@ -717,16 +781,40 @@ export default function VideoPlayer({
     }, 1000);
   }, [clearNextEpisodeCountdown, nextEpisodeFile, onEpisodeChange]);
 
+  const latestEpisodePlaybackRef = useRef({
+    autoplayNextEnabled,
+    nextEpisodeFile,
+    markCurrentEpisodeComplete,
+    scheduleNextEpisode,
+  });
+
+  useEffect(() => {
+    latestEpisodePlaybackRef.current = {
+      autoplayNextEnabled,
+      nextEpisodeFile,
+      markCurrentEpisodeComplete,
+      scheduleNextEpisode,
+    };
+  }, [autoplayNextEnabled, markCurrentEpisodeComplete, nextEpisodeFile, scheduleNextEpisode]);
+
   const startTranscodedFallback = useCallback(async (
     startSeconds = 0,
-    options: { force?: boolean } = {},
+    options: {
+      force?: boolean;
+      allowNearEnd?: boolean;
+      showSeekingStatus?: boolean;
+      keepReadyDuringRestart?: boolean;
+      deferStopCurrent?: boolean;
+    } = {},
   ) => {
+    if (!playerActiveRef.current) return;
     if (didTryTranscodeRef.current && !options.force) return;
     didTryTranscodeRef.current = true;
     const token = loadTokenRef.current;
     const durationHint = probedDurationRef.current || getStoredDuration(filePath);
     const clampedStartSeconds = clampSeconds(startSeconds, durationHint || undefined);
     const safeStartSeconds = durationHint > 0
+      && !options.allowNearEnd
       && (clampedStartSeconds / durationHint >= WATCHED_THRESHOLD
         || durationHint - clampedStartSeconds <= REPLAY_FROM_START_REMAINING_SECONDS)
       ? 0
@@ -734,22 +822,32 @@ export default function VideoPlayer({
     hlsRecoveryAttemptsRef.current = 0;
     transcodeStartSecondsRef.current = safeStartSeconds;
     setPosition(safeStartSeconds);
-    setPlayerState('loading');
-    setStatusMessage(safeStartSeconds > 0 ? 'Seeking local stream...' : 'Starting local compatible stream...');
+    const keepReady = Boolean(options.keepReadyDuringRestart && hasPlayableDataRef.current);
+    if (!keepReady) {
+      setPlayerState('loading');
+      setStatusMessage(
+        safeStartSeconds > 0 && options.showSeekingStatus
+          ? 'Seeking local stream...'
+          : 'Loading local stream...',
+      );
+    }
     setErrorMessage(null);
-    clearHls();
-    await stopTranscodeSession();
+    const previousSessionId = transcodeSessionIdRef.current;
+    if (!options.deferStopCurrent) {
+      clearHls();
+      await stopTranscodeSession();
+    }
 
     try {
       if (probeTracksRef.current.length === 0 && probedDurationRef.current === 0) {
         const probeResult = await desktopApi.media.probe(filePath);
-        if (token !== loadTokenRef.current) return;
+        if (!playerActiveRef.current || token !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data);
       }
 
       const subtitleIndex = selectedSubtitleTrackIndexRef.current;
       const embeddedSubtitle = selectedEmbeddedSubtitle(probeTracksRef.current, subtitleIndex);
-      const { url } = await desktopApi.getStreamUrl(filePath, {
+      const transcodeResult = await desktopApi.media.startTranscode(filePath, {
         forceTranscode: true,
         startSeconds: safeStartSeconds,
         ...(typeof selectedVideoTrackIndexRef.current === 'number' ? { videoTrackIndex: selectedVideoTrackIndexRef.current } : {}),
@@ -759,23 +857,37 @@ export default function VideoPlayer({
           subtitleStreamOrdinal: embeddedSubtitle.ordinal,
           subtitleCodec: embeddedSubtitle.track.codec,
         } : {}),
-        subtitleStyle,
+        subtitleStyle: subtitleStyleRef.current,
       });
-      if (token !== loadTokenRef.current) return;
+      if (!playerActiveRef.current || token !== loadTokenRef.current) return;
+      if (!transcodeResult.ok || !transcodeResult.data?.playlistUrl) {
+        throw new Error(transcodeResult.error || 'Unable to start local stream.');
+      }
 
-      transcodeSessionIdRef.current = null;
+      transcodeSessionIdRef.current = transcodeResult.data.sessionId;
       setStreamIsTranscoded(true);
-      setStreamUrl(url);
-      setPlayerState('loading');
-      setStatusMessage('Loading local stream...');
+      setStreamUrl(transcodeResult.data.playlistUrl);
+      if (options.deferStopCurrent && previousSessionId && previousSessionId !== transcodeResult.data.sessionId) {
+        void desktopApi.media.stopTranscode(previousSessionId);
+      }
+      if (!keepReady) {
+        setPlayerState('loading');
+        setStatusMessage('Loading local stream...');
+      }
     } catch (error) {
-      if (token !== loadTokenRef.current) return;
+      if (!playerActiveRef.current || token !== loadTokenRef.current) return;
+      if (options.deferStopCurrent) {
+        setPlayerState('ready');
+        setStatusMessage('');
+        setErrorMessage(null);
+        return;
+      }
       setPlayerState('error');
       setStatusMessage('Unable to play media');
       setErrorMessage(transcodeErrorMessage(error));
       setStreamIsTranscoded(false);
     }
-  }, [applyProbeData, clearHls, filePath, stopTranscodeSession, subtitleStyle]);
+  }, [applyProbeData, clearHls, filePath, stopTranscodeSession]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -810,18 +922,20 @@ export default function VideoPlayer({
     }).catch(() => {
       if (!cancelled) {
         probedDurationRef.current = 0;
-        applyNativeTextTrackVisibility();
+        applyNativeTextTrackVisibilityRef.current();
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [applyNativeTextTrackVisibility, applyProbeData, externalSubtitleTracks, filePath, trackPreferenceScopeKey]);
+  }, [applyProbeData, externalSubtitleTracks, filePath, trackPreferenceScopeKey]);
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
     const loadToken = ++loadTokenRef.current;
+    playerActiveRef.current = true;
+    userPausedRef.current = false;
     didTryTranscodeRef.current = false;
     transcodeStartSecondsRef.current = 0;
     hlsRecoveryAttemptsRef.current = 0;
@@ -839,6 +953,25 @@ export default function VideoPlayer({
     (async () => {
       try {
         const startSeconds = getPlayableStartPosition(filePath, probedDurationRef.current);
+        const html5DirectPlay = await desktopApi.media.canDirectPlay(filePath, 'html5').catch(() => null);
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+
+        if (html5DirectPlay?.ok && html5DirectPlay.data === false) {
+          const mpvResult = await desktopApi.playWithMPV(filePath, startSeconds);
+          if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+          if (mpvResult.ok) {
+            setPlaybackEngine('mpv');
+            setStreamIsTranscoded(false);
+            setStreamUrl('');
+            setPlayerState('ready');
+            setStatusMessage('');
+            setPaused(false);
+            const durationHint = probedDurationRef.current || getStoredDuration(filePath);
+            if (durationHint > 0) setDuration(durationHint);
+            return;
+          }
+          console.warn('[player] mpv unavailable, falling back to browser playback:', mpvResult.error);
+        }
 
         if (shouldStartWithTranscode(filePath)) {
           await startTranscodedFallback(startSeconds, { force: true });
@@ -846,11 +979,11 @@ export default function VideoPlayer({
         }
 
         const { url, isTranscoded } = await desktopApi.getStreamUrl(filePath);
-        if (loadToken !== loadTokenRef.current) return;
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         setStreamIsTranscoded(Boolean(isTranscoded));
         setStreamUrl(url);
       } catch (error) {
-        if (loadToken !== loadTokenRef.current) return;
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         setPlayerState('error');
         setStatusMessage('Failed to resolve stream');
         setErrorMessage(error instanceof Error ? error.message : 'Failed to resolve stream URL');
@@ -858,6 +991,8 @@ export default function VideoPlayer({
     })();
 
     return () => {
+      loadTokenRef.current += 1;
+      sourceLoadTokenRef.current += 1;
       void desktopApi.closeMPV();
       void stopTranscodeSession();
     };
@@ -923,6 +1058,14 @@ export default function VideoPlayer({
     setErrorMessage(null);
     setPaused(true);
 
+    const playIfAllowed = () => {
+      if (!playerActiveRef.current || userPausedRef.current) {
+        setPaused(true);
+        return;
+      }
+      void video.play().catch(() => setPaused(true));
+    };
+
     if (isHlsSource) {
       if (isSupported()) {
         const hls = new Hls({
@@ -941,7 +1084,7 @@ export default function VideoPlayer({
           hasPlayableDataRef.current = true;
           setPlayerState('ready');
           setStatusMessage('');
-          void video.play().catch(() => setPaused(true));
+          playIfAllowed();
         };
         hls.on(Events.MEDIA_ATTACHED, () => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
@@ -968,7 +1111,7 @@ export default function VideoPlayer({
             setPlayerState('loading');
             setStatusMessage('Restarting local stream...');
             setErrorMessage(null);
-            void startTranscodedFallback(restartAt, { force: true });
+            void startTranscodedFallback(restartAt, { force: true, allowNearEnd: true });
             return true;
           };
 
@@ -1017,6 +1160,7 @@ export default function VideoPlayer({
 
     const onLoadStart = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
+      if (hasPlayableDataRef.current || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
       setPlayerState('loading');
       setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Buffering...');
       setErrorMessage(null);
@@ -1061,7 +1205,7 @@ export default function VideoPlayer({
       if (sourceToken !== sourceLoadTokenRef.current) return;
       const mediaDuration = Number.isFinite(video.duration) ? video.duration : 0;
       setDuration(probedDurationRef.current || mediaDuration);
-      applyNativeTextTrackVisibility();
+      applyNativeTextTrackVisibilityRef.current();
       if (!streamIsTranscoded && resumeSeconds > 10 && mediaDuration) {
         video.currentTime = Math.min(resumeSeconds, Math.max(0, video.duration - 0.1));
       }
@@ -1073,7 +1217,7 @@ export default function VideoPlayer({
       hasPlayableDataRef.current = true;
       setPlayerState('ready');
       setStatusMessage('');
-      void video.play().catch(() => setPaused(true));
+      playIfAllowed();
     };
 
     const onPlaying = () => {
@@ -1086,8 +1230,34 @@ export default function VideoPlayer({
     };
 
     const onEnded = () => {
+      const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const totalDuration = probedDurationRef.current || (Number.isFinite(video.duration) ? video.duration : 0);
+      const endedPosition = clampSeconds(
+        streamIsTranscoded ? transcodeStartSecondsRef.current + currentTime : currentTime,
+        totalDuration || undefined,
+      );
+      const nearEnoughToComplete = totalDuration > 0
+        && totalDuration - endedPosition <= Math.max(END_COMPLETION_TOLERANCE_SECONDS, REPLAY_FROM_START_REMAINING_SECONDS);
+      if (nearEnoughToComplete) {
+        latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
+        setPaused(true);
+        if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
+          latestEpisodePlaybackRef.current.scheduleNextEpisode();
+        }
+        return;
+      }
+      if (totalDuration > 0 && endedPosition < totalDuration - END_COMPLETION_TOLERANCE_SECONDS) {
+        hlsTranscodeRestartAttemptsRef.current = 0;
+        void startTranscodedFallback(endedPosition, { force: true, allowNearEnd: true });
+        return;
+      }
+      if (totalDuration > 0) {
+        latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
+      }
       setPaused(true);
-      if (autoplayNextEnabled && nextEpisodeFile) scheduleNextEpisode();
+      if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
+        latestEpisodePlaybackRef.current.scheduleNextEpisode();
+      }
     };
 
     const onError = () => {
@@ -1098,7 +1268,7 @@ export default function VideoPlayer({
         const fallbackStart = video.currentTime > 0
           ? video.currentTime
           : getPlayableStartPosition(filePath, probedDurationRef.current);
-        void startTranscodedFallback(fallbackStart, { force: true });
+        void startTranscodedFallback(fallbackStart, { force: true, allowNearEnd: true });
         return;
       }
       setPlayerState('error');
@@ -1119,10 +1289,10 @@ export default function VideoPlayer({
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
     video.preload = 'auto';
-    video.autoplay = true;
+    video.autoplay = !userPausedRef.current;
     if (!isManagedHls) {
       video.load();
-      void video.play().catch(() => setPaused(true));
+      playIfAllowed();
     }
 
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
@@ -1130,6 +1300,8 @@ export default function VideoPlayer({
     }
 
     return () => {
+      sourceLoadTokenRef.current += 1;
+      video.autoplay = false;
       video.removeEventListener('loadstart', onLoadStart);
       video.removeEventListener('waiting', onWaiting);
       video.removeEventListener('loadeddata', onPlayable);
@@ -1151,14 +1323,9 @@ export default function VideoPlayer({
     streamUrl,
     streamIsTranscoded,
     playbackEngine,
-    hasEpisodes,
-    autoplayNextEnabled,
-    nextEpisodeFile,
     clearHls,
     clearVideoElement,
-    applyNativeTextTrackVisibility,
     startTranscodedFallback,
-    scheduleNextEpisode,
   ]);
 
   // ─── Auto-hide controls ────────────────────────────────────────────────────
@@ -1208,29 +1375,60 @@ export default function VideoPlayer({
 
   // Stop transcode session when component closes.
   useEffect(() => () => {
+    playerActiveRef.current = false;
+    userPausedRef.current = true;
+    loadTokenRef.current += 1;
+    sourceLoadTokenRef.current += 1;
+    clearNextEpisodeCountdown();
     void stopTranscodeSession();
     void desktopApi.closeMPV();
-  }, [stopTranscodeSession]);
+  }, [clearNextEpisodeCountdown, stopTranscodeSession]);
 
   // ─── Controls ──────────────────────────────────────────────────────────────
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
     if (playbackEngine === 'mpv') {
+      const nextPaused = !paused;
+      userPausedRef.current = nextPaused;
       void desktopApi.toggleMPVPause();
-      setPaused((value) => !value);
+      setPaused(nextPaused);
       return;
     }
     const video = videoRef.current;
     if (!video) return;
-    video.paused ? void video.play() : video.pause();
-  }, [playbackEngine, playerState]);
+    if (video.paused) {
+      userPausedRef.current = false;
+      video.autoplay = true;
+      void video.play().catch(() => setPaused(true));
+      return;
+    }
+    userPausedRef.current = true;
+    video.autoplay = false;
+    video.pause();
+  }, [paused, playbackEngine, playerState]);
+
+  const shutdownPlayback = useCallback(() => {
+    playerActiveRef.current = false;
+    userPausedRef.current = true;
+    loadTokenRef.current += 1;
+    sourceLoadTokenRef.current += 1;
+    clearNextEpisodeCountdown();
+    clearHls();
+    const video = videoRef.current;
+    if (video) {
+      video.autoplay = false;
+      video.pause();
+    }
+    void stopTranscodeSession();
+    void desktopApi.closeMPV();
+  }, [clearHls, clearNextEpisodeCountdown, stopTranscodeSession]);
 
   const handleClose = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    void desktopApi.closeMPV();
+    shutdownPlayback();
     onClose();
-  }, [onClose]);
+  }, [onClose, shutdownPlayback]);
 
   const handleBack = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
@@ -1238,8 +1436,9 @@ export default function VideoPlayer({
       void document.exitFullscreen();
       return;
     }
+    shutdownPlayback();
     onClose();
-  }, [onClose]);
+  }, [onClose, shutdownPlayback]);
 
   const toggleFullscreen = useCallback(() => {
     if (playbackEngine === 'mpv') {
@@ -1329,7 +1528,7 @@ export default function VideoPlayer({
     }
   }, [applyNativeTextTrackVisibility, playbackEngine, subtitleStyle]);
 
-  const seekTo = useCallback((targetSeconds: number) => {
+  const seekTo = useCallback((targetSeconds: number, options: { restartTranscoded?: boolean } = {}) => {
     const nextPosition = clampSeconds(targetSeconds, duration || undefined);
     setPosition(nextPosition);
 
@@ -1338,14 +1537,26 @@ export default function VideoPlayer({
       return;
     }
 
+    const video = videoRef.current;
+    if (!video) return;
+
     if (streamIsTranscoded) {
+      const streamPosition = nextPosition - transcodeStartSecondsRef.current;
+      if (streamPosition >= 0 && !options.restartTranscoded) {
+        const streamDuration = Number.isFinite(video.duration) ? video.duration : undefined;
+        video.currentTime = clampSeconds(streamPosition, streamDuration);
+        return;
+      }
       hlsTranscodeRestartAttemptsRef.current = 0;
-      void startTranscodedFallback(nextPosition, { force: true });
+      void startTranscodedFallback(nextPosition, {
+        force: true,
+        allowNearEnd: true,
+        showSeekingStatus: true,
+        keepReadyDuringRestart: !options.restartTranscoded,
+      });
       return;
     }
 
-    const video = videoRef.current;
-    if (!video) return;
     const directDuration = Number.isFinite(video.duration) ? video.duration : duration;
     video.currentTime = clampSeconds(nextPosition, directDuration || undefined);
   }, [duration, playbackEngine, startTranscodedFallback, streamIsTranscoded]);
@@ -1353,7 +1564,7 @@ export default function VideoPlayer({
   const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (!duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    seekTo(((e.clientX - rect.left) / rect.width) * duration);
+    seekTo(((e.clientX - rect.left) / rect.width) * duration, { restartTranscoded: true });
   }, [duration, seekTo]);
 
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1385,7 +1596,7 @@ export default function VideoPlayer({
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
     hlsTranscodeRestartAttemptsRef.current = 0;
-    void startTranscodedFallback(position, { force: true });
+    void startTranscodedFallback(position, { force: true, allowNearEnd: true });
   }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamUrl]);
 
   const applySubtitleStyleToStream = useCallback(() => {
@@ -1396,7 +1607,12 @@ export default function VideoPlayer({
     }
     if (streamIsTranscoded && selectedSubtitleTrackIndexRef.current >= 0) {
       hlsTranscodeRestartAttemptsRef.current = 0;
-      void startTranscodedFallback(position, { force: true });
+      void startTranscodedFallback(position, {
+        force: true,
+        allowNearEnd: true,
+        keepReadyDuringRestart: true,
+        deferStopCurrent: true,
+      });
     }
   }, [applyNativeTextTrackVisibility, playbackEngine, position, startTranscodedFallback, streamIsTranscoded, subtitleStyle]);
 
@@ -1521,11 +1737,11 @@ export default function VideoPlayer({
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          seekTo(position - (e.shiftKey ? 60 : 10));
+          seekTo(position - (e.shiftKey ? 60 : skipBackSeconds));
           break;
         case 'ArrowRight':
           e.preventDefault();
-          seekTo(position + (e.shiftKey ? 60 : 30));
+          seekTo(position + (e.shiftKey ? 60 : skipForwardSeconds));
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -1565,16 +1781,16 @@ export default function VideoPlayer({
           break;
         case 'Home':
           e.preventDefault();
-          seekTo(0);
+          seekTo(0, { restartTranscoded: true });
           break;
         case 'End':
           e.preventDefault();
-          seekTo(duration);
+          seekTo(duration, { restartTranscoded: true });
           break;
         default:
           if (/^[0-9]$/.test(e.key) && duration > 0) {
             e.preventDefault();
-            seekTo((Number(e.key) / 10) * duration);
+            seekTo((Number(e.key) / 10) * duration, { restartTranscoded: true });
           }
           break;
       }
@@ -1588,6 +1804,8 @@ export default function VideoPlayer({
     handleBack,
     position,
     resetPlaybackRate,
+    skipBackSeconds,
+    skipForwardSeconds,
     seekTo,
     toggleMute,
     toggleFullscreen,
@@ -1619,6 +1837,14 @@ export default function VideoPlayer({
       ? `${epCode(nextEpisodeFile.season, nextEpisodeFile.episode)} - ${cleanEpisodeTitle(ep.title, nextEpisodeFile.season, nextEpisodeFile.episode)}`
       : epCode(nextEpisodeFile.season, nextEpisodeFile.episode);
   }, [episodes, nextEpisodeFile]);
+  const showNextEpisodePrompt = Boolean(
+    nextEpisodeFile
+    && duration > 0
+    && nextCountdown === null
+    && dismissedNextPromptKey !== `${currentSeason}-${currentEpisode}`
+    && duration - position <= NEXT_EPISODE_PROMPT_REMAINING_SECONDS
+    && position / duration >= WATCHED_THRESHOLD,
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex bg-black" ref={containerRef}>
@@ -1720,25 +1946,35 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {nextCountdown !== null && nextEpisodeFile && (
+        {(nextCountdown !== null || showNextEpisodePrompt) && nextEpisodeFile && (
           <div
-            className="absolute inset-0 z-30 flex items-end justify-end bg-gradient-to-t from-black/85 via-black/20 to-transparent p-6"
+            className="pointer-events-none absolute inset-0 z-30 flex items-end justify-end p-6"
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
           >
-            <div className="w-full max-w-sm rounded-lg border border-white/15 bg-black/70 p-4 text-white shadow-2xl backdrop-blur-md">
+            <div className="pointer-events-auto w-fit min-w-64 max-w-[min(22rem,calc(100vw-3rem))] rounded-lg border border-white/15 bg-black/70 p-3 text-white shadow-2xl">
               <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--loom-accent)]">Up next</p>
               <p className="mt-1 truncate text-sm font-semibold">{nextEpLabel || epCode(nextEpisodeFile.season, nextEpisodeFile.episode)}</p>
-              <p className="mt-2 text-xs text-white/65">Playing in {nextCountdown}</p>
+              <p className="mt-2 text-xs text-white/65">
+                {nextCountdown !== null
+                  ? `Playing in ${nextCountdown}`
+                  : autoplayNextEnabled ? 'Autoplay starts when this episode finishes.' : 'Ready when you are.'}
+              </p>
               <div className="mt-4 flex gap-2">
                 <button
-                  onClick={() => goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode)}
+                  onClick={playNextEpisodeNow}
                   className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-white/85"
                 >
                   Play now
                 </button>
                 <button
-                  onClick={clearNextEpisodeCountdown}
+                  onClick={() => {
+                    if (nextCountdown !== null) {
+                      clearNextEpisodeCountdown();
+                    } else {
+                      setDismissedNextPromptKey(`${currentSeason}-${currentEpisode}`);
+                    }
+                  }}
                   className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
                 >
                   Cancel
@@ -1776,17 +2012,17 @@ export default function VideoPlayer({
             </button>
 
             <button
-              onClick={() => seekTo(position - 10)}
+              onClick={() => seekTo(position - skipBackSeconds)}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              title="Back 10s"
+              title={`Back ${skipBackSeconds}s`}
             >
               <RotateCcw className="w-4 h-4" />
             </button>
 
             <button
-              onClick={() => seekTo(position + 30)}
+              onClick={() => seekTo(position + skipForwardSeconds)}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              title="Forward 30s"
+              title={`Forward ${skipForwardSeconds}s`}
             >
               <RotateCw className="w-4 h-4" />
             </button>
@@ -2059,8 +2295,6 @@ export default function VideoPlayer({
                         step={1}
                         value={subtitleStyle.position}
                         onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
-                        onMouseUp={applySubtitleStyleToStream}
-                        onTouchEnd={applySubtitleStyleToStream}
                         className="w-full accent-[var(--loom-accent)]"
                       />
                     </div>
@@ -2077,11 +2311,51 @@ export default function VideoPlayer({
                         step={1}
                         value={subtitleStyle.fontSize}
                         onChange={(event) => updateSubtitleStyle('fontSize', Number(event.target.value))}
-                        onMouseUp={applySubtitleStyleToStream}
-                        onTouchEnd={applySubtitleStyleToStream}
                         className="w-full accent-[var(--loom-accent)]"
                       />
                     </div>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-xs font-semibold text-white">Outline</p>
+                        <span className="text-xs text-[var(--loom-accent)]">{subtitleStyle.borderWidth}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={10}
+                        step={1}
+                        value={subtitleStyle.borderWidth}
+                        onChange={(event) => updateSubtitleStyle('borderWidth', Number(event.target.value))}
+                        className="w-full accent-[var(--loom-accent)]"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      {([
+                        ['fontColor', 'Text'],
+                        ['borderColor', 'Outline'],
+                        ['backgroundColor', 'Background'],
+                      ] as Array<[keyof SubtitleStyleSettings, string]>).map(([key, label]) => (
+                        <label key={key} className="space-y-2">
+                          <span className="block text-xs font-semibold text-white">{label}</span>
+                          <input
+                            type="color"
+                            value={String(subtitleStyle[key])}
+                            onChange={(event) => updateSubtitleStyle(key, event.target.value)}
+                            className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1"
+                          />
+                        </label>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={applySubtitleStyleToStream}
+                      className="w-full rounded-md bg-white/10 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-white/15"
+                    >
+                      Apply subtitle style
+                    </button>
                   </div>
 
                 </div>
