@@ -3452,7 +3452,7 @@ async function buildTVItemFromFolder(
     );
 
     mergedEpisodes = localEpisodes.map((local) => {
-      const key = `${local.season}-${local.episode}`;
+      const key = `${local.season}-${local.number}`;
       const remote = remoteEpMap.get(key);
       if (!remote) return local;
       return {

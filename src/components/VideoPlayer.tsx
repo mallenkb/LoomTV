@@ -585,6 +585,15 @@ export default function VideoPlayer({
     }, {} as Record<number, EpisodeMeta[]>),
   [episodes]);
 
+  const displayEpisodeTitle = useCallback((season: number, episode: number, rawTitle?: string, filePath?: string): string => {
+    const metadataTitle = cleanEpisodeTitleForDisplay(rawTitle, title, season, episode);
+    if (metadataTitle !== `Episode ${episode}`) return metadataTitle;
+    if (!filePath) return metadataTitle;
+
+    const fileTitle = cleanEpisodeTitle(filePath, season, episode);
+    return fileTitle !== `Episode ${episode}` ? fileTitle : metadataTitle;
+  }, [title]);
+
   const sortedSeasons = useMemo(
     () => Object.keys(groupedEpisodes).map(Number).sort((a, b) => a - b),
     [groupedEpisodes],
@@ -1823,20 +1832,23 @@ export default function VideoPlayer({
   const currentEpLabel = useMemo(() => {
     if (!hasEpisodes) return null;
     const ep = episodes.find((item) => item.season === currentSeason && item.number === currentEpisode);
-    return ep?.title
-      ? `${epCode(currentSeason, currentEpisode)} – ${cleanEpisodeTitle(ep.title, currentSeason, currentEpisode)}`
+    const file = episodeFiles.find((item) => item.season === currentSeason && item.episode === currentEpisode);
+    const label = displayEpisodeTitle(currentSeason, currentEpisode, ep?.title, file?.filePath);
+    return label !== `Episode ${currentEpisode}`
+      ? `${epCode(currentSeason, currentEpisode)} – ${label}`
       : epCode(currentSeason, currentEpisode);
-  }, [currentEpisode, currentSeason, episodes, hasEpisodes]);
+  }, [currentEpisode, currentSeason, displayEpisodeTitle, episodeFiles, episodes, hasEpisodes]);
 
   const nextEpLabel = useMemo(() => {
     if (!nextEpisodeFile) return null;
     const ep = episodes.find((item) =>
       item.season === nextEpisodeFile.season && item.number === nextEpisodeFile.episode,
     );
-    return ep?.title
-      ? `${epCode(nextEpisodeFile.season, nextEpisodeFile.episode)} - ${cleanEpisodeTitle(ep.title, nextEpisodeFile.season, nextEpisodeFile.episode)}`
+    const label = displayEpisodeTitle(nextEpisodeFile.season, nextEpisodeFile.episode, ep?.title, nextEpisodeFile.filePath);
+    return label !== `Episode ${nextEpisodeFile.episode}`
+      ? `${epCode(nextEpisodeFile.season, nextEpisodeFile.episode)} - ${label}`
       : epCode(nextEpisodeFile.season, nextEpisodeFile.episode);
-  }, [episodes, nextEpisodeFile]);
+  }, [displayEpisodeTitle, episodes, nextEpisodeFile]);
   const showNextEpisodePrompt = Boolean(
     nextEpisodeFile
     && duration > 0
@@ -2398,6 +2410,7 @@ export default function VideoPlayer({
                   const isCurrent = ep.season === currentSeason && ep.number === currentEpisode;
                   const epPath = file?.filePath;
                   const epDur = isCurrent ? duration : file?.localMetadata?.durationSeconds;
+                  const episodeTitle = displayEpisodeTitle(ep.season, ep.number, ep.title, epPath);
                   const watched = epPath ? isWatched(epPath, epDur) : false;
                   const inProgress = epPath ? isInProgress(epPath, epDur) : false;
                   const progFrac = isCurrent && duration > 0
@@ -2426,7 +2439,7 @@ export default function VideoPlayer({
                         {epCode(ep.season, ep.number)}
                       </span>
                       <span className={`min-w-0 flex-1 truncate text-xs leading-snug ${isCurrent ? 'font-medium text-[var(--loom-accent)]' : watched ? 'text-[#555]' : 'text-white'}`}>
-                        {ep.title ? cleanEpisodeTitle(ep.title, ep.season, ep.number) : `Episode ${ep.number}`}
+                        {episodeTitle}
                       </span>
                       {watched && !isCurrent && <CheckCircle className="h-3 w-3 shrink-0 text-green-500 opacity-70" />}
                       {inProgress && !isCurrent && <span className="shrink-0 text-[9px] text-amber-400">resume</span>}
