@@ -28,6 +28,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.8](docs/releases/v1.0.8.md): fixes installed macOS builds so adding library folders no longer crashes on the packaged SQLite native module.
 - [LoomTV 1.0.7](docs/releases/v1.0.7.md): fixes library folder updates so scans no longer overwrite saved library data mid-progress, and clarifies update installation restart state.
 - [LoomTV 1.0.6](docs/releases/v1.0.6.md): adds the new theming system, black/default/navy themes, an Others library section, and several playback, metadata, and settings UX fixes.
 - [LoomTV 1.0.5](docs/releases/v1.0.5.md): fixes installed-app library add and sync stalls by keeping library payloads lightweight and moving artwork caching out of the blocking scan path.

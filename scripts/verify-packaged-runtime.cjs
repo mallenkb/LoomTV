@@ -1,5 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { spawnSync } = require('node:child_process');
 const asar = require('@electron/asar');
 
 const root = process.cwd();
@@ -65,6 +67,22 @@ const requiredUnpacked = [
 
 for (const candidate of requiredUnpacked) {
   if (!exists(candidate)) fail(`Missing unpacked runtime file: ${candidate}`);
+}
+
+const sqliteNative = requiredUnpacked[0];
+if (exists(sqliteNative)) {
+  const checkScript = path.join(os.tmpdir(), `loomtv-native-check-${process.pid}.cjs`);
+  fs.writeFileSync(checkScript, `require(${JSON.stringify(sqliteNative)});\n`, 'utf8');
+
+  const result = spawnSync(require('electron'), [checkScript], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    encoding: 'utf8',
+  });
+  fs.rmSync(checkScript, { force: true });
+
+  if (result.status !== 0) {
+    fail(`better-sqlite3 native module is not compatible with Electron ${process.versions.electron || ''}.\n${result.stderr || result.stdout}`);
+  }
 }
 
 const bundledFfmpeg = path.join(resources, 'ffmpeg', platformFolder(), binaryName('ffmpeg'));
