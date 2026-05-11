@@ -28,6 +28,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.12](docs/releases/v1.0.12.md): fixes release CI signing fallbacks and Linux package metadata.
 - [LoomTV 1.0.11](docs/releases/v1.0.11.md): improves GitHub-hosted update flow, release packaging, and restart prompts.
 - [LoomTV 1.0.10](docs/releases/v1.0.10.md): fixes auto-update detection/install flow for packaged apps using GitHub-hosted releases.
 - [LoomTV 1.0.8](docs/releases/v1.0.8.md): fixes installed macOS builds so adding library folders no longer crashes on the packaged SQLite native module.
@@ -112,12 +113,12 @@ Publishes distributables through Electron Builder's GitHub publisher. Publishing
 
 For release automation:
 
-1. Bump version with `npm version 1.0.11` (or the next patch/minor version).
+1. Bump version with `npm version 1.0.12` (or the next patch/minor version).
 2. Push commit and create/push a tag that matches `v*`:
 
    ```sh
    git push origin main
-   git push origin v1.0.11
+   git push origin v1.0.12
    ```
 
 3. The workflow in `.github/workflows/build-installers.yml` runs on tag pushes. Electron Builder creates and uploads macOS/Windows/Linux installers plus updater metadata (`latest*.yml`, `.blockmap`) to the GitHub release.
@@ -130,7 +131,7 @@ For release automation:
 - After a package is downloaded, LoomTV prompts to restart now. If you skip, the update remains ready in-app until installed later.
 
 - Requirements:
-  - GitHub releases must be published with version tags like `v1.0.11`.
+  - GitHub releases must be published with version tags like `v1.0.12`.
   - Release assets must include install artifacts and Electron Builder update metadata files (workflow is configured for this).
   - macOS/Windows release builds should be signed in CI for reliable install/update trust.
   - mac signing: configure Electron Builder signing secrets such as `CSC_LINK` and `CSC_KEY_PASSWORD`; notarization also needs Apple credentials such as `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
