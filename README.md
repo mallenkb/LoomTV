@@ -64,6 +64,11 @@ Download the installer or archive for your operating system, then run it like an
 - better-sqlite3 for local persistence.
 - FFmpeg, FFprobe, HLS.js, and MPV integration for media playback workflows.
 
+## Playback Roadmap
+
+- Short term: keep playback inside LoomTV by using browser-compatible streams and HLS/transcode fallbacks so custom React controls can stay over the video.
+- Long term: build a real `libmpv` native addon if LoomTV needs MPV-level playback without opening a separate native player window.
+
 ## Getting Started
 
 ### Prerequisites
