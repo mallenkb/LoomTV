@@ -70,7 +70,7 @@ function AppShell() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-[var(--loom-bg)] text-[var(--loom-text)]">
+    <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <Sidebar />
       <main
         className="flex-1 overflow-hidden"

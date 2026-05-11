@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';
     appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+    appDarkTheme?: 'default' | 'justwatch' | 'black';
     appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
     localNetworkSharingEnabled?: boolean;
     localNetworkShareToken?: string;
@@ -193,6 +194,7 @@ declare global {
         sidebarNavOrder?: string[];
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+        appDarkTheme?: 'default' | 'justwatch' | 'black';
         appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
         localNetworkSharingEnabled?: boolean;
         localNetworkShareToken?: string;
@@ -205,6 +207,7 @@ declare global {
         sidebarNavOrder?: string[];
         appThemeMode?: 'dark' | 'light';
         appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+        appDarkTheme?: 'default' | 'justwatch' | 'black';
         appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
         localNetworkSharingEnabled?: boolean;
         localNetworkShareToken?: string;

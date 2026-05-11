@@ -243,6 +243,7 @@ interface AppSettings {
   sidebarNavOrder?: string[];
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
+  appDarkTheme?: 'default' | 'justwatch' | 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;
@@ -290,6 +291,9 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
       ? raw.appThemeColor
       : 'yellow',
+    appDarkTheme: raw.appDarkTheme === 'default' || raw.appDarkTheme === 'justwatch' || raw.appDarkTheme === 'black'
+      ? raw.appDarkTheme
+      : 'justwatch',
     appLoaderStyle: raw.appLoaderStyle === 'logo-mark' || raw.appLoaderStyle === 'horizontal-logo' || raw.appLoaderStyle === 'play-mark'
       ? raw.appLoaderStyle
       : 'play-mark',

@@ -31,7 +31,7 @@ export default function Home() {
   const showMoviesSection = isLoading || filteredMovies.length > 0;
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
+    <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} placeholder="Search Home" />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
         {!normalizedQuery && !isLoading && !hasLibraryItems && (
@@ -41,7 +41,7 @@ export default function Home() {
         {!normalizedQuery && continueWatching.length > 0 && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white">Continue Watching</h3>
+              <h3 className="loom-section-title text-xl font-semibold text-white">Continue Watching</h3>
               <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                 See All <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
@@ -53,7 +53,7 @@ export default function Home() {
         {showAnimeSection && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white">Anime</h3>
+              <h3 className="loom-section-title text-xl font-semibold text-white">Anime</h3>
               <Link to="/anime">
                 <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
@@ -67,7 +67,7 @@ export default function Home() {
         {showTVSection && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white">TV Shows</h3>
+              <h3 className="loom-section-title text-xl font-semibold text-white">TV Shows</h3>
               <Link to="/tv">
                 <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
@@ -81,7 +81,7 @@ export default function Home() {
         {showMoviesSection && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold text-white">Movies</h3>
+              <h3 className="loom-section-title text-xl font-semibold text-white">Movies</h3>
               <Link to="/movies">
                 <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
@@ -109,7 +109,7 @@ function HomeEmptyState({
   return (
     <div className="flex min-h-[calc(100vh-220px)] items-center justify-center px-4">
       <div className="w-full max-w-[620px] text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-border)] bg-[var(--loom-surface)] shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
           <FolderPlus className="h-9 w-9 text-[var(--loom-accent)]" />
         </div>
         <h2 className="text-2xl font-semibold text-white">Add your first library folder</h2>
@@ -187,9 +187,9 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
     <LinkComponent
       to={to}
       state={{ from, artwork: routeArtworkState(item, imageSources) }}
-      className="group block w-[200px] flex-none"
+      className="loom-poster-link group block w-[200px] flex-none"
     >
-      <div className="relative aspect-[2/3] rounded-lg overflow-hidden">
+      <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
           src={imageSources}
           alt={item.title}
@@ -203,15 +203,15 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
           }
         />
         <RatingBadge rating={item.rating} />
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
+        <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-12 h-12 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_6px_rgba(251,197,0,0.14)]">
             <Play className="w-6 h-6 text-[var(--loom-accent-foreground)] ml-1" />
           </div>
         </div>
       </div>
       <div className="mt-2">
-        <h4 className="text-sm font-medium text-white truncate">{item.title}</h4>
+        <h4 className="truncate text-sm font-semibold text-white">{item.title}</h4>
         {metaLine && <p className="text-xs text-[var(--loom-muted)]">{metaLine}</p>}
       </div>
     </LinkComponent>
@@ -221,7 +221,7 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
 function RatingBadge({ rating }: { rating?: number }) {
   if (!rating || rating <= 0) return null;
   return (
-    <div className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md bg-black/72 px-2 text-xs font-semibold text-[#F5C451] shadow-lg backdrop-blur-md">
+    <div className="loom-chip absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-semibold backdrop-blur-md">
       <Star className="h-3.5 w-3.5" fill="currentColor" />
       {rating.toFixed(1)}
     </div>

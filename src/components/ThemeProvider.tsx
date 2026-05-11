@@ -4,6 +4,7 @@ import {
   AppThemeSettings,
   DEFAULT_THEME_SETTINGS,
   applyTheme,
+  normalizeDarkTheme,
   normalizeLoaderStyle,
   normalizeThemeColor,
 } from '@/lib/theme';
@@ -26,6 +27,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         const loadedTheme = {
           mode: 'dark' as const,
           color: normalizeThemeColor(settings.appThemeColor),
+          darkTheme: normalizeDarkTheme(settings.appDarkTheme),
           loaderStyle: normalizeLoaderStyle(settings.appLoaderStyle),
         };
         setThemeState(loadedTheme);
@@ -45,6 +47,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const nextTheme = {
       mode: 'dark' as const,
       color: normalizeThemeColor(updates.color || theme.color),
+      darkTheme: normalizeDarkTheme(updates.darkTheme || theme.darkTheme),
       loaderStyle: normalizeLoaderStyle(updates.loaderStyle || theme.loaderStyle),
     };
     setThemeState(nextTheme);
@@ -52,6 +55,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     await desktopApi.saveSettings({
       appThemeMode: nextTheme.mode,
       appThemeColor: nextTheme.color,
+      appDarkTheme: nextTheme.darkTheme,
       appLoaderStyle: nextTheme.loaderStyle,
     });
   };

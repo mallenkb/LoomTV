@@ -8,7 +8,7 @@ import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { useTheme } from '@/components/ThemeProvider';
 import LoomLogo from '@/components/LoomLogo';
 import LoomLoader from '@/components/LoomLoader';
-import { AppLoaderStyle, AppThemeColor, THEME_COLORS } from '@/lib/theme';
+import { AppDarkTheme, AppLoaderStyle, AppThemeColor, DARK_THEMES, THEME_COLORS } from '@/lib/theme';
 
 type MetadataProvider = {
   id: string;
@@ -478,11 +478,11 @@ export default function Settings() {
   const currentNetworkName = localNetworkStatus?.networkName || 'Connected locally';
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--loom-bg)]">
+    <div className="loom-page h-full overflow-y-auto">
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
-        <div className="mx-auto max-w-4xl pt-16">
+        <div className="mx-auto max-w-5xl pt-16">
           <LayoutGroup>
-            <div className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-56rem)/2)))] top-6 z-40 inline-flex rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface)]/95 p-1 shadow-lg shadow-black/10 backdrop-blur-md">
+            <div className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md">
               {SETTINGS_SECTIONS.map((section) => {
                 const isActive = activeSection === section.id;
                 return (
@@ -526,7 +526,7 @@ export default function Settings() {
         {activeSection === 'library' && (
           <>
         {/* Library Folders */}
-        <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+        <Card className="settings-panel">
           <CardHeader>
             <CardTitle className="text-white">Library Folders</CardTitle>
             <CardDescription className="text-[var(--loom-muted)]">
@@ -553,7 +553,7 @@ export default function Settings() {
                       <p className="text-[var(--loom-faint)] text-sm py-2">No {section.title.toLowerCase()} folders added</p>
                     ) : (
                       section.folders.map((folder) => (
-                        <div key={folder} className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#151515] text-white text-sm">
+                        <div key={folder} className="settings-panel-soft flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm text-white">
                           <span className="truncate flex-1">{folder}</span>
                           <button
                             onClick={() => removeLibraryFolder(folder)}
@@ -572,7 +572,7 @@ export default function Settings() {
         </Card>
 
         {/* Sidebar Order */}
-        <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+        <Card className="settings-panel">
           <CardHeader>
             <CardTitle className="text-white">Sidebar Order</CardTitle>
             <CardDescription className="text-[var(--loom-muted)]">
@@ -592,7 +592,7 @@ export default function Settings() {
                   className={`flex cursor-grab items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors active:cursor-grabbing ${
                     draggedSidebarItem === itemId
                       ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/10'
-                      : 'border-[var(--loom-border)] bg-[#151515] hover:border-[#4a4a4a]'
+                      : 'border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] hover:border-[var(--loom-accent)]/35'
                   }`}
                 >
                   <GripVertical className="h-4 w-4 shrink-0 text-[var(--loom-faint)]" />
@@ -632,7 +632,7 @@ export default function Settings() {
         </Card>
 
         {/* Scan Library */}
-        <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+        <Card className="settings-panel">
           <CardHeader>
             <CardTitle className="text-white">Scan Library</CardTitle>
             <CardDescription className="text-[var(--loom-muted)]">
@@ -701,7 +701,7 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+        <Card className="settings-panel">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white">
               <Download className="h-4 w-4 text-[var(--loom-accent)]" />
@@ -723,7 +723,7 @@ export default function Settings() {
         </Card>
 
         {/* Automatic Sync */}
-        <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+        <Card className="settings-panel">
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-[var(--loom-accent)]" />
@@ -757,7 +757,7 @@ export default function Settings() {
 
         {activeSection === 'network' && (
           <>
-            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+            <Card className="settings-panel">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-white">
                   <Wifi className="h-4 w-4 text-[var(--loom-accent)]" />
@@ -769,11 +769,11 @@ export default function Settings() {
               </CardHeader>
               <CardContent className="space-y-5">
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                  <div className="settings-panel-soft rounded-lg p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Sharing device</p>
                     <p className="mt-1 text-sm text-[var(--loom-muted)]">Turn on sharing, then give the other person this 6-digit share code.</p>
                   </div>
-                  <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                  <div className="settings-panel-soft rounded-lg p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Connecting device</p>
                     <p className="mt-1 text-sm text-[var(--loom-muted)]">Join the same Wi-Fi network, enter the code below, then connect.</p>
                   </div>
@@ -811,7 +811,7 @@ export default function Settings() {
                       transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
                     >
                       <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                        <div className="settings-panel-soft rounded-lg p-3">
                           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Device Address</p>
                           <div className="flex items-center gap-2">
                             <code className="min-w-0 flex-1 truncate text-sm text-white">
@@ -829,7 +829,7 @@ export default function Settings() {
                           </div>
                         </div>
 
-                        <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                        <div className="settings-panel-soft rounded-lg p-3">
                           <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Share Code</p>
                           <div className="flex items-center gap-2">
                             <code className="min-w-0 flex-1 truncate text-sm text-white">
@@ -848,7 +848,7 @@ export default function Settings() {
                         </div>
                       </div>
 
-                      <div className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                      <div className="settings-panel-soft rounded-lg p-3">
                         <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Network Library URL</p>
                         <div className="flex items-center gap-2">
                           <code className="min-w-0 flex-1 truncate text-sm text-white">
@@ -882,7 +882,7 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+            <Card className="settings-panel">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-white">
                   <Key className="h-4 w-4 text-[var(--loom-accent)]" />
@@ -948,7 +948,7 @@ export default function Settings() {
             </Card>
 
             {sharedLibrarySnapshot && (
-              <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+              <Card className="settings-panel">
                 <CardHeader>
                   <CardTitle className="text-white">Shared Library</CardTitle>
                   <CardDescription className="text-[var(--loom-muted)]">
@@ -958,7 +958,7 @@ export default function Settings() {
                 <CardContent>
                   <div className="grid gap-3 md:grid-cols-3">
                     {sharedLibrarySections.map((section) => (
-                      <div key={section.title} className="rounded-lg border border-[var(--loom-border)] bg-[#151515] p-3">
+                      <div key={section.title} className="settings-panel-soft rounded-lg p-3">
                         <p className="text-sm font-semibold text-white">{section.title}</p>
                         <p className="mb-3 text-xs text-[var(--loom-muted)]">{section.items.length} item{section.items.length === 1 ? '' : 's'}</p>
                         <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
@@ -984,7 +984,7 @@ export default function Settings() {
         {activeSection === 'metadata' && (
           <>
         {/* Metadata API keys */}
-        <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+        <Card className="settings-panel">
           <CardHeader>
             <CardTitle className="text-white flex items-center gap-2">
               <Key className="w-4 h-4 text-[var(--loom-accent)]" />
@@ -1172,7 +1172,7 @@ export default function Settings() {
 
         {activeSection === 'theme' && (
           <div className="space-y-6">
-            <Card className="border-[var(--loom-border)] bg-[var(--loom-surface)]">
+            <Card className="settings-panel">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-[var(--loom-text)]">
                   <Palette className="h-4 w-4 text-[var(--loom-accent)]" />
@@ -1205,7 +1205,9 @@ export default function Settings() {
                             style={{ backgroundColor: palette.hex }}
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-semibold text-[var(--loom-text)]">{palette.label}</span>
+                            <span className={`block text-sm font-semibold ${color === 'yellow' ? 'text-[#fbc500]' : 'text-[var(--loom-text)]'}`}>
+                              {palette.label}
+                            </span>
                             <span className="block text-xs text-[var(--loom-muted)]">{palette.hex}</span>
                           </span>
                           <LoomLogo accent={palette.hex} className="h-6 w-auto" />
@@ -1215,6 +1217,42 @@ export default function Settings() {
                   </div>
                   <p className="mt-3 text-xs text-[var(--loom-muted)]">
                     Yellow is the default LoomTV branding.
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
+                  <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Dark Theme</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {(Object.keys(DARK_THEMES) as AppDarkTheme[]).map((darkTheme) => {
+                      const palette = DARK_THEMES[darkTheme];
+                      const isSelected = theme.darkTheme === darkTheme;
+                      return (
+                        <button
+                          key={darkTheme}
+                          type="button"
+                          onClick={() => void setTheme({ darkTheme })}
+                          className={`flex min-h-32 flex-col justify-between rounded-lg border p-3 text-left transition-colors ${
+                            isSelected
+                              ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/10'
+                              : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-accent)]/50'
+                          }`}
+                        >
+                          <span>
+                            <span className="block text-sm font-semibold text-[var(--loom-text)]">{palette.label}</span>
+                            <span className="mt-1 block text-xs leading-4 text-[var(--loom-muted)]">{palette.description}</span>
+                          </span>
+                          <span
+                            className="mt-4 block h-8 rounded-md border border-white/10"
+                            style={{ backgroundColor: palette.bg }}
+                          >
+                            <span className="sr-only">{palette.bg}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-xs text-[var(--loom-muted)]">
+                    Black uses #0a0a0a as the app-wide dark foundation.
                   </p>
                 </div>
 
@@ -1271,7 +1309,7 @@ export default function Settings() {
         {activeSection === 'about' && (
           <div className="space-y-4">
             {/* App identity hero */}
-            <div className="relative overflow-hidden rounded-2xl border border-[var(--loom-surface-3)] bg-[var(--loom-surface)] p-6">
+            <div className="settings-panel relative overflow-hidden rounded-2xl p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-3 mb-2">
@@ -1286,10 +1324,9 @@ export default function Settings() {
                   <p className="text-sm text-[var(--loom-muted)] max-w-md leading-relaxed">
                     Local media library and playback app powered by Electron, React, and FFmpeg.
                   </p>
-                  <p className="mt-3 text-xs text-[#555]">{APP_LICENSE.copyright}</p>
+                  <p className="mt-3 text-xs text-[var(--loom-faint)]">{APP_LICENSE.copyright}</p>
                 </div>
 
-                {/* FFmpeg status pill */}
                 <div className="flex flex-col items-stretch gap-2 sm:items-end">
                   <button
                     type="button"
@@ -1319,7 +1356,7 @@ export default function Settings() {
                   }`}>
                     {ffmpegStatus === null ? (
                       <>
-                        <span className="h-2 w-2 rounded-full bg-[#555]" />
+                        <span className="h-2 w-2 rounded-full bg-[var(--loom-faint)]" />
                         Checking FFmpeg...
                       </>
                     ) : ffmpegStatus.available ? (
@@ -1337,35 +1374,38 @@ export default function Settings() {
                 </div>
               </div>
 
-              <p className="mt-4 text-xs leading-5 text-[#666] border-t border-[#2a2a2a] pt-4">
-                {getUpdateStatusText(updateState)}
-              </p>
-
-              <p className="mt-3 text-xs leading-5 text-[#666] border-t border-[#2a2a2a] pt-4">
-                LoomTV's own source code is licensed under the MIT License. Third-party libraries,
-                services, and bundled tools remain owned by their respective copyright holders and
-                are provided under their own licenses.
-              </p>
+              <div className="mt-6 grid gap-3 md:grid-cols-2">
+                <div className="settings-panel-soft rounded-xl p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-faint)]">Update Status</p>
+                  <p className="mt-2 text-sm leading-5 text-[var(--loom-muted)]">{getUpdateStatusText(updateState)}</p>
+                </div>
+                <div className="settings-panel-soft rounded-xl p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-faint)]">License Scope</p>
+                  <p className="mt-2 text-sm leading-5 text-[var(--loom-muted)]">
+                    LoomTV source is MIT licensed. Third-party libraries, services, and bundled tools keep their own licenses.
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Metadata sources */}
-            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+            <Card className="settings-panel">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-white">Metadata &amp; Artwork Sources</CardTitle>
-                <CardDescription className="text-[#666] text-xs">
+                <CardDescription className="text-[var(--loom-faint)] text-xs">
                   Content data is fetched from these services at scan time.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   {METADATA_ATTRIBUTIONS.map((source) => (
                     <button
                       key={source.name}
                       type="button"
                       onClick={() => desktopApi.openExternal(source.url)}
-                      className="group flex items-start gap-3 rounded-xl border border-[var(--loom-surface-3)] bg-[var(--loom-surface-2)] p-3 text-left transition-all hover:border-[var(--loom-accent)]/40 hover:bg-[#222]"
+                      className="settings-action-tile group flex items-start gap-3 rounded-xl p-3 text-left transition-all"
                     >
-                      <div className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#2a2a2a] group-hover:bg-[var(--loom-accent)]/10 transition-colors">
+                      <div className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--loom-accent)]/10 transition-colors group-hover:bg-[var(--loom-accent)]/18">
                         <ExternalLink className="h-3.5 w-3.5 text-[var(--loom-accent)]" />
                       </div>
                       <div className="min-w-0">
@@ -1379,17 +1419,17 @@ export default function Settings() {
             </Card>
 
             {/* Bundled media tools */}
-            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+            <Card className="settings-panel">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-white">Bundled Media Tools</CardTitle>
-                <CardDescription className="text-[#666] text-xs leading-5">
+                <CardDescription className="text-[var(--loom-faint)] text-xs leading-5">
                   LoomTV bundles FFmpeg and FFprobe for macOS and Windows. These binaries include GPL
                   components and are distributed under GNU GPL v3 or later. FFmpeg is a trademark of
                   Fabrice Bellard; LoomTV is not affiliated with the FFmpeg project.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                   {[
                     { label: 'macOS FFmpeg builds', sub: "Martin Riedl's FFmpeg Build Server", url: 'https://ffmpeg.martin-riedl.de/' },
                     { label: 'Windows FFmpeg builds', sub: 'CODEX FFMPEG by Gyan Doshi', url: 'https://www.gyan.dev/ffmpeg/builds/' },
@@ -1400,11 +1440,11 @@ export default function Settings() {
                       key={link.label}
                       type="button"
                       onClick={() => desktopApi.openExternal(link.url)}
-                      className="group flex items-center gap-3 rounded-xl border border-[var(--loom-surface-3)] bg-[var(--loom-surface-2)] px-3 py-2.5 text-left transition-all hover:border-[var(--loom-accent)]/40 hover:bg-[#222]"
+                      className="settings-action-tile group flex items-center gap-3 rounded-xl px-3 py-3 text-left transition-all"
                     >
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-white leading-tight">{link.label}</p>
-                        <p className="text-xs text-[#666] mt-0.5">{link.sub}</p>
+                        <p className="text-xs text-[var(--loom-faint)] mt-0.5">{link.sub}</p>
                       </div>
                       <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[var(--loom-accent)] opacity-60 group-hover:opacity-100 transition-opacity" />
                     </button>
@@ -1414,29 +1454,29 @@ export default function Settings() {
             </Card>
 
             {/* Third-party libraries */}
-            <Card className="bg-[var(--loom-surface)] border-[var(--loom-surface-3)]">
+            <Card className="settings-panel">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-semibold text-white">Third-Party Libraries</CardTitle>
-                <CardDescription className="text-[#666] text-xs">
+                <CardDescription className="text-[var(--loom-faint)] text-xs">
                   Direct dependencies and major development tools. Packaged builds also include Chromium/Electron notices.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="overflow-hidden rounded-xl border border-[var(--loom-surface-3)]">
-                  <div className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] bg-[var(--loom-bg)] px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-[#555]">
+                <div className="settings-panel-soft overflow-hidden rounded-xl">
+                  <div className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] bg-black/16 px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--loom-faint)]">
                     <span>Project</span>
                     <span>License</span>
                     <span />
                   </div>
-                  <div className="max-h-72 overflow-y-auto divide-y divide-[var(--loom-surface)]">
+                  <div className="max-h-72 overflow-y-auto divide-y divide-[var(--loom-panel-border)]">
                     {THIRD_PARTY_DEPENDENCIES.map((dependency) => (
                       <div
                         key={dependency.name}
-                        className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] items-center gap-2 bg-[var(--loom-surface-2)] px-3 py-2.5 transition-colors hover:bg-[#212121]"
+                        className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] items-center gap-2 px-3 py-2.5 transition-colors hover:bg-[var(--loom-surface-3)]/70"
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium text-white">{dependency.name}</p>
-                          <p className="truncate text-xs text-[#555]">{dependency.owner}</p>
+                          <p className="truncate text-xs text-[var(--loom-faint)]">{dependency.owner}</p>
                         </div>
                         <span className="truncate text-xs text-[var(--loom-faint)]">{dependency.license}</span>
                         <button
