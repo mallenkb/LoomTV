@@ -53,13 +53,36 @@ jobs:
       - name: Build installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_LINK || runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
+          MACOS_CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          MACOS_CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            if [[ -n "${MACOS_CSC_LINK:-}" ]]; then
+              export CSC_LINK="$MACOS_CSC_LINK"
+              export CSC_KEY_PASSWORD="${MACOS_CSC_KEY_PASSWORD:-}"
+            else
+              unset CSC_LINK CSC_KEY_PASSWORD
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+            fi
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            if [[ -n "${WINDOWS_CSC_LINK:-}" ]]; then
+              export CSC_LINK="$WINDOWS_CSC_LINK"
+              export CSC_KEY_PASSWORD="${WINDOWS_CSC_KEY_PASSWORD:-}"
+            else
+              unset CSC_LINK CSC_KEY_PASSWORD
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+            fi
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             npm run release
           else
