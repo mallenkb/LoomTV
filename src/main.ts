@@ -61,6 +61,45 @@ import {
   saveProgress,
   saveSettingsToDatabase,
 } from './main/database';
+import {
+  cleanMediaTitle,
+  isGenericGroupingFolderTitle,
+  normalizeTitleForMatch,
+  numericRating,
+  parseYearFromText,
+  remoteMatchesAnyLocalTitle,
+  titleMatchesLocal,
+  uniqueLocalTitles,
+  usefulLocalTitle,
+} from './main/metadata/helpers';
+import type {
+  EpisodeFile as MetadataEpisodeFile,
+  EpisodeMeta as MetadataEpisodeMeta,
+  LocalMediaDetails as MetadataLocalMediaDetails,
+  MediaItem as MetadataMediaItem,
+  TVMetadata as MetadataTVMetadata,
+} from './main/metadata/types';
+import { fetchOMDbMetadata, fetchOMDbMetadataById } from './main/metadata/omdb';
+import { fetchTVMetadata, fetchTVMetadataCandidates } from './main/metadata/tvmaze';
+import {
+  fetchTMDBMovieMetadata,
+  fetchTMDBMovieMetadataById,
+  fetchTMDBMovieMetadataCandidates,
+  fetchTMDBTVMetadata,
+  fetchTMDBTVMetadataById,
+  fetchTMDBTVMetadataCandidates,
+} from './main/metadata/tmdb';
+import {
+  type JikanAnimeResult,
+  fetchJikanMetadata,
+  fetchJikanMetadataCandidates,
+} from './main/metadata/jikan';
+
+type EpisodeMeta = MetadataEpisodeMeta;
+type EpisodeFile = MetadataEpisodeFile;
+type LocalMediaDetails = MetadataLocalMediaDetails;
+type MediaItem = MetadataMediaItem;
+type TVMetadata = MetadataTVMetadata;
 
 function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -165,62 +204,6 @@ function isUpdaterSupportedPlatform(): boolean {
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
-interface EpisodeMeta {
-  season: number;
-  number: number;
-  title: string;
-  summary: string;
-  still: string;
-  rating: number;
-  airDate: string;
-  localMetadata?: LocalMediaDetails;
-}
-
-interface EpisodeFile {
-  season: number;
-  episode: number;
-  filePath: string;
-  title?: string;
-  localMetadata?: LocalMediaDetails;
-}
-
-interface LocalMediaDetails {
-  durationSeconds?: number;
-  width?: number;
-  height?: number;
-  videoCodec?: string;
-  videoProfile?: string;
-  pixelFormat?: string;
-  audioCodec?: string;
-  audioTracks?: number;
-  subtitleTracks?: number;
-  bitrateKbps?: number;
-  container?: string;
-}
-
-interface MediaItem {
-  id: string;
-  type: 'movie' | 'tv' | 'anime';
-  title: string;
-  year: number;
-  poster: string;
-  backdrop: string;
-  posterCandidates?: string[];
-  backdropCandidates?: string[];
-  summary: string;
-  rating: number;
-  genres: string[];
-  cast: { name: string; character: string; image: string }[];
-  filePath: string;
-  fileSize?: number;
-  lastPlayed?: number;
-  seasons?: { number: number; title: string; episodeCount: number }[];
-  episodes?: EpisodeMeta[];
-  episodeFiles?: EpisodeFile[];
-  subtitles?: { lang: string; label: string; url: string }[];
-  localMetadata?: LocalMediaDetails;
-}
-
 interface LibraryData {
   movies: MediaItem[];
   tvShows: MediaItem[];
@@ -235,12 +218,6 @@ type LibraryScanProgress = LibraryData & {
   scannedFolders: number;
   totalFolders: number;
 };
-
-interface TVMetadata extends Partial<MediaItem> {
-  language?: string;
-  country?: string;
-  showType?: string;
-}
 
 type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type ScanFolderKind = 'movies' | 'tv' | 'anime';
@@ -1446,100 +1423,6 @@ function createMediaItemId(filePath: string): string {
   return createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 32);
 }
 
-function cleanMediaTitle(name: string): { title: string; year: number } {
-  const withoutExt = name.replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts|vtt|srt|ass|ssa)$/i, '');
-  const yearMatches = [...withoutExt.matchAll(/\b(19\d{2}|20\d{2})\b/g)];
-  const maxReleaseYear = new Date().getFullYear() + 1;
-  const releaseYearMatch =
-    yearMatches.find((match) => match.index !== undefined && match.index > 0 && parseInt(match[1], 10) <= maxReleaseYear)
-    || yearMatches.find((match) => parseInt(match[1], 10) <= maxReleaseYear);
-  const titleSource = releaseYearMatch?.index && releaseYearMatch.index > 0
-    ? withoutExt.slice(0, releaseYearMatch.index).replace(/[\s([._-]+$/, ' ')
-    : withoutExt;
-  const title = titleSource
-    .replace(/\[.*?\]|\(.*?\)/g, ' ')
-    .replace(/[._-]+/g, ' ')
-    .replace(/\b(480p|720p|1080p|2160p|4k|uhd|hdr10|hdr|dv|dolby|vision|bluray|blu-ray|brrip|webrip|web-rip|web-dl|webdl|hdtv|remux|proper|repack|extended|directors?|cut|imax|x264|x265|h264|h265|hevc|av1|aac|ac3|eac3|dts|truehd|atmos)\b/gi, ' ')
-    .replace(/\b(yts|rarbg|ettv|eztv|tgx|galaxyrg|psa|pahe|ntb|successfulcrab)\b/gi, ' ')
-    .replace(/\b(19\d{2}|20\d{2})\b/g, ' ')
-    .replace(/\s+[Ss]\d{1,2}[Ee]\d{1,3}.*$/, '')
-    .replace(/\s+[Ss]\d{1,2}\s*$/, '')
-    .replace(/\s+season\s+\d{1,2}\s*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return {
-    title: title || withoutExt.trim() || name,
-    year: releaseYearMatch ? parseInt(releaseYearMatch[1], 10) : 0,
-  };
-}
-
-function normalizeTitleForMatch(value?: string): string {
-  return (value || '')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/\b(the|a|an)\b/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function titleMatchesLocal(localTitle: string, remoteTitle?: string): boolean {
-  const local = normalizeTitleForMatch(localTitle);
-  const remote = normalizeTitleForMatch(remoteTitle);
-  if (!local || !remote) return false;
-  if (local === remote) return true;
-
-  const localTokens = new Set(local.split(' ').filter((token) => token.length > 2));
-  const remoteTokens = new Set(remote.split(' ').filter((token) => token.length > 2));
-  if (localTokens.size === 0 || remoteTokens.size === 0) return false;
-  if (localTokens.size > 1 && [...localTokens].every((token) => remoteTokens.has(token))) return true;
-  if (remoteTokens.size > 1 && [...remoteTokens].every((token) => localTokens.has(token))) return true;
-
-  let shared = 0;
-  localTokens.forEach((token) => {
-    if (remoteTokens.has(token)) shared++;
-  });
-  return shared / Math.max(localTokens.size, remoteTokens.size) >= 0.75;
-}
-
-function isGenericMediaFolderTitle(value: string): boolean {
-  return /^(movie|movies|film|films|tv|tv shows|shows|series|season|season \d+|anime|animations?)$/i
-    .test(normalizeTitleForMatch(value));
-}
-
-function isGenericGroupingFolderTitle(value: string): boolean {
-  const normalized = normalizeTitleForMatch(value);
-  return isGenericMediaFolderTitle(value)
-    || /^(complete|completed|batch|batches|pack|packs|collection|collections|part|part \d+|pt|pt \d+|cour|cour \d+|volume|volume \d+|vol|vol \d+|episodes|episode|1080p|720p|2160p|4k)$/.test(normalized);
-}
-
-function usefulLocalTitle(value?: string | null): string | null {
-  const title = cleanMediaTitle(value || '').title;
-  if (!title || isGenericGroupingFolderTitle(title)) return null;
-  return title;
-}
-
-function uniqueLocalTitles(candidates: Array<string | null | undefined>): string[] {
-  const seen = new Set<string>();
-  const titles: string[] = [];
-
-  candidates.forEach((candidate) => {
-    const title = usefulLocalTitle(candidate);
-    if (!title) return;
-    const key = normalizeTitleForMatch(title);
-    if (seen.has(key)) return;
-    seen.add(key);
-    titles.push(title);
-  });
-
-  return titles;
-}
-
-function remoteMatchesAnyLocalTitle(localTitles: string[], remoteTitle?: string): boolean {
-  return localTitles.some((localTitle) => titleMatchesLocal(localTitle, remoteTitle));
-}
-
 function mediaItemHasUsableArtwork(item: MediaItem): boolean {
   return Boolean(
     durableArtworkSource(item.poster)
@@ -1583,38 +1466,6 @@ function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
 
 function cachedItemsAreComplete(items: MediaItem[]): boolean {
   return items.length > 0 && items.every((item) => !cachedItemNeedsMetadataRefresh(item));
-}
-
-function yearFromDateString(value?: string): number {
-  if (!value) return 0;
-  const year = new Date(value).getFullYear();
-  return Number.isFinite(year) ? year : parseYearFromText(value);
-}
-
-function yearsMatch(localYear?: number, remoteYear?: number): boolean {
-  if (!localYear || !remoteYear) return true;
-  return Math.abs(localYear - remoteYear) <= 1;
-}
-
-function uniqueMetadataSearchHits<T>(hits: T[], keyForHit: (hit: T) => string): T[] {
-  const seen = new Set<string>();
-  return hits.filter((hit) => {
-    const key = keyForHit(hit);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function movieHitMatchesLocal(
-  hit: { title?: string; original_title?: string; release_date?: string },
-  localTitles: string[],
-  localYear?: number,
-): boolean {
-  if (!remoteMatchesAnyLocalTitle(localTitles, hit.title) && !remoteMatchesAnyLocalTitle(localTitles, hit.original_title)) {
-    return false;
-  }
-  return yearsMatch(localYear, yearFromDateString(hit.release_date));
 }
 
 function isTrustedLocalTagTitle(structureTitle: string | null, tagTitle: string | null, rawStructureTitle: string): boolean {
@@ -1692,12 +1543,6 @@ function providerIdsFromTags(tags: Record<string, string>): MetadataProviderIds 
     parseMetadataProviderIds(Object.entries(tags).map(([key, value]) => `${key}-${value}`).join(' ')),
     directIds,
   );
-}
-
-function parseYearFromText(value?: string): number {
-  if (!value) return 0;
-  const match = value.match(/\b(19\d{2}|20\d{2})\b/);
-  return match ? parseInt(match[1], 10) : 0;
 }
 
 function parseIntegerTag(value?: string): number | undefined {
@@ -2575,628 +2420,6 @@ function startMediaServer(): Promise<number> {
 
     tryListen(mediaServerPort);
   });
-}
-
-// ─── Metadata — OMDb API (movies & TV, with API key) ──────────────────
-async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey?: string): Promise<Record<string, any> | null> {
-  if (!omdbApiKey) return null;
-  try {
-    const attempts = year ? [year, undefined] : [undefined];
-    for (const attemptYear of attempts) {
-      const yearParam = attemptYear ? `&y=${attemptYear}` : '';
-      const url = `http://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}`;
-      const res = await fetch(url);
-      const data = await res.json() as Record<string, any>;
-      if (data.Response !== 'False') return data;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchOMDbMetadataById(imdbId: string | undefined, omdbApiKey?: string): Promise<Record<string, any> | null> {
-  if (!imdbId || !omdbApiKey) return null;
-  try {
-    const url = `http://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(omdbApiKey)}`;
-    const res = await fetch(url);
-    const data = await res.json() as Record<string, any>;
-    return data.Response !== 'False' ? data : null;
-  } catch {
-    return null;
-  }
-}
-
-// ─── Metadata — TVmaze (TV shows, free, no API key) ─────────────────────────
-
-function tvmazeEpisodeToMeta(episode: any): EpisodeMeta {
-  return {
-    season: episode.season,
-    number: episode.number,
-    title: episode.name || '',
-    summary: episode.summary ? episode.summary.replace(/<[^>]*>/g, '') : '',
-    still: episode.image?.medium || episode.image?.original || '',
-    rating: episode.rating?.average || 0,
-    airDate: episode.airdate || '',
-  };
-}
-
-async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
-  const episodesRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
-  if (!episodesRes.ok) return [];
-  const episodes: any[] = await episodesRes.json();
-  if (!Array.isArray(episodes)) return [];
-  return episodes.map(tvmazeEpisodeToMeta).filter((episode) => episode.season > 0 && episode.number > 0);
-}
-
-async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
-  const detailRes = await fetch(
-    `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
-  );
-  if (!detailRes.ok) return null;
-  const [details, episodes] = await Promise.all([
-    detailRes.json(),
-    fetchTVEpisodesById(showId),
-  ]);
-
-  const seasons = (details._embedded?.seasons || [])
-    .filter((s: any) => s.number > 0)
-    .map((s: any) => ({
-      number: s.number,
-      title: s.name || `Season ${s.number}`,
-        episodeCount: s.episodeOrder || 0,
-      }));
-
-  const cast = (details._embedded?.cast || []).slice(0, 6).map((c: any) => ({
-    name: c.person?.name || '',
-    character: c.character?.name || '',
-    image: c.person?.image?.medium || '',
-  }));
-
-  const posterUrl = details.image?.original || details.image?.medium || '';
-
-  return {
-    title: details.name || fallbackTitle,
-    poster: posterUrl,
-    backdrop: '',
-    summary: details.summary ? details.summary.replace(/<[^>]*>/g, '') : '',
-    rating: details.rating?.average || 0,
-    genres: details.genres || [],
-    cast,
-    year: details.premiered ? new Date(details.premiered).getFullYear() : (localYear || 0),
-    language: details.language || '',
-    country: details.network?.country?.name || details.webChannel?.country?.name || '',
-    showType: details.type || '',
-    seasons: seasons.length > 0 ? seasons : undefined,
-    episodes,
-  };
-}
-
-async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMetadata | null> {
-  try {
-    const searchRes = await fetch(
-      `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`,
-    );
-    const searchData: any[] = await searchRes.json();
-    if (!searchData || searchData.length === 0) return null;
-
-    // Prefer a result whose premiered year matches what we extracted locally
-    let show = searchData[0].show;
-    if (localYear) {
-      const yearMatch = searchData.find((r: any) => {
-        const premiered = r.show?.premiered;
-        return premiered && new Date(premiered).getFullYear() === localYear;
-      });
-      if (yearMatch) show = yearMatch.show;
-    }
-
-    return fetchTVMetadataById(show.id, show.name || title, localYear);
-  } catch (error) {
-    console.error('TVmaze fetch error:', error);
-    return null;
-  }
-}
-
-async function fetchTVMetadataCandidates(title: string, localYear?: number): Promise<TVMetadata[]> {
-  try {
-    const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`);
-    const searchData: any[] = await searchRes.json();
-    if (!Array.isArray(searchData) || searchData.length === 0) return [];
-
-    return await Promise.all(searchData.slice(0, 6).map(async (result: any) => {
-      const show = result.show || {};
-      if (show.id) {
-        const details = await fetchTVMetadataById(show.id, show.name || title, localYear);
-        if (details) return details;
-      }
-      return {
-        title: show.name || title,
-        poster: show.image?.original || show.image?.medium || '',
-        backdrop: '',
-        summary: show.summary ? String(show.summary).replace(/<[^>]*>/g, '') : '',
-        rating: show.rating?.average || 0,
-        genres: show.genres || [],
-        cast: [],
-        year: show.premiered ? yearFromDateString(show.premiered) : (localYear || 0),
-        language: show.language || '',
-        country: show.network?.country?.name || show.webChannel?.country?.name || '',
-        showType: show.type || '',
-      };
-    }));
-  } catch (error) {
-    console.error('TVmaze candidates fetch error:', error);
-    return [];
-  }
-}
-
-async function fetchMovieMetadata(title: string, year?: number, omdbApiKey?: string): Promise<Partial<MediaItem> | null> {
-  if (!omdbApiKey) return null;
-  try {
-    const yearParam = year ? `&y=${year}` : '';
-    const url = `http://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}`;
-    const res = await fetch(url);
-    const data: any = await res.json();
-    if (data.Response === 'False') return null;
-
-    return {
-      poster: data.Poster && data.Poster !== 'N/A' ? data.Poster : '',
-      backdrop: data.Poster && data.Poster !== 'N/A' ? data.Poster : '',
-      summary: data.Plot || '',
-      rating: numericRating(data.imdbRating),
-      genres: data.Genre ? data.Genre.split(', ') : [],
-      cast: [],
-      year: data.Year ? parseInt(data.Year, 10) : year || 0,
-    };
-  } catch (error) {
-    console.error('OMDb fetch error:', error);
-    return null;
-  }
-}
-
-// ─── Metadata — TMDB (movies + TV, free key from themoviedb.org) ─────────────
-
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
-
-function normalizeTMDBCredential(value: string): string {
-  return value.trim().replace(/^Bearer\s+/i, '');
-}
-
-function isTMDBReadAccessToken(value: string): boolean {
-  const candidate = value.trim();
-  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(candidate);
-}
-
-async function fetchTMDBJson<T>(path: string, tmdbCredential?: string): Promise<T | null> {
-  const credential = normalizeTMDBCredential(tmdbCredential || '');
-  if (!credential) return null;
-
-  const url = new URL(`https://api.themoviedb.org/3/${path}`);
-  url.searchParams.set('language', 'en-US');
-
-  const requestInit: RequestInit = {};
-  if (isTMDBReadAccessToken(credential)) {
-    requestInit.headers = {
-      Authorization: `Bearer ${credential}`,
-    };
-  } else {
-    url.searchParams.set('api_key', credential);
-  }
-
-  const response = await fetch(url.toString(), requestInit);
-  if (!response.ok) {
-    throw new Error(`TMDB request failed with ${response.status}`);
-  }
-
-  return (await response.json()) as T;
-}
-
-function tmdbPoster(path: string | null | undefined): string {
-  return path ? `${TMDB_IMAGE_BASE}/w500${path}` : '';
-}
-function tmdbBackdrop(path: string | null | undefined): string {
-  return path ? `${TMDB_IMAGE_BASE}/w1280${path}` : '';
-}
-
-function tmdbMovieResult(d: any, fallbackTitle: string): Partial<MediaItem> | null {
-  if (!d) return null;
-  const cast = ((d.credits?.cast ?? []) as any[]).slice(0, 8).map((c: any) => ({
-    name: c.name ?? '',
-    character: c.character ?? '',
-    image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
-  }));
-
-  return {
-    title: d.title || fallbackTitle,
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
-    summary: d.overview || '',
-    rating: d.vote_average ?? 0,
-    genres: ((d.genres ?? []) as any[]).map((g: any) => g.name as string),
-    year: d.release_date ? new Date(d.release_date).getFullYear() : 0,
-    cast,
-  };
-}
-
-function tmdbMovieSearchResult(d: any, fallbackTitle: string): Partial<MediaItem> | null {
-  if (!d) return null;
-  return {
-    title: d.title || fallbackTitle,
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
-    summary: d.overview || '',
-    rating: d.vote_average ?? 0,
-    genres: [],
-    year: d.release_date ? yearFromDateString(d.release_date) : 0,
-    cast: [],
-  };
-}
-
-async function fetchTMDBMovieMetadataCandidates(
-  title: string,
-  year?: number,
-  tmdbCredential?: string,
-): Promise<Partial<MediaItem>[]> {
-  if (!tmdbCredential) return [];
-  try {
-    const searchPaths = [
-      `search/movie?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`,
-      year ? `search/movie?query=${encodeURIComponent(title)}` : '',
-    ].filter(Boolean);
-    const hits: any[] = [];
-    for (const searchPath of searchPaths) {
-      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-      const results = Array.isArray(searchData?.results) ? searchData.results : [];
-      hits.push(...results.slice(0, 6));
-    }
-    return uniqueMetadataSearchHits(hits, (hit) => `tmdb-movie:${hit.id}`)
-      .map((hit) => tmdbMovieSearchResult(hit, title))
-      .filter((result): result is Partial<MediaItem> => Boolean(result));
-  } catch (err) {
-    console.error('[TMDB movie candidates]', err);
-    return [];
-  }
-}
-
-async function fetchTMDBMovieMetadata(
-  title: string,
-  year?: number,
-  tmdbCredential?: string,
-): Promise<Partial<MediaItem> | null> {
-  if (!tmdbCredential) return null;
-  try {
-    const localTitles = uniqueLocalTitles([title]);
-    const searchPaths = [
-      `search/movie?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`,
-      year ? `search/movie?query=${encodeURIComponent(title)}` : '',
-    ].filter(Boolean);
-    let hit: any = null;
-    for (const searchPath of searchPaths) {
-      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-      const results = Array.isArray(searchData?.results) ? searchData.results : [];
-      hit = results.find((candidate: any) => movieHitMatchesLocal(candidate, localTitles, year)) || null;
-      if (hit) break;
-    }
-    if (!hit) return null;
-
-    const d = await fetchTMDBJson<any>(`movie/${hit.id}?append_to_response=credits`, tmdbCredential);
-    const result = tmdbMovieResult(d, hit.title || title);
-    return result ? { ...result, year: result.year || year || 0 } : null;
-  } catch (err) {
-    console.error('[TMDB movie]', err);
-    return null;
-  }
-}
-
-async function fetchTMDBMovieMetadataById(
-  tmdbId: string | undefined,
-  tmdbCredential?: string,
-): Promise<Partial<MediaItem> | null> {
-  if (!tmdbId || !tmdbCredential) return null;
-  try {
-    const d = await fetchTMDBJson<any>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits`, tmdbCredential);
-    return tmdbMovieResult(d, '');
-  } catch (err) {
-    console.error('[TMDB movie id]', err);
-    return null;
-  }
-}
-
-interface TMDBTVResult extends Partial<MediaItem> {
-  episodes?: EpisodeMeta[];
-  tmdbSeasons?: { number: number; title: string; episodeCount: number }[];
-}
-
-async function tmdbTVResultFromDetails(d: any, fallbackTitle: string, tmdbCredential?: string): Promise<TMDBTVResult | null> {
-  if (!d) return null;
-
-  const cast = ((d.credits?.cast ?? []) as any[]).slice(0, 8).map((c: any) => ({
-    name: c.name ?? '',
-    character: c.character ?? '',
-    image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
-  }));
-
-  const realSeasons: any[] = ((d.seasons ?? []) as any[]).filter(
-    (s: any) => s.season_number > 0,
-  );
-
-  const tmdbSeasons = realSeasons.map((s: any) => ({
-    number: s.season_number as number,
-    title: (s.name as string) || `Season ${s.season_number}`,
-    episodeCount: (s.episode_count as number) || 0,
-  }));
-
-  const seasonEpisodes = await Promise.all(
-    realSeasons.slice(0, 15).map(async (s: any) => {
-      try {
-        const epData = await fetchTMDBJson<any>(`tv/${d.id}/season/${s.season_number}`, tmdbCredential);
-        return ((epData?.episodes ?? []) as any[]);
-      } catch {
-        return [] as any[];
-      }
-    }),
-  );
-
-  const episodes: EpisodeMeta[] = seasonEpisodes.flat().map((e: any) => ({
-    season: e.season_number as number,
-    number: e.episode_number as number,
-    title: (e.name as string) || '',
-    summary: (e.overview as string) || '',
-    still: e.still_path ? `${TMDB_IMAGE_BASE}/w300${e.still_path}` : '',
-    rating: (e.vote_average as number) || 0,
-    airDate: (e.air_date as string) || '',
-  }));
-
-  return {
-    title: (d.name as string) || fallbackTitle,
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
-    summary: (d.overview as string) || '',
-    rating: (d.vote_average as number) ?? 0,
-    genres: ((d.genres ?? []) as any[]).map((g: any) => g.name as string),
-    year: d.first_air_date ? new Date(d.first_air_date as string).getFullYear() : 0,
-    cast,
-    episodes,
-    tmdbSeasons,
-  };
-}
-
-function tmdbTVSearchResult(d: any, fallbackTitle: string): TMDBTVResult | null {
-  if (!d) return null;
-  return {
-    title: d.name || fallbackTitle,
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
-    summary: d.overview || '',
-    rating: d.vote_average ?? 0,
-    genres: [],
-    year: d.first_air_date ? yearFromDateString(d.first_air_date) : 0,
-    cast: [],
-  };
-}
-
-async function fetchTMDBTVMetadataCandidates(
-  title: string,
-  year?: number,
-  tmdbCredential?: string,
-): Promise<TMDBTVResult[]> {
-  if (!tmdbCredential) return [];
-  try {
-    const searchPaths = [
-      `search/tv?query=${encodeURIComponent(title)}${year ? `&first_air_date_year=${year}` : ''}`,
-      year ? `search/tv?query=${encodeURIComponent(title)}` : '',
-    ].filter(Boolean);
-    const hits: any[] = [];
-    for (const searchPath of searchPaths) {
-      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-      const results = Array.isArray(searchData?.results) ? searchData.results : [];
-      hits.push(...results.slice(0, 6));
-    }
-    return uniqueMetadataSearchHits(hits, (hit) => `tmdb-tv:${hit.id}`)
-      .map((hit) => tmdbTVSearchResult(hit, title))
-      .filter((result): result is TMDBTVResult => Boolean(result));
-  } catch (err) {
-    console.error('[TMDB TV candidates]', err);
-    return [];
-  }
-}
-
-async function fetchTMDBTVMetadata(
-  title: string,
-  year?: number,
-  tmdbCredential?: string,
-): Promise<TMDBTVResult | null> {
-  if (!tmdbCredential) return null;
-  try {
-    const searchPath = `search/tv?query=${encodeURIComponent(title)}${year ? `&first_air_date_year=${year}` : ''}`;
-    const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-    const hit = searchData?.results?.[0];
-    if (!hit) return null;
-
-    const d = await fetchTMDBJson<any>(`tv/${hit.id}?append_to_response=credits`, tmdbCredential);
-    const result = await tmdbTVResultFromDetails(d, hit.name || title, tmdbCredential);
-    return result ? { ...result, year: result.year || year || 0 } : null;
-  } catch (err) {
-    console.error('[TMDB TV]', err);
-    return null;
-  }
-}
-
-async function fetchTMDBTVMetadataById(
-  tmdbId: string | undefined,
-  tmdbCredential?: string,
-): Promise<TMDBTVResult | null> {
-  if (!tmdbId || !tmdbCredential) return null;
-  try {
-    const d = await fetchTMDBJson<any>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits`, tmdbCredential);
-    return tmdbTVResultFromDetails(d, '', tmdbCredential);
-  } catch (err) {
-    console.error('[TMDB TV id]', err);
-    return null;
-  }
-}
-
-// ─── Metadata — Jikan v4 (MyAnimeList, free, no key) ─────────────────────────
-// https://docs.api.jikan.moe/
-
-/** Respect Jikan's public rate limit (3 req/sec). */
-const _jikan = { lastCallAt: 0 };
-async function jikanDelay(): Promise<void> {
-  const MIN_GAP = 350;
-  const wait = MIN_GAP - (Date.now() - _jikan.lastCallAt);
-  if (wait > 0) await new Promise<void>((r) => setTimeout(r, wait));
-  _jikan.lastCallAt = Date.now();
-}
-
-async function jikanFetch(path: string): Promise<any> {
-  await jikanDelay();
-  const res = await fetch(`https://api.jikan.moe/v4${path}`);
-  if (!res.ok) throw new Error(`Jikan ${path} → ${res.status}`);
-  return res.json();
-}
-
-interface JikanAnimeResult extends Partial<MediaItem> {
-  episodes?: EpisodeMeta[];
-  malId?: number;
-  aliases?: string[];
-}
-
-function isGenericEpisodeTitle(value: unknown, episodeNumber: number): boolean {
-  if (typeof value !== 'string') return true;
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return true;
-  return normalized === `episode ${episodeNumber}`
-    || normalized === `ep ${episodeNumber}`
-    || normalized === `episode ${String(episodeNumber).padStart(2, '0')}`
-    || normalized === `ep ${String(episodeNumber).padStart(2, '0')}`;
-}
-
-function resolveJikanEpisodeTitle(episode: any): string {
-  const episodeNumber = Number(episode?.mal_id) || 0;
-  const candidates = [
-    episode?.title,
-    episode?.title_romanji,
-    episode?.title_japanese,
-  ];
-  const specificTitle = candidates.find((candidate) => !isGenericEpisodeTitle(candidate, episodeNumber));
-  return typeof specificTitle === 'string' ? specificTitle.trim() : `Episode ${episodeNumber}`;
-}
-
-async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<EpisodeMeta[]> {
-  const episodes: EpisodeMeta[] = [];
-  let page = 1;
-  let hasNextPage = true;
-  while (hasNextPage && page <= maxPages) {
-    const epData: any = await jikanFetch(`/anime/${malId}/episodes?page=${page}`);
-    const epList: any[] = epData.data ?? [];
-    episodes.push(
-      ...epList.map((e: any) => ({
-        season: 1,
-        number: e.mal_id as number,
-        title: resolveJikanEpisodeTitle(e),
-        summary: '',
-        still: '',
-        rating: (e.score as number) || 0,
-        airDate: e.aired ? String(e.aired).split('T')[0] : '',
-      })),
-    );
-    hasNextPage = epData.pagination?.has_next_page === true;
-    page++;
-  }
-  return episodes;
-}
-
-async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | null> {
-  try {
-    // ── 1. Search ────────────────────────────────────────────────────────────
-    const searchData: any = await jikanFetch(
-      `/anime?q=${encodeURIComponent(title)}&limit=5&sfw`,
-    );
-    const hit: any = searchData.data?.[0];
-    if (!hit) return null;
-
-    const malId: number = hit.mal_id;
-    const poster: string =
-      hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '';
-
-    // ── 2. Characters (cast) ─────────────────────────────────────────────────
-    let cast: MediaItem['cast'] = [];
-    try {
-      const charData: any = await jikanFetch(`/anime/${malId}/characters`);
-      cast = ((charData.data ?? []) as any[])
-        .filter((c: any) => c.role === 'Main')
-        .slice(0, 8)
-        .map((c: any) => ({
-          name: c.character?.name ?? '',
-          character: c.character?.name ?? '',
-          image: c.character?.images?.jpg?.image_url ?? '',
-        }));
-    } catch { /* cast is optional */ }
-
-    // ── 3. Episodes (paginated, cap at 3 pages = 75 episodes for performance) ─
-    let episodes: EpisodeMeta[] = [];
-    try {
-      episodes = await fetchJikanEpisodes(malId, 3);
-    } catch { /* episodes are optional */ }
-
-    return {
-      malId,
-      title: (hit.title_english as string) || (hit.title as string) || title,
-      aliases: [
-        hit.title,
-        hit.title_english,
-        hit.title_japanese,
-        ...(Array.isArray(hit.title_synonyms) ? hit.title_synonyms : []),
-      ].filter(Boolean),
-      poster,
-      backdrop: '',
-      summary: (hit.synopsis as string) || '',
-      rating: (hit.score as number) ?? 0,
-      genres: ((hit.genres ?? []) as any[]).map((g: any) => g.name as string),
-      year: (hit.year as number) ?? (hit.aired?.from ? new Date(hit.aired.from).getFullYear() : 0),
-      cast,
-      episodes,
-    };
-  } catch (err) {
-    console.error('[Jikan]', err);
-    return null;
-  }
-}
-
-async function fetchJikanMetadataCandidates(title: string): Promise<JikanAnimeResult[]> {
-  try {
-    const searchData: any = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=8&sfw`);
-    const hits: any[] = Array.isArray(searchData.data) ? searchData.data : [];
-    const results: JikanAnimeResult[] = [];
-    for (const hit of hits) {
-      const malId = hit.mal_id as number;
-      let episodes: EpisodeMeta[] = [];
-      try {
-        episodes = await fetchJikanEpisodes(malId, 1);
-      } catch { /* candidate episode names are optional */ }
-      results.push({
-        malId,
-        title: (hit.title_english as string) || (hit.title as string) || title,
-        aliases: [
-          hit.title,
-          hit.title_english,
-          hit.title_japanese,
-          ...(Array.isArray(hit.title_synonyms) ? hit.title_synonyms : []),
-        ].filter(Boolean),
-        poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '',
-        backdrop: '',
-        summary: (hit.synopsis as string) || '',
-        rating: (hit.score as number) ?? 0,
-        genres: ((hit.genres ?? []) as any[]).map((genre: any) => genre.name as string),
-        year: (hit.year as number) ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
-        cast: [],
-        episodes,
-      });
-    }
-    return results;
-  } catch (err) {
-    console.error('[Jikan candidates]', err);
-    return [];
-  }
 }
 
 function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle: string): Map<number, string> {
@@ -4783,11 +4006,6 @@ type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   episodeCount?: number;
   episodePreview?: string[];
 };
-
-function numericRating(value: unknown): number {
-  const rating = typeof value === 'number' ? value : parseFloat(String(value || ''));
-  return Number.isFinite(rating) && rating > 0 ? rating : 0;
-}
 
 function movieMetadataRating(
   tmdbMeta?: Partial<MediaItem> | null,
