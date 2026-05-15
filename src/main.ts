@@ -14,10 +14,16 @@ import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
-import { createHash, randomInt } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { autoUpdater } from 'electron-updater';
 import { mpvController } from './main/mpv/mpvController';
+import {
+  advertiseLanService,
+  destroyLanDiscovery,
+  discoverLanPeers,
+  unadvertiseLanService,
+} from './main/lanDiscovery';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import {
@@ -289,7 +295,20 @@ interface AppSettings {
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;
+  localNetworkDeviceId?: string;
+  localNetworkDeviceName?: string;
+  localNetworkHmacSecret?: string;
+  localNetworkPairedDevices?: LanPairedDevice[];
 }
+
+export type LanPairedDevice = {
+  id: string;
+  name: string;
+  token: string;
+  createdAt: number;
+  lastSeenAt: number;
+  lastAddress?: string;
+};
 
 const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' | 'tmdbApiKey'>> = {
   omdb: 'omdbApiKey',
@@ -349,6 +368,31 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     localNetworkShareToken: raw.localNetworkShareToken && /^\d{6}$/.test(raw.localNetworkShareToken)
       ? raw.localNetworkShareToken
       : createLanShareCode(),
+    localNetworkDeviceId: typeof raw.localNetworkDeviceId === 'string' && raw.localNetworkDeviceId.length >= 8
+      ? raw.localNetworkDeviceId
+      : randomUUID(),
+    localNetworkDeviceName: typeof raw.localNetworkDeviceName === 'string' && raw.localNetworkDeviceName.trim()
+      ? raw.localNetworkDeviceName.trim().slice(0, 80)
+      : os.hostname(),
+    localNetworkHmacSecret: typeof raw.localNetworkHmacSecret === 'string' && /^[0-9a-f]{32,}$/i.test(raw.localNetworkHmacSecret)
+      ? raw.localNetworkHmacSecret
+      : randomBytes(32).toString('hex'),
+    localNetworkPairedDevices: Array.isArray(raw.localNetworkPairedDevices)
+      ? raw.localNetworkPairedDevices
+        .filter((entry): entry is LanPairedDevice =>
+          !!entry
+          && typeof entry.id === 'string'
+          && typeof entry.token === 'string'
+          && /^[0-9a-f]{32,}$/i.test(entry.token))
+        .map((entry) => ({
+          id: entry.id,
+          name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 80) : 'Unnamed device',
+          token: entry.token,
+          createdAt: Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : Date.now(),
+          lastSeenAt: Number.isFinite(entry.lastSeenAt) ? Number(entry.lastSeenAt) : Date.now(),
+          lastAddress: typeof entry.lastAddress === 'string' ? entry.lastAddress : undefined,
+        }))
+      : [],
   };
 }
 
@@ -1080,24 +1124,236 @@ function getLanShareToken(): string {
   return token;
 }
 
-function requestToken(reqUrl: URL, req: http.IncomingMessage): string {
+function getLanHmacSecret(): string {
+  return loadSettings().localNetworkHmacSecret || '';
+}
+
+function timingSafeStringEqual(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+function requestBearerToken(req: http.IncomingMessage): string {
   const authHeader = req.headers.authorization || '';
   const bearer = Array.isArray(authHeader) ? authHeader[0] : authHeader;
   if (bearer?.startsWith('Bearer ')) return bearer.slice('Bearer '.length).trim();
-  return reqUrl.searchParams.get('token') || '';
+  return '';
 }
 
-function isAuthorizedLanRequest(reqUrl: URL, req: http.IncomingMessage): boolean {
-  return isLanSharingEnabled() && requestToken(reqUrl, req) === getLanShareToken();
+function requestToken(reqUrl: URL, req: http.IncomingMessage): string {
+  return requestBearerToken(req) || reqUrl.searchParams.get('token') || '';
+}
+
+function findPairedDeviceByToken(token: string): LanPairedDevice | null {
+  if (!token) return null;
+  const settings = loadSettings();
+  const devices = settings.localNetworkPairedDevices || [];
+  for (const device of devices) {
+    if (timingSafeStringEqual(device.token, token)) return device;
+  }
+  return null;
+}
+
+function touchPairedDevice(deviceId: string, address: string): void {
+  const settings = loadSettings();
+  const devices = settings.localNetworkPairedDevices || [];
+  let changed = false;
+  const updated = devices.map((device) => {
+    if (device.id !== deviceId) return device;
+    changed = true;
+    return { ...device, lastSeenAt: Date.now(), lastAddress: address };
+  });
+  if (changed) saveSettings({ ...settings, localNetworkPairedDevices: updated });
+}
+
+function signLanPayload(payload: string): string {
+  return createHmac('sha256', getLanHmacSecret()).update(payload).digest('hex');
+}
+
+function buildSignedLanUrl(base: string, pathname: string, params: URLSearchParams, ttlSeconds = 24 * 60 * 60): string {
+  const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const nonce = randomBytes(8).toString('hex');
+  const signingInput = `${pathname}?${params.toString()}|exp=${expires}|nonce=${nonce}`;
+  const sig = signLanPayload(signingInput);
+  params.set('exp', String(expires));
+  params.set('nonce', nonce);
+  params.set('sig', sig);
+  return `${base}${pathname}?${params.toString()}`;
+}
+
+function isSignedLanRequestValid(reqUrl: URL): boolean {
+  const sig = reqUrl.searchParams.get('sig');
+  const exp = reqUrl.searchParams.get('exp');
+  const nonce = reqUrl.searchParams.get('nonce');
+  if (!sig || !exp || !nonce) return false;
+
+  const expSeconds = Number(exp);
+  if (!Number.isFinite(expSeconds) || expSeconds < Math.floor(Date.now() / 1000)) return false;
+
+  const params = new URLSearchParams(reqUrl.searchParams);
+  params.delete('sig');
+  params.delete('exp');
+  params.delete('nonce');
+  const signingInput = `${reqUrl.pathname}?${params.toString()}|exp=${expSeconds}|nonce=${nonce}`;
+  return timingSafeStringEqual(sig, signLanPayload(signingInput));
+}
+
+function authorizeLanRequest(reqUrl: URL, req: http.IncomingMessage): { ok: boolean; device?: LanPairedDevice } {
+  if (!isLanSharingEnabled()) return { ok: false };
+  const token = requestToken(reqUrl, req);
+  if (!token) return { ok: false };
+
+  if (timingSafeStringEqual(token, getLanShareToken())) {
+    return { ok: true };
+  }
+
+  const device = findPairedDeviceByToken(token);
+  if (device) {
+    touchPairedDevice(device.id, getRequestRemoteAddress(req));
+    return { ok: true, device };
+  }
+
+  return { ok: false };
 }
 
 function requireLocalOrLanAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
   if (isLoopbackRequest(req)) return true;
-  if (isAuthorizedLanRequest(reqUrl, req)) return true;
+  if (authorizeLanRequest(reqUrl, req).ok) return true;
 
   res.writeHead(isLanSharingEnabled() ? 401 : 403, { 'Content-Type': 'text/plain' });
   res.end(isLanSharingEnabled() ? 'Local network pairing is required.' : 'Local network sharing is disabled.');
   return false;
+}
+
+function requireStreamAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (isLoopbackRequest(req)) return true;
+  if (isLanSharingEnabled() && isSignedLanRequestValid(reqUrl)) return true;
+  if (authorizeLanRequest(reqUrl, req).ok) return true;
+
+  res.writeHead(isLanSharingEnabled() ? 401 : 403, { 'Content-Type': 'text/plain' });
+  res.end(isLanSharingEnabled() ? 'Local network pairing is required.' : 'Local network sharing is disabled.');
+  return false;
+}
+
+// ─── Pair rate limiting ──────────────────────────────────────────────────────
+// Per-remote-IP sliding window. After PAIR_LOCKOUT_FAILS bad attempts inside
+// PAIR_LOCKOUT_WINDOW_MS, lock for PAIR_LOCKOUT_DURATION_MS.
+
+const PAIR_LOCKOUT_FAILS = 5;
+const PAIR_LOCKOUT_WINDOW_MS = 60 * 1000;
+const PAIR_LOCKOUT_DURATION_MS = 60 * 60 * 1000;
+
+type PairAttemptState = { fails: number[]; lockedUntil?: number };
+const pairAttempts = new Map<string, PairAttemptState>();
+
+function checkPairRateLimit(address: string): { allowed: boolean; retryAfterMs?: number } {
+  const now = Date.now();
+  const state = pairAttempts.get(address) || { fails: [] };
+  if (state.lockedUntil && state.lockedUntil > now) {
+    return { allowed: false, retryAfterMs: state.lockedUntil - now };
+  }
+  state.fails = state.fails.filter((timestamp) => now - timestamp < PAIR_LOCKOUT_WINDOW_MS);
+  pairAttempts.set(address, state);
+  return { allowed: true };
+}
+
+function recordPairFailure(address: string): void {
+  const now = Date.now();
+  const state = pairAttempts.get(address) || { fails: [] };
+  state.fails = state.fails.filter((timestamp) => now - timestamp < PAIR_LOCKOUT_WINDOW_MS);
+  state.fails.push(now);
+  if (state.fails.length >= PAIR_LOCKOUT_FAILS) {
+    state.lockedUntil = now + PAIR_LOCKOUT_DURATION_MS;
+    state.fails = [];
+  }
+  pairAttempts.set(address, state);
+}
+
+function recordPairSuccess(address: string): void {
+  pairAttempts.delete(address);
+}
+
+async function handleLanPairRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  if (!isLanSharingEnabled()) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' });
+    res.end('Local network sharing is disabled.');
+    return;
+  }
+
+  const address = getRequestRemoteAddress(req);
+  const limit = checkPairRateLimit(address);
+  if (!limit.allowed) {
+    res.writeHead(429, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Retry-After': String(Math.ceil((limit.retryAfterMs || 0) / 1000)),
+    });
+    res.end(JSON.stringify({ error: 'Too many failed pairing attempts. Try again later.' }));
+    return;
+  }
+
+  const body = await readJsonBody(req).catch(() => ({} as Record<string, unknown>));
+  const code = String(body.code || '').replace(/\D/g, '').slice(0, 6);
+  const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
+  const requestedDeviceId = String(body.deviceId || '').trim().slice(0, 64);
+
+  if (!timingSafeStringEqual(code, getLanShareToken())) {
+    recordPairFailure(address);
+    writeJson(res, 401, { error: 'The sharing code was not accepted.' });
+    return;
+  }
+
+  recordPairSuccess(address);
+  const settings = loadSettings();
+  const existing = (settings.localNetworkPairedDevices || []).find((device) => requestedDeviceId && device.id === requestedDeviceId);
+  const deviceId = existing?.id || requestedDeviceId || randomUUID();
+  const deviceToken = randomBytes(32).toString('hex');
+  const now = Date.now();
+  const updated: LanPairedDevice = {
+    id: deviceId,
+    name: deviceName,
+    token: deviceToken,
+    createdAt: existing?.createdAt || now,
+    lastSeenAt: now,
+    lastAddress: address,
+  };
+  const others = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
+  saveSettings({ ...settings, localNetworkPairedDevices: [...others, updated] });
+
+  const payload = libraryForLocalNetwork();
+  writeJson(res, 200, {
+    ok: true,
+    deviceId,
+    deviceToken,
+    hostDeviceId: settings.localNetworkDeviceId,
+    hostDeviceName: settings.localNetworkDeviceName || os.hostname(),
+    library: payload,
+    libraryEtag: libraryEtagFor(payload),
+  });
+}
+
+// ─── Library snapshot ETag ────────────────────────────────────────────────────
+
+function libraryEtagFor(payload: unknown): string {
+  return createHash('sha1').update(JSON.stringify(payload)).digest('hex');
+}
+
+// ─── mDNS advertisement sync ─────────────────────────────────────────────────
+
+function syncLanAdvertisement(): void {
+  const settings = loadSettings();
+  if (!settings.localNetworkSharingEnabled || !mediaServerPort) {
+    unadvertiseLanService();
+    return;
+  }
+  advertiseLanService({
+    port: mediaServerPort,
+    deviceId: settings.localNetworkDeviceId || randomUUID(),
+    deviceName: settings.localNetworkDeviceName || os.hostname(),
+    appVersion: app.getVersion(),
+  });
 }
 
 function isLocalMediaServerArtworkUrl(source: string): boolean {
@@ -1149,12 +1405,22 @@ function rewriteLocalServerUrl(source: string, base: string, token?: string): st
   }
 }
 
-function remoteArtworkDeliveryUrl(source: string, base: string, token: string): string {
+function rewriteLocalServerUrlSigned(source: string, base: string): string {
+  try {
+    const parsed = new URL(source);
+    const params = new URLSearchParams(parsed.search);
+    params.delete('token');
+    return signedArtworkUrlForRemote(base, parsed.pathname, params);
+  } catch {
+    return source;
+  }
+}
+
+function remoteArtworkDeliveryUrl(source: string, base: string, _token: string): string {
   if (!source) return '';
-  if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrl(source, base, token);
+  if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrlSigned(source, base);
   if (isExternalArtworkUrl(source)) {
-    const params = new URLSearchParams({ source, token });
-    return `${base}/api/cached-artwork?${params.toString()}`;
+    return signedArtworkUrlForRemote(base, '/api/cached-artwork', new URLSearchParams({ source }));
   }
   return source;
 }
@@ -1615,7 +1881,8 @@ function startMediaServer(): Promise<number> {
         writeJson(res, 200, {
           ok: true,
           app: 'LoomTV',
-          deviceName: os.hostname(),
+          deviceId: settings.localNetworkDeviceId,
+          deviceName: settings.localNetworkDeviceName || os.hostname(),
           sharingEnabled: Boolean(settings.localNetworkSharingEnabled),
           networkName: getLocalNetworkName(),
           port: mediaServerPort,
@@ -1631,27 +1898,83 @@ function startMediaServer(): Promise<number> {
           return;
         }
 
+        const settings = loadSettings();
         const token = getLanShareToken();
         const base = getLanServerBase();
         writeJson(res, 200, {
           sharingEnabled: isLanSharingEnabled(),
           token,
+          deviceId: settings.localNetworkDeviceId,
+          deviceName: settings.localNetworkDeviceName || os.hostname(),
           networkName: getLocalNetworkName(),
           port: mediaServerPort,
           addresses: getLocalNetworkAddresses(),
           baseUrl: base,
-          libraryUrl: base ? `${base}/api/lan/library?token=${encodeURIComponent(token)}` : null,
+          libraryUrl: base ? `${base}/api/lan/library` : null,
+          pairedDevices: settings.localNetworkPairedDevices || [],
         });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/lan/pair' && req.method === 'POST') {
+        handleLanPairRequest(req, res).catch((error) => {
+          console.error('[lan/pair] error', error);
+          writeJson(res, 500, { error: 'Pairing failed' });
+        });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/lan/unpair' && req.method === 'POST') {
+        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+        const authResult = authorizeLanRequest(reqUrl, req);
+        // Devices may self-revoke; loopback can revoke any device.
+        readJsonBody(req)
+          .catch(() => ({}))
+          .then((body) => {
+            const settings = loadSettings();
+            const requestedId = String(body?.deviceId || authResult.device?.id || '');
+            if (!requestedId) {
+              writeJson(res, 400, { error: 'deviceId required' });
+              return;
+            }
+            if (!isLoopbackRequest(req) && authResult.device && authResult.device.id !== requestedId) {
+              writeJson(res, 403, { error: 'Cannot revoke other devices' });
+              return;
+            }
+            const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== requestedId);
+            saveSettings({ ...settings, localNetworkPairedDevices: remaining });
+            writeJson(res, 200, { ok: true });
+          })
+          .catch((error) => {
+            console.error('[lan/unpair] error', error);
+            writeJson(res, 500, { error: 'Unpair failed' });
+          });
         return;
       }
 
       if (reqUrl.pathname === '/api/lan/library') {
         if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
-        writeJson(res, 200, libraryForLocalNetwork());
+        const payload = libraryForLocalNetwork();
+        const etag = `"${libraryEtagFor(payload)}"`;
+        const requestEtag = (req.headers['if-none-match'] || '') as string;
+        if (requestEtag && requestEtag === etag) {
+          res.writeHead(304, { ETag: etag });
+          res.end();
+          return;
+        }
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'no-cache');
+        writeJson(res, 200, payload);
         return;
       }
 
-      if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      // /stream and artwork endpoints accept signed URLs; HLS playlists too.
+      const isStreamRoute = reqUrl.pathname === '/stream' || reqUrl.pathname.startsWith('/hls/');
+      const isArtworkRoute = reqUrl.pathname === '/api/cached-artwork'
+        || reqUrl.pathname === '/api/local-image'
+        || reqUrl.pathname === '/api/thumbnail';
+      const hasValidSignature = isLanSharingEnabled() && isSignedLanRequestValid(reqUrl);
+      if (!isStreamRoute && !(isArtworkRoute && (isLoopbackRequest(req) || hasValidSignature)) && !requireLocalOrLanAccess(reqUrl, req, res)) return;
 
       if (reqUrl.pathname === '/api/library' && req.method === 'GET') {
         writeJson(res, 200, libraryForRenderer());
@@ -2050,6 +2373,8 @@ function startMediaServer(): Promise<number> {
         res.end('Not found');
         return;
       }
+
+      if (!requireStreamAccess(reqUrl, req, res)) return;
 
       if (!filePath || !fs.existsSync(filePath)) {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -4344,8 +4669,15 @@ function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
   };
 }
 
+function signedStreamUrlForRemote(base: string, filePath: string): string {
+  return buildSignedLanUrl(base, '/stream', new URLSearchParams({ path: filePath }));
+}
+
+function signedArtworkUrlForRemote(base: string, pathname: string, params: URLSearchParams): string {
+  return buildSignedLanUrl(base, pathname, params);
+}
+
 function itemForLocalNetwork(item: MediaItem, base: string, token: string): MediaItem {
-  const streamParams = new URLSearchParams({ path: item.filePath, token });
   const poster = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.poster), base, token);
   const backdrop = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.backdrop), base, token);
   const posterCandidates = artworkDeliveryUrls(item.posterCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
@@ -4353,7 +4685,7 @@ function itemForLocalNetwork(item: MediaItem, base: string, token: string): Medi
 
   return {
     ...item,
-    filePath: `${base}/stream?${streamParams.toString()}`,
+    filePath: signedStreamUrlForRemote(base, item.filePath),
     poster,
     backdrop,
     posterCandidates,
@@ -4362,13 +4694,10 @@ function itemForLocalNetwork(item: MediaItem, base: string, token: string): Medi
       ...episode,
       still: remoteArtworkDeliveryUrl(artworkDeliveryUrl(episode.still), base, token),
     })),
-    episodeFiles: item.episodeFiles?.map((episodeFile) => {
-      const episodeParams = new URLSearchParams({ path: episodeFile.filePath, token });
-      return {
-        ...episodeFile,
-        filePath: `${base}/stream?${episodeParams.toString()}`,
-      };
-    }),
+    episodeFiles: item.episodeFiles?.map((episodeFile) => ({
+      ...episodeFile,
+      filePath: signedStreamUrlForRemote(base, episodeFile.filePath),
+    })),
   };
 }
 
@@ -5310,12 +5639,47 @@ async function handleManualUpdateCheck() {
 
 function installDownloadedUpdate() {
   if (updateInstallStarted) return updateState;
+  if (updateState.status !== 'downloaded') return updateState;
   updateInstallStarted = true;
 
   setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
+
+  // Drain pending playback/server work before quitAndInstall — otherwise
+  // active streams or open file handles can stall the squirrel/NSIS installer
+  // and the relaunch never happens.
+  try {
+    stopAllTranscodes();
+    void stopLocal(mainWindow);
+    void mpvController.stop({ suppressEvent: true });
+    destroyLanDiscovery();
+    if (mediaServer) {
+      mediaServer.close();
+      mediaServer = null;
+    }
+    if (updateCheckTimer) {
+      clearInterval(updateCheckTimer);
+      updateCheckTimer = null;
+    }
+    BrowserWindow.getAllWindows().forEach((window) => {
+      try {
+        window.removeAllListeners('close');
+        window.destroy();
+      } catch {
+        // Ignore destroy errors — quitAndInstall will force-close any survivors.
+      }
+    });
+  } catch (error) {
+    console.warn('[updates] pre-install cleanup failed:', error);
+  }
+
+  // Force-restart after install. Without isForceRunAfter:true the squirrel/NSIS
+  // installer can exit silently without relaunching the app.
+  // - isSilent:true skips the NSIS UI on Windows (DMG on macOS ignores this).
+  // - autoInstallOnAppQuit was set to false at configure time so this call is
+  //   the single source of truth for installing.
   setImmediate(() => {
     try {
-      autoUpdater.quitAndInstall();
+      autoUpdater.quitAndInstall(true, true);
     } catch (error) {
       updateInstallStarted = false;
       setUpdateState({
@@ -5350,8 +5714,10 @@ function configureAutoUpdater() {
   }
 
   autoUpdater.autoDownload = true;
+  // We control the install moment via quitAndInstall(true, true). Letting
+  // electron-updater also install on natural app quit would double-install
+  // and race the relaunch.
   autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.setFeedURL({
     provider: 'github',
     owner: UPDATE_OWNER,
@@ -5558,21 +5924,51 @@ ipcMain.handle('settings:get', () => loadSettings());
 
 ipcMain.handle('settings:save', (_event, settings: AppSettings) => {
   saveSettings({ ...loadSettings(), ...settings });
+  syncLanAdvertisement();
   return true;
 });
 
 ipcMain.handle('network:status', () => {
+  const settings = loadSettings();
   const token = getLanShareToken();
   const base = getLanServerBase();
   return {
     sharingEnabled: isLanSharingEnabled(),
     token,
+    deviceId: settings.localNetworkDeviceId,
+    deviceName: settings.localNetworkDeviceName || os.hostname(),
     networkName: getLocalNetworkName(),
     port: mediaServerPort,
     addresses: getLocalNetworkAddresses(),
     baseUrl: base,
-    libraryUrl: base ? `${base}/api/lan/library?token=${encodeURIComponent(token)}` : null,
+    libraryUrl: base ? `${base}/api/lan/library` : null,
+    pairedDevices: settings.localNetworkPairedDevices || [],
   };
+});
+
+ipcMain.handle('network:discover-peers', async (_event, timeoutMs?: number) => {
+  const settings = loadSettings();
+  try {
+    return await discoverLanPeers(Number(timeoutMs) || 2500, settings.localNetworkDeviceId);
+  } catch (error) {
+    console.warn('[mdns] discover failed:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('network:revoke-paired-device', (_event, deviceId: string) => {
+  const settings = loadSettings();
+  const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
+  saveSettings({ ...settings, localNetworkPairedDevices: remaining });
+  return remaining;
+});
+
+ipcMain.handle('network:set-device-name', (_event, name: string) => {
+  const settings = loadSettings();
+  const nextName = String(name || '').trim().slice(0, 80) || os.hostname();
+  saveSettings({ ...settings, localNetworkDeviceName: nextName });
+  syncLanAdvertisement();
+  return nextName;
 });
 
 ipcMain.handle('progress:get', (_event, filePath?: string) => filePath ? getProgress(filePath) : getAllProgress());
@@ -5724,6 +6120,7 @@ app.whenReady().then(async () => {
   applyAppIcon();
   cleanupOldTranscodes();
   await startMediaServer();
+  syncLanAdvertisement();
   buildUpdateMenu();
 
   // ── plexserver:// protocol handler ──────────────────────────────────────────
@@ -5764,9 +6161,13 @@ app.on('second-instance', () => {
 });
 
 app.on('window-all-closed', () => {
+  // Don't tear down twice when quitAndInstall is closing windows — it issues
+  // its own quit and the install path needs a clean exit.
+  if (updateInstallStarted) return;
   stopAllTranscodes();
   void stopLocal(mainWindow);
   void mpvController.stop({ suppressEvent: true });
+  destroyLanDiscovery();
   if (process.platform !== 'darwin') app.quit();
 });
 
@@ -5775,15 +6176,23 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  stopAllTranscodes();
-  void stopLocal(mainWindow);
-  void mpvController.stop({ suppressEvent: true });
+  // Skip if quitAndInstall already drained these — re-running close() on a
+  // null server or stopping mpv twice can throw and abort the install path.
+  if (!updateInstallStarted) {
+    stopAllTranscodes();
+    void stopLocal(mainWindow);
+    void mpvController.stop({ suppressEvent: true });
+  }
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);
     updateCheckTimer = null;
   }
   if (mediaServer) {
-    mediaServer.close();
+    try {
+      mediaServer.close();
+    } catch {
+      // Ignore close errors during quit.
+    }
     mediaServer = null;
   }
 });

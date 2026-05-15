@@ -24,7 +24,7 @@ const HLS_PENDING_SEGMENT_TIMEOUT_MS = 8000;
 const HLS_PENDING_SEGMENT_POLL_MS = 80;
 const encoderSupport = new Map<string, boolean>();
 
-export function transcodeRoot(): string {
+function transcodeRoot(): string {
   return path.join(app.getPath('userData'), 'transcodes');
 }
 

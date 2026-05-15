@@ -104,19 +104,44 @@ function isSettingsSection(value: string | null): value is SettingsSection {
     || value === 'about';
 }
 
+type LocalNetworkPairedDevice = {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number;
+  lastAddress?: string;
+};
+
 type LocalNetworkStatus = {
   sharingEnabled: boolean;
   token: string;
+  deviceId?: string;
+  deviceName?: string;
   networkName: string;
   port: number;
   addresses: string[];
   baseUrl: string | null;
   libraryUrl: string | null;
+  pairedDevices?: LocalNetworkPairedDevice[];
+};
+
+type LocalNetworkPeer = {
+  deviceId: string;
+  deviceName: string;
+  host: string;
+  port: number;
+  addresses: string[];
+  appVersion: string;
 };
 
 type SharedLibrarySnapshot = {
   baseUrl: string;
+  deviceId: string;
+  deviceToken: string;
+  hostDeviceId?: string;
+  hostDeviceName?: string;
   connectedAt: number;
+  libraryEtag?: string;
   library: {
     movies?: { title?: string; year?: number }[];
     tvShows?: { title?: string; year?: number }[];
@@ -237,6 +262,8 @@ export default function Settings() {
   const [remoteLibraryStatus, setRemoteLibraryStatus] = useState('');
   const [showManualNetworkAddress, setShowManualNetworkAddress] = useState(false);
   const [sharedLibrarySnapshot, setSharedLibrarySnapshot] = useState<SharedLibrarySnapshot | null>(null);
+  const [discoveredPeers, setDiscoveredPeers] = useState<LocalNetworkPeer[]>([]);
+  const [isScanningPeers, setIsScanningPeers] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
   const { theme, setTheme } = useTheme();
@@ -273,11 +300,10 @@ export default function Settings() {
     desktopApi.getUpdateState().then(setUpdateState);
     const unsubscribeUpdates = desktopApi.onUpdateState(setUpdateState);
     try {
-      const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string; code?: string } | null;
+      const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
-      if (savedRemoteLibrary?.code) setRemoteShareCode(savedRemoteLibrary.code);
       const savedSharedLibrary = JSON.parse(localStorage.getItem('loomtv:shared-library') || 'null') as SharedLibrarySnapshot | null;
-      if (savedSharedLibrary?.library) setSharedLibrarySnapshot(savedSharedLibrary);
+      if (savedSharedLibrary?.library && savedSharedLibrary?.deviceToken) setSharedLibrarySnapshot(savedSharedLibrary);
     } catch {
       // Ignore invalid saved pairing data.
     }
@@ -451,25 +477,95 @@ export default function Settings() {
         + (connection.library.animeShows?.length || 0);
       localStorage.setItem('loomtv:last-remote-library', JSON.stringify({
         baseUrl: connection.baseUrl,
-        code: connection.code,
         connectedAt: Date.now(),
       }));
-      const snapshot = {
+      const snapshot: SharedLibrarySnapshot = {
         baseUrl: connection.baseUrl,
+        deviceId: connection.deviceId,
+        deviceToken: connection.deviceToken,
+        hostDeviceId: connection.hostDeviceId,
+        hostDeviceName: connection.hostDeviceName,
         connectedAt: Date.now(),
+        libraryEtag: connection.libraryEtag,
         library: connection.library,
       };
       localStorage.setItem('loomtv:shared-library', JSON.stringify(snapshot));
       setSharedLibrarySnapshot(snapshot);
       setRemoteLibraryAddress(connection.baseUrl);
-      setRemoteShareCode(connection.code);
-      setRemoteLibraryStatus(`Connected. Found ${itemCount} shared item${itemCount === 1 ? '' : 's'}.`);
+      setRemoteShareCode('');
+      setRemoteLibraryStatus(`Connected to ${connection.hostDeviceName || 'shared device'}. Found ${itemCount} shared item${itemCount === 1 ? '' : 's'}.`);
     } catch (error) {
       setRemoteLibraryStatus(error instanceof Error ? error.message : 'Could not connect to that shared library.');
     } finally {
       setIsConnectingRemoteLibrary(false);
     }
   };
+
+  const refreshRemoteLibrarySnapshot = async () => {
+    if (!sharedLibrarySnapshot) return;
+    try {
+      const refreshed = await desktopApi.refreshRemoteLibrary(
+        sharedLibrarySnapshot.baseUrl,
+        sharedLibrarySnapshot.deviceToken,
+        sharedLibrarySnapshot.libraryEtag,
+      );
+      if (!refreshed) return; // 304 — no change.
+      const next: SharedLibrarySnapshot = {
+        ...sharedLibrarySnapshot,
+        library: refreshed.library,
+        libraryEtag: refreshed.etag,
+      };
+      localStorage.setItem('loomtv:shared-library', JSON.stringify(next));
+      setSharedLibrarySnapshot(next);
+    } catch (error) {
+      console.warn('Remote library refresh failed:', error);
+    }
+  };
+
+  const disconnectRemoteLibrary = async () => {
+    if (!sharedLibrarySnapshot) return;
+    await desktopApi.unpairFromRemoteLibrary(
+      sharedLibrarySnapshot.baseUrl,
+      sharedLibrarySnapshot.deviceToken,
+      sharedLibrarySnapshot.deviceId,
+    );
+    localStorage.removeItem('loomtv:shared-library');
+    localStorage.removeItem('loomtv:last-remote-library');
+    setSharedLibrarySnapshot(null);
+    setRemoteLibraryStatus('Disconnected from shared library.');
+  };
+
+  const scanForPeers = async () => {
+    setIsScanningPeers(true);
+    try {
+      const peers = await desktopApi.discoverLocalNetworkPeers(2500);
+      setDiscoveredPeers(peers);
+    } catch (error) {
+      console.warn('Peer scan failed:', error);
+      setDiscoveredPeers([]);
+    } finally {
+      setIsScanningPeers(false);
+    }
+  };
+
+  const revokePairedDevice = async (deviceId: string) => {
+    const remaining = await desktopApi.revokePairedDevice(deviceId);
+    setLocalNetworkStatus((current) => current ? { ...current, pairedDevices: remaining } : current);
+  };
+
+  useEffect(() => {
+    if (activeSection !== 'network') return;
+    void scanForPeers();
+    const id = setInterval(() => void scanForPeers(), 8000);
+    return () => clearInterval(id);
+  }, [activeSection]);
+
+  useEffect(() => {
+    if (!sharedLibrarySnapshot) return;
+    void refreshRemoteLibrarySnapshot();
+    const id = setInterval(() => void refreshRemoteLibrarySnapshot(), 30000);
+    return () => clearInterval(id);
+  }, [sharedLibrarySnapshot?.baseUrl, sharedLibrarySnapshot?.deviceToken]);
 
   const customProviders = Object.keys(metadataKeys)
     .filter((providerId) => !METADATA_PROVIDERS.some((provider) => provider.id === providerId))
@@ -933,8 +1029,8 @@ export default function Settings() {
                     type="button"
                     onClick={() => void setLocalNetworkSharing(!isNetworkSharingOn)}
                     disabled={isTogglingNetworkSharing}
-                    className="gap-2"
                     variant={isNetworkSharingOn ? 'outline' : 'default'}
+                    className={`gap-2 ${isNetworkSharingOn ? 'border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50' : ''}`}
                   >
                     {isTogglingNetworkSharing ? (
                       <RefreshCw className="h-4 w-4 animate-spin" />
@@ -1019,6 +1115,34 @@ export default function Settings() {
                           Connect this device to Wi-Fi or Ethernet to make it visible to other devices.
                         </p>
                       )}
+
+                      <div className="settings-panel-soft rounded-lg p-3">
+                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Paired Devices</p>
+                        {(localNetworkStatus?.pairedDevices?.length || 0) === 0 ? (
+                          <p className="text-xs text-[var(--loom-faint)]">No devices have paired yet. Share the code above to pair a device.</p>
+                        ) : (
+                          <ul className="space-y-1.5">
+                            {localNetworkStatus?.pairedDevices?.map((device) => {
+                              const lastSeenLabel = new Date(device.lastSeenAt).toLocaleString();
+                              return (
+                                <li key={device.id} className="flex items-center justify-between rounded-md bg-[var(--loom-surface-2)] px-2 py-1.5">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-xs font-semibold text-white">{device.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--loom-faint)]">Last seen {lastSeenLabel}{device.lastAddress ? ` · ${device.lastAddress}` : ''}</p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => void revokePairedDevice(device.id)}
+                                    className="ml-3 shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                                  >
+                                    Revoke
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -1045,6 +1169,46 @@ export default function Settings() {
                     <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Current Network</p>
                     <p className="truncate text-sm font-semibold text-white">{currentNetworkName}</p>
                   </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Devices on this network</p>
+                    <button
+                      type="button"
+                      onClick={() => void scanForPeers()}
+                      disabled={isScanningPeers}
+                      className="text-xs font-medium text-[var(--loom-accent)] hover:underline disabled:opacity-50"
+                    >
+                      {isScanningPeers ? 'Scanning...' : 'Rescan'}
+                    </button>
+                  </div>
+                  {discoveredPeers.length === 0 ? (
+                    <p className="text-xs text-[var(--loom-faint)]">
+                      {isScanningPeers ? 'Looking for LoomTV devices...' : 'No other LoomTV devices found. Make sure sharing is on over there.'}
+                    </p>
+                  ) : (
+                    <div className="space-y-1">
+                      {discoveredPeers.map((peer) => {
+                        const peerBaseUrl = `http://${peer.host}:${peer.port}`;
+                        const isSelected = remoteLibraryAddress === peerBaseUrl;
+                        return (
+                          <button
+                            key={peer.deviceId}
+                            type="button"
+                            onClick={() => {
+                              setRemoteLibraryAddress(peerBaseUrl);
+                              setShowManualNetworkAddress(true);
+                            }}
+                            className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-[var(--loom-accent)]/15 text-white' : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
+                          >
+                            <span className="truncate font-medium">{peer.deviceName}</span>
+                            <span className="ml-3 shrink-0 text-[var(--loom-faint)]">{peer.host}:{peer.port}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -1094,10 +1258,22 @@ export default function Settings() {
             {sharedLibrarySnapshot && (
               <Card className="settings-panel">
                 <CardHeader>
-                  <CardTitle className="text-white">Shared Library</CardTitle>
-                  <CardDescription className="text-[var(--loom-muted)]">
-                    Connected from {sharedLibrarySnapshot.baseUrl}
-                  </CardDescription>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="text-white">Shared Library</CardTitle>
+                      <CardDescription className="text-[var(--loom-muted)]">
+                        Connected to {sharedLibrarySnapshot.hostDeviceName || sharedLibrarySnapshot.baseUrl} · auto-refreshing
+                      </CardDescription>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void disconnectRemoteLibrary()}
+                      className="shrink-0"
+                    >
+                      Disconnect
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-3 md:grid-cols-3">
