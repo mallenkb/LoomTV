@@ -10,6 +10,7 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  ListOrdered,
   Maximize,
   Minimize,
   Pause,
@@ -17,6 +18,7 @@ import {
   RotateCcw,
   RotateCw,
   SlidersHorizontal,
+  Subtitles,
   Volume2,
   VolumeX,
   X,
@@ -1455,14 +1457,15 @@ export default function VideoPlayer({
   }, [fullscreen, playbackEngine]);
 
   const openMediaPanel = useCallback(() => {
-    if (showMediaPanel) {
+    if (showMediaPanel && mediaPanelTab === 'video') {
       setShowMediaPanel(false);
       return;
     }
 
     setShowSidebar(false);
+    setMediaPanelTab('video');
     setShowMediaPanel(true);
-  }, [showMediaPanel]);
+  }, [showMediaPanel, mediaPanelTab]);
 
   const openEpisodePanel = useCallback(() => {
     if (showSidebar) {
@@ -1473,6 +1476,17 @@ export default function VideoPlayer({
     setShowMediaPanel(false);
     setShowSidebar(true);
   }, [showSidebar]);
+
+  const openSubtitlesPanel = useCallback(() => {
+    if (showMediaPanel && mediaPanelTab === 'subtitles') {
+      setShowMediaPanel(false);
+      return;
+    }
+
+    setShowSidebar(false);
+    setMediaPanelTab('subtitles');
+    setShowMediaPanel(true);
+  }, [showMediaPanel, mediaPanelTab]);
 
   const startSidePanelResize = useCallback((
     event: React.MouseEvent<HTMLDivElement>,
@@ -1563,6 +1577,50 @@ export default function VideoPlayer({
     const rect = e.currentTarget.getBoundingClientRect();
     seekTo(((e.clientX - rect.left) / rect.width) * duration, { restartTranscoded: true });
   }, [duration, seekTo]);
+
+  const handleProgressPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const bar = event.currentTarget;
+    bar.setPointerCapture(event.pointerId);
+    const rect = bar.getBoundingClientRect();
+    const seekFromClientX = (clientX: number, restart: boolean) => {
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      seekTo(ratio * duration, { restartTranscoded: restart });
+    };
+    seekFromClientX(event.clientX, false);
+    const handleMove = (moveEvent: PointerEvent) => seekFromClientX(moveEvent.clientX, false);
+    const handleUp = (upEvent: PointerEvent) => {
+      seekFromClientX(upEvent.clientX, true);
+      bar.releasePointerCapture(event.pointerId);
+      bar.removeEventListener('pointermove', handleMove);
+      bar.removeEventListener('pointerup', handleUp);
+      bar.removeEventListener('pointercancel', handleUp);
+    };
+    bar.addEventListener('pointermove', handleMove);
+    bar.addEventListener('pointerup', handleUp);
+    bar.addEventListener('pointercancel', handleUp);
+  }, [duration, seekTo]);
+
+  const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    const big = event.shiftKey ? 60 : 10;
+    const small = 5;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      seekTo(position - (event.shiftKey ? big : small), { restartTranscoded: true });
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      seekTo(position + (event.shiftKey ? big : small), { restartTranscoded: true });
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      seekTo(0, { restartTranscoded: true });
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      seekTo(duration, { restartTranscoded: true });
+    }
+  }, [duration, position, seekTo]);
 
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
@@ -1948,156 +2006,259 @@ export default function VideoPlayer({
 
         {(nextCountdown !== null || showNextEpisodePrompt) && nextEpisodeFile && (
           <div
-            className="pointer-events-none absolute inset-0 z-30 flex items-end justify-end p-6"
+            className="pointer-events-none absolute inset-0 z-30 flex items-end justify-end p-6 pb-28"
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
           >
-            <div className="pointer-events-auto w-fit min-w-64 max-w-[min(22rem,calc(100vw-3rem))] rounded-lg border border-white/15 bg-black/70 p-3 text-white shadow-2xl">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--loom-accent)]">Up next</p>
-              <p className="mt-1 truncate text-sm font-semibold">{nextEpLabel || epCode(nextEpisodeFile.season, nextEpisodeFile.episode)}</p>
-              <p className="mt-2 text-xs text-white/65">
-                {nextCountdown !== null
-                  ? `Playing in ${nextCountdown}`
-                  : autoplayNextEnabled ? 'Autoplay starts when this episode finishes.' : 'Ready when you are.'}
-              </p>
-              <div className="mt-4 flex gap-2">
-                <button
-                  onClick={playNextEpisodeNow}
-                  className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-white/85"
-                >
-                  Play now
-                </button>
-                <button
-                  onClick={() => {
-                    if (nextCountdown !== null) {
-                      clearNextEpisodeCountdown();
-                    } else {
-                      setDismissedNextPromptKey(`${currentSeason}-${currentEpisode}`);
-                    }
-                  }}
-                  className="rounded-md border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
-                >
-                  Cancel
-                </button>
+            <div className="pointer-events-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/15 bg-black/75 text-white shadow-2xl backdrop-blur-xl">
+              <div className="p-5">
+                <div className="flex items-start gap-4">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--loom-accent)]">Up next</p>
+                    <p className="mt-1.5 truncate text-lg font-semibold leading-tight">
+                      {nextEpLabel || epCode(nextEpisodeFile.season, nextEpisodeFile.episode)}
+                    </p>
+                    <p className="mt-2 text-sm text-white/65">
+                      {nextCountdown !== null
+                        ? 'Playing next in'
+                        : autoplayNextEnabled ? 'Autoplay starts when this episode finishes.' : 'Ready when you are.'}
+                    </p>
+                  </div>
+                  {nextCountdown !== null && (
+                    <div className="relative shrink-0">
+                      <svg viewBox="0 0 44 44" className="h-20 w-20 -rotate-90">
+                        <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="3" />
+                        <circle
+                          cx="22"
+                          cy="22"
+                          r="20"
+                          fill="none"
+                          stroke="var(--loom-accent)"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeDasharray={2 * Math.PI * 20}
+                          strokeDashoffset={2 * Math.PI * 20 * (1 - Math.min(1, Math.max(0, nextCountdown / NEXT_EPISODE_COUNTDOWN_SECONDS)))}
+                          style={{ transition: 'stroke-dashoffset 1s linear' }}
+                        />
+                      </svg>
+                      <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                        <span className="font-semibold text-white tabular-nums leading-none text-[28px]">
+                          {nextCountdown}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-5 flex gap-2.5">
+                  <button
+                    onClick={playNextEpisodeNow}
+                    className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-white text-sm font-semibold text-black shadow-sm transition-colors hover:bg-white/90"
+                  >
+                    <Play className="h-4 w-4 fill-current" />
+                    Play now
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (nextCountdown !== null) {
+                        clearNextEpisodeCountdown();
+                      } else {
+                        setDismissedNextPromptKey(`${currentSeason}-${currentEpisode}`);
+                      }
+                    }}
+                    className="flex h-11 items-center justify-center rounded-lg border border-white/20 bg-black/40 px-5 text-sm font-semibold text-white/80 backdrop-blur-md transition-colors hover:border-white/30 hover:bg-white/10 hover:text-white"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
+              {nextCountdown !== null && (
+                <div className="h-1 w-full bg-white/10">
+                  <div
+                    className="h-full bg-[var(--loom-accent)] transition-[width] duration-1000 ease-linear"
+                    style={{
+                      width: `${Math.min(100, Math.max(0, ((NEXT_EPISODE_COUNTDOWN_SECONDS - nextCountdown) / NEXT_EPISODE_COUNTDOWN_SECONDS) * 100))}%`,
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Controls overlay */}
         <div
-          className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent px-4 pb-4 pt-10 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-4 pb-4 pt-14 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >
           {/* Progress bar */}
           <div
-            className="relative h-1.5 rounded-full bg-white/20 cursor-pointer mb-3 group"
-            onClick={handleSeek}
+            role="slider"
+            tabIndex={0}
+            aria-label="Seek"
+            aria-valuemin={0}
+            aria-valuemax={duration || 0}
+            aria-valuenow={Math.min(position, duration || position)}
+            aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
+            aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+            onPointerDown={handleProgressPointerDown}
+            onKeyDown={handleProgressKeyDown}
+            className="group relative mb-3 h-6 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
           >
-            <div className="h-full rounded-full bg-[var(--loom-accent)] pointer-events-none" style={{ width: `${progressPct}%` }} />
+            <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
+              <div
+                className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
             <div
-              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-3.5 w-3.5 rounded-full bg-white shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+              className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
               style={{ left: `${progressPct}%` }}
             />
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={togglePlay}
-              className="grid h-12 w-12 shrink-0 place-items-center rounded-full text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
-              title={paused ? 'Play' : 'Pause'}
+              className="grid h-14 w-14 shrink-0 place-items-center rounded-full text-white outline-none transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)] focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              title={paused ? 'Play (Space)' : 'Pause (Space)'}
+              aria-label={paused ? 'Play' : 'Pause'}
+              aria-keyshortcuts="Space"
             >
-              {paused ? <Play className="h-6 w-6 fill-current" /> : <Pause className="h-6 w-6 fill-current" />}
+              {paused ? <Play className="h-8 w-8 fill-current" /> : <Pause className="h-8 w-8 fill-current" />}
             </button>
 
             <button
+              type="button"
               onClick={() => seekTo(position - skipBackSeconds)}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               title={`Back ${skipBackSeconds}s`}
+              aria-label={`Back ${skipBackSeconds} seconds`}
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="h-5 w-5" strokeWidth={2.25} />
             </button>
 
             <button
+              type="button"
               onClick={() => seekTo(position + skipForwardSeconds)}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               title={`Forward ${skipForwardSeconds}s`}
+              aria-label={`Forward ${skipForwardSeconds} seconds`}
             >
-              <RotateCw className="w-4 h-4" />
+              <RotateCw className="h-5 w-5" strokeWidth={2.25} />
             </button>
 
-            <span className="text-white/70 text-xs tabular-nums select-none">
-              {formatTime(position)} / {formatTime(duration)}
-            </span>
+            <div
+              className="ml-1 select-none text-base font-medium tabular-nums text-white/90"
+              aria-live="off"
+            >
+              <span className="text-white">{formatTime(position)}</span>
+              <span className="mx-1.5 text-white/45">/</span>
+              <span className="text-white/60">{formatTime(duration)}</span>
+            </div>
 
             <div className="flex-1" />
 
             {hasEpisodes && (
-              <>
+              <div className="mr-1 flex items-center gap-1">
                 <button
+                  type="button"
                   onClick={handlePrevEpisode}
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
                   title="Previous episode"
+                  aria-label="Previous episode"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="h-5 w-5" strokeWidth={2.5} />
                 </button>
                 <button
+                  type="button"
                   onClick={handleNextEpisode}
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
                   title="Next episode"
+                  aria-label="Next episode"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="h-5 w-5" strokeWidth={2.5} />
                 </button>
-              </>
+              </div>
             )}
 
-            <button
-              onClick={toggleMute}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              title={muted || volume === 0 ? 'Unmute' : 'Mute'}
-            >
-              {muted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={muted ? 0 : volume}
-              onChange={handleVolume}
-              className="w-20 accent-[var(--loom-accent)] cursor-pointer"
-            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                title={muted || volume === 0 ? 'Unmute (M)' : 'Mute (M)'}
+                aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
+                aria-pressed={muted || volume === 0}
+              >
+                {muted || volume === 0 ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={muted ? 0 : volume}
+                onChange={handleVolume}
+                aria-label="Volume"
+                aria-valuetext={`${Math.round((muted ? 0 : volume) * 100)}%`}
+                className="h-1.5 w-24 cursor-pointer rounded-full accent-[var(--loom-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              />
+            </div>
 
-            <button
-              onClick={openMediaPanel}
-              className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showMediaPanel ? 'text-[var(--loom-accent)]' : ''}`}
-              title="Video, audio, and subtitle controls"
-            >
-              <SlidersHorizontal className="w-4 h-4" />
-            </button>
+            <div className="mx-1 h-7 w-px bg-white/20" aria-hidden="true" />
 
             {hasEpisodes && (
               <button
+                type="button"
                 onClick={openEpisodePanel}
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white ${showSidebar ? 'text-[var(--loom-accent)]' : ''}`}
+                className={`flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showSidebar ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
                 title="Episode list"
+                aria-label="Episode list"
+                aria-pressed={showSidebar}
+                aria-expanded={showSidebar}
               >
-                <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                  <line x1="15" y1="3" x2="15" y2="21" />
-                </svg>
+                <ListOrdered className="h-5 w-5" strokeWidth={2.25} />
+                <span className="text-sm font-medium">Episodes</span>
               </button>
             )}
 
             <button
-              onClick={toggleFullscreen}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-              title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              type="button"
+              onClick={openSubtitlesPanel}
+              className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showMediaPanel && mediaPanelTab === 'subtitles' ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
+              title="Subtitles"
+              aria-label="Subtitles"
+              aria-pressed={showMediaPanel && mediaPanelTab === 'subtitles'}
+              aria-expanded={showMediaPanel && mediaPanelTab === 'subtitles'}
             >
-              {fullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              <Subtitles className="h-5 w-5" strokeWidth={2.25} />
             </button>
 
+            <button
+              type="button"
+              onClick={openMediaPanel}
+              className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showMediaPanel && mediaPanelTab === 'video' ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
+              title="Playback settings"
+              aria-label="Playback settings"
+              aria-pressed={showMediaPanel && mediaPanelTab === 'video'}
+              aria-expanded={showMediaPanel && mediaPanelTab === 'video'}
+            >
+              <SlidersHorizontal className="h-5 w-5" strokeWidth={2.25} />
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              title={fullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'}
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+              aria-pressed={fullscreen}
+              aria-keyshortcuts="F"
+            >
+              {fullscreen ? <Minimize className="h-5 w-5" strokeWidth={2.25} /> : <Maximize className="h-5 w-5" strokeWidth={2.25} />}
+            </button>
           </div>
         </div>
       </div>

@@ -90,7 +90,7 @@ export const DARK_THEMES: Record<AppDarkTheme, {
   },
 };
 
-export function normalizeThemeMode(_value?: string): AppThemeMode {
+function normalizeThemeMode(_value?: string): AppThemeMode {
   return 'dark';
 }
 

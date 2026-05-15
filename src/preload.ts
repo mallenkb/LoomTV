@@ -84,6 +84,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     localNetworkShareToken?: string;
   }) => ipcRenderer.invoke('settings:save', settings),
   getLocalNetworkStatus: () => ipcRenderer.invoke('network:status'),
+  discoverLocalNetworkPeers: (timeoutMs?: number) => ipcRenderer.invoke('network:discover-peers', timeoutMs),
+  revokePairedDevice: (deviceId: string) => ipcRenderer.invoke('network:revoke-paired-device', deviceId),
+  setLocalNetworkDeviceName: (name: string) => ipcRenderer.invoke('network:set-device-name', name),
   getProgress: (filePath?: string) => ipcRenderer.invoke('progress:get', filePath),
   saveProgress: (filePath: string, position: number, duration: number) => ipcRenderer.invoke('progress:save', filePath, position, duration),
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) =>
@@ -224,12 +227,25 @@ declare global {
       getLocalNetworkStatus: () => Promise<{
         sharingEnabled: boolean;
         token: string;
+        deviceId?: string;
+        deviceName?: string;
         networkName: string;
         port: number;
         addresses: string[];
         baseUrl: string | null;
         libraryUrl: string | null;
+        pairedDevices?: Array<{ id: string; name: string; createdAt: number; lastSeenAt: number; lastAddress?: string }>;
       }>;
+      discoverLocalNetworkPeers: (timeoutMs?: number) => Promise<Array<{
+        deviceId: string;
+        deviceName: string;
+        host: string;
+        port: number;
+        addresses: string[];
+        appVersion: string;
+      }>>;
+      revokePairedDevice: (deviceId: string) => Promise<Array<{ id: string; name: string; createdAt: number; lastSeenAt: number; lastAddress?: string }>>;
+      setLocalNetworkDeviceName: (name: string) => Promise<string>;
       getProgress: (filePath?: string) => Promise<Record<string, { position: number; duration: number; updatedAt: number; watched: boolean }> | { position: number; duration: number; updatedAt: number; watched: boolean } | null>;
       saveProgress: (filePath: string, position: number, duration: number) => Promise<{ position: number; duration: number; updatedAt: number; watched: boolean }>;
       importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;

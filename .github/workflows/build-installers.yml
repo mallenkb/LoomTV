@@ -39,7 +39,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable pnpm
+        run: corepack enable
 
       - name: Install Linux maker dependencies
         if: runner.os == 'Linux'
@@ -48,7 +52,7 @@ jobs:
           sudo apt-get install -y rpm
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+        run: corepack pnpm install --frozen-lockfile
 
       - name: Build installers
         env:
@@ -84,13 +88,13 @@ jobs:
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            npm run release
+            corepack pnpm run release
           else
-            npm run dist
+            corepack pnpm run dist
           fi
 
       - name: Verify packaged runtime dependencies
-        run: npm run verify:runtime
+        run: corepack pnpm run verify:runtime
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

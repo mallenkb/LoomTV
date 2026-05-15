@@ -18,7 +18,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export interface MpvLaunchOptions {
+interface MpvLaunchOptions {
   /** Window title shown in the OS taskbar / title bar. */
   title?: string;
   /** Start playback at this position in seconds. */
@@ -29,7 +29,7 @@ export interface MpvLaunchOptions {
   subtitles?: string[];
 }
 
-export interface MpvPlaybackState {
+interface MpvPlaybackState {
   position: number;
   duration: number;
   paused: boolean;
@@ -52,7 +52,7 @@ interface MpvTrack {
   'ff-index'?: number;
 }
 
-export class MpvController {
+class MpvController {
   private proc: ChildProcess | undefined;
   private ipc: MpvIpc | undefined;
   /** Updated IPC path per launch (pid-scoped). */
