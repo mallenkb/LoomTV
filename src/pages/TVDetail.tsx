@@ -235,8 +235,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     ? `${formatShortMinutes(heroProgress.position)} of ${formatShortMinutes(heroProgress.duration)}`
     : '';
   const firstEpisodeStill = show.episodes
-    ?.flatMap((season) => season.episodes || [])
-    .find((episode) => Boolean(episode.still))?.still || '';
+    ?.find((episode) => Boolean(episode.still))?.still || '';
   const sourceArtwork = (location.state as { artwork?: RouteArtworkState } | null)?.artwork;
   const generatedArtwork = uniqueArtworkSources(firstEpisodeStill, fallbackThumbnails);
   const heroArtwork = uniqueArtworkSources(
@@ -657,7 +656,7 @@ function EpisodeRow({
   void progressTick;
 
   return (
-    <div className={`relative flex items-start gap-4 p-4 transition-colors group cursor-pointer ${progress.watched ? 'opacity-55' : 'hover:bg-white/5'}`} onClick={onPlay}>
+    <div className="relative flex cursor-pointer items-start gap-4 p-4 transition-colors group hover:bg-white/5" onClick={onPlay}>
       {(progress.inProgress || progress.watched) && progress.fraction > 0 && (
         <span
           className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${progress.watched ? 'bg-green-500' : 'bg-[var(--loom-accent)]'}`}
@@ -688,7 +687,7 @@ function EpisodeRow({
 
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium ${progress.watched ? 'text-[var(--loom-faint)]' : 'text-white'}`}>{epLabel} - {displayTitle}</p>
+        <p className="text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
         {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">

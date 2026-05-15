@@ -356,7 +356,7 @@ async function launchTranscode(
   ffmpegProc.once('error', (error) => {
     stderr = `${stderr}\n${error.message}`.slice(-2400);
   });
-  ffmpegProc.stderr.on('data', (chunk: Buffer) => {
+  ffmpegProc.stderr?.on('data', (chunk: Buffer) => {
     const text = chunk.toString().trim();
     stderr = `${stderr}\n${text}`.slice(-2400);
     if (process.env.DEBUG_TRANSCODE) console.debug('[transcode]', text);

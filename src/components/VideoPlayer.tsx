@@ -5,7 +5,7 @@
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ErrorTypes, Events, Hls, isSupported } from 'hls.js';
+import Hls, { ErrorTypes, Events, type ErrorData } from 'hls.js';
 import {
   CheckCircle,
   ChevronLeft,
@@ -1006,8 +1006,8 @@ export default function VideoPlayer({
         const state = await desktopApi.queryMPV();
         if (cancelled || !state) return;
 
-        const nextPosition = Number.isFinite(state.position) ? state.position : 0;
-        const nextDuration = Number.isFinite(state.duration) ? state.duration : duration;
+        const nextPosition = typeof state.position === 'number' && Number.isFinite(state.position) ? state.position : 0;
+        const nextDuration = typeof state.duration === 'number' && Number.isFinite(state.duration) ? state.duration : duration;
         setPosition(nextPosition);
         if (nextDuration > 0) setDuration(nextDuration);
         setPaused(Boolean(state.paused));
@@ -1066,7 +1066,7 @@ export default function VideoPlayer({
     };
 
     if (isHlsSource) {
-      if (isSupported()) {
+      if (Hls.isSupported()) {
         const hls = new Hls({
           autoStartLoad: false,
           startPosition: 0,
@@ -1095,7 +1095,7 @@ export default function VideoPlayer({
         });
         hls.on(Events.FRAG_BUFFERED, markHlsPlayable);
         hls.attachMedia(video);
-        hls.on(Events.ERROR, (_event, data) => {
+        hls.on(Events.ERROR, (_event: Events.ERROR, data: ErrorData) => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
           console.warn(`[player] HLS error ${hlsErrorSummary(data)}`);
           const restartLocalHls = () => {
@@ -2575,8 +2575,7 @@ export default function VideoPlayer({
                       onClick={() => file && goToEpisode(ep.season, ep.number)}
                       className={`relative w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors
                         ${isCurrent ? 'bg-[var(--loom-accent)]/15' : 'hover:bg-white/5'}
-                        ${!file ? 'cursor-not-allowed opacity-30' : ''}
-                        ${watched && !isCurrent ? 'opacity-50' : ''}`}
+                        ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
                     >
                       {(inProgress || isCurrent) && progFrac > 0 && (
                         <span
@@ -2584,13 +2583,13 @@ export default function VideoPlayer({
                           style={{ width: `${Math.min(100, progFrac * 100)}%` }}
                         />
                       )}
-                      <span className={`w-12 shrink-0 font-mono text-[10px] ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-[#555]'}`}>
+                      <span className={`w-12 shrink-0 font-mono text-[10px] ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-muted)]'}`}>
                         {epCode(ep.season, ep.number)}
                       </span>
-                      <span className={`min-w-0 flex-1 truncate text-xs leading-snug ${isCurrent ? 'font-medium text-[var(--loom-accent)]' : watched ? 'text-[#555]' : 'text-white'}`}>
+                      <span className={`min-w-0 flex-1 truncate text-xs leading-snug ${isCurrent ? 'font-medium text-[var(--loom-accent)]' : 'text-white'}`}>
                         {episodeTitle}
                       </span>
-                      {watched && !isCurrent && <CheckCircle className="h-3 w-3 shrink-0 text-green-500 opacity-70" />}
+                      {watched && !isCurrent && <CheckCircle className="h-3 w-3 shrink-0 text-green-500" />}
                       {inProgress && !isCurrent && <span className="shrink-0 text-[9px] text-amber-400">resume</span>}
                     </button>
                   );

@@ -71,11 +71,13 @@ function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
 ignoreBrokenConsolePipe(process.stdout);
 ignoreBrokenConsolePipe(process.stderr);
 
-let started = false;
 try {
-  started = require('electron-squirrel-startup');
-  if (started) app.quit();
-} catch (e) {}
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const squirrelStartup: boolean = require('electron-squirrel-startup');
+  if (squirrelStartup) app.quit();
+} catch {
+  // electron-squirrel-startup is optional and missing in some envs.
+}
 
 // Enable hardware HEVC (H.265) decoding — allows MKV/HEVC files to be
 // remuxed instead of re-encoded, giving near-instant local playback.
@@ -1512,7 +1514,7 @@ function isGenericGroupingFolderTitle(value: string): boolean {
     || /^(complete|completed|batch|batches|pack|packs|collection|collections|part|part \d+|pt|pt \d+|cour|cour \d+|volume|volume \d+|vol|vol \d+|episodes|episode|1080p|720p|2160p|4k)$/.test(normalized);
 }
 
-function usefulLocalTitle(value?: string): string | null {
+function usefulLocalTitle(value?: string | null): string | null {
   const title = cleanMediaTitle(value || '').title;
   if (!title || isGenericGroupingFolderTitle(title)) return null;
   return title;
@@ -1834,21 +1836,25 @@ function probeMediaFile(filePath: string): ProbeMediaFileResult {
 }
 
 function makeLocalEpisodeMeta(files: EpisodeFile[], seriesTitle?: string): EpisodeMeta[] {
-  return files.map((file) => ({
-    season: file.season,
-    number: file.episode,
-    title: !looksLikeLocalEpisodeFileTitle(file.title, seriesTitle)
-      ? file.title
-      : path.basename(file.filePath, path.extname(file.filePath))
+  return files.map((file) => {
+    const fallback = path.basename(file.filePath, path.extname(file.filePath))
       .replace(/[._-]+/g, ' ')
       .replace(/\s+/g, ' ')
-      .trim() || `Episode ${file.episode}`,
-    summary: '',
-    still: '',
-    rating: 0,
-    airDate: '',
-    localMetadata: file.localMetadata,
-  }));
+      .trim() || `Episode ${file.episode}`;
+    const resolvedTitle = !looksLikeLocalEpisodeFileTitle(file.title, seriesTitle) && file.title
+      ? file.title
+      : fallback;
+    return {
+      season: file.season,
+      number: file.episode,
+      title: resolvedTitle,
+      summary: '',
+      still: '',
+      rating: 0,
+      airDate: '',
+      localMetadata: file.localMetadata,
+    };
+  });
 }
 
 // ─── HTTP Media Server ────────────────────────────────────────────────────────
@@ -1929,7 +1935,7 @@ function startMediaServer(): Promise<number> {
         const authResult = authorizeLanRequest(reqUrl, req);
         // Devices may self-revoke; loopback can revoke any device.
         readJsonBody(req)
-          .catch(() => ({}))
+          .catch((): Record<string, any> => ({}))
           .then((body) => {
             const settings = loadSettings();
             const requestedId = String(body?.deviceId || authResult.device?.id || '');
@@ -1984,7 +1990,7 @@ function startMediaServer(): Promise<number> {
       if (reqUrl.pathname === '/api/library/scan' && req.method === 'POST') {
         const scanVersion = libraryMutationVersion;
         readJsonBody(req)
-          .catch(() => ({}))
+          .catch((): Record<string, any> => ({}))
           .then((body) => scanLibrary(loadLibrary(), {
             force: Boolean(body.force),
             mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
@@ -2004,7 +2010,7 @@ function startMediaServer(): Promise<number> {
 
       if (reqUrl.pathname === '/api/library/add-folder' && req.method === 'POST') {
         readJsonBody(req)
-          .catch(() => ({}))
+          .catch((): Record<string, any> => ({}))
           .then((body) => {
             const requestedKind = String(body.kind || '');
             const kind: LibraryFolderKind = requestedKind === 'tvShows' || requestedKind === 'anime' || requestedKind === 'movies' || requestedKind === 'others'

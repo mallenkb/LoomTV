@@ -9,6 +9,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { app } from 'electron';
@@ -138,6 +139,6 @@ export function getIpcPath(): string {
     return path.join(app.getPath('temp'), `loomtv-mpv-${process.pid}.sock`);
   } catch {
     // Fallback if app is not ready yet (unlikely in practice)
-    return path.join(require('node:os').tmpdir(), `loomtv-mpv-${process.pid}.sock`);
+    return path.join(os.tmpdir(), `loomtv-mpv-${process.pid}.sock`);
   }
 }
