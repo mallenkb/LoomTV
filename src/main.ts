@@ -4554,7 +4554,14 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // Allow renderer to load media from the local HTTP media server (127.0.0.1)
+      // TODO(security): webSecurity:false is here so the renderer (loaded
+      // from file:// in production) can fetch from http://127.0.0.1:*. The
+      // tighter replacement is either (a) register a `loomtv-media://`
+      // privileged scheme and route stream/artwork through it, or (b) keep
+      // webSecurity:true and add a CSP via session.webRequest that allows
+      // connect-src/media-src http://127.0.0.1:* + http://localhost:*.
+      // Either change needs manual verification of direct play, HLS, the
+      // transcode fallback, and LAN-shared playback on macOS/Windows/Linux.
       webSecurity: false,
     },
   };
