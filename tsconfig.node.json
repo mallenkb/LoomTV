@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
+    "composite": true,
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "strict": true
+    "strict": true,
+    "skipLibCheck": true
   },
   "include": ["vite.main.config.ts", "vite.preload.config.ts", "vite.renderer.config.ts", "forge.config.ts"]
 }
