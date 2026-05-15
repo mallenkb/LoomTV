@@ -43,7 +43,11 @@ function queryMPVSocket(command: Array<string | number | boolean>): Promise<any>
           if ('error' in response) {
             clearTimeout(timer);
             socket.destroy();
-            response.error === 'success' ? resolve(response.data) : reject(new Error(response.error));
+            if (response.error === 'success') {
+              resolve(response.data);
+            } else {
+              reject(new Error(response.error));
+            }
             return;
           }
         } catch {
