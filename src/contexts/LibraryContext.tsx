@@ -69,7 +69,7 @@ export interface LibraryFolderGroups {
   others: string[];
 }
 
-export interface LibraryState {
+interface LibraryState {
   movies: MediaItem[];
   tvShows: TVShow[];
   animeShows: TVShow[];

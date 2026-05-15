@@ -109,19 +109,41 @@ export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION_
   ? __APP_VERSION__
   : packageJson.version || 'dev';
 
+export type LocalNetworkPairedDevice = {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number;
+  lastAddress?: string;
+};
 export type LocalNetworkStatus = {
   sharingEnabled: boolean;
   token: string;
+  deviceId?: string;
+  deviceName?: string;
   networkName: string;
   port: number;
   addresses: string[];
   baseUrl: string | null;
   libraryUrl: string | null;
+  pairedDevices?: LocalNetworkPairedDevice[];
+};
+export type LocalNetworkPeer = {
+  deviceId: string;
+  deviceName: string;
+  host: string;
+  port: number;
+  addresses: string[];
+  appVersion: string;
 };
 export type RemoteLibraryConnection = {
   baseUrl: string;
-  code: string;
+  deviceId: string;
+  deviceToken: string;
+  hostDeviceId?: string;
+  hostDeviceName?: string;
   library: LibraryPayload;
+  libraryEtag: string;
 };
 export type StoredProgress = { position: number; duration: number; updatedAt: number; watched: boolean };
 export type OfficialArtworkResult = {
@@ -161,6 +183,9 @@ declare global {
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
       getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
+      discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
+      revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
+      setLocalNetworkDeviceName?: (name: string) => Promise<string>;
       getProgress?: (filePath?: string) => Promise<Record<string, StoredProgress> | StoredProgress | null>;
       saveProgress?: (filePath: string, position: number, duration: number) => Promise<StoredProgress>;
       importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
@@ -278,7 +303,32 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
   }
 }
 
-async function discoverLocalNetworkLibraryBaseUrl(code: string): Promise<string> {
+async function probeLanInfo(baseUrl: string, timeoutMs = 800): Promise<boolean> {
+  try {
+    const response = await fetchWithTimeout(`${baseUrl}/api/lan/info`, timeoutMs);
+    if (!response.ok) return false;
+    const info = await response.json() as { app?: string };
+    return info?.app === 'LoomTV';
+  } catch {
+    return false;
+  }
+}
+
+async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
+  // mDNS first — fast and accurate when peers advertise. Returns the first host
+  // that publishes a LoomTV service.
+  if (window.desktopApi?.discoverLocalNetworkPeers) {
+    try {
+      const peers = await window.desktopApi.discoverLocalNetworkPeers(2500);
+      const peer = peers.find((candidate) => candidate.host && candidate.port);
+      if (peer) return `http://${peer.host}:${peer.port}`;
+    } catch {
+      // Fall through to subnet scan if the mDNS browse failed.
+    }
+  }
+
+  // Fallback: probe the /api/lan/info endpoint (no token) on each candidate.
+  // Stops broadcasting the code to random IPs.
   const status = await desktopApi.getLocalNetworkStatus();
   const ports = Array.from({ length: 8 }, (_, index) => status.port + index);
   const candidates = subnetCandidates(status.addresses);
@@ -287,20 +337,22 @@ async function discoverLocalNetworkLibraryBaseUrl(code: string): Promise<string>
 
   for (let index = 0; index < urls.length; index += batchSize) {
     const batch = urls.slice(index, index + batchSize);
-    const results = await Promise.all(batch.map(async (baseUrl) => {
-      try {
-        const response = await fetchWithTimeout(`${baseUrl}/api/lan/library?token=${encodeURIComponent(code)}`, 900);
-        return response.ok ? baseUrl : null;
-      } catch {
-        return null;
-      }
-    }));
+    const results = await Promise.all(batch.map(async (baseUrl) => (await probeLanInfo(baseUrl) ? baseUrl : null)));
     const found = results.find(Boolean);
-
     if (found) return found;
   }
 
-  throw new Error('No shared LoomTV library was found on this network for that code.');
+  throw new Error('No shared LoomTV library was found on this network.');
+}
+
+function bearerHeaders(token: string, init?: RequestInit): RequestInit {
+  return {
+    ...(init || {}),
+    headers: {
+      ...(init?.headers || {}),
+      Authorization: `Bearer ${token}`,
+    },
+  };
 }
 
 export const desktopApi = {
@@ -349,6 +401,21 @@ export const desktopApi = {
     return fetchJson<LocalNetworkStatus>('/api/lan/status');
   },
 
+  async discoverLocalNetworkPeers(timeoutMs = 2500): Promise<LocalNetworkPeer[]> {
+    if (window.desktopApi?.discoverLocalNetworkPeers) return window.desktopApi.discoverLocalNetworkPeers(timeoutMs);
+    return [];
+  },
+
+  async revokePairedDevice(deviceId: string): Promise<LocalNetworkPairedDevice[]> {
+    if (window.desktopApi?.revokePairedDevice) return window.desktopApi.revokePairedDevice(deviceId);
+    return [];
+  },
+
+  async setLocalNetworkDeviceName(name: string): Promise<string> {
+    if (window.desktopApi?.setLocalNetworkDeviceName) return window.desktopApi.setLocalNetworkDeviceName(name);
+    return name;
+  },
+
   async connectToLocalNetworkLibrary(baseUrl: string, code: string): Promise<RemoteLibraryConnection> {
     const normalizedCode = code.replace(/\D/g, '').slice(0, 6);
     if (!/^\d{6}$/.test(normalizedCode)) {
@@ -357,17 +424,63 @@ export const desktopApi = {
 
     const normalizedBaseUrl = baseUrl.trim()
       ? normalizeLocalNetworkBaseUrl(baseUrl)
-      : await discoverLocalNetworkLibraryBaseUrl(normalizedCode);
-    const response = await fetch(`${normalizedBaseUrl}/api/lan/library?token=${encodeURIComponent(normalizedCode)}`);
+      : await discoverLocalNetworkLibraryBaseUrl();
+
+    const status = await desktopApi.getLocalNetworkStatus().catch(() => null);
+    const deviceId = status?.deviceId || '';
+    const deviceName = status?.deviceName || 'LoomTV device';
+
+    const response = await fetch(`${normalizedBaseUrl}/api/lan/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: normalizedCode, deviceId, deviceName }),
+    });
+
     if (!response.ok) {
-      throw new Error(response.status === 401 ? 'The sharing code was not accepted.' : 'Could not connect to that LoomTV library.');
+      if (response.status === 401) throw new Error('The sharing code was not accepted.');
+      if (response.status === 429) throw new Error('Too many failed pairing attempts. Try again in a few minutes.');
+      throw new Error('Could not connect to that LoomTV library.');
     }
+
+    const payload = await response.json() as {
+      deviceId: string;
+      deviceToken: string;
+      hostDeviceId?: string;
+      hostDeviceName?: string;
+      library: LibraryPayload;
+      libraryEtag: string;
+    };
 
     return {
       baseUrl: normalizedBaseUrl,
-      code: normalizedCode,
-      library: await response.json() as LibraryPayload,
+      deviceId: payload.deviceId,
+      deviceToken: payload.deviceToken,
+      hostDeviceId: payload.hostDeviceId,
+      hostDeviceName: payload.hostDeviceName,
+      library: payload.library,
+      libraryEtag: payload.libraryEtag,
     };
+  },
+
+  async refreshRemoteLibrary(baseUrl: string, deviceToken: string, etag?: string): Promise<{ library: LibraryPayload; etag: string } | null> {
+    const response = await fetch(`${baseUrl}/api/lan/library`, bearerHeaders(deviceToken, {
+      headers: etag ? { 'If-None-Match': etag } : undefined,
+    }));
+    if (response.status === 304) return null;
+    if (!response.ok) {
+      if (response.status === 401) throw new Error('Pairing was revoked on the host.');
+      throw new Error('Could not refresh the shared library.');
+    }
+    const library = await response.json() as LibraryPayload;
+    return { library, etag: response.headers.get('ETag') || '' };
+  },
+
+  async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string, deviceId: string): Promise<void> {
+    await fetch(`${baseUrl}/api/lan/unpair`, bearerHeaders(deviceToken, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId }),
+    })).catch(() => undefined);
   },
 
   async getThumbnail(filePath: string, time?: string): Promise<{ url: string }> {

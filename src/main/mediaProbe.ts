@@ -3,10 +3,6 @@ import { execFileSync } from 'node:child_process';
 import { findFFprobe } from './mediaBinaries';
 import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
 
-export const LOCAL_VIDEO_EXTENSIONS = new Set([
-  '.mkv', '.mp4', '.avi', '.mov', '.webm', '.flv', '.m4v', '.mpeg', '.mpg', '.ts', '.m2ts', '.wmv', '.3gp',
-]);
-
 function streamType(value?: string): MediaTrack['type'] {
   if (value === 'video' || value === 'audio' || value === 'subtitle' || value === 'data') return value;
   return 'unknown';

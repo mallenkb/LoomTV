@@ -1,0 +1,14 @@
+allowBuilds:
+  better-sqlite3: true
+  electron: true
+  electron-winstaller: true
+  ffmpeg-static: true
+  fs-xattr: true
+  macos-alias: true
+  unrs-resolver: true
+blockExoticSubdeps: false
+# 24 hour delay before pnpm accepts newly published package versions.
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - pnpm
+nodeLinker: hoisted

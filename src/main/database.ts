@@ -25,7 +25,7 @@ type SettingsData = Record<string, unknown>;
 
 let db: Database.Database | null = null;
 
-export function databasePath(): string {
+function databasePath(): string {
   return path.join(app.getPath('userData'), 'loomtv.sqlite');
 }
 
@@ -190,7 +190,7 @@ function migrateLibraryFoldersKind(database: Database.Database): void {
   `);
 }
 
-export function hasLibraryData(): boolean {
+function hasLibraryData(): boolean {
   const row = getDb().prepare('SELECT COUNT(*) AS count FROM media_items').get() as { count: number };
   const folders = getDb().prepare('SELECT COUNT(*) AS count FROM library_folders').get() as { count: number };
   return row.count > 0 || folders.count > 0;
