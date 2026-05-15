@@ -27,424 +27,81 @@ import { ScrollArea } from './ui/scroll-area';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
 import { desktopApi } from '@/lib/desktopApi';
+import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import {
   getPlayableStartPosition,
-  getProgressState,
   hydrateProgressFromDatabase,
   isWatched,
   progressFraction,
   saveProgress as savePlaybackProgress,
 } from '@/lib/progress';
-import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
-const AUTOPLAY_NEXT_EPISODE_KEY = 'loomtvAutoplayNextEpisode';
-const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
-const WATCHED_THRESHOLD = 0.9;
-const CONTROLS_HIDE_MS = 3000;
-const NEXT_EPISODE_COUNTDOWN_SECONDS = 3;
-const NEXT_EPISODE_PROMPT_REMAINING_SECONDS = 30;
-const REPLAY_FROM_START_REMAINING_SECONDS = 8;
-const END_COMPLETION_TOLERANCE_SECONDS = 1.5;
-const HLS_RECOVERY_ATTEMPTS = 3;
-const HLS_TRANSCODE_RESTART_ATTEMPTS = 2;
-const HLS_FIRST_EXTENSIONS = new Set(['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts']);
-const DEFAULT_EPISODE_PANEL_WIDTH = 288;
-const DEFAULT_MEDIA_PANEL_WIDTH = 360;
-const MIN_SIDE_PANEL_WIDTH = 260;
-const MAX_SIDE_PANEL_RATIO = 0.4;
-const DEFAULT_SKIP_BACK_SECONDS = 10;
-const DEFAULT_SKIP_FORWARD_SECONDS = 15;
-type PlayerState = 'loading' | 'ready' | 'error';
-type ControlTab = 'video' | 'audio' | 'subtitles';
-type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
-type PlaybackEngine = 'mpv' | 'html5';
-type TrackPreferenceType = 'audio' | 'subtitle';
-
-type SubtitleStyleSettings = {
-  delaySeconds: number;
-  position: number;
-  scale: number;
-  fontSize: number;
-  fontColor: string;
-  borderColor: string;
-  borderWidth: number;
-  backgroundColor: string;
-};
-
-interface MediaTrack {
-  index: number;
-  type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
-  codec?: string;
-  language?: string;
-  title?: string;
-  channels?: number;
-  width?: number;
-  height?: number;
-  profile?: string;
-  pixelFormat?: string;
-  default?: boolean;
-  forced?: boolean;
-}
-
-type ProbeData = { durationSeconds?: number; tracks?: MediaTrack[] };
-type TrackPreference = {
-  enabled: boolean;
-  index?: number;
-  language?: string;
-  title?: string;
-  codec?: string;
-  forced?: boolean;
-};
-
-type PlaybackTrackPreferences = {
-  audio?: TrackPreference;
-  subtitle?: TrackPreference;
-};
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface EpisodeMeta {
-  season: number;
-  number: number;
-  title: string;
-  summary: string;
-  still: string;
-  rating: number;
-  airDate: string;
-}
-
-interface EpisodeFile {
-  season: number;
-  episode: number;
-  filePath: string;
-  localMetadata?: {
-    durationSeconds?: number;
-  };
-}
-
-export interface VideoPlayerProps {
-  mediaId?: string;
-  filePath: string;
-  title: string;
-  subtitles?: { lang: string; label: string; url: string }[];
-  episodes?: EpisodeMeta[];
-  episodeFiles?: EpisodeFile[];
-  currentSeason?: number;
-  currentEpisode?: number;
-  onClose: () => void;
-  onEpisodeChange?: (filePath: string, season: number, episode: number) => void;
-}
+import {
+  CONTROLS_HIDE_MS,
+  DEFAULT_EPISODE_PANEL_WIDTH,
+  DEFAULT_MEDIA_PANEL_WIDTH,
+  DEFAULT_SKIP_BACK_SECONDS,
+  DEFAULT_SKIP_FORWARD_SECONDS,
+  DEFAULT_SUBTITLE_STYLE,
+  END_COMPLETION_TOLERANCE_SECONDS,
+  HLS_RECOVERY_ATTEMPTS,
+  HLS_TRANSCODE_RESTART_ATTEMPTS,
+  NEXT_EPISODE_COUNTDOWN_SECONDS,
+  NEXT_EPISODE_PROMPT_REMAINING_SECONDS,
+  REPLAY_FROM_START_REMAINING_SECONDS,
+  WATCHED_THRESHOLD,
+  subtitleCueTiming,
+} from './VideoPlayer/constants';
+import type {
+  AspectMode,
+  ControlTab,
+  EpisodeFile,
+  EpisodeMeta,
+  MediaTrack,
+  PlaybackEngine,
+  PlayerState,
+  SubtitleStyleSettings,
+  TrackPreference,
+  VideoPlayerProps,
+} from './VideoPlayer/types';
+export type { VideoPlayerProps } from './VideoPlayer/types';
+import {
+  cleanEpisodeTitle,
+  clampSeconds,
+  clampSidePanelWidth,
+  epCode,
+  externalSubtitleOrdinal,
+  firstSubtitleTrackIndex,
+  firstTrackIndex,
+  formatTime,
+  getStoredDuration,
+  hlsErrorSummary,
+  isInProgress,
+  loadAutoplayNextEpisode,
+  loadSubtitlesDefaultEnabled,
+  loadTrackPreferences,
+  maxSidePanelWidth,
+  mediaErrorMessage,
+  mpvTrackType,
+  normalizeTrackField,
+  preferredTrackIndex,
+  probeDurationSeconds,
+  probeTracks,
+  saveAutoplayNextEpisode,
+  saveSubtitlesDefaultEnabled,
+  saveTrackPreference,
+  selectedEmbeddedSubtitle,
+  shouldRestartMissingLocalHls,
+  shouldStartWithTranscode,
+  subtitleOrdinal,
+  subtitleSource,
+  trackLabel,
+  trackPreferenceScope,
+  transcodeErrorMessage,
+} from './VideoPlayer/helpers';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
-const subtitleCueTiming = new WeakMap<TextTrackCue, { startTime: number; endTime: number }>();
-const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
-  delaySeconds: 0,
-  position: 96,
-  scale: 1,
-  fontSize: 32,
-  fontColor: '#ffffff',
-  borderColor: '#000000',
-  borderWidth: 3,
-  backgroundColor: '#000000',
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function cleanEpisodeTitle(raw: string, season: number, episode: number): string {
-  if (!raw) return `Episode ${episode}`;
-  const officialTitle = cleanEpisodeTitleForDisplay(raw, undefined, season, episode);
-  if (officialTitle !== `Episode ${episode}`) return officialTitle;
-  let s = raw;
-  s = s.replace(new RegExp(`^.*?[Ss]0*${season}\\s*[Ee]0*${episode}\\s*[-–_.\\s]*`, ''), '');
-  s = s.replace(
-    /[\s._-]*(?:\[|\()?(?:2160p|1080p|720p|480p|4K|BluRay|BDRip|WEB-DL|WEBRip|HDTV|AMZN|NF|DSNP|x264|x265|H\.264|H\.265|HEVC|AAC|AC3|DTS|SAMPA)\b.*$/i,
-    '',
-  );
-  s = s.replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return s || `Episode ${episode}`;
-}
-
-function epCode(season: number, episode: number): string {
-  return episodeCode(season, episode);
-}
-
-function formatTime(secs: number): string {
-  if (!Number.isFinite(secs) || secs < 0) return '0:00';
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = Math.floor(secs % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function shouldStartWithTranscode(filePath: string): boolean {
-  const ext = filePath.split('.').pop()?.toLowerCase() || '';
-  return HLS_FIRST_EXTENSIONS.has(ext);
-}
-
-function probeDurationSeconds(value: unknown): number {
-  const duration = (value as ProbeData | undefined)?.durationSeconds;
-  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : 0;
-}
-
-function probeTracks(value: unknown): MediaTrack[] {
-  const tracks = (value as ProbeData | undefined)?.tracks;
-  return Array.isArray(tracks) ? tracks : [];
-}
-
-function clampSeconds(value: number, max?: number): number {
-  const safeValue = Number.isFinite(value) ? value : 0;
-  const safeMax = typeof max === 'number' && Number.isFinite(max) && max > 0 ? max : undefined;
-  return Math.max(0, safeMax ? Math.min(safeValue, safeMax) : safeValue);
-}
-
-function maxSidePanelWidth(): number {
-  if (typeof window === 'undefined') return DEFAULT_MEDIA_PANEL_WIDTH;
-  return Math.max(MIN_SIDE_PANEL_WIDTH, Math.floor(window.innerWidth * MAX_SIDE_PANEL_RATIO));
-}
-
-function clampSidePanelWidth(value: number): number {
-  return Math.max(MIN_SIDE_PANEL_WIDTH, Math.min(value, maxSidePanelWidth()));
-}
-
-function trackLabel(track: MediaTrack, ordinal: number): string {
-  const language = track.language ? `[${track.language}] ` : '';
-  const title = track.title ? `${track.title} ` : '';
-  const flags = [
-    track.default ? 'default' : undefined,
-    track.forced ? 'forced' : undefined,
-  ].filter(Boolean).join(', ');
-  const details = track.type === 'video'
-    ? [track.codec, track.width && track.height ? `${track.width}x${track.height}` : undefined, track.pixelFormat].filter(Boolean).join(', ')
-    : track.type === 'audio'
-      ? [track.codec, track.channels ? `${track.channels}ch` : undefined].filter(Boolean).join(', ')
-      : [track.codec || 'subtitle', flags].filter(Boolean).join(', ');
-  return `#${ordinal + 1} ${language}${title}${details}`.trim();
-}
-
-function subtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
-  return tracks.filter((track) => track.type === 'subtitle').findIndex((track) => track.index === streamIndex);
-}
-
-function selectedEmbeddedSubtitle(tracks: MediaTrack[], streamIndex: number): { track: MediaTrack; ordinal: number } | null {
-  if (streamIndex < 0) return null;
-  const track = tracks.find((candidate) => candidate.type === 'subtitle' && candidate.index === streamIndex);
-  if (!track) return null;
-  const ordinal = subtitleOrdinal(tracks, streamIndex);
-  return ordinal >= 0 ? { track, ordinal } : null;
-}
-
-function externalSubtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
-  return tracks.findIndex((track) => track.index === streamIndex);
-}
-
-function firstTrackIndex(tracks: MediaTrack[], type: MediaTrack['type']): number {
-  return tracks.find((track) => track.type === type)?.index ?? -1;
-}
-
-function firstSubtitleTrackIndex(tracks: MediaTrack[]): number {
-  const candidates = tracks.filter((track) => track.type === 'subtitle');
-  if (candidates.length === 0) return -1;
-
-  const fullSubtitle = candidates.find((track) => track.default && !track.forced)
-    || candidates.find((track) => normalizeTrackField(track.language).startsWith('en') && !track.forced)
-    || candidates.find((track) => !track.forced);
-
-  return (fullSubtitle || candidates[0]).index;
-}
-
-function normalizeTrackField(value?: string): string {
-  return (value || '').trim().toLowerCase();
-}
-
-function trackPreferenceScope(mediaId: string | undefined, filePath: string): string {
-  return mediaId ? `media:${mediaId}` : `file:${filePath}`;
-}
-
-function loadTrackPreferences(scope: string): PlaybackTrackPreferences {
-  try {
-    const all = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) || '{}') as Record<string, PlaybackTrackPreferences>;
-    return all[scope] || {};
-  } catch {
-    return {};
-  }
-}
-
-function saveTrackPreference(scope: string, type: TrackPreferenceType, track: MediaTrack | undefined, enabled: boolean): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) || '{}') as Record<string, PlaybackTrackPreferences>;
-    all[scope] = {
-      ...(all[scope] || {}),
-      [type]: {
-        enabled,
-        index: track?.index,
-        language: normalizeTrackField(track?.language),
-        title: normalizeTrackField(track?.title),
-        codec: normalizeTrackField(track?.codec),
-        forced: track?.forced,
-      },
-    };
-    localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify(all));
-  } catch (_error) {
-    // Track selection still applies for the current session.
-  }
-}
-
-function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceType, preference?: TrackPreference): number | null {
-  if (!preference) return null;
-  if (!preference.enabled) return -1;
-
-  const candidates = tracks.filter((track) => track.type === type);
-  if (candidates.length === 0) return null;
-  const scopedCandidates = type === 'subtitle'
-    && candidates.some((track) => !track.forced)
-    ? candidates.filter((track) => !track.forced)
-    : candidates;
-
-  const language = normalizeTrackField(preference.language);
-  const title = normalizeTrackField(preference.title);
-  const codec = normalizeTrackField(preference.codec);
-
-  const sameIndex = scopedCandidates.find((track) => track.index === preference.index);
-  if (sameIndex) return sameIndex.index;
-
-  const exact = scopedCandidates.find((track) =>
-    language && normalizeTrackField(track.language) === language
-    && normalizeTrackField(track.title) === title
-    && normalizeTrackField(track.codec) === codec,
-  );
-  if (exact) return exact.index;
-
-  const languageAndTitle = scopedCandidates.find((track) =>
-    language && normalizeTrackField(track.language) === language
-    && title && normalizeTrackField(track.title) === title,
-  );
-  if (languageAndTitle) return languageAndTitle.index;
-
-  const languageMatch = scopedCandidates.find((track) =>
-    language && normalizeTrackField(track.language) === language,
-  );
-  if (languageMatch) return languageMatch.index;
-
-  const titleMatch = scopedCandidates.find((track) =>
-    title && normalizeTrackField(track.title) === title,
-  );
-  if (titleMatch) return titleMatch.index;
-
-  return scopedCandidates.find((track) => track.index === preference.index)?.index ?? null;
-}
-
-function subtitleSource(url: string, serverBase: string): string {
-  if (/^https?:\/\//i.test(url)) return url;
-  if (!serverBase) return url;
-  return `${serverBase}${url.startsWith('/') ? url : `/${url}`}`;
-}
-
-function hlsResponseCode(data: unknown): number | undefined {
-  if (!data || typeof data !== 'object') return undefined;
-  const response = (data as { response?: { code?: unknown } }).response;
-  return typeof response?.code === 'number' ? response.code : undefined;
-}
-
-function hlsErrorSummary(data: unknown): string {
-  if (!data || typeof data !== 'object') return String(data);
-  const value = data as {
-    type?: unknown;
-    details?: unknown;
-    fatal?: unknown;
-    reason?: unknown;
-    error?: { message?: unknown };
-    response?: { code?: unknown; text?: unknown; url?: unknown };
-  };
-  return JSON.stringify({
-    type: value.type,
-    details: value.details,
-    fatal: value.fatal,
-    reason: value.reason,
-    message: value.error?.message,
-    response: value.response,
-  });
-}
-
-function shouldRestartMissingLocalHls(data: unknown): boolean {
-  if (!data || typeof data !== 'object') return false;
-  const detail = String((data as { details?: unknown }).details || '');
-  const statusCode = hlsResponseCode(data);
-  return statusCode === 404 && /manifest|level/i.test(detail);
-}
-
-function mpvTrackType(type: 'video' | 'audio' | 'subtitle'): 'video' | 'audio' | 'sub' {
-  return type === 'subtitle' ? 'sub' : type;
-}
-
-function getStoredDuration(filePath: string): number {
-  return getProgressState(filePath).duration;
-}
-
-function loadSubtitlesDefaultEnabled(): boolean {
-  try {
-    return localStorage.getItem(SUBTITLES_DEFAULT_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-}
-
-function saveSubtitlesDefaultEnabled(enabled: boolean): void {
-  try {
-    localStorage.setItem(SUBTITLES_DEFAULT_KEY, enabled ? 'true' : 'false');
-  } catch (_error) {
-    // Ignore storage failures; subtitles still work for this session.
-  }
-}
-
-function loadAutoplayNextEpisode(): boolean {
-  try {
-    return localStorage.getItem(AUTOPLAY_NEXT_EPISODE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-}
-
-function saveAutoplayNextEpisode(enabled: boolean): void {
-  try {
-    localStorage.setItem(AUTOPLAY_NEXT_EPISODE_KEY, enabled ? 'true' : 'false');
-  } catch (_error) {
-    // Autoplay still applies for the current session.
-  }
-}
-
-function isInProgress(filePath: string, duration?: number): boolean {
-  return getProgressState(filePath, duration).inProgress;
-}
-
-function mediaErrorMessage(error: MediaError | null): string {
-  if (!error) return 'Playback error';
-  if (error.message) return error.message;
-  return `Playback error (${error.code})`;
-}
-
-function transcodeErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') {
-    try {
-      const parsed = JSON.parse(error) as { error?: unknown };
-      if (typeof parsed.error === 'string') return parsed.error;
-    } catch {
-      return error;
-    }
-    return error;
-  }
-  if (error && typeof error === 'object' && 'error' in error) {
-    const nestedError = (error as { error?: unknown }).error;
-    if (typeof nestedError === 'string') return nestedError;
-  }
-  return 'Unable to start transcoding fallback';
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
