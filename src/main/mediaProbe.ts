@@ -75,8 +75,6 @@ export function probeMedia(filePath: string): ProbeResult {
 }
 
 export function canDirectPlay(_filePath: string, _probeResult: ProbeResult, backend: MediaBackend): boolean {
-  if (backend === 'mpv') return true;
-
   if (backend === 'html5') {
     const videoCodec = (_probeResult.videoCodec || '').toLowerCase();
     const audioCodec = (_probeResult.audioCodec || '').toLowerCase();

@@ -10,7 +10,7 @@ export function yearFromDateString(value?: string): number {
   return Number.isFinite(year) ? year : parseYearFromText(value);
 }
 
-export function yearsMatch(localYear?: number, remoteYear?: number): boolean {
+function yearsMatch(localYear?: number, remoteYear?: number): boolean {
   if (!localYear || !remoteYear) return true;
   return Math.abs(localYear - remoteYear) <= 1;
 }
@@ -30,7 +30,7 @@ export function normalizeTitleForMatch(value?: string): string {
     .trim();
 }
 
-export function isGenericMediaFolderTitle(value: string): boolean {
+function isGenericMediaFolderTitle(value: string): boolean {
   return /^(movie|movies|film|films|tv|tv shows|shows|series|season|season \d+|anime|animations?)$/i
     .test(normalizeTitleForMatch(value));
 }
@@ -89,6 +89,79 @@ export function uniqueLocalTitles(candidates: Array<string | null | undefined>):
   });
 
   return titles;
+}
+
+function countUsefulTitles(candidates: Array<string | null | undefined>): Array<{ title: string; count: number }> {
+  const counts = new Map<string, { title: string; count: number }>();
+
+  candidates.forEach((candidate) => {
+    const title = usefulLocalTitle(candidate);
+    if (!title) return;
+    const key = normalizeTitleForMatch(title);
+    counts.set(key, { title, count: (counts.get(key)?.count || 0) + 1 });
+  });
+
+  return [...counts.values()];
+}
+
+function basenameFromPath(value?: string | null): string {
+  return (value || '').split(/[\\/]/).pop() || '';
+}
+
+export function seriesTitleFromEpisodeFileName(value?: string | null): string | null {
+  if (!value) return null;
+  const withoutExt = basenameFromPath(value).replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts)$/i, '');
+  const withoutReleaseGroups = withoutExt.replace(/\[[^\]]*]/g, ' ');
+  const beforeEpisodeMarker = withoutReleaseGroups
+    .replace(/\s+-\s+S\d{1,2}E\d{1,3}\s+-\s+.*$/i, ' ')
+    .replace(/\s+[Ss]\d{1,2}[Ee]\d{1,3}\s+.*$/i, ' ')
+    .replace(/\s+-\s+\d{1,3}\s*$/i, ' ')
+    .replace(/\s+\d{1,3}\s*$/i, ' ');
+  const title = cleanMediaTitle(beforeEpisodeMarker).title;
+  if (!title || isGenericGroupingFolderTitle(title)) return null;
+  return title;
+}
+
+export function bestSeriesTitleFromEpisodeFiles(files: Array<{ filePath?: string | null }>): string | null {
+  const counts = countUsefulTitles(files.map((file) => seriesTitleFromEpisodeFileName(file.filePath)));
+  if (counts.length === 0) return null;
+  return counts
+    .sort((a, b) =>
+      b.count - a.count
+      || normalizeTitleForMatch(a.title).length - normalizeTitleForMatch(b.title).length)[0].title;
+}
+
+export function chooseMetadataSearchTitle({
+  itemTitle,
+  embeddedTitle,
+  folderTitle,
+  parsedPathTitle,
+  episodeSeriesTitle,
+  fallbackTitle,
+}: {
+  itemTitle?: string | null;
+  embeddedTitle?: string | null;
+  folderTitle?: string | null;
+  parsedPathTitle?: string | null;
+  episodeSeriesTitle?: string | null;
+  fallbackTitle?: string | null;
+}): string {
+  const displayTitle = usefulLocalTitle(itemTitle);
+  const structuralTitle =
+    usefulLocalTitle(folderTitle)
+    || usefulLocalTitle(parsedPathTitle)
+    || usefulLocalTitle(episodeSeriesTitle);
+  const trustedDisplayTitle = displayTitle
+    && (!structuralTitle || titleMatchesLocal(structuralTitle, displayTitle))
+    ? displayTitle
+    : null;
+
+  return trustedDisplayTitle
+    || structuralTitle
+    || displayTitle
+    || usefulLocalTitle(embeddedTitle)
+    || fallbackTitle
+    || '';
 }
 
 export function titleMatchesLocal(localTitle: string, remoteTitle?: string): boolean {

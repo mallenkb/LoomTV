@@ -24,11 +24,12 @@ export default function SafeArtwork({
 }: SafeArtworkProps) {
   const [sourceIndex, setSourceIndex] = useState(0);
   const sources = normalizeSources(src);
+  const sourceKey = sources.join('|');
   const currentSource = sources[sourceIndex] || '';
 
   useEffect(() => {
     setSourceIndex(0);
-  }, [sources.join('|')]);
+  }, [sourceKey]);
 
   return (
     <div className={`relative overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)] ${className}`}>

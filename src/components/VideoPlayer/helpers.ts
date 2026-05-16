@@ -65,7 +65,7 @@ export function clampSeconds(value: number, max?: number): number {
   return Math.max(0, safeMax ? Math.min(safeValue, safeMax) : safeValue);
 }
 
-export function maxSidePanelWidth(): number {
+function maxSidePanelWidth(): number {
   if (typeof window === 'undefined') return DEFAULT_MEDIA_PANEL_WIDTH;
   return Math.max(MIN_SIDE_PANEL_WIDTH, Math.floor(window.innerWidth * MAX_SIDE_PANEL_RATIO));
 }
@@ -109,7 +109,7 @@ export function firstTrackIndex(tracks: MediaTrack[], type: MediaTrack['type']):
   return tracks.find((track) => track.type === type)?.index ?? -1;
 }
 
-export function normalizeTrackField(value?: string): string {
+function normalizeTrackField(value?: string): string {
   return (value || '').trim().toLowerCase();
 }
 
@@ -207,7 +207,7 @@ export function subtitleSource(url: string, serverBase: string): string {
   return `${serverBase}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
-export function hlsResponseCode(data: unknown): number | undefined {
+function hlsResponseCode(data: unknown): number | undefined {
   if (!data || typeof data !== 'object') return undefined;
   const response = (data as { response?: { code?: unknown } }).response;
   return typeof response?.code === 'number' ? response.code : undefined;
@@ -238,10 +238,6 @@ export function shouldRestartMissingLocalHls(data: unknown): boolean {
   const detail = String((data as { details?: unknown }).details || '');
   const statusCode = hlsResponseCode(data);
   return statusCode === 404 && /manifest|level/i.test(detail);
-}
-
-export function mpvTrackType(type: 'video' | 'audio' | 'subtitle'): 'video' | 'audio' | 'sub' {
-  return type === 'subtitle' ? 'sub' : type;
 }
 
 export function getStoredDuration(filePath: string): number {

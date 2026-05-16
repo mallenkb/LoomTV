@@ -23,21 +23,22 @@
     "start": "electron-forge start",
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
     "clean:build": "node -e \"const fs=require('fs'); for (const p of ['out', '.vite']) fs.rmSync(p, { recursive: true, force: true })\"",
-    "rebuild:natives": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:natives": "electron-builder install-app-deps",
     "build:main": "vite build --config vite.main.config.ts",
     "build:preload": "vite build --config vite.preload.config.ts",
     "build:renderer": "vite build --config vite.renderer.config.ts",
-    "build": "pnpm run clean:build && pnpm run build:main && pnpm run build:preload && pnpm run build:renderer",
-    "package": "pnpm run rebuild:natives && pnpm run clean:out && electron-forge package",
-    "make": "pnpm run rebuild:natives && pnpm run clean:out && electron-forge make",
-    "make:all": "pnpm run rebuild:natives && pnpm run clean:out && electron-forge make --platform=darwin --arch=arm64 && electron-forge make --platform=win32 --arch=x64 && electron-forge make --platform=linux --arch=x64",
+    "build": "corepack pnpm run clean:build && corepack pnpm run build:main && corepack pnpm run build:preload && corepack pnpm run build:renderer",
+    "package": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && electron-forge package",
+    "make": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && electron-forge make",
+    "make:all": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && electron-forge make --platform=darwin --arch=arm64 && electron-forge make --platform=win32 --arch=x64 && electron-forge make --platform=linux --arch=x64",
     "verify:runtime": "node scripts/verify-packaged-runtime.cjs",
-    "publish": "pnpm run release",
-    "dist": "pnpm run rebuild:natives && pnpm run build && electron-builder --publish=never",
-    "dist:dir": "pnpm run rebuild:natives && pnpm run build && electron-builder --dir --publish=never",
-    "release": "pnpm run rebuild:natives && pnpm run build && electron-builder --publish=always",
-    "release:all-platforms": "pnpm run release",
-    "lint": "eslint --ext .ts,.tsx ."
+    "publish": "corepack pnpm run release",
+    "dist": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=never",
+    "dist:dir": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --dir --publish=never",
+    "release": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=always",
+    "release:all-platforms": "corepack pnpm run release",
+    "lint": "eslint --ext .ts,.tsx .",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts"
   },
   "keywords": [],
   "author": "malllenkb",
@@ -107,14 +108,6 @@
     ],
     "extraResources": [
       {
-        "from": "resources/ffmpeg",
-        "to": "ffmpeg"
-      },
-      {
-        "from": "resources/mpv",
-        "to": "mpv"
-      },
-      {
         "from": "resources/icon.png",
         "to": "icon.png"
       },
@@ -144,6 +137,12 @@
     "mac": {
       "category": "public.app-category.entertainment",
       "icon": "resources/icon.icns",
+      "extraResources": [
+        {
+          "from": "resources/ffmpeg/mac",
+          "to": "ffmpeg/mac"
+        }
+      ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
@@ -167,6 +166,12 @@
     },
     "win": {
       "icon": "resources/icon.ico",
+      "extraResources": [
+        {
+          "from": "resources/ffmpeg/win",
+          "to": "ffmpeg/win"
+        }
+      ],
       "target": [
         {
           "target": "nsis",
@@ -187,6 +192,12 @@
       "icon": "resources/icon.png",
       "category": "AudioVideo",
       "maintainer": "mallenkb <releases@loomtv.local>",
+      "extraResources": [
+        {
+          "from": "resources/ffmpeg/linux",
+          "to": "ffmpeg/linux"
+        }
+      ],
       "target": [
         "AppImage",
         "deb",

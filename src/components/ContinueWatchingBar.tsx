@@ -248,7 +248,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
     return () => {
       cancelled = true;
     };
-  }, [candidate?.duration, candidate?.filePath, candidate?.key, candidate?.position]);
+  }, [candidate]);
 
   if (isHidden || !candidate || dismissedKey === candidate.key) return null;
 

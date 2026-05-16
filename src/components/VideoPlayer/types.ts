@@ -1,7 +1,6 @@
 export type PlayerState = 'loading' | 'ready' | 'error';
 export type ControlTab = 'video' | 'audio' | 'subtitles';
 export type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
-export type PlaybackEngine = 'mpv' | 'html5';
 export type TrackPreferenceType = 'audio' | 'subtitle';
 
 export type SubtitleStyleSettings = {

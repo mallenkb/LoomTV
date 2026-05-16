@@ -1,4 +1,4 @@
-import { yearFromDateString } from './helpers';
+import { remoteMatchesAnyLocalTitle, yearFromDateString } from './helpers';
 import type { EpisodeMeta, MediaItem } from './types';
 
 export interface JikanAnimeResult extends Partial<MediaItem> {
@@ -44,7 +44,7 @@ function resolveJikanEpisodeTitle(episode: any): string {
   return typeof specificTitle === 'string' ? specificTitle.trim() : `Episode ${episodeNumber}`;
 }
 
-export async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<EpisodeMeta[]> {
+async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<EpisodeMeta[]> {
   const episodes: EpisodeMeta[] = [];
   let page = 1;
   let hasNextPage = true;
@@ -66,6 +66,20 @@ export async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<E
     page++;
   }
   return episodes;
+}
+
+function jikanHitTitles(hit: any): string[] {
+  return [
+    hit?.title,
+    hit?.title_english,
+    hit?.title_japanese,
+    ...(Array.isArray(hit?.title_synonyms) ? hit.title_synonyms : []),
+  ].filter((title): title is string => typeof title === 'string' && title.trim().length > 0);
+}
+
+function jikanHitMatchesLocal(hit: any, localTitles: string[]): boolean {
+  if (localTitles.length === 0) return true;
+  return jikanHitTitles(hit).some((title) => remoteMatchesAnyLocalTitle(localTitles, title));
 }
 
 export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | null> {
@@ -122,10 +136,12 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
   }
 }
 
-export async function fetchJikanMetadataCandidates(title: string): Promise<JikanAnimeResult[]> {
+export async function fetchJikanMetadataCandidates(title: string, localTitles: string[] = []): Promise<JikanAnimeResult[]> {
   try {
     const searchData: any = await jikanFetch(`/anime?q=${encodeURIComponent(title)}&limit=8&sfw`);
-    const hits: any[] = Array.isArray(searchData.data) ? searchData.data : [];
+    const hits: any[] = Array.isArray(searchData.data)
+      ? searchData.data.filter((hit: any) => jikanHitMatchesLocal(hit, localTitles))
+      : [];
     const results: JikanAnimeResult[] = [];
     for (const hit of hits) {
       const malId = hit.mal_id as number;

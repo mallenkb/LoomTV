@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { desktopApi } from '@/lib/desktopApi';
 import {
   AppThemeSettings,
@@ -91,7 +91,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyTheme(theme);
   }, [theme]);
 
-  const setTheme = async (updates: Partial<AppThemeSettings>) => {
+  const setTheme = useCallback(async (updates: Partial<AppThemeSettings>) => {
     const nextTheme = normalizeThemeSettings({ ...theme, ...updates });
     setThemeState(nextTheme);
     applyTheme(nextTheme);
@@ -102,9 +102,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       appDarkTheme: nextTheme.darkTheme,
       appLoaderStyle: nextTheme.loaderStyle,
     });
-  };
+  }, [theme]);
 
-  const value = useMemo(() => ({ theme, setTheme }), [theme]);
+  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
 
   return (
     <ThemeContext.Provider value={value}>
