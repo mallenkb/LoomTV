@@ -9,11 +9,13 @@ import {
   net,
   session,
   shell,
+  autoUpdater as electronAutoUpdater,
 } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
+import type { Socket as NodeSocket } from 'node:net';
 import os from 'node:os';
 import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -52,6 +54,10 @@ import {
   stopAllTranscodes,
   stopTranscode,
 } from './main/transcodeManager';
+import {
+  closeServerForUpdateInstall,
+  trackServerConnections,
+} from './main/updateInstall';
 import {
   backupDatabase,
   cacheLibraryArtwork,
@@ -159,6 +165,7 @@ let libraryMutationVersion = 0;
 
 let mediaServerPort = 3847;
 let mediaServer: http.Server | null = null;
+const mediaServerSockets = new Set<NodeSocket>();
 const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
@@ -201,6 +208,8 @@ let updateInstallStarted = false;
 let updatePromptInFlight = false;
 let updateCheckTimer: NodeJS.Timeout | null = null;
 let updateMenu: Menu | null = null;
+let updateQuitFallbackTimer: NodeJS.Timeout | null = null;
+let updateQuitFallbackCleanup: (() => void) | null = null;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
@@ -2468,6 +2477,7 @@ function startMediaServer(): Promise<number> {
     };
 
     mediaServer = http.createServer(requestHandler);
+    trackServerConnections(mediaServer, mediaServerSockets);
 
     const tryListen = (port: number) => {
       mediaServer!.listen(port, '0.0.0.0', () => {
@@ -4736,7 +4746,7 @@ function compareReleaseVersions(left?: string, right?: string): number {
 }
 
 async function checkLatestGitHubRelease(): Promise<UpdateState> {
-  setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking GitHub releases...' });
+  setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
 
   try {
     const response = await fetch(`https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`, {
@@ -4747,7 +4757,7 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
     });
 
     if (!response.ok) {
-      throw new Error(`GitHub returned ${response.status}`);
+      throw new Error(`Update check returned ${response.status}`);
     }
 
     const release = await response.json() as { tag_name?: string; html_url?: string };
@@ -4761,7 +4771,7 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
       releaseUrl: release.html_url,
       checkedAt: new Date().toISOString(),
       message: hasUpdate
-        ? `LoomTV ${latestVersion} is available. Download it from GitHub Releases.`
+        ? `LoomTV ${latestVersion} is available.`
         : `LoomTV is up to date at ${currentVersion}.`,
     });
   } catch (error) {
@@ -4789,12 +4799,50 @@ function showUpdateDownloadedPrompt() {
   })
     .then((response) => {
       if (response.response === 0) {
-        installDownloadedUpdate();
+        void installDownloadedUpdate();
       }
     })
     .finally(() => {
       updatePromptInFlight = false;
     });
+}
+
+function clearUpdateQuitFallback(): void {
+  if (updateQuitFallbackTimer) {
+    clearTimeout(updateQuitFallbackTimer);
+    updateQuitFallbackTimer = null;
+  }
+  if (updateQuitFallbackCleanup) {
+    updateQuitFallbackCleanup();
+    updateQuitFallbackCleanup = null;
+  }
+}
+
+function scheduleUpdateQuitFallback(): void {
+  clearUpdateQuitFallback();
+  const fallbackDelayMs = process.platform === 'darwin' ? 15000 : 3000;
+
+  const clearFallbackOnceQuitStarts = () => clearUpdateQuitFallback();
+  app.once('before-quit', clearFallbackOnceQuitStarts);
+  electronAutoUpdater.once('before-quit-for-update', clearFallbackOnceQuitStarts);
+  updateQuitFallbackCleanup = () => {
+    app.removeListener('before-quit', clearFallbackOnceQuitStarts);
+    electronAutoUpdater.removeListener('before-quit-for-update', clearFallbackOnceQuitStarts);
+  };
+
+  updateQuitFallbackTimer = setTimeout(() => {
+    updateQuitFallbackTimer = null;
+    if (updateQuitFallbackCleanup) {
+      updateQuitFallbackCleanup();
+      updateQuitFallbackCleanup = null;
+    }
+
+    if (!updateInstallStarted) return;
+
+    console.warn('[updates] quitAndInstall did not begin app shutdown; forcing LoomTV to quit.');
+    app.quit();
+  }, fallbackDelayMs);
+  updateQuitFallbackTimer.unref?.();
 }
 
 function refreshUpdateMenu() {
@@ -4828,7 +4876,7 @@ function buildUpdateMenu() {
       visible: updateState.status === 'downloaded',
       enabled: updateState.status === 'downloaded',
       click: () => {
-        if (updateState.status === 'downloaded') installDownloadedUpdate();
+        if (updateState.status === 'downloaded') void installDownloadedUpdate();
       },
     },
   ];
@@ -4966,48 +5014,44 @@ async function handleManualUpdateCheck() {
   }
 }
 
-function installDownloadedUpdate() {
+async function installDownloadedUpdate() {
   if (updateInstallStarted) return updateState;
   if (updateState.status !== 'downloaded') return updateState;
   updateInstallStarted = true;
 
   setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
 
-  // Drain pending playback/server work before quitAndInstall — otherwise
-  // active streams or open file handles can stall the squirrel/NSIS installer
-  // and the relaunch never happens.
+  // Drain playback/server work before quitAndInstall. Active HTTP streams can
+  // keep the process alive after every window has closed, which leaves the
+  // downloaded installer waiting for LoomTV to exit.
   try {
     stopAllTranscodes();
     destroyLanDiscovery();
-    if (mediaServer) {
-      mediaServer.close();
-      mediaServer = null;
-    }
+    const serverToClose = mediaServer;
+    mediaServer = null;
+    await closeServerForUpdateInstall(serverToClose, mediaServerSockets);
     if (updateCheckTimer) {
       clearInterval(updateCheckTimer);
       updateCheckTimer = null;
     }
-    BrowserWindow.getAllWindows().forEach((window) => {
-      try {
-        window.removeAllListeners('close');
-        window.destroy();
-      } catch {
-        // Ignore destroy errors — quitAndInstall will force-close any survivors.
-      }
-    });
   } catch (error) {
     console.warn('[updates] pre-install cleanup failed:', error);
   }
 
-  // Force-restart after install. Without isForceRunAfter:true the squirrel/NSIS
+  // Let electron-updater own the window close and app quit sequence. Destroying
+  // windows manually before this call can bypass the updater's normal restart
+  // path and leave the app sitting on "Restarting...".
+  // Force-restart after install. Without isForceRunAfter:true the NSIS/AppImage
   // installer can exit silently without relaunching the app.
   // - isSilent:true skips the NSIS UI on Windows (DMG on macOS ignores this).
   // - autoInstallOnAppQuit was set to false at configure time so this call is
   //   the single source of truth for installing.
-  setImmediate(() => {
+  setTimeout(() => {
     try {
+      scheduleUpdateQuitFallback();
       autoUpdater.quitAndInstall(true, true);
     } catch (error) {
+      clearUpdateQuitFallback();
       updateInstallStarted = false;
       setUpdateState({
         status: 'error',
@@ -5015,7 +5059,7 @@ function installDownloadedUpdate() {
         checkedAt: new Date().toISOString(),
       });
     }
-  });
+  }, 250);
 
   return updateState;
 }
@@ -5086,6 +5130,10 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('error', (error) => {
+    if (updateState.status === 'installing') {
+      updateInstallStarted = false;
+      clearUpdateQuitFallback();
+    }
     setUpdateState({
       status: 'error',
       message: error instanceof Error ? error.message : String(error),
@@ -5404,6 +5452,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('second-instance', () => {
+  if (updateInstallStarted) return;
   if (!app.isReady()) return;
   createWindow();
 });
@@ -5418,10 +5467,12 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
+  if (updateInstallStarted) return;
   createWindow();
 });
 
 app.on('before-quit', () => {
+  clearUpdateQuitFallback();
   // Skip if quitAndInstall already drained these — re-running close() on a
   // null server can throw and abort the install path.
   if (!updateInstallStarted) {

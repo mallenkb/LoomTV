@@ -612,7 +612,7 @@ export const desktopApi = {
       const response = await fetch('https://api.github.com/repos/mallenkb/LoomTV/releases/latest', {
         headers: { Accept: 'application/vnd.github+json' },
       });
-      if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+      if (!response.ok) throw new Error(`Update check returned ${response.status}`);
       const release = await response.json() as { tag_name?: string; html_url?: string };
       const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
       return {
@@ -625,8 +625,8 @@ export const desktopApi = {
         releaseUrl: release.html_url,
         checkedAt: new Date().toISOString(),
         message: latestVersion
-          ? `Latest GitHub release is LoomTV ${latestVersion}.`
-          : 'Checked GitHub releases.',
+          ? `Latest release is LoomTV ${latestVersion}.`
+          : 'Checked for updates.',
       };
     } catch (error) {
       return {
