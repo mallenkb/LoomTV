@@ -97,7 +97,7 @@ function AppShell() {
       </main>
       {nowPlaying && (
         <VideoPlayer
-          key={`${nowPlaying.mediaId || 'file'}:${nowPlaying.filePath}`}
+          key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
           mediaId={nowPlaying.mediaId}
           filePath={nowPlaying.filePath}
           title={nowPlaying.title}
