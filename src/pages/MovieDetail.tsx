@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Play, Star, Clock, ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';

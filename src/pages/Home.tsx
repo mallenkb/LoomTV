@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight, Film, FolderPlus, Play, Star, Tv } from 'lucide-react';
 import { useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';
