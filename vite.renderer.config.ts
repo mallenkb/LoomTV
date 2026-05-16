@@ -46,6 +46,7 @@ function rendererCspPlugin(): Plugin {
 
 // https://vitejs.dev/config
 export default defineConfig({
+  base: './',
   plugins: [rendererCspPlugin(), react()],
   build: {
     emptyOutDir: false,

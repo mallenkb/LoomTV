@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Play, X } from 'lucide-react';
 import { useLibrary, EpisodeFile, EpisodeMeta, MediaItem, TVShow } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
