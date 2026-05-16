@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDown, ArrowUp, ChevronDown, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette, Wifi, Copy } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import LoomLogo from '@/components/LoomLogo';
 import LoomLoader from '@/components/LoomLoader';
 import LoomPlayMark from '@/components/LoomPlayMark';
 import { AppDarkTheme, AppLoaderStyle, AppThemeColor, DARK_THEMES, THEME_COLORS } from '@/lib/theme';
+import { cn } from '@/lib/utils';
 
 type MetadataProvider = {
   id: string;
@@ -212,8 +213,8 @@ function getUpdateButtonLabel(updateState: UpdateState | null): string {
 function getCompactUpdateStatus(updateState: UpdateState | null): string {
   if (!updateState) return 'Update status is loading.';
   if (updateState.message) return updateState.message;
-  if (updateState.status === 'checking') return 'Checking GitHub releases...';
-  if (updateState.status === 'idle') return 'Ready to check GitHub releases.';
+  if (updateState.status === 'checking') return 'Checking for updates...';
+  if (updateState.status === 'idle') return 'Ready to check for updates.';
   return 'Use the button to check for the latest release.';
 }
 
@@ -266,6 +267,7 @@ export default function Settings() {
   const [isScanningPeers, setIsScanningPeers] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
+  const peerScanInFlightRef = useRef(false);
   const { theme, setTheme } = useTheme();
   const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
 
@@ -309,6 +311,10 @@ export default function Settings() {
     }
     return unsubscribeUpdates;
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
+  }, [activeSection]);
 
   const setMetadataKey = (providerId: string, value: string) => {
     setMetadataKeys((current) => ({ ...current, [providerId]: value }));
@@ -535,7 +541,9 @@ export default function Settings() {
     setRemoteLibraryStatus('Disconnected from shared library.');
   };
 
-  const scanForPeers = async () => {
+  const scanForPeers = useCallback(async () => {
+    if (peerScanInFlightRef.current) return;
+    peerScanInFlightRef.current = true;
     setIsScanningPeers(true);
     try {
       const peers = await desktopApi.discoverLocalNetworkPeers(2500);
@@ -544,9 +552,10 @@ export default function Settings() {
       console.warn('Peer scan failed:', error);
       setDiscoveredPeers([]);
     } finally {
+      peerScanInFlightRef.current = false;
       setIsScanningPeers(false);
     }
-  };
+  }, []);
 
   const revokePairedDevice = async (deviceId: string) => {
     const remaining = await desktopApi.revokePairedDevice(deviceId);
@@ -558,7 +567,7 @@ export default function Settings() {
     void scanForPeers();
     const id = setInterval(() => void scanForPeers(), 8000);
     return () => clearInterval(id);
-  }, [activeSection]);
+  }, [activeSection, scanForPeers]);
 
   useEffect(() => {
     if (!sharedLibrarySnapshot) return;
@@ -607,8 +616,19 @@ export default function Settings() {
   const currentNetworkName = localNetworkStatus?.networkName || 'Connected locally';
   const isUpdateChecking = isCheckingUpdateServer || updateState?.status === 'checking';
   const isUpdateBusy = isUpdateChecking || updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const isUpdateDownloading = updateState?.status === 'downloading';
+  const updateDownloadPercent = isUpdateDownloading
+    ? Math.max(0, Math.min(100, Math.round(updateState.downloadPercent || 0)))
+    : 0;
   const updateButtonLabel = isUpdateChecking ? 'Checking...' : getUpdateButtonLabel(updateState);
-  const updateStatusCopy = isUpdateChecking ? 'Checking GitHub releases...' : getCompactUpdateStatus(updateState);
+  const updateStatusCopy = isUpdateBusy ? '' : getCompactUpdateStatus(updateState);
+  const updateButtonStyle: React.CSSProperties | undefined = isUpdateDownloading
+    ? {
+        background: `linear-gradient(to right, color-mix(in srgb, var(--loom-accent) 72%, black) ${updateDownloadPercent}%, color-mix(in srgb, var(--loom-accent) 38%, black) ${updateDownloadPercent}%)`,
+      }
+    : isUpdateBusy
+      ? { backgroundColor: 'color-mix(in srgb, var(--loom-accent) 58%, black)' }
+      : undefined;
 
   const handleUpdateAction = async () => {
     if (isUpdateBusy) return;
@@ -639,7 +659,7 @@ export default function Settings() {
       }),
       status: 'checking',
       downloadPercent: undefined,
-      message: 'Checking GitHub releases...',
+      message: 'Checking for updates...',
     }));
     try {
       const [nextState] = await Promise.all([
@@ -652,96 +672,86 @@ export default function Settings() {
     }
   };
 
+  const handleSectionSelect = useCallback((sectionId: SettingsSection) => {
+    if (sectionId === activeSection) return;
+    setActiveSection(sectionId);
+  }, [activeSection]);
+
   return (
     <div className="loom-page h-full overflow-y-auto">
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
         <div className="mx-auto max-w-5xl pt-16">
-          <LayoutGroup>
-            <div
-              className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
-              style={{ borderRadius: 12 }}
-            >
-              {SETTINGS_SECTIONS.map((section) => {
-                const isActive = activeSection === section.id;
-                return (
-                  <button
-                    key={section.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveSection(section.id);
-                      localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, section.id);
-                    }}
-                    className={`relative h-9 rounded-[8px] px-4 text-sm font-medium transition-colors ${
-                      isActive
-                        ? 'text-[var(--loom-accent-foreground)]'
-                        : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
-                    }`}
-                    style={{ borderRadius: 8 }}
-                  >
-                    {isActive && (
-                      <motion.span
-                        layoutId="settings-active-tab"
-                        className="absolute inset-0 rounded-[8px] bg-[var(--loom-accent)]"
-                        style={{ borderRadius: 8 }}
-                        transition={{ type: 'spring', stiffness: 460, damping: 36, mass: 0.8 }}
-                      />
-                    )}
-                    <span className="relative z-10">{section.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </LayoutGroup>
-
-          {activeSection === 'playback' && (
-            <Card className="settings-panel mt-6">
-              <CardHeader>
-                <CardTitle className="text-white">Playback</CardTitle>
-                <CardDescription className="text-[var(--loom-muted)]">
-                  Adjust the default seek distances used by the player controls and keyboard shortcuts.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-white">Back skip seconds</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={playbackSkipBackSeconds}
-                      onChange={(event) => setPlaybackSkipBackSeconds(Number(event.target.value))}
-                      className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none"
+          <div
+            className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
+            style={{ borderRadius: 12 }}
+          >
+            {SETTINGS_SECTIONS.map((section) => {
+              const isActive = activeSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => handleSectionSelect(section.id)}
+                  aria-pressed={isActive}
+                  className={`relative h-9 rounded-[8px] px-4 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'text-[var(--loom-accent-foreground)]'
+                      : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
+                  }`}
+                  style={{ borderRadius: 8 }}
+                >
+                  {isActive && (
+                    <span
+                      className="absolute inset-0 rounded-[8px] bg-[var(--loom-accent)]"
+                      style={{ borderRadius: 8 }}
                     />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="text-sm font-medium text-white">Forward skip seconds</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={playbackSkipForwardSeconds}
-                      onChange={(event) => setPlaybackSkipForwardSeconds(Number(event.target.value))}
-                      className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none"
-                    />
-                  </label>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <Button onClick={() => void handleSavePlaybackSettings()}>Save playback settings</Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                  )}
+                  <span className="relative z-10">{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.div
-              key={activeSection}
-              className="space-y-6"
-              initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -8, filter: 'blur(6px)' }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            >
+          <div className="space-y-6">
+              {activeSection === 'playback' && (
+                <Card className="settings-panel">
+                  <CardHeader>
+                    <CardTitle className="text-white">Playback</CardTitle>
+                    <CardDescription className="text-[var(--loom-muted)]">
+                      Adjust the default seek distances used by the player controls and keyboard shortcuts.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-white">Back skip seconds</span>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={playbackSkipBackSeconds}
+                          onChange={(event) => setPlaybackSkipBackSeconds(Number(event.target.value))}
+                          className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="text-sm font-medium text-white">Forward skip seconds</span>
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={playbackSkipForwardSeconds}
+                          onChange={(event) => setPlaybackSkipForwardSeconds(Number(event.target.value))}
+                          className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                      <Button onClick={() => void handleSavePlaybackSettings()}>Save playback settings</Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
         {activeSection === 'library' && (
           <>
@@ -1316,12 +1326,19 @@ export default function Settings() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-              {METADATA_PROVIDERS.map((provider) => {
+              {METADATA_PROVIDERS.map((provider, providerIndex) => {
                 const currentValue = metadataKeys[provider.id] || '';
                 const isEditing = editingKeys[provider.id] ?? !currentValue;
                 const isVisible = visibleKeys[provider.id] || false;
+                const isLastBuiltInProvider = providerIndex === METADATA_PROVIDERS.length - 1;
                 return (
-                  <div key={provider.id} className="space-y-2 border-b border-[var(--loom-border)] pb-5 last:border-b-0 last:pb-0">
+                  <div
+                    key={provider.id}
+                    className={cn(
+                      'space-y-2 pb-5',
+                      !isLastBuiltInProvider && 'border-b border-[var(--loom-border)]',
+                    )}
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
@@ -1643,19 +1660,54 @@ export default function Settings() {
                   <p className="text-sm text-[var(--loom-muted)] max-w-md leading-relaxed">
                     Local media library and playback app powered by Electron, React, and FFmpeg.
                   </p>
+                  <div className={cn(
+                    'mt-3 inline-flex h-8 items-center gap-2 rounded-lg bg-[var(--loom-surface-2)] px-3 text-xs font-medium',
+                    ffmpegStatus === null
+                      ? 'text-[var(--loom-faint)]'
+                      : ffmpegStatus.available
+                        ? 'text-green-400'
+                        : 'bg-yellow-500/8 text-yellow-400 ring-1 ring-yellow-500/20',
+                  )}>
+                    {ffmpegStatus === null ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-[var(--loom-faint)]" />
+                        Checking FFmpeg...
+                      </>
+                    ) : ffmpegStatus.available ? (
+                      <>
+                        <CheckCircle className="h-3.5 w-3.5" />
+                        {isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled FFmpeg' : 'System FFmpeg'}
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-yellow-400" />
+                        FFmpeg not found
+                      </>
+                    )}
+                  </div>
                   <p className="mt-3 text-xs text-[var(--loom-faint)]">{APP_LICENSE.copyright}</p>
                 </div>
 
-                <div className="grid min-w-48 gap-3 sm:w-52">
-                  <div className="rounded-lg bg-[var(--loom-surface-2)] p-1">
+                <div className="flex min-w-0 flex-col items-end gap-3">
+                  <div className="inline-flex rounded-lg bg-[var(--loom-surface-2)] p-1">
                     <button
                       type="button"
                       onClick={() => void handleUpdateAction()}
                       disabled={isUpdateBusy}
-                      className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:cursor-wait disabled:opacity-70"
+                      className={cn(
+                        'inline-flex h-9 w-auto items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors',
+                        isUpdateBusy
+                          ? 'cursor-wait shadow-inner shadow-black/20'
+                          : 'hover:bg-[var(--loom-accent-hover)]',
+                      )}
+                      style={updateButtonStyle}
                       aria-busy={isUpdateBusy}
                     >
-                      {isUpdateBusy ? (
+                      {isUpdateChecking ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : isUpdateDownloading ? (
+                        <Download className="h-4 w-4 animate-pulse" />
+                      ) : updateState?.status === 'installing' ? (
                         <LoomLoader
                           style={theme.loaderStyle}
                           className="grid h-4 w-4 place-items-center text-current"
@@ -1668,42 +1720,11 @@ export default function Settings() {
                       {updateButtonLabel}
                     </button>
                   </div>
-                  <p className="px-1 text-[11px] leading-4 text-[var(--loom-faint)]" aria-live="polite">
-                    {updateStatusCopy}
-                  </p>
-                  {isUpdateChecking && (
-                    <div className="flex items-center gap-2 rounded-lg border border-[var(--loom-accent)]/20 bg-[var(--loom-accent)]/10 px-3 py-2 text-[11px] font-medium text-[var(--loom-accent)]">
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      Contacting the update server
-                    </div>
+                  {updateStatusCopy && (
+                    <p className="max-w-52 px-1 text-right text-[11px] leading-4 text-[var(--loom-faint)]" aria-live="polite">
+                      {updateStatusCopy}
+                    </p>
                   )}
-
-                  <div className="rounded-lg bg-[var(--loom-surface-2)] p-1">
-                    <div className={`flex h-9 items-center justify-center gap-2 rounded-md px-3 text-xs font-medium ${
-                      ffmpegStatus === null
-                        ? 'text-[var(--loom-faint)]'
-                      : ffmpegStatus.available
-                        ? 'text-green-400'
-                        : 'bg-yellow-500/8 text-yellow-400 ring-1 ring-yellow-500/20'
-                    }`}>
-                      {ffmpegStatus === null ? (
-                        <>
-                          <span className="h-2 w-2 rounded-full bg-[var(--loom-faint)]" />
-                          Checking FFmpeg...
-                        </>
-                      ) : ffmpegStatus.available ? (
-                        <>
-                          <CheckCircle className="h-3.5 w-3.5" />
-                          {isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled FFmpeg' : 'System FFmpeg'}
-                        </>
-                      ) : (
-                        <>
-                          <span className="h-2 w-2 rounded-full bg-yellow-400" />
-                          FFmpeg not found
-                        </>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -1818,8 +1839,7 @@ export default function Settings() {
           </div>
         )}
 
-            </motion.div>
-          </AnimatePresence>
+          </div>
         </div>
       </div>
     </div>

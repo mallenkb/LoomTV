@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.19](docs/releases/v1.0.19.md): fixes restart-to-update reliability and polishes update/settings UI feedback.
 - [LoomTV 1.0.17](docs/releases/v1.0.17.md): keeps unsupported local videos inside LoomTV's in-app stream/transcode player.
 - [LoomTV 1.0.16](docs/releases/v1.0.16.md): fixes episode metadata title matching for series playback.
 - [LoomTV 1.0.15](docs/releases/v1.0.15.md): improves local playback, series handoff behavior, subtitle controls, and update feedback.
