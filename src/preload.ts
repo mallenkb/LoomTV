@@ -109,43 +109,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     return () => ipcRenderer.removeListener('updates:state', handler);
   },
 
-  // Legacy MPV handlers (still used by existing VideoPlayer)
-  playWithMPV: (filePath: string, startSecs?: number) => ipcRenderer.invoke('media:play-mpv', filePath, startSecs),
-  queryMPV: () => ipcRenderer.invoke('media:query-mpv'),
-  closeMPV: () => ipcRenderer.invoke('media:close-mpv'),
-  toggleMPVPause: () => ipcRenderer.invoke('media:mpv-toggle-pause'),
-  seekMPV: (seconds: number, mode: 'relative' | 'absolute' = 'relative') => ipcRenderer.invoke('media:mpv-seek', seconds, mode),
-  setMPVVolume: (value: number) => ipcRenderer.invoke('media:mpv-set-volume', value),
-  toggleMPVMute: () => ipcRenderer.invoke('media:mpv-toggle-mute'),
-  setMPVSpeed: (value: number) => ipcRenderer.invoke('media:mpv-set-speed', value),
-  setMPVFullscreen: (fullscreen: boolean) => ipcRenderer.invoke('media:mpv-set-fullscreen', fullscreen),
-  setMPVAspectMode: (mode: 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9') =>
-    ipcRenderer.invoke('media:mpv-set-aspect-mode', mode),
-  selectMPVTrack: (type: 'video' | 'audio' | 'sub', ffIndex: number) =>
-    ipcRenderer.invoke('media:mpv-select-track', type, ffIndex),
-  selectMPVSecondarySubtitleTrack: (ffIndex: number) =>
-    ipcRenderer.invoke('media:mpv-select-secondary-subtitle-track', ffIndex),
-  setMPVSubtitleStyle: (style: SubtitleStyleOptions) =>
-    ipcRenderer.invoke('media:mpv-set-subtitle-style', style),
-  cycleMPVAudio: () => ipcRenderer.invoke('media:mpv-cycle-audio'),
-  cycleMPVSubtitle: () => ipcRenderer.invoke('media:mpv-cycle-subtitle'),
-  disableMPVSubtitles: () => ipcRenderer.invoke('media:mpv-disable-subtitles'),
-  onMPVEvent: (callback: (event: string) => void) => {
-    const handler = (_: Electron.IpcRendererEvent, event: string) => callback(event);
-    ipcRenderer.on('mpv:event', handler);
-    return () => ipcRenderer.removeListener('mpv:event', handler);
-  },
-
   media: {
     probe: (filePath: string) => ipcRenderer.invoke('media:probe', filePath),
-    canDirectPlay: (filePath: string, backend = 'mpv') => ipcRenderer.invoke('media:can-direct-play', filePath, backend),
-    playLocal: (filePath: string) => ipcRenderer.invoke('media:play-local', filePath),
-    pause: () => ipcRenderer.invoke('media:pause-local'),
-    resume: () => ipcRenderer.invoke('media:resume-local'),
-    stop: () => ipcRenderer.invoke('media:stop-local'),
-    seek: (seconds: number) => ipcRenderer.invoke('media:seek-local', seconds),
-    setVolume: (value: number) => ipcRenderer.invoke('media:set-volume-local', value),
-    getState: () => ipcRenderer.invoke('media:get-playback-state'),
+    canDirectPlay: (filePath: string, backend = 'html5') => ipcRenderer.invoke('media:can-direct-play', filePath, backend),
     startTranscode: (filePath: string, options?: {
       preset?: string;
       startSeconds?: number;

@@ -126,7 +126,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     return () => {
       cancelled = true;
     };
-  }, [movie?.filePath]);
+  }, [movie?.filePath, movie?.localMetadata?.durationSeconds]);
 
   useEffect(() => {
     const bump = () => setProgressTick((value) => value + 1);

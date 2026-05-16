@@ -57,10 +57,8 @@ import type {
   EpisodeFile,
   EpisodeMeta,
   MediaTrack,
-  PlaybackEngine,
   PlayerState,
   SubtitleStyleSettings,
-  TrackPreference,
   VideoPlayerProps,
 } from './VideoPlayer/types';
 export type { VideoPlayerProps } from './VideoPlayer/types';
@@ -79,10 +77,7 @@ import {
   loadAutoplayNextEpisode,
   loadSubtitlesDefaultEnabled,
   loadTrackPreferences,
-  maxSidePanelWidth,
   mediaErrorMessage,
-  mpvTrackType,
-  normalizeTrackField,
   preferredTrackIndex,
   probeDurationSeconds,
   probeTracks,
@@ -145,7 +140,6 @@ export default function VideoPlayer({
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
-  const [playbackEngine, setPlaybackEngine] = useState<PlaybackEngine>('html5');
   const [playerState, setPlayerState] = useState<PlayerState>('loading');
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -609,7 +603,6 @@ export default function VideoPlayer({
     hlsRecoveryAttemptsRef.current = 0;
     hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
-    setPlaybackEngine('html5');
     setPosition(0);
     setPlayerState('loading');
     setStatusMessage('Preparing stream...');
@@ -649,57 +642,14 @@ export default function VideoPlayer({
     return () => {
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
-      void desktopApi.closeMPV();
       void stopTranscodeSession();
     };
   }, [filePath, reloadToken, startTranscodedFallback, stopTranscodeSession]);
 
-  useEffect(() => {
-    if (playbackEngine !== 'mpv') return;
-    let cancelled = false;
-
-    const poll = async () => {
-      try {
-        const state = await desktopApi.queryMPV();
-        if (cancelled || !state) return;
-
-        const nextPosition = typeof state.position === 'number' && Number.isFinite(state.position) ? state.position : 0;
-        const nextDuration = typeof state.duration === 'number' && Number.isFinite(state.duration) ? state.duration : duration;
-        setPosition(nextPosition);
-        if (nextDuration > 0) setDuration(nextDuration);
-        setPaused(Boolean(state.paused));
-        setMuted(Boolean(state.muted));
-        setVolume(Math.max(0, Math.min(1, (state.volume ?? 100) / 100)));
-        if (state.speed && Number.isFinite(state.speed)) setPlaybackRate(state.speed);
-
-        if (nextPosition > 10 && nextDuration > 0) {
-          void savePlaybackProgress(filePath, nextPosition, nextDuration);
-          setTick((n) => n + 1);
-        }
-      } catch {
-        // mpv may be closing; the exit event closes the player.
-      }
-    };
-
-    void poll();
-    const interval = setInterval(() => void poll(), 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [duration, filePath, playbackEngine]);
-
-  useEffect(() => {
-    if (playbackEngine !== 'mpv') return () => undefined;
-    return desktopApi.onMPVEvent((event) => {
-      if (event === 'closed') onClose();
-    });
-  }, [onClose, playbackEngine]);
-
   // ─── Player binding, events, and fallback ────────────────────────────────
   useEffect(() => {
     const video = videoRef.current;
-    if (playbackEngine !== 'html5' || !video || !streamUrl) return;
+    if (!video || !streamUrl) return;
 
     const sourceToken = ++sourceLoadTokenRef.current;
     const isHlsSource = /\.m3u8(\?|$)/i.test(streamUrl);
@@ -978,7 +928,6 @@ export default function VideoPlayer({
     filePath,
     streamUrl,
     streamIsTranscoded,
-    playbackEngine,
     clearHls,
     clearVideoElement,
     startTranscodedFallback,
@@ -991,12 +940,12 @@ export default function VideoPlayer({
     setShowTopControls(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      if (playbackEngine === 'mpv' ? !paused : !videoRef.current?.paused) {
+      if (!videoRef.current?.paused) {
         setShowControls(false);
         setShowTopControls(false);
       }
     }, CONTROLS_HIDE_MS);
-  }, [paused, playbackEngine]);
+  }, []);
 
   const handlePointerMove = useCallback(() => {
     resetHideTimer();
@@ -1037,20 +986,12 @@ export default function VideoPlayer({
     sourceLoadTokenRef.current += 1;
     clearNextEpisodeCountdown();
     void stopTranscodeSession();
-    void desktopApi.closeMPV();
   }, [clearNextEpisodeCountdown, stopTranscodeSession]);
 
   // ─── Controls ──────────────────────────────────────────────────────────────
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
-    if (playbackEngine === 'mpv') {
-      const nextPaused = !paused;
-      userPausedRef.current = nextPaused;
-      void desktopApi.toggleMPVPause();
-      setPaused(nextPaused);
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -1062,7 +1003,7 @@ export default function VideoPlayer({
     userPausedRef.current = true;
     video.autoplay = false;
     video.pause();
-  }, [paused, playbackEngine, playerState]);
+  }, [playerState]);
 
   const shutdownPlayback = useCallback(() => {
     playerActiveRef.current = false;
@@ -1077,7 +1018,6 @@ export default function VideoPlayer({
       video.pause();
     }
     void stopTranscodeSession();
-    void desktopApi.closeMPV();
   }, [clearHls, clearNextEpisodeCountdown, stopTranscodeSession]);
 
   const handleClose = useCallback((event?: React.SyntheticEvent) => {
@@ -1097,13 +1037,6 @@ export default function VideoPlayer({
   }, [onClose, shutdownPlayback]);
 
   const toggleFullscreen = useCallback(() => {
-    if (playbackEngine === 'mpv') {
-      const nextFullscreen = !fullscreen;
-      setFullscreen(nextFullscreen);
-      void desktopApi.setMPVFullscreen(nextFullscreen);
-      return;
-    }
-
     const el = containerRef.current;
     if (!el) return;
     if (!document.fullscreenElement) {
@@ -1111,7 +1044,7 @@ export default function VideoPlayer({
     } else {
       void document.exitFullscreen();
     }
-  }, [fullscreen, playbackEngine]);
+  }, []);
 
   const openMediaPanel = useCallback(() => {
     if (showMediaPanel && mediaPanelTab === 'video') {
@@ -1177,33 +1110,18 @@ export default function VideoPlayer({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (playbackEngine === 'mpv') {
-      void desktopApi.setMPVSpeed(playbackRate);
-    } else if (video) {
+    if (video) {
       video.playbackRate = playbackRate;
     }
-  }, [playbackEngine, playbackRate, streamUrl]);
-
-  useEffect(() => {
-    if (playbackEngine !== 'mpv') return;
-    void desktopApi.setMPVAspectMode(aspectMode);
-  }, [aspectMode, playbackEngine]);
+  }, [playbackRate, streamUrl]);
 
   useEffect(() => {
     applyNativeTextTrackVisibility();
-    if (playbackEngine === 'mpv') {
-      void desktopApi.setMPVSubtitleStyle(subtitleStyle);
-    }
-  }, [applyNativeTextTrackVisibility, playbackEngine, subtitleStyle]);
+  }, [applyNativeTextTrackVisibility, subtitleStyle]);
 
   const seekTo = useCallback((targetSeconds: number, options: { restartTranscoded?: boolean } = {}) => {
     const nextPosition = clampSeconds(targetSeconds, duration || undefined);
     setPosition(nextPosition);
-
-    if (playbackEngine === 'mpv') {
-      void desktopApi.seekMPV(nextPosition, 'absolute');
-      return;
-    }
 
     const video = videoRef.current;
     if (!video) return;
@@ -1227,13 +1145,7 @@ export default function VideoPlayer({
 
     const directDuration = Number.isFinite(video.duration) ? video.duration : duration;
     video.currentTime = clampSeconds(nextPosition, directDuration || undefined);
-  }, [duration, playbackEngine, startTranscodedFallback, streamIsTranscoded]);
-
-  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    seekTo(((e.clientX - rect.left) / rect.width) * duration, { restartTranscoded: true });
-  }, [duration, seekTo]);
+  }, [duration, startTranscodedFallback, streamIsTranscoded]);
 
   const handleProgressPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!duration) return;
@@ -1283,25 +1195,16 @@ export default function VideoPlayer({
     const v = parseFloat(e.target.value);
     setVolume(v);
     setMuted(v === 0);
-    if (playbackEngine === 'mpv') {
-      void desktopApi.setMPVVolume(v * 100);
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     video.volume = v;
     video.muted = v === 0;
-  }, [playbackEngine]);
+  }, []);
 
   const toggleMute = useCallback(() => {
-    if (playbackEngine === 'mpv') {
-      void desktopApi.toggleMPVMute();
-      setMuted((value) => !value);
-      return;
-    }
     const video = videoRef.current;
     if (video) video.muted = !video.muted;
-  }, [playbackEngine]);
+  }, []);
 
   const restartForTrackChange = useCallback(() => {
     if (!streamUrl) return;
@@ -1313,10 +1216,6 @@ export default function VideoPlayer({
 
   const applySubtitleStyleToStream = useCallback(() => {
     applyNativeTextTrackVisibility();
-    if (playbackEngine === 'mpv') {
-      void desktopApi.setMPVSubtitleStyle(subtitleStyle);
-      return;
-    }
     if (streamIsTranscoded && selectedSubtitleTrackIndexRef.current >= 0) {
       hlsTranscodeRestartAttemptsRef.current = 0;
       void startTranscodedFallback(position, {
@@ -1326,7 +1225,7 @@ export default function VideoPlayer({
         deferStopCurrent: true,
       });
     }
-  }, [applyNativeTextTrackVisibility, playbackEngine, position, startTranscodedFallback, streamIsTranscoded, subtitleStyle]);
+  }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamIsTranscoded]);
 
   const updateSubtitleStyle = useCallback((key: keyof SubtitleStyleSettings, value: number | string) => {
     setSubtitleStyle((current) => ({
@@ -1347,24 +1246,16 @@ export default function VideoPlayer({
   const selectVideoTrack = useCallback((trackIndex: number) => {
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
-    if (playbackEngine === 'mpv') {
-      void desktopApi.selectMPVTrack(mpvTrackType('video'), trackIndex);
-      return;
-    }
     restartForTrackChange();
-  }, [playbackEngine, restartForTrackChange]);
+  }, [restartForTrackChange]);
 
   const selectAudioTrack = useCallback((trackIndex: number) => {
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'audio');
     saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
-    if (playbackEngine === 'mpv') {
-      void desktopApi.selectMPVTrack(mpvTrackType('audio'), trackIndex);
-      return;
-    }
     restartForTrackChange();
-  }, [playbackEngine, restartForTrackChange, trackPreferenceScopeKey]);
+  }, [restartForTrackChange, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
     const enabled = trackIndex >= 0 || trackIndex <= -1000;
@@ -1379,31 +1270,20 @@ export default function VideoPlayer({
       applyNativeTextTrackVisibility();
       return;
     }
-    if (playbackEngine === 'mpv') {
-      void desktopApi.selectMPVTrack(mpvTrackType('subtitle'), trackIndex);
-      return;
-    }
     restartForTrackChange();
-  }, [applyNativeTextTrackVisibility, playbackEngine, restartForTrackChange, trackPreferenceScopeKey]);
+  }, [applyNativeTextTrackVisibility, restartForTrackChange, trackPreferenceScopeKey]);
 
   const changeVolume = useCallback((delta: number) => {
-    const currentVolume = playbackEngine === 'mpv'
-      ? volume
-      : videoRef.current?.volume ?? volume;
+    const currentVolume = videoRef.current?.volume ?? volume;
     const nextVolume = Math.min(1, Math.max(0, currentVolume + delta));
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
-
-    if (playbackEngine === 'mpv') {
-      void desktopApi.setMPVVolume(nextVolume * 100);
-      return;
-    }
 
     const video = videoRef.current;
     if (!video) return;
     video.volume = nextVolume;
     video.muted = nextVolume === 0;
-  }, [playbackEngine, volume]);
+  }, [volume]);
 
   const changePlaybackRate = useCallback((delta: number) => {
     setPlaybackRate((value) => Math.min(3, Math.max(0.25, value + delta)));
@@ -2063,7 +1943,7 @@ export default function VideoPlayer({
                   <div>
                     <p className="mb-2 text-xs font-semibold text-white">Audio delay</p>
                     <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/55">
-                      Delay controls need the native mpv engine path; track switching is available here.
+                      Delay controls are not available for in-app playback yet; track switching is available here.
                     </p>
                   </div>
                 </div>

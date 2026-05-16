@@ -7,6 +7,7 @@ import {
   ipcMain,
   protocol,
   net,
+  session,
   shell,
 } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
@@ -14,10 +15,22 @@ import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
-import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { autoUpdater } from 'electron-updater';
-import { mpvController } from './main/mpv/mpvController';
+import {
+  LOCAL_ACCESS_HEADER,
+  LOCAL_ACCESS_QUERY_PARAM,
+  addLocalAccessToken,
+  allowedCorsOrigin,
+  createLocalAccessToken,
+  hasValidLocalAccessToken,
+  isLoopbackAddress,
+  localAccessQuery,
+  normalizeRemoteAddress,
+  requestLanToken,
+  timingSafeStringEqual,
+} from './main/serverSecurity';
 import {
   advertiseLanService,
   destroyLanDiscovery,
@@ -27,15 +40,10 @@ import {
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import {
-  getLocalState,
-  pauseLocal,
-  playLocal,
-  resumeLocal,
-  seekLocal,
-  setLocalVolume,
-  stopLocal,
-} from './main/localPlaybackEngine';
-import { assertLocalMediaPath, canDirectPlay, probeMedia } from './main/mediaProbe';
+  assertLocalMediaPath,
+  canDirectPlay,
+  probeMedia,
+} from './main/mediaProbe';
 import type { ApiResult, SubtitleStyleOptions, TranscodeOptions } from './main/mediaTypes';
 import {
   cleanupOldTranscodes,
@@ -63,6 +71,8 @@ import {
 } from './main/database';
 import {
   cleanMediaTitle,
+  bestSeriesTitleFromEpisodeFiles,
+  chooseMetadataSearchTitle,
   isGenericGroupingFolderTitle,
   normalizeTitleForMatch,
   numericRating,
@@ -149,6 +159,7 @@ let libraryMutationVersion = 0;
 
 let mediaServerPort = 3847;
 let mediaServer: http.Server | null = null;
+const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
 
@@ -195,6 +206,9 @@ const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
 const MAIN_WINDOW_NAME =
   typeof MAIN_WINDOW_VITE_NAME === 'string' && MAIN_WINDOW_VITE_NAME ? MAIN_WINDOW_VITE_NAME : 'main_window';
+const ALLOWED_CORS_ORIGINS = new Set<string>(
+  [MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : ''].filter(Boolean),
+);
 
 function isUpdaterSupportedPlatform(): boolean {
   return process.platform === 'darwin'
@@ -457,14 +471,14 @@ function loadSettings(): AppSettings {
       saveSettingsToDatabase(settings as unknown as Record<string, unknown>);
       return settings;
     }
-  } catch (e) {}
+  } catch {}
   return normalizeSettings({});
 }
 
 function saveSettings(settings: AppSettings): void {
   try {
     saveSettingsToDatabase(normalizeSettings(settings) as unknown as Record<string, unknown>);
-  } catch (e) {}
+  } catch {}
 }
 
 // ─── FFmpeg ──────────────────────────────────────────────────────────────────
@@ -480,7 +494,7 @@ function isCompatibleDarwinBinary(binaryPath: string): boolean {
     if (process.arch === 'x64') {
       return description.includes('x86_64');
     }
-  } catch (error) {
+  } catch {
     return true;
   }
 
@@ -493,7 +507,7 @@ function existingCompatibleBinary(candidate?: string | null): string | null {
     if (fs.existsSync(candidate) && isCompatibleDarwinBinary(candidate)) {
       return candidate;
     }
-  } catch (error) {}
+  } catch {}
   return null;
 }
 
@@ -532,7 +546,7 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe'): string[] {
       .map((value) => value.trim())
       .filter(Boolean);
     candidates.push(...whichResult);
-  } catch (e) {}
+  } catch {}
 
   return [...new Set(candidates)];
 }
@@ -541,7 +555,7 @@ function hasFFmpegEncoder(binaryPath: string, encoder: string): boolean {
   try {
     const output = execFileSync(binaryPath, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
     return output.includes(encoder);
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -631,14 +645,14 @@ function findFFprobe(): string | null {
   try {
     const staticBinary = existingCompatibleBinary(ffprobeStatic?.path);
     if (staticBinary) return staticBinary;
-  } catch (e) {}
+  } catch {}
   try {
     if (ffmpegStatic) {
       const sibling = path.join(path.dirname(ffmpegStatic), binaryName('ffprobe'));
       const siblingBinary = existingCompatibleBinary(sibling);
       if (siblingBinary) return siblingBinary;
     }
-  } catch (e) {}
+  } catch {}
   try {
     const candidate = path.join(
       app.getAppPath(),
@@ -651,7 +665,7 @@ function findFFprobe(): string | null {
     );
     const bundledBinary = existingCompatibleBinary(candidate);
     if (bundledBinary) return bundledBinary;
-  } catch (e) {}
+  } catch {}
 
   return firstExistingBinary(systemBinaryCandidates('ffprobe'));
 }
@@ -916,17 +930,17 @@ function getImageMimeType(filePath: string): string {
 }
 
 function getLocalImageUrl(filePath: string): string {
-  const params = new URLSearchParams({ path: filePath });
+  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
   return `http://127.0.0.1:${mediaServerPort}/api/local-image?${params.toString()}`;
 }
 
 function getLocalThumbnailUrl(filePath: string, time = '00:03:00'): string {
-  const params = new URLSearchParams({ path: filePath, t: time });
+  const params = addLocalAccessToken(new URLSearchParams({ path: filePath, t: time }), LOCAL_ACCESS_TOKEN);
   return `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
 }
 
 function getEmbeddedThumbnailUrl(filePath: string, streamIndex?: number): string {
-  const params = new URLSearchParams({ path: filePath, embedded: '1' });
+  const params = addLocalAccessToken(new URLSearchParams({ path: filePath, embedded: '1' }), LOCAL_ACCESS_TOKEN);
   if (streamIndex !== undefined) params.set('stream', String(streamIndex));
   return `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
 }
@@ -1075,12 +1089,11 @@ function getLocalNetworkName(): string {
 }
 
 function getRequestRemoteAddress(req: http.IncomingMessage): string {
-  return (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  return normalizeRemoteAddress(req.socket.remoteAddress);
 }
 
 function isLoopbackRequest(req: http.IncomingMessage): boolean {
-  const address = getRequestRemoteAddress(req);
-  return address === '127.0.0.1' || address === '::1' || address === 'localhost';
+  return isLoopbackAddress(getRequestRemoteAddress(req));
 }
 
 function getLanServerBase(): string | null {
@@ -1107,23 +1120,8 @@ function getLanHmacSecret(): string {
   return loadSettings().localNetworkHmacSecret || '';
 }
 
-function timingSafeStringEqual(a: string, b: string): boolean {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const aBuf = Buffer.from(a);
-  const bBuf = Buffer.from(b);
-  if (aBuf.length !== bBuf.length) return false;
-  return timingSafeEqual(aBuf, bBuf);
-}
-
-function requestBearerToken(req: http.IncomingMessage): string {
-  const authHeader = req.headers.authorization || '';
-  const bearer = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-  if (bearer?.startsWith('Bearer ')) return bearer.slice('Bearer '.length).trim();
-  return '';
-}
-
 function requestToken(reqUrl: URL, req: http.IncomingMessage): string {
-  return requestBearerToken(req) || reqUrl.searchParams.get('token') || '';
+  return requestLanToken(reqUrl, req.headers);
 }
 
 function findPairedDeviceByToken(token: string): LanPairedDevice | null {
@@ -1198,8 +1196,17 @@ function authorizeLanRequest(reqUrl: URL, req: http.IncomingMessage): { ok: bool
   return { ok: false };
 }
 
+function authorizeLocalRequest(reqUrl: URL, req: http.IncomingMessage): boolean {
+  return isLoopbackRequest(req) && hasValidLocalAccessToken(reqUrl, req.headers, LOCAL_ACCESS_TOKEN);
+}
+
 function requireLocalOrLanAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
-  if (isLoopbackRequest(req)) return true;
+  if (authorizeLocalRequest(reqUrl, req)) return true;
+  if (isLoopbackRequest(req)) {
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('Local access token is required.');
+    return false;
+  }
   if (authorizeLanRequest(reqUrl, req).ok) return true;
 
   res.writeHead(isLanSharingEnabled() ? 401 : 403, { 'Content-Type': 'text/plain' });
@@ -1208,7 +1215,12 @@ function requireLocalOrLanAccess(reqUrl: URL, req: http.IncomingMessage, res: ht
 }
 
 function requireStreamAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
-  if (isLoopbackRequest(req)) return true;
+  if (authorizeLocalRequest(reqUrl, req)) return true;
+  if (isLoopbackRequest(req)) {
+    res.writeHead(401, { 'Content-Type': 'text/plain' });
+    res.end('Local access token is required.');
+    return false;
+  }
   if (isLanSharingEnabled() && isSignedLanRequestValid(reqUrl)) return true;
   if (authorizeLanRequest(reqUrl, req).ok) return true;
 
@@ -1362,26 +1374,16 @@ function artworkDeliveryUrl(source?: string | null): string {
 
   if (isLocalMediaServerArtworkUrl(durableSource)) {
     const parsed = new URL(durableSource);
+    parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
     return `http://127.0.0.1:${mediaServerPort}${parsed.pathname}${parsed.search}`;
   }
 
   if (isExternalArtworkUrl(durableSource)) {
-    const params = new URLSearchParams({ source: durableSource });
+    const params = addLocalAccessToken(new URLSearchParams({ source: durableSource }), LOCAL_ACCESS_TOKEN);
     return `http://127.0.0.1:${mediaServerPort}/api/cached-artwork?${params.toString()}`;
   }
 
   return durableSource;
-}
-
-function rewriteLocalServerUrl(source: string, base: string, token?: string): string {
-  try {
-    const parsed = new URL(source);
-    const next = new URL(`${parsed.pathname}${parsed.search}`, base);
-    if (token) next.searchParams.set('token', token);
-    return next.toString();
-  } catch {
-    return source;
-  }
 }
 
 function rewriteLocalServerUrlSigned(source: string, base: string): string {
@@ -1406,6 +1408,52 @@ function remoteArtworkDeliveryUrl(source: string, base: string, _token: string):
 
 function artworkDeliveryUrls(sources?: string[]): string[] {
   return Array.from(new Set((sources || []).map(artworkDeliveryUrl).filter(Boolean)));
+}
+
+function localSubtitleUrl(source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed, `http://127.0.0.1:${mediaServerPort}`);
+    if (parsed.pathname !== '/subtitle') return source;
+    parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
+    return /^https?:\/\//i.test(trimmed) ? parsed.toString() : `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return source;
+  }
+}
+
+function signedSubtitleUrlForRemote(base: string, source: string): string {
+  const trimmed = source.trim();
+  if (!trimmed) return trimmed;
+
+  try {
+    const parsed = new URL(trimmed, base);
+    if (parsed.pathname !== '/subtitle') return source;
+    const params = new URLSearchParams(parsed.search);
+    params.delete(LOCAL_ACCESS_QUERY_PARAM);
+    params.delete('sig');
+    params.delete('exp');
+    params.delete('nonce');
+    return buildSignedLanUrl(base, parsed.pathname, params);
+  } catch {
+    return source;
+  }
+}
+
+function subtitleRecordsForRenderer(subtitles?: MediaItem['subtitles']): MediaItem['subtitles'] {
+  return subtitles?.map((subtitle) => ({
+    ...subtitle,
+    url: localSubtitleUrl(subtitle.url),
+  }));
+}
+
+function subtitleRecordsForLocalNetwork(subtitles: MediaItem['subtitles'] | undefined, base: string): MediaItem['subtitles'] {
+  return subtitles?.map((subtitle) => ({
+    ...subtitle,
+    url: signedSubtitleUrlForRemote(base, subtitle.url),
+  }));
 }
 
 function orderedArtworkCandidates(...urls: Array<string | null | undefined>): string[] {
@@ -1704,16 +1752,26 @@ function makeLocalEpisodeMeta(files: EpisodeFile[], seriesTitle?: string): Episo
 
 // ─── HTTP Media Server ────────────────────────────────────────────────────────
 
+function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
+  const allowedOrigin = allowedCorsOrigin(origin, ALLOWED_CORS_ORIGINS);
+  res.setHeader('Vary', 'Origin');
+  if (!allowedOrigin) return !origin;
+
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Headers', `Range, Content-Type, Authorization, ${LOCAL_ACCESS_HEADER}`);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+  return true;
+}
+
 function startMediaServer(): Promise<number> {
   return new Promise((resolve, reject) => {
     const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
+      const corsAllowed = applyCorsHeaders(req, res);
 
       if (req.method === 'OPTIONS') {
-        res.writeHead(200);
+        res.writeHead(corsAllowed ? 204 : 403);
         res.end();
         return;
       }
@@ -1819,13 +1877,16 @@ function startMediaServer(): Promise<number> {
         return;
       }
 
-      // /stream and artwork endpoints accept signed URLs; HLS playlists too.
-      const isStreamRoute = reqUrl.pathname === '/stream' || reqUrl.pathname.startsWith('/hls/');
+      // Stream-like endpoints accept signed LAN URLs.
+      const isStreamRoute = reqUrl.pathname === '/stream'
+        || reqUrl.pathname === '/subtitle'
+        || reqUrl.pathname.startsWith('/hls/');
       const isArtworkRoute = reqUrl.pathname === '/api/cached-artwork'
         || reqUrl.pathname === '/api/local-image'
         || reqUrl.pathname === '/api/thumbnail';
       const hasValidSignature = isLanSharingEnabled() && isSignedLanRequestValid(reqUrl);
-      if (!isStreamRoute && !(isArtworkRoute && (isLoopbackRequest(req) || hasValidSignature)) && !requireLocalOrLanAccess(reqUrl, req, res)) return;
+      const hasLocalAccess = authorizeLocalRequest(reqUrl, req);
+      if (!isStreamRoute && !(isArtworkRoute && (hasLocalAccess || hasValidSignature)) && !requireLocalOrLanAccess(reqUrl, req, res)) return;
 
       if (reqUrl.pathname === '/api/library' && req.method === 'GET') {
         writeJson(res, 200, libraryForRenderer());
@@ -2160,6 +2221,9 @@ function startMediaServer(): Promise<number> {
             (body.options || {}) as TranscodeOptions,
             `http://127.0.0.1:${mediaServerPort}`,
           )))
+          .then((result) => result.ok && result.data
+            ? { ...result, data: { ...result.data, playlistUrl: appendLocalAccessTokenToUrl(result.data.playlistUrl) } }
+            : result)
           .then((result) => writeJson(res, result.ok ? 200 : 400, result))
           .catch((error) => {
             console.error('start transcode API error:', error);
@@ -2196,6 +2260,8 @@ function startMediaServer(): Promise<number> {
       }
 
       if (reqUrl.pathname === '/subtitle') {
+        if (!requireStreamAccess(reqUrl, req, res)) return;
+
         if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           res.end('Not found');
@@ -2210,14 +2276,15 @@ function startMediaServer(): Promise<number> {
             'Cache-Control': 'no-store',
           });
           res.end(ext === '.srt' ? srtToVtt(body) : body);
-        } catch (e) {
+        } catch {
           res.writeHead(500, { 'Content-Type': 'text/plain' });
           res.end('Could not read subtitle');
         }
         return;
       }
 
-      if (serveHls(reqUrl, res)) return;
+      if (reqUrl.pathname.startsWith('/hls/') && !requireStreamAccess(reqUrl, req, res)) return;
+      if (serveHls(reqUrl, res, localAccessQuery(LOCAL_ACCESS_TOKEN))) return;
 
       if (reqUrl.pathname !== '/stream') {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -2360,7 +2427,7 @@ function startMediaServer(): Promise<number> {
         let stat: fs.Stats;
         try {
           stat = fs.statSync(filePath);
-        } catch (e) {
+        } catch {
           res.writeHead(500);
           res.end();
           return;
@@ -3679,17 +3746,6 @@ async function scanLibrary(
   return nextLibrary;
 }
 
-async function scanLegacyLibrary(folders: string[]): Promise<LibraryData> {
-  const folderGroups = normalizeLibraryFolderGroups({ libraryFolders: folders });
-  return scanLibrary({
-    movies: [],
-    tvShows: [],
-    animeShows: [],
-    libraryFolders: flattenLibraryFolders(folderGroups),
-    libraryFolderGroups: folderGroups,
-  });
-}
-
 // ─── Library persistence ──────────────────────────────────────────────────────
 
 function localTitleFromPath(filePath?: string): string | null {
@@ -3700,30 +3756,6 @@ function localTitleFromPath(filePath?: string): string | null {
   const parentTitle = cleanMediaTitle(path.basename(path.dirname(filePath))).title;
   if (parentTitle && !isGenericGroupingFolderTitle(parentTitle)) return parentTitle;
   return null;
-}
-
-function seriesTitleFromEpisodeName(value?: string): string | null {
-  if (!value) return null;
-  const withoutExt = value.replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts)$/i, '');
-  const withoutReleaseGroups = withoutExt.replace(/\[[^\]]*]/g, ' ');
-  const beforeEpisodeMarker = withoutReleaseGroups
-    .replace(/\s+-\s+S\d{1,2}E\d{1,3}\s+-\s+.*$/i, ' ')
-    .replace(/\s+[Ss]\d{1,2}[Ee]\d{1,3}\s+.*$/i, ' ')
-    .replace(/\s+-\s+\d{1,3}\s*$/i, ' ')
-    .replace(/\s+\d{1,3}\s*$/i, ' ');
-  const title = cleanMediaTitle(beforeEpisodeMarker).title;
-  if (!title || isGenericGroupingFolderTitle(title)) return null;
-  return title;
-}
-
-function bestSeriesTitleFromEpisodes(item: MediaItem): string | null {
-  const candidates = (item.episodeFiles || []).flatMap((episodeFile) => [
-    seriesTitleFromEpisodeName(path.basename(episodeFile.filePath)),
-    seriesTitleFromEpisodeName(episodeFile.title || ''),
-  ]);
-  const titles = uniqueLocalTitles(candidates);
-  if (titles.length === 0) return null;
-  return titles.sort((a, b) => normalizeTitleForMatch(b).length - normalizeTitleForMatch(a).length)[0];
 }
 
 function pathExists(candidatePath?: string): boolean {
@@ -3882,6 +3914,7 @@ function itemWithArtworkDeliveryUrls(item: MediaItem): MediaItem {
     backdrop,
     posterCandidates,
     backdropCandidates,
+    subtitles: subtitleRecordsForRenderer(item.subtitles),
     episodes: item.episodes?.map((episode) => ({
       ...episode,
       still: artworkDeliveryUrl(episode.still),
@@ -3896,6 +3929,12 @@ function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
     tvShows: (data.tvShows || []).map(itemWithArtworkDeliveryUrls),
     animeShows: (data.animeShows || []).map(itemWithArtworkDeliveryUrls),
   };
+}
+
+function appendLocalAccessTokenToUrl(url: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
+  return parsed.toString();
 }
 
 function signedStreamUrlForRemote(base: string, filePath: string): string {
@@ -3919,6 +3958,7 @@ function itemForLocalNetwork(item: MediaItem, base: string, token: string): Medi
     backdrop,
     posterCandidates,
     backdropCandidates,
+    subtitles: subtitleRecordsForLocalNetwork(item.subtitles, base),
     episodes: item.episodes?.map((episode) => ({
       ...episode,
       still: remoteArtworkDeliveryUrl(artworkDeliveryUrl(episode.still), base, token),
@@ -4117,6 +4157,25 @@ function uniqueMetadataCandidates(candidates: Array<OfficialMetadataCandidate | 
   });
 }
 
+function metadataResultMatchesLocalTitle(
+  metadata: (Partial<MediaItem> & { aliases?: string[] }) | null | undefined,
+  localTitles: string[],
+): boolean {
+  if (!metadata) return false;
+  const remoteTitles = [
+    metadata.title,
+    ...(Array.isArray(metadata.aliases) ? metadata.aliases : []),
+  ].filter((title): title is string => typeof title === 'string' && title.trim().length > 0);
+  return remoteTitles.some((remoteTitle) => remoteMatchesAnyLocalTitle(localTitles, remoteTitle));
+}
+
+function matchingMetadataResults<T extends Partial<MediaItem> & { aliases?: string[] }>(
+  candidates: T[],
+  localTitles: string[],
+): T[] {
+  return candidates.filter((candidate) => metadataResultMatchesLocalTitle(candidate, localTitles));
+}
+
 function metadataCandidateScore(candidate: OfficialMetadataCandidate, preferredTitle: string, localTitles: string[]): number {
   const normalizedCandidate = normalizeTitleForMatch(candidate.title);
   const normalizedPreferred = normalizeTitleForMatch(preferredTitle);
@@ -4215,22 +4274,24 @@ function itemArtworkLookupData(item: MediaItem): {
   const parsedPathTitle = representativePath ? cleanMediaTitle(path.basename(representativePath)).title : '';
   const folderTitle = item.filePath ? cleanMediaTitle(path.basename(item.filePath)).title : '';
   const embeddedTitle = item.type === 'movie' ? probe.embeddedTitle : probe.embeddedShowTitle;
-  const episodeSeriesTitle = item.type === 'movie' ? null : bestSeriesTitleFromEpisodes(item);
-  const searchTitle =
-    usefulLocalTitle(episodeSeriesTitle || '')
-    || usefulLocalTitle(embeddedTitle)
-    || usefulLocalTitle(folderTitle)
-    || usefulLocalTitle(parsedPathTitle)
-    || usefulLocalTitle(item.title)
-    || item.title;
-  const localTitles = uniqueLocalTitles([
-    searchTitle,
-    episodeSeriesTitle,
-    item.title,
+  const episodeSeriesTitle = item.type === 'movie' ? null : bestSeriesTitleFromEpisodeFiles(item.episodeFiles || []);
+  const pathTitle = localTitleFromPath(representativePath || item.filePath) || '';
+  const searchTitle = chooseMetadataSearchTitle({
+    itemTitle: item.title,
     embeddedTitle,
     folderTitle,
+    parsedPathTitle: pathTitle || parsedPathTitle,
+    episodeSeriesTitle,
+    fallbackTitle: item.title,
+  });
+  const localTitles = uniqueLocalTitles([
+    searchTitle,
+    item.title,
+    folderTitle,
     parsedPathTitle,
-    localTitleFromPath(representativePath || item.filePath) || '',
+    pathTitle,
+    episodeSeriesTitle,
+    embeddedTitle,
   ]);
   const providerIds = mergeProviderIds(
     probe.providerIds || {},
@@ -4268,11 +4329,11 @@ async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<
     return sortMetadataCandidates(uniqueMetadataCandidates([
       metadataCandidate('TMDB', tmdbById, title),
       metadataCandidate('TMDB', tmdbBySearch, title),
-      ...tmdbCandidates.map((candidate) => metadataCandidate('TMDB', candidate, title)),
+      ...matchingMetadataResults(tmdbCandidates, localTitles).map((candidate) => metadataCandidate('TMDB', candidate, title)),
       omdbMetadataCandidate(omdbById, title),
       omdbMetadataCandidate(omdbBySearch, title),
       metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
-      ...tvCandidates.map((candidate) => metadataCandidate('TVmaze', candidate, title)),
+      ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
     ]), title, localTitles);
   }
 
@@ -4280,7 +4341,7 @@ async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<
   const [omdbById, omdbBySearch, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvMeta, tvCandidates] = await Promise.all([
     providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
     fetchOMDbMetadata(title, year, omdbApiKey),
-    likelyAnime ? fetchJikanMetadataCandidates(title) : Promise.resolve([]),
+    likelyAnime ? fetchJikanMetadataCandidates(title, localTitles) : Promise.resolve([]),
     providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
     fetchTMDBTVMetadata(title, year, tmdbApiKey),
     fetchTMDBTVMetadataCandidates(title, year, tmdbApiKey),
@@ -4288,14 +4349,14 @@ async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<
     fetchTVMetadataCandidates(title, year),
   ]);
   return sortMetadataCandidates(uniqueMetadataCandidates([
-    ...jikanCandidates.map((candidate) => metadataCandidate('Jikan', candidate, title)),
+    ...matchingMetadataResults(jikanCandidates, localTitles).map((candidate) => metadataCandidate('Jikan', candidate, title)),
     metadataCandidate('TMDB', tmdbById, title),
     metadataCandidate('TMDB', remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null, title),
-    ...tmdbCandidates.map((candidate) => metadataCandidate('TMDB', candidate, title)),
+    ...matchingMetadataResults(tmdbCandidates, localTitles).map((candidate) => metadataCandidate('TMDB', candidate, title)),
     omdbMetadataCandidate(omdbById, title),
     omdbMetadataCandidate(remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null, title),
     metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
-    ...tvCandidates.map((candidate) => metadataCandidate('TVmaze', candidate, title)),
+    ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
   ]), title, localTitles);
 }
 
@@ -4339,7 +4400,7 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     fetchTVMetadata(title, year),
   ]);
   const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
-  const matchedJikan = remoteMatchesAnyLocalTitle(localTitles, jikanMeta?.title) ? jikanMeta : null;
+  const matchedJikan = metadataResultMatchesLocalTitle(jikanMeta, localTitles) ? jikanMeta : null;
   const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
   const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
   const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
@@ -4535,6 +4596,51 @@ function applyAppIcon() {
   }
 }
 
+let rendererSecurityPolicyConfigured = false;
+
+function configureRendererSecurityPolicy(): void {
+  if (rendererSecurityPolicyConfigured) return;
+  rendererSecurityPolicyConfigured = true;
+
+  const scriptSrc = ["'self'", 'file:'];
+  if (MAIN_WINDOW_DEV_SERVER_URL) {
+    scriptSrc.push("'unsafe-inline'", "'unsafe-eval'");
+  }
+
+  const connectSrc = [
+    "'self'",
+    'file:',
+    'http://127.0.0.1:*',
+    'http://localhost:*',
+    'http://[::1]:*',
+    'http://*:*',
+    'https:',
+    'plexserver:',
+  ];
+  if (MAIN_WINDOW_DEV_SERVER_URL) {
+    connectSrc.push('ws://localhost:*', 'ws://127.0.0.1:*', 'ws://[::1]:*');
+  }
+
+  const csp = [
+    "default-src 'self' file: data: blob:",
+    `script-src ${scriptSrc.join(' ')}`,
+    "style-src 'self' file: 'unsafe-inline'",
+    "img-src 'self' file: data: blob: http: https: plexserver:",
+    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* plexserver:",
+    `connect-src ${connectSrc.join(' ')}`,
+    "font-src 'self' file: data:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-src 'none'",
+  ].join('; ');
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = { ...(details.responseHeaders || {}) };
+    responseHeaders['Content-Security-Policy'] = [csp];
+    callback({ responseHeaders });
+  });
+}
+
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -4554,15 +4660,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // TODO(security): webSecurity:false is here so the renderer (loaded
-      // from file:// in production) can fetch from http://127.0.0.1:*. The
-      // tighter replacement is either (a) register a `loomtv-media://`
-      // privileged scheme and route stream/artwork through it, or (b) keep
-      // webSecurity:true and add a CSP via session.webRequest that allows
-      // connect-src/media-src http://127.0.0.1:* + http://localhost:*.
-      // Either change needs manual verification of direct play, HLS, the
-      // transcode fallback, and LAN-shared playback on macOS/Windows/Linux.
-      webSecurity: false,
+      webSecurity: true,
     },
   };
   const iconPath = getWindowIconPath();
@@ -4880,8 +4978,6 @@ function installDownloadedUpdate() {
   // and the relaunch never happens.
   try {
     stopAllTranscodes();
-    void stopLocal(mainWindow);
-    void mpvController.stop({ suppressEvent: true });
     destroyLanDiscovery();
     if (mediaServer) {
       mediaServer.close();
@@ -5106,7 +5202,7 @@ ipcMain.handle('media:play', async (_event, filePath: string) => {
     assertLocalMediaPath(filePath);
     // In-app playback is handled by the renderer's <video> player.
     return false;
-  } catch (e) {
+  } catch {
     return false;
   }
 });
@@ -5118,7 +5214,7 @@ ipcMain.handle('media:get-stream-url', (_event, filePath: string, options?: Tran
   // Stream directly from the local media server. Routing through the custom
   // plexserver:// protocol can exhaust Electron's net.fetch resources during
   // repeated video range requests.
-  const params = new URLSearchParams({ path: filePath });
+  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
   appendStreamOptionParams(params, options);
   const isTranscoded = Boolean(options?.forceTranscode)
     || typeof options?.videoTrackIndex === 'number'
@@ -5136,8 +5232,10 @@ ipcMain.handle('media:get-stream-url', (_event, filePath: string, options?: Tran
 });
 
 ipcMain.handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
-  const base = `http://127.0.0.1:${mediaServerPort}/api/thumbnail?path=${encodeURIComponent(filePath)}`;
-  return { url: time ? `${base}&t=${encodeURIComponent(time)}` : base };
+  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
+  if (time) params.set('t', time);
+  const base = `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
+  return { url: base };
 });
 
 ipcMain.handle('media:get-file-info', (_event, filePath: string) => {
@@ -5146,7 +5244,7 @@ ipcMain.handle('media:get-file-info', (_event, filePath: string) => {
     const exists = fs.existsSync(filePath);
     const size = exists ? fs.statSync(filePath).size : 0;
     return { size, path: filePath, exists };
-  } catch (e) {
+  } catch {
     return { size: 0, path: filePath, exists: false };
   }
 });
@@ -5224,7 +5322,13 @@ ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string,
 });
 ipcMain.handle('database:backup', () => backupDatabase());
 ipcMain.handle('database:clear', () => libraryForRenderer(clearAppData()));
-ipcMain.handle('shell:open-external', (_event, url: string) => shell.openExternal(url));
+ipcMain.handle('shell:open-external', (_event, url: string) => {
+  const parsed = new URL(String(url || ''));
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Only http and https links can be opened externally.');
+  }
+  return shell.openExternal(parsed.toString());
+});
 ipcMain.handle('updates:get-state', () => updateState);
 ipcMain.handle('updates:check', () => checkForUpdates());
 ipcMain.handle('updates:install', () => {
@@ -5238,109 +5342,20 @@ ipcMain.handle('media:ffmpeg-available', () => {
 
 ipcMain.handle('media:probe', (_event, filePath: string) => safeResult(() => probeMedia(filePath)));
 
-ipcMain.handle('media:can-direct-play', (_event, filePath: string, backend: 'mpv' | 'html5' | 'hls' = 'mpv') =>
+ipcMain.handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
   safeResult(() => {
     const result = probeMedia(filePath);
     return canDirectPlay(filePath, result, backend);
   }),
 );
 
-ipcMain.handle('media:play-local', (_event, filePath: string) => safeResult(() => playLocal(filePath, mainWindow)));
-ipcMain.handle('media:pause-local', () => safeResult(() => pauseLocal()));
-ipcMain.handle('media:resume-local', () => safeResult(() => resumeLocal()));
-ipcMain.handle('media:stop-local', () => safeResult(() => stopLocal(mainWindow)));
-ipcMain.handle('media:seek-local', (_event, seconds: number) => safeResult(() => seekLocal(Number(seconds) || 0)));
-ipcMain.handle('media:set-volume-local', (_event, volume: number) => safeResult(() => setLocalVolume(Number(volume) || 0)));
-ipcMain.handle('media:get-playback-state', () => safeResult(() => getLocalState()));
-
 ipcMain.handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
-  safeResult(() => startTranscode(filePath, options || {}, `http://127.0.0.1:${mediaServerPort}`)),
+  safeResult(async () => {
+    const session = await startTranscode(filePath, options || {}, `http://127.0.0.1:${mediaServerPort}`);
+    return { ...session, playlistUrl: appendLocalAccessTokenToUrl(session.playlistUrl) };
+  }),
 );
 ipcMain.handle('media:stop-transcode', (_event, sessionId: string) => safeResult(() => stopTranscode(sessionId)));
-
-// ─── MPV integration ──────────────────────────────────────────────────────────
-// Uses MpvController (src/main/mpv/mpvController.ts) which wraps the mpv process
-// and a proper JSON IPC client with request_id matching.
-
-// Wire the natural-exit event so the renderer panel can close itself.
-mpvController.onExit(() => {
-  mainWindow?.webContents.send('mpv:event', 'closed');
-});
-
-// ── Existing preload-compatible handlers ──────────────────────────────────────
-
-ipcMain.handle('media:play-mpv', async (_event, filePath: string, startSecs?: number) => {
-  try {
-    await mpvController.launch(filePath, { startSeconds: startSecs });
-    return { ok: true };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error('[mpv] launch failed:', msg);
-    return { error: msg };
-  }
-});
-
-ipcMain.handle('media:query-mpv', async () => {
-  const state = await mpvController.getPlaybackState();
-  if (!state) return null;
-  return state;
-});
-
-ipcMain.handle('media:close-mpv', async () => {
-  await mpvController.stop({ suppressEvent: true });
-});
-
-ipcMain.handle('media:mpv-toggle-pause', async () => {
-  await mpvController.togglePause();
-});
-
-ipcMain.handle('media:mpv-seek', async (_event, seconds: number, mode: 'relative' | 'absolute' = 'relative') => {
-  await mpvController.seek(Number(seconds) || 0, mode);
-});
-
-ipcMain.handle('media:mpv-set-volume', async (_event, value: number) => {
-  await mpvController.setVolume(Number(value) || 0);
-});
-
-ipcMain.handle('media:mpv-toggle-mute', async () => {
-  await mpvController.toggleMute();
-});
-
-ipcMain.handle('media:mpv-set-speed', async (_event, value: number) => {
-  await mpvController.setSpeed(Number(value) || 1);
-});
-
-ipcMain.handle('media:mpv-set-fullscreen', async (_event, fullscreen: boolean) => {
-  await mpvController.setFullscreen(Boolean(fullscreen));
-});
-
-ipcMain.handle('media:mpv-set-aspect-mode', async (_event, mode: 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9') => {
-  await mpvController.setAspectMode(mode);
-});
-
-ipcMain.handle('media:mpv-select-track', async (_event, type: 'video' | 'audio' | 'sub', ffIndex: number) => {
-  await mpvController.selectTrack(type, Number(ffIndex));
-});
-
-ipcMain.handle('media:mpv-select-secondary-subtitle-track', async (_event, ffIndex: number) => {
-  await mpvController.selectSecondarySubtitleTrack(Number(ffIndex));
-});
-
-ipcMain.handle('media:mpv-set-subtitle-style', async (_event, style: SubtitleStyleOptions) => {
-  await mpvController.setSubtitleStyle(style || {});
-});
-
-ipcMain.handle('media:mpv-cycle-audio', async () => {
-  await mpvController.cycleAudio();
-});
-
-ipcMain.handle('media:mpv-cycle-subtitle', async () => {
-  await mpvController.cycleSubtitle();
-});
-
-ipcMain.handle('media:mpv-disable-subtitles', async () => {
-  await mpvController.disableSubtitles();
-});
 
 // ── VideoPlayer uses HTML5 <video> + the HTTP media server directly.
 // No player:* IPC handlers needed.
@@ -5361,6 +5376,7 @@ app.whenReady().then(async () => {
   protocol.handle('plexserver', async (request: Request) => {
     try {
       const parsed = new URL(request.url);
+      parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
       const targetUrl = `http://127.0.0.1:${mediaServerPort}${parsed.pathname}${parsed.search}`;
 
       // Forward Range header so video seeking works correctly
@@ -5376,6 +5392,7 @@ app.whenReady().then(async () => {
     }
   });
 
+  configureRendererSecurityPolicy();
   createWindow();
   configureAutoUpdater();
   setTimeout(() => {
@@ -5396,8 +5413,6 @@ app.on('window-all-closed', () => {
   // its own quit and the install path needs a clean exit.
   if (updateInstallStarted) return;
   stopAllTranscodes();
-  void stopLocal(mainWindow);
-  void mpvController.stop({ suppressEvent: true });
   destroyLanDiscovery();
   if (process.platform !== 'darwin') app.quit();
 });
@@ -5408,11 +5423,9 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   // Skip if quitAndInstall already drained these — re-running close() on a
-  // null server or stopping mpv twice can throw and abort the install path.
+  // null server can throw and abort the install path.
   if (!updateInstallStarted) {
     stopAllTranscodes();
-    void stopLocal(mainWindow);
-    void mpvController.stop({ suppressEvent: true });
   }
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { appendQueryToHlsPlaylist } from './hlsPlaylist';
 import { findFFmpeg } from './mediaBinaries';
 import { assertLocalMediaPath } from './mediaProbe';
 import type { SubtitleStyleOptions, TranscodeOptions, TranscodeSession } from './mediaTypes';
@@ -102,52 +103,6 @@ function escapeSubtitleFilterPath(filePath: string): string {
 function isBitmapSubtitle(codec?: string): boolean {
   const normalized = (codec || '').toLowerCase();
   return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
-}
-
-type SubtitlePlacement = 'primary' | 'secondary';
-
-interface SubtitleSelection {
-  trackIndex: number;
-  streamOrdinal: number;
-  codec?: string;
-  placement: SubtitlePlacement;
-}
-
-function subtitleSelections(options: TranscodeOptions): SubtitleSelection[] {
-  const selections: SubtitleSelection[] = [];
-  if (typeof options.subtitleTrackIndex === 'number' && options.subtitleTrackIndex >= 0) {
-    selections.push({
-      trackIndex: options.subtitleTrackIndex,
-      streamOrdinal: typeof options.subtitleStreamOrdinal === 'number' ? options.subtitleStreamOrdinal : 0,
-      codec: options.subtitleCodec,
-      placement: 'primary',
-    });
-  }
-
-  if (
-    typeof options.secondarySubtitleTrackIndex === 'number'
-    && options.secondarySubtitleTrackIndex >= 0
-    && options.secondarySubtitleTrackIndex !== options.subtitleTrackIndex
-  ) {
-    selections.push({
-      trackIndex: options.secondarySubtitleTrackIndex,
-      streamOrdinal: typeof options.secondarySubtitleStreamOrdinal === 'number'
-        ? options.secondarySubtitleStreamOrdinal
-        : 0,
-      codec: options.secondarySubtitleCodec,
-      placement: 'secondary',
-    });
-  }
-
-  return selections;
-}
-
-function hasSubtitleSelection(options: TranscodeOptions): boolean {
-  return subtitleSelections(options).length > 0;
-}
-
-function hasBitmapSubtitleSelection(options: TranscodeOptions): boolean {
-  return subtitleSelections(options).some((selection) => isBitmapSubtitle(selection.codec));
 }
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -423,7 +378,7 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
 
   try {
     return await launchTranscode(ffmpeg, filePath, cleanSoftwareOptions(options, true), serverBase);
-  } catch (error) {
+  } catch {
     try {
       return await launchTranscode(ffmpeg, filePath, cleanSoftwareOptions(options, false), serverBase);
     } catch (finalError) {
@@ -449,7 +404,7 @@ export function stopAllTranscodes(): void {
   }
 }
 
-export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
+export function serveHls(reqUrl: URL, res: http.ServerResponse, playlistQueryString = ''): boolean {
   const match = reqUrl.pathname.match(/^\/hls\/([^/]+)\/(.+)$/);
   if (!match) return false;
 
@@ -480,6 +435,10 @@ export function serveHls(reqUrl: URL, res: http.ServerResponse): boolean {
           : 'application/octet-stream';
   const serveFile = () => {
     res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+    if (filePath.endsWith('.m3u8') && playlistQueryString) {
+      res.end(appendQueryToHlsPlaylist(fs.readFileSync(filePath, 'utf8'), playlistQueryString));
+      return;
+    }
     fs.createReadStream(filePath).pipe(res);
   };
 

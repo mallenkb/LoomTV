@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/main.ts",
+    "src/preload.ts",
+    "src/renderer.tsx",
+    "forge.config.ts",
+    "vite.*.config.ts",
+    "tests/*.test.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "tests/**/*.ts",
+    "forge.config.ts",
+    "vite.*.config.ts"
+  ],
+  "ignore": [
+    "forge.env.d.ts"
+  ],
+  "ignoreDependencies": [
+    "pnpm"
+  ]
+}

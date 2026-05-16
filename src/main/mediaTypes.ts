@@ -1,4 +1,4 @@
-export type MediaBackend = 'mpv' | 'html5' | 'hls';
+export type MediaBackend = 'html5' | 'hls';
 
 export interface MediaTrack {
   index: number;
@@ -30,16 +30,6 @@ export interface ProbeResult {
 export interface ApiResult<T> {
   ok: boolean;
   data?: T;
-  error?: string;
-}
-
-export interface PlaybackState {
-  backend: MediaBackend;
-  filePath?: string;
-  state: 'loading' | 'playing' | 'paused' | 'stopped' | 'error';
-  positionSeconds?: number | null;
-  durationSeconds?: number | null;
-  volume?: number | null;
   error?: string;
 }
 
