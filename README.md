@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.23](docs/releases/v1.0.23.md): validates the macOS updater fallback close, replace, and relaunch flow.
 - [LoomTV 1.0.22](docs/releases/v1.0.22.md): adds a macOS updater fallback for ad-hoc signed builds.
 - [LoomTV 1.0.21](docs/releases/v1.0.21.md): verifies packaged update restart from 1.0.20 without blank-window regressions.
 - [LoomTV 1.0.20](docs/releases/v1.0.20.md): fixes packaged updater startup dependencies and trims safe unused code.
