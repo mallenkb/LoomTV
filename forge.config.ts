@@ -58,9 +58,36 @@ function makeTargets() {
   return makers;
 }
 
+function platformFolder(platform: string): 'win' | 'mac' | 'linux' {
+  if (platform === 'win32') return 'win';
+  if (platform === 'darwin') return 'mac';
+  return 'linux';
+}
+
+function resourcesPath(outputPath: string, platform: string): string {
+  if (platform === 'darwin') {
+    return path.join(outputPath, 'LoomTV.app', 'Contents', 'Resources');
+  }
+  return path.join(outputPath, 'resources');
+}
+
+function prunePackagedFfmpegResources(outputPath: string, platform: string): void {
+  const keepFolder = platformFolder(platform);
+  const ffmpegPath = path.join(resourcesPath(outputPath, platform), 'ffmpeg');
+  for (const folder of ['win', 'mac', 'linux']) {
+    if (folder !== keepFolder) {
+      fs.rmSync(path.join(ffmpegPath, folder), { recursive: true, force: true });
+    }
+  }
+}
+
 const config: ForgeConfig = {
   hooks: {
     postPackage: async (_config, packageResult) => {
+      for (const outputPath of packageResult.outputPaths) {
+        prunePackagedFfmpegResources(outputPath, packageResult.platform);
+      }
+
       if (packageResult.platform !== 'darwin') {
         return;
       }
@@ -86,7 +113,6 @@ const config: ForgeConfig = {
     executableName: 'LoomTV',
     extraResource: [
       'resources/ffmpeg',
-      'resources/mpv',
       'resources/icon.png',
       'resources/icon.ico',
       'resources/icon.icns',

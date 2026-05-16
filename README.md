@@ -29,7 +29,7 @@ This project is for organizing and playing media files that you own, have create
 - Scan local folders and organize media by library type.
 - Fetch posters, backdrops, cast data, ratings, and summaries from metadata providers.
 - Continue watching with saved playback progress.
-- Play local media with stream, transcode, and MPV-backed playback support.
+- Play local media with direct stream and HLS/transcode fallback support.
 - Generate thumbnails and inspect local media details with bundled FFmpeg/FFprobe resources.
 - Customize artwork, theme color, loader style, and sidebar ordering.
 - Back up the local database from Settings.
@@ -44,6 +44,9 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.17](docs/releases/v1.0.17.md): keeps unsupported local videos inside LoomTV's in-app stream/transcode player.
+- [LoomTV 1.0.16](docs/releases/v1.0.16.md): fixes episode metadata title matching for series playback.
+- [LoomTV 1.0.15](docs/releases/v1.0.15.md): improves local playback, series handoff behavior, subtitle controls, and update feedback.
 - [LoomTV 1.0.13](docs/releases/v1.0.13.md): fixes macOS relaunch/focus behavior when LoomTV is already running.
 - [LoomTV 1.0.12](docs/releases/v1.0.12.md): fixes release CI signing fallbacks and Linux package metadata.
 - [LoomTV 1.0.11](docs/releases/v1.0.11.md): improves GitHub-hosted update flow, release packaging, and restart prompts.
@@ -62,12 +65,12 @@ Download the installer or archive for your operating system, then run it like an
 - TypeScript for application code.
 - Tailwind CSS and local UI components for styling.
 - better-sqlite3 for local persistence.
-- FFmpeg, FFprobe, HLS.js, and MPV integration for media playback workflows.
+- FFmpeg, FFprobe, and HLS.js for direct playback checks and HLS/transcode fallback.
 
 ## Playback Roadmap
 
 - Short term: keep playback inside LoomTV by using browser-compatible streams and HLS/transcode fallbacks so custom React controls can stay over the video.
-- Long term: build a real `libmpv` native addon if LoomTV needs MPV-level playback without opening a separate native player window.
+- Long term: add dedicated native playback only if the in-app HTML5/HLS path cannot cover a real user workflow.
 
 ## Getting Started
 

@@ -13,7 +13,7 @@ import { posterSources, routeArtworkState } from '@/lib/artwork';
 export default function Others() {
   const { state, addLibraryFolder } = useLibrary();
   const { isLoading, libraryFolderGroups } = state;
-  const othersFolders = libraryFolderGroups.others || [];
+  const othersFolders = useMemo(() => libraryFolderGroups.others || [], [libraryFolderGroups.others]);
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');

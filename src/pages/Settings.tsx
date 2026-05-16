@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react';
 import { ArrowDown, ArrowUp, ChevronDown, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette, Wifi, Copy } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -501,7 +501,7 @@ export default function Settings() {
     }
   };
 
-  const refreshRemoteLibrarySnapshot = async () => {
+  const refreshRemoteLibrarySnapshot = useCallback(async () => {
     if (!sharedLibrarySnapshot) return;
     try {
       const refreshed = await desktopApi.refreshRemoteLibrary(
@@ -520,7 +520,7 @@ export default function Settings() {
     } catch (error) {
       console.warn('Remote library refresh failed:', error);
     }
-  };
+  }, [sharedLibrarySnapshot]);
 
   const disconnectRemoteLibrary = async () => {
     if (!sharedLibrarySnapshot) return;
@@ -565,7 +565,7 @@ export default function Settings() {
     void refreshRemoteLibrarySnapshot();
     const id = setInterval(() => void refreshRemoteLibrarySnapshot(), 30000);
     return () => clearInterval(id);
-  }, [sharedLibrarySnapshot?.baseUrl, sharedLibrarySnapshot?.deviceToken]);
+  }, [refreshRemoteLibrarySnapshot, sharedLibrarySnapshot]);
 
   const customProviders = Object.keys(metadataKeys)
     .filter((providerId) => !METADATA_PROVIDERS.some((provider) => provider.id === providerId))

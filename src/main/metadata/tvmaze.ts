@@ -21,7 +21,7 @@ async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
   return episodes.map(tvmazeEpisodeToMeta).filter((episode) => episode.season > 0 && episode.number > 0);
 }
 
-export async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
+async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
   const detailRes = await fetch(
     `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
   );

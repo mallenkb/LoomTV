@@ -160,33 +160,3 @@ export function findFFprobe(): string | null {
 
   return firstExistingBinary(systemBinaryCandidates('ffprobe'));
 }
-
-export function findMPV(): string | null {
-  const mpvBinary = process.platform === 'win32' ? 'mpv.exe' : 'mpv';
-  const candidates = [
-    path.join(process.resourcesPath || '', 'mpv', platformFolder(), mpvBinary),
-    path.join(app.getAppPath(), 'resources', 'mpv', platformFolder(), mpvBinary),
-    path.join(process.cwd(), 'resources', 'mpv', platformFolder(), mpvBinary),
-    '/Applications/mpv.app/Contents/MacOS/mpv',
-    '/Applications/IINA.app/Contents/MacOS/iina-cli',
-    '/opt/homebrew/bin/mpv',
-    '/usr/local/bin/mpv',
-    '/usr/bin/mpv',
-    '/snap/bin/mpv',
-  ];
-
-  for (const candidate of candidates) {
-    try {
-      if (candidate && fs.existsSync(candidate)) return candidate;
-    } catch {
-      // Keep looking.
-    }
-  }
-
-  try {
-    const result = execFileSync('which', ['mpv'], { encoding: 'utf8' }).trim();
-    return result || null;
-  } catch {
-    return null;
-  }
-}

@@ -44,17 +44,6 @@ export type UpdateState = {
   checkedAt?: string;
 };
 type FFmpegStatus = { available: boolean; path: string | null };
-type MPVPlayResult = { ok?: boolean; error?: string };
-type MPVStatus = {
-  position: number | null;
-  duration: number | null;
-  paused?: boolean;
-  volume?: number;
-  muted?: boolean;
-  speed?: number;
-};
-type MPVTrackType = 'video' | 'audio' | 'sub';
-type MPVAspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
 type ApiResult<T> = { ok: boolean; data?: T; error?: string };
 type SubtitleStyleOptions = {
   delaySeconds?: number;
@@ -65,15 +54,6 @@ type SubtitleStyleOptions = {
   borderColor?: string;
   borderWidth?: number;
   backgroundColor?: string;
-};
-type PlaybackState = {
-  backend: 'mpv' | 'html5' | 'hls';
-  filePath?: string;
-  state: 'loading' | 'playing' | 'paused' | 'stopped' | 'error';
-  positionSeconds?: number | null;
-  durationSeconds?: number | null;
-  volume?: number | null;
-  error?: string;
 };
 type TranscodeOptions = {
   preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
@@ -202,30 +182,9 @@ declare global {
       checkForUpdates?: () => Promise<UpdateState>;
       installUpdate?: () => Promise<UpdateState>;
       onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
-      playWithMPV: (filePath: string, startSecs?: number) => Promise<MPVPlayResult>;
-      queryMPV: () => Promise<MPVStatus | null>;
-      closeMPV: () => Promise<void>;
-      toggleMPVPause?: () => Promise<void>;
-      seekMPV?: (seconds: number, mode?: 'relative' | 'absolute') => Promise<void>;
-      setMPVVolume?: (value: number) => Promise<void>;
-      toggleMPVMute?: () => Promise<void>;
-      setMPVSpeed?: (value: number) => Promise<void>;
-      setMPVFullscreen?: (fullscreen: boolean) => Promise<void>;
-      setMPVAspectMode?: (mode: MPVAspectMode) => Promise<void>;
-      selectMPVTrack?: (type: MPVTrackType, ffIndex: number) => Promise<void>;
-      selectMPVSecondarySubtitleTrack?: (ffIndex: number) => Promise<void>;
-      setMPVSubtitleStyle?: (style: SubtitleStyleOptions) => Promise<void>;
-      onMPVEvent: (callback: (event: string) => void) => () => void;
       media?: {
         probe: (filePath: string) => Promise<ApiResult<unknown>>;
         canDirectPlay: (filePath: string, backend?: string) => Promise<ApiResult<boolean>>;
-        playLocal: (filePath: string) => Promise<ApiResult<PlaybackState>>;
-        pause: () => Promise<ApiResult<PlaybackState>>;
-        resume: () => Promise<ApiResult<PlaybackState>>;
-        stop: () => Promise<ApiResult<PlaybackState>>;
-        seek: (seconds: number) => Promise<ApiResult<PlaybackState>>;
-        setVolume: (value: number) => Promise<ApiResult<PlaybackState>>;
-        getState: () => Promise<ApiResult<PlaybackState>>;
         startTranscode: (filePath: string, options?: TranscodeOptions) => Promise<ApiResult<TranscodeSession>>;
         stopTranscode: (sessionId: string) => Promise<ApiResult<boolean>>;
       };
@@ -247,7 +206,7 @@ async function discoverServerBase(): Promise<string> {
         resolvedServerBase = `http://127.0.0.1:${port}`;
         return resolvedServerBase;
       }
-    } catch (error) {
+    } catch {
       // Try the next port; the media server can shift if the default is occupied.
     }
   }
@@ -484,6 +443,7 @@ export const desktopApi = {
   },
 
   async getThumbnail(filePath: string, time?: string): Promise<{ url: string }> {
+    if (window.desktopApi?.getThumbnail) return window.desktopApi.getThumbnail(filePath, time);
     const base = await discoverServerBase();
     let url = `${base}/api/thumbnail?path=${encodeURIComponent(filePath)}`;
     if (time) url += `&t=${encodeURIComponent(time)}`;
@@ -700,65 +660,6 @@ export const desktopApi = {
     return response.ok;
   },
 
-  async playWithMPV(filePath: string, startSecs?: number): Promise<MPVPlayResult> {
-    if (window.desktopApi) return window.desktopApi.playWithMPV(filePath, startSecs);
-    return { error: 'not_electron' };
-  },
-
-  async queryMPV(): Promise<MPVStatus | null> {
-    if (window.desktopApi) return window.desktopApi.queryMPV();
-    return null;
-  },
-
-  async closeMPV(): Promise<void> {
-    if (window.desktopApi) return window.desktopApi.closeMPV();
-  },
-
-  async toggleMPVPause(): Promise<void> {
-    if (window.desktopApi?.toggleMPVPause) return window.desktopApi.toggleMPVPause();
-  },
-
-  async seekMPV(seconds: number, mode: 'relative' | 'absolute' = 'relative'): Promise<void> {
-    if (window.desktopApi?.seekMPV) return window.desktopApi.seekMPV(seconds, mode);
-  },
-
-  async setMPVVolume(value: number): Promise<void> {
-    if (window.desktopApi?.setMPVVolume) return window.desktopApi.setMPVVolume(value);
-  },
-
-  async toggleMPVMute(): Promise<void> {
-    if (window.desktopApi?.toggleMPVMute) return window.desktopApi.toggleMPVMute();
-  },
-
-  async setMPVSpeed(value: number): Promise<void> {
-    if (window.desktopApi?.setMPVSpeed) return window.desktopApi.setMPVSpeed(value);
-  },
-
-  async setMPVFullscreen(fullscreen: boolean): Promise<void> {
-    if (window.desktopApi?.setMPVFullscreen) return window.desktopApi.setMPVFullscreen(fullscreen);
-  },
-
-  async setMPVAspectMode(mode: MPVAspectMode): Promise<void> {
-    if (window.desktopApi?.setMPVAspectMode) return window.desktopApi.setMPVAspectMode(mode);
-  },
-
-  async selectMPVTrack(type: MPVTrackType, ffIndex: number): Promise<void> {
-    if (window.desktopApi?.selectMPVTrack) return window.desktopApi.selectMPVTrack(type, ffIndex);
-  },
-
-  async selectMPVSecondarySubtitleTrack(ffIndex: number): Promise<void> {
-    if (window.desktopApi?.selectMPVSecondarySubtitleTrack) return window.desktopApi.selectMPVSecondarySubtitleTrack(ffIndex);
-  },
-
-  async setMPVSubtitleStyle(style: SubtitleStyleOptions): Promise<void> {
-    if (window.desktopApi?.setMPVSubtitleStyle) return window.desktopApi.setMPVSubtitleStyle(style);
-  },
-
-  onMPVEvent(callback: (event: string) => void): () => void {
-    if (window.desktopApi) return window.desktopApi.onMPVEvent(callback);
-    return () => undefined;
-  },
-
   media: {
     async probe(filePath: string): Promise<ApiResult<unknown>> {
       if (window.desktopApi?.media) return window.desktopApi.media.probe(filePath);
@@ -768,45 +669,10 @@ export const desktopApi = {
       });
     },
 
-    async canDirectPlay(filePath: string, backend = 'mpv'): Promise<ApiResult<boolean>> {
+    async canDirectPlay(filePath: string, backend = 'html5'): Promise<ApiResult<boolean>> {
       if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
       const probeResult = await this.probe(filePath);
-      return probeResult.ok ? { ok: true, data: backend === 'mpv' } : { ok: false, error: probeResult.error };
-    },
-
-    async playLocal(filePath: string): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.playLocal(filePath);
-      return { ok: false, error: 'Native local playback is only available inside Electron.' };
-    },
-
-    async pause(): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.pause();
-      return { ok: false, error: 'Native local playback is only available inside Electron.' };
-    },
-
-    async resume(): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.resume();
-      return { ok: false, error: 'Native local playback is only available inside Electron.' };
-    },
-
-    async stop(): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.stop();
-      return { ok: true, data: { backend: 'html5', state: 'stopped' } as PlaybackState };
-    },
-
-    async seek(seconds: number): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.seek(seconds);
-      return { ok: false, error: 'Native local playback is only available inside Electron.' };
-    },
-
-    async setVolume(value: number): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.setVolume(value);
-      return { ok: false, error: 'Native local playback is only available inside Electron.' };
-    },
-
-    async getState(): Promise<ApiResult<PlaybackState>> {
-      if (window.desktopApi?.media) return window.desktopApi.media.getState();
-      return { ok: true, data: { backend: 'html5', state: 'stopped' } as PlaybackState };
+      return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };
     },
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
