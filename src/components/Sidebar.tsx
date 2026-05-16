@@ -133,7 +133,7 @@ export default function Sidebar() {
 
   return (
     <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
-      <div className="p-4 bg-black/10">
+      <div className="loom-sidebar-brand p-4 bg-black/10">
         <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
           <LoomLogo className="h-8 w-auto" />
         </Link>

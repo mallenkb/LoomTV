@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.25](docs/releases/v1.0.25.md): keeps macOS window controls while removing the full native title bar and fixing logo spacing.
 - [LoomTV 1.0.24](docs/releases/v1.0.24.md): publishes a fresh updater release after the verified macOS restart/install fix.
 - [LoomTV 1.0.23](docs/releases/v1.0.23.md): validates the macOS updater fallback close, replace, and relaunch flow.
 - [LoomTV 1.0.22](docs/releases/v1.0.22.md): adds a macOS updater fallback for ad-hoc signed builds.

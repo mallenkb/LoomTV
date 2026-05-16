@@ -4666,6 +4666,9 @@ function createWindow() {
     minWidth: 960,
     minHeight: 540,
     title: 'LoomTV',
+    frame: process.platform === 'darwin',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 16 } : undefined,
     backgroundColor: '#1a1a1a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -4692,6 +4695,14 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`));
   }
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const platformClass = `platform-${process.platform}`;
+    void mainWindow.webContents.executeJavaScript(
+      `document.body.classList.add(${JSON.stringify(platformClass)})`,
+    );
+  });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
