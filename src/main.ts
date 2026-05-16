@@ -210,6 +210,7 @@ let updateCheckTimer: NodeJS.Timeout | null = null;
 let updateMenu: Menu | null = null;
 let updateQuitFallbackTimer: NodeJS.Timeout | null = null;
 let updateQuitFallbackCleanup: (() => void) | null = null;
+let downloadedUpdateFilePath: string | null = null;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
@@ -4845,6 +4846,107 @@ function scheduleUpdateQuitFallback(): void {
   updateQuitFallbackTimer.unref?.();
 }
 
+function getMacUpdaterPendingInfoPath(updateFilePath: string): string {
+  return path.join(path.dirname(updateFilePath), 'update-info.json');
+}
+
+async function sha512Base64(filePath: string): Promise<string> {
+  const hash = createHash('sha512');
+  await new Promise<void>((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  return hash.digest('base64');
+}
+
+async function verifyMacUpdateZip(updateFilePath: string): Promise<void> {
+  const infoPath = getMacUpdaterPendingInfoPath(updateFilePath);
+  const rawInfo = await fs.promises.readFile(infoPath, 'utf8');
+  const info = JSON.parse(rawInfo) as { sha512?: string; fileName?: string };
+  if (!info.sha512) throw new Error('Downloaded update metadata is missing a sha512 checksum.');
+
+  const actualSha512 = await sha512Base64(updateFilePath);
+  if (actualSha512 !== info.sha512) {
+    throw new Error('Downloaded update checksum did not match the release metadata.');
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<void> {
+  await verifyMacUpdateZip(updateFilePath);
+
+  const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
+  const helperPath = path.join(helperDir, 'install-update.sh');
+  const appPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
+  const targetAppPath = appPath.startsWith('/Applications/')
+    ? appPath
+    : path.join('/Applications', `${app.getName()}.app`);
+  const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
+  const extractDir = path.join(helperDir, 'extracted');
+  const logPath = path.join(helperDir, 'install.log');
+  const parentPid = String(process.pid);
+
+  const script = `#!/bin/sh
+set -eu
+LOG=${shellQuote(logPath)}
+exec >> "$LOG" 2>&1
+echo "Starting LoomTV macOS update install at $(date)"
+PARENT_PID=${shellQuote(parentPid)}
+UPDATE_ZIP=${shellQuote(updateFilePath)}
+EXTRACT_DIR=${shellQuote(extractDir)}
+TARGET_APP=${shellQuote(targetAppPath)}
+BACKUP_APP=${shellQuote(backupAppPath)}
+
+while kill -0 "$PARENT_PID" >/dev/null 2>&1; do
+  sleep 0.25
+done
+
+rm -rf "$EXTRACT_DIR"
+mkdir -p "$EXTRACT_DIR"
+/usr/bin/ditto -x -k "$UPDATE_ZIP" "$EXTRACT_DIR"
+
+if [ ! -d "$EXTRACT_DIR/LoomTV.app" ]; then
+  echo "Extracted update did not contain LoomTV.app"
+  exit 1
+fi
+
+rm -rf "$BACKUP_APP"
+if [ -d "$TARGET_APP" ]; then
+  /bin/mv "$TARGET_APP" "$BACKUP_APP"
+fi
+
+if ! /usr/bin/ditto "$EXTRACT_DIR/LoomTV.app" "$TARGET_APP"; then
+  echo "Failed to copy updated app, restoring previous app"
+  rm -rf "$TARGET_APP"
+  if [ -d "$BACKUP_APP" ]; then
+    /bin/mv "$BACKUP_APP" "$TARGET_APP"
+  fi
+  exit 1
+fi
+
+/usr/bin/xattr -dr com.apple.quarantine "$TARGET_APP" >/dev/null 2>&1 || true
+/usr/bin/open "$TARGET_APP"
+echo "Finished LoomTV macOS update install at $(date)"
+`;
+
+  await fs.promises.writeFile(helperPath, script, { mode: 0o755 });
+
+  const child = spawn('/bin/sh', [helperPath], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+
+  setTimeout(() => {
+    app.quit();
+  }, 250);
+}
+
 function refreshUpdateMenu() {
   if (!updateMenu) return;
 
@@ -5038,6 +5140,20 @@ async function installDownloadedUpdate() {
     console.warn('[updates] pre-install cleanup failed:', error);
   }
 
+  if (process.platform === 'darwin' && downloadedUpdateFilePath) {
+    try {
+      await installMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
+    } catch (error) {
+      updateInstallStarted = false;
+      setUpdateState({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        checkedAt: new Date().toISOString(),
+      });
+    }
+    return updateState;
+  }
+
   // Let electron-updater own the window close and app quit sequence. Destroying
   // windows manually before this call can bypass the updater's normal restart
   // path and leave the app sitting on "Restarting...".
@@ -5120,7 +5236,8 @@ function configureAutoUpdater() {
     });
   });
 
-  autoUpdater.on('update-downloaded', () => {
+  autoUpdater.on('update-downloaded', (event) => {
+    downloadedUpdateFilePath = event.downloadedFile;
     setUpdateState({
       status: 'downloaded',
       message: 'Update downloaded. Restart LoomTV to install it.',
