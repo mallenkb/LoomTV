@@ -81,6 +81,40 @@ function prunePackagedFfmpegResources(outputPath: string, platform: string): voi
   }
 }
 
+function copyRuntimeModule(moduleName: string, targetNodeModules: string, copied = new Set<string>()): void {
+  if (copied.has(moduleName)) return;
+  copied.add(moduleName);
+
+  const sourcePath = path.join(process.cwd(), 'node_modules', moduleName);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`Missing runtime module ${moduleName} at ${sourcePath}`);
+  }
+
+  const packageJsonPath = path.join(sourcePath, 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as {
+    dependencies?: Record<string, string>;
+  };
+
+  const targetPath = path.join(targetNodeModules, moduleName);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+
+  for (const dependencyName of Object.keys(packageJson.dependencies || {})) {
+    copyRuntimeModule(dependencyName, targetNodeModules, copied);
+  }
+}
+
+function copyDirectRuntimeModule(moduleName: string, targetNodeModules: string): void {
+  const sourcePath = path.join(process.cwd(), 'node_modules', moduleName);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`Missing runtime module ${moduleName} at ${sourcePath}`);
+  }
+
+  const targetPath = path.join(targetNodeModules, moduleName);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.cpSync(sourcePath, targetPath, { recursive: true, force: true });
+}
+
 const config: ForgeConfig = {
   hooks: {
     postPackage: async (_config, packageResult) => {
@@ -120,17 +154,14 @@ const config: ForgeConfig = {
     afterPrune: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
         try {
-          const runtimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path', 'ffmpeg-static', 'ffprobe-static'];
+          const directRuntimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path', 'ffmpeg-static', 'ffprobe-static'];
           const targetNodeModules = path.join(buildPath, 'node_modules');
           fs.mkdirSync(targetNodeModules, { recursive: true });
 
-          for (const moduleName of runtimeModules) {
-            fs.cpSync(
-              path.join(process.cwd(), 'node_modules', moduleName),
-              path.join(targetNodeModules, moduleName),
-              { recursive: true, force: true },
-            );
+          for (const moduleName of directRuntimeModules) {
+            copyDirectRuntimeModule(moduleName, targetNodeModules);
           }
+          copyRuntimeModule('electron-updater', targetNodeModules);
           callback();
         } catch (error) {
           callback(error as Error);

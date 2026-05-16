@@ -74,9 +74,18 @@ const appFiles = exists(appAsar)
 const requiredAsarEntries = [
   '/node_modules/better-sqlite3/lib/index.js',
   '/node_modules/bindings/bindings.js',
+  '/node_modules/builder-util-runtime/out/index.js',
+  '/node_modules/electron-updater/out/main.js',
   '/node_modules/file-uri-to-path/index.js',
   '/node_modules/ffmpeg-static/index.js',
   '/node_modules/ffprobe-static/index.js',
+  '/node_modules/fs-extra/lib/index.js',
+  '/node_modules/js-yaml/index.js',
+  '/node_modules/lazy-val/out/main.js',
+  '/node_modules/lodash.escaperegexp/index.js',
+  '/node_modules/lodash.isequal/index.js',
+  '/node_modules/semver/index.js',
+  '/node_modules/tiny-typed-emitter/lib/index.js',
 ];
 
 for (const entry of requiredAsarEntries) {

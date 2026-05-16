@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'motion/react';
 import LoomLogo from '@/components/LoomLogo';
 import LoomPlayMark from '@/components/LoomPlayMark';

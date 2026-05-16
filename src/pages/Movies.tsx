@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Film, Play, Star } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
