@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     localNetworkSharingEnabled?: boolean;
     localNetworkShareToken?: string;
   }) => ipcRenderer.invoke('settings:save', settings),
+  testMetadataKeys: (keys: Record<string, string>) => ipcRenderer.invoke('metadata:test-keys', keys),
   getLocalNetworkStatus: () => ipcRenderer.invoke('network:status'),
   discoverLocalNetworkPeers: (timeoutMs?: number) => ipcRenderer.invoke('network:discover-peers', timeoutMs),
   revokePairedDevice: (deviceId: string) => ipcRenderer.invoke('network:revoke-paired-device', deviceId),
@@ -96,6 +97,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   getOfficialMetadataCandidates: (mediaId: string) => ipcRenderer.invoke('artwork:official-candidates', mediaId),
   applyOfficialMetadata: (mediaId: string, candidate: unknown) => ipcRenderer.invoke('artwork:apply-official', mediaId, candidate),
   refreshOfficialArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:refresh-official', mediaId),
+  getPlaybackLogo: (mediaId: string) => ipcRenderer.invoke('artwork:playback-logo', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
   clearAppData: () => ipcRenderer.invoke('database:clear'),

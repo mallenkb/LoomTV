@@ -9,13 +9,23 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
-import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
+import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 
 interface MovieDetailProps {
-  onPlay?: (filePath: string, title: string, subtitles?: MediaItem['subtitles'], episodes?: undefined, episodeFiles?: undefined, currentSeason?: undefined, currentEpisode?: undefined, mediaId?: string) => void;
+  onPlay?: (
+    filePath: string,
+    title: string,
+    subtitles?: MediaItem['subtitles'],
+    episodes?: undefined,
+    episodeFiles?: undefined,
+    currentSeason?: undefined,
+    currentEpisode?: undefined,
+    mediaId?: string,
+    artwork?: Pick<RouteArtworkState, 'logo' | 'logoCandidates' | 'poster' | 'posterCandidates' | 'backdrop' | 'backdropCandidates'>,
+  ) => void;
 }
 
 const CUSTOM_MOVIE_ARTWORK_KEY = 'loomtvCustomMovieArtwork';
@@ -167,6 +177,15 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   );
   const officialPosterArtwork = uniqueArtworkSources(movie.posterCandidates, movie.poster, sourceArtwork?.posterCandidates, sourceArtwork?.poster);
   const officialCoverArtwork = uniqueArtworkSources(movie.backdropCandidates, movie.backdrop, sourceArtwork?.backdropCandidates, sourceArtwork?.backdrop);
+  const playerLogoArtwork = logoSources(movie, sourceArtwork);
+  const playerArtwork = {
+    logo: playerLogoArtwork[0] || '',
+    logoCandidates: playerLogoArtwork,
+    poster: posterArtwork[0] || movie.poster,
+    posterCandidates: posterArtwork,
+    backdrop: heroArtwork[0] || movie.backdrop,
+    backdropCandidates: heroArtwork,
+  };
   const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
   const hasResumeProgress = progress.inProgress;
   const progressPercent = Math.min(100, Math.max(0, progress.fraction * 100));
@@ -177,7 +196,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
   const handlePlay = async () => {
     if (onPlay) {
-      onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id);
+      onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id, playerArtwork);
     }
   };
 

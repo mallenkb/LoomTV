@@ -68,6 +68,14 @@ export interface VideoPlayerProps {
   mediaId?: string;
   filePath: string;
   title: string;
+  artwork?: {
+    logo?: string;
+    logoCandidates?: string[];
+    poster?: string;
+    posterCandidates?: string[];
+    backdrop?: string;
+    backdropCandidates?: string[];
+  };
   subtitles?: { lang: string; label: string; url: string }[];
   episodes?: EpisodeMeta[];
   episodeFiles?: EpisodeFile[];

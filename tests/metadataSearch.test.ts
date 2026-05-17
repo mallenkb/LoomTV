@@ -4,6 +4,7 @@ import {
   bestSeriesTitleFromEpisodeFiles,
   chooseMetadataSearchTitle,
   seriesTitleFromEpisodeFileName,
+  tmdbLogoCandidates,
 } from '../src/main/metadata/helpers.ts';
 
 test('series title extraction uses episode file names, not episode titles', () => {
@@ -40,5 +41,25 @@ test('metadata lookup can recover from a wrong applied title by trusting the fol
       fallbackTitle: '[C] CONTROL - The Money and Soul of Possibility',
     }),
     'Baby Steps',
+  );
+});
+
+test('tmdb logo candidates prefer English transparent title art', () => {
+  assert.deepEqual(
+    tmdbLogoCandidates({
+      images: {
+        logos: [
+          { file_path: '/no-language.png', iso_639_1: null, vote_average: 8 },
+          { file_path: '/spanish.png', iso_639_1: 'es', vote_average: 10 },
+          { file_path: '/english-best.png', iso_639_1: 'en', vote_average: 7 },
+          { file_path: '/english-alt.png', iso_639_1: 'en', vote_average: 4 },
+        ],
+      },
+    }),
+    [
+      'https://image.tmdb.org/t/p/original/english-best.png',
+      'https://image.tmdb.org/t/p/original/english-alt.png',
+      'https://image.tmdb.org/t/p/original/no-language.png',
+    ],
   );
 });

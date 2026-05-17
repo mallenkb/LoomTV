@@ -31,6 +31,15 @@ type SettingsPayload = {
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;
 };
+export type MetadataKeyTestResult = {
+  provider: string;
+  ok: boolean;
+  message: string;
+};
+export type PlaybackLogoResult = {
+  logo?: string;
+  logoCandidates?: string[];
+};
 export type UpdateState = {
   status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error';
   currentVersion: string;
@@ -135,6 +144,8 @@ export type OfficialArtworkResult = {
   episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
   posterCandidates?: string[];
   backdropCandidates?: string[];
+  logoCandidates?: string[];
+  logo?: string;
 };
 export type OfficialMetadataCandidate = OfficialArtworkResult & {
   id: string;
@@ -162,6 +173,7 @@ declare global {
       checkFFmpeg: () => Promise<FFmpegStatus>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
+      testMetadataKeys?: (keys: MetadataApiKeys) => Promise<MetadataKeyTestResult[]>;
       getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
       discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
       revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
@@ -174,6 +186,7 @@ declare global {
       getOfficialMetadataCandidates?: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
       applyOfficialMetadata?: (mediaId: string, candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
       refreshOfficialArtwork?: (mediaId: string) => Promise<OfficialArtworkResult>;
+      getPlaybackLogo?: (mediaId: string) => Promise<PlaybackLogoResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       clearAppData?: () => Promise<LibraryPayload>;
@@ -507,6 +520,14 @@ export const desktopApi = {
     return response.ok;
   },
 
+  async testMetadataKeys(keys: MetadataApiKeys): Promise<MetadataKeyTestResult[]> {
+    if (window.desktopApi?.testMetadataKeys) return window.desktopApi.testMetadataKeys(keys);
+    return fetchJson<MetadataKeyTestResult[]>('/api/metadata/test-keys', {
+      method: 'POST',
+      body: JSON.stringify({ keys }),
+    });
+  },
+
   async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
     if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
     const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
@@ -546,6 +567,14 @@ export const desktopApi = {
   async refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkResult> {
     if (window.desktopApi?.refreshOfficialArtwork) return window.desktopApi.refreshOfficialArtwork(mediaId);
     return fetchJson<OfficialArtworkResult>('/api/artwork/refresh-official', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId }),
+    });
+  },
+
+  async getPlaybackLogo(mediaId: string): Promise<PlaybackLogoResult> {
+    if (window.desktopApi?.getPlaybackLogo) return window.desktopApi.getPlaybackLogo(mediaId);
+    return fetchJson<PlaybackLogoResult>('/api/artwork/playback-logo', {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });

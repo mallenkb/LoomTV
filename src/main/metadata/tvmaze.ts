@@ -49,6 +49,10 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
 
   return {
     title: details.name || fallbackTitle,
+    providerIds: {
+      imdbId: details.externals?.imdb || undefined,
+      tvdbId: details.externals?.thetvdb ? String(details.externals.thetvdb) : undefined,
+    },
     poster: posterUrl,
     backdrop: '',
     summary: details.summary ? details.summary.replace(/<[^>]*>/g, '') : '',

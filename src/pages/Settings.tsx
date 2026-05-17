@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ChevronDown, FolderPlus, RefreshCw, X, Key, CheckCi
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { APP_VERSION, desktopApi, UpdateState } from '@/lib/desktopApi';
+import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState } from '@/lib/desktopApi';
 import { useTheme } from '@/components/ThemeProvider';
 import LoomBrandLockup from '@/components/LoomBrandLockup';
 import LoomLogo from '@/components/LoomLogo';
@@ -58,6 +58,25 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
             className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
           >
             omdbapi.com <ExternalLink className="w-3 h-3" />
+          </button>
+          .
+        </>
+      ),
+    },
+    {
+      id: 'fanart',
+      label: 'Fanart.tv API Key',
+      badge: 'Clearlogos',
+      placeholder: 'Enter your Fanart.tv API key',
+      description: (
+        <>
+          Used for media-center style clearlogos and title artwork. Get your key from{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://fanart.tv/get-an-api-key/')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            fanart.tv <ExternalLink className="w-3 h-3" />
           </button>
           .
         </>
@@ -198,6 +217,7 @@ const METADATA_ATTRIBUTIONS = [
   { name: 'TVmaze', details: 'TV show and episode metadata.', url: 'https://www.tvmaze.com/' },
   { name: 'Jikan / MyAnimeList', details: 'Anime posters, ratings, and anime metadata.', url: 'https://jikan.moe/' },
   { name: 'OMDb API', details: 'Fallback movie and TV metadata.', url: 'https://www.omdbapi.com/' },
+  { name: 'Fanart.tv', details: 'Clearlogos and media-center artwork.', url: 'https://fanart.tv/' },
 ];
 
 function getUpdateButtonLabel(updateState: UpdateState | null): string {
@@ -242,6 +262,8 @@ export default function Settings() {
   const [newProviderName, setNewProviderName] = useState('');
   const [newProviderKey, setNewProviderKey] = useState('');
   const [savedKey, setSavedKey] = useState(false);
+  const [isTestingKeys, setIsTestingKeys] = useState(false);
+  const [metadataKeyTestResults, setMetadataKeyTestResults] = useState<MetadataKeyTestResult[]>([]);
   const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; path: string | null } | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
     const savedSection = localStorage.getItem(SETTINGS_SECTION_STORAGE_KEY);
@@ -286,6 +308,7 @@ export default function Settings() {
         ...(s.metadataApiKeys || {}),
         tmdb: s.metadataApiKeys?.tmdb || s.tmdbApiKey || '',
         omdb: s.metadataApiKeys?.omdb || s.omdbApiKey || '',
+        fanart: s.metadataApiKeys?.fanart || '',
       };
       setMetadataKeys(loadedKeys);
       setEditingKeys(
@@ -375,6 +398,29 @@ export default function Settings() {
     );
     setSavedKey(true);
     setTimeout(() => setSavedKey(false), 2000);
+  };
+
+  const cleanedMetadataKeys = () => Object.fromEntries(
+    Object.entries(metadataKeys)
+      .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
+      .filter(([provider, value]) => provider && value),
+  ) as Record<string, string>;
+
+  const handleTestApiKeys = async () => {
+    const cleanedKeys = cleanedMetadataKeys();
+    setIsTestingKeys(true);
+    setMetadataKeyTestResults([]);
+    try {
+      setMetadataKeyTestResults(await desktopApi.testMetadataKeys(cleanedKeys));
+    } catch (error) {
+      setMetadataKeyTestResults([{
+        provider: 'metadata',
+        ok: false,
+        message: error instanceof Error ? error.message : 'Failed to test API keys.',
+      }]);
+    } finally {
+      setIsTestingKeys(false);
+    }
   };
 
   const handleSavePlaybackSettings = async () => {
@@ -1500,10 +1546,43 @@ export default function Settings() {
         </Card>
 
         {/* Save button for metadata keys */}
-        <Button onClick={handleSaveApiKeys} className="gap-2 w-full sm:w-auto">
-          {savedKey ? <CheckCircle className="w-4 h-4" /> : <Key className="w-4 h-4" />}
-          {savedKey ? 'API keys saved!' : 'Save API Keys'}
-        </Button>
+        <div className="flex flex-col gap-3">
+          {metadataKeyTestResults.length > 0 && (
+            <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-panel)] p-3 text-sm">
+              <div className="space-y-2">
+                {metadataKeyTestResults.map((result) => (
+                  <div key={result.provider} className="flex items-start gap-2">
+                    <span className={cn(
+                      'mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full',
+                      result.ok ? 'bg-emerald-400' : 'bg-red-400',
+                    )}
+                    />
+                    <p className={result.ok ? 'text-white/85' : 'text-red-200'}>
+                      <span className="font-semibold uppercase">{result.provider}</span>
+                      <span className="text-[var(--loom-muted)]"> - {result.message}</span>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button onClick={handleSaveApiKeys} className="gap-2 w-full sm:w-auto">
+              {savedKey ? <CheckCircle className="w-4 h-4" /> : <Key className="w-4 h-4" />}
+              {savedKey ? 'API keys saved!' : 'Save API Keys'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTestApiKeys}
+              disabled={isTestingKeys || Object.keys(cleanedMetadataKeys()).length === 0}
+              className="gap-2 w-full sm:w-auto"
+            >
+              {isTestingKeys ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+              {isTestingKeys ? 'Testing API Keys...' : 'Test API Keys'}
+            </Button>
+          </div>
+        </div>
           </>
         )}
 
