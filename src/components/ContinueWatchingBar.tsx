@@ -38,6 +38,7 @@ type ContinueCandidate = {
       posterCandidates?: string[];
       backdrop?: string;
       backdropCandidates?: string[];
+      rating?: number;
     },
   ];
 };
@@ -169,6 +170,7 @@ function findLatestCandidate(
           posterCandidates: uniqueArtworkSources(movie.posterCandidates, movie.poster),
           backdrop: movie.backdrop,
           backdropCandidates: uniqueArtworkSources(movie.backdropCandidates, movie.backdrop),
+          rating: movie.rating,
         },
       ],
     });
@@ -206,6 +208,7 @@ function findLatestCandidate(
             posterCandidates: uniqueArtworkSources(show.posterCandidates, show.poster),
             backdrop: show.backdrop,
             backdropCandidates: uniqueArtworkSources(show.backdropCandidates, show.backdrop),
+            rating: show.rating,
           },
         ],
       });

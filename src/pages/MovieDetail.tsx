@@ -185,6 +185,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     posterCandidates: posterArtwork,
     backdrop: heroArtwork[0] || movie.backdrop,
     backdropCandidates: heroArtwork,
+    rating: movie.rating,
   };
   const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
   const hasResumeProgress = progress.inProgress;

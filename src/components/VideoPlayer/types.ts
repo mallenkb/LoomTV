@@ -75,6 +75,7 @@ export interface VideoPlayerProps {
     posterCandidates?: string[];
     backdrop?: string;
     backdropCandidates?: string[];
+    rating?: number;
   };
   subtitles?: { lang: string; label: string; url: string }[];
   episodes?: EpisodeMeta[];
