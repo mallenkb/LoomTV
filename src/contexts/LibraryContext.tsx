@@ -10,8 +10,10 @@ export interface MediaItem {
   year: number;
   poster: string;
   backdrop: string;
+  logo?: string;
   posterCandidates?: string[];
   backdropCandidates?: string[];
+  logoCandidates?: string[];
   summary: string;
   rating: number;
   genres: string[];
@@ -21,6 +23,11 @@ export interface MediaItem {
   lastPlayed?: number;
   subtitles?: { lang: string; label: string; url: string }[];
   localMetadata?: LocalMediaDetails;
+  providerIds?: {
+    tmdbId?: string;
+    imdbId?: string;
+    tvdbId?: string;
+  };
 }
 
 export interface EpisodeMeta {

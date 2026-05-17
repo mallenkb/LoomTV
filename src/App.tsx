@@ -19,6 +19,14 @@ interface NowPlaying {
   mediaId?: string;
   filePath: string;
   title: string;
+  artwork?: {
+    logo?: string;
+    logoCandidates?: string[];
+    poster?: string;
+    posterCandidates?: string[];
+    backdrop?: string;
+    backdropCandidates?: string[];
+  };
   subtitles?: MediaItem['subtitles'];
   episodes?: EpisodeMeta[];
   episodeFiles?: EpisodeFile[];
@@ -55,8 +63,9 @@ function AppShell() {
     currentSeason?: number,
     currentEpisode?: number,
     mediaId?: string,
+    artwork?: NowPlaying['artwork'],
   ) => {
-    setNowPlaying({ mediaId, filePath, title, subtitles, episodes, episodeFiles, currentSeason, currentEpisode });
+    setNowPlaying({ mediaId, filePath, title, artwork, subtitles, episodes, episodeFiles, currentSeason, currentEpisode });
   }, []);
 
   /** Called when the user picks a different episode from the panel. */
@@ -101,6 +110,7 @@ function AppShell() {
           mediaId={nowPlaying.mediaId}
           filePath={nowPlaying.filePath}
           title={nowPlaying.title}
+          artwork={nowPlaying.artwork}
           subtitles={nowPlaying.subtitles}
           episodes={nowPlaying.episodes}
           episodeFiles={nowPlaying.episodeFiles}
