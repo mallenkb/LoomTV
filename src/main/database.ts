@@ -2,6 +2,7 @@ import { app, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
+import { collectArtworkSourcesForCache } from './artworkCache';
 
 type JsonValue = unknown;
 
@@ -576,35 +577,6 @@ export function getCachedArtwork(sourceUrl: string): { dataUrl: string; mimeType
   return row ? { dataUrl: row.data_url, mimeType: row.mime_type } : null;
 }
 
-function isCacheableArtworkSource(source: string): boolean {
-  try {
-    const parsed = new URL(source);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname.toLowerCase();
-    return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
-  } catch {
-    return false;
-  }
-}
-
-function collectArtworkSources(data: LibraryData): string[] {
-  const sources = new Set<string>();
-  const add = (source?: string) => {
-    if (source && isCacheableArtworkSource(source)) sources.add(source);
-  };
-
-  for (const item of [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]) {
-    add(item.poster);
-    add(item.backdrop);
-    add(item.logo);
-    (item.posterCandidates || []).forEach(add);
-    (item.backdropCandidates || []).forEach(add);
-    (item.logoCandidates || []).forEach(add);
-    (item.episodes || []).forEach((episode: any) => add(episode.still));
-  }
-  return Array.from(sources);
-}
-
 async function fetchArtworkAsDataUrl(sourceUrl: string): Promise<{ dataUrl: string; mimeType: string; byteLength: number } | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
@@ -628,11 +600,22 @@ async function fetchArtworkAsDataUrl(sourceUrl: string): Promise<{ dataUrl: stri
 }
 
 export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
-  const sources = collectArtworkSources(data);
-  if (sources.length === 0) return;
+  const sources = collectArtworkSourcesForCache(data);
 
   const database = getDb();
-  const existing = new Set((database.prepare('SELECT source_url FROM artwork_cache').all() as any[]).map((row) => row.source_url));
+  const sourceSet = new Set(sources);
+  const rows = database.prepare('SELECT source_url FROM artwork_cache').all() as Array<{ source_url: string }>;
+  const deleteStale = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
+  const pruneStale = database.transaction(() => {
+    for (const row of rows) {
+      if (!sourceSet.has(row.source_url)) deleteStale.run(row.source_url);
+    }
+  });
+  pruneStale();
+
+  if (sources.length === 0) return;
+
+  const existing = new Set(rows.map((row) => row.source_url).filter((source) => sourceSet.has(source)));
   const pending = sources.filter((source) => !existing.has(source));
   const insert = database.prepare(`
     INSERT OR REPLACE INTO artwork_cache (source_url, data_url, mime_type, byte_length, updated_at)

@@ -57,9 +57,29 @@ test('tmdb logo candidates prefer English transparent title art', () => {
       },
     }),
     [
-      'https://image.tmdb.org/t/p/original/english-best.png',
-      'https://image.tmdb.org/t/p/original/english-alt.png',
-      'https://image.tmdb.org/t/p/original/no-language.png',
+      'https://image.tmdb.org/t/p/w500/english-best.png',
+      'https://image.tmdb.org/t/p/w500/english-alt.png',
+      'https://image.tmdb.org/t/p/w500/no-language.png',
+    ],
+  );
+});
+
+test('tmdb logo candidates keep only the best few fallback images', () => {
+  const logos = Array.from({ length: 10 }, (_, index) => ({
+    file_path: `/english-${index}.png`,
+    iso_639_1: 'en',
+    vote_average: 10 - index,
+  }));
+
+  assert.deepEqual(
+    tmdbLogoCandidates({ images: { logos } }),
+    [
+      'https://image.tmdb.org/t/p/w500/english-0.png',
+      'https://image.tmdb.org/t/p/w500/english-1.png',
+      'https://image.tmdb.org/t/p/w500/english-2.png',
+      'https://image.tmdb.org/t/p/w500/english-3.png',
+      'https://image.tmdb.org/t/p/w500/english-4.png',
+      'https://image.tmdb.org/t/p/w500/english-5.png',
     ],
   );
 });
