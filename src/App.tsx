@@ -26,6 +26,7 @@ interface NowPlaying {
     posterCandidates?: string[];
     backdrop?: string;
     backdropCandidates?: string[];
+    rating?: number;
   };
   subtitles?: MediaItem['subtitles'];
   episodes?: EpisodeMeta[];

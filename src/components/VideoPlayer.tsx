@@ -6,6 +6,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls, { ErrorTypes, Events, type ErrorData } from 'hls.js';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   CheckCircle,
   ChevronLeft,
@@ -18,6 +19,7 @@ import {
   RotateCcw,
   RotateCw,
   SlidersHorizontal,
+  Star,
   Subtitles,
   Volume2,
   VolumeX,
@@ -1467,6 +1469,10 @@ export default function VideoPlayer({
     const label = displayEpisodeTitle(currentSeason, currentEpisode, currentEpisodeMeta?.title, file?.filePath);
     return label !== `Episode ${currentEpisode}` ? label : '';
   }, [currentEpisode, currentSeason, currentEpisodeMeta?.title, displayEpisodeTitle, episodeFiles, hasEpisodes]);
+  const pauseRating = useMemo(() => {
+    const value = hasEpisodes ? currentEpisodeMeta?.rating : artwork?.rating;
+    return Number.isFinite(value) && (value || 0) > 0 ? Number(value) : 0;
+  }, [artwork?.rating, currentEpisodeMeta?.rating, hasEpisodes]);
 
   const nextEpLabel = useMemo(() => {
     if (!nextEpisodeFile) return null;
@@ -1554,45 +1560,68 @@ export default function VideoPlayer({
           })}
         </video>
 
-        {paused && playerState === 'ready' && (
-          <div
-            className="pointer-events-none absolute inset-0 z-10 overflow-hidden bg-[#071a33] transition-opacity duration-300"
-            aria-hidden="true"
-          >
-            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(17,70,132,0.90),rgba(5,17,35,0.98))]" />
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(93,156,236,0.26),rgba(5,17,35,0.42)_42%,rgba(0,0,0,0.46))]" />
-            <div className="absolute bottom-24 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-28">
-              {pauseLogoSources.length > 0 ? (
-                <img
-                  src={pauseLogoSources[0]}
-                  alt={title}
-                  className="mb-4 h-40 max-h-[28vh] w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
-                  onError={(event) => {
-                    event.currentTarget.style.display = 'none';
-                  }}
-                />
-              ) : (
-                <h2 className="mb-2 max-w-[min(34rem,78vw)] text-4xl font-black uppercase leading-none tracking-normal drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-5xl">
-                  {title}
-                </h2>
-              )}
-              {hasEpisodes && (
-                <p className="text-[24px] font-semibold leading-tight text-white/85">
-                  {epCode(currentSeason, currentEpisode)}
-                  {duration > 0 ? ` · ${formatTime(duration)}` : ''}
-                </p>
-              )}
-              {pauseEpisodeTitle && (
-                <p className="mt-2 max-w-3xl text-[32px] font-bold leading-tight text-white">{pauseEpisodeTitle}</p>
-              )}
-              {currentEpisodeMeta?.summary && (
-                <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/75">
-                  {currentEpisodeMeta.summary}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
+        <AnimatePresence>
+          {paused && playerState === 'ready' && (
+            <motion.div
+              key="pause-overlay"
+              className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
+              aria-hidden="true"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <motion.div
+                className="absolute inset-0 bg-black/65"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              />
+              <motion.div
+                className="absolute bottom-32 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-36"
+                initial={{ opacity: 0, y: 18, scale: 0.99 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.995 }}
+                transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {pauseLogoSources.length > 0 ? (
+                  <img
+                    src={pauseLogoSources[0]}
+                    alt={title}
+                    className="mb-4 h-40 max-h-[28vh] w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                    onError={(event) => {
+                      event.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <h2 className="mb-2 max-w-[min(34rem,78vw)] text-4xl font-black uppercase leading-none tracking-normal drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-5xl">
+                    {title}
+                  </h2>
+                )}
+                {hasEpisodes && (
+                  <p className="text-[24px] font-semibold leading-tight text-white/85">
+                    {epCode(currentSeason, currentEpisode)}
+                  </p>
+                )}
+                {pauseEpisodeTitle && (
+                  <p className="mt-2 max-w-3xl text-[32px] font-bold leading-tight text-white">{pauseEpisodeTitle}</p>
+                )}
+                {pauseRating > 0 && (
+                  <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                    <Star className="h-4 w-4 fill-current" />
+                    {pauseRating.toFixed(1)}
+                  </span>
+                )}
+                {currentEpisodeMeta?.summary && (
+                  <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/75">
+                    {currentEpisodeMeta.summary}
+                  </p>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {playerState === 'loading' && (
           <div className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center">

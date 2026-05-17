@@ -258,6 +258,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     posterCandidates: posterArtwork,
     backdrop: heroArtwork[0] || show.backdrop,
     backdropCandidates: heroArtwork,
+    rating: show.rating,
   };
 
   const handlePlayEpisode = (season: number, episode: number) => {
@@ -661,6 +662,7 @@ function EpisodeRow({
 
   const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
   const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
+  const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
   const progress = getProgressState(filePath, durationHint);
   void progressTick;
 
@@ -697,7 +699,15 @@ function EpisodeRow({
       {/* Info */}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
-        {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
+          {episodeRating > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#f5c451]/15 px-2 py-0.5 text-[11px] font-semibold text-[#f5c451]">
+              <Star className="h-3 w-3 fill-current" />
+              {episodeRating.toFixed(1)}
+            </span>
+          )}
+        </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">
         {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--loom-accent)]">resume</span>}
