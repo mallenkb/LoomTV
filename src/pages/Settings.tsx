@@ -67,16 +67,17 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
       id: 'fanart',
       label: 'Fanart.tv API Key',
       badge: 'Clearlogos',
-      placeholder: 'Enter your Fanart.tv API key',
+      placeholder: 'Paste your Fanart.tv personal API key',
       description: (
         <>
-          Used for media-center style clearlogos and title artwork. Get your key from{' '}
+          Used for playback pause/start clearlogos. Create or sign in to Fanart.tv, open the API key page,
+          and copy the <span className="font-semibold text-white">Personal API Key</span>. That is the key LoomTV needs.{' '}
           <button
             type="button"
-            onClick={() => openExternal('https://fanart.tv/get-an-api-key/')}
+            onClick={() => openExternal('https://fanart.tv/get-an-api-key/#personal')}
             className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
           >
-            fanart.tv <ExternalLink className="w-3 h-3" />
+            Open Fanart.tv personal API key page <ExternalLink className="w-3 h-3" />
           </button>
           .
         </>
