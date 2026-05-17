@@ -54,6 +54,7 @@ import {
   stopAllTranscodes,
   stopTranscode,
 } from './main/transcodeManager';
+import { cachedArtworkResponseHeaders } from './main/artworkCache';
 import {
   closeServerForUpdateInstall,
   trackServerConnections,
@@ -2243,11 +2244,10 @@ function startMediaServer(): Promise<number> {
           return;
         }
 
-        res.writeHead(200, {
-          'Content-Type': cachedArtwork.mimeType || decoded.mimeType,
-          'Cache-Control': 'public, max-age=86400',
-          'Content-Length': decoded.buffer.byteLength,
-        });
+        res.writeHead(200, cachedArtworkResponseHeaders(
+          cachedArtwork.mimeType || decoded.mimeType,
+          decoded.buffer.byteLength,
+        ));
         res.end(decoded.buffer);
         return;
       }
@@ -4746,7 +4746,6 @@ async function getPlaybackLogo(mediaId: string): Promise<{ logo?: string; logoCa
     ...officialArtworkOnly(target.logoCandidates || []),
   );
   if (existing.length > 0) {
-    await cacheArtworkNow(library);
     const delivered = artworkDeliveryUrls(existing);
     return { logo: delivered[0] || artworkDeliveryUrl(existing[0]), logoCandidates: delivered };
   }
@@ -4763,7 +4762,9 @@ async function getPlaybackLogo(mediaId: string): Promise<{ logo?: string; logoCa
       ...officialArtworkOnly(target.logoCandidates || []),
     );
     saveLibrary(library);
-    await cacheArtworkNow(library);
+    void cacheArtworkNow(library).catch((error) => {
+      console.error('playback logo artwork cache error:', error);
+    });
   }
 
   const delivered = artworkDeliveryUrls(logoCandidates);
