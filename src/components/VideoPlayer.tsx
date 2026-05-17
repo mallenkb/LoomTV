@@ -1579,7 +1579,7 @@ export default function VideoPlayer({
                 <img
                   src={pauseLogoSources[0]}
                   alt={title}
-                  className="mb-3 h-20 w-[min(24rem,70vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                  className="mb-4 h-40 max-h-[28vh] w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
                   onError={(event) => {
                     event.currentTarget.style.display = 'none';
                   }}
@@ -1590,13 +1590,13 @@ export default function VideoPlayer({
                 </h2>
               )}
               {hasEpisodes && (
-                <p className="text-xs font-semibold text-white/85">
+                <p className="text-[24px] font-semibold leading-tight text-white/85">
                   {epCode(currentSeason, currentEpisode)}
                   {duration > 0 ? ` · ${formatTime(duration)}` : ''}
                 </p>
               )}
               {pauseEpisodeTitle && (
-                <p className="mt-1 max-w-xl text-sm font-bold text-white">{pauseEpisodeTitle}</p>
+                <p className="mt-2 max-w-3xl text-[32px] font-bold leading-tight text-white">{pauseEpisodeTitle}</p>
               )}
               {currentEpisodeMeta?.summary && (
                 <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/75">
@@ -1642,7 +1642,7 @@ export default function VideoPlayer({
 
         {(nextCountdown !== null || showNextEpisodePrompt) && nextEpisodeFile && (
           <div
-            className="pointer-events-none absolute inset-0 z-30 flex items-end justify-end p-6 pb-28"
+            className="pointer-events-auto absolute inset-0 z-50 flex items-end justify-end p-6 pb-28"
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
           >
@@ -1687,14 +1687,18 @@ export default function VideoPlayer({
                 </div>
                 <div className="mt-5 flex gap-2.5">
                   <button
-                    onClick={playNextEpisodeNow}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      playNextEpisodeNow();
+                    }}
                     className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-white text-sm font-semibold text-black shadow-sm transition-colors hover:bg-white/90"
                   >
                     <Play className="h-4 w-4 fill-current" />
                     Play now
                   </button>
                   <button
-                    onClick={() => {
+                    onClick={(event) => {
+                      event.stopPropagation();
                       if (nextCountdown !== null) {
                         clearNextEpisodeCountdown();
                       } else {
