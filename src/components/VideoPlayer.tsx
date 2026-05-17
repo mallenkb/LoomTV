@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import LoomLoader from '@/components/LoomLoader';
-import SafeArtwork from '@/components/SafeArtwork';
 import { useTheme } from '@/components/ThemeProvider';
 import { desktopApi } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
@@ -184,10 +183,6 @@ export default function VideoPlayer({
       artwork?.logo,
     ].filter((source): source is string => Boolean(source)))),
   [artwork?.logo, artwork?.logoCandidates, playbackLogoCandidates]);
-  const pauseBackdropSources = useMemo(() =>
-    Array.from(new Set([...(artwork?.backdropCandidates || []), artwork?.backdrop].filter((source): source is string => Boolean(source)))),
-  [artwork?.backdrop, artwork?.backdropCandidates]);
-
   useEffect(() => {
     void hydrateProgressFromDatabase().then(() => setTick((value) => value + 1));
   }, []);
@@ -1561,19 +1556,11 @@ export default function VideoPlayer({
 
         {paused && playerState === 'ready' && (
           <div
-            className="pointer-events-none absolute inset-0 z-10 overflow-hidden bg-black/20 transition-opacity duration-300"
+            className="pointer-events-none absolute inset-0 z-10 overflow-hidden bg-[#071a33] transition-opacity duration-300"
             aria-hidden="true"
           >
-            <div className="absolute inset-0 backdrop-blur-sm" />
-            {pauseBackdropSources.length > 0 && (
-              <SafeArtwork
-                src={pauseBackdropSources}
-                alt=""
-                className="absolute inset-0 h-full w-full opacity-20 blur-sm scale-[1.02]"
-                imgClassName="object-cover"
-              />
-            )}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.20),rgba(0,0,0,0.55))]" />
+            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(17,70,132,0.90),rgba(5,17,35,0.98))]" />
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(93,156,236,0.26),rgba(5,17,35,0.42)_42%,rgba(0,0,0,0.46))]" />
             <div className="absolute bottom-24 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-28">
               {pauseLogoSources.length > 0 ? (
                 <img
