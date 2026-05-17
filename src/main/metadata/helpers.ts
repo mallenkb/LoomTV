@@ -20,6 +20,24 @@ export function numericRating(value: unknown): number {
   return Number.isFinite(rating) && rating > 0 ? rating : 0;
 }
 
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+
+export function tmdbLogoCandidates(details: unknown): string[] {
+  const logos = Array.isArray((details as any)?.images?.logos)
+    ? (details as any).images.logos as any[]
+    : [];
+
+  return Array.from(new Set(logos
+    .filter((logo) => logo?.file_path && (logo.iso_639_1 === 'en' || logo.iso_639_1 === null))
+    .sort((a, b) => {
+      const leftLanguageScore = a.iso_639_1 === 'en' ? 1 : 0;
+      const rightLanguageScore = b.iso_639_1 === 'en' ? 1 : 0;
+      return rightLanguageScore - leftLanguageScore
+        || (Number(b.vote_average) || 0) - (Number(a.vote_average) || 0);
+    })
+    .map((logo) => `${TMDB_IMAGE_BASE}/original${logo.file_path}`)));
+}
+
 export function normalizeTitleForMatch(value?: string): string {
   return (value || '')
     .toLowerCase()

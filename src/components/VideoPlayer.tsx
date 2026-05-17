@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import LoomLoader from '@/components/LoomLoader';
+import SafeArtwork from '@/components/SafeArtwork';
 import { useTheme } from '@/components/ThemeProvider';
 import { desktopApi } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
@@ -104,6 +105,7 @@ export default function VideoPlayer({
   mediaId,
   filePath,
   title,
+  artwork,
   subtitles = EMPTY_SUBTITLES,
   episodes = EMPTY_EPISODES,
   episodeFiles = EMPTY_EPISODE_FILES,
@@ -173,11 +175,49 @@ export default function VideoPlayer({
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
   const [dismissedNextPromptKey, setDismissedNextPromptKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // force episode list re-render
+  const [playbackLogoCandidates, setPlaybackLogoCandidates] = useState<string[]>([]);
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
+  const pauseLogoSources = useMemo(() =>
+    Array.from(new Set([
+      ...playbackLogoCandidates,
+      ...(artwork?.logoCandidates || []),
+      artwork?.logo,
+    ].filter((source): source is string => Boolean(source)))),
+  [artwork?.logo, artwork?.logoCandidates, playbackLogoCandidates]);
+  const pauseBackdropSources = useMemo(() =>
+    Array.from(new Set([...(artwork?.backdropCandidates || []), artwork?.backdrop].filter((source): source is string => Boolean(source)))),
+  [artwork?.backdrop, artwork?.backdropCandidates]);
 
   useEffect(() => {
     void hydrateProgressFromDatabase().then(() => setTick((value) => value + 1));
   }, []);
+
+  useEffect(() => {
+    setPlaybackLogoCandidates([]);
+    if (!mediaId) return;
+    let cancelled = false;
+    void desktopApi.getPlaybackLogo(mediaId)
+      .then((result) => {
+        if (cancelled) return;
+        setPlaybackLogoCandidates(
+          Array.from(new Set([...(result.logoCandidates || []), result.logo].filter((source): source is string => Boolean(source)))),
+        );
+      })
+      .catch((error) => {
+        console.warn('[VideoPlayer] playback logo lookup failed', error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaId]);
+
+  useEffect(() => {
+    pauseLogoSources.slice(0, 3).forEach((source) => {
+      const image = new Image();
+      image.decoding = 'async';
+      image.src = source;
+    });
+  }, [pauseLogoSources]);
 
   useEffect(() => {
     subtitleStyleRef.current = subtitleStyle;
@@ -1422,6 +1462,17 @@ export default function VideoPlayer({
       : epCode(currentSeason, currentEpisode);
   }, [currentEpisode, currentSeason, displayEpisodeTitle, episodeFiles, episodes, hasEpisodes]);
 
+  const currentEpisodeMeta = useMemo(() =>
+    episodes.find((item) => item.season === currentSeason && item.number === currentEpisode),
+  [currentEpisode, currentSeason, episodes]);
+
+  const pauseEpisodeTitle = useMemo(() => {
+    if (!hasEpisodes) return '';
+    const file = episodeFiles.find((item) => item.season === currentSeason && item.episode === currentEpisode);
+    const label = displayEpisodeTitle(currentSeason, currentEpisode, currentEpisodeMeta?.title, file?.filePath);
+    return label !== `Episode ${currentEpisode}` ? label : '';
+  }, [currentEpisode, currentSeason, currentEpisodeMeta?.title, displayEpisodeTitle, episodeFiles, hasEpisodes]);
+
   const nextEpLabel = useMemo(() => {
     if (!nextEpisodeFile) return null;
     const ep = episodes.find((item) =>
@@ -1463,14 +1514,14 @@ export default function VideoPlayer({
             handleBack(event);
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className={`absolute top-3 left-3 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+          className={`loom-player-top-control absolute left-6 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
           aria-label="Back"
         >
           <ChevronLeft className="w-4 h-4" />
           Back
         </button>
 
-        <div className={`pointer-events-none absolute top-3 left-1/2 z-40 max-w-[60%] -translate-x-1/2 rounded-full border border-white/10 bg-black/35 px-4 py-1.5 text-center text-xs font-medium text-white/80 shadow-lg backdrop-blur-md transition-opacity duration-200 ${showTopControls ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`loom-player-top-control pointer-events-none absolute left-1/2 z-40 max-w-[60%] -translate-x-1/2 rounded-full border border-white/10 bg-black/35 px-4 py-1.5 text-center text-xs font-medium text-white/80 shadow-lg backdrop-blur-md transition-opacity duration-200 ${showTopControls ? 'opacity-100' : 'opacity-0'}`}>
           <span className="block truncate">{currentEpLabel ?? title}</span>
         </div>
 
@@ -1480,7 +1531,7 @@ export default function VideoPlayer({
             handleClose();
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className={`absolute right-3 top-3 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+          className={`loom-player-top-control absolute right-6 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
           title="Close player"
           aria-label="Close player"
         >
@@ -1507,6 +1558,54 @@ export default function VideoPlayer({
             );
           })}
         </video>
+
+        {paused && playerState === 'ready' && (
+          <div
+            className="pointer-events-none absolute inset-0 z-10 overflow-hidden bg-black/20 transition-opacity duration-300"
+            aria-hidden="true"
+          >
+            <div className="absolute inset-0 backdrop-blur-sm" />
+            {pauseBackdropSources.length > 0 && (
+              <SafeArtwork
+                src={pauseBackdropSources}
+                alt=""
+                className="absolute inset-0 h-full w-full opacity-20 blur-sm scale-[1.02]"
+                imgClassName="object-cover"
+              />
+            )}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.20),rgba(0,0,0,0.55))]" />
+            <div className="absolute bottom-24 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-28">
+              {pauseLogoSources.length > 0 ? (
+                <img
+                  src={pauseLogoSources[0]}
+                  alt={title}
+                  className="mb-3 h-20 w-[min(24rem,70vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                  onError={(event) => {
+                    event.currentTarget.style.display = 'none';
+                  }}
+                />
+              ) : (
+                <h2 className="mb-2 max-w-[min(34rem,78vw)] text-4xl font-black uppercase leading-none tracking-normal drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-5xl">
+                  {title}
+                </h2>
+              )}
+              {hasEpisodes && (
+                <p className="text-xs font-semibold text-white/85">
+                  {epCode(currentSeason, currentEpisode)}
+                  {duration > 0 ? ` · ${formatTime(duration)}` : ''}
+                </p>
+              )}
+              {pauseEpisodeTitle && (
+                <p className="mt-1 max-w-xl text-sm font-bold text-white">{pauseEpisodeTitle}</p>
+              )}
+              {currentEpisodeMeta?.summary && (
+                <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/75">
+                  {currentEpisodeMeta.summary}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {playerState === 'loading' && (
           <div className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center">
@@ -1624,7 +1723,7 @@ export default function VideoPlayer({
 
         {/* Controls overlay */}
         <div
-          className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-4 pb-4 pt-14 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+          className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-6 pb-6 pt-14 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >

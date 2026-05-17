@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
-import { backdropSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
+import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
@@ -26,6 +26,7 @@ interface TVDetailProps {
     currentSeason?: number,
     currentEpisode?: number,
     mediaId?: string,
+    artwork?: Pick<RouteArtworkState, 'logo' | 'logoCandidates' | 'poster' | 'posterCandidates' | 'backdrop' | 'backdropCandidates'>,
   ) => void;
 }
 
@@ -201,14 +202,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
   const playerEpisodes = visibleSeasons.flatMap((season) => episodesWithFilesForSeason(season.number));
 
-  const handlePlayEpisode = (season: number, episode: number) => {
-    const filePath = findEpisodeFile(season, episode);
-    if (!filePath) return;
-    if (onPlay) {
-      onPlay(filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season, episode, show.id);
-    }
-  };
-
   const firstPlayableEpisode = show.episodeFiles
     ?.slice()
     .sort((a, b) => a.season - b.season || a.episode - b.episode)
@@ -258,6 +251,20 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     sourceArtwork?.backdropCandidates,
     sourceArtwork?.backdrop,
   );
+  const playerArtwork = {
+    logo: logoSources(show, sourceArtwork)[0] || '',
+    logoCandidates: logoSources(show, sourceArtwork),
+    poster: posterArtwork[0] || show.poster,
+    posterCandidates: posterArtwork,
+    backdrop: heroArtwork[0] || show.backdrop,
+    backdropCandidates: heroArtwork,
+  };
+
+  const handlePlayEpisode = (season: number, episode: number) => {
+    const filePath = findEpisodeFile(season, episode);
+    if (!filePath || !onPlay) return;
+    onPlay(filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season, episode, show.id, playerArtwork);
+  };
 
   const handlePlayShow = () => {
     if (!heroEpisode || !onPlay) return;
@@ -270,6 +277,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       heroEpisode.season,
       heroEpisode.episode,
       show.id,
+      playerArtwork,
     );
   };
 
@@ -301,6 +309,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       seasonNum,
       targetEpisode.episode,
       show.id,
+      playerArtwork,
     );
   };
 
@@ -518,7 +527,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                                 seasonNum={season.number}
                                 progressTick={progressTick}
                                 durationHint={ef.localMetadata?.durationSeconds}
-                                onPlay={() => onPlay && onPlay(ef.filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season.number, ef.episode, show.id)}
+                                onPlay={() => onPlay && onPlay(ef.filePath, show.title, show.subtitles, playerEpisodes, show.episodeFiles, season.number, ef.episode, show.id, playerArtwork)}
                               />
                             ))
                         )}

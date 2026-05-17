@@ -9,6 +9,7 @@ import {
   episodeCode as formatEpisodeCode,
   looksLikeGenericEpisodeTitle,
 } from '@/lib/episodeTitles';
+import { logoSources, uniqueArtworkSources } from '@/lib/artwork';
 
 const WATCHED_THRESHOLD = 0.9;
 
@@ -30,6 +31,14 @@ type ContinueCandidate = {
     currentSeason?: number,
     currentEpisode?: number,
     mediaId?: string,
+    artwork?: {
+      logo?: string;
+      logoCandidates?: string[];
+      poster?: string;
+      posterCandidates?: string[];
+      backdrop?: string;
+      backdropCandidates?: string[];
+    },
   ];
 };
 
@@ -44,6 +53,7 @@ interface ContinueWatchingBarProps {
     currentSeason?: number,
     currentEpisode?: number,
     mediaId?: string,
+    artwork?: ContinueCandidate['onPlayArgs'][8],
   ) => void;
 }
 
@@ -143,7 +153,24 @@ function findLatestCandidate(
       duration: details.duration,
       fraction: details.fraction,
       updatedAt: details.updatedAt || movie.lastPlayed || 0,
-      onPlayArgs: [movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id],
+      onPlayArgs: [
+        movie.filePath,
+        movie.title,
+        movie.subtitles,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        movie.id,
+        {
+          logo: logoSources(movie)[0] || '',
+          logoCandidates: logoSources(movie),
+          poster: movie.poster,
+          posterCandidates: uniqueArtworkSources(movie.posterCandidates, movie.poster),
+          backdrop: movie.backdrop,
+          backdropCandidates: uniqueArtworkSources(movie.backdropCandidates, movie.backdrop),
+        },
+      ],
     });
   });
 
@@ -172,6 +199,14 @@ function findLatestCandidate(
           episodeFile.season,
           episodeFile.episode,
           show.id,
+          {
+            logo: logoSources(show)[0] || '',
+            logoCandidates: logoSources(show),
+            poster: show.poster,
+            posterCandidates: uniqueArtworkSources(show.posterCandidates, show.poster),
+            backdrop: show.backdrop,
+            backdropCandidates: uniqueArtworkSources(show.backdropCandidates, show.backdrop),
+          },
         ],
       });
     });

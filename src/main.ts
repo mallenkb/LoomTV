@@ -110,6 +110,7 @@ import {
   fetchJikanMetadata,
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
+import { fetchFanartMovieLogos, fetchFanartTVLogos } from './main/metadata/fanart';
 
 type EpisodeMeta = MetadataEpisodeMeta;
 type EpisodeFile = MetadataEpisodeFile;
@@ -160,7 +161,7 @@ if (!hasSingleInstanceLock) {
 let mainWindow: BrowserWindow | null = null;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 8;
+const SCAN_CACHE_VERSION = 9;
 let libraryMutationVersion = 0;
 
 let mediaServerPort = 3847;
@@ -407,6 +408,88 @@ function getMetadataApiKey(settings: AppSettings, providerId: string): string | 
 
   const legacyField = METADATA_KEY_ALIASES[id];
   return legacyField ? normalized[legacyField]?.trim() || undefined : undefined;
+}
+
+type MetadataKeyTestResult = {
+  provider: string;
+  ok: boolean;
+  message: string;
+};
+
+function isTMDBReadAccessToken(value: string): boolean {
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value.trim());
+}
+
+async function testTMDBKey(value: string): Promise<MetadataKeyTestResult> {
+  const credential = value.trim().replace(/^Bearer\s+/i, '');
+  if (!credential) return { provider: 'tmdb', ok: false, message: 'Missing key.' };
+  const url = new URL('https://api.themoviedb.org/3/configuration');
+  const requestInit: RequestInit = {};
+  if (isTMDBReadAccessToken(credential)) {
+    requestInit.headers = { Authorization: `Bearer ${credential}` };
+  } else {
+    url.searchParams.set('api_key', credential);
+  }
+  const response = await fetch(url.toString(), requestInit);
+  return {
+    provider: 'tmdb',
+    ok: response.ok,
+    message: response.ok ? 'TMDB key works.' : `TMDB returned ${response.status}.`,
+  };
+}
+
+async function testOMDbKey(value: string): Promise<MetadataKeyTestResult> {
+  const key = value.trim();
+  if (!key) return { provider: 'omdb', ok: false, message: 'Missing key.' };
+  const url = new URL('https://www.omdbapi.com/');
+  url.searchParams.set('apikey', key);
+  url.searchParams.set('i', 'tt0133093');
+  const response = await fetch(url.toString());
+  const json = await response.json().catch(() => ({}));
+  const ok = response.ok && json?.Response !== 'False';
+  return {
+    provider: 'omdb',
+    ok,
+    message: ok ? 'OMDb key works.' : String(json?.Error || `OMDb returned ${response.status}.`),
+  };
+}
+
+async function testFanartKey(value: string): Promise<MetadataKeyTestResult> {
+  const key = value.trim();
+  if (!key) return { provider: 'fanart', ok: false, message: 'Missing key.' };
+  const url = new URL('https://webservice.fanart.tv/v3/movies/120');
+  url.searchParams.set('api_key', key);
+  const response = await fetch(url.toString());
+  return {
+    provider: 'fanart',
+    ok: response.ok,
+    message: response.ok ? 'Fanart.tv key works.' : `Fanart.tv returned ${response.status}.`,
+  };
+}
+
+async function testMetadataKeys(keys: Record<string, string>): Promise<MetadataKeyTestResult[]> {
+  const cleaned = Object.fromEntries(
+    Object.entries(keys || {})
+      .map(([provider, value]) => [normalizeProviderId(provider), String(value || '').trim()])
+      .filter(([provider, value]) => provider && value),
+  ) as Record<string, string>;
+
+  const tests = Object.entries(cleaned).map(async ([provider, value]) => {
+    try {
+      if (provider === 'tmdb') return await testTMDBKey(value);
+      if (provider === 'omdb') return await testOMDbKey(value);
+      if (provider === 'fanart') return await testFanartKey(value);
+      return { provider, ok: false, message: 'No built-in test for this provider.' };
+    } catch (error) {
+      return {
+        provider,
+        ok: false,
+        message: error instanceof Error ? error.message : 'Test failed.',
+      };
+    }
+  });
+
+  return Promise.all(tests);
 }
 
 async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, any>> {
@@ -1485,8 +1568,10 @@ function mediaItemHasUsableArtwork(item: MediaItem): boolean {
   return Boolean(
     durableArtworkSource(item.poster)
     || durableArtworkSource(item.backdrop)
+    || durableArtworkSource(item.logo)
     || item.posterCandidates?.some((source) => durableArtworkSource(source))
-    || item.backdropCandidates?.some((source) => durableArtworkSource(source)),
+    || item.backdropCandidates?.some((source) => durableArtworkSource(source))
+    || item.logoCandidates?.some((source) => durableArtworkSource(source)),
   );
 }
 
@@ -1911,9 +1996,9 @@ function startMediaServer(): Promise<number> {
             force: Boolean(body.force),
             mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
           }))
-          .then((scanned) => {
+          .then(async (scanned) => {
             if (saveLibraryFromScan(scanned, scanVersion)) {
-              cacheArtworkInBackground(scanned);
+              await cacheArtworkNow(scanned);
             }
             writeJson(res, 200, libraryForRenderer());
           })
@@ -1947,7 +2032,7 @@ function startMediaServer(): Promise<number> {
             const scanVersion = libraryMutationVersion;
             const scanned = await scanLibrary(updated, { mode: 'quick' });
             if (saveLibraryFromScan(scanned, scanVersion)) {
-              cacheArtworkInBackground(scanned);
+              await cacheArtworkNow(scanned);
             }
             writeJson(res, 200, libraryForRenderer());
           })
@@ -1987,6 +2072,28 @@ function startMediaServer(): Promise<number> {
           .catch((error) => {
             console.error('save settings API error:', error);
             writeJson(res, 500, { error: 'Failed to save settings' });
+          });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/metadata/test-keys' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => testMetadataKeys((body.keys || {}) as Record<string, string>))
+          .then((results) => writeJson(res, 200, results))
+          .catch((error) => {
+            console.error('metadata key test API error:', error);
+            writeJson(res, 500, { error: 'Failed to test metadata keys' });
+          });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/artwork/playback-logo' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => getPlaybackLogo(String(body.mediaId || '')))
+          .then((result) => writeJson(res, 200, result))
+          .catch((error) => {
+            console.error('playback logo API error:', error);
+            writeJson(res, 500, { error: 'Failed to fetch playback logo' });
           });
         return;
       }
@@ -2919,6 +3026,7 @@ async function buildTVItemFromFolder(
   omdbApiKey?: string,
   itemType: 'tv' | 'anime' = 'tv',
   tmdbApiKey?: string,
+  fanartApiKey?: string,
 ): Promise<MediaItem | null> {
   const localSeasons = extractSeasons(fullPath, entryName);
   const episodeFiles = scanEpisodeFiles(fullPath);
@@ -3026,6 +3134,16 @@ async function buildTVItemFromFolder(
     localBackdrop,
     officialBackdrop,
   );
+  const fanartLogoCandidates = await fetchFanartTVLogos(
+    matchedTmdbTVMeta?.providerIds?.tvdbId || matchedTVMeta?.providerIds?.tvdbId || providerIds.tvdbId,
+    fanartApiKey,
+  );
+  const logoCandidates = orderedArtworkCandidates(
+    matchedTmdbTVMeta?.logo,
+    ...officialArtworkOnly(matchedTmdbTVMeta?.logoCandidates || []),
+    ...fanartLogoCandidates,
+  );
+  const logo = logoCandidates[0] || '';
 
   // ── Summary / rating / genres / cast ──────────────────────────────────────
   const summary =
@@ -3115,8 +3233,10 @@ async function buildTVItemFromFolder(
     year: resolvedYear,
     poster,
     backdrop,
+    logo,
     posterCandidates,
     backdropCandidates,
+    logoCandidates,
     summary,
     rating,
     genres,
@@ -3127,6 +3247,7 @@ async function buildTVItemFromFolder(
     episodeFiles: mergedEpisodeFiles,
     subtitles,
     localMetadata: representativeProbe.localMetadata,
+    providerIds: mergeProviderIds(providerIds, matchedTmdbTVMeta?.providerIds || {}, matchedTVMeta?.providerIds || {}),
   };
 }
 
@@ -3144,6 +3265,7 @@ async function buildMovieItemFromFile(
   year: number,
   omdbApiKey?: string,
   tmdbApiKey?: string,
+  fanartApiKey?: string,
   forcedType?: 'movie' | 'tv' | 'anime',
 ): Promise<MediaItem> {
   const parsedFile = cleanMediaTitle(fileName);
@@ -3252,6 +3374,15 @@ async function buildMovieItemFromFile(
     localBackdrop,
     officialBackdrop,
   );
+  const fanartLogoCandidates = shouldUseShowProviders
+    ? await fetchFanartTVLogos(matchedTmdbTVMeta?.providerIds?.tvdbId || matchedTVMeta?.providerIds?.tvdbId || providerIds.tvdbId, fanartApiKey)
+    : await fetchFanartMovieLogos(matchedTmdbData?.providerIds?.tmdbId || providerIds.tmdbId, fanartApiKey);
+  const logoCandidates = orderedArtworkCandidates(
+    shouldUseShowProviders ? matchedTmdbTVMeta?.logo : matchedTmdbData?.logo,
+    ...officialArtworkOnly((shouldUseShowProviders ? matchedTmdbTVMeta?.logoCandidates : matchedTmdbData?.logoCandidates) || []),
+    ...fanartLogoCandidates,
+  );
+  const logo = logoCandidates[0] || '';
 
   const summary =
     probe.summary
@@ -3292,8 +3423,10 @@ async function buildMovieItemFromFile(
     year: resolvedYear,
     poster,
     backdrop,
+    logo,
     posterCandidates,
     backdropCandidates,
+    logoCandidates,
     summary,
     rating,
     genres,
@@ -3302,6 +3435,12 @@ async function buildMovieItemFromFile(
     fileSize: stats.size,
     subtitles,
     localMetadata: probe.localMetadata,
+    providerIds: mergeProviderIds(
+      providerIds,
+      matchedTmdbData?.providerIds || {},
+      matchedTmdbTVMeta?.providerIds || {},
+      matchedTVMeta?.providerIds || {},
+    ),
   };
 
   if (finalType === 'anime' || finalType === 'tv') {
@@ -3345,6 +3484,7 @@ async function buildMovieItemFromFile(
 interface ScanContext {
   omdbApiKey?: string;
   tmdbApiKey?: string;
+  fanartApiKey?: string;
   folderKind?: ScanFolderKind;
 }
 
@@ -3449,7 +3589,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
       path.join(folderPath, videoFiles[0]),
       videoFiles[0], parsedFolder.title,
       subtitles, parsedFolder.year,
-      ctx.omdbApiKey, ctx.tmdbApiKey,
+      ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
       ctx.folderKind === 'anime' ? 'anime' : 'tv',
     );
   }
@@ -3461,6 +3601,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
       ctx.omdbApiKey,
       ctx.folderKind === 'anime' || isLikelyAnimePath(folderPath, parsedFolder.title) ? 'anime' : 'tv',
       ctx.tmdbApiKey,
+      ctx.fanartApiKey,
     );
   }
 
@@ -3468,7 +3609,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
     path.join(folderPath, videoFiles[0]),
     videoFiles[0], parsedFolder.title,
     subtitles, parsedFolder.year,
-    ctx.omdbApiKey, ctx.tmdbApiKey,
+    ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
     ctx.folderKind === 'anime' ? 'anime' : undefined,
   );
 }
@@ -3518,7 +3659,7 @@ async function scanFolder(
         cleanMediaTitle(videoFile).title,
         createSubtitleRecords(folderPath, matchingSubtitles),
         cleanMediaTitle(videoFile).year,
-        ctx.omdbApiKey, ctx.tmdbApiKey,
+        ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
         forcedMovieType,
       )]);
     }
@@ -3559,6 +3700,7 @@ async function scanFolder(
               ctx.omdbApiKey,
               ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
               ctx.tmdbApiKey,
+              ctx.fanartApiKey,
             );
             if (tvItem) await addItems([tvItem]);
             continue;
@@ -3583,6 +3725,7 @@ async function scanFolder(
           ctx.omdbApiKey,
           ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
           ctx.tmdbApiKey,
+          ctx.fanartApiKey,
         );
         if (tvItem) await addItems([tvItem]);
       } else if (videoFiles.length > 0) {
@@ -3590,7 +3733,7 @@ async function scanFolder(
           path.join(fullPath, videoFiles[0]),
           videoFiles[0], parsedFolder.title,
           subtitles, parsedFolder.year,
-          ctx.omdbApiKey, ctx.tmdbApiKey,
+          ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
           ctx.folderKind === 'movies' ? 'movie' : undefined,
         )]);
       }
@@ -3611,6 +3754,7 @@ async function scanLibrary(
   const ctx: ScanContext = {
     omdbApiKey: getMetadataApiKey(settings, 'omdb'),
     tmdbApiKey: getMetadataApiKey(settings, 'tmdb'),
+    fanartApiKey: getMetadataApiKey(settings, 'fanart'),
   };
   const folderGroups = normalizeLibraryFolderGroups(data);
   const movies: MediaItem[] = [];
@@ -3895,8 +4039,10 @@ function stripInlineArtworkFromItem(item: MediaItem): MediaItem {
     ...item,
     poster: durableArtworkSource(item.poster),
     backdrop: durableArtworkSource(item.backdrop),
+    logo: durableArtworkSource(item.logo),
     posterCandidates: durableArtworkSources(item.posterCandidates),
     backdropCandidates: durableArtworkSources(item.backdropCandidates),
+    logoCandidates: durableArtworkSources(item.logoCandidates),
     episodes: item.episodes?.map((episode) => ({
       ...episode,
       still: durableArtworkSource(episode.still),
@@ -3916,15 +4062,19 @@ function stripInlineArtworkFromLibrary(data: LibraryData): LibraryData {
 function itemWithArtworkDeliveryUrls(item: MediaItem): MediaItem {
   const poster = artworkDeliveryUrl(item.poster);
   const backdrop = artworkDeliveryUrl(item.backdrop);
+  const logo = artworkDeliveryUrl(item.logo);
   const posterCandidates = artworkDeliveryUrls(item.posterCandidates);
   const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates);
+  const logoCandidates = artworkDeliveryUrls(item.logoCandidates);
 
   return {
     ...item,
     poster,
     backdrop,
+    logo,
     posterCandidates,
     backdropCandidates,
+    logoCandidates,
     subtitles: subtitleRecordsForRenderer(item.subtitles),
     episodes: item.episodes?.map((episode) => ({
       ...episode,
@@ -3959,16 +4109,20 @@ function signedArtworkUrlForRemote(base: string, pathname: string, params: URLSe
 function itemForLocalNetwork(item: MediaItem, base: string, token: string): MediaItem {
   const poster = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.poster), base, token);
   const backdrop = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.backdrop), base, token);
+  const logo = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.logo), base, token);
   const posterCandidates = artworkDeliveryUrls(item.posterCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
   const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
+  const logoCandidates = artworkDeliveryUrls(item.logoCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
 
   return {
     ...item,
     filePath: signedStreamUrlForRemote(base, item.filePath),
     poster,
     backdrop,
+    logo,
     posterCandidates,
     backdropCandidates,
+    logoCandidates,
     subtitles: subtitleRecordsForLocalNetwork(item.subtitles, base),
     episodes: item.episodes?.map((episode) => ({
       ...episode,
@@ -3997,14 +4151,12 @@ function libraryForLocalNetwork(): LibraryData {
 
 let artworkCacheQueue: Promise<void> = Promise.resolve();
 
-function cacheArtworkInBackground(data: LibraryData): void {
+async function cacheArtworkNow(data: LibraryData): Promise<void> {
   const snapshot = stripInlineArtworkFromLibrary(data);
   artworkCacheQueue = artworkCacheQueue
     .catch(() => undefined)
-    .then(() => cacheLibraryArtwork(snapshot))
-    .catch((error) => {
-      console.warn('[artwork-cache] Failed to cache library artwork:', error);
-    });
+    .then(() => cacheLibraryArtwork(snapshot));
+  await artworkCacheQueue;
 }
 
 function saveLibrary(data: LibraryData): void {
@@ -4046,6 +4198,8 @@ type OfficialArtworkRefreshResult = {
   episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
   posterCandidates: string[];
   backdropCandidates: string[];
+  logo?: string;
+  logoCandidates: string[];
 };
 
 type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
@@ -4087,6 +4241,8 @@ function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
       const parsed = new URL(url);
       const host = parsed.hostname.toLowerCase();
       return host.includes('image.tmdb.org')
+        || host.includes('assets.fanart.tv')
+        || host.includes('fanart.tv')
         || host.includes('media-amazon.com')
         || host.includes('m.media-amazon.com')
         || host.includes('cdn.myanimelist.net')
@@ -4119,6 +4275,7 @@ function metadataCandidate(
   if (!metadata) return null;
   const posterCandidates = officialArtworkOnly([metadata.poster, ...(metadata.posterCandidates || [])]);
   const backdropCandidates = officialArtworkOnly([metadata.backdrop, ...(metadata.backdropCandidates || [])]);
+  const logoCandidates = officialArtworkOnly([metadata.logo, ...(metadata.logoCandidates || [])]);
   const title = String(metadata.title || fallbackTitle || '').trim();
   const episodes = (metadata.episodes || []).filter((episode) => episode.title);
   const candidateWithoutId: Omit<OfficialMetadataCandidate, 'id'> = {
@@ -4138,6 +4295,8 @@ function metadataCandidate(
     }),
     posterCandidates,
     backdropCandidates,
+    logo: logoCandidates[0] || '',
+    logoCandidates,
   };
   if (!candidateWithoutId.title && !candidateWithoutId.thumbnail && !candidateWithoutId.cover) return null;
   return { ...candidateWithoutId, id: metadataCandidateId(candidateWithoutId) };
@@ -4375,6 +4534,7 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
   const settings = loadSettings();
   const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
   const omdbApiKey = getMetadataApiKey(settings, 'omdb');
+  const fanartApiKey = getMetadataApiKey(settings, 'fanart');
   const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
 
   if (item.type === 'movie') {
@@ -4391,6 +4551,14 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
     const posterCandidates = officialArtworkOnly([tmdbMeta?.poster, omdbPoster]);
     const backdropCandidates = officialArtworkOnly([tmdbMeta?.backdrop]);
+    const fanartLogoCandidates = await fetchFanartMovieLogos(
+      tmdbMeta?.providerIds?.tmdbId || providerIds.tmdbId,
+      fanartApiKey,
+    );
+    const logoCandidates = orderedArtworkCandidates(
+      ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
+      ...fanartLogoCandidates,
+    );
     return {
       thumbnail: posterCandidates[0] || '',
       cover: backdropCandidates[0] || posterCandidates[0] || '',
@@ -4398,6 +4566,8 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
       rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
       posterCandidates,
       backdropCandidates,
+      logo: logoCandidates[0] || '',
+      logoCandidates,
     };
   }
 
@@ -4426,6 +4596,14 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     likelyAnime ? matchedJikan?.backdrop : '',
     matchedTV?.backdrop,
   ]);
+  const fanartLogoCandidates = await fetchFanartTVLogos(
+    tmdbMeta?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
+    fanartApiKey,
+  );
+  const logoCandidates = orderedArtworkCandidates(
+    ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
+    ...fanartLogoCandidates,
+  );
   const episodes = matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes;
   const episodeSource = matchedTV?.episodes?.length
     ? 'TVmaze'
@@ -4444,10 +4622,12 @@ async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArt
     episodeSource,
     posterCandidates,
     backdropCandidates,
+    logo: logoCandidates[0] || '',
+    logoCandidates,
   };
 }
 
-function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMetadataCandidate): OfficialArtworkRefreshResult {
+async function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMetadataCandidate): Promise<OfficialArtworkRefreshResult> {
   const library = loadLibrary();
   const target = findLibraryMediaItem(library, mediaId);
 
@@ -4459,6 +4639,7 @@ function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMeta
   if (candidate.year) target.year = candidate.year;
   if (candidate.thumbnail) target.poster = candidate.thumbnail;
   if (candidate.cover) target.backdrop = candidate.cover;
+  if (candidate.logo) target.logo = candidate.logo;
   if (candidate.summary) target.summary = candidate.summary;
   if (candidate.rating) target.rating = candidate.rating;
   if (candidate.genres?.length) target.genres = candidate.genres;
@@ -4475,7 +4656,14 @@ function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMeta
     ...officialArtworkOnly(target.backdropCandidates || []),
     target.backdrop,
   );
+  target.logoCandidates = orderedArtworkCandidates(
+    ...(candidate.logoCandidates || []),
+    candidate.logo,
+    ...officialArtworkOnly(target.logoCandidates || []),
+    target.logo,
+  );
   saveLibrary(library);
+  await cacheArtworkNow(library);
 
   return {
     thumbnail: candidate.thumbnail || target.poster || '',
@@ -4486,6 +4674,8 @@ function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMeta
     episodeSource: candidate.source,
     posterCandidates: target.posterCandidates || [],
     backdropCandidates: target.backdropCandidates || [],
+    logo: candidate.logo || target.logo || '',
+    logoCandidates: target.logoCandidates || [],
   };
 }
 
@@ -4507,9 +4697,10 @@ async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkR
   }
 
   const refreshed = await fetchOfficialArtworkForItem(target);
-  if (refreshed.thumbnail || refreshed.cover || refreshed.summary || refreshed.rating || refreshed.episodes?.length) {
+  if (refreshed.thumbnail || refreshed.cover || refreshed.logo || refreshed.summary || refreshed.rating || refreshed.episodes?.length) {
     if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
     if (refreshed.cover) target.backdrop = refreshed.cover;
+    if (refreshed.logo) target.logo = refreshed.logo;
     if (refreshed.summary) target.summary = refreshed.summary;
     if (refreshed.rating) target.rating = refreshed.rating;
     mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
@@ -4523,7 +4714,13 @@ async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkR
       ...officialArtworkOnly(target.backdropCandidates || []),
       target.backdrop,
     );
+    target.logoCandidates = orderedArtworkCandidates(
+      ...refreshed.logoCandidates,
+      ...officialArtworkOnly(target.logoCandidates || []),
+      target.logo,
+    );
     saveLibrary(library);
+    await cacheArtworkNow(library);
   }
 
   return {
@@ -4532,7 +4729,45 @@ async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkR
     episodeSource: refreshed.episodeSource,
     posterCandidates: target.posterCandidates || refreshed.posterCandidates,
     backdropCandidates: target.backdropCandidates || refreshed.backdropCandidates,
+    logo: target.logo || refreshed.logo || '',
+    logoCandidates: target.logoCandidates || refreshed.logoCandidates,
   };
+}
+
+async function getPlaybackLogo(mediaId: string): Promise<{ logo?: string; logoCandidates: string[] }> {
+  const library = loadLibrary();
+  const target = findLibraryMediaItem(library, mediaId);
+  if (!target) {
+    throw new Error('Media item was not found in the library.');
+  }
+
+  const existing = orderedArtworkCandidates(
+    target.logo,
+    ...officialArtworkOnly(target.logoCandidates || []),
+  );
+  if (existing.length > 0) {
+    await cacheArtworkNow(library);
+    const delivered = artworkDeliveryUrls(existing);
+    return { logo: delivered[0] || artworkDeliveryUrl(existing[0]), logoCandidates: delivered };
+  }
+
+  const refreshed = await fetchOfficialArtworkForItem(target);
+  const logoCandidates = orderedArtworkCandidates(
+    refreshed.logo,
+    ...officialArtworkOnly(refreshed.logoCandidates || []),
+  );
+  if (logoCandidates.length > 0) {
+    target.logo = logoCandidates[0];
+    target.logoCandidates = orderedArtworkCandidates(
+      ...logoCandidates,
+      ...officialArtworkOnly(target.logoCandidates || []),
+    );
+    saveLibrary(library);
+    await cacheArtworkNow(library);
+  }
+
+  const delivered = artworkDeliveryUrls(logoCandidates);
+  return { logo: delivered[0] || artworkDeliveryUrl(logoCandidates[0]), logoCandidates: delivered };
 }
 
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
@@ -5328,7 +5563,7 @@ ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?:
     },
   });
   if (saveLibraryFromScan(scanned, scanVersion)) {
-    cacheArtworkInBackground(scanned);
+    await cacheArtworkNow(scanned);
   }
   return libraryForRenderer();
 });
@@ -5359,7 +5594,7 @@ ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'm
       },
     });
     if (saveLibraryFromScan(scanned, scanVersion)) {
-      cacheArtworkInBackground(scanned);
+      await cacheArtworkNow(scanned);
     }
     return libraryForRenderer();
   }
@@ -5433,6 +5668,8 @@ ipcMain.handle('settings:save', (_event, settings: AppSettings) => {
   return true;
 });
 
+ipcMain.handle('metadata:test-keys', (_event, keys: Record<string, string>) => testMetadataKeys(keys || {}));
+
 ipcMain.handle('network:status', () => {
   const settings = loadSettings();
   const token = getLanShareToken();
@@ -5492,6 +5729,7 @@ ipcMain.handle('artwork:official-candidates', (_event, mediaId: string) => getOf
 ipcMain.handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) =>
   applyOfficialMetadataCandidate(mediaId, candidate));
 ipcMain.handle('artwork:refresh-official', (_event, mediaId: string) => refreshOfficialArtwork(mediaId));
+ipcMain.handle('artwork:playback-logo', (_event, mediaId: string) => getPlaybackLogo(mediaId));
 ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
   importCustomArtwork(entries || {});
   return true;

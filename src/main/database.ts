@@ -75,6 +75,7 @@ function migrate(database: Database.Database): void {
       year INTEGER NOT NULL DEFAULT 0,
       poster TEXT NOT NULL DEFAULT '',
       backdrop TEXT NOT NULL DEFAULT '',
+      logo TEXT NOT NULL DEFAULT '',
       summary TEXT NOT NULL DEFAULT '',
       rating REAL NOT NULL DEFAULT 0,
       file_path TEXT NOT NULL,
@@ -84,8 +85,10 @@ function migrate(database: Database.Database): void {
       cast_json TEXT NOT NULL DEFAULT '[]',
       subtitles_json TEXT NOT NULL DEFAULT '[]',
       local_metadata_json TEXT,
+      provider_ids_json TEXT,
       poster_candidates_json TEXT NOT NULL DEFAULT '[]',
       backdrop_candidates_json TEXT NOT NULL DEFAULT '[]',
+      logo_candidates_json TEXT NOT NULL DEFAULT '[]',
       updated_at INTEGER NOT NULL
     );
 
@@ -160,7 +163,21 @@ function migrate(database: Database.Database): void {
     );
   `);
 
+  migrateMediaItemArtworkColumns(database);
   migrateLibraryFoldersKind(database);
+}
+
+function migrateMediaItemArtworkColumns(database: Database.Database): void {
+  const columns = new Set((database.prepare('PRAGMA table_info(media_items)').all() as Array<{ name: string }>).map((column) => column.name));
+  if (!columns.has('logo')) {
+    database.exec("ALTER TABLE media_items ADD COLUMN logo TEXT NOT NULL DEFAULT '';");
+  }
+  if (!columns.has('logo_candidates_json')) {
+    database.exec("ALTER TABLE media_items ADD COLUMN logo_candidates_json TEXT NOT NULL DEFAULT '[]';");
+  }
+  if (!columns.has('provider_ids_json')) {
+    database.exec('ALTER TABLE media_items ADD COLUMN provider_ids_json TEXT;');
+  }
 }
 
 function migrateLibraryFoldersKind(database: Database.Database): void {
@@ -231,8 +248,10 @@ function applyDurableState(item: any, progress: Map<string, StoredProgress>, cus
 
   next.poster = durableArtworkSource(next.poster);
   next.backdrop = durableArtworkSource(next.backdrop);
+  next.logo = durableArtworkSource(next.logo);
   next.posterCandidates = durableArtworkSources(next.posterCandidates);
   next.backdropCandidates = durableArtworkSources(next.backdropCandidates);
+  next.logoCandidates = durableArtworkSources(next.logoCandidates);
   next.episodes = (next.episodes || []).map((episode: any) => ({
     ...episode,
     still: durableArtworkSource(episode.still),
@@ -339,8 +358,10 @@ export function loadLibraryFromDatabase(): LibraryData | null {
       year: row.year,
       poster: row.poster,
       backdrop: row.backdrop,
+      logo: row.logo,
       posterCandidates: jsonParse(row.poster_candidates_json, []),
       backdropCandidates: jsonParse(row.backdrop_candidates_json, []),
+      logoCandidates: jsonParse(row.logo_candidates_json, []),
       summary: row.summary,
       rating: row.rating,
       genres: jsonParse(row.genres_json, []),
@@ -350,6 +371,7 @@ export function loadLibraryFromDatabase(): LibraryData | null {
       lastPlayed: row.last_played || undefined,
       subtitles: jsonParse(row.subtitles_json, []),
       localMetadata: jsonParse(row.local_metadata_json, undefined),
+      providerIds: jsonParse(row.provider_ids_json, undefined),
       seasons: seasonsByMedia.get(row.id) || undefined,
       episodes: episodesByMedia.get(row.id) || undefined,
       episodeFiles: episodeFilesByMedia.get(row.id) || undefined,
@@ -378,9 +400,9 @@ export function saveLibraryToDatabase(data: LibraryData): void {
 
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
-        id, type, title, year, poster, backdrop, summary, rating, file_path, file_size, last_played,
-        genres_json, cast_json, subtitles_json, local_metadata_json, poster_candidates_json, backdrop_candidates_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, type, title, year, poster, backdrop, logo, summary, rating, file_path, file_size, last_played,
+        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
     const insertEpisode = database.prepare(`
@@ -400,6 +422,7 @@ export function saveLibraryToDatabase(data: LibraryData): void {
         item.year || 0,
         durableArtworkSource(item.poster),
         durableArtworkSource(item.backdrop),
+        durableArtworkSource(item.logo),
         item.summary || '',
         item.rating || 0,
         item.filePath || '',
@@ -409,8 +432,10 @@ export function saveLibraryToDatabase(data: LibraryData): void {
         jsonString(item.cast || []),
         jsonString(item.subtitles || []),
         item.localMetadata ? jsonString(item.localMetadata) : null,
+        item.providerIds ? jsonString(item.providerIds) : null,
         jsonString(durableArtworkSources(item.posterCandidates || [])),
         jsonString(durableArtworkSources(item.backdropCandidates || [])),
+        jsonString(durableArtworkSources(item.logoCandidates || [])),
         now,
       );
 
@@ -571,8 +596,10 @@ function collectArtworkSources(data: LibraryData): string[] {
   for (const item of [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]) {
     add(item.poster);
     add(item.backdrop);
+    add(item.logo);
     (item.posterCandidates || []).forEach(add);
     (item.backdropCandidates || []).forEach(add);
+    (item.logoCandidates || []).forEach(add);
     (item.episodes || []).forEach((episode: any) => add(episode.still));
   }
   return Array.from(sources);
