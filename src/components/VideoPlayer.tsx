@@ -1065,10 +1065,6 @@ export default function VideoPlayer({
 
   const handleBack = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-      return;
-    }
     shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
@@ -1448,6 +1444,10 @@ export default function VideoPlayer({
   const subtitleCueShadow = subtitleStyle.borderWidth > 0
     ? `-${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, -${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}`
     : 'none';
+  const videoStyle: React.CSSProperties = {
+    ...(aspectMode.includes('/') ? { aspectRatio: aspectMode } : {}),
+    ...(fullscreen ? { objectPosition: 'center 24px' } : {}),
+  };
 
   const currentEpLabel = useMemo(() => {
     if (!hasEpisodes) return null;
@@ -1542,7 +1542,7 @@ export default function VideoPlayer({
         <video
           ref={videoRef}
           className={`w-full h-full ${aspectMode === 'fill' ? 'object-cover' : 'object-contain'}`}
-          style={aspectMode.includes('/') ? { aspectRatio: aspectMode } : undefined}
+          style={videoStyle}
           preload="auto"
         >
           {subtitles.map((subtitle, index) => {

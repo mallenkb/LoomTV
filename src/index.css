@@ -153,6 +153,10 @@ body.platform-darwin .loom-player-top-control {
   top: 3.5rem;
 }
 
+:fullscreen .loom-player-top-control {
+  top: 1.5rem;
+}
+
 .loom-detail-hero-fade {
   background:
     linear-gradient(180deg, rgba(8, 15, 25, 0.14) 0%, rgba(8, 15, 25, 0.44) 58%, var(--loom-sidebar) 100%),
