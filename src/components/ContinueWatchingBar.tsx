@@ -18,10 +18,12 @@ type ContinueCandidate = {
   filePath: string;
   title: string;
   subtitle: string;
+  label: string;
   position: number;
   duration: number;
   fraction: number;
   updatedAt: number;
+  priority: number;
   onPlayArgs: [
     filePath: string,
     title: string,
@@ -71,6 +73,7 @@ function progressDetails(filePath: string, durationHint = 0, progress: Record<st
     fraction,
     updatedAt,
     inProgress: position > 10 && duration > 0 && fraction < WATCHED_THRESHOLD,
+    watched: Boolean(stored?.watched) || fraction >= WATCHED_THRESHOLD,
   };
 }
 
@@ -149,11 +152,13 @@ function findLatestCandidate(
       key: `movie:${movie.id}`,
       filePath: movie.filePath,
       title: movie.title,
+      label: 'Continue watching',
       subtitle: `${formatTime(details.position)} / ${formatTime(details.duration)}`,
       position: details.position,
       duration: details.duration,
       fraction: details.fraction,
       updatedAt: details.updatedAt || movie.lastPlayed || 0,
+      priority: 2,
       onPlayArgs: [
         movie.filePath,
         movie.title,
@@ -178,8 +183,15 @@ function findLatestCandidate(
 
   shows.forEach((show) => {
     const playerEpisodes = playerEpisodesFor(show);
-    (show.episodeFiles || []).forEach((episodeFile) => {
-      const details = progressDetails(episodeFile.filePath, episodeFile.localMetadata?.durationSeconds, progress);
+    const sortedFiles = (show.episodeFiles || [])
+      .slice()
+      .sort((a, b) => a.season - b.season || a.episode - b.episode);
+    const episodeDetails = sortedFiles.map((episodeFile) => ({
+      episodeFile,
+      details: progressDetails(episodeFile.filePath, episodeFile.localMetadata?.durationSeconds, progress),
+    }));
+
+    episodeDetails.forEach(({ episodeFile, details }) => {
       if (!details.inProgress) return;
       const episode = playerEpisodes.find((item) => item.season === episodeFile.season && item.number === episodeFile.episode);
       const episodeTitle = cleanEpisodeTitleForDisplay(episode?.title, show.title, episodeFile.season, episodeFile.episode);
@@ -187,11 +199,13 @@ function findLatestCandidate(
         key: `${show.type}:${show.id}:${episodeFile.season}:${episodeFile.episode}`,
         filePath: episodeFile.filePath,
         title: show.title,
+        label: 'Continue episode',
         subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` - ${episodeTitle}` : ''} · ${formatTime(details.position)} / ${formatTime(details.duration)}`,
         position: details.position,
         duration: details.duration,
         fraction: details.fraction,
         updatedAt: details.updatedAt || show.lastPlayed || 0,
+        priority: 2,
         onPlayArgs: [
           episodeFile.filePath,
           show.title,
@@ -213,9 +227,57 @@ function findLatestCandidate(
         ],
       });
     });
+
+    if (episodeDetails.some(({ details }) => details.inProgress)) return;
+
+    const lastWatched = episodeDetails
+      .filter(({ details }) => details.watched)
+      .sort((a, b) => b.details.updatedAt - a.details.updatedAt)[0];
+    if (!lastWatched) return;
+
+    const nextEpisode = episodeDetails.find(({ details }) => !details.watched);
+    if (!nextEpisode) return;
+
+    const { episodeFile } = nextEpisode;
+    const episode = playerEpisodes.find((item) => item.season === episodeFile.season && item.number === episodeFile.episode);
+    const episodeTitle = cleanEpisodeTitleForDisplay(episode?.title, show.title, episodeFile.season, episodeFile.episode);
+    candidates.push({
+      key: `${show.type}:${show.id}:next:${episodeFile.season}:${episodeFile.episode}`,
+      filePath: episodeFile.filePath,
+      title: show.title,
+      label: 'Up next',
+      subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` - ${episodeTitle}` : ''}`,
+      position: 0,
+      duration: episodeFile.localMetadata?.durationSeconds || 0,
+      fraction: 0,
+      updatedAt: lastWatched.details.updatedAt || show.lastPlayed || 0,
+      priority: 1,
+      onPlayArgs: [
+        episodeFile.filePath,
+        show.title,
+        show.subtitles,
+        playerEpisodes,
+        show.episodeFiles,
+        episodeFile.season,
+        episodeFile.episode,
+        show.id,
+        {
+          logo: logoSources(show)[0] || '',
+          logoCandidates: logoSources(show),
+          poster: show.poster,
+          posterCandidates: uniqueArtworkSources(show.posterCandidates, show.poster),
+          backdrop: show.backdrop,
+          backdropCandidates: uniqueArtworkSources(show.backdropCandidates, show.backdrop),
+          rating: show.rating,
+        },
+      ],
+    });
   });
 
-  return candidates.sort((a, b) => b.updatedAt - a.updatedAt || b.position - a.position)[0] || null;
+  return candidates.sort((a, b) =>
+    b.priority - a.priority
+    || b.updatedAt - a.updatedAt
+    || b.position - a.position)[0] || null;
 }
 
 export default function ContinueWatchingBar({ isHidden = false, onPlay }: ContinueWatchingBarProps) {
@@ -318,6 +380,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
             )}
           </span>
           <span className="min-w-0 flex-1 leading-tight">
+            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">{candidate.label}</span>
             <span className="block truncate text-[20px] font-semibold text-white">{candidate.title}</span>
             <span className="mt-1 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
           </span>
