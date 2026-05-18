@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.31](docs/releases/v1.0.31.md): fixes fullscreen Back behavior and tightens fullscreen video/top-control spacing.
 - [LoomTV 1.0.30](docs/releases/v1.0.30.md): adds item-level metadata repair, library filters, better continue watching, and anime episode rating fixes.
 - [LoomTV 1.0.29](docs/releases/v1.0.29.md): reduces artwork cache growth and playback-time resource spikes.
 - [LoomTV 1.0.25](docs/releases/v1.0.25.md): keeps macOS window controls while removing the full native title bar and fixing logo spacing.
