@@ -2218,6 +2218,7 @@ export default function VideoPlayer({
                   const episodeTitle = displayEpisodeTitle(ep.season, ep.number, ep.title, epPath);
                   const watched = epPath ? isWatched(epPath, epDur) : false;
                   const inProgress = epPath ? isInProgress(epPath, epDur) : false;
+                  const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
                   const progFrac = isCurrent && duration > 0
                     ? position / duration
                     : epPath
@@ -2245,6 +2246,12 @@ export default function VideoPlayer({
                       <span className={`min-w-0 flex-1 truncate text-xs leading-snug ${isCurrent ? 'font-medium text-[var(--loom-accent)]' : 'text-white'}`}>
                         {episodeTitle}
                       </span>
+                      {episodeRating > 0 && (
+                        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#f5c451]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#f5c451]">
+                          <Star className="h-2.5 w-2.5 fill-current" />
+                          {episodeRating.toFixed(1)}
+                        </span>
+                      )}
                       {watched && !isCurrent && <CheckCircle className="h-3 w-3 shrink-0 text-green-500" />}
                       {inProgress && !isCurrent && <span className="shrink-0 text-[9px] text-amber-400">resume</span>}
                     </button>

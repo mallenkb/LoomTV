@@ -9,6 +9,9 @@ import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import SafeArtwork from '@/components/SafeArtwork';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
+import { hydrateProgressFromDatabase, loadProgress } from '@/lib/progress';
+import type { StoredProgress } from '@/lib/desktopApi';
+import { libraryFilterOptions, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 
 interface TVShowsProps {
   kind?: 'series' | 'anime';
@@ -22,14 +25,32 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const [progress, setProgress] = useState<Record<string, StoredProgress>>(() => loadProgress());
   const normalizedQuery = searchQuery(query);
-  const filteredShows = tvShows.filter((item) => matchesMediaItem(item, normalizedQuery));
+  const filteredShows = tvShows
+    .filter((item) => matchesMediaItem(item, normalizedQuery))
+    .filter((item) => matchesLibraryFilter(item, activeFilter, progress));
+
+  useEffect(() => {
+    const refresh = () => setProgress(loadProgress());
+    void hydrateProgressFromDatabase().then(refresh);
+    window.addEventListener('loomtv-progress', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.removeEventListener('loomtv-progress', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
 
   return (
     <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
-        <h2 className="loom-section-title mb-6 text-2xl font-bold text-white">{title}</h2>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <h2 className="loom-section-title text-2xl font-bold text-white">{title}</h2>
+          <FilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
+        </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
           {isLoading
             ? Array.from({ length: 12 }).map((_, i) => (
@@ -47,9 +68,38 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
           />
         )}
         {tvShows.length > 0 && filteredShows.length === 0 && !isLoading && (
-          <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
+          <div className="py-12 text-center text-[var(--loom-muted)]">
+            {activeFilter === 'all' ? 'No local matches found' : `No ${title.toLowerCase()} match this filter`}
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function FilterBar({
+  activeFilter,
+  onChange,
+}: {
+  activeFilter: LibraryFilter;
+  onChange: (filter: LibraryFilter) => void;
+}) {
+  return (
+    <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1">
+      {libraryFilterOptions.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          onClick={() => onChange(option.id)}
+          className={`h-8 shrink-0 rounded-md px-3 text-xs font-medium transition-colors ${
+            activeFilter === option.id
+              ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
+              : 'text-[var(--loom-muted)] hover:bg-white/10 hover:text-white'
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Loader2, MoreHorizontal, RefreshCw, Star, X } from 'lucide-react';
+import { Image, Loader2, MoreHorizontal, RefreshCw, Search, Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
@@ -265,6 +265,35 @@ export default function ArtworkEditorControls({
     }
   };
 
+  const refreshOfficialMetadata = async () => {
+    if (!mediaId || isFetchingArtwork || !onFetchOfficialArtwork) return;
+
+    setIsFetchingArtwork(true);
+    setArtworkSaveError('');
+    setMetadataError('');
+    try {
+      const refreshedArtwork = await onFetchOfficialArtwork();
+      const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
+      if (!hasFreshOfficialArtwork) {
+        showToast({
+          title: 'Metadata refreshed',
+          description: 'No new official artwork was found, but available metadata was checked.',
+          tone: 'warning',
+        });
+      }
+      await saveOfficialArtwork(refreshedArtwork);
+      showToast({
+        title: 'Metadata refreshed',
+        description: 'This item was refreshed from the connected metadata APIs.',
+        tone: 'success',
+      });
+    } catch (error) {
+      setArtworkSaveError(error instanceof Error ? error.message : 'Unable to refresh metadata.');
+    } finally {
+      setIsFetchingArtwork(false);
+    }
+  };
+
   const applyMetadataCandidate = async (candidate: OfficialMetadataCandidate) => {
     if (!onApplyOfficialArtworkCandidate || applyingCandidateId) return;
     setApplyingCandidateId(candidate.id);
@@ -376,8 +405,8 @@ export default function ArtworkEditorControls({
         <Button
           type="button"
           variant="ghost"
-          aria-label="Refresh metadata"
-          title="Refresh metadata"
+          aria-label="Fix metadata match"
+          title="Fix metadata match"
           onClick={openMetadataCandidates}
           disabled={isFetchingArtwork}
           className={`${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md transition-all duration-200 hover:border-[var(--loom-accent)]/45 hover:bg-[var(--loom-panel)] hover:text-[var(--loom-accent)] disabled:cursor-wait disabled:opacity-70`}
@@ -385,9 +414,9 @@ export default function ArtworkEditorControls({
           {isFetchingArtwork ? (
             <Loader2 className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4 animate-spin text-[var(--loom-accent)]`} />
           ) : (
-            <RefreshCw className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4`} />
+            <Search className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4`} />
           )}
-          {!isPageScrolled && <span className="text-sm font-medium">Refresh metadata</span>}
+          {!isPageScrolled && <span className="text-sm font-medium">Fix Match</span>}
         </Button>
         <div className="relative">
           <Button
@@ -411,6 +440,19 @@ export default function ArtworkEditorControls({
               role="menu"
               className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] py-1 shadow-2xl backdrop-blur-md"
             >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setArtworkMenuOpen(false);
+                  void refreshOfficialMetadata();
+                }}
+                disabled={!onFetchOfficialArtwork || isFetchingArtwork}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh metadata
+              </button>
               <button
                 type="button"
                 role="menuitem"
