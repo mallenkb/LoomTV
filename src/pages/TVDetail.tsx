@@ -667,7 +667,7 @@ function EpisodeRow({
   void progressTick;
 
   return (
-    <div className="relative flex cursor-pointer items-start gap-4 p-4 transition-colors group hover:bg-white/5" onClick={onPlay}>
+    <div className="relative flex cursor-pointer items-center gap-4 p-4 transition-colors group hover:bg-white/5" onClick={onPlay}>
       {(progress.inProgress || progress.watched) && progress.fraction > 0 && (
         <span
           className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${progress.watched ? 'bg-green-500' : 'bg-[var(--loom-accent)]'}`}
@@ -697,7 +697,7 @@ function EpisodeRow({
       </div>
 
       {/* Info */}
-      <div className="flex-1 min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
         <p className="text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
@@ -709,7 +709,7 @@ function EpisodeRow({
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2 pt-0.5">
+      <div className="flex shrink-0 items-center gap-2">
         {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--loom-accent)]">resume</span>}
         {progress.watched && <CheckCircle className="h-4 w-4 text-green-500" />}
       </div>

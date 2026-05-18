@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   bestSeriesTitleFromEpisodeFiles,
   chooseMetadataSearchTitle,
+  mergeEpisodeMetadataSources,
   seriesTitleFromEpisodeFileName,
   tmdbLogoCandidates,
 } from '../src/main/metadata/helpers.ts';
@@ -82,4 +83,78 @@ test('tmdb logo candidates keep only the best few fallback images', () => {
       'https://image.tmdb.org/t/p/w500/english-5.png',
     ],
   );
+});
+
+test('episode metadata merge fills missing anime ratings from lower-priority sources', () => {
+  const [episode] = mergeEpisodeMetadataSources(
+    [{
+      season: 1,
+      number: 1,
+      title: 'Local File Title',
+      summary: '',
+      still: '',
+      rating: 0,
+      airDate: '',
+    }],
+    [
+      [{
+        season: 1,
+        number: 1,
+        title: 'TVmaze Episode Title',
+        summary: '',
+        still: '',
+        rating: 0,
+        airDate: '2024-01-01',
+      }],
+      [{
+        season: 1,
+        number: 1,
+        title: 'Jikan Episode Title',
+        summary: '',
+        still: '',
+        rating: 8.4,
+        airDate: '',
+      }],
+    ],
+  );
+
+  assert.equal(episode.title, 'TVmaze Episode Title');
+  assert.equal(episode.rating, 8.4);
+  assert.equal(episode.airDate, '2024-01-01');
+});
+
+test('episode metadata merge preserves MAL-style episode scores', () => {
+  const [episode] = mergeEpisodeMetadataSources(
+    [{
+      season: 1,
+      number: 12,
+      title: 'Local File Title',
+      summary: '',
+      still: '',
+      rating: 0,
+      airDate: '',
+    }],
+    [
+      [{
+        season: 1,
+        number: 12,
+        title: 'Improvement by Memory',
+        summary: '',
+        still: '',
+        rating: 0,
+        airDate: '2014-06-22',
+      }],
+      [{
+        season: 1,
+        number: 12,
+        title: 'Improvement by Memory',
+        summary: '',
+        still: '',
+        rating: 4.74,
+        airDate: '2014-06-22',
+      }],
+    ],
+  );
+
+  assert.equal(episode.rating, 4.74);
 });

@@ -1,3 +1,5 @@
+import type { EpisodeMeta } from './types';
+
 export function parseYearFromText(value?: string): number {
   if (!value) return 0;
   const match = value.match(/\b(19\d{2}|20\d{2})\b/);
@@ -225,5 +227,37 @@ export function uniqueMetadataSearchHits<T>(hits: T[], keyForHit: (hit: T) => st
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+}
+
+function episodeKey(episode: Pick<EpisodeMeta, 'season' | 'number'>): string {
+  return `${episode.season}-${episode.number}`;
+}
+
+export function mergeEpisodeMetadataSources(
+  localEpisodes: EpisodeMeta[],
+  remoteSources: Array<EpisodeMeta[] | null | undefined>,
+): EpisodeMeta[] {
+  const remoteMaps = remoteSources
+    .filter((source): source is EpisodeMeta[] => Boolean(source?.length))
+    .map((source) => new Map(source.map((episode) => [episodeKey(episode), episode])));
+
+  if (remoteMaps.length === 0) return localEpisodes;
+
+  return localEpisodes.map((local) => {
+    const remotes = remoteMaps
+      .map((source) => source.get(episodeKey(local)))
+      .filter((episode): episode is EpisodeMeta => Boolean(episode));
+
+    if (remotes.length === 0) return local;
+
+    return {
+      ...local,
+      title: remotes.find((episode) => Boolean(episode.title))?.title || local.title,
+      summary: local.summary || remotes.find((episode) => Boolean(episode.summary))?.summary || '',
+      still: remotes.find((episode) => Boolean(episode.still))?.still || local.still,
+      rating: local.rating || remotes.find((episode) => numericRating(episode.rating) > 0)?.rating || 0,
+      airDate: local.airDate || remotes.find((episode) => Boolean(episode.airDate))?.airDate || '',
+    };
   });
 }

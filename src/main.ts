@@ -81,6 +81,7 @@ import {
   bestSeriesTitleFromEpisodeFiles,
   chooseMetadataSearchTitle,
   isGenericGroupingFolderTitle,
+  mergeEpisodeMetadataSources,
   normalizeTitleForMatch,
   numericRating,
   parseYearFromText,
@@ -3179,42 +3180,18 @@ async function buildTVItemFromFolder(
     || (matchedTmdbTVMeta?.year ?? 0)
     || (matchedTVMeta?.year ?? 0)
     || year;
-  const jikanEpisodesForLocalSeasons = finalType === 'anime' && !matchedTVMeta?.episodes?.length
+  const jikanEpisodesForLocalSeasons = finalType === 'anime'
     ? await fetchJikanEpisodesForLocalAnimeSeasons(episodeFiles, searchTitle, matchedJikanMeta)
     : [];
 
   // ── Merge episode metadata onto local files ────────────────────────────────
-  // Priority of episode data: TVmaze names > Jikan names for anime > TMDB TV.
-  // Remote episode maps are keyed by "season-number" (Jikan uses season=1 for all)
-  const remoteEpisodes: EpisodeMeta[] =
-    matchedTVMeta?.episodes
-    ?? (finalType === 'anime' && jikanEpisodesForLocalSeasons.length > 0 ? jikanEpisodesForLocalSeasons : null)
-    ?? matchedTmdbTVMeta?.episodes
-    ?? [];
-
-  let mergedEpisodes = localEpisodes;
-  if (remoteEpisodes.length > 0) {
-    const remoteEpMap = new Map<string, EpisodeMeta>(
-      remoteEpisodes.map((ep) => [
-        `${ep.season}-${ep.number}`,
-        ep,
-      ]),
-    );
-
-    mergedEpisodes = localEpisodes.map((local) => {
-      const key = `${local.season}-${local.number}`;
-      const remote = remoteEpMap.get(key);
-      if (!remote) return local;
-      return {
-        ...local,
-        title: remote.title || local.title,
-        summary: local.summary || remote.summary,
-        still: remote.still || local.still,
-        rating: remote.rating || local.rating,
-        airDate: local.airDate || remote.airDate,
-      };
-    });
-  }
+  // Keep provider priority per field so anime can use TVmaze titles while Jikan
+  // fills episode scores that TVmaze often leaves empty.
+  const mergedEpisodes = mergeEpisodeMetadataSources(localEpisodes, [
+    matchedTVMeta?.episodes,
+    finalType === 'anime' && jikanEpisodesForLocalSeasons.length > 0 ? jikanEpisodesForLocalSeasons : null,
+    matchedTmdbTVMeta?.episodes,
+  ]);
   const mergedEpisodeTitleByKey = new Map(
     mergedEpisodes.map((episode) => [`${episode.season}-${episode.number}`, episode.title]),
   );
