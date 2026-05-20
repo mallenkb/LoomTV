@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.34](docs/releases/v1.0.34.md): keeps subtitles behind the playback overlays so controls remain readable.
 - [LoomTV 1.0.31](docs/releases/v1.0.31.md): fixes fullscreen Back behavior and tightens fullscreen video/top-control spacing.
 - [LoomTV 1.0.30](docs/releases/v1.0.30.md): adds item-level metadata repair, library filters, better continue watching, and anime episode rating fixes.
 - [LoomTV 1.0.29](docs/releases/v1.0.29.md): reduces artwork cache growth and playback-time resource spikes.
