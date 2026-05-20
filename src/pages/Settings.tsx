@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDown, ArrowUp, ChevronDown, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette, Wifi, Copy } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -12,6 +12,7 @@ import LoomLoader from '@/components/LoomLoader';
 import LoomPlayMark from '@/components/LoomPlayMark';
 import { AppDarkTheme, AppLoaderStyle, AppThemeColor, DARK_THEMES, THEME_COLORS } from '@/lib/theme';
 import { cn } from '@/lib/utils';
+import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
 
 type MetadataProvider = {
   id: string;
@@ -291,8 +292,16 @@ export default function Settings() {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
   const peerScanInFlightRef = useRef(false);
+  const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
   const { theme, setTheme } = useTheme();
-  const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
+  const openExternal = useCallback((url: string) => {
+    void desktopApi.openExternal(url);
+  }, []);
+  const METADATA_PROVIDERS = useMemo(() => makeMetadataProviders(openExternal), [openExternal]);
+  const remoteLibraryRefreshKey = useMemo(
+    () => remoteLibraryRefreshIdentity(sharedLibrarySnapshot),
+    [sharedLibrarySnapshot],
+  );
 
   const refreshLocalNetworkStatus = async () => {
     try {
@@ -339,6 +348,10 @@ export default function Settings() {
   useEffect(() => {
     localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
   }, [activeSection]);
+
+  useEffect(() => {
+    sharedLibrarySnapshotRef.current = sharedLibrarySnapshot;
+  }, [sharedLibrarySnapshot]);
 
   const setMetadataKey = (providerId: string, value: string) => {
     setMetadataKeys((current) => ({ ...current, [providerId]: value }));
@@ -543,6 +556,7 @@ export default function Settings() {
         library: connection.library,
       };
       localStorage.setItem('loomtv:shared-library', JSON.stringify(snapshot));
+      sharedLibrarySnapshotRef.current = snapshot;
       setSharedLibrarySnapshot(snapshot);
       setRemoteLibraryAddress(connection.baseUrl);
       setRemoteShareCode('');
@@ -555,25 +569,27 @@ export default function Settings() {
   };
 
   const refreshRemoteLibrarySnapshot = useCallback(async () => {
-    if (!sharedLibrarySnapshot) return;
+    const snapshot = sharedLibrarySnapshotRef.current;
+    if (!snapshot) return;
     try {
       const refreshed = await desktopApi.refreshRemoteLibrary(
-        sharedLibrarySnapshot.baseUrl,
-        sharedLibrarySnapshot.deviceToken,
-        sharedLibrarySnapshot.libraryEtag,
+        snapshot.baseUrl,
+        snapshot.deviceToken,
+        snapshot.libraryEtag,
       );
       if (!refreshed) return; // 304 — no change.
       const next: SharedLibrarySnapshot = {
-        ...sharedLibrarySnapshot,
+        ...snapshot,
         library: refreshed.library,
         libraryEtag: refreshed.etag,
       };
       localStorage.setItem('loomtv:shared-library', JSON.stringify(next));
+      sharedLibrarySnapshotRef.current = next;
       setSharedLibrarySnapshot(next);
     } catch (error) {
       console.warn('Remote library refresh failed:', error);
     }
-  }, [sharedLibrarySnapshot]);
+  }, []);
 
   const disconnectRemoteLibrary = async () => {
     if (!sharedLibrarySnapshot) return;
@@ -584,6 +600,7 @@ export default function Settings() {
     );
     localStorage.removeItem('loomtv:shared-library');
     localStorage.removeItem('loomtv:last-remote-library');
+    sharedLibrarySnapshotRef.current = null;
     setSharedLibrarySnapshot(null);
     setRemoteLibraryStatus('Disconnected from shared library.');
   };
@@ -617,11 +634,10 @@ export default function Settings() {
   }, [activeSection, scanForPeers]);
 
   useEffect(() => {
-    if (!sharedLibrarySnapshot) return;
-    void refreshRemoteLibrarySnapshot();
+    if (!remoteLibraryRefreshKey) return;
     const id = setInterval(() => void refreshRemoteLibrarySnapshot(), 30000);
     return () => clearInterval(id);
-  }, [refreshRemoteLibrarySnapshot, sharedLibrarySnapshot]);
+  }, [refreshRemoteLibrarySnapshot, remoteLibraryRefreshKey]);
 
   const customProviders = Object.keys(metadataKeys)
     .filter((providerId) => !METADATA_PROVIDERS.some((provider) => provider.id === providerId))
@@ -720,9 +736,10 @@ export default function Settings() {
   };
 
   const handleSectionSelect = useCallback((sectionId: SettingsSection) => {
-    if (sectionId === activeSection) return;
-    setActiveSection(sectionId);
-  }, [activeSection]);
+    startTransition(() => {
+      setActiveSection((current) => nextSettingsSection(current, sectionId));
+    });
+  }, []);
 
   return (
     <div className="loom-page h-full overflow-y-auto">

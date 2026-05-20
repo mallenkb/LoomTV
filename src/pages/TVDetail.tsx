@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
-import { motion } from 'motion/react';
 import { useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -64,6 +63,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [progressTick, setProgressTick] = useState(0);
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
+  const [detailsReady, setDetailsReady] = useState(false);
 
   useEffect(() => {
     const collection = kind === 'anime' ? state.animeShows : state.tvShows;
@@ -77,6 +77,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       setExpandedSeason(firstVisibleSeason?.number ?? null);
     }
   }, [id, kind, state.animeShows, state.tvShows]);
+
+  useEffect(() => {
+    setDetailsReady(false);
+    const frame = window.requestAnimationFrame(() => setDetailsReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [show?.id]);
 
   useEffect(() => {
     const bump = () => setProgressTick((value) => value + 1);
@@ -100,6 +106,14 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       void loadCustomArtwork(show.id, CUSTOM_ARTWORK_KEY)
         .then((artwork) => setCustomArtwork(artwork as CustomArtworkState));
     }
+
+    const hasStoredArtwork = Boolean(
+      show?.poster
+      || show?.backdrop
+      || show?.posterCandidates?.length
+      || show?.backdropCandidates?.length,
+    );
+    if (hasStoredArtwork) return;
 
     const episodeFiles = show?.episodeFiles
       ?.slice()
@@ -129,7 +143,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     return () => {
       cancelled = true;
     };
-  }, [show?.id, show?.episodeFiles]);
+  }, [show?.backdrop, show?.backdropCandidates?.length, show?.episodeFiles, show?.id, show?.poster, show?.posterCandidates?.length]);
 
   if (!show) {
     return (
@@ -351,7 +365,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:text-[var(--loom-accent)]"
+          className="loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:text-[var(--loom-accent)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           Back
@@ -542,7 +556,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </section>
 
         {/* Cast */}
-        {show.cast.length > 0 && (
+        {detailsReady && show.cast.length > 0 && (
           <section>
             <h3 className="text-lg font-semibold text-white mb-3">Cast</h3>
             <div className="flex gap-4 overflow-x-auto pb-2">
@@ -572,44 +586,50 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
 function ExpandableSummary({ summary }: { summary: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+  const summaryRef = useRef<HTMLParagraphElement | null>(null);
   const toggleSummary = () => setIsExpanded((expanded) => !expanded);
 
+  useLayoutEffect(() => {
+    const element = summaryRef.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight) || 24;
+      setCanExpand(element.scrollHeight > lineHeight * 3 + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [summary]);
+
   return (
-    <motion.div
-      layout
+    <div
       onClick={toggleSummary}
       className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70"
-      whileTap={{ scale: 0.998 }}
     >
-      <motion.div
-        layout
-        className="overflow-hidden"
-        transition={{ type: 'spring', stiffness: 360, damping: 34, mass: 0.9 }}
-      >
-        <motion.p
-          key={isExpanded ? 'expanded' : 'collapsed'}
+      <div className="overflow-hidden">
+        <p
+          ref={summaryRef}
           className={`text-[var(--loom-muted)] leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}
-          initial={{ opacity: 0.72, y: isExpanded ? -3 : 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
         >
           {summary}
-        </motion.p>
-      </motion.div>
-      <motion.button
-        layout
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={(event) => {
-          event.stopPropagation();
-          toggleSummary();
-        }}
-        className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
-        whileTap={{ scale: 0.98 }}
-      >
-        {isExpanded ? 'Show Less' : 'Show More'}
-      </motion.button>
-    </motion.div>
+        </p>
+      </div>
+      {canExpand && (
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSummary();
+          }}
+          className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
+        >
+          {isExpanded ? 'Show Less' : 'Show More'}
+        </button>
+      )}
+    </div>
   );
 }
 
