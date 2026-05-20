@@ -163,6 +163,7 @@ if (!hasSingleInstanceLock) {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let isAppShuttingDown = false;
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const SCAN_CACHE_VERSION = 9;
@@ -5187,10 +5188,13 @@ async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
 
   const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
   const helperPath = path.join(helperDir, 'install-update.sh');
-  const appPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-  const targetAppPath = appPath.startsWith('/Applications/')
-    ? appPath
-    : path.join('/Applications', `${app.getName()}.app`);
+  const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
+  const canonicalAppPath = path.join('/Applications', `${app.getName()}.app`);
+  const legacyAppPath = runningAppPath.startsWith('/Applications/')
+    && runningAppPath !== canonicalAppPath
+    ? runningAppPath
+    : null;
+  const targetAppPath = canonicalAppPath;
   const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
   const extractDir = path.join(helperDir, 'extracted');
   const logPath = path.join(helperDir, 'install.log');
@@ -5206,6 +5210,7 @@ UPDATE_ZIP=${shellQuote(updateFilePath)}
 EXTRACT_DIR=${shellQuote(extractDir)}
 TARGET_APP=${shellQuote(targetAppPath)}
 BACKUP_APP=${shellQuote(backupAppPath)}
+LEGACY_APP=${shellQuote(legacyAppPath || '')}
 
 while kill -0 "$PARENT_PID" >/dev/null 2>&1; do
   sleep 0.25
@@ -5218,6 +5223,10 @@ mkdir -p "$EXTRACT_DIR"
 if [ ! -d "$EXTRACT_DIR/LoomTV.app" ]; then
   echo "Extracted update did not contain LoomTV.app"
   exit 1
+fi
+
+if [ -n "$LEGACY_APP" ]; then
+  echo "Replacing legacy app bundle path $LEGACY_APP with canonical bundle $TARGET_APP"
 fi
 
 rm -rf "$BACKUP_APP"
@@ -5886,6 +5895,7 @@ app.whenReady().then(async () => {
 app.on('second-instance', () => {
   if (updateInstallStarted) return;
   if (!app.isReady()) return;
+  if (isAppShuttingDown) return;
   createWindow();
 });
 
@@ -5893,17 +5903,20 @@ app.on('window-all-closed', () => {
   // Don't tear down twice when quitAndInstall is closing windows — it issues
   // its own quit and the install path needs a clean exit.
   if (updateInstallStarted) return;
+  if (isAppShuttingDown) return;
   stopAllTranscodes();
   destroyLanDiscovery();
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });
 
 app.on('activate', () => {
   if (updateInstallStarted) return;
+  if (isAppShuttingDown) return;
   createWindow();
 });
 
 app.on('before-quit', () => {
+  isAppShuttingDown = true;
   clearUpdateQuitFallback();
   // Skip if quitAndInstall already drained these — re-running close() on a
   // null server can throw and abort the install path.
