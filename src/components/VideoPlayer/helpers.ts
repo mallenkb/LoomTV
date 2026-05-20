@@ -303,3 +303,53 @@ export function transcodeErrorMessage(error: unknown): string {
   }
   return 'Unable to start transcoding fallback';
 }
+
+export type SubtitleCue = { start: number; end: number; text: string };
+
+const BITMAP_SUBTITLE_CODECS = [
+  'hdmv_pgs_subtitle',
+  'pgssub',
+  'pgs',
+  'dvd_subtitle',
+  'dvdsub',
+  'dvb_subtitle',
+  'dvbsub',
+  'xsub',
+];
+
+export function isBitmapSubtitleCodec(codec?: string): boolean {
+  const normalized = (codec || '').toLowerCase();
+  return BITMAP_SUBTITLE_CODECS.some((entry) => normalized.includes(entry));
+}
+
+function parseVttTimestamp(value: string): number {
+  const parts = value.trim().split(':');
+  if (parts.length < 2) return NaN;
+  const seconds = parseFloat((parts.pop() || '').replace(',', '.'));
+  const minutes = parseInt(parts.pop() || '0', 10);
+  const hours = parts.length ? parseInt(parts.pop() || '0', 10) : 0;
+  if (!Number.isFinite(seconds) || !Number.isFinite(minutes) || !Number.isFinite(hours)) return NaN;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+export function parseVttCues(content: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  const blocks = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.split('\n').filter((line) => line.trim().length > 0);
+    const arrowIndex = lines.findIndex((line) => line.includes('-->'));
+    if (arrowIndex === -1) continue;
+    const [startRaw, restRaw] = lines[arrowIndex].split('-->');
+    const endRaw = (restRaw || '').trim().split(/\s+/)[0] || '';
+    const start = parseVttTimestamp(startRaw);
+    const end = parseVttTimestamp(endRaw);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const text = lines
+      .slice(arrowIndex + 1)
+      .join('\n')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+    if (text) cues.push({ start, end, text });
+  }
+  return cues.sort((a, b) => a.start - b.start);
+}

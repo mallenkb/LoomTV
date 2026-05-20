@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Download, Film, Folder, Home, RefreshCw, Settings, Tv } from 'lucide-react';
+import { Download, Film, Folder, RefreshCw, Settings, Tv } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { desktopApi, UpdateState } from '@/lib/desktopApi';
@@ -14,7 +14,7 @@ const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'ot
 const navItemHeight = 40;
 const navItemGap = 4;
 
-const homeNavItem = { id: 'home', path: '/', label: 'Home', icon: Home };
+const homeNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeIcon };
 
 const sidebarNavItems: Record<SidebarNavItemId, { id: SidebarNavItemId; path: string; label: string; icon: React.ComponentType<{ className?: string }> }> = {
   anime: { id: 'anime', path: '/anime', label: 'Anime', icon: AnimeIcon },
@@ -63,6 +63,20 @@ function AnimeIcon({ className }: { className?: string }) {
           d="M21.778 3.372a1 1 0 0 1 .116 1.075l-2 4a1 1 0 0 1-.777.546q-1.557.178-3.117.306v1.366a58 58 0 0 0 3.797-.644a1 1 0 0 1 .406 1.958q-.6.122-1.203.23V18a1 1 0 1 1 0 2h-5a1 1 0 1 1 0-2v-5.095c-.692.059-1.374.095-2 .095s-1.308-.037-2-.095V18a1 1 0 1 1 0 2H5a1 1 0 0 1 0-2v-5.79a51 51 0 0 1-1.203-.23a1 1 0 0 1 .406-1.96c1.258.258 2.525.47 3.797.645V9.299a100 100 0 0 1-3.116-.306a1.01 1.01 0 0 1-.778-.546l-2-4a1 1 0 0 1 1.143-1.415l.47.117l.952.224l.856.191l.642.137l.337.069q.398.08.81.158l.83.15c1.392.24 2.798.422 3.854.422s2.462-.181 3.853-.421l.83-.15l.81-.16l.98-.205l.856-.19l.482-.113q.471-.11.939-.23a1 1 0 0 1 1.028.34ZM17 18v-5.459l-.66.096l-.34.046V18zM7 12.541v5.46h1v-5.318l-.675-.094zm7-1.644v-1.46l-.827.04c-.407.014-.803.023-1.173.023s-.766-.009-1.173-.024L10 9.438v1.459c.703.063 1.387.103 2 .103c.49 0 1.026-.025 1.581-.068zm4.349-3.83l.801-1.604l-1.175.256c-1.967.42-3.972.781-5.975.781s-4.008-.361-5.975-.78L4.85 5.462l.801 1.603c2.107.226 4.23.434 6.349.434c1.817 0 3.636-.153 5.445-.339l.904-.095Z"
         />
       </g>
+    </svg>
+  );
+}
+
+function HomeIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 256 256"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z" />
     </svg>
   );
 }
@@ -133,12 +147,13 @@ export default function Sidebar() {
 
   return (
     <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
-      <div className="loom-sidebar-brand p-4 bg-black/10">
-        <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
+      <div className="loom-sidebar-brand relative p-4 bg-black/10">
+        <div className="loom-sidebar-drag-region" aria-hidden="true" />
+        <Link to="/" className="loom-no-drag relative z-10 inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
           <LoomLogo className="h-8 w-auto" />
         </Link>
       </div>
-      <nav className="flex-1 p-3 flex flex-col">
+      <nav className="flex-1 p-3 pt-0 flex flex-col">
         <div className="relative">
           {activeNavIndex >= 0 && (
             <motion.span

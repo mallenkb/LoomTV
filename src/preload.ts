@@ -8,7 +8,9 @@ type SubtitleStyleOptions = {
   fontColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  borderEnabled?: boolean;
   backgroundColor?: string;
+  backgroundEnabled?: boolean;
 };
 
 type LibraryPayload = {
@@ -63,6 +65,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     subtitleStyle?: SubtitleStyleOptions;
     forceTranscode?: boolean;
   }) => ipcRenderer.invoke('media:get-stream-url', filePath, options || {}),
+  getSubtitleUrl: (filePath: string, streamOrdinal?: number) => ipcRenderer.invoke('media:get-subtitle-url', filePath, streamOrdinal),
   getThumbnail: (filePath: string, time?: string) => ipcRenderer.invoke('media:get-thumbnail', filePath, time),
   getFileInfo: (filePath: string) => ipcRenderer.invoke('media:get-file-info', filePath),
   getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port: number) => `http://127.0.0.1:${port}`),

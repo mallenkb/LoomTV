@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FolderPlus, Play, Star, Tv } from 'lucide-react';
 import { useLibrary, TVShow } from '@/contexts/LibraryContext';
@@ -8,10 +8,12 @@ import { desktopApi } from '@/lib/desktopApi';
 import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import SafeArtwork from '@/components/SafeArtwork';
+import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
 import { hydrateProgressFromDatabase, loadProgress } from '@/lib/progress';
 import type { StoredProgress } from '@/lib/desktopApi';
-import { libraryFilterOptions, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import LibraryFilterBar from '@/components/LibraryFilterBar';
 
 interface TVShowsProps {
   kind?: 'series' | 'anime';
@@ -28,9 +30,9 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const [progress, setProgress] = useState<Record<string, StoredProgress>>(() => loadProgress());
   const normalizedQuery = searchQuery(query);
-  const filteredShows = tvShows
+  const filteredShows = useMemo(() => tvShows
     .filter((item) => matchesMediaItem(item, normalizedQuery))
-    .filter((item) => matchesLibraryFilter(item, activeFilter, progress));
+    .filter((item) => matchesLibraryFilter(item, activeFilter, progress)), [activeFilter, normalizedQuery, progress, tvShows]);
 
   useEffect(() => {
     const refresh = () => setProgress(loadProgress());
@@ -47,19 +49,22 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
     <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-4">
           <h2 className="loom-section-title text-2xl font-bold text-white">{title}</h2>
-          <FilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
+          <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
         </div>
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
-          {isLoading
-            ? Array.from({ length: 12 }).map((_, i) => (
-                <Skeleton key={i} className="h-[300px] w-full max-w-[200px] rounded-lg" />
-              ))
-            : filteredShows.map((item) => (
-                <TVShowCard key={item.id} show={item} from={currentRoute} />
-              ))}
-        </div>
+        {isLoading ? (
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <Skeleton key={i} className="h-[300px] w-full max-w-[200px] rounded-lg" />
+            ))}
+          </div>
+        ) : (
+          <VirtualPosterGrid
+            items={filteredShows}
+            renderItem={(item) => <TVShowCard show={item} from={currentRoute} />}
+          />
+        )}
         {tvShows.length === 0 && !isLoading && (
           <EmptyShowsState
             kind={kind}
@@ -73,33 +78,6 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function FilterBar({
-  activeFilter,
-  onChange,
-}: {
-  activeFilter: LibraryFilter;
-  onChange: (filter: LibraryFilter) => void;
-}) {
-  return (
-    <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1">
-      {libraryFilterOptions.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => onChange(option.id)}
-          className={`h-8 shrink-0 rounded-md px-3 text-xs font-medium transition-colors ${
-            activeFilter === option.id
-              ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
-              : 'text-[var(--loom-muted)] hover:bg-white/10 hover:text-white'
-          }`}
-        >
-          {option.label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -146,11 +124,14 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
   const fallbackFilePath = show.episodeFiles
     ?.slice()
     .sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
-  const imageSources = posterSources(show, undefined, fallbackThumbnail ? [fallbackThumbnail] : []);
+  const baseImageSources = useMemo(() => posterSources(show), [show]);
+  const generatedSources = useMemo(() => fallbackThumbnail ? [fallbackThumbnail] : [], [fallbackThumbnail]);
+  const imageSources = useMemo(() => posterSources(show, undefined, generatedSources), [generatedSources, show]);
+  const routeArtwork = useMemo(() => routeArtworkState(show, imageSources), [imageSources, show]);
 
   useEffect(() => {
     setFallbackThumbnail('');
-    if (!fallbackFilePath) return;
+    if (!fallbackFilePath || baseImageSources.length > 0) return;
 
     let isMounted = true;
     void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
@@ -164,13 +145,13 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
     return () => {
       isMounted = false;
     };
-  }, [fallbackFilePath]);
+  }, [baseImageSources.length, fallbackFilePath]);
 
   return (
     <Link
       to={`${routeBase}/${show.id}`}
-      state={{ from, artwork: routeArtworkState(show, imageSources) }}
-      className="loom-poster-link group block w-full max-w-[200px]"
+      state={{ from, artwork: routeArtwork }}
+      className="loom-poster-link group block w-full max-w-[200px] [contain-intrinsic-size:300px_200px] [content-visibility:auto]"
     >
       <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork

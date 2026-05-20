@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cachedArtworkResponseHeaders, collectArtworkSourcesForCache } from '../src/main/artworkCache.ts';
+import {
+  cachedArtworkResponseHeaders,
+  collectArtworkSourcesForCache,
+  artworkCacheFileName,
+  customArtworkReference,
+  parseCustomArtworkReference,
+} from '../src/main/artworkCache.ts';
 
 test('artwork cache only keeps bounded external artwork fallbacks', () => {
   const sources = collectArtworkSourcesForCache({
@@ -72,4 +78,26 @@ test('cached artwork responses are not duplicated into Chromium HTTP cache', () 
     'Cache-Control': 'no-store',
     'Content-Length': 1024,
   });
+});
+
+test('custom artwork references keep database artwork out of renderer state', () => {
+  const reference = customArtworkReference('movie:/Library/Marty Supreme.mkv', 'thumbnail');
+
+  assert.equal(reference, 'loomtv-custom-artwork://artwork/movie%3A%2FLibrary%2FMarty%20Supreme.mkv/thumbnail');
+  assert.deepEqual(parseCustomArtworkReference(reference), {
+    mediaId: 'movie:/Library/Marty Supreme.mkv',
+    target: 'thumbnail',
+  });
+  assert.equal(parseCustomArtworkReference('data:image/jpeg;base64,abc'), null);
+});
+
+test('disk artwork cache file names are stable and content-type aware', () => {
+  assert.equal(
+    artworkCacheFileName('https://images.example/poster.jpg?size=large', 'image/webp'),
+    'a8f2d58f5d2bfa035bfdc0bd9101b5fd421de141b3c5843042b6c260961e6eab.webp',
+  );
+  assert.equal(
+    artworkCacheFileName('https://images.example/poster.jpg?size=large', 'image/jpeg'),
+    'a8f2d58f5d2bfa035bfdc0bd9101b5fd421de141b3c5843042b6c260961e6eab.jpg',
+  );
 });

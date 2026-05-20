@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import path from 'node:path';
 import { findFFprobe } from './mediaBinaries';
 import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
+
+const PROBE_CACHE_LIMIT = 1000;
+const probeCache = new Map<string, ProbeResult>();
 
 function streamType(value?: string): MediaTrack['type'] {
   if (value === 'video' || value === 'audio' || value === 'subtitle' || value === 'data') return value;
@@ -16,8 +20,29 @@ export function assertLocalMediaPath(filePath: string): string {
   return filePath;
 }
 
+function probeCacheKey(filePath: string): string {
+  const stats = fs.statSync(filePath);
+  return `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`;
+}
+
+function cacheProbeResult(cacheKey: string, result: ProbeResult): ProbeResult {
+  if (probeCache.size >= PROBE_CACHE_LIMIT) {
+    const oldestKey = probeCache.keys().next().value;
+    if (oldestKey) probeCache.delete(oldestKey);
+  }
+  probeCache.set(cacheKey, result);
+  return result;
+}
+
+export function clearProbeCache(): void {
+  probeCache.clear();
+}
+
 export function probeMedia(filePath: string): ProbeResult {
   assertLocalMediaPath(filePath);
+  const cacheKey = probeCacheKey(filePath);
+  const cached = probeCache.get(cacheKey);
+  if (cached) return cached;
 
   const ffprobe = findFFprobe();
   if (!ffprobe) throw new Error('ffprobe is not available.');
@@ -61,7 +86,7 @@ export function probeMedia(filePath: string): ProbeResult {
   const video = tracks.find((track) => track.type === 'video');
   const audio = tracks.find((track) => track.type === 'audio');
 
-  return {
+  return cacheProbeResult(cacheKey, {
     filePath,
     container: parsed.format?.format_name?.split(',')[0],
     durationSeconds: parsed.format?.duration ? Math.round(Number(parsed.format.duration)) : undefined,
@@ -71,7 +96,7 @@ export function probeMedia(filePath: string): ProbeResult {
     resolution: video ? { width: video.width, height: video.height } : undefined,
     subtitleStreams: tracks.filter((track) => track.type === 'subtitle'),
     tracks,
-  };
+  });
 }
 
 export function canDirectPlay(_filePath: string, _probeResult: ProbeResult, backend: MediaBackend): boolean {

@@ -3,6 +3,7 @@ import type { SubtitleStyleSettings } from './types';
 export const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
 export const AUTOPLAY_NEXT_EPISODE_KEY = 'loomtvAutoplayNextEpisode';
 export const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
+export const MAX_SUBTITLE_OUTLINE_WIDTH = 20;
 export const WATCHED_THRESHOLD = 0.9;
 export const CONTROLS_HIDE_MS = 3000;
 export const NEXT_EPISODE_COUNTDOWN_SECONDS = 3;
@@ -18,6 +19,9 @@ export const MIN_SIDE_PANEL_WIDTH = 260;
 export const MAX_SIDE_PANEL_RATIO = 0.4;
 export const DEFAULT_SKIP_BACK_SECONDS = 10;
 export const DEFAULT_SKIP_FORWARD_SECONDS = 15;
+export const SUBTITLE_DELAY_STEP_SECONDS = 0.5;
+export const SUBTITLE_DELAY_FINE_STEP_SECONDS = 0.1;
+export const SUBTITLE_DELAY_LIMIT_SECONDS = 60;
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   delaySeconds: 0,
@@ -27,7 +31,9 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   fontColor: '#ffffff',
   borderColor: '#000000',
   borderWidth: 3,
-  backgroundColor: '#000000',
+  borderEnabled: true,
+  backgroundColor: 'transparent',
+  backgroundEnabled: false,
 };
 
 export const subtitleCueTiming = new WeakMap<TextTrackCue, { startTime: number; endTime: number }>();

@@ -8,6 +8,7 @@ import { desktopApi } from '@/lib/desktopApi';
 import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import SafeArtwork from '@/components/SafeArtwork';
+import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
 
 export default function Others() {
@@ -22,13 +23,16 @@ export default function Others() {
     () => otherFolderItems([...state.movies, ...state.tvShows, ...state.animeShows], othersFolders),
     [othersFolders, state.animeShows, state.movies, state.tvShows],
   );
-  const filteredItems = items.filter((item) => matchesMediaItem(item, normalizedQuery));
+  const filteredItems = useMemo(
+    () => items.filter((item) => matchesMediaItem(item, normalizedQuery)),
+    [items, normalizedQuery],
+  );
 
   return (
     <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
-        <h2 className="loom-section-title mb-6 text-2xl font-bold text-white">Others</h2>
+        <h2 className="loom-section-title mb-2 text-2xl font-bold text-white">Others</h2>
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -39,11 +43,10 @@ export default function Others() {
           <EmptyOthersState onAddFolder={() => addLibraryFolder('others')} />
         ) : (
           <>
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
-              {filteredItems.map((item) => (
-                <OtherMediaCard key={item.id} item={item} from={currentRoute} />
-              ))}
-            </div>
+            <VirtualPosterGrid
+              items={filteredItems}
+              renderItem={(item) => <OtherMediaCard item={item} from={currentRoute} />}
+            />
             {items.length === 0 && (
               <div className="py-12 text-center text-[var(--loom-muted)]">
                 No media found in your Others folders yet.
@@ -84,7 +87,10 @@ function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
   const fallbackFilePath = item.type === 'movie'
     ? item.filePath
     : (item as TVShow).episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
-  const imageSources = posterSources(item, undefined, fallbackThumbnail ? [fallbackThumbnail] : []);
+  const baseImageSources = useMemo(() => posterSources(item), [item]);
+  const generatedSources = useMemo(() => fallbackThumbnail ? [fallbackThumbnail] : [], [fallbackThumbnail]);
+  const imageSources = useMemo(() => posterSources(item, undefined, generatedSources), [generatedSources, item]);
+  const routeArtwork = useMemo(() => routeArtworkState(item, imageSources), [imageSources, item]);
   const seasonCount = item.type === 'movie' ? 0 : availableSeasonCount(item as TVShow);
   const metaLine = [
     item.year > 0 ? String(item.year) : '',
@@ -93,7 +99,7 @@ function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
 
   useEffect(() => {
     setFallbackThumbnail('');
-    if (!fallbackFilePath) return;
+    if (!fallbackFilePath || baseImageSources.length > 0) return;
 
     let isMounted = true;
     void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
@@ -107,13 +113,13 @@ function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
     return () => {
       isMounted = false;
     };
-  }, [fallbackFilePath]);
+  }, [baseImageSources.length, fallbackFilePath]);
 
   return (
     <Link
       to={mediaLink(item)}
-      state={{ from, artwork: routeArtworkState(item, imageSources) }}
-      className="loom-poster-link group block w-full max-w-[200px]"
+      state={{ from, artwork: routeArtwork }}
+      className="loom-poster-link group block w-full max-w-[200px] [contain-intrinsic-size:300px_200px] [content-visibility:auto]"
     >
       <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork

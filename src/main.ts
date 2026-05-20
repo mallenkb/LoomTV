@@ -54,7 +54,8 @@ import {
   stopAllTranscodes,
   stopTranscode,
 } from './main/transcodeManager';
-import { cachedArtworkResponseHeaders } from './main/artworkCache';
+import { buildEmbeddedSubtitleVttArgs } from './main/transcodePlan';
+import { cachedArtworkResponseHeaders, customArtworkReference, parseCustomArtworkReference } from './main/artworkCache';
 import {
   closeServerForUpdateInstall,
   trackServerConnections,
@@ -66,6 +67,7 @@ import {
   getAllProgress,
   getCachedArtwork,
   getCustomArtwork,
+  getCustomArtworkData,
   getProgress,
   importCustomArtwork,
   importProgress,
@@ -1446,7 +1448,7 @@ function isLocalMediaServerArtworkUrl(source: string): boolean {
   try {
     const parsed = new URL(source);
     return isLoopbackHost(parsed.hostname)
-      && ['/api/thumbnail', '/api/local-image', '/api/cached-artwork'].includes(parsed.pathname);
+      && ['/api/thumbnail', '/api/local-image', '/api/cached-artwork', '/api/custom-artwork'].includes(parsed.pathname);
   } catch {
     return false;
   }
@@ -1466,6 +1468,15 @@ function artworkDeliveryUrl(source?: string | null): string {
 
   const durableSource = durableArtworkSource(source);
   if (!durableSource) return '';
+
+  const customArtwork = parseCustomArtworkReference(durableSource);
+  if (customArtwork) {
+    const params = addLocalAccessToken(new URLSearchParams({
+      mediaId: customArtwork.mediaId,
+      target: customArtwork.target,
+    }), LOCAL_ACCESS_TOKEN);
+    return `http://127.0.0.1:${mediaServerPort}/api/custom-artwork?${params.toString()}`;
+  }
 
   if (isLocalMediaServerArtworkUrl(durableSource)) {
     const parsed = new URL(durableSource);
@@ -1503,6 +1514,14 @@ function remoteArtworkDeliveryUrl(source: string, base: string, _token: string):
 
 function artworkDeliveryUrls(sources?: string[]): string[] {
   return Array.from(new Set((sources || []).map(artworkDeliveryUrl).filter(Boolean)));
+}
+
+function customArtworkForRenderer(mediaId: string): Record<string, string> {
+  const entries = Object.entries(getCustomArtwork(mediaId)).map(([target]) => [
+    target,
+    artworkDeliveryUrl(customArtworkReference(mediaId, target)),
+  ]);
+  return Object.fromEntries(entries);
 }
 
 function localSubtitleUrl(source: string): string {
@@ -2137,7 +2156,7 @@ function startMediaServer(): Promise<number> {
       }
 
       if (reqUrl.pathname === '/api/artwork' && req.method === 'GET') {
-        writeJson(res, 200, getCustomArtwork(reqUrl.searchParams.get('mediaId') || ''));
+        writeJson(res, 200, customArtworkForRenderer(reqUrl.searchParams.get('mediaId') || ''));
         return;
       }
 
@@ -2145,7 +2164,7 @@ function startMediaServer(): Promise<number> {
         readJsonBody(req)
           .then((body) => {
             saveCustomArtwork(String(body.mediaId || ''), String(body.target || ''), String(body.dataUrl || ''));
-            writeJson(res, 200, getCustomArtwork(String(body.mediaId || '')));
+            writeJson(res, 200, customArtworkForRenderer(String(body.mediaId || '')));
           })
           .catch((error) => {
             console.error('save artwork API error:', error);
@@ -2239,6 +2258,17 @@ function startMediaServer(): Promise<number> {
           return;
         }
 
+        if (cachedArtwork.cachePath) {
+          res.writeHead(200, cachedArtworkResponseHeaders(
+            cachedArtwork.mimeType,
+            cachedArtwork.byteLength,
+          ));
+          const stream = fs.createReadStream(cachedArtwork.cachePath);
+          stream.once('error', () => redirectToArtworkSource(res, sourceUrl));
+          stream.pipe(res);
+          return;
+        }
+
         const decoded = decodeDataUrl(cachedArtwork.dataUrl);
         if (!decoded) {
           redirectToArtworkSource(res, sourceUrl);
@@ -2249,6 +2279,25 @@ function startMediaServer(): Promise<number> {
           cachedArtwork.mimeType || decoded.mimeType,
           decoded.buffer.byteLength,
         ));
+        res.end(decoded.buffer);
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/custom-artwork') {
+        const mediaId = reqUrl.searchParams.get('mediaId') || '';
+        const target = reqUrl.searchParams.get('target') || '';
+        const artwork = mediaId && target ? getCustomArtworkData(mediaId, target) : null;
+        const decoded = decodeDataUrl(artwork?.dataUrl || '');
+        if (!decoded) {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+
+        res.writeHead(200, {
+          ...cachedArtworkResponseHeaders(decoded.mimeType, decoded.buffer.byteLength),
+          ETag: `"${createHash('sha1').update(artwork!.dataUrl).digest('hex')}"`,
+        });
         res.end(decoded.buffer);
         return;
       }
@@ -2383,6 +2432,38 @@ function startMediaServer(): Promise<number> {
         if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           res.end('Not found');
+          return;
+        }
+
+        const streamOrdinal = queryNumber(reqUrl.searchParams.get('streamOrdinal'));
+        if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) {
+          const ffmpegPath = findFFmpeg();
+          if (!ffmpegPath) {
+            res.writeHead(503, { 'Content-Type': 'text/plain' });
+            res.end('FFmpeg is not available');
+            return;
+          }
+
+          res.writeHead(200, {
+            'Content-Type': 'text/vtt; charset=utf-8',
+            'Cache-Control': 'no-store',
+          });
+          try {
+            const proc = spawn(ffmpegPath, buildEmbeddedSubtitleVttArgs(filePath, streamOrdinal), { stdio: ['ignore', 'pipe', 'pipe'] });
+            proc.stdout?.on('error', () => safeEndResponse(res));
+            proc.stdout?.pipe(res);
+            proc.once('error', (error) => {
+              console.error('subtitle FFmpeg spawn error:', error);
+              safeEndResponse(res);
+            });
+            proc.stderr?.on('data', () => {});
+            req.on('close', () => {
+              if (!proc.killed) proc.kill('SIGKILL');
+            });
+          } catch (error) {
+            console.error('subtitle FFmpeg spawn failed:', error);
+            safeEndResponse(res);
+          }
           return;
         }
 
@@ -5620,6 +5701,13 @@ ipcMain.handle('media:get-stream-url', (_event, filePath: string, options?: Tran
   };
 });
 
+ipcMain.handle('media:get-subtitle-url', (_event, filePath: string, streamOrdinal?: number) => {
+  assertLocalMediaPath(filePath);
+  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
+  if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) params.set('streamOrdinal', String(Math.floor(streamOrdinal)));
+  return { url: `http://127.0.0.1:${mediaServerPort}/subtitle?${params.toString()}` };
+});
+
 ipcMain.handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
   const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
   if (time) params.set('t', time);
@@ -5698,10 +5786,10 @@ ipcMain.handle('progress:import', (_event, progress: Record<string, number | { p
   importProgress(progress || {});
   return true;
 });
-ipcMain.handle('artwork:get', (_event, mediaId: string) => getCustomArtwork(mediaId));
+ipcMain.handle('artwork:get', (_event, mediaId: string) => customArtworkForRenderer(mediaId));
 ipcMain.handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
   saveCustomArtwork(mediaId, target, dataUrl);
-  return getCustomArtwork(mediaId);
+  return customArtworkForRenderer(mediaId);
 });
 ipcMain.handle('artwork:official-candidates', (_event, mediaId: string) => getOfficialMetadataCandidates(mediaId));
 ipcMain.handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) =>

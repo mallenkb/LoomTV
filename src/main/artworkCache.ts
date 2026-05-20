@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
+
 const MAX_CACHED_CANDIDATES_PER_KIND = 2;
 const MAX_CACHED_EPISODE_STILLS_PER_ITEM = 6;
+const CUSTOM_ARTWORK_PROTOCOL = 'loomtv-custom-artwork:';
 
 type ArtworkCacheItem = {
   poster?: string;
@@ -16,6 +19,35 @@ type ArtworkCacheLibrary = {
   tvShows?: ArtworkCacheItem[];
   animeShows?: ArtworkCacheItem[];
 };
+
+export type CustomArtworkReference = {
+  mediaId: string;
+  target: string;
+};
+
+export function customArtworkReference(mediaId: string, target: string): string {
+  const normalizedMediaId = encodeURIComponent(mediaId.trim());
+  const normalizedTarget = encodeURIComponent(target.trim());
+  return normalizedMediaId && normalizedTarget
+    ? `${CUSTOM_ARTWORK_PROTOCOL}//artwork/${normalizedMediaId}/${normalizedTarget}`
+    : '';
+}
+
+export function parseCustomArtworkReference(source?: string | null): CustomArtworkReference | null {
+  const value = (source || '').trim();
+  if (!value.startsWith(`${CUSTOM_ARTWORK_PROTOCOL}//`)) return null;
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname !== 'artwork') return null;
+    const [mediaIdPart, targetPart] = parsed.pathname.replace(/^\/+/, '').split('/');
+    const mediaId = decodeURIComponent(mediaIdPart || '');
+    const target = decodeURIComponent(targetPart || '');
+    return mediaId && target ? { mediaId, target } : null;
+  } catch {
+    return null;
+  }
+}
 
 function isCacheableArtworkSource(source: string): boolean {
   try {
@@ -56,4 +88,18 @@ export function cachedArtworkResponseHeaders(mimeType: string, byteLength: numbe
     'Cache-Control': 'no-store',
     'Content-Length': byteLength,
   };
+}
+
+function artworkExtensionForMimeType(mimeType: string): string {
+  const normalized = mimeType.toLowerCase().split(';')[0].trim();
+  if (normalized === 'image/png') return '.png';
+  if (normalized === 'image/webp') return '.webp';
+  if (normalized === 'image/avif') return '.avif';
+  if (normalized === 'image/gif') return '.gif';
+  return '.jpg';
+}
+
+export function artworkCacheFileName(sourceUrl: string, mimeType: string): string {
+  const digest = createHash('sha256').update(sourceUrl).digest('hex');
+  return `${digest}${artworkExtensionForMimeType(mimeType)}`;
 }

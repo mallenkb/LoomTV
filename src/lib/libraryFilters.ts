@@ -3,13 +3,26 @@ import type { StoredProgress } from '@/lib/desktopApi';
 
 export type LibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched' | 'missing-metadata' | 'missing-artwork';
 
-export const libraryFilterOptions: Array<{ id: LibraryFilter; label: string }> = [
+export interface LibraryFilterOption {
+  id: LibraryFilter;
+  label: string;
+}
+
+export const primaryLibraryFilterOptions: LibraryFilterOption[] = [
   { id: 'all', label: 'All' },
   { id: 'in-progress', label: 'In Progress' },
   { id: 'unwatched', label: 'Unwatched' },
   { id: 'watched', label: 'Watched' },
+];
+
+export const issueLibraryFilterOptions: LibraryFilterOption[] = [
   { id: 'missing-metadata', label: 'Missing Metadata' },
   { id: 'missing-artwork', label: 'Missing Artwork' },
+];
+
+export const libraryFilterOptions: LibraryFilterOption[] = [
+  ...primaryLibraryFilterOptions,
+  ...issueLibraryFilterOptions,
 ];
 
 const WATCHED_THRESHOLD = 0.9;
