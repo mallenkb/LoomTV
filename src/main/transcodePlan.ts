@@ -1,7 +1,8 @@
 import path from 'node:path';
 import type { SubtitleStyleOptions, TranscodeOptions } from './mediaTypes';
 
-export const TRANSCODE_READY_SEGMENTS = 1;
+export const TRANSCODE_READY_SEGMENTS = 2;
+export const HLS_SEGMENT_SECONDS = 2;
 
 export function buildEmbeddedSubtitleVttArgs(filePath: string, streamOrdinal: number): string[] {
   const safeOrdinal = Number.isFinite(streamOrdinal) && streamOrdinal > 0
@@ -205,7 +206,7 @@ export function buildHlsArgs({
     '-muxdelay', '0',
     '-muxpreload', '0',
     '-f', 'hls',
-    '-hls_time', '1',
+    '-hls_time', String(HLS_SEGMENT_SECONDS),
     '-hls_list_size', '0',
     '-hls_playlist_type', 'event',
     '-hls_flags', 'append_list+independent_segments',
@@ -213,7 +214,7 @@ export function buildHlsArgs({
   );
 
   if (!copyVideo) {
-    args.push('-force_key_frames', 'expr:gte(t,n_forced*1)');
+    args.push('-force_key_frames', `expr:gte(t,n_forced*${HLS_SEGMENT_SECONDS})`);
   }
 
   args.push(outputPath);
