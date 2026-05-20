@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { DEFAULT_SUBTITLE_STYLE, SUBTITLE_STYLE_KEY } from '../src/components/VideoPlayer/constants.ts';
 import {
   clampSubtitleDelay,
   transcodeSeekRestartOptions,
@@ -11,6 +12,10 @@ import {
   shouldShowSubtitleOverlay,
   shouldUseNativeSubtitleTracks,
 } from '../src/components/VideoPlayer/playerControls.ts';
+import {
+  loadSubtitleStyle,
+  saveSubtitleStyle,
+} from '../src/components/VideoPlayer/subtitleStyleStorage.ts';
 
 class MockElement {
   isContentEditable = false;
@@ -34,6 +39,24 @@ globalThis.HTMLInputElement = MockInputElement as unknown as typeof HTMLInputEle
 globalThis.HTMLTextAreaElement = MockTextAreaElement as unknown as typeof HTMLTextAreaElement;
 globalThis.HTMLSelectElement = MockSelectElement as unknown as typeof HTMLSelectElement;
 
+const storage = new Map<string, string>();
+globalThis.localStorage = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    storage.set(key, value);
+  },
+  removeItem: (key: string) => {
+    storage.delete(key);
+  },
+  clear: () => {
+    storage.clear();
+  },
+  key: (index: number) => Array.from(storage.keys())[index] ?? null,
+  get length() {
+    return storage.size;
+  },
+} as Storage;
+
 test('editable shortcut targets include inputs textareas selects and contenteditable nodes', () => {
   assert.equal(isEditableShortcutTarget(new MockInputElement() as unknown as EventTarget), true);
   assert.equal(isEditableShortcutTarget(new MockTextAreaElement() as unknown as EventTarget), true);
@@ -55,6 +78,47 @@ test('subtitle delay clamps to the player sync range', () => {
   assert.equal(clampSubtitleDelay(-90), -60);
   assert.equal(clampSubtitleDelay(1.234), 1.23);
   assert.equal(clampSubtitleDelay(Number.NaN), 0);
+});
+
+test('subtitle style persists between player sessions', () => {
+  storage.clear();
+  const style = {
+    ...DEFAULT_SUBTITLE_STYLE,
+    delaySeconds: 1.25,
+    position: 82,
+    scale: 1.4,
+    fontSize: 44,
+    fontColor: '#ffeeaa',
+    borderColor: '#111111',
+    borderWidth: 5,
+    backgroundColor: '#000000',
+    backgroundEnabled: true,
+  };
+
+  saveSubtitleStyle(style);
+
+  assert.deepEqual(loadSubtitleStyle(), style);
+});
+
+test('subtitle style loading falls back safely for invalid saved values', () => {
+  storage.clear();
+  localStorage.setItem(SUBTITLE_STYLE_KEY, JSON.stringify({
+    delaySeconds: 999,
+    position: -20,
+    scale: 20,
+    fontSize: 999,
+    fontColor: 'red',
+    borderWidth: -3,
+  }));
+
+  assert.deepEqual(loadSubtitleStyle(), {
+    ...DEFAULT_SUBTITLE_STYLE,
+    delaySeconds: 60,
+    position: 0,
+    scale: 2,
+    fontSize: 96,
+    borderWidth: 0,
+  });
 });
 
 test('scrub seeks are committed during direct playback only after a short interval', () => {

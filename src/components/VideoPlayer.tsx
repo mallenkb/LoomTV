@@ -43,7 +43,6 @@ import {
   DEFAULT_MEDIA_PANEL_WIDTH,
   DEFAULT_SKIP_BACK_SECONDS,
   DEFAULT_SKIP_FORWARD_SECONDS,
-  DEFAULT_SUBTITLE_STYLE,
   END_COMPLETION_TOLERANCE_SECONDS,
   HLS_RECOVERY_ATTEMPTS,
   HLS_TRANSCODE_RESTART_ATTEMPTS,
@@ -99,6 +98,7 @@ import {
   type SubtitleCue,
 } from './VideoPlayer/helpers';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
+import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import {
   clampSubtitleDelay,
   isEditableShortcutTarget,
@@ -159,7 +159,7 @@ export default function VideoPlayer({
   const selectedAudioTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
-  const subtitleStyleRef = useRef<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
+  const subtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
   const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
   const nextEpisodeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastPositionUiUpdateRef = useRef(0);
@@ -200,7 +200,7 @@ export default function VideoPlayer({
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
   const [autoplayNextEnabled, setAutoplayNextEnabled] = useState(loadAutoplayNextEpisode);
   const [nextCountdown, setNextCountdown] = useState<number | null>(null);
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
@@ -295,6 +295,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     subtitleStyleRef.current = subtitleStyle;
+    saveSubtitleStyle(subtitleStyle);
   }, [subtitleStyle]);
 
   useEffect(() => {

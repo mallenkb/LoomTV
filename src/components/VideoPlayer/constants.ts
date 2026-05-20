@@ -1,6 +1,7 @@
 import type { SubtitleStyleSettings } from './types';
 
 export const SUBTITLES_DEFAULT_KEY = 'subtitlesDefaultEnabled';
+export const SUBTITLE_STYLE_KEY = 'loomtvSubtitleStyle';
 export const AUTOPLAY_NEXT_EPISODE_KEY = 'loomtvAutoplayNextEpisode';
 export const TRACK_PREFERENCES_KEY = 'loomtvPlaybackTrackPreferences';
 export const MAX_SUBTITLE_OUTLINE_WIDTH = 20;
