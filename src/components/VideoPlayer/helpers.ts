@@ -1,5 +1,5 @@
-import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
-import { getProgressState } from '@/lib/progress';
+import { cleanEpisodeTitleForDisplay, episodeCode } from '../../lib/episodeTitles.ts';
+import { getProgressState } from '../../lib/progress.ts';
 import {
   AUTOPLAY_NEXT_EPISODE_KEY,
   DEFAULT_MEDIA_PANEL_WIDTH,
