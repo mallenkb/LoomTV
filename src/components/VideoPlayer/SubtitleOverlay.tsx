@@ -138,7 +138,7 @@ export default function SubtitleOverlay({
 
   return (
     <div
-      className="pointer-events-none absolute inset-x-0 z-40 px-[5%] text-center"
+      className="pointer-events-none absolute inset-x-0 z-[1] px-[5%] text-center"
       style={{
         bottom: `${100 - verticalPosition}%`,
         fontSize: `${fontSize}px`,
