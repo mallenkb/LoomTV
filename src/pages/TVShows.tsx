@@ -9,9 +9,7 @@ import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import SafeArtwork from '@/components/SafeArtwork';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
-import { hydrateProgressFromDatabase, loadProgress } from '@/lib/progress';
-import type { StoredProgress } from '@/lib/desktopApi';
-import { libraryFilterOptions, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { firstEpisodeFilePath, shouldRequestFallbackThumbnail, useDeferredVisibility } from '@/lib/renderPerformance';
 
 interface TVShowsProps {
   kind?: 'series' | 'anime';
@@ -25,31 +23,15 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
-  const [progress, setProgress] = useState<Record<string, StoredProgress>>(() => loadProgress());
   const normalizedQuery = searchQuery(query);
-  const filteredShows = tvShows
-    .filter((item) => matchesMediaItem(item, normalizedQuery))
-    .filter((item) => matchesLibraryFilter(item, activeFilter, progress));
-
-  useEffect(() => {
-    const refresh = () => setProgress(loadProgress());
-    void hydrateProgressFromDatabase().then(refresh);
-    window.addEventListener('loomtv-progress', refresh);
-    window.addEventListener('focus', refresh);
-    return () => {
-      window.removeEventListener('loomtv-progress', refresh);
-      window.removeEventListener('focus', refresh);
-    };
-  }, []);
+  const filteredShows = tvShows.filter((item) => matchesMediaItem(item, normalizedQuery));
 
   return (
     <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="mb-6">
           <h2 className="loom-section-title text-2xl font-bold text-white">{title}</h2>
-          <FilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
         </div>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
           {isLoading
@@ -69,37 +51,10 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
         )}
         {tvShows.length > 0 && filteredShows.length === 0 && !isLoading && (
           <div className="py-12 text-center text-[var(--loom-muted)]">
-            {activeFilter === 'all' ? 'No local matches found' : `No ${title.toLowerCase()} match this filter`}
+            No local matches found
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function FilterBar({
-  activeFilter,
-  onChange,
-}: {
-  activeFilter: LibraryFilter;
-  onChange: (filter: LibraryFilter) => void;
-}) {
-  return (
-    <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1">
-      {libraryFilterOptions.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => onChange(option.id)}
-          className={`h-8 shrink-0 rounded-md px-3 text-xs font-medium transition-colors ${
-            activeFilter === option.id
-              ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
-              : 'text-[var(--loom-muted)] hover:bg-white/10 hover:text-white'
-          }`}
-        >
-          {option.label}
-        </button>
-      ))}
     </div>
   );
 }
@@ -143,14 +98,24 @@ function EmptyShowsState({
 function TVShowCard({ show, from }: { show: TVShow; from: string }) {
   const routeBase = show.type === 'anime' ? '/anime' : '/tv';
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
-  const fallbackFilePath = show.episodeFiles
-    ?.slice()
-    .sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
-  const imageSources = posterSources(show, undefined, fallbackThumbnail ? [fallbackThumbnail] : []);
+  const [artworkFailed, setArtworkFailed] = useState(false);
+  const [cardRef, isVisible] = useDeferredVisibility<HTMLAnchorElement>();
+  const fallbackFilePath = firstEpisodeFilePath(show.episodeFiles);
+  const baseImageSources = posterSources(show);
+  const shouldLoadFallbackThumbnail = shouldRequestFallbackThumbnail({
+    hasArtworkFailed: artworkFailed,
+    hasArtworkSources: baseImageSources.length > 0,
+    isVisible,
+  });
+  const imageSources = fallbackThumbnail ? posterSources(show, undefined, [fallbackThumbnail]) : baseImageSources;
 
   useEffect(() => {
     setFallbackThumbnail('');
-    if (!fallbackFilePath) return;
+    setArtworkFailed(false);
+  }, [fallbackFilePath, show.id]);
+
+  useEffect(() => {
+    if (!fallbackFilePath || !shouldLoadFallbackThumbnail) return;
 
     let isMounted = true;
     void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
@@ -164,10 +129,11 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
     return () => {
       isMounted = false;
     };
-  }, [fallbackFilePath]);
+  }, [fallbackFilePath, shouldLoadFallbackThumbnail]);
 
   return (
     <Link
+      ref={cardRef}
       to={`${routeBase}/${show.id}`}
       state={{ from, artwork: routeArtworkState(show, imageSources) }}
       className="loom-poster-link group block w-full max-w-[200px]"
@@ -178,6 +144,7 @@ function TVShowCard({ show, from }: { show: TVShow; from: string }) {
           alt={show.title}
           className="h-full w-full transition-transform group-hover:scale-105"
           imgClassName="object-cover"
+          onError={() => setArtworkFailed(true)}
           fallback={
           <div className="w-full h-full bg-[var(--loom-surface)] flex flex-col items-center justify-center gap-2 p-3">
             <Play className="w-8 h-8 text-[var(--loom-accent)] shrink-0" />

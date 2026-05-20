@@ -20,7 +20,7 @@ interface ActiveSession extends TranscodeSession {
 const sessions = new Map<string, ActiveSession>();
 const TRANSCODE_READY_TIMEOUT_MS = 30000;
 const TRANSCODE_READY_POLL_MS = 150;
-const TRANSCODE_READY_SEGMENTS = 3;
+const TRANSCODE_READY_SEGMENTS = 1;
 const HLS_PENDING_SEGMENT_TIMEOUT_MS = 8000;
 const HLS_PENDING_SEGMENT_POLL_MS = 80;
 const encoderSupport = new Map<string, boolean>();
@@ -112,6 +112,12 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
 }
 
 function assColor(value: unknown, fallback: string): string {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'transparent' || normalized === 'none' || normalized === 'rgba(0,0,0,0)' || normalized === 'rgba(0, 0, 0, 0)' || normalized === '#00000000') {
+      return '&HFF000000';
+    }
+  }
   const hex = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
   const red = hex.slice(1, 3);
   const green = hex.slice(3, 5);
@@ -121,15 +127,15 @@ function assColor(value: unknown, fallback: string): string {
 
 function subtitleForceStyle(style?: SubtitleStyleOptions): string {
   const fontSize = clampNumber(style?.fontSize, 55, 24, 96) * clampNumber(style?.scale, 1, 0.5, 2);
-  const position = clampNumber(style?.position, 92, 0, 100);
+  const position = clampNumber(style?.position, 95, 0, 100);
   const marginV = Math.round((100 - position) * 6);
-  const borderWidth = clampNumber(style?.borderWidth, 3, 0, 10);
+  const borderWidth = style?.borderEnabled === false ? 0 : clampNumber(style?.borderWidth, 3, 0, 20);
 
   return [
     `Fontsize=${Math.round(fontSize)}`,
     `PrimaryColour=${assColor(style?.fontColor, '#ffffff')}`,
     `OutlineColour=${assColor(style?.borderColor, '#000000')}`,
-    `BackColour=${assColor(style?.backgroundColor, '#000000')}`,
+    `BackColour=${style?.backgroundEnabled ? assColor(style?.backgroundColor, '#000000') : '&HFF000000'}`,
     `Outline=${borderWidth}`,
     'Shadow=0',
     'Alignment=2',
@@ -434,7 +440,13 @@ export function serveHls(reqUrl: URL, res: http.ServerResponse, playlistQueryStr
           ? 'video/mp2t'
           : 'application/octet-stream';
   const serveFile = () => {
-    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+    const cacheControl = filePath.endsWith('.m3u8')
+      ? 'no-store'
+      : 'public, max-age=31536000, immutable';
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': cacheControl,
+    });
     if (filePath.endsWith('.m3u8') && playlistQueryString) {
       res.end(appendQueryToHlsPlaylist(fs.readFileSync(filePath, 'utf8'), playlistQueryString));
       return;

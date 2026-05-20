@@ -41,7 +41,9 @@ export interface SubtitleStyleOptions {
   fontColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  borderEnabled?: boolean;
   backgroundColor?: string;
+  backgroundEnabled?: boolean;
 }
 
 export interface TranscodeOptions {

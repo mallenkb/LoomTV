@@ -1,4 +1,4 @@
-import { yearFromDateString } from './helpers';
+import { fetchWithTimeout, yearFromDateString } from './helpers';
 import type { EpisodeMeta, TVMetadata } from './types';
 
 function tvmazeEpisodeToMeta(episode: any): EpisodeMeta {
@@ -14,7 +14,7 @@ function tvmazeEpisodeToMeta(episode: any): EpisodeMeta {
 }
 
 async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
-  const episodesRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
+  const episodesRes = await fetchWithTimeout(`https://api.tvmaze.com/shows/${showId}/episodes`);
   if (!episodesRes.ok) return [];
   const episodes: any[] = await episodesRes.json();
   if (!Array.isArray(episodes)) return [];
@@ -22,7 +22,7 @@ async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
 }
 
 async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
-  const detailRes = await fetch(
+  const detailRes = await fetchWithTimeout(
     `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
   );
   if (!detailRes.ok) return null;
@@ -70,7 +70,7 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
 
 export async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMetadata | null> {
   try {
-    const searchRes = await fetch(
+    const searchRes = await fetchWithTimeout(
       `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`,
     );
     const searchData: any[] = await searchRes.json();
@@ -94,7 +94,7 @@ export async function fetchTVMetadata(title: string, localYear?: number): Promis
 
 export async function fetchTVMetadataCandidates(title: string, localYear?: number): Promise<TVMetadata[]> {
   try {
-    const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`);
+    const searchRes = await fetchWithTimeout(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`);
     const searchData: any[] = await searchRes.json();
     if (!Array.isArray(searchData) || searchData.length === 0) return [];
 

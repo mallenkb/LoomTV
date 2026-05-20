@@ -291,12 +291,10 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   useEffect(() => {
     const refresh = () => setProgress(loadProgress());
     void hydrateProgressFromDatabase().then(refresh);
-    const interval = window.setInterval(refresh, 2000);
     window.addEventListener('focus', refresh);
     window.addEventListener('storage', refresh);
     window.addEventListener('loomtv-progress', refresh);
     return () => {
-      window.clearInterval(interval);
       window.removeEventListener('focus', refresh);
       window.removeEventListener('storage', refresh);
       window.removeEventListener('loomtv-progress', refresh);
@@ -380,7 +378,6 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
             )}
           </span>
           <span className="min-w-0 flex-1 leading-tight">
-            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">{candidate.label}</span>
             <span className="block truncate text-[20px] font-semibold text-white">{candidate.title}</span>
             <span className="mt-1 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
           </span>

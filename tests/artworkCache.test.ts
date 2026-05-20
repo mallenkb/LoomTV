@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { cachedArtworkResponseHeaders, collectArtworkSourcesForCache } from '../src/main/artworkCache.ts';
+import { rewriteArtworkRecordForDelivery } from '../src/main/artworkDelivery.ts';
 
 test('artwork cache only keeps bounded external artwork fallbacks', () => {
   const sources = collectArtworkSourcesForCache({
@@ -72,4 +73,19 @@ test('cached artwork responses are not duplicated into Chromium HTTP cache', () 
     'Cache-Control': 'no-store',
     'Content-Length': 1024,
   });
+});
+
+test('custom artwork records are rewritten through the renderer delivery path', () => {
+  assert.deepEqual(
+    rewriteArtworkRecordForDelivery({
+      poster: 'https://images.example/poster.jpg',
+      cover: 'http://127.0.0.1:3847/api/thumbnail?path=%2Fmovie.mkv',
+      logo: '',
+    }, (source) => `delivered:${source}`),
+    {
+      poster: 'delivered:https://images.example/poster.jpg',
+      cover: 'delivered:http://127.0.0.1:3847/api/thumbnail?path=%2Fmovie.mkv',
+      logo: '',
+    },
+  );
 });

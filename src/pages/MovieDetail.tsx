@@ -9,7 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
-import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
+import { logoSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
@@ -59,11 +59,19 @@ function resolveMovieArtwork(
   const effectiveCover = customArtwork.cover || effectivePoster;
   const heroArtwork = uniqueArtworkSources(
     effectiveCover,
-    backdropSources(movie, routeArtwork, generated),
+    routeArtwork?.backdropCandidates,
+    routeArtwork?.backdrop,
+    movie.backdropCandidates,
+    movie.backdrop,
+    generated,
   );
   const posterArtwork = uniqueArtworkSources(
     effectivePoster,
-    posterSources(movie, routeArtwork, generated),
+    routeArtwork?.posterCandidates,
+    routeArtwork?.poster,
+    movie.posterCandidates,
+    movie.poster,
+    generated,
   );
 
   return {
@@ -215,6 +223,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           alt={movie.title}
           className="h-full w-full"
           imgClassName="object-cover"
+          loading="eager"
           fallback={<div className="h-full w-full" />}
         />
         <div className="loom-detail-hero-fade absolute inset-0" />
@@ -241,13 +250,14 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           Back
         </button>
 
-        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-6 p-8">
+        <div className="absolute bottom-0 left-0 right-0 z-30 flex items-end gap-6 p-8">
           <SafeArtwork
             key={posterKey}
             src={posterArtwork}
             alt={movie.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
             imgClassName="object-cover"
+            loading="eager"
             fallback={
               <div className="flex h-full w-full items-center justify-center p-2">
                 <span className="line-clamp-4 text-center text-[10px] font-medium leading-tight text-white/60">
@@ -384,13 +394,20 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
 function ExpandableSummary({ summary }: { summary: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const toggleSummary = () => setIsExpanded((expanded) => !expanded);
+  const [canExpand, setCanExpand] = useState(false);
+  const toggleSummary = () => {
+    if (canExpand) setIsExpanded((expanded) => !expanded);
+  };
+
+  useEffect(() => {
+    setCanExpand(summary.trim().length > 320);
+  }, [summary]);
 
   return (
     <motion.div
       layout
       onClick={toggleSummary}
-      className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70"
+      className={`group rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${canExpand ? 'cursor-pointer' : ''}`}
       whileTap={{ scale: 0.998 }}
     >
       <motion.div
@@ -408,19 +425,21 @@ function ExpandableSummary({ summary }: { summary: string }) {
           {summary}
         </motion.p>
       </motion.div>
-      <motion.button
-        layout
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={(event) => {
-          event.stopPropagation();
-          toggleSummary();
-        }}
-        className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
-        whileTap={{ scale: 0.98 }}
-      >
-        {isExpanded ? 'Show Less' : 'Show More'}
-      </motion.button>
+      {canExpand && (
+        <motion.button
+          layout
+          type="button"
+          aria-expanded={isExpanded}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSummary();
+          }}
+          className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
+          whileTap={{ scale: 0.98 }}
+        >
+          {isExpanded ? 'Show Less' : 'Show More'}
+        </motion.button>
+      )}
     </motion.div>
   );
 }

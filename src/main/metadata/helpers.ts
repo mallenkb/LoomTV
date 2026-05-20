@@ -1,5 +1,25 @@
 import type { EpisodeMeta } from './types';
 
+const DEFAULT_METADATA_TIMEOUT_MS = 15000;
+
+/**
+ * fetch() with a hard timeout. Without this a stalled metadata API connection
+ * never settles, hanging the whole "Fix Match" request indefinitely.
+ */
+export async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_METADATA_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function parseYearFromText(value?: string): number {
   if (!value) return 0;
   const match = value.match(/\b(19\d{2}|20\d{2})\b/);
@@ -183,6 +203,45 @@ export function chooseMetadataSearchTitle({
     || displayTitle
     || usefulLocalTitle(embeddedTitle)
     || fallbackTitle
+    || '';
+}
+
+export function looksLikeReleaseMetadataText(value?: string | null): boolean {
+  const text = (value || '').trim();
+  if (!text) return false;
+  const normalized = text.toLowerCase();
+  const technicalTokenCount = [
+    /\b(480p|720p|1080p|2160p|4k|uhd|hdr|web[- .]?dl|web[- .]?rip|hdtv|bluray|brrip|remux)\b/i,
+    /\b(x264|x265|h\.?264|h\.?265|hevc|av1|aac|ac3|eac3|dts|atmos)\b/i,
+    /\b(amzn|nf|dsnp|hmax|hulu|itunes|webrip|webdl)\b/i,
+  ].filter((pattern) => pattern.test(text)).length;
+  const commaParts = text.split(',').map((part) => part.trim()).filter(Boolean);
+  const looksLikeReleaseStamp = /^[a-z0-9]+-[a-z]{3}-\d{1,2}-[a-z]{3}-\d{4},\d{1,2}:\d{2}:\d{2}/i.test(text);
+  const mostlyTelemetry = commaParts.length >= 6
+    && commaParts.filter((part) => /^[\d.:/-]+$/.test(part) || /^(low|medium|high|y|n|yes|no)$/i.test(part)).length >= commaParts.length - 2;
+  const hasSentenceShape = /[.!?]\s+[A-Z0-9]/.test(text) || /\b(the|and|but|with|from|into|through)\b/i.test(text);
+
+  return looksLikeReleaseStamp
+    || mostlyTelemetry
+    || (technicalTokenCount >= 2 && !hasSentenceShape)
+    || /\b(encoded|uploaded|released|ripped)\s+by\b/i.test(normalized);
+}
+
+export function usableMetadataSummary(value?: string | null): string {
+  const summary = (value || '').trim();
+  if (!summary || looksLikeReleaseMetadataText(summary)) return '';
+  return summary;
+}
+
+export function chooseMetadataSummary({
+  localSummary,
+  providerSummaries,
+}: {
+  localSummary?: string | null;
+  providerSummaries?: Array<string | null | undefined>;
+}): string {
+  return (providerSummaries || []).map(usableMetadataSummary).find(Boolean)
+    || usableMetadataSummary(localSummary)
     || '';
 }
 

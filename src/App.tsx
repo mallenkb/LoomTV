@@ -1,19 +1,20 @@
-import React, { useState, useCallback } from 'react';
+import React, { lazy, Suspense, useState, useCallback } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
-import Home from './pages/Home';
-import Movies from './pages/Movies';
-import Others from './pages/Others';
-import TVShows from './pages/TVShows';
-import MovieDetail from './pages/MovieDetail';
-import TVDetail from './pages/TVDetail';
-import Settings from './pages/Settings';
 import Sidebar from './components/Sidebar';
-import VideoPlayer from './components/VideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
 import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
+
+const Home = lazy(() => import('./pages/Home'));
+const Movies = lazy(() => import('./pages/Movies'));
+const Others = lazy(() => import('./pages/Others'));
+const TVShows = lazy(() => import('./pages/TVShows'));
+const MovieDetail = lazy(() => import('./pages/MovieDetail'));
+const TVDetail = lazy(() => import('./pages/TVDetail'));
+const Settings = lazy(() => import('./pages/Settings'));
+const VideoPlayer = lazy(() => import('./components/VideoPlayer'));
 
 interface NowPlaying {
   mediaId?: string;
@@ -88,40 +89,53 @@ function AppShell() {
   return (
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <Sidebar />
+      <div className="loom-main-drag-region" data-tauri-drag-region aria-hidden="true" />
       <main
         className="flex-1 overflow-hidden"
         style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '8rem' : '0px' } as React.CSSProperties}
       >
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/movies" element={<Movies />} />
-          <Route path="/others" element={<Others />} />
-          <Route path="/tv" element={<TVShows kind="series" />} />
-          <Route path="/anime" element={<TVShows kind="anime" />} />
-          <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
-          <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
-          <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/movies" element={<Movies />} />
+            <Route path="/others" element={<Others />} />
+            <Route path="/tv" element={<TVShows kind="series" />} />
+            <Route path="/anime" element={<TVShows kind="anime" />} />
+            <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
+            <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
+            <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
       {nowPlaying && (
-        <VideoPlayer
-          key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
-          mediaId={nowPlaying.mediaId}
-          filePath={nowPlaying.filePath}
-          title={nowPlaying.title}
-          artwork={nowPlaying.artwork}
-          subtitles={nowPlaying.subtitles}
-          episodes={nowPlaying.episodes}
-          episodeFiles={nowPlaying.episodeFiles}
-          currentSeason={nowPlaying.currentSeason}
-          currentEpisode={nowPlaying.currentEpisode}
-          onEpisodeChange={handleEpisodeSelect}
-          onClose={handleClose}
-        />
+        <Suspense fallback={null}>
+          <VideoPlayer
+            key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
+            mediaId={nowPlaying.mediaId}
+            filePath={nowPlaying.filePath}
+            title={nowPlaying.title}
+            artwork={nowPlaying.artwork}
+            subtitles={nowPlaying.subtitles}
+            episodes={nowPlaying.episodes}
+            episodeFiles={nowPlaying.episodeFiles}
+            currentSeason={nowPlaying.currentSeason}
+            currentEpisode={nowPlaying.currentEpisode}
+            onEpisodeChange={handleEpisodeSelect}
+            onClose={handleClose}
+          />
+        </Suspense>
       )}
       <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
+    </div>
+  );
+}
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full items-center justify-center text-sm text-[var(--loom-muted)]">
+      Loading...
     </div>
   );
 }

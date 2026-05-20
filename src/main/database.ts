@@ -23,6 +23,7 @@ type LibraryData = {
 };
 
 type SettingsData = Record<string, unknown>;
+type CustomArtworkEntry = { dataUrl: string; updatedAt: number };
 
 let db: Database.Database | null = null;
 
@@ -241,7 +242,13 @@ function durableArtworkSources(sources?: string[]): string[] {
   return Array.from(new Set((sources || []).map(durableArtworkSource).filter(Boolean)));
 }
 
-function applyDurableState(item: any, progress: Map<string, StoredProgress>, custom: Map<string, Map<string, string>>): any {
+function latestCustomArtwork(...entries: Array<CustomArtworkEntry | undefined>): string {
+  return entries
+    .filter((entry): entry is CustomArtworkEntry => Boolean(entry?.dataUrl))
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0]?.dataUrl || '';
+}
+
+function applyDurableState(item: any, progress: Map<string, StoredProgress>, custom: Map<string, Map<string, CustomArtworkEntry>>): any {
   const next = { ...item };
   const itemCustom = custom.get(item.id);
   const itemProgress = progress.get(item.filePath);
@@ -269,17 +276,20 @@ function applyDurableState(item: any, progress: Map<string, StoredProgress>, cus
   if (lastPlayed) next.lastPlayed = lastPlayed;
 
   if (itemCustom) {
-    const cover = itemCustom.get('cover');
-    const poster = itemCustom.get('poster');
-    const thumbnail = itemCustom.get('thumbnail');
+    const cover = latestCustomArtwork(itemCustom.get('cover'), itemCustom.get('backdrop'));
+    const poster = latestCustomArtwork(itemCustom.get('thumbnail'), itemCustom.get('poster'));
+    const logo = latestCustomArtwork(itemCustom.get('logo'));
     if (cover) {
       next.backdrop = cover;
       next.backdropCandidates = [cover, ...(next.backdropCandidates || []).filter((source: string) => source !== cover)];
     }
-    if (poster || thumbnail) {
-      const primary = poster || thumbnail || '';
-      next.poster = primary;
-      next.posterCandidates = [primary, ...(next.posterCandidates || []).filter((source: string) => source !== primary)];
+    if (poster) {
+      next.poster = poster;
+      next.posterCandidates = [poster, ...(next.posterCandidates || []).filter((source: string) => source !== poster)];
+    }
+    if (logo) {
+      next.logo = logo;
+      next.logoCandidates = [logo, ...(next.logoCandidates || []).filter((source: string) => source !== logo)];
     }
   }
 
@@ -561,11 +571,14 @@ function getProgressMap(): Map<string, StoredProgress> {
   return new Map(Object.entries(getAllProgress()));
 }
 
-function getCustomArtworkMap(): Map<string, Map<string, string>> {
-  const result = new Map<string, Map<string, string>>();
-  for (const row of getDb().prepare('SELECT media_id, target, data_url FROM custom_artwork').all() as any[]) {
+function getCustomArtworkMap(): Map<string, Map<string, CustomArtworkEntry>> {
+  const result = new Map<string, Map<string, CustomArtworkEntry>>();
+  for (const row of getDb().prepare('SELECT media_id, target, data_url, updated_at FROM custom_artwork').all() as any[]) {
     if (!result.has(row.media_id)) result.set(row.media_id, new Map());
-    result.get(row.media_id)!.set(row.target, row.data_url);
+    result.get(row.media_id)!.set(row.target, {
+      dataUrl: row.data_url,
+      updatedAt: Number(row.updated_at || 0),
+    });
   }
   return result;
 }

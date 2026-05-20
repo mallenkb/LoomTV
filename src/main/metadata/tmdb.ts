@@ -1,4 +1,4 @@
-import { movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers';
+import { fetchWithTimeout, movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers';
 import type { EpisodeMeta, MediaItem } from './types';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -33,7 +33,7 @@ async function fetchTMDBJson<T>(path: string, tmdbCredential?: string): Promise<
     url.searchParams.set('api_key', credential);
   }
 
-  const response = await fetch(url.toString(), requestInit);
+  const response = await fetchWithTimeout(url.toString(), requestInit);
   if (!response.ok) {
     throw new Error(`TMDB request failed with ${response.status}`);
   }

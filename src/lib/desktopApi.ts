@@ -1,4 +1,6 @@
 import packageJson from '../../package.json';
+import { invoke, isTauri as isTauriRuntime } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
@@ -62,7 +64,9 @@ type SubtitleStyleOptions = {
   fontColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  borderEnabled?: boolean;
   backgroundColor?: string;
+  backgroundEnabled?: boolean;
 };
 type TranscodeOptions = {
   preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
@@ -80,6 +84,7 @@ type TranscodeOptions = {
 };
 type TranscodeSession = { sessionId: string; filePath: string; playlistUrl: string; outputDir: string };
 type StreamUrlOptions = Pick<TranscodeOptions,
+  | 'preset'
   | 'startSeconds'
   | 'videoTrackIndex'
   | 'audioTrackIndex'
@@ -207,6 +212,33 @@ declare global {
 
 const DEFAULT_MEDIA_PORT = 3847;
 let resolvedServerBase: string | null = null;
+const isTauri = isTauriRuntime();
+
+function isHttpMediaUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function fileNameFromUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
+  } catch {
+    return value.split('/').pop() || '';
+  }
+}
+
+async function invokeTauri<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return invoke<T>(command, args || {});
+}
+
+async function invokeTauriWithFallback<T>(command: string, args: Record<string, unknown> | undefined, fallback: () => Promise<T>): Promise<T> {
+  if (!isTauri) return fallback();
+  try {
+    return await invoke<T>(command, args || {});
+  } catch {
+    return fallback();
+  }
+}
 
 async function discoverServerBase(): Promise<string> {
   if (resolvedServerBase) return resolvedServerBase;
@@ -330,12 +362,45 @@ function bearerHeaders(token: string, init?: RequestInit): RequestInit {
 export const desktopApi = {
   async getLibrary(): Promise<LibraryPayload> {
     if (window.desktopApi) return window.desktopApi.getLibrary();
+    if (isTauri) return invokeTauri<LibraryPayload>('library_get');
     return fetchJson<LibraryPayload>('/api/library');
   },
 
   async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {
+    if (isHttpMediaUrl(filePath)) {
+      return {
+        url: filePath,
+        contentType: 'video/mp4',
+        fileName: fileNameFromUrl(filePath),
+        isTranscoded: /\.m3u8(\?|$)/i.test(filePath),
+      };
+    }
     if (window.desktopApi) {
       return window.desktopApi.getStreamUrl(filePath, options);
+    }
+    if (isTauri) {
+      return invokeTauriWithFallback<StreamUrlResult>(
+        'media_get_stream_url',
+        { file_path: filePath, options },
+        async () => {
+          const base = await discoverServerBase();
+          const ext = filePath.split('.').pop()?.toLowerCase() || '';
+          const contentTypeMap: Record<string, string> = {
+            mp4: 'video/mp4', webm: 'video/webm', mov: 'video/mp4', m4v: 'video/mp4',
+            mkv: 'video/mp4', avi: 'video/mp4', wmv: 'video/mp4',
+          };
+          const params = new URLSearchParams({ path: filePath });
+          if (options.startSeconds && options.startSeconds > 0) params.set('t', String(Math.floor(options.startSeconds)));
+          if (options.subtitleStyle) params.set('subtitleStyle', JSON.stringify(options.subtitleStyle));
+          if (options.forceTranscode) params.set('forceTranscode', '1');
+          return {
+            url: `${base}/stream?${params.toString()}`,
+            contentType: contentTypeMap[ext] || 'video/mp4',
+            fileName: filePath.split('/').pop() || '',
+            isTranscoded: options.forceTranscode || ['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts'].includes(ext),
+          };
+        },
+      );
     }
     const base = await discoverServerBase();
     const ext = filePath.split('.').pop()?.toLowerCase() || '';
@@ -365,26 +430,47 @@ export const desktopApi = {
 
   async getServerBase(): Promise<string> {
     if (window.desktopApi) return window.desktopApi.getServerBase();
+    if (isTauri) {
+      const port = await invokeTauri<number>('media_get_server_port');
+      return `http://127.0.0.1:${port}`;
+    }
     return discoverServerBase();
   },
 
   async getLocalNetworkStatus(): Promise<LocalNetworkStatus> {
     if (window.desktopApi?.getLocalNetworkStatus) return window.desktopApi.getLocalNetworkStatus();
+    if (isTauri) return invokeTauriWithFallback<LocalNetworkStatus>(
+      'network_status',
+      {},
+      async () => ({
+        sharingEnabled: false,
+        token: '',
+        networkName: '',
+        port: DEFAULT_MEDIA_PORT,
+        addresses: [],
+        baseUrl: null,
+        libraryUrl: null,
+        pairedDevices: [],
+      }),
+    );
     return fetchJson<LocalNetworkStatus>('/api/lan/status');
   },
 
   async discoverLocalNetworkPeers(timeoutMs = 2500): Promise<LocalNetworkPeer[]> {
     if (window.desktopApi?.discoverLocalNetworkPeers) return window.desktopApi.discoverLocalNetworkPeers(timeoutMs);
+    if (isTauri) return invokeTauriWithFallback('network_discover_peers', { timeout_ms: timeoutMs }, async () => []);
     return [];
   },
 
   async revokePairedDevice(deviceId: string): Promise<LocalNetworkPairedDevice[]> {
     if (window.desktopApi?.revokePairedDevice) return window.desktopApi.revokePairedDevice(deviceId);
+    if (isTauri) return invokeTauriWithFallback('network_revoke_paired_device', { device_id: deviceId }, async () => []);
     return [];
   },
 
   async setLocalNetworkDeviceName(name: string): Promise<string> {
     if (window.desktopApi?.setLocalNetworkDeviceName) return window.desktopApi.setLocalNetworkDeviceName(name);
+    if (isTauri) return invokeTauriWithFallback('network_set_device_name', { name }, async () => name);
     return name;
   },
 
@@ -457,6 +543,7 @@ export const desktopApi = {
 
   async getThumbnail(filePath: string, time?: string): Promise<{ url: string }> {
     if (window.desktopApi?.getThumbnail) return window.desktopApi.getThumbnail(filePath, time);
+    if (isTauri) return invokeTauriWithFallback('media_get_thumbnail', { file_path: filePath, time }, async () => ({ url: '' }));
     const base = await discoverServerBase();
     let url = `${base}/api/thumbnail?path=${encodeURIComponent(filePath)}`;
     if (time) url += `&t=${encodeURIComponent(time)}`;
@@ -465,6 +552,7 @@ export const desktopApi = {
 
   async scanLibrary(mode: LibraryScanMode = 'quick'): Promise<LibraryPayload> {
     if (window.desktopApi) return window.desktopApi.scanLibrary({ force: mode === 'full', mode });
+    if (isTauri) return invokeTauri('library_scan', { mode, force: mode === 'full' });
     return fetchJson<LibraryPayload>('/api/library/scan', {
       method: 'POST',
       body: JSON.stringify({ force: mode === 'full', mode }),
@@ -472,11 +560,23 @@ export const desktopApi = {
   },
 
   onLibraryScanProgress(callback: (library: LibraryPayload, progress: LibraryScanProgress) => void): () => void {
+    if (isTauri) {
+      let unlisten: (() => void) | null = null;
+      void listen<{ library: LibraryPayload; progress: LibraryScanProgress }>('library:scan-progress', (event) => {
+        callback(event.payload.library, event.payload.progress);
+      }).then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      }).catch(() => undefined);
+      return () => {
+        if (unlisten) unlisten();
+      };
+    }
     return window.desktopApi?.onLibraryScanProgress?.(callback) || (() => undefined);
   },
 
   async addLibraryFolder(kind: LibraryFolderKind = 'movies'): Promise<LibraryPayload | null> {
     if (window.desktopApi) return window.desktopApi.addLibraryFolder(kind);
+    if (isTauri) return invokeTauri('library_add_folder', { kind });
     return fetchJson<LibraryPayload | null>('/api/library/add-folder', {
       method: 'POST',
       body: JSON.stringify({ kind }),
@@ -485,6 +585,7 @@ export const desktopApi = {
 
   async removeLibraryFolder(folderPath: string): Promise<LibraryPayload> {
     if (window.desktopApi) return window.desktopApi.removeLibraryFolder(folderPath);
+    if (isTauri) return invokeTauri('library_remove_folder', { folder_path: folderPath });
     return fetchJson<LibraryPayload>('/api/library/remove-folder', {
       method: 'POST',
       body: JSON.stringify({ folderPath }),
@@ -497,23 +598,29 @@ export const desktopApi = {
       const parsed = new URL(base);
       return Number(parsed.port || DEFAULT_MEDIA_PORT);
     }
+    if (isTauri) return invokeTauri<number>('media_get_server_port');
     const response = await fetchJson<{ port: number }>('/api/media-server-port');
     return response.port;
   },
 
   async checkFFmpeg(): Promise<FFmpegStatus> {
     if (window.desktopApi) return window.desktopApi.checkFFmpeg();
+    if (isTauri) return invokeTauri<FFmpegStatus>('ffmpeg_available');
     return fetchJson<FFmpegStatus>('/api/ffmpeg');
   },
 
   async getSettings(): Promise<SettingsPayload> {
     if (window.desktopApi) return window.desktopApi.getSettings();
-    return fetchJson<SettingsPayload>('/api/settings');
+    if (isTauri) return invokeTauri<SettingsPayload>('settings_get');
+    const base = await discoverServerBase();
+    return fetchJson<SettingsPayload>(`${base}/api/settings`);
   },
 
   async saveSettings(settings: SettingsPayload): Promise<boolean> {
     if (window.desktopApi) return window.desktopApi.saveSettings(settings);
-    const response = await fetchJson<{ ok: boolean }>('/api/settings', {
+    if (isTauri) return invokeTauri<boolean>('settings_save', { settings });
+    const base = await discoverServerBase();
+    const response = await fetchJson<{ ok: boolean }>(`${base}/api/settings`, {
       method: 'POST',
       body: JSON.stringify(settings),
     });
@@ -522,7 +629,9 @@ export const desktopApi = {
 
   async testMetadataKeys(keys: MetadataApiKeys): Promise<MetadataKeyTestResult[]> {
     if (window.desktopApi?.testMetadataKeys) return window.desktopApi.testMetadataKeys(keys);
-    return fetchJson<MetadataKeyTestResult[]>('/api/metadata/test-keys', {
+    if (isTauri) return invokeTauri<MetadataKeyTestResult[]>('metadata_test_keys', { keys });
+    const base = await discoverServerBase();
+    return fetchJson<MetadataKeyTestResult[]>(`${base}/api/metadata/test-keys`, {
       method: 'POST',
       body: JSON.stringify({ keys }),
     });
@@ -530,12 +639,14 @@ export const desktopApi = {
 
   async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
     if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
+    if (isTauri) return invokeTauri('progress_get', { file_path: filePath });
     const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
     return fetchJson<Record<string, StoredProgress> | StoredProgress | null>(`/api/progress${query}`);
   },
 
   async saveProgress(filePath: string, position: number, duration: number): Promise<StoredProgress> {
     if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration);
+    if (isTauri) return invokeTauri('progress_save', { file_path: filePath, position, duration });
     return fetchJson<StoredProgress>('/api/progress', {
       method: 'POST',
       body: JSON.stringify({ filePath, position, duration }),
@@ -544,6 +655,7 @@ export const desktopApi = {
 
   async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>): Promise<boolean> {
     if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress);
+    if (isTauri) return invokeTauri<boolean>('progress_import', { progress });
     const response = await fetchJson<{ ok: boolean }>('/api/progress/import', {
       method: 'POST',
       body: JSON.stringify({ progress }),
@@ -553,12 +665,16 @@ export const desktopApi = {
 
   async getCustomArtwork(mediaId: string): Promise<Record<string, string>> {
     if (window.desktopApi?.getCustomArtwork) return window.desktopApi.getCustomArtwork(mediaId);
-    return fetchJson<Record<string, string>>(`/api/artwork?mediaId=${encodeURIComponent(mediaId)}`);
+    if (isTauri) return invokeTauri('artwork_get', { media_id: mediaId });
+    const base = await discoverServerBase();
+    return fetchJson<Record<string, string>>(`${base}/api/artwork?mediaId=${encodeURIComponent(mediaId)}`);
   },
 
   async saveCustomArtwork(mediaId: string, target: string, dataUrl: string): Promise<Record<string, string>> {
     if (window.desktopApi?.saveCustomArtwork) return window.desktopApi.saveCustomArtwork(mediaId, target, dataUrl);
-    return fetchJson<Record<string, string>>('/api/artwork', {
+    if (isTauri) return invokeTauri('artwork_save', { media_id: mediaId, target, data_url: dataUrl });
+    const base = await discoverServerBase();
+    return fetchJson<Record<string, string>>(`${base}/api/artwork`, {
       method: 'POST',
       body: JSON.stringify({ mediaId, target, dataUrl }),
     });
@@ -566,7 +682,9 @@ export const desktopApi = {
 
   async refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkResult> {
     if (window.desktopApi?.refreshOfficialArtwork) return window.desktopApi.refreshOfficialArtwork(mediaId);
-    return fetchJson<OfficialArtworkResult>('/api/artwork/refresh-official', {
+    if (isTauri) return invokeTauri('artwork_refresh_official', { media_id: mediaId });
+    const base = await discoverServerBase();
+    return fetchJson<OfficialArtworkResult>(`${base}/api/artwork/refresh-official`, {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -574,7 +692,9 @@ export const desktopApi = {
 
   async getPlaybackLogo(mediaId: string): Promise<PlaybackLogoResult> {
     if (window.desktopApi?.getPlaybackLogo) return window.desktopApi.getPlaybackLogo(mediaId);
-    return fetchJson<PlaybackLogoResult>('/api/artwork/playback-logo', {
+    if (isTauri) return invokeTauri('artwork_playback_logo', { media_id: mediaId });
+    const base = await discoverServerBase();
+    return fetchJson<PlaybackLogoResult>(`${base}/api/artwork/playback-logo`, {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -582,7 +702,9 @@ export const desktopApi = {
 
   async getOfficialMetadataCandidates(mediaId: string): Promise<OfficialMetadataCandidate[]> {
     if (window.desktopApi?.getOfficialMetadataCandidates) return window.desktopApi.getOfficialMetadataCandidates(mediaId);
-    return fetchJson<OfficialMetadataCandidate[]>('/api/artwork/official-candidates', {
+    if (isTauri) return invokeTauri('artwork_official_candidates', { media_id: mediaId });
+    const base = await discoverServerBase();
+    return fetchJson<OfficialMetadataCandidate[]>(`${base}/api/artwork/official-candidates`, {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -590,7 +712,9 @@ export const desktopApi = {
 
   async applyOfficialMetadata(mediaId: string, candidate: OfficialMetadataCandidate): Promise<OfficialArtworkResult> {
     if (window.desktopApi?.applyOfficialMetadata) return window.desktopApi.applyOfficialMetadata(mediaId, candidate);
-    return fetchJson<OfficialArtworkResult>('/api/artwork/apply-official', {
+    if (isTauri) return invokeTauri('artwork_apply_official', { media_id: mediaId, candidate });
+    const base = await discoverServerBase();
+    return fetchJson<OfficialArtworkResult>(`${base}/api/artwork/apply-official`, {
       method: 'POST',
       body: JSON.stringify({ mediaId, candidate }),
     });
@@ -598,7 +722,9 @@ export const desktopApi = {
 
   async importCustomArtwork(entries: Record<string, Record<string, string>>): Promise<boolean> {
     if (window.desktopApi?.importCustomArtwork) return window.desktopApi.importCustomArtwork(entries);
-    const response = await fetchJson<{ ok: boolean }>('/api/artwork/import', {
+    if (isTauri) return invokeTauri<boolean>('artwork_import', { entries });
+    const base = await discoverServerBase();
+    const response = await fetchJson<{ ok: boolean }>(`${base}/api/artwork/import`, {
       method: 'POST',
       body: JSON.stringify({ entries }),
     });
@@ -607,17 +733,21 @@ export const desktopApi = {
 
   async backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
     if (window.desktopApi?.backupDatabase) return window.desktopApi.backupDatabase();
+    if (isTauri) return invokeTauri('database_backup');
     return fetchJson<{ ok: boolean; path?: string; error?: string }>('/api/database/backup', { method: 'POST' });
   },
 
   async clearAppData(): Promise<LibraryPayload> {
     if (window.desktopApi?.clearAppData) return window.desktopApi.clearAppData();
+    if (isTauri) return invokeTauri('database_clear');
     return fetchJson<LibraryPayload>('/api/database/clear', { method: 'POST' });
   },
 
   openExternal(url: string): void {
     if (window.desktopApi?.openExternal) {
       void window.desktopApi.openExternal(url);
+    } else if (isTauri) {
+      void invokeTauri<boolean>('shell_open_external', { url }).catch(() => undefined);
     } else {
       window.open(url, '_blank', 'noopener,noreferrer');
     }
@@ -625,6 +755,7 @@ export const desktopApi = {
 
   async getUpdateState(): Promise<UpdateState> {
     if (window.desktopApi?.getUpdateState) return window.desktopApi.getUpdateState();
+    if (isTauri) return invokeTauri<UpdateState>('updates_get_state');
     return {
       status: 'disabled',
       currentVersion: APP_VERSION,
@@ -637,6 +768,7 @@ export const desktopApi = {
 
   async checkForUpdates(): Promise<UpdateState> {
     if (window.desktopApi?.checkForUpdates) return window.desktopApi.checkForUpdates();
+    if (isTauri) return invokeTauri<UpdateState>('updates_check');
     try {
       const response = await fetch('https://api.github.com/repos/mallenkb/LoomTV/releases/latest', {
         headers: { Accept: 'application/vnd.github+json' },
@@ -672,16 +804,29 @@ export const desktopApi = {
 
   async installUpdate(): Promise<UpdateState> {
     if (window.desktopApi?.installUpdate) return window.desktopApi.installUpdate();
+    if (isTauri) return invokeTauri<UpdateState>('updates_install');
     return this.getUpdateState();
   },
 
   onUpdateState(callback: (state: UpdateState) => void): () => void {
     if (window.desktopApi?.onUpdateState) return window.desktopApi.onUpdateState(callback);
+    if (isTauri) {
+      let unlisten: (() => void) | null = null;
+      void listen<UpdateState>('updates:state', (event) => {
+        callback(event.payload);
+      }).then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      }).catch(() => undefined);
+      return () => {
+        if (unlisten) unlisten();
+      };
+    }
     return () => undefined;
   },
 
   async playMedia(filePath: string): Promise<boolean> {
     if (window.desktopApi) return window.desktopApi.playMedia(filePath);
+    if (isTauri) return invokeTauri<boolean>('media_play', { file_path: filePath });
     const response = await fetchJson<{ ok: boolean }>('/api/play-media', {
       method: 'POST',
       body: JSON.stringify({ filePath }),
@@ -692,7 +837,9 @@ export const desktopApi = {
   media: {
     async probe(filePath: string): Promise<ApiResult<unknown>> {
       if (window.desktopApi?.media) return window.desktopApi.media.probe(filePath);
-      return fetchJson<ApiResult<unknown>>('/api/media/probe', {
+      if (isTauri) return invokeTauri('media_probe', { file_path: filePath });
+      const base = await discoverServerBase();
+      return fetchJson<ApiResult<unknown>>(`${base}/api/media/probe`, {
         method: 'POST',
         body: JSON.stringify({ filePath }),
       });
@@ -700,13 +847,16 @@ export const desktopApi = {
 
     async canDirectPlay(filePath: string, backend = 'html5'): Promise<ApiResult<boolean>> {
       if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
+      if (isTauri) return invokeTauri('media_can_direct_play', { file_path: filePath, backend });
       const probeResult = await this.probe(filePath);
       return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };
     },
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
       if (window.desktopApi?.media) return window.desktopApi.media.startTranscode(filePath, options);
-      return fetchJson<ApiResult<TranscodeSession>>('/api/media/start-transcode', {
+      if (isTauri) return invokeTauri('media_start_transcode', { file_path: filePath, options });
+      const base = await discoverServerBase();
+      return fetchJson<ApiResult<TranscodeSession>>(`${base}/api/media/start-transcode`, {
         method: 'POST',
         body: JSON.stringify({ filePath, options }),
       });
@@ -714,10 +864,24 @@ export const desktopApi = {
 
     async stopTranscode(sessionId: string): Promise<ApiResult<boolean>> {
       if (window.desktopApi?.media) return window.desktopApi.media.stopTranscode(sessionId);
-      return fetchJson<ApiResult<boolean>>('/api/media/stop-transcode', {
+      if (isTauri) return invokeTauri('media_stop_transcode', { session_id: sessionId });
+      const base = await discoverServerBase();
+      return fetchJson<ApiResult<boolean>>(`${base}/api/media/stop-transcode`, {
         method: 'POST',
         body: JSON.stringify({ sessionId }),
       });
+    },
+
+    async getSubtitleUrl(filePath: string, streamOrdinal: number): Promise<string> {
+      if (isTauri) {
+        const result = await invokeTauri<{ url: string }>('media_get_subtitle_url', {
+          file_path: filePath,
+          stream_ordinal: streamOrdinal,
+        });
+        return result?.url || '';
+      }
+      const base = await discoverServerBase();
+      return `${base}/subtitle?path=${encodeURIComponent(filePath)}&streamOrdinal=${streamOrdinal}`;
     },
   },
 };

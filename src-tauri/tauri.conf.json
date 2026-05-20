@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LoomTV",
+  "version": "1.0.31",
+  "identifier": "com.mallenkb.loomtv",
+  "build": {
+    "beforeDevCommand": "corepack pnpm run dev:web",
+    "beforeBuildCommand": "corepack pnpm run build:renderer",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../.vite/renderer/main_window"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LoomTV",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 920,
+        "minHeight": 620,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 18
+        }
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["app", "deb", "appimage", "dmg", "nsis", "rpm"],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": ["../resources/ffmpeg/**/*"],
+    "category": "Entertainment",
+    "longDescription": "A local media server for your movie and TV show collection",
+    "shortDescription": "LoomTV"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDcyQjQ4MEY3OUVEMDAwMEEKUldRS0FOQ2U5NEMwY2dSbVNFS2gyQ2REbjRnaUoyN2R0QTl2Kzd2WUJtK0g3MjJGODNyTzYwSzYK",
+      "endpoints": [
+        "https://github.com/mallenkb/LoomTV/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

@@ -9,6 +9,7 @@ import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import SafeArtwork from '@/components/SafeArtwork';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
+import { firstEpisodeFilePath, shouldRequestFallbackThumbnail, useDeferredVisibility } from '@/lib/renderPerformance';
 
 export default function Others() {
   const { state, addLibraryFolder } = useLibrary();
@@ -81,10 +82,18 @@ function EmptyOthersState({ onAddFolder }: { onAddFolder: () => Promise<void> })
 
 function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
+  const [artworkFailed, setArtworkFailed] = useState(false);
+  const [cardRef, isVisible] = useDeferredVisibility<HTMLAnchorElement>();
   const fallbackFilePath = item.type === 'movie'
     ? item.filePath
-    : (item as TVShow).episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
-  const imageSources = posterSources(item, undefined, fallbackThumbnail ? [fallbackThumbnail] : []);
+    : firstEpisodeFilePath((item as TVShow).episodeFiles);
+  const baseImageSources = posterSources(item);
+  const shouldLoadFallbackThumbnail = shouldRequestFallbackThumbnail({
+    hasArtworkFailed: artworkFailed,
+    hasArtworkSources: baseImageSources.length > 0,
+    isVisible,
+  });
+  const imageSources = fallbackThumbnail ? posterSources(item, undefined, [fallbackThumbnail]) : baseImageSources;
   const seasonCount = item.type === 'movie' ? 0 : availableSeasonCount(item as TVShow);
   const metaLine = [
     item.year > 0 ? String(item.year) : '',
@@ -93,7 +102,11 @@ function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
 
   useEffect(() => {
     setFallbackThumbnail('');
-    if (!fallbackFilePath) return;
+    setArtworkFailed(false);
+  }, [fallbackFilePath, item.id]);
+
+  useEffect(() => {
+    if (!fallbackFilePath || !shouldLoadFallbackThumbnail) return;
 
     let isMounted = true;
     void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
@@ -107,10 +120,11 @@ function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
     return () => {
       isMounted = false;
     };
-  }, [fallbackFilePath]);
+  }, [fallbackFilePath, shouldLoadFallbackThumbnail]);
 
   return (
     <Link
+      ref={cardRef}
       to={mediaLink(item)}
       state={{ from, artwork: routeArtworkState(item, imageSources) }}
       className="loom-poster-link group block w-full max-w-[200px]"
@@ -121,6 +135,7 @@ function OtherMediaCard({ item, from }: { item: MediaItem; from: string }) {
           alt={item.title}
           className="h-full w-full transition-transform group-hover:scale-105"
           imgClassName="object-cover"
+          onError={() => setArtworkFailed(true)}
           fallback={
             <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3">
               <Play className="h-8 w-8 shrink-0 text-[var(--loom-accent)]" />

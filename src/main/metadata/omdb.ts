@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from './helpers';
+
 export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey?: string): Promise<Record<string, any> | null> {
   if (!omdbApiKey) return null;
   try {
@@ -5,7 +7,7 @@ export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey
     for (const attemptYear of attempts) {
       const yearParam = attemptYear ? `&y=${attemptYear}` : '';
       const url = `http://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}`;
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url);
       const data = await res.json() as Record<string, any>;
       if (data.Response !== 'False') return data;
     }

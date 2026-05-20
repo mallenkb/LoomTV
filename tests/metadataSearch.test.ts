@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   bestSeriesTitleFromEpisodeFiles,
   chooseMetadataSearchTitle,
+  chooseMetadataSummary,
+  looksLikeReleaseMetadataText,
   mergeEpisodeMetadataSources,
   seriesTitleFromEpisodeFileName,
   tmdbLogoCandidates,
@@ -42,6 +44,30 @@ test('metadata lookup can recover from a wrong applied title by trusting the fol
       fallbackTitle: '[C] CONTROL - The Money and Soul of Possibility',
     }),
     'Baby Steps',
+  );
+});
+
+test('release tag comments are not treated as usable summaries', () => {
+  assert.equal(
+    looksLikeReleaseMetadataText('FENiX-Fri-15-May-2026,15:54:16,720p,22,medium,N,9315712,1920,960,2'),
+    true,
+  );
+  assert.equal(
+    looksLikeReleaseMetadataText('Rip Wheeler and Beth Dutton gamble everything on a new life in South Texas.'),
+    false,
+  );
+});
+
+test('official metadata summaries outrank noisy embedded release tags', () => {
+  assert.equal(
+    chooseMetadataSummary({
+      localSummary: 'FENiX-Fri-15-May-2026,15:54:16,720p,22,medium,N,9315712,1920,960,2',
+      providerSummaries: [
+        '',
+        'Rip Wheeler and Beth Dutton gamble everything on a new life in South Texas.',
+      ],
+    }),
+    'Rip Wheeler and Beth Dutton gamble everything on a new life in South Texas.',
   );
 });
 

@@ -57,6 +57,11 @@ typings/
 .env
 .env.test
 
+# Tauri updater signing secrets
+.tauri-updater.key
+.tauri-updater.key.pub
+src-tauri/target/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 

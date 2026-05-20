@@ -3,9 +3,13 @@ import { getProgressState } from '@/lib/progress';
 import {
   AUTOPLAY_NEXT_EPISODE_KEY,
   DEFAULT_MEDIA_PANEL_WIDTH,
+  DEFAULT_SUBTITLE_STYLE,
   HLS_FIRST_EXTENSIONS,
   MAX_SIDE_PANEL_RATIO,
+  MAX_SUBTITLE_OUTLINE_WIDTH,
   MIN_SIDE_PANEL_WIDTH,
+  SUBTITLE_DELAY_LIMIT_SECONDS,
+  SUBTITLE_STYLE_KEY,
   SUBTITLES_DEFAULT_KEY,
   TRACK_PREFERENCES_KEY,
 } from './constants';
@@ -13,6 +17,7 @@ import type {
   MediaTrack,
   PlaybackTrackPreferences,
   ProbeData,
+  SubtitleStyleSettings,
   TrackPreference,
   TrackPreferenceType,
 } from './types';
@@ -260,6 +265,60 @@ export function saveSubtitlesDefaultEnabled(enabled: boolean): void {
   }
 }
 
+/** Clamp a subtitle delay (in seconds) to a sane range, rounded to 1/100s. */
+export function clampSubtitleDelay(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  const clamped = Math.max(-SUBTITLE_DELAY_LIMIT_SECONDS, Math.min(SUBTITLE_DELAY_LIMIT_SECONDS, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+/**
+ * Load the persisted subtitle appearance. Visual styling (size, colours,
+ * position) is remembered across sessions; `delaySeconds` is intentionally
+ * per-playback and always starts at 0, matching how IINA treats sub sync.
+ */
+export function loadSubtitleStyle(): SubtitleStyleSettings {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SUBTITLE_STYLE_KEY) || '{}') as Record<string, unknown>;
+    const num = (value: unknown, fallback: number): number =>
+      typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+    const str = (value: unknown, fallback: string): string =>
+      typeof value === 'string' && value.trim() ? value : fallback;
+    const backgroundColor = str(stored.backgroundColor, DEFAULT_SUBTITLE_STYLE.backgroundColor);
+    const backgroundEnabled = typeof stored.backgroundEnabled === 'boolean'
+      ? stored.backgroundEnabled
+      : DEFAULT_SUBTITLE_STYLE.backgroundEnabled;
+    const borderWidth = Math.max(0, Math.min(MAX_SUBTITLE_OUTLINE_WIDTH, num(stored.borderWidth, DEFAULT_SUBTITLE_STYLE.borderWidth)));
+    const borderEnabled = typeof stored.borderEnabled === 'boolean'
+      ? stored.borderEnabled
+      : borderWidth > 0;
+    return {
+      delaySeconds: 0,
+      position: num(stored.position, DEFAULT_SUBTITLE_STYLE.position),
+      scale: num(stored.scale, DEFAULT_SUBTITLE_STYLE.scale),
+      fontSize: num(stored.fontSize, DEFAULT_SUBTITLE_STYLE.fontSize),
+      fontColor: str(stored.fontColor, DEFAULT_SUBTITLE_STYLE.fontColor),
+      borderColor: str(stored.borderColor, DEFAULT_SUBTITLE_STYLE.borderColor),
+      borderWidth,
+      borderEnabled,
+      backgroundColor,
+      backgroundEnabled,
+    };
+  } catch {
+    return { ...DEFAULT_SUBTITLE_STYLE };
+  }
+}
+
+/** Persist subtitle appearance (everything except the per-playback delay). */
+export function saveSubtitleStyle(style: SubtitleStyleSettings): void {
+  try {
+    const { delaySeconds: _delaySeconds, ...persisted } = style;
+    localStorage.setItem(SUBTITLE_STYLE_KEY, JSON.stringify(persisted));
+  } catch (_error) {
+    // Ignore storage failures; the style still applies for this session.
+  }
+}
+
 export function loadAutoplayNextEpisode(): boolean {
   try {
     return localStorage.getItem(AUTOPLAY_NEXT_EPISODE_KEY) !== 'false';
@@ -302,4 +361,55 @@ export function transcodeErrorMessage(error: unknown): string {
     if (typeof nestedError === 'string') return nestedError;
   }
   return 'Unable to start transcoding fallback';
+}
+
+export type SubtitleCue = { start: number; end: number; text: string };
+
+const BITMAP_SUBTITLE_CODECS = [
+  'hdmv_pgs_subtitle',
+  'pgssub',
+  'pgs',
+  'dvd_subtitle',
+  'dvdsub',
+  'dvb_subtitle',
+  'dvbsub',
+  'xsub',
+];
+
+export function isBitmapSubtitleCodec(codec?: string): boolean {
+  const normalized = (codec || '').toLowerCase();
+  return BITMAP_SUBTITLE_CODECS.some((entry) => normalized.includes(entry));
+}
+
+function parseVttTimestamp(value: string): number {
+  const parts = value.trim().split(':');
+  if (parts.length < 2) return NaN;
+  const seconds = parseFloat((parts.pop() || '').replace(',', '.'));
+  const minutes = parseInt(parts.pop() || '0', 10);
+  const hours = parts.length ? parseInt(parts.pop() || '0', 10) : 0;
+  if (!Number.isFinite(seconds) || !Number.isFinite(minutes) || !Number.isFinite(hours)) return NaN;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+/** Parse WebVTT (or VTT-shaped) text into plain-text cues sorted by start time. */
+export function parseVttCues(content: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  const blocks = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.split('\n').filter((line) => line.trim().length > 0);
+    const arrowIndex = lines.findIndex((line) => line.includes('-->'));
+    if (arrowIndex === -1) continue;
+    const [startRaw, restRaw] = lines[arrowIndex].split('-->');
+    const endRaw = (restRaw || '').trim().split(/\s+/)[0] || '';
+    const start = parseVttTimestamp(startRaw);
+    const end = parseVttTimestamp(endRaw);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const text = lines
+      .slice(arrowIndex + 1)
+      .join('\n')
+      .replace(/<[^>]+>/g, '')
+      .trim();
+    if (text) cues.push({ start, end, text });
+  }
+  return cues.sort((a, b) => a.start - b.start);
 }

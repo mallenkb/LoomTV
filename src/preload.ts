@@ -8,7 +8,9 @@ type SubtitleStyleOptions = {
   fontColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  borderEnabled?: boolean;
   backgroundColor?: string;
+  backgroundEnabled?: boolean;
 };
 
 type LibraryPayload = {

@@ -142,7 +142,56 @@ body {
 }
 
 body.platform-darwin .loom-sidebar-brand {
-  padding-top: 2.75rem;
+  padding-top: 1.25rem;
+  padding-left: 1rem;
+}
+
+.loom-sidebar-drag-region {
+  display: none;
+}
+
+body.platform-darwin .loom-sidebar-drag-region {
+  -webkit-app-region: drag;
+  position: absolute;
+  inset: 0;
+}
+
+body.platform-darwin .loom-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.loom-main-drag-region {
+  display: none;
+}
+
+body.platform-darwin .loom-main-drag-region {
+  -webkit-app-region: drag;
+  position: fixed;
+  left: 12rem;
+  right: 0;
+  top: 0;
+  z-index: 35;
+  display: block;
+  height: 5rem;
+}
+
+.loom-player-drag-region {
+  display: none;
+}
+
+body.platform-darwin .loom-player-drag-region {
+  -webkit-app-region: drag;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 39;
+  display: block;
+  height: 6rem;
+}
+
+body.platform-darwin .loom-player-root-fullscreen .loom-player-drag-region {
+  display: none;
 }
 
 .loom-player-top-control {
@@ -150,10 +199,14 @@ body.platform-darwin .loom-sidebar-brand {
 }
 
 body.platform-darwin .loom-player-top-control {
-  top: 3.5rem;
+  top: 2.5rem;
 }
 
 :fullscreen .loom-player-top-control {
+  top: 1.5rem;
+}
+
+body.platform-darwin .loom-player-root-fullscreen .loom-player-top-control {
   top: 1.5rem;
 }
 

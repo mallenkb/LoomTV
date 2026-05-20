@@ -254,7 +254,7 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
 }
 
 export default function Settings() {
-  const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, refreshLibrary, clearAppData, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
+  const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, clearAppData, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
   const { libraryFolderGroups, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
@@ -274,6 +274,7 @@ export default function Settings() {
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
+  const [sidebarDropIndex, setSidebarDropIndex] = useState<number | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
@@ -291,6 +292,8 @@ export default function Settings() {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
   const peerScanInFlightRef = useRef(false);
+  const sidebarNavOrderRef = useRef<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
+  const sidebarDragItemRef = useRef<SidebarNavItemId | null>(null);
   const { theme, setTheme } = useTheme();
   const METADATA_PROVIDERS = makeMetadataProviders((url) => desktopApi.openExternal(url));
 
@@ -339,6 +342,10 @@ export default function Settings() {
   useEffect(() => {
     localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
   }, [activeSection]);
+
+  useEffect(() => {
+    sidebarNavOrderRef.current = sidebarNavOrder;
+  }, [sidebarNavOrder]);
 
   const setMetadataKey = (providerId: string, value: string) => {
     setMetadataKeys((current) => ({ ...current, [providerId]: value }));
@@ -435,23 +442,99 @@ export default function Settings() {
     });
   };
 
-  const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
-    setSidebarNavOrder(nextOrder);
-    await desktopApi.saveSettings({ sidebarNavOrder: nextOrder });
-    window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: nextOrder }));
+  const applySidebarNavOrder = (nextOrder: SidebarNavItemId[]) => {
+    const normalizedOrder = normalizeSidebarNavOrder(nextOrder);
+    sidebarNavOrderRef.current = normalizedOrder;
+    setSidebarNavOrder(normalizedOrder);
+    window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: normalizedOrder }));
+    return normalizedOrder;
   };
 
-  const handleSidebarOrderDrop = (targetId: SidebarNavItemId) => {
-    if (!draggedSidebarItem || draggedSidebarItem === targetId) {
+  const persistSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
+    try {
+      await desktopApi.saveSettings({ sidebarNavOrder: normalizeSidebarNavOrder(nextOrder) });
+    } catch (error) {
+      console.error('Failed to save sidebar order:', error);
+    }
+  };
+
+  const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
+    const normalizedOrder = applySidebarNavOrder(nextOrder);
+    await persistSidebarNavOrder(normalizedOrder);
+  };
+
+  const reorderSidebarItemToIndex = (sourceItem: SidebarNavItemId, visualInsertIndex: number) => {
+    const currentOrder = sidebarNavOrderRef.current;
+    const currentIndex = currentOrder.indexOf(sourceItem);
+    if (currentIndex < 0) return;
+
+    const boundedVisualIndex = Math.max(0, Math.min(visualInsertIndex, currentOrder.length));
+    setSidebarDropIndex(boundedVisualIndex);
+
+    const nextOrder = currentOrder.filter((item) => item !== sourceItem);
+    const insertIndex = currentIndex < boundedVisualIndex ? boundedVisualIndex - 1 : boundedVisualIndex;
+    if (insertIndex === currentIndex) return;
+
+    nextOrder.splice(insertIndex, 0, sourceItem);
+    applySidebarNavOrder(nextOrder);
+  };
+
+  const handleSidebarOrderPointerDown = (event: React.PointerEvent<HTMLDivElement>, itemId: SidebarNavItemId) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    event.preventDefault();
+    sidebarDragItemRef.current = itemId;
+    setDraggedSidebarItem(itemId);
+    setSidebarDropIndex(sidebarNavOrderRef.current.indexOf(itemId));
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleSidebarOrderPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const sourceItem = sidebarDragItemRef.current;
+    if (!sourceItem) return;
+    const targetRow = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-sidebar-order-item]');
+    if (!targetRow) return;
+    const targetId = targetRow?.dataset.sidebarOrderItem as SidebarNavItemId | undefined;
+    if (!targetId || !DEFAULT_SIDEBAR_NAV_ORDER.includes(targetId)) return;
+
+    const currentOrder = sidebarNavOrderRef.current;
+    const targetIndex = currentOrder.indexOf(targetId);
+    if (targetIndex < 0) return;
+
+    const targetRect = targetRow.getBoundingClientRect();
+    const visualInsertIndex = event.clientY > targetRect.top + targetRect.height / 2
+      ? targetIndex + 1
+      : targetIndex;
+
+    reorderSidebarItemToIndex(sourceItem, visualInsertIndex);
+  };
+
+  const handleSidebarOrderPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!sidebarDragItemRef.current) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    sidebarDragItemRef.current = null;
+    setDraggedSidebarItem(null);
+    setSidebarDropIndex(null);
+    void persistSidebarNavOrder(sidebarNavOrderRef.current);
+  };
+
+  const handleSidebarOrderDrop = (event: React.DragEvent<HTMLDivElement>, targetId: SidebarNavItemId) => {
+    event.preventDefault();
+    const sourceItem = draggedSidebarItem || event.dataTransfer.getData('text/plain') as SidebarNavItemId;
+
+    if (!sourceItem || sourceItem === targetId || !DEFAULT_SIDEBAR_NAV_ORDER.includes(sourceItem)) {
       setDraggedSidebarItem(null);
       return;
     }
 
-    const currentOrder = sidebarNavOrder.filter((item) => item !== draggedSidebarItem);
+    const currentOrder = sidebarNavOrder.filter((item) => item !== sourceItem);
     const targetIndex = currentOrder.indexOf(targetId);
     const nextOrder = [
       ...currentOrder.slice(0, targetIndex),
-      draggedSidebarItem,
+      sourceItem,
       ...currentOrder.slice(targetIndex),
     ];
 
@@ -680,7 +763,7 @@ export default function Settings() {
   const handleUpdateAction = async () => {
     if (isUpdateBusy) return;
 
-    if (updateState?.status === 'downloaded') {
+    if (updateState?.status === 'downloaded' || updateState?.status === 'available') {
       setUpdateState((current) => ({
         ...(current || {
           currentVersion: APP_VERSION,
@@ -859,48 +942,67 @@ export default function Settings() {
           <CardContent>
             <div className="space-y-2 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-2">
               {sidebarNavOrder.map((itemId, index) => (
-                <div
-                  key={itemId}
-                  draggable
-                  onDragStart={() => setDraggedSidebarItem(itemId)}
-                  onDragEnd={() => setDraggedSidebarItem(null)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => handleSidebarOrderDrop(itemId)}
-                  className={`flex cursor-grab items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors active:cursor-grabbing ${
-                    draggedSidebarItem === itemId
-                      ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/10'
-                      : 'border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] hover:border-[var(--loom-accent)]/35'
-                  }`}
-                >
-                  <GripVertical className="h-4 w-4 shrink-0 text-[var(--loom-faint)]" />
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-xs font-semibold text-[var(--loom-accent)]">
-                    {index + 1}
-                  </span>
-                  <span className="min-w-0 flex-1 text-sm font-medium text-white">
-                    {SIDEBAR_NAV_LABELS[itemId]}
-                  </span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => moveSidebarItem(itemId, -1)}
-                      disabled={index === 0}
-                      aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} up`}
-                      className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => moveSidebarItem(itemId, 1)}
-                      disabled={index === sidebarNavOrder.length - 1}
-                      aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} down`}
-                      className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      <ArrowDown className="h-4 w-4" />
-                    </button>
+                <React.Fragment key={itemId}>
+                  {draggedSidebarItem && sidebarDropIndex === index && (
+                    <div className="flex h-3 items-center px-2" aria-hidden="true">
+                      <span className="h-0.5 w-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(251,197,0,0.18),0_0_14px_rgba(251,197,0,0.42)]" />
+                    </div>
+                  )}
+                  <div
+                    data-sidebar-order-item={itemId}
+                    draggable={false}
+                    onPointerDown={(event) => handleSidebarOrderPointerDown(event, itemId)}
+                    onPointerMove={handleSidebarOrderPointerMove}
+                    onPointerUp={handleSidebarOrderPointerEnd}
+                    onPointerCancel={handleSidebarOrderPointerEnd}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                    }}
+                    onDrop={(event) => handleSidebarOrderDrop(event, itemId)}
+                    className={`flex cursor-grab touch-none select-none items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors active:cursor-grabbing ${
+                      draggedSidebarItem === itemId
+                        ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/10 opacity-85'
+                        : 'border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] hover:border-[var(--loom-accent)]/35'
+                    }`}
+                  >
+                    <GripVertical className="h-4 w-4 shrink-0 text-[var(--loom-faint)]" />
+                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-xs font-semibold text-[var(--loom-accent)]">
+                      {index + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 text-sm font-medium text-white">
+                      {SIDEBAR_NAV_LABELS[itemId]}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        draggable={false}
+                        onClick={() => moveSidebarItem(itemId, -1)}
+                        disabled={index === 0}
+                        aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} up`}
+                        className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        draggable={false}
+                        onClick={() => moveSidebarItem(itemId, 1)}
+                        disabled={index === sidebarNavOrder.length - 1}
+                        aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} down`}
+                        className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ArrowDown className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </React.Fragment>
               ))}
+              {draggedSidebarItem && sidebarDropIndex === sidebarNavOrder.length && (
+                <div className="flex h-3 items-center px-2" aria-hidden="true">
+                  <span className="h-0.5 w-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(251,197,0,0.18),0_0_14px_rgba(251,197,0,0.42)]" />
+                </div>
+              )}
             </div>
             <p className="mt-3 text-xs text-[var(--loom-faint)]">
               Home stays pinned first. Settings and refresh stay pinned at the bottom.
@@ -943,7 +1045,7 @@ export default function Settings() {
                 <Button onClick={fullRescanLibrary} disabled={isScanning} variant="outline" className="gap-2">
                   Full Rescan
                 </Button>
-                <Button onClick={refreshLibrary} variant="outline" className="gap-2">
+                <Button onClick={scanLibrary} disabled={isScanning} variant="outline" className="gap-2">
                   Refresh
                 </Button>
               </div>

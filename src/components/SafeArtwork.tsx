@@ -5,6 +5,7 @@ interface SafeArtworkProps {
   alt: string;
   className: string;
   imgClassName?: string;
+  loading?: 'eager' | 'lazy';
   fallback?: React.ReactNode;
   onError?: () => void;
 }
@@ -19,6 +20,7 @@ export default function SafeArtwork({
   alt,
   className,
   imgClassName = 'object-cover',
+  loading = 'lazy',
   fallback,
   onError,
 }: SafeArtworkProps) {
@@ -31,16 +33,23 @@ export default function SafeArtwork({
     setSourceIndex(0);
   }, [sourceKey]);
 
+  const backgroundStyle = currentSource
+    ? { backgroundImage: `url("${currentSource.replace(/"/g, '\\"')}")`, backgroundPosition: 'center', backgroundSize: 'cover' }
+    : undefined;
+
   return (
-    <div className={`relative overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)] ${className}`}>
-      {fallback}
+    <div
+      className={`relative overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)] ${className}`}
+      style={backgroundStyle}
+    >
+      {!currentSource && fallback}
       {currentSource && (
         <img
           src={currentSource}
           alt={alt}
-          loading="eager"
+          loading={loading}
           decoding="async"
-          className={`absolute inset-0 h-full w-full ${imgClassName}`}
+          className={`absolute inset-0 z-10 h-full w-full ${imgClassName}`}
           onError={() => {
             onError?.();
             setSourceIndex((index) => Math.min(index + 1, sources.length));

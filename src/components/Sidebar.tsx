@@ -121,9 +121,11 @@ export default function Sidebar() {
     };
   }, []);
 
-  const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const showUpdateButton = updateState?.status === 'available' || updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
   const updateButtonLabel =
-    updateState?.status === 'downloaded'
+    updateState?.status === 'available'
+      ? 'Update now'
+      : updateState?.status === 'downloaded'
       ? 'Update ready'
       : updateState?.status === 'installing'
         ? 'Restarting'
@@ -133,12 +135,13 @@ export default function Sidebar() {
 
   return (
     <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
-      <div className="loom-sidebar-brand p-4 bg-black/10">
-        <Link to="/" className="inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
+      <div className="loom-sidebar-brand relative p-4 bg-black/10">
+        <div className="loom-sidebar-drag-region" data-tauri-drag-region aria-hidden="true" />
+        <Link to="/" className="relative z-10 mt-4 inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
           <LoomLogo className="h-8 w-auto" />
         </Link>
       </div>
-      <nav className="flex-1 p-3 flex flex-col">
+      <nav className="flex-1 px-3 pb-3 pt-1 flex flex-col">
         <div className="relative">
           {activeNavIndex >= 0 && (
             <motion.span
@@ -176,9 +179,9 @@ export default function Sidebar() {
             <button
               type="button"
               onClick={() => {
-                if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
+                if (updateState?.status === 'available' || updateState?.status === 'downloaded') void desktopApi.installUpdate();
               }}
-              disabled={updateState?.status !== 'downloaded'}
+              disabled={updateState?.status !== 'available' && updateState?.status !== 'downloaded'}
               className="mb-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
               title={updateState?.message || 'Update LoomTV'}
             >

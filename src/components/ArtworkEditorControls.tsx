@@ -212,12 +212,15 @@ export default function ArtworkEditorControls({
       return true;
     }
 
-    if (thumbnailSource) await saveCustomArtwork(mediaId, 'thumbnail', thumbnailSource, legacyStorageKey);
-    if (coverSource) await saveCustomArtwork(mediaId, 'cover', coverSource, legacyStorageKey);
+    let savedArtwork: Record<string, string> = {};
+    if (thumbnailSource) savedArtwork = await saveCustomArtwork(mediaId, 'thumbnail', thumbnailSource, legacyStorageKey);
+    if (coverSource) savedArtwork = await saveCustomArtwork(mediaId, 'cover', coverSource, legacyStorageKey);
+    const savedThumbnail = savedArtwork.thumbnail || savedArtwork.poster || thumbnailSource;
+    const savedCover = savedArtwork.cover || savedArtwork.backdrop || coverSource;
     onCustomArtworkChange((current) => ({
       ...current,
-      ...(thumbnailSource ? { thumbnail: thumbnailSource, poster: thumbnailSource } : {}),
-      ...(coverSource ? { cover: coverSource } : {}),
+      ...(thumbnailSource ? { thumbnail: savedThumbnail, poster: savedThumbnail } : {}),
+      ...(coverSource ? { cover: savedCover } : {}),
     }));
     setArtworkMenuOpen(false);
     await onSaved?.();

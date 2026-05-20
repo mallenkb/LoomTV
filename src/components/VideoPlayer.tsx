@@ -5,7 +5,8 @@
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Hls, { ErrorTypes, Events, type ErrorData } from 'hls.js';
+import type Hls from 'hls.js';
+import type { ErrorData } from 'hls.js';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   CheckCircle,
@@ -43,15 +44,16 @@ import {
   DEFAULT_MEDIA_PANEL_WIDTH,
   DEFAULT_SKIP_BACK_SECONDS,
   DEFAULT_SKIP_FORWARD_SECONDS,
-  DEFAULT_SUBTITLE_STYLE,
   END_COMPLETION_TOLERANCE_SECONDS,
   HLS_RECOVERY_ATTEMPTS,
   HLS_TRANSCODE_RESTART_ATTEMPTS,
+  MAX_SUBTITLE_OUTLINE_WIDTH,
   NEXT_EPISODE_COUNTDOWN_SECONDS,
   NEXT_EPISODE_PROMPT_REMAINING_SECONDS,
   REPLAY_FROM_START_REMAINING_SECONDS,
+  SUBTITLE_DELAY_FINE_STEP_SECONDS,
+  SUBTITLE_DELAY_STEP_SECONDS,
   WATCHED_THRESHOLD,
-  subtitleCueTiming,
 } from './VideoPlayer/constants';
 import type {
   AspectMode,
@@ -65,40 +67,78 @@ import type {
 } from './VideoPlayer/types';
 export type { VideoPlayerProps } from './VideoPlayer/types';
 import {
+  clampSubtitleDelay,
   cleanEpisodeTitle,
   clampSeconds,
   clampSidePanelWidth,
   epCode,
-  externalSubtitleOrdinal,
   firstSubtitleTrackIndex,
   firstTrackIndex,
   formatTime,
   getStoredDuration,
   hlsErrorSummary,
+  isBitmapSubtitleCodec,
   isInProgress,
   loadAutoplayNextEpisode,
+  loadSubtitleStyle,
   loadSubtitlesDefaultEnabled,
   loadTrackPreferences,
   mediaErrorMessage,
+  parseVttCues,
   preferredTrackIndex,
   probeDurationSeconds,
   probeTracks,
   saveAutoplayNextEpisode,
+  saveSubtitleStyle,
   saveSubtitlesDefaultEnabled,
   saveTrackPreference,
   selectedEmbeddedSubtitle,
   shouldRestartMissingLocalHls,
   shouldStartWithTranscode,
-  subtitleOrdinal,
   subtitleSource,
   trackLabel,
   trackPreferenceScope,
   transcodeErrorMessage,
 } from './VideoPlayer/helpers';
+import type { SubtitleCue } from './VideoPlayer/helpers';
+import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
+const PLAYBACK_STATE_SYNC_MS = 500;
+const PROGRESS_SAVE_INTERVAL_MS = 5000;
+const EPISODE_PANEL_PROGRESS_SYNC_MS = 3000;
+
+async function getTauriAppWindow() {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null;
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    return getCurrentWindow();
+  } catch (error) {
+    console.warn('[VideoPlayer] Tauri fullscreen API unavailable', error);
+    return null;
+  }
+}
+
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    return true;
+  }
+  return target.isContentEditable || Boolean(target.closest('[contenteditable="true"], [role="textbox"]'));
+}
+
+function isPlayerControlTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest(
+    'button, input, select, textarea, a, [role="slider"], [data-player-control], .player-side-panel',
+  ));
+}
+
+function colorInputValue(value: string, fallback: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -118,6 +158,11 @@ export default function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
+  const seekSliderRef = useRef<HTMLDivElement>(null);
+  const progressFillRef = useRef<HTMLDivElement>(null);
+  const progressThumbRef = useRef<HTMLDivElement>(null);
+  const currentTimeTextRef = useRef<HTMLSpanElement>(null);
+  const durationTimeTextRef = useRef<HTMLSpanElement>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -126,6 +171,7 @@ export default function VideoPlayer({
   const sourceLoadTokenRef = useRef(0);
   const playerActiveRef = useRef(true);
   const userPausedRef = useRef(false);
+  const suppressPauseIntentUntilMsRef = useRef(0);
   const didTryTranscodeRef = useRef(false);
   const hasPlayableDataRef = useRef(false);
   const transcodeStartSecondsRef = useRef(0);
@@ -137,9 +183,19 @@ export default function VideoPlayer({
   const selectedAudioTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
-  const subtitleStyleRef = useRef<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
+  const initialSubtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
+  const subtitleStyleRef = useRef<SubtitleStyleSettings>(initialSubtitleStyleRef.current);
   const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
   const nextEpisodeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const osdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackPositionRef = useRef(0);
+  const playbackDurationRef = useRef(0);
+  const showSidebarRef = useRef(false);
+  const lastPlaybackStateSyncMsRef = useRef(0);
+  const lastProgressSaveMsRef = useRef(0);
+  const lastEpisodeProgressTickMsRef = useRef(0);
+  const scrubPreviewRafRef = useRef<number | null>(null);
+  const isScrubbingRef = useRef(false);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
@@ -169,7 +225,9 @@ export default function VideoPlayer({
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
   const [autoplayNextEnabled, setAutoplayNextEnabled] = useState(loadAutoplayNextEpisode);
   const [nextCountdown, setNextCountdown] = useState<number | null>(null);
-  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(DEFAULT_SUBTITLE_STYLE);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(initialSubtitleStyleRef.current);
+  const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
+  const [playerOsd, setPlayerOsd] = useState<string | null>(null);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
@@ -177,6 +235,74 @@ export default function VideoPlayer({
   const [dismissedNextPromptKey, setDismissedNextPromptKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // force episode list re-render
   const [playbackLogoCandidates, setPlaybackLogoCandidates] = useState<string[]>([]);
+
+  const syncPlaybackUi = useCallback((nextPosition: number, nextDuration: number) => {
+    const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
+    const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
+    const progressRatio = safeDuration > 0 ? Math.min(1, Math.max(0, safePosition / safeDuration)) : 0;
+    const progressPercent = progressRatio * 100;
+
+    if (progressFillRef.current) {
+      progressFillRef.current.style.transform = `scaleX(${progressRatio})`;
+    }
+    if (progressThumbRef.current) {
+      progressThumbRef.current.style.left = `${progressPercent}%`;
+    }
+    if (currentTimeTextRef.current) {
+      currentTimeTextRef.current.textContent = formatTime(safePosition);
+    }
+    if (durationTimeTextRef.current) {
+      durationTimeTextRef.current.textContent = formatTime(safeDuration);
+    }
+    if (seekSliderRef.current) {
+      seekSliderRef.current.setAttribute('aria-valuemax', String(safeDuration || 0));
+      seekSliderRef.current.setAttribute('aria-valuenow', String(Math.min(safePosition, safeDuration || safePosition)));
+      seekSliderRef.current.setAttribute('aria-valuetext', `${formatTime(safePosition)} of ${formatTime(safeDuration)}`);
+    }
+  }, []);
+
+  const updatePlaybackSnapshot = useCallback((
+    nextPosition: number,
+    nextDuration = playbackDurationRef.current,
+    options: { forceReact?: boolean } = {},
+  ) => {
+    const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
+    const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
+    playbackPositionRef.current = safePosition;
+    playbackDurationRef.current = safeDuration;
+    syncPlaybackUi(safePosition, safeDuration);
+
+    const now = performance.now();
+    if (options.forceReact || now - lastPlaybackStateSyncMsRef.current >= PLAYBACK_STATE_SYNC_MS) {
+      lastPlaybackStateSyncMsRef.current = now;
+      setPosition(safePosition);
+      setDuration(safeDuration);
+    }
+  }, [syncPlaybackUi]);
+
+  const persistPlaybackProgress = useCallback((
+    nextPosition = playbackPositionRef.current,
+    nextDuration = playbackDurationRef.current,
+    options: { force?: boolean } = {},
+  ) => {
+    if (nextPosition <= 10 || nextDuration <= 0) return;
+    const now = Date.now();
+
+    if (options.force || now - lastProgressSaveMsRef.current >= PROGRESS_SAVE_INTERVAL_MS) {
+      lastProgressSaveMsRef.current = now;
+      void savePlaybackProgress(filePath, nextPosition, nextDuration);
+    }
+
+    if (options.force || (showSidebarRef.current && now - lastEpisodeProgressTickMsRef.current >= EPISODE_PANEL_PROGRESS_SYNC_MS)) {
+      lastEpisodeProgressTickMsRef.current = now;
+      setTick((value) => value + 1);
+    }
+  }, [filePath]);
+
+  useEffect(() => {
+    showSidebarRef.current = showSidebar;
+  }, [showSidebar]);
+
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
   const pauseLogoSources = useMemo(() =>
     Array.from(new Set([
@@ -219,6 +345,55 @@ export default function VideoPlayer({
   useEffect(() => {
     subtitleStyleRef.current = subtitleStyle;
   }, [subtitleStyle]);
+
+  // Subtitle sync is per-file: a delay tuned for one file should not leak into
+  // the next episode. Appearance (size/colour/position) is left untouched.
+  useEffect(() => {
+    setSubtitleStyle((current) => (current.delaySeconds === 0 ? current : { ...current, delaySeconds: 0 }));
+  }, [filePath]);
+
+  useEffect(() => () => { if (osdTimerRef.current) clearTimeout(osdTimerRef.current); }, []);
+
+  useEffect(() => () => {
+    if (scrubPreviewRafRef.current !== null) {
+      cancelAnimationFrame(scrubPreviewRafRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const index = selectedSubtitleTrackIndex;
+    const resolveSubtitleUrl = async (): Promise<string> => {
+      if (index <= -1000) {
+        const external = subtitles[-1000 - index];
+        return external ? subtitleSource(external.url, serverBase) : '';
+      }
+      if (index >= 0) {
+        const embedded = selectedEmbeddedSubtitle(mediaTracks, index);
+        if (embedded && !isBitmapSubtitleCodec(embedded.track.codec)) {
+          return desktopApi.media.getSubtitleUrl(filePath, embedded.ordinal);
+        }
+      }
+      return '';
+    };
+
+    setSubtitleCues([]);
+    void (async () => {
+      try {
+        const url = await resolveSubtitleUrl();
+        if (cancelled || !url) return;
+        const response = await fetch(url);
+        const text = response.ok ? await response.text() : '';
+        if (!cancelled) setSubtitleCues(parseVttCues(text));
+      } catch {
+        if (!cancelled) setSubtitleCues([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSubtitleTrackIndex, subtitles, mediaTracks, filePath, serverBase]);
 
   useEffect(() => {
     setDismissedNextPromptKey(null);
@@ -346,47 +521,16 @@ export default function VideoPlayer({
   const applyNativeTextTrackVisibility = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    const tracks = Array.from(video.textTracks);
-    const selectedIndex = selectedSubtitleTrackIndexRef.current;
-    const selectedSubtitleOrdinal = selectedIndex <= -1000
-      ? externalSubtitleOrdinal(externalSubtitleTracks, selectedIndex)
-      : subtitleOrdinal(probeTracksRef.current, selectedIndex);
-
-    tracks.forEach((track, index) => {
-      const shouldShow = subtitlesDefaultEnabledRef.current
-        && (selectedSubtitleOrdinal >= 0 ? index === selectedSubtitleOrdinal : index === 0);
+    // Subtitles are rendered by the client-side SubtitleOverlay, so any native
+    // text tracks the browser exposes must stay disabled to avoid double cues.
+    Array.from(video.textTracks).forEach((track) => {
       try {
-        track.mode = shouldShow ? 'showing' : 'disabled';
+        track.mode = 'disabled';
       } catch (_error) {
-        return;
+        // Some browser track implementations reject mode changes.
       }
-
-      let cues: TextTrackCue[] = [];
-      try {
-        cues = Array.from(track.cues || []);
-      } catch (_error) {
-        return;
-      }
-      cues.forEach((cue) => {
-        try {
-          const originalTiming = subtitleCueTiming.get(cue) || {
-            startTime: cue.startTime,
-            endTime: cue.endTime,
-          };
-          subtitleCueTiming.set(cue, originalTiming);
-          const delayedStart = Math.max(0, originalTiming.startTime + subtitleStyle.delaySeconds);
-          cue.startTime = delayedStart;
-          cue.endTime = Math.max(delayedStart + 0.1, originalTiming.endTime + subtitleStyle.delaySeconds);
-
-          if ('line' in cue) {
-            (cue as VTTCue).line = Math.round(100 - subtitleStyle.position);
-          }
-        } catch (_error) {
-          // Browser cue implementations can reject runtime mutations.
-        }
-      });
     });
-  }, [externalSubtitleTracks, subtitleStyle.delaySeconds, subtitleStyle.position]);
+  }, []);
 
   useEffect(() => {
     applyNativeTextTrackVisibilityRef.current = applyNativeTextTrackVisibility;
@@ -411,13 +555,15 @@ export default function VideoPlayer({
     selectedSubtitleTrackIndexRef.current = firstSubtitle;
     subtitlesDefaultEnabledRef.current = subtitlesEnabled;
 
-    if (nextDuration > 0) setDuration(nextDuration);
+    if (nextDuration > 0) {
+      updatePlaybackSnapshot(playbackPositionRef.current, nextDuration, { forceReact: true });
+    }
     setMediaTracks(nextTracks);
     setSelectedVideoTrackIndex(firstVideo);
     setSelectedAudioTrackIndex(firstAudio);
     setSelectedSubtitleTrackIndex(firstSubtitle);
     setSubtitlesDefaultEnabled(subtitlesEnabled);
-  }, [externalSubtitleTracks, trackPreferenceScopeKey]);
+  }, [externalSubtitleTracks, trackPreferenceScopeKey, updatePlaybackSnapshot]);
 
   // ─── Episode navigation ────────────────────────────────────────────────────
 
@@ -450,15 +596,17 @@ export default function VideoPlayer({
   }, [goToEpisode, nextEpisodeFile]);
 
   const markCurrentEpisodeComplete = useCallback(() => {
-    if (duration <= 0) return;
-    setPosition(duration);
-    void savePlaybackProgress(filePath, duration, duration);
-    setTick((n) => n + 1);
-  }, [duration, filePath]);
+    const currentDuration = playbackDurationRef.current || duration;
+    if (currentDuration <= 0) return;
+    updatePlaybackSnapshot(currentDuration, currentDuration, { forceReact: true });
+    persistPlaybackProgress(currentDuration, currentDuration, { force: true });
+  }, [duration, persistPlaybackProgress, updatePlaybackSnapshot]);
 
   const playNextEpisodeNow = useCallback(() => {
     if (!nextEpisodeFile) return;
-    if (duration > 0 && position / duration >= WATCHED_THRESHOLD) {
+    const currentDuration = playbackDurationRef.current || duration;
+    const currentPosition = playbackPositionRef.current || position;
+    if (currentDuration > 0 && currentPosition / currentDuration >= WATCHED_THRESHOLD) {
       markCurrentEpisodeComplete();
     }
     goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
@@ -520,7 +668,8 @@ export default function VideoPlayer({
       : Math.floor(clampedStartSeconds);
     hlsRecoveryAttemptsRef.current = 0;
     transcodeStartSecondsRef.current = safeStartSeconds;
-    setPosition(safeStartSeconds);
+    updatePlaybackSnapshot(safeStartSeconds, durationHint || playbackDurationRef.current, { forceReact: true });
+    suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
     const keepReady = Boolean(options.keepReadyDuringRestart && hasPlayableDataRef.current);
     if (!keepReady) {
       setPlayerState('loading');
@@ -546,17 +695,23 @@ export default function VideoPlayer({
 
       const subtitleIndex = selectedSubtitleTrackIndexRef.current;
       const embeddedSubtitle = selectedEmbeddedSubtitle(probeTracksRef.current, subtitleIndex);
+      // Only bitmap subtitles (PGS/DVD) are burned into the transcode — those
+      // cannot be rendered as text. Text subtitles are drawn live by
+      // SubtitleOverlay, so they must not be burned in.
+      const burnInSubtitle = embeddedSubtitle && isBitmapSubtitleCodec(embeddedSubtitle.track.codec)
+        ? embeddedSubtitle
+        : null;
       const transcodeResult = await desktopApi.media.startTranscode(filePath, {
         forceTranscode: true,
         startSeconds: safeStartSeconds,
         ...(typeof selectedVideoTrackIndexRef.current === 'number' ? { videoTrackIndex: selectedVideoTrackIndexRef.current } : {}),
         ...(typeof selectedAudioTrackIndexRef.current === 'number' ? { audioTrackIndex: selectedAudioTrackIndexRef.current } : {}),
-        ...(embeddedSubtitle ? {
+        ...(burnInSubtitle ? {
           subtitleTrackIndex: subtitleIndex,
-          subtitleStreamOrdinal: embeddedSubtitle.ordinal,
-          subtitleCodec: embeddedSubtitle.track.codec,
+          subtitleStreamOrdinal: burnInSubtitle.ordinal,
+          subtitleCodec: burnInSubtitle.track.codec,
+          subtitleStyle: subtitleStyleRef.current,
         } : {}),
-        subtitleStyle: subtitleStyleRef.current,
       });
       if (!playerActiveRef.current || token !== loadTokenRef.current) return;
       if (!transcodeResult.ok || !transcodeResult.data?.playlistUrl) {
@@ -586,7 +741,7 @@ export default function VideoPlayer({
       setErrorMessage(transcodeErrorMessage(error));
       setStreamIsTranscoded(false);
     }
-  }, [applyProbeData, clearHls, filePath, stopTranscodeSession]);
+  }, [applyProbeData, clearHls, filePath, stopTranscodeSession, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -613,7 +768,7 @@ export default function VideoPlayer({
     selectedSubtitleTrackIndexRef.current = firstExternalSubtitle;
     setSelectedSubtitleTrackIndex(firstExternalSubtitle);
     setSubtitlesDefaultEnabled(externalSubtitlesEnabled);
-    setDuration(0);
+    updatePlaybackSnapshot(playbackPositionRef.current, 0, { forceReact: true });
 
     void desktopApi.media.probe(filePath).then((result) => {
       if (cancelled || !result.ok) return;
@@ -628,7 +783,7 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [applyProbeData, externalSubtitleTracks, filePath, trackPreferenceScopeKey]);
+  }, [applyProbeData, externalSubtitleTracks, filePath, trackPreferenceScopeKey, updatePlaybackSnapshot]);
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
@@ -639,8 +794,9 @@ export default function VideoPlayer({
     transcodeStartSecondsRef.current = 0;
     hlsRecoveryAttemptsRef.current = 0;
     hlsTranscodeRestartAttemptsRef.current = 0;
+    hasPlayableDataRef.current = false;
     setStreamIsTranscoded(false);
-    setPosition(0);
+    updatePlaybackSnapshot(0, 0, { forceReact: true });
     setPlayerState('loading');
     setStatusMessage('Preparing stream...');
     setErrorMessage(null);
@@ -681,7 +837,7 @@ export default function VideoPlayer({
       sourceLoadTokenRef.current += 1;
       void stopTranscodeSession();
     };
-  }, [filePath, reloadToken, startTranscodedFallback, stopTranscodeSession]);
+  }, [filePath, reloadToken, startTranscodedFallback, stopTranscodeSession, updatePlaybackSnapshot]);
 
   // ─── Player binding, events, and fallback ────────────────────────────────
   useEffect(() => {
@@ -690,16 +846,20 @@ export default function VideoPlayer({
 
     const sourceToken = ++sourceLoadTokenRef.current;
     const isHlsSource = /\.m3u8(\?|$)/i.test(streamUrl);
-    let isManagedHls = false;
     const resumeSeconds = getPlayableStartPosition(filePath, probedDurationRef.current);
+    const hadPlayableData = hasPlayableDataRef.current;
 
     clearHls();
     hlsRecoveryAttemptsRef.current = 0;
     hasPlayableDataRef.current = false;
-    setPlayerState('loading');
-    setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Loading stream...');
+    if (!hadPlayableData) {
+      setPlayerState('loading');
+      setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Loading stream...');
+      setPaused(true);
+    } else {
+      setStatusMessage('');
+    }
     setErrorMessage(null);
-    setPaused(true);
 
     const playIfAllowed = () => {
       if (!playerActiveRef.current || userPausedRef.current) {
@@ -709,17 +869,28 @@ export default function VideoPlayer({
       void video.play().catch(() => setPaused(true));
     };
 
-    if (isHlsSource) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
+    const loadHlsSource = async () => {
+      const { default: HlsPlayer, Events, ErrorTypes } = await import('hls.js/dist/hls.light.mjs');
+      if (sourceToken !== sourceLoadTokenRef.current) return;
+
+      if (HlsPlayer.isSupported()) {
+        const hls = new HlsPlayer({
           autoStartLoad: false,
           startPosition: 0,
+          lowLatencyMode: false,
+          maxBufferLength: 90,
+          maxMaxBufferLength: 180,
+          backBufferLength: 30,
+          maxBufferHole: 0.75,
+          maxFragLookUpTolerance: 0.5,
+          nudgeOffset: 0.05,
+          nudgeMaxRetry: 8,
           manifestLoadingMaxRetry: 20,
           manifestLoadingRetryDelay: 500,
           fragLoadingMaxRetry: 20,
           fragLoadingRetryDelay: 500,
+          fragLoadingMaxRetryTimeout: 5000,
         });
-        isManagedHls = true;
         hlsRef.current = hls;
         const markHlsPlayable = () => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
@@ -739,7 +910,7 @@ export default function VideoPlayer({
         });
         hls.on(Events.FRAG_BUFFERED, markHlsPlayable);
         hls.attachMedia(video);
-        hls.on(Events.ERROR, (_event: Events.ERROR, data: ErrorData) => {
+        hls.on(Events.ERROR, (_event: unknown, data: ErrorData) => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
           console.warn(`[player] HLS error ${hlsErrorSummary(data)}`);
           const restartLocalHls = () => {
@@ -790,16 +961,18 @@ export default function VideoPlayer({
             setErrorMessage(data.details ? `HLS playback error: ${data.details}` : 'Unable to play HLS stream.');
           }
         });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL')) {
+        return;
+      }
+
+      if (video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL')) {
         video.src = streamUrl;
+        video.load();
+        playIfAllowed();
       } else {
         setPlayerState('error');
         setErrorMessage('HLS streams are not supported in this build.');
-        return;
       }
-    } else {
-      video.src = streamUrl;
-    }
+    };
 
     const onLoadStart = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
@@ -816,27 +989,36 @@ export default function VideoPlayer({
       setStatusMessage('Buffering...');
     };
 
-    const onPlay = () => setPaused(false);
+    const onPlay = () => {
+      userPausedRef.current = false;
+      setPaused(false);
+    };
 
-    const onPause = () => setPaused(true);
+    const onPause = () => {
+      // Mirror the real pause state so buffer/reload events (playIfAllowed)
+      // never resume a video the viewer intentionally paused.
+      if (performance.now() >= suppressPauseIntentUntilMsRef.current) {
+        userPausedRef.current = true;
+      }
+      setPaused(true);
+      persistPlaybackProgress(playbackPositionRef.current, playbackDurationRef.current, { force: true });
+    };
 
     const onDuration = () => {
       const mediaDuration = Number.isFinite(video.duration) ? video.duration : 0;
-      setDuration(probedDurationRef.current || mediaDuration);
+      updatePlaybackSnapshot(playbackPositionRef.current, probedDurationRef.current || mediaDuration, { forceReact: true });
     };
 
     const onTime = () => {
+      if (isScrubbingRef.current) return;
       const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
       const totalDuration = probedDurationRef.current || (Number.isFinite(video.duration) ? video.duration : 0);
       const absolutePosition = streamIsTranscoded
         ? transcodeStartSecondsRef.current + currentTime
         : currentTime;
       const nextPosition = clampSeconds(absolutePosition, totalDuration || undefined);
-      setPosition(nextPosition);
-      if (nextPosition > 10 && totalDuration > 0) {
-        void savePlaybackProgress(filePath, nextPosition, totalDuration);
-        setTick((n) => n + 1);
-      }
+      updatePlaybackSnapshot(nextPosition, totalDuration);
+      persistPlaybackProgress(nextPosition, totalDuration);
     };
 
     const onVolumeChange = () => {
@@ -844,10 +1026,14 @@ export default function VideoPlayer({
       setMuted(video.muted);
     };
 
+    const onTextTrackListChanged = () => {
+      applyNativeTextTrackVisibilityRef.current();
+    };
+
     const onLoadedMetadata = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
       const mediaDuration = Number.isFinite(video.duration) ? video.duration : 0;
-      setDuration(probedDurationRef.current || mediaDuration);
+      updatePlaybackSnapshot(playbackPositionRef.current, probedDurationRef.current || mediaDuration, { forceReact: true });
       applyNativeTextTrackVisibilityRef.current();
       if (!streamIsTranscoded && resumeSeconds > 10 && mediaDuration) {
         video.currentTime = Math.min(resumeSeconds, Math.max(0, video.duration - 0.1));
@@ -879,6 +1065,8 @@ export default function VideoPlayer({
         streamIsTranscoded ? transcodeStartSecondsRef.current + currentTime : currentTime,
         totalDuration || undefined,
       );
+      updatePlaybackSnapshot(endedPosition, totalDuration, { forceReact: true });
+      persistPlaybackProgress(endedPosition, totalDuration, { force: true });
       const nearEnoughToComplete = totalDuration > 0
         && totalDuration - endedPosition <= Math.max(END_COMPLETION_TOLERANCE_SECONDS, REPLAY_FROM_START_REMAINING_SECONDS);
       if (nearEnoughToComplete) {
@@ -931,9 +1119,20 @@ export default function VideoPlayer({
     video.addEventListener('volumechange', onVolumeChange);
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
+    video.textTracks.addEventListener('addtrack', onTextTrackListChanged);
+    video.textTracks.addEventListener('change', onTextTrackListChanged);
     video.preload = 'auto';
     video.autoplay = !userPausedRef.current;
-    if (!isManagedHls) {
+    applyNativeTextTrackVisibilityRef.current();
+
+    if (isHlsSource) {
+      void loadHlsSource().catch((error) => {
+        if (sourceToken !== sourceLoadTokenRef.current) return;
+        setPlayerState('error');
+        setErrorMessage(error instanceof Error ? error.message : 'Unable to load HLS playback support.');
+      });
+    } else {
+      video.src = streamUrl;
       video.load();
       playIfAllowed();
     }
@@ -958,6 +1157,8 @@ export default function VideoPlayer({
       video.removeEventListener('volumechange', onVolumeChange);
       video.removeEventListener('ended', onEnded);
       video.removeEventListener('error', onError);
+      video.textTracks.removeEventListener('addtrack', onTextTrackListChanged);
+      video.textTracks.removeEventListener('change', onTextTrackListChanged);
       clearHls();
       clearVideoElement(video);
     };
@@ -967,7 +1168,9 @@ export default function VideoPlayer({
     streamIsTranscoded,
     clearHls,
     clearVideoElement,
+    persistPlaybackProgress,
     startTranscodedFallback,
+    updatePlaybackSnapshot,
   ]);
 
   // ─── Auto-hide controls ────────────────────────────────────────────────────
@@ -1000,11 +1203,30 @@ export default function VideoPlayer({
 
   useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }, []);
 
-  useEffect(() => {
-    const onFullscreenChange = () => setFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  const syncFullscreenState = useCallback(() => {
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    const browserFullscreen = !!(doc.fullscreenElement ?? doc.webkitFullscreenElement);
+    setFullscreen(browserFullscreen);
+    void getTauriAppWindow()
+      .then((appWindow) => appWindow?.isFullscreen())
+      .then((nativeFullscreen) => {
+        if (typeof nativeFullscreen === 'boolean') {
+          setFullscreen(browserFullscreen || nativeFullscreen);
+        }
+      })
+      .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => syncFullscreenState();
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    syncFullscreenState();
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+    };
+  }, [syncFullscreenState]);
 
   useEffect(() => () => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
@@ -1017,13 +1239,14 @@ export default function VideoPlayer({
 
   // Stop transcode session when component closes.
   useEffect(() => () => {
+    persistPlaybackProgress(playbackPositionRef.current, playbackDurationRef.current, { force: true });
     playerActiveRef.current = false;
     userPausedRef.current = true;
     loadTokenRef.current += 1;
     sourceLoadTokenRef.current += 1;
     clearNextEpisodeCountdown();
     void stopTranscodeSession();
-  }, [clearNextEpisodeCountdown, stopTranscodeSession]);
+  }, [clearNextEpisodeCountdown, persistPlaybackProgress, stopTranscodeSession]);
 
   // ─── Controls ──────────────────────────────────────────────────────────────
 
@@ -1043,6 +1266,7 @@ export default function VideoPlayer({
   }, [playerState]);
 
   const shutdownPlayback = useCallback(() => {
+    persistPlaybackProgress(playbackPositionRef.current, playbackDurationRef.current, { force: true });
     playerActiveRef.current = false;
     userPausedRef.current = true;
     loadTokenRef.current += 1;
@@ -1055,7 +1279,7 @@ export default function VideoPlayer({
       video.pause();
     }
     void stopTranscodeSession();
-  }, [clearHls, clearNextEpisodeCountdown, stopTranscodeSession]);
+  }, [clearHls, clearNextEpisodeCountdown, persistPlaybackProgress, stopTranscodeSession]);
 
   const handleClose = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
@@ -1070,13 +1294,43 @@ export default function VideoPlayer({
   }, [onClose, shutdownPlayback]);
 
   const toggleFullscreen = useCallback(() => {
-    const el = containerRef.current;
+    const el = containerRef.current as
+      | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void })
+      | null;
     if (!el) return;
-    if (!document.fullscreenElement) {
-      void el.requestFullscreen();
-    } else {
-      void document.exitFullscreen();
-    }
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+
+    void (async () => {
+      const appWindow = await getTauriAppWindow();
+      if (appWindow) {
+        try {
+          const isFullscreen = await appWindow.isFullscreen();
+          await appWindow.setFullscreen(!isFullscreen);
+          setFullscreen(!isFullscreen);
+          return;
+        } catch (error) {
+          console.warn('[VideoPlayer] Native fullscreen toggle failed; falling back to browser fullscreen', error);
+        }
+      }
+
+      const fullscreenElement = doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+      if (!fullscreenElement) {
+        const requestFullscreen = el.requestFullscreen?.bind(el) ?? el.webkitRequestFullscreen?.bind(el);
+        if (requestFullscreen) {
+          await requestFullscreen();
+          setFullscreen(true);
+        }
+      } else {
+        const exitFullscreen = doc.exitFullscreen?.bind(doc) ?? doc.webkitExitFullscreen?.bind(doc);
+        if (exitFullscreen) {
+          await exitFullscreen();
+          setFullscreen(false);
+        }
+      }
+    })();
   }, []);
 
   const openMediaPanel = useCallback(() => {
@@ -1154,16 +1408,24 @@ export default function VideoPlayer({
 
   const seekTo = useCallback((targetSeconds: number, options: { restartTranscoded?: boolean } = {}) => {
     const nextPosition = clampSeconds(targetSeconds, duration || undefined);
-    setPosition(nextPosition);
+    updatePlaybackSnapshot(nextPosition, duration || playbackDurationRef.current, { forceReact: true });
 
     const video = videoRef.current;
     if (!video) return;
+    const shouldResumeAfterSeek = !video.paused && !userPausedRef.current;
+    suppressPauseIntentUntilMsRef.current = performance.now() + 1500;
 
     if (streamIsTranscoded) {
       const streamPosition = nextPosition - transcodeStartSecondsRef.current;
-      if (streamPosition >= 0 && !options.restartTranscoded) {
-        const streamDuration = Number.isFinite(video.duration) ? video.duration : undefined;
+      const streamDuration = Number.isFinite(video.duration) ? video.duration : undefined;
+      const canSeekInCurrentStream = streamPosition >= 0
+        && !options.restartTranscoded
+        && (streamDuration === undefined || streamPosition <= Math.max(0, streamDuration - 0.25));
+      if (canSeekInCurrentStream) {
         video.currentTime = clampSeconds(streamPosition, streamDuration);
+        if (shouldResumeAfterSeek) {
+          void video.play().catch(() => setPaused(true));
+        }
         return;
       }
       hlsTranscodeRestartAttemptsRef.current = 0;
@@ -1178,7 +1440,10 @@ export default function VideoPlayer({
 
     const directDuration = Number.isFinite(video.duration) ? video.duration : duration;
     video.currentTime = clampSeconds(nextPosition, directDuration || undefined);
-  }, [duration, startTranscodedFallback, streamIsTranscoded]);
+    if (shouldResumeAfterSeek) {
+      void video.play().catch(() => setPaused(true));
+    }
+  }, [duration, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
 
   const handleProgressPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!duration) return;
@@ -1187,14 +1452,28 @@ export default function VideoPlayer({
     const bar = event.currentTarget;
     bar.setPointerCapture(event.pointerId);
     const rect = bar.getBoundingClientRect();
-    const seekFromClientX = (clientX: number, restart: boolean) => {
+    let pendingPosition = playbackPositionRef.current;
+    isScrubbingRef.current = true;
+    const previewFromClientX = (clientX: number) => {
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      seekTo(ratio * duration, { restartTranscoded: restart });
+      pendingPosition = ratio * duration;
+      if (scrubPreviewRafRef.current !== null) return;
+      scrubPreviewRafRef.current = requestAnimationFrame(() => {
+        scrubPreviewRafRef.current = null;
+        updatePlaybackSnapshot(pendingPosition, duration, { forceReact: false });
+      });
     };
-    seekFromClientX(event.clientX, false);
-    const handleMove = (moveEvent: PointerEvent) => seekFromClientX(moveEvent.clientX, false);
+    previewFromClientX(event.clientX);
+    const handleMove = (moveEvent: PointerEvent) => previewFromClientX(moveEvent.clientX);
     const handleUp = (upEvent: PointerEvent) => {
-      seekFromClientX(upEvent.clientX, true);
+      previewFromClientX(upEvent.clientX);
+      if (scrubPreviewRafRef.current !== null) {
+        cancelAnimationFrame(scrubPreviewRafRef.current);
+        scrubPreviewRafRef.current = null;
+      }
+      updatePlaybackSnapshot(pendingPosition, duration, { forceReact: true });
+      seekTo(pendingPosition);
+      isScrubbingRef.current = false;
       bar.releasePointerCapture(event.pointerId);
       bar.removeEventListener('pointermove', handleMove);
       bar.removeEventListener('pointerup', handleUp);
@@ -1203,7 +1482,7 @@ export default function VideoPlayer({
     bar.addEventListener('pointermove', handleMove);
     bar.addEventListener('pointerup', handleUp);
     bar.addEventListener('pointercancel', handleUp);
-  }, [duration, seekTo]);
+  }, [duration, seekTo, updatePlaybackSnapshot]);
 
   const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!duration) return;
@@ -1211,18 +1490,18 @@ export default function VideoPlayer({
     const small = 5;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      seekTo(position - (event.shiftKey ? big : small), { restartTranscoded: true });
+      seekTo(playbackPositionRef.current - (event.shiftKey ? big : small));
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      seekTo(position + (event.shiftKey ? big : small), { restartTranscoded: true });
+      seekTo(playbackPositionRef.current + (event.shiftKey ? big : small));
     } else if (event.key === 'Home') {
       event.preventDefault();
-      seekTo(0, { restartTranscoded: true });
+      seekTo(0);
     } else if (event.key === 'End') {
       event.preventDefault();
-      seekTo(duration, { restartTranscoded: true });
+      seekTo(duration);
     }
-  }, [duration, position, seekTo]);
+  }, [duration, seekTo]);
 
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
@@ -1244,28 +1523,89 @@ export default function VideoPlayer({
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
     hlsTranscodeRestartAttemptsRef.current = 0;
-    void startTranscodedFallback(position, { force: true, allowNearEnd: true });
-  }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamUrl]);
+    void startTranscodedFallback(playbackPositionRef.current, { force: true, allowNearEnd: true });
+  }, [applyNativeTextTrackVisibility, startTranscodedFallback, streamUrl]);
 
   const applySubtitleStyleToStream = useCallback(() => {
     applyNativeTextTrackVisibility();
     if (streamIsTranscoded && selectedSubtitleTrackIndexRef.current >= 0) {
       hlsTranscodeRestartAttemptsRef.current = 0;
-      void startTranscodedFallback(position, {
+      void startTranscodedFallback(playbackPositionRef.current, {
         force: true,
         allowNearEnd: true,
         keepReadyDuringRestart: true,
         deferStopCurrent: true,
       });
     }
-  }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamIsTranscoded]);
+  }, [applyNativeTextTrackVisibility, startTranscodedFallback, streamIsTranscoded]);
+
+  const showOsd = useCallback((message: string) => {
+    setPlayerOsd(message);
+    if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+    osdTimerRef.current = setTimeout(() => setPlayerOsd(null), 1500);
+  }, []);
 
   const updateSubtitleStyle = useCallback((key: keyof SubtitleStyleSettings, value: number | string) => {
-    setSubtitleStyle((current) => ({
-      ...current,
-      [key]: value,
-    }));
+    setSubtitleStyle((current) => {
+      const nextValue = key === 'borderWidth'
+        ? Math.max(0, Math.min(MAX_SUBTITLE_OUTLINE_WIDTH, Number(value)))
+        : key === 'position'
+          ? Math.max(0, Math.min(100, Number(value)))
+        : value;
+      const next = {
+        ...current,
+        [key]: nextValue,
+        ...(key === 'borderWidth' ? { borderEnabled: Number(nextValue) > 0 } : {}),
+        ...(key === 'backgroundColor' ? { backgroundEnabled: true } : {}),
+      };
+      // Appearance is remembered across sessions; delay stays per-playback.
+      if (key !== 'delaySeconds') saveSubtitleStyle(next);
+      return next;
+    });
   }, []);
+
+  const setSubtitleBackgroundEnabled = useCallback((enabled: boolean) => {
+    setSubtitleStyle((current) => {
+      const next = {
+        ...current,
+        backgroundEnabled: enabled,
+        backgroundColor: current.backgroundColor === 'transparent' || current.backgroundColor === 'none'
+          ? '#000000'
+          : current.backgroundColor,
+      };
+      saveSubtitleStyle(next);
+      return next;
+    });
+  }, []);
+
+  const setSubtitleBorderEnabled = useCallback((enabled: boolean) => {
+    setSubtitleStyle((current) => {
+      const next = {
+        ...current,
+        borderEnabled: enabled,
+        borderWidth: current.borderWidth > 0 ? current.borderWidth : 3,
+      };
+      saveSubtitleStyle(next);
+      return next;
+    });
+  }, []);
+
+  const adjustSubtitleDelay = useCallback((deltaSeconds: number) => {
+    if (selectedSubtitleTrackIndexRef.current < 0) {
+      showOsd('No subtitle selected');
+      return;
+    }
+    setSubtitleStyle((current) => {
+      const delaySeconds = clampSubtitleDelay(current.delaySeconds + deltaSeconds);
+      showOsd(`Subtitle delay ${delaySeconds > 0 ? '+' : ''}${delaySeconds.toFixed(2).replace(/\.?0+$/, '')}s`);
+      return { ...current, delaySeconds };
+    });
+  }, [showOsd]);
+
+  const resetSubtitleDelay = useCallback(() => {
+    setSubtitleStyle((current) => (current.delaySeconds === 0 ? current : { ...current, delaySeconds: 0 }));
+    showOsd('Subtitle delay reset');
+  }, [showOsd]);
 
   const toggleAutoplayNext = useCallback(() => {
     setAutoplayNextEnabled((current) => {
@@ -1345,11 +1685,17 @@ export default function VideoPlayer({
     if (playerState !== 'error') toggleFullscreen();
   }, [playerState, toggleFullscreen]);
 
+  const handleSurfaceDoubleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isPlayerControlTarget(event.target)) return;
+    handleSurfaceDoubleClick(event);
+  }, [handleSurfaceDoubleClick]);
+
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (isEditableShortcutTarget(e.target)) return;
+      const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
 
       switch (e.key) {
         case 'Escape':
@@ -1357,16 +1703,18 @@ export default function VideoPlayer({
           handleBack();
           break;
         case ' ':
+        case 'Spacebar':
+          if (hasCommandModifier) break;
           e.preventDefault();
           togglePlay();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          seekTo(position - (e.shiftKey ? 60 : skipBackSeconds));
+          seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
           break;
         case 'ArrowRight':
           e.preventDefault();
-          seekTo(position + (e.shiftKey ? 60 : skipForwardSeconds));
+          seekTo(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -1378,6 +1726,7 @@ export default function VideoPlayer({
           break;
         case 'm':
         case 'M':
+          if (hasCommandModifier) break;
           e.preventDefault();
           toggleMute();
           break;
@@ -1388,6 +1737,7 @@ export default function VideoPlayer({
           break;
         case 'f':
         case 'F':
+          if (hasCommandModifier) break;
           e.preventDefault();
           toggleFullscreen();
           break;
@@ -1406,16 +1756,32 @@ export default function VideoPlayer({
           break;
         case 'Home':
           e.preventDefault();
-          seekTo(0, { restartTranscoded: true });
+          seekTo(0);
           break;
         case 'End':
           e.preventDefault();
-          seekTo(duration, { restartTranscoded: true });
+          seekTo(duration);
+          break;
+        case 'z':
+        case 'Z':
+          // IINA-style sub sync: hold Shift for fine (0.1s) nudges.
+          e.preventDefault();
+          adjustSubtitleDelay(-(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS));
+          break;
+        case 'x':
+        case 'X':
+          e.preventDefault();
+          adjustSubtitleDelay(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS);
+          break;
+        case 'c':
+        case 'C':
+          e.preventDefault();
+          resetSubtitleDelay();
           break;
         default:
           if (/^[0-9]$/.test(e.key) && duration > 0) {
             e.preventDefault();
-            seekTo((Number(e.key) / 10) * duration, { restartTranscoded: true });
+            seekTo((Number(e.key) / 10) * duration);
           }
           break;
       }
@@ -1427,11 +1793,12 @@ export default function VideoPlayer({
     changeVolume,
     duration,
     handleBack,
-    position,
     resetPlaybackRate,
     skipBackSeconds,
     skipForwardSeconds,
     seekTo,
+    adjustSubtitleDelay,
+    resetSubtitleDelay,
     toggleMute,
     toggleFullscreen,
     togglePlay,
@@ -1441,12 +1808,9 @@ export default function VideoPlayer({
 
   const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
   const subtitleCueFontSize = Math.round(subtitleStyle.fontSize * subtitleStyle.scale);
-  const subtitleCueShadow = subtitleStyle.borderWidth > 0
-    ? `-${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, -${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}`
-    : 'none';
   const videoStyle: React.CSSProperties = {
+    objectPosition: 'center center',
     ...(aspectMode.includes('/') ? { aspectRatio: aspectMode } : {}),
-    ...(fullscreen ? { objectPosition: 'center 24px' } : {}),
   };
 
   const currentEpLabel = useMemo(() => {
@@ -1494,28 +1858,26 @@ export default function VideoPlayer({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black" ref={containerRef}>
-      <style>
-        {`video::cue {
-          color: ${subtitleStyle.fontColor};
-          font-size: ${subtitleCueFontSize}px;
-          background-color: ${subtitleStyle.backgroundColor};
-          text-shadow: ${subtitleCueShadow};
-        }`}
-      </style>
+    <div
+      className={`fixed inset-0 z-50 flex overflow-hidden bg-black ${fullscreen ? 'loom-player-root-fullscreen' : ''}`}
+      ref={containerRef}
+    >
       <div
-        className={`relative flex-1 flex items-center justify-center bg-black overflow-hidden ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
+        className={`relative z-0 flex flex-1 items-center justify-center overflow-hidden bg-black ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
         onMouseMove={handlePointerMove}
         onClick={handleSurfaceClick}
+        onDoubleClickCapture={handleSurfaceDoubleClickCapture}
         onDoubleClick={handleSurfaceDoubleClick}
       >
+        <div className="loom-player-drag-region" data-tauri-drag-region aria-hidden="true" />
+
         <button
           onClick={(event) => {
             event.stopPropagation();
             handleBack(event);
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className={`loom-player-top-control absolute left-6 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+          className={`loom-no-drag loom-player-top-control absolute left-6 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
           aria-label="Back"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -1532,7 +1894,7 @@ export default function VideoPlayer({
             handleClose();
           }}
           onDoubleClick={(event) => event.stopPropagation()}
-          className={`loom-player-top-control absolute right-6 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+          className={`loom-no-drag loom-player-top-control absolute right-6 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
           title="Close player"
           aria-label="Close player"
         >
@@ -1541,24 +1903,20 @@ export default function VideoPlayer({
 
         <video
           ref={videoRef}
-          className={`w-full h-full ${aspectMode === 'fill' ? 'object-cover' : 'object-contain'}`}
+          className={`absolute left-1/2 top-1/2 z-0 h-full w-full -translate-x-1/2 -translate-y-1/2 object-center ${aspectMode === 'fill' ? 'object-cover' : 'object-contain'}`}
           style={videoStyle}
           preload="auto"
-        >
-          {subtitles.map((subtitle, index) => {
-            const trackIndex = -1000 - index;
-            return (
-              <track
-                key={`${subtitle.url}-${index}`}
-                kind="subtitles"
-                src={subtitleSource(subtitle.url, serverBase)}
-                srcLang={subtitle.lang || 'en'}
-                label={subtitle.label || subtitle.lang || `Subtitle ${index + 1}`}
-                default={subtitlesDefaultEnabled && selectedSubtitleTrackIndex === trackIndex}
-              />
-            );
-          })}
-        </video>
+          playsInline
+        />
+
+        <SubtitleOverlay
+          cues={subtitleCues}
+          videoRef={videoRef}
+          transcodeStartSecondsRef={transcodeStartSecondsRef}
+          streamIsTranscoded={streamIsTranscoded}
+          style={subtitleStyle}
+          visible={subtitlesDefaultEnabled && selectedSubtitleTrackIndex !== -1}
+        />
 
         <AnimatePresence>
           {paused && playerState === 'ready' && (
@@ -1599,13 +1957,19 @@ export default function VideoPlayer({
                     {title}
                   </h2>
                 )}
-                {hasEpisodes && (
-                  <p className="text-[24px] font-semibold leading-tight text-white/85">
-                    {epCode(currentSeason, currentEpisode)}
-                  </p>
-                )}
-                {pauseEpisodeTitle && (
-                  <p className="mt-2 max-w-3xl text-[32px] font-bold leading-tight text-white">{pauseEpisodeTitle}</p>
+                {(hasEpisodes || pauseEpisodeTitle) && (
+                  <div className="flex max-w-3xl min-w-0 items-baseline gap-3 text-white">
+                    {hasEpisodes && (
+                      <span className="shrink-0 text-[24px] font-semibold leading-tight text-white/85">
+                        {epCode(currentSeason, currentEpisode)}
+                      </span>
+                    )}
+                    {pauseEpisodeTitle && (
+                      <span className="min-w-0 truncate text-[24px] font-bold leading-tight">
+                        {pauseEpisodeTitle}
+                      </span>
+                    )}
+                  </div>
                 )}
                 {pauseRating > 0 && (
                   <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
@@ -1619,6 +1983,20 @@ export default function VideoPlayer({
                   </p>
                 )}
               </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {playerOsd && (
+            <motion.div
+              className="pointer-events-none absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-black/75 px-4 py-2 text-sm font-semibold text-white shadow-2xl ring-1 ring-white/10 backdrop-blur-md"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.16 }}
+            >
+              {playerOsd}
             </motion.div>
           )}
         </AnimatePresence>
@@ -1747,30 +2125,43 @@ export default function VideoPlayer({
           onClick={(e) => e.stopPropagation()}
           onDoubleClick={(e) => e.stopPropagation()}
         >
-          {/* Progress bar */}
-          <div
-            role="slider"
-            tabIndex={0}
-            aria-label="Seek"
-            aria-valuemin={0}
-            aria-valuemax={duration || 0}
-            aria-valuenow={Math.min(position, duration || position)}
-            aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
-            aria-keyshortcuts="ArrowLeft ArrowRight Home End"
-            onPointerDown={handleProgressPointerDown}
-            onKeyDown={handleProgressKeyDown}
-            className="group relative mb-3 h-6 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-          >
-            <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
+          <div className="mb-3 flex items-center gap-3">
+            {/* Progress bar */}
+            <div
+              ref={seekSliderRef}
+              role="slider"
+              tabIndex={0}
+              aria-label="Seek"
+              aria-valuemin={0}
+              aria-valuemax={duration || 0}
+              aria-valuenow={Math.min(position, duration || position)}
+              aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
+              aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+              onPointerDown={handleProgressPointerDown}
+              onKeyDown={handleProgressKeyDown}
+              className="group relative h-6 min-w-0 flex-1 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            >
+              <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
+                <div
+                  ref={progressFillRef}
+                  className="h-full origin-left rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)] will-change-transform"
+                  style={{ transform: `scaleX(${progressPct / 100})` }}
+                />
+              </div>
               <div
-                className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-                style={{ width: `${progressPct}%` }}
+                ref={progressThumbRef}
+                className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+                style={{ left: `${progressPct}%` }}
               />
             </div>
             <div
-              className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-              style={{ left: `${progressPct}%` }}
-            />
+              className="min-w-[6.75rem] shrink-0 select-none text-right text-sm font-medium tabular-nums text-white/90 sm:text-base"
+              aria-live="off"
+            >
+              <span ref={currentTimeTextRef} className="text-white">{formatTime(position)}</span>
+              <span className="mx-1.5 text-white/45">/</span>
+              <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1787,7 +2178,7 @@ export default function VideoPlayer({
 
             <button
               type="button"
-              onClick={() => seekTo(position - skipBackSeconds)}
+              onClick={() => seekTo(playbackPositionRef.current - skipBackSeconds)}
               className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               title={`Back ${skipBackSeconds}s`}
               aria-label={`Back ${skipBackSeconds} seconds`}
@@ -1797,7 +2188,7 @@ export default function VideoPlayer({
 
             <button
               type="button"
-              onClick={() => seekTo(position + skipForwardSeconds)}
+              onClick={() => seekTo(playbackPositionRef.current + skipForwardSeconds)}
               className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               title={`Forward ${skipForwardSeconds}s`}
               aria-label={`Forward ${skipForwardSeconds} seconds`}
@@ -1805,13 +2196,28 @@ export default function VideoPlayer({
               <RotateCw className="h-5 w-5" strokeWidth={2.25} />
             </button>
 
-            <div
-              className="ml-1 select-none text-base font-medium tabular-nums text-white/90"
-              aria-live="off"
-            >
-              <span className="text-white">{formatTime(position)}</span>
-              <span className="mx-1.5 text-white/45">/</span>
-              <span className="text-white/60">{formatTime(duration)}</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleMute}
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                title={muted || volume === 0 ? 'Unmute (M)' : 'Mute (M)'}
+                aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
+                aria-pressed={muted || volume === 0}
+              >
+                {muted || volume === 0 ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={muted ? 0 : volume}
+                onChange={handleVolume}
+                aria-label="Volume"
+                aria-valuetext={`${Math.round((muted ? 0 : volume) * 100)}%`}
+                className="h-1.5 w-24 cursor-pointer rounded-full accent-[var(--loom-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              />
             </div>
 
             <div className="flex-1" />
@@ -1838,30 +2244,6 @@ export default function VideoPlayer({
                 </button>
               </div>
             )}
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={toggleMute}
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-                title={muted || volume === 0 ? 'Unmute (M)' : 'Mute (M)'}
-                aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
-                aria-pressed={muted || volume === 0}
-              >
-                {muted || volume === 0 ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={muted ? 0 : volume}
-                onChange={handleVolume}
-                aria-label="Volume"
-                aria-valuetext={`${Math.round((muted ? 0 : volume) * 100)}%`}
-                className="h-1.5 w-24 cursor-pointer rounded-full accent-[var(--loom-accent)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-              />
-            </div>
 
             <div className="mx-1 h-7 w-px bg-white/20" aria-hidden="true" />
 
@@ -1921,7 +2303,7 @@ export default function VideoPlayer({
 
       {showMediaPanel && (
         <aside
-          className="player-side-panel relative flex h-full shrink-0 flex-col border-l border-white/10 bg-[#111] shadow-2xl"
+          className="player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col border-l border-white/10 bg-[#111] shadow-2xl"
           style={{ width: clampSidePanelWidth(mediaPanelWidth), maxWidth: '40vw' }}
           onClick={(event) => event.stopPropagation()}
           onDoubleClick={(event) => event.stopPropagation()}
@@ -2102,8 +2484,8 @@ export default function VideoPlayer({
                   <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
                     <div>
                       <div className="mb-2 flex items-center justify-between">
-                        <p className="text-xs font-semibold text-white">Position</p>
-                        <span className="text-xs text-[var(--loom-accent)]">{Math.round(subtitleStyle.position)}%</span>
+                        <p className="text-xs font-semibold text-white">Vertical position</p>
+                        <span className="text-xs text-[var(--loom-accent)]">{Math.round(subtitleStyle.position)}% down</span>
                       </div>
                       <input
                         type="range"
@@ -2112,6 +2494,7 @@ export default function VideoPlayer({
                         step={1}
                         value={subtitleStyle.position}
                         onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
+                        aria-valuetext={`${Math.round(subtitleStyle.position)}% down from top`}
                         className="w-full accent-[var(--loom-accent)]"
                       />
                     </div>
@@ -2135,35 +2518,72 @@ export default function VideoPlayer({
                     <div>
                       <div className="mb-2 flex items-center justify-between">
                         <p className="text-xs font-semibold text-white">Outline</p>
-                        <span className="text-xs text-[var(--loom-accent)]">{subtitleStyle.borderWidth}px</span>
+                        <button
+                          type="button"
+                          onClick={() => setSubtitleBorderEnabled(!subtitleStyle.borderEnabled)}
+                          aria-pressed={subtitleStyle.borderEnabled}
+                          className={`h-7 rounded-md px-2.5 text-xs font-semibold transition-colors ${subtitleStyle.borderEnabled ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/80 hover:bg-white/15'}`}
+                        >
+                          {subtitleStyle.borderEnabled ? `${subtitleStyle.borderWidth}px` : 'Off'}
+                        </button>
                       </div>
                       <input
                         type="range"
                         min={0}
-                        max={10}
+                        max={MAX_SUBTITLE_OUTLINE_WIDTH}
                         step={1}
                         value={subtitleStyle.borderWidth}
                         onChange={(event) => updateSubtitleStyle('borderWidth', Number(event.target.value))}
-                        className="w-full accent-[var(--loom-accent)]"
+                        disabled={!subtitleStyle.borderEnabled}
+                        className="w-full accent-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-35"
                       />
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      {([
-                        ['fontColor', 'Text'],
-                        ['borderColor', 'Outline'],
-                        ['backgroundColor', 'Background'],
-                      ] as Array<[keyof SubtitleStyleSettings, string]>).map(([key, label]) => (
-                        <label key={key} className="space-y-2">
-                          <span className="block text-xs font-semibold text-white">{label}</span>
-                          <input
-                            type="color"
-                            value={String(subtitleStyle[key])}
-                            onChange={(event) => updateSubtitleStyle(key, event.target.value)}
-                            className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1"
-                          />
-                        </label>
-                      ))}
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="space-y-2">
+                        <span className="block text-xs font-semibold text-white">Text</span>
+                        <input
+                          type="color"
+                          value={colorInputValue(subtitleStyle.fontColor, '#ffffff')}
+                          onChange={(event) => updateSubtitleStyle('fontColor', event.target.value)}
+                          className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1"
+                        />
+                      </label>
+                      <label className="space-y-2">
+                        <span className="block text-xs font-semibold text-white">Outline</span>
+                        <input
+                          type="color"
+                          value={colorInputValue(subtitleStyle.borderColor, '#000000')}
+                          onChange={(event) => updateSubtitleStyle('borderColor', event.target.value)}
+                          className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.04] p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold text-white">Subtitle background</p>
+                          <p className="mt-0.5 text-[10px] text-white/50">
+                            {subtitleStyle.backgroundEnabled ? 'Box behind text is on.' : 'No box behind text.'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSubtitleBackgroundEnabled(!subtitleStyle.backgroundEnabled)}
+                          aria-pressed={subtitleStyle.backgroundEnabled}
+                          className={`h-8 rounded-md px-3 text-xs font-semibold transition-colors ${subtitleStyle.backgroundEnabled ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/80 hover:bg-white/15'}`}
+                        >
+                          {subtitleStyle.backgroundEnabled ? 'On' : 'Off'}
+                        </button>
+                      </div>
+                      <input
+                        type="color"
+                        value={colorInputValue(subtitleStyle.backgroundColor, '#000000')}
+                        onChange={(event) => updateSubtitleStyle('backgroundColor', event.target.value)}
+                        disabled={!subtitleStyle.backgroundEnabled}
+                        className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1 disabled:cursor-not-allowed disabled:opacity-35"
+                      />
                     </div>
 
                     <button
@@ -2184,7 +2604,7 @@ export default function VideoPlayer({
 
       {hasEpisodes && showSidebar && (
         <aside
-          className="player-side-panel relative flex h-full shrink-0 flex-col bg-[#111] border-l border-white/10 shadow-2xl"
+          className="player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col border-l border-white/10 bg-[#111] shadow-2xl"
           style={{ width: clampSidePanelWidth(episodePanelWidth), maxWidth: '40vw' }}
         >
           <div
