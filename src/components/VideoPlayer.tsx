@@ -113,7 +113,7 @@ import {
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
-const POSITION_UI_UPDATE_INTERVAL_MS = 250;
+const POSITION_UI_UPDATE_INTERVAL_MS = 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2000;
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -800,6 +800,9 @@ export default function VideoPlayer({
         const hls = new Hls({
           autoStartLoad: false,
           startPosition: 0,
+          maxBufferLength: 45,
+          maxMaxBufferLength: 90,
+          backBufferLength: 30,
           manifestLoadingMaxRetry: 20,
           manifestLoadingRetryDelay: 500,
           fragLoadingMaxRetry: 20,
@@ -935,7 +938,6 @@ export default function VideoPlayer({
       if (nextPosition > 10 && totalDuration > 0 && now - lastProgressSaveRef.current >= PROGRESS_SAVE_INTERVAL_MS) {
         lastProgressSaveRef.current = now;
         void savePlaybackProgress(filePath, nextPosition, totalDuration);
-        setTick((n) => n + 1);
       }
     };
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
 import {
+  HLS_SEGMENT_SECONDS,
   TRANSCODE_READY_SEGMENTS,
   buildEmbeddedSubtitleVttArgs,
   buildHlsArgs,
@@ -9,8 +10,9 @@ import {
 
 const outputPath = path.join('/tmp', 'loomtv-transcode-test', 'index.m3u8');
 
-test('HLS startup waits for only one ready segment', () => {
-  assert.equal(TRANSCODE_READY_SEGMENTS, 1);
+test('HLS startup waits for enough buffered media to avoid immediate underruns', () => {
+  assert.equal(TRANSCODE_READY_SEGMENTS, 2);
+  assert.equal(HLS_SEGMENT_SECONDS, 2);
 });
 
 test('HLS args stream-copy browser-safe video and audio when no burn-in is needed', () => {
