@@ -2,7 +2,7 @@ import { app, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
-import { collectArtworkSourcesForCache } from './artworkCache';
+import { artworkCacheFileName, collectArtworkSourcesForCache, customArtworkReference } from './artworkCache';
 
 type JsonValue = unknown;
 
@@ -28,6 +28,10 @@ let db: Database.Database | null = null;
 
 function databasePath(): string {
   return path.join(app.getPath('userData'), 'loomtv.sqlite');
+}
+
+function artworkCacheDirectory(): string {
+  return path.join(app.getPath('userData'), 'artwork-cache');
 }
 
 function jsonParse<T>(value: string | null | undefined, fallback: T): T {
@@ -158,6 +162,7 @@ function migrate(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS artwork_cache (
       source_url TEXT PRIMARY KEY,
       data_url TEXT NOT NULL,
+      cache_path TEXT,
       mime_type TEXT NOT NULL,
       byte_length INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -165,6 +170,7 @@ function migrate(database: Database.Database): void {
   `);
 
   migrateMediaItemArtworkColumns(database);
+  migrateArtworkCacheColumns(database);
   migrateLibraryFoldersKind(database);
 }
 
@@ -178,6 +184,13 @@ function migrateMediaItemArtworkColumns(database: Database.Database): void {
   }
   if (!columns.has('provider_ids_json')) {
     database.exec('ALTER TABLE media_items ADD COLUMN provider_ids_json TEXT;');
+  }
+}
+
+function migrateArtworkCacheColumns(database: Database.Database): void {
+  const columns = new Set((database.prepare('PRAGMA table_info(artwork_cache)').all() as Array<{ name: string }>).map((column) => column.name));
+  if (!columns.has('cache_path')) {
+    database.exec('ALTER TABLE artwork_cache ADD COLUMN cache_path TEXT;');
   }
 }
 
@@ -273,11 +286,13 @@ function applyDurableState(item: any, progress: Map<string, StoredProgress>, cus
     const poster = itemCustom.get('poster');
     const thumbnail = itemCustom.get('thumbnail');
     if (cover) {
-      next.backdrop = cover;
-      next.backdropCandidates = [cover, ...(next.backdropCandidates || []).filter((source: string) => source !== cover)];
+      const coverReference = customArtworkReference(item.id, 'cover');
+      next.backdrop = coverReference;
+      next.backdropCandidates = [coverReference, ...(next.backdropCandidates || []).filter((source: string) => source !== coverReference)];
     }
     if (poster || thumbnail) {
-      const primary = poster || thumbnail || '';
+      const primaryTarget = poster ? 'poster' : 'thumbnail';
+      const primary = customArtworkReference(item.id, primaryTarget);
       next.poster = primary;
       next.posterCandidates = [primary, ...(next.posterCandidates || []).filter((source: string) => source !== primary)];
     }
@@ -546,6 +561,13 @@ export function getCustomArtwork(mediaId: string): Record<string, string> {
     .map((row) => [row.target, row.data_url]));
 }
 
+export function getCustomArtworkData(mediaId: string, target: string): { dataUrl: string; updatedAt: number } | null {
+  const row = getDb().prepare('SELECT data_url, updated_at FROM custom_artwork WHERE media_id = ? AND target = ?').get(mediaId, target) as
+    | { data_url: string; updated_at: number }
+    | undefined;
+  return row ? { dataUrl: row.data_url, updatedAt: row.updated_at } : null;
+}
+
 export function importCustomArtwork(entries: Record<string, Record<string, string>>): void {
   const tx = getDb().transaction(() => {
     for (const [mediaId, targets] of Object.entries(entries || {})) {
@@ -570,14 +592,19 @@ function getCustomArtworkMap(): Map<string, Map<string, string>> {
   return result;
 }
 
-export function getCachedArtwork(sourceUrl: string): { dataUrl: string; mimeType: string } | null {
-  const row = getDb().prepare('SELECT data_url, mime_type FROM artwork_cache WHERE source_url = ?').get(sourceUrl) as
-    | { data_url: string; mime_type: string }
+export function getCachedArtwork(sourceUrl: string): { dataUrl?: string; cachePath?: string; mimeType: string; byteLength: number } | null {
+  const row = getDb().prepare('SELECT data_url, cache_path, mime_type, byte_length FROM artwork_cache WHERE source_url = ?').get(sourceUrl) as
+    | { data_url: string; cache_path?: string | null; mime_type: string; byte_length: number }
     | undefined;
-  return row ? { dataUrl: row.data_url, mimeType: row.mime_type } : null;
+  if (!row) return null;
+  const cachePath = row.cache_path || undefined;
+  if (cachePath && fs.existsSync(cachePath)) {
+    return { cachePath, mimeType: row.mime_type, byteLength: row.byte_length };
+  }
+  return row.data_url ? { dataUrl: row.data_url, mimeType: row.mime_type, byteLength: row.byte_length } : null;
 }
 
-async function fetchArtworkAsDataUrl(sourceUrl: string): Promise<{ dataUrl: string; mimeType: string; byteLength: number } | null> {
+async function fetchArtworkBytes(sourceUrl: string): Promise<{ bytes: Buffer; mimeType: string; byteLength: number } | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
@@ -588,7 +615,7 @@ async function fetchArtworkAsDataUrl(sourceUrl: string): Promise<{ dataUrl: stri
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.byteLength === 0 || bytes.byteLength > 5 * 1024 * 1024) return null;
     return {
-      dataUrl: `data:${mimeType};base64,${bytes.toString('base64')}`,
+      bytes,
       mimeType,
       byteLength: bytes.byteLength,
     };
@@ -603,12 +630,23 @@ export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
   const sources = collectArtworkSourcesForCache(data);
 
   const database = getDb();
+  const cacheDir = artworkCacheDirectory();
+  fs.mkdirSync(cacheDir, { recursive: true });
   const sourceSet = new Set(sources);
-  const rows = database.prepare('SELECT source_url FROM artwork_cache').all() as Array<{ source_url: string }>;
+  const rows = database.prepare('SELECT source_url, cache_path FROM artwork_cache').all() as Array<{ source_url: string; cache_path?: string | null }>;
   const deleteStale = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
   const pruneStale = database.transaction(() => {
     for (const row of rows) {
-      if (!sourceSet.has(row.source_url)) deleteStale.run(row.source_url);
+      if (!sourceSet.has(row.source_url)) {
+        if (row.cache_path) {
+          try {
+            if (fs.existsSync(row.cache_path)) fs.unlinkSync(row.cache_path);
+          } catch {
+            // Cache file cleanup is best-effort; the database row is authoritative.
+          }
+        }
+        deleteStale.run(row.source_url);
+      }
     }
   });
   pruneStale();
@@ -618,16 +656,20 @@ export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
   const existing = new Set(rows.map((row) => row.source_url).filter((source) => sourceSet.has(source)));
   const pending = sources.filter((source) => !existing.has(source));
   const insert = database.prepare(`
-    INSERT OR REPLACE INTO artwork_cache (source_url, data_url, mime_type, byte_length, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   let index = 0;
   const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
     while (index < pending.length) {
       const source = pending[index++];
-      const cached = await fetchArtworkAsDataUrl(source);
-      if (cached) insert.run(source, cached.dataUrl, cached.mimeType, cached.byteLength, Date.now());
+      const cached = await fetchArtworkBytes(source);
+      if (cached) {
+        const cachePath = path.join(cacheDir, artworkCacheFileName(source, cached.mimeType));
+        fs.writeFileSync(cachePath, cached.bytes);
+        insert.run(source, '', cachePath, cached.mimeType, cached.byteLength, Date.now());
+      }
     }
   });
   await Promise.all(workers);

@@ -62,7 +62,9 @@ type SubtitleStyleOptions = {
   fontColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  borderEnabled?: boolean;
   backgroundColor?: string;
+  backgroundEnabled?: boolean;
 };
 type TranscodeOptions = {
   preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
@@ -167,6 +169,7 @@ declare global {
       removeLibraryFolder: (folderPath: string) => Promise<LibraryPayload>;
       playMedia: (filePath: string) => Promise<boolean>;
       getStreamUrl: (filePath: string, options?: StreamUrlOptions) => Promise<StreamUrlResult>;
+      getSubtitleUrl?: (filePath: string, streamOrdinal?: number) => Promise<{ url: string }>;
       getThumbnail: (filePath: string, time?: string) => Promise<{ url: string }>;
       getFileInfo: (filePath: string) => Promise<{ size: number; path: string; exists: boolean }>;
       getServerBase: () => Promise<string>;
@@ -361,6 +364,14 @@ export const desktopApi = {
       fileName: filePath.split('/').pop() || '',
       isTranscoded: options.forceTranscode || ['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts'].includes(ext),
     };
+  },
+
+  async getSubtitleUrl(filePath: string, streamOrdinal?: number): Promise<{ url: string }> {
+    if (window.desktopApi?.getSubtitleUrl) return window.desktopApi.getSubtitleUrl(filePath, streamOrdinal);
+    const base = await discoverServerBase();
+    const params = new URLSearchParams({ path: filePath });
+    if (typeof streamOrdinal === 'number') params.set('streamOrdinal', String(streamOrdinal));
+    return { url: `${base}/subtitle?${params.toString()}` };
   },
 
   async getServerBase(): Promise<string> {

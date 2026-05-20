@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight, Film, FolderPlus, Play, Star, Tv } from 'lucide-react';
 import { useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';
@@ -19,13 +19,22 @@ export default function Home() {
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
 
-  const continueWatching = [...movies, ...tvShows, ...animeShows]
+  const continueWatching = useMemo(() => [...movies, ...tvShows, ...animeShows]
     .filter((item) => item.lastPlayed)
     .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))
-    .slice(0, 30);
-  const filteredAnime = animeShows.filter((item) => matchesMediaItem(item, normalizedQuery));
-  const filteredTVShows = tvShows.filter((item) => matchesMediaItem(item, normalizedQuery));
-  const filteredMovies = movies.filter((item) => matchesMediaItem(item, normalizedQuery));
+    .slice(0, 30), [animeShows, movies, tvShows]);
+  const filteredAnime = useMemo(
+    () => animeShows.filter((item) => matchesMediaItem(item, normalizedQuery)),
+    [animeShows, normalizedQuery],
+  );
+  const filteredTVShows = useMemo(
+    () => tvShows.filter((item) => matchesMediaItem(item, normalizedQuery)),
+    [normalizedQuery, tvShows],
+  );
+  const filteredMovies = useMemo(
+    () => movies.filter((item) => matchesMediaItem(item, normalizedQuery)),
+    [movies, normalizedQuery],
+  );
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
   const showMoviesSection = isLoading || filteredMovies.length > 0;
@@ -40,8 +49,8 @@ export default function Home() {
 
         {!normalizedQuery && continueWatching.length > 0 && (
           <section className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="loom-section-title text-xl font-semibold text-white">Continue Watching</h3>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="loom-section-title text-2xl font-bold text-white">Continue Watching</h3>
               <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                 See All <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
@@ -52,8 +61,8 @@ export default function Home() {
 
         {showAnimeSection && (
           <section className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="loom-section-title text-xl font-semibold text-white">Anime</h3>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="loom-section-title text-2xl font-bold text-white">Anime</h3>
               <Link to="/anime">
                 <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
@@ -66,8 +75,8 @@ export default function Home() {
 
         {showTVSection && (
           <section className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="loom-section-title text-xl font-semibold text-white">TV Shows</h3>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="loom-section-title text-2xl font-bold text-white">TV Shows</h3>
               <Link to="/tv">
                 <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
@@ -80,8 +89,8 @@ export default function Home() {
 
         {showMoviesSection && (
           <section className="mb-8">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="loom-section-title text-xl font-semibold text-white">Movies</h3>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="loom-section-title text-2xl font-bold text-white">Movies</h3>
               <Link to="/movies">
                 <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
                   See All <ChevronRight className="w-4 h-4 ml-1" />
@@ -153,7 +162,10 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
   const LinkComponent = Link;
   const to = mediaLink(item);
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
-  const imageSources = posterSources(item, undefined, fallbackThumbnail ? [fallbackThumbnail] : []);
+  const baseImageSources = useMemo(() => posterSources(item), [item]);
+  const generatedSources = useMemo(() => fallbackThumbnail ? [fallbackThumbnail] : [], [fallbackThumbnail]);
+  const imageSources = useMemo(() => posterSources(item, undefined, generatedSources), [generatedSources, item]);
+  const routeArtwork = useMemo(() => routeArtworkState(item, imageSources), [imageSources, item]);
   const fallbackFilePath = item.type === 'movie'
     ? item.filePath
     : (item as TVShow).episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath;
@@ -167,7 +179,7 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
   useEffect(() => {
     setFallbackThumbnail('');
 
-    if (!fallbackFilePath) return;
+    if (!fallbackFilePath || baseImageSources.length > 0) return;
 
     let isMounted = true;
     void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
@@ -181,13 +193,13 @@ function MediaCard({ item, from }: { item: MediaItem; from: string }) {
     return () => {
       isMounted = false;
     };
-  }, [fallbackFilePath]);
+  }, [baseImageSources.length, fallbackFilePath]);
 
   return (
     <LinkComponent
       to={to}
-      state={{ from, artwork: routeArtworkState(item, imageSources) }}
-      className="loom-poster-link group block w-[200px] flex-none"
+      state={{ from, artwork: routeArtwork }}
+      className="loom-poster-link group block w-[200px] flex-none [contain-intrinsic-size:300px_200px] [content-visibility:auto]"
     >
       <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork

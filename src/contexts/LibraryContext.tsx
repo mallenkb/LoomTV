@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode, useCallback } from 'react';
 import { desktopApi } from '@/lib/desktopApi';
 import { migrateLegacyArtwork } from '@/lib/customArtwork';
 import { hydrateProgressFromDatabase } from '@/lib/progress';
@@ -89,6 +89,16 @@ interface LibraryState {
 }
 
 type LibraryAction =
+  | {
+      type: 'SET_LIBRARY_DATA';
+      payload: {
+        movies?: MediaItem[];
+        tvShows?: TVShow[];
+        animeShows?: TVShow[];
+        libraryFolders?: string[];
+        libraryFolderGroups?: Partial<LibraryFolderGroups>;
+      };
+    }
   | { type: 'SET_MOVIES'; payload: MediaItem[] }
   | { type: 'SET_TV_SHOWS'; payload: TVShow[] }
   | { type: 'SET_ANIME_SHOWS'; payload: TVShow[] }
@@ -113,6 +123,17 @@ const initialState: LibraryState = {
 
 function libraryReducer(state: LibraryState, action: LibraryAction): LibraryState {
   switch (action.type) {
+    case 'SET_LIBRARY_DATA': {
+      const libraryFolderGroups = normalizeFolderGroups(action.payload.libraryFolderGroups);
+      return {
+        ...state,
+        movies: action.payload.movies || [],
+        tvShows: action.payload.tvShows || [],
+        animeShows: action.payload.animeShows || [],
+        libraryFolders: action.payload.libraryFolders || [],
+        libraryFolderGroups,
+      };
+    }
     case 'SET_MOVIES':
       return { ...state, movies: action.payload };
     case 'SET_TV_SHOWS':
@@ -178,23 +199,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const isScanningRef = useRef(false);
   const hasConfiguredFoldersRef = useRef(false);
 
-  const applyLibraryData = (data: {
+  const applyLibraryData = useCallback((data: {
     movies?: MediaItem[];
     tvShows?: TVShow[];
     animeShows?: TVShow[];
     libraryFolders?: string[];
     libraryFolderGroups?: Partial<LibraryFolderGroups>;
   }) => {
-    const libraryFolderGroups = normalizeFolderGroups(data.libraryFolderGroups);
-    dispatch({ type: 'SET_MOVIES', payload: data.movies || [] });
-    dispatch({ type: 'SET_TV_SHOWS', payload: data.tvShows || [] });
-    dispatch({ type: 'SET_ANIME_SHOWS', payload: data.animeShows || [] });
-    dispatch({ type: 'SET_LIBRARY_FOLDERS', payload: data.libraryFolders || [] });
-    dispatch({
-      type: 'SET_LIBRARY_FOLDER_GROUPS',
-      payload: libraryFolderGroups,
-    });
-  };
+    dispatch({ type: 'SET_LIBRARY_DATA', payload: data });
+  }, []);
 
   const applyScanProgress = (progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
     if (!progress) return;
@@ -292,7 +305,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       applyScanProgress(progress);
       dispatch({ type: 'SET_LOADING', payload: false });
     });
-  }, []);
+  }, [applyLibraryData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,7 +347,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyLibraryData]);
 
   useEffect(() => {
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
@@ -357,7 +370,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }, intervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [state.autoSyncIntervalHours]);
+  }, [applyLibraryData, state.autoSyncIntervalHours]);
 
   return (
     <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours }}>

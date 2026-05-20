@@ -400,7 +400,7 @@ export default function ArtworkEditorControls({
     <>
       <div
         ref={artworkMenuRef}
-        className="fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex items-center gap-2"
+        className="loom-no-drag fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex items-center gap-2"
       >
         <Button
           type="button"

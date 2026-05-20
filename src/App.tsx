@@ -88,6 +88,7 @@ function AppShell() {
   return (
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <Sidebar />
+      <div className="loom-main-drag-region" aria-hidden="true" />
       <main
         className="flex-1 overflow-hidden"
         style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '8rem' : '0px' } as React.CSSProperties}

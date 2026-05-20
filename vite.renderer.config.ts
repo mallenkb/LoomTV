@@ -56,7 +56,8 @@ export default defineConfig({
     entries: ['index.html'],
   },
   server: {
-    strictPort: true,
+    port: 5174,
+    strictPort: false,
     watch: {
       ignored: ['**/dist/**', '**/out/**', '**/.vite/**'],
     },

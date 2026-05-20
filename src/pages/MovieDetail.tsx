@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Play, Star, Clock, ArrowLeft } from 'lucide-react';
-import { motion } from 'motion/react';
 import { useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -97,11 +96,18 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [progressTick, setProgressTick] = useState(0);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
+  const [detailsReady, setDetailsReady] = useState(false);
 
   useEffect(() => {
     const found = state.movies.find((m) => m.id === id);
     setMovie(found || null);
   }, [id, state.movies]);
+
+  useEffect(() => {
+    setDetailsReady(false);
+    const frame = window.requestAnimationFrame(() => setDetailsReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [movie?.id]);
 
   useEffect(() => {
     setCustomArtwork({});
@@ -114,7 +120,13 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   useEffect(() => {
     setFallbackThumbnails([]);
 
-    if (!movie?.filePath) return;
+    const hasStoredArtwork = Boolean(
+      movie?.poster
+      || movie?.backdrop
+      || movie?.posterCandidates?.length
+      || movie?.backdropCandidates?.length,
+    );
+    if (!movie?.filePath || hasStoredArtwork) return;
 
     let cancelled = false;
     const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
@@ -136,7 +148,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     return () => {
       cancelled = true;
     };
-  }, [movie?.filePath, movie?.localMetadata?.durationSeconds]);
+  }, [movie?.backdrop, movie?.backdropCandidates?.length, movie?.filePath, movie?.localMetadata?.durationSeconds, movie?.poster, movie?.posterCandidates?.length]);
 
   useEffect(() => {
     const bump = () => setProgressTick((value) => value + 1);
@@ -235,7 +247,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:text-[var(--loom-accent)]"
+          className="loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:text-[var(--loom-accent)]"
         >
           <ArrowLeft className="w-5 h-5" />
           Back
@@ -354,7 +366,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           </section>
         )}
 
-        {movie.cast.length > 0 && (
+        {detailsReady && movie.cast.length > 0 && (
           <section>
             <h3 className="text-lg font-semibold text-white mb-3">Cast</h3>
             <div className="flex gap-4 overflow-x-auto pb-2">
@@ -384,43 +396,49 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
 function ExpandableSummary({ summary }: { summary: string }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+  const summaryRef = useRef<HTMLParagraphElement | null>(null);
   const toggleSummary = () => setIsExpanded((expanded) => !expanded);
 
+  useLayoutEffect(() => {
+    const element = summaryRef.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight) || 24;
+      setCanExpand(element.scrollHeight > lineHeight * 3 + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [summary]);
+
   return (
-    <motion.div
-      layout
+    <div
       onClick={toggleSummary}
       className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70"
-      whileTap={{ scale: 0.998 }}
     >
-      <motion.div
-        layout
-        className="overflow-hidden"
-        transition={{ type: 'spring', stiffness: 360, damping: 34, mass: 0.9 }}
-      >
-        <motion.p
-          key={isExpanded ? 'expanded' : 'collapsed'}
+      <div className="overflow-hidden">
+        <p
+          ref={summaryRef}
           className={`text-[var(--loom-muted)] leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}
-          initial={{ opacity: 0.72, y: isExpanded ? -3 : 3 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
         >
           {summary}
-        </motion.p>
-      </motion.div>
-      <motion.button
-        layout
-        type="button"
-        aria-expanded={isExpanded}
-        onClick={(event) => {
-          event.stopPropagation();
-          toggleSummary();
-        }}
-        className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
-        whileTap={{ scale: 0.98 }}
-      >
-        {isExpanded ? 'Show Less' : 'Show More'}
-      </motion.button>
-    </motion.div>
+        </p>
+      </div>
+      {canExpand && (
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleSummary();
+          }}
+          className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
+        >
+          {isExpanded ? 'Show Less' : 'Show More'}
+        </button>
+      )}
+    </div>
   );
 }

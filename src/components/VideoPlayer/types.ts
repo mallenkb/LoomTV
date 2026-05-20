@@ -11,7 +11,9 @@ export type SubtitleStyleSettings = {
   fontColor: string;
   borderColor: string;
   borderWidth: number;
+  borderEnabled: boolean;
   backgroundColor: string;
+  backgroundEnabled: boolean;
 };
 
 export interface MediaTrack {
