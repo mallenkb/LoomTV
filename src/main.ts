@@ -4,11 +4,9 @@ import {
   Menu,
   dialog,
   nativeImage,
-  ipcMain,
   protocol,
   net,
   session,
-  shell,
   autoUpdater as electronAutoUpdater,
 } from 'electron';
 import type { MenuItemConstructorOptions, OpenDialogOptions } from 'electron';
@@ -19,6 +17,7 @@ import type { Socket as NodeSocket } from 'node:net';
 import os from 'node:os';
 import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
+import squirrelStartup from 'electron-squirrel-startup';
 import { autoUpdater } from 'electron-updater';
 import {
   LOCAL_ACCESS_HEADER,
@@ -60,6 +59,7 @@ import {
 } from './main/transcodeManager';
 import { buildEmbeddedSubtitleVttArgs } from './main/transcodePlan';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './main/mimeTypes';
+import { registerIpcHandlers } from './main/ipcHandlers';
 import { checkPairRateLimit, recordPairFailure, recordPairSuccess } from './main/pairRateLimit';
 import { normalizeProviderId, testMetadataKeys } from './main/metadataKeys';
 import {
@@ -85,7 +85,6 @@ import {
 } from './main/mediaTags';
 import type { MetadataProviderIds } from './main/mediaTags';
 import {
-  appendStreamOptionParams,
   hasBitmapSubtitleSelection,
   hasSubtitleSelection,
   parseSubtitleStyle,
@@ -178,13 +177,7 @@ function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
 ignoreBrokenConsolePipe(process.stdout);
 ignoreBrokenConsolePipe(process.stderr);
 
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-  const squirrelStartup: boolean = require('electron-squirrel-startup');
-  if (squirrelStartup) app.quit();
-} catch {
-  // electron-squirrel-startup is optional and missing in some envs.
-}
+if (squirrelStartup) app.quit();
 
 // Enable hardware HEVC (H.265) decoding — allows MKV/HEVC files to be
 // remuxed instead of re-encoded, giving near-instant local playback.
@@ -4867,242 +4860,55 @@ async function checkForUpdates(): Promise<UpdateState> {
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
-ipcMain.handle('library:get', () => libraryForRenderer());
-
-ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?: LibraryScanMode }) => {
-  const data = loadLibrary();
-  const scanVersion = libraryMutationVersion;
-  const mode: LibraryScanMode = options?.force
-    ? 'full'
-    : options?.mode === 'metadata' || options?.mode === 'full'
-      ? options.mode
-      : 'quick';
-  const scanned = await scanLibrary(data, {
-    mode,
-    onProgress: (snapshot) => {
-      event.sender.send('library:scan-progress', libraryForRenderer(snapshot), {
-        isComplete: snapshot.isComplete,
-        scannedFolders: snapshot.scannedFolders,
-        totalFolders: snapshot.totalFolders,
-      });
-    },
-  });
-  if (saveLibraryFromScan(scanned, scanVersion)) {
-    await cacheArtworkNow(scanned);
-  }
-  return libraryForRenderer();
+registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateState>({
+  getMediaServerPort: () => mediaServerPort,
+  localAccessToken: LOCAL_ACCESS_TOKEN,
+  showOpenFolderDialog,
+  loadLibrary,
+  libraryForRenderer,
+  scanLibrary,
+  saveLibraryFromScan,
+  getLibraryMutationVersion: () => libraryMutationVersion,
+  cacheArtworkNow,
+  addFolderToLibrary,
+  removeFolderFromLibrary,
+  saveLibraryMutation,
+  assertLocalMediaPath,
+  needsBrowserTranscoding,
+  loadSettings,
+  saveSettings,
+  syncLanAdvertisement,
+  testMetadataKeys,
+  getLanShareToken,
+  getLanServerBase,
+  isLanSharingEnabled,
+  getLocalNetworkNameFast,
+  getLocalNetworkAddresses,
+  discoverLanPeers,
+  getProgress,
+  getAllProgress,
+  saveProgress,
+  importProgress,
+  customArtworkForRenderer,
+  saveCustomArtwork,
+  getOfficialMetadataCandidates,
+  applyOfficialMetadataCandidate,
+  refreshOfficialArtwork,
+  getPlaybackLogo,
+  importCustomArtwork,
+  backupDatabase,
+  clearAppData,
+  getUpdateState: () => updateState,
+  checkForUpdates,
+  installDownloadedUpdate,
+  findFFmpeg,
+  safeResult,
+  probeMedia,
+  canDirectPlay,
+  startTranscode,
+  appendLocalAccessTokenToUrl,
+  stopTranscode,
 });
-
-ipcMain.handle('library:add-folder', async (_event, kind: LibraryFolderKind = 'movies') => {
-  const result = await showOpenFolderDialog({
-    properties: ['openDirectory'],
-    buttonLabel: 'Add Folder',
-    message: 'Select a folder to add to your LoomTV library.',
-  });
-  if (!result.canceled && result.filePaths.length > 0) {
-    const data = loadLibrary();
-    const newFolder = result.filePaths[0];
-    const safeKind: LibraryFolderKind = kind === 'tvShows' || kind === 'anime' || kind === 'movies' || kind === 'others' ? kind : 'movies';
-    const updated = addFolderToLibrary(data, newFolder, safeKind);
-    saveLibraryMutation(updated);
-    const scanVersion = libraryMutationVersion;
-    const scanned = await scanLibrary(updated, {
-      mode: 'quick',
-      onProgress: (snapshot) => {
-        BrowserWindow.getAllWindows().forEach((window) => {
-          window.webContents.send('library:scan-progress', libraryForRenderer(snapshot), {
-            isComplete: snapshot.isComplete,
-            scannedFolders: snapshot.scannedFolders,
-            totalFolders: snapshot.totalFolders,
-          });
-        });
-      },
-    });
-    if (saveLibraryFromScan(scanned, scanVersion)) {
-      await cacheArtworkNow(scanned);
-    }
-    return libraryForRenderer();
-  }
-  return null;
-});
-
-ipcMain.handle('library:remove-folder', (_event, folderPath: string) => {
-  const data = loadLibrary();
-  const updated = removeFolderFromLibrary(data, folderPath);
-  saveLibraryMutation(updated);
-  return libraryForRenderer();
-});
-
-ipcMain.handle('media:play', async (_event, filePath: string) => {
-  try {
-    assertLocalMediaPath(filePath);
-    // In-app playback is handled by the renderer's <video> player.
-    return false;
-  } catch {
-    return false;
-  }
-});
-
-ipcMain.handle('media:get-server-port', () => mediaServerPort);
-
-ipcMain.handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
-  assertLocalMediaPath(filePath);
-  // Stream directly from the local media server. Routing through the custom
-  // plexserver:// protocol can exhaust Electron's net.fetch resources during
-  // repeated video range requests.
-  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
-  appendStreamOptionParams(params, options);
-  const isTranscoded = Boolean(options?.forceTranscode)
-    || typeof options?.videoTrackIndex === 'number'
-    || typeof options?.audioTrackIndex === 'number'
-    || typeof options?.subtitleTrackIndex === 'number'
-    || typeof options?.secondarySubtitleTrackIndex === 'number'
-    || needsBrowserTranscoding(filePath);
-  const url = `http://127.0.0.1:${mediaServerPort}/stream?${params.toString()}`;
-  return {
-    url,
-    contentType: isTranscoded ? 'video/mp4' : getMimeType(filePath),
-    fileName: path.basename(filePath),
-    isTranscoded,
-  };
-});
-
-ipcMain.handle('media:get-subtitle-url', (_event, filePath: string, streamOrdinal?: number) => {
-  assertLocalMediaPath(filePath);
-  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
-  if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) params.set('streamOrdinal', String(Math.floor(streamOrdinal)));
-  return { url: `http://127.0.0.1:${mediaServerPort}/subtitle?${params.toString()}` };
-});
-
-ipcMain.handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
-  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
-  if (time) params.set('t', time);
-  const base = `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
-  return { url: base };
-});
-
-ipcMain.handle('media:get-file-info', (_event, filePath: string) => {
-  try {
-    assertLocalMediaPath(filePath);
-    const exists = fs.existsSync(filePath);
-    const size = exists ? fs.statSync(filePath).size : 0;
-    return { size, path: filePath, exists };
-  } catch {
-    return { size: 0, path: filePath, exists: false };
-  }
-});
-
-ipcMain.handle('settings:get', () => loadSettings());
-
-ipcMain.handle('settings:save', (_event, settings: AppSettings) => {
-  saveSettings({ ...loadSettings(), ...settings });
-  syncLanAdvertisement();
-  return true;
-});
-
-ipcMain.handle('metadata:test-keys', (_event, keys: Record<string, string>) => testMetadataKeys(keys || {}));
-
-ipcMain.handle('network:status', () => {
-  const settings = loadSettings();
-  const token = getLanShareToken();
-  const base = getLanServerBase();
-  return {
-    sharingEnabled: isLanSharingEnabled(),
-    token,
-    deviceId: settings.localNetworkDeviceId,
-    deviceName: settings.localNetworkDeviceName || os.hostname(),
-    networkName: getLocalNetworkNameFast(),
-    port: mediaServerPort,
-    addresses: getLocalNetworkAddresses(),
-    baseUrl: base,
-    libraryUrl: base ? `${base}/api/lan/library` : null,
-    pairedDevices: settings.localNetworkPairedDevices || [],
-  };
-});
-
-ipcMain.handle('network:discover-peers', async (_event, timeoutMs?: number) => {
-  const settings = loadSettings();
-  try {
-    return await discoverLanPeers(Number(timeoutMs) || 2500, settings.localNetworkDeviceId);
-  } catch (error) {
-    console.warn('[mdns] discover failed:', error);
-    return [];
-  }
-});
-
-ipcMain.handle('network:revoke-paired-device', (_event, deviceId: string) => {
-  const settings = loadSettings();
-  const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
-  saveSettings({ ...settings, localNetworkPairedDevices: remaining });
-  return remaining;
-});
-
-ipcMain.handle('network:set-device-name', (_event, name: string) => {
-  const settings = loadSettings();
-  const nextName = String(name || '').trim().slice(0, 80) || os.hostname();
-  saveSettings({ ...settings, localNetworkDeviceName: nextName });
-  syncLanAdvertisement();
-  return nextName;
-});
-
-ipcMain.handle('progress:get', (_event, filePath?: string) => filePath ? getProgress(filePath) : getAllProgress());
-ipcMain.handle('progress:save', (_event, filePath: string, position: number, duration: number) =>
-  saveProgress(filePath, Number(position) || 0, Number(duration) || 0));
-ipcMain.handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => {
-  importProgress(progress || {});
-  return true;
-});
-ipcMain.handle('artwork:get', (_event, mediaId: string) => customArtworkForRenderer(mediaId));
-ipcMain.handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
-  saveCustomArtwork(mediaId, target, dataUrl);
-  return customArtworkForRenderer(mediaId);
-});
-ipcMain.handle('artwork:official-candidates', (_event, mediaId: string) => getOfficialMetadataCandidates(mediaId));
-ipcMain.handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) =>
-  applyOfficialMetadataCandidate(mediaId, candidate));
-ipcMain.handle('artwork:refresh-official', (_event, mediaId: string) => refreshOfficialArtwork(mediaId));
-ipcMain.handle('artwork:playback-logo', (_event, mediaId: string) => getPlaybackLogo(mediaId));
-ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
-  importCustomArtwork(entries || {});
-  return true;
-});
-ipcMain.handle('database:backup', () => backupDatabase());
-ipcMain.handle('database:clear', () => libraryForRenderer(clearAppData()));
-ipcMain.handle('shell:open-external', (_event, url: string) => {
-  const parsed = new URL(String(url || ''));
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new Error('Only http and https links can be opened externally.');
-  }
-  return shell.openExternal(parsed.toString());
-});
-ipcMain.handle('updates:get-state', () => updateState);
-ipcMain.handle('updates:check', () => checkForUpdates());
-ipcMain.handle('updates:install', () => {
-  if (updateState.status !== 'downloaded') return updateState;
-  return installDownloadedUpdate();
-});
-
-ipcMain.handle('media:ffmpeg-available', () => {
-  const ffmpegPath = findFFmpeg();
-  return { available: ffmpegPath !== null, path: ffmpegPath };
-});
-
-ipcMain.handle('media:probe', (_event, filePath: string) => safeResult(() => probeMedia(filePath)));
-
-ipcMain.handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
-  safeResult(() => {
-    const result = probeMedia(filePath);
-    return canDirectPlay(filePath, result, backend);
-  }),
-);
-
-ipcMain.handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
-  safeResult(async () => {
-    const session = await startTranscode(filePath, options || {}, `http://127.0.0.1:${mediaServerPort}`);
-    return { ...session, playlistUrl: appendLocalAccessTokenToUrl(session.playlistUrl) };
-  }),
-);
-ipcMain.handle('media:stop-transcode', (_event, sessionId: string) => safeResult(() => stopTranscode(sessionId)));
 
 // ── VideoPlayer uses HTML5 <video> + the HTTP media server directly.
 // No player:* IPC handlers needed.

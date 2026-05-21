@@ -89,7 +89,7 @@ export function trackLabel(track: MediaTrack, ordinal: number): string {
   return `#${ordinal + 1} ${language}${title}${details}`.trim();
 }
 
-export function subtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
+function subtitleOrdinal(tracks: MediaTrack[], streamIndex: number): number {
   return tracks.filter((track) => track.type === 'subtitle').findIndex((track) => track.index === streamIndex);
 }
 

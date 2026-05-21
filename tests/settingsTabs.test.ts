@@ -8,8 +8,15 @@ import {
 } from '../src/lib/settingsTabs.ts';
 
 const settingsPageSource = () => readFileSync(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8');
-const mainProcessSource = () => readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+const ipcHandlersSource = () => readFileSync(new URL('../src/main/ipcHandlers.ts', import.meta.url), 'utf8');
+const settingsTabsSource = () => readFileSync(new URL('../src/pages/SettingsTabs.tsx', import.meta.url), 'utf8');
 const stylesheetSource = () => readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+
+function ipcHandlerSource(source: string, channel: string): string {
+  const handlerStart = source.indexOf(`ipcMain.handle('${channel}'`);
+  const handlerEnd = source.indexOf('\n  });', handlerStart);
+  return handlerStart >= 0 && handlerEnd >= 0 ? source.slice(handlerStart, handlerEnd) : '';
+}
 
 test('settings tab selection keeps the current section when the selected tab is already active', () => {
   assert.equal(nextSettingsSection('network', 'network'), 'network');
@@ -54,10 +61,8 @@ test('settings page defers Electron-only status probes until their tabs are acti
 });
 
 test('network status IPC avoids synchronous Wi-Fi name probing', () => {
-  const source = mainProcessSource();
-  const handlerStart = source.indexOf("ipcMain.handle('network:status'");
-  const handlerEnd = source.indexOf('\n});', handlerStart);
-  const handler = handlerStart >= 0 && handlerEnd >= 0 ? source.slice(handlerStart, handlerEnd) : '';
+  const source = ipcHandlersSource();
+  const handler = ipcHandlerSource(source, 'network:status');
 
   assert.notEqual(handler, '', 'Expected to find the network status IPC handler.');
   assert.equal(
@@ -68,10 +73,8 @@ test('network status IPC avoids synchronous Wi-Fi name probing', () => {
 });
 
 test('FFmpeg status IPC resolves the binary path once', () => {
-  const source = mainProcessSource();
-  const handlerStart = source.indexOf("ipcMain.handle('media:ffmpeg-available'");
-  const handlerEnd = source.indexOf('\n});', handlerStart);
-  const handler = handlerStart >= 0 && handlerEnd >= 0 ? source.slice(handlerStart, handlerEnd) : '';
+  const source = ipcHandlersSource();
+  const handler = ipcHandlerSource(source, 'media:ffmpeg-available');
   const findCalls = handler.match(/findFFmpeg\(\)/g) || [];
 
   assert.notEqual(handler, '', 'Expected to find the FFmpeg availability IPC handler.');
@@ -79,7 +82,7 @@ test('FFmpeg status IPC resolves the binary path once', () => {
 });
 
 test('settings tab strip opts out of the macOS drag area', () => {
-  const source = settingsPageSource();
+  const source = settingsTabsSource();
   const tabStripStart = source.indexOf('{SETTINGS_SECTIONS.map');
   const tabStripOpening = source.lastIndexOf('className="', tabStripStart);
   const tabStripClass = tabStripOpening >= 0

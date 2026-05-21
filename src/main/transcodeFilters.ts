@@ -29,7 +29,7 @@ function isBitmapSubtitleCodec(codec?: string): boolean {
   return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
 }
 
-export type SubtitlePlacement = 'primary' | 'secondary';
+type SubtitlePlacement = 'primary' | 'secondary';
 
 export interface SubtitleSelection {
   trackIndex: number;
