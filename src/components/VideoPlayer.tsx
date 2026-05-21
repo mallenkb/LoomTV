@@ -6,7 +6,6 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Hls, { ErrorTypes, Events, type ErrorData } from 'hls.js';
-import { AnimatePresence, motion } from 'motion/react';
 import {
   CheckCircle,
   ChevronLeft,
@@ -97,7 +96,9 @@ import {
   transcodeErrorMessage,
   type SubtitleCue,
 } from './VideoPlayer/helpers';
+import PauseOverlay from './VideoPlayer/PauseOverlay';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
+import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import {
   clampSubtitleDelay,
@@ -1774,35 +1775,12 @@ export default function VideoPlayer({
       >
         <div className="loom-player-drag-region" aria-hidden="true" />
 
-        <button
-          onClick={(event) => {
-            event.stopPropagation();
-            handleBack(event);
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-          className={`loom-no-drag loom-player-top-control absolute left-6 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-          aria-label="Back"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          Back
-        </button>
-
-        <div className={`loom-no-drag loom-player-top-control pointer-events-none absolute left-1/2 z-40 max-w-[60%] -translate-x-1/2 rounded-full border border-white/10 bg-black/35 px-4 py-1.5 text-center text-xs font-medium text-white/80 shadow-lg backdrop-blur-md transition-opacity duration-200 ${showTopControls ? 'opacity-100' : 'opacity-0'}`}>
-          <span className="block truncate">{currentEpLabel ?? title}</span>
-        </div>
-
-        <button
-          onClick={(event) => {
-            event.stopPropagation();
-            handleClose();
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-          className={`loom-no-drag loom-player-top-control absolute right-6 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${showTopControls ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-          title="Close player"
-          aria-label="Close player"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <TopPlayerControls
+          visible={showTopControls}
+          label={currentEpLabel ?? title}
+          onBack={handleBack}
+          onClose={handleClose}
+        />
 
         <video
           ref={videoRef}
@@ -1834,80 +1812,17 @@ export default function VideoPlayer({
           visible={showSubtitleOverlay}
         />
 
-        <AnimatePresence>
-          {paused && playerState === 'ready' && (
-            <motion.div
-              key="pause-overlay"
-              className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
-              aria-hidden="true"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <motion.div
-                className="absolute inset-0 bg-black/65"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-              />
-              <motion.div
-                className="absolute bottom-32 left-6 right-6 flex max-w-2xl flex-col items-start text-white sm:bottom-36"
-                initial={{ opacity: 0, y: 18, scale: 0.99 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 12, scale: 0.995 }}
-                transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
-              >
-                {pauseLogoSources.length > 0 ? (
-                  <img
-                    src={pauseLogoSources[0]}
-                    alt={title}
-                    className="mb-4 h-40 max-h-[28vh] w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
-                    onError={(event) => {
-                      event.currentTarget.style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <h2 className="mb-2 max-w-[min(34rem,78vw)] text-4xl font-black uppercase leading-none tracking-normal drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-5xl">
-                    {title}
-                  </h2>
-                )}
-                {(hasEpisodes || pauseEpisodeTitle) && (
-                  <div className="flex max-w-3xl min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-white">
-                    {hasEpisodes && (
-                      <span className="shrink-0 text-[24px] font-semibold leading-tight text-white/85">
-                        {epCode(currentSeason, currentEpisode)}
-                      </span>
-                    )}
-                    {pauseEpisodeTitle && (
-                      <span className="min-w-[8rem] flex-1 truncate text-[24px] font-bold leading-tight">
-                        {pauseEpisodeTitle}
-                      </span>
-                    )}
-                    {pauseRating > 0 && (
-                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold leading-none text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
-                        <Star className="h-4 w-4 fill-current" />
-                        {pauseRating.toFixed(1)}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {pauseRating > 0 && !hasEpisodes && !pauseEpisodeTitle && (
-                  <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
-                    <Star className="h-4 w-4 fill-current" />
-                    {pauseRating.toFixed(1)}
-                  </span>
-                )}
-                {currentEpisodeMeta?.summary && (
-                  <p className="mt-1 line-clamp-2 max-w-xl text-xs leading-relaxed text-white/75">
-                    {currentEpisodeMeta.summary}
-                  </p>
-                )}
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <PauseOverlay
+          visible={paused && playerState === 'ready'}
+          title={title}
+          logoSources={pauseLogoSources}
+          hasEpisodes={hasEpisodes}
+          currentSeason={currentSeason}
+          currentEpisode={currentEpisode}
+          episodeTitle={pauseEpisodeTitle}
+          rating={pauseRating}
+          episodeSummary={currentEpisodeMeta?.summary}
+        />
 
         {playerState === 'loading' && (
           <div className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center">

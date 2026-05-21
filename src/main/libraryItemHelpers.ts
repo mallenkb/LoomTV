@@ -17,7 +17,7 @@ export function createMediaItemId(filePath: string): string {
   return createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 32);
 }
 
-export function mediaItemHasUsableArtwork(item: MediaItem): boolean {
+function mediaItemHasUsableArtwork(item: MediaItem): boolean {
   return Boolean(
     durableArtworkSource(item.poster)
     || durableArtworkSource(item.backdrop)
@@ -44,7 +44,7 @@ export function looksLikeLocalEpisodeFileTitle(title?: string, seriesTitle?: str
     || (Boolean(normalizedSeries) && normalized === normalizedSeries);
 }
 
-export function seriesHasGenericEpisodeTitles(item: MediaItem): boolean {
+function seriesHasGenericEpisodeTitles(item: MediaItem): boolean {
   if (item.type === 'movie' || !item.episodeFiles?.length) return false;
   const byKey = new Map((item.episodes || []).map((episode) => [`${episode.season}-${episode.number}`, episode]));
   return item.episodeFiles.some((file) => {
@@ -53,7 +53,7 @@ export function seriesHasGenericEpisodeTitles(item: MediaItem): boolean {
   });
 }
 
-export function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
+function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
   const isSeries = item.type === 'tv' || item.type === 'anime' || Boolean(item.episodeFiles?.length);
   if (isSeries && (!item.year || item.year <= 0)) return true;
   if (isSeries && seriesHasGenericEpisodeTitles(item)) return true;

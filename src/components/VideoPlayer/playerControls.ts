@@ -1,4 +1,5 @@
-const SUBTITLE_DELAY_LIMIT_SECONDS = 60;
+import { SUBTITLE_DELAY_LIMIT_SECONDS } from './constants.ts';
+
 const SCRUB_SEEK_COMMIT_INTERVAL_MS = 120;
 
 export function isEditableShortcutTarget(target: EventTarget | null): boolean {

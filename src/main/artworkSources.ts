@@ -2,7 +2,7 @@ export function isInlineArtworkSource(source?: string | null): boolean {
   return /^data:/i.test(source || '');
 }
 
-export function hasDurableArtworkSource(source?: string | null): boolean {
+function hasDurableArtworkSource(source?: string | null): boolean {
   return Boolean(source?.trim()) && !isInlineArtworkSource(source);
 }
 

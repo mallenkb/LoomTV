@@ -36,5 +36,3 @@ export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   backgroundColor: 'transparent',
   backgroundEnabled: false,
 };
-
-export const subtitleCueTiming = new WeakMap<TextTrackCue, { startTime: number; endTime: number }>();
