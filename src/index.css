@@ -194,6 +194,10 @@ body.platform-darwin .loom-no-drag {
   -webkit-app-region: no-drag;
 }
 
+body.platform-darwin :where(a[href], button, input, select, textarea, label, summary, [role="button"], [contenteditable="true"]) {
+  -webkit-app-region: no-drag;
+}
+
 .loom-main-drag-region {
   display: none;
 }
