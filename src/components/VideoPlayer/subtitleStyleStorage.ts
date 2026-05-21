@@ -41,7 +41,7 @@ export function loadSubtitleStyle(): SubtitleStyleSettings {
 export function saveSubtitleStyle(style: SubtitleStyleSettings): void {
   try {
     localStorage.setItem(SUBTITLE_STYLE_KEY, JSON.stringify(normalizeSubtitleStyle(style)));
-  } catch (_error) {
+  } catch {
     // Subtitle style still applies for the current session.
   }
 }

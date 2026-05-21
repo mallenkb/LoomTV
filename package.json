@@ -1,7 +1,7 @@
 {
   "name": "loomtv",
   "productName": "LoomTV",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.1.1",
@@ -24,9 +24,9 @@
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
     "clean:build": "node -e \"const fs=require('fs'); for (const p of ['out', '.vite']) fs.rmSync(p, { recursive: true, force: true })\"",
     "rebuild:natives": "electron-builder install-app-deps",
-    "build:main": "vite build --config vite.main.config.ts",
-    "build:preload": "vite build --config vite.preload.config.ts",
-    "build:renderer": "vite build --config vite.renderer.config.ts",
+    "build:main": "vp build --config vite.main.config.ts",
+    "build:preload": "vp build --config vite.preload.config.ts",
+    "build:renderer": "vp build --config vite.renderer.config.ts",
     "build": "corepack pnpm run clean:build && corepack pnpm run build:main && corepack pnpm run build:preload && corepack pnpm run build:renderer",
     "package": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && electron-forge package",
     "make": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && electron-forge make",
@@ -74,7 +74,8 @@
     "postcss": "8.5.14",
     "tailwindcss": "4.2.4",
     "typescript": "5.7.3",
-    "vite": "8.0.10"
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
   },
   "dependencies": {
     "@types/better-sqlite3": "7.6.13",
