@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowDown, ArrowUp, ChevronDown, FolderPlus, RefreshCw, X, Key, CheckCircle, ExternalLink, Pencil, Plus, Save, Trash2, Eye, EyeOff, Clock, GripVertical, Download, Palette, Wifi, Copy } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -303,14 +303,14 @@ export default function Settings() {
     [sharedLibrarySnapshot],
   );
 
-  const refreshLocalNetworkStatus = async () => {
+  const refreshLocalNetworkStatus = useCallback(async () => {
     try {
       setLocalNetworkStatus(await desktopApi.getLocalNetworkStatus());
     } catch (error) {
       console.error('Failed to load local network status:', error);
       setNetworkStatusMessage('Could not read local network status.');
     }
-  };
+  }, []);
 
   useEffect(() => {
     desktopApi.getSettings().then((s) => {
@@ -330,10 +330,6 @@ export default function Settings() {
       setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
       setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
     });
-    desktopApi.checkFFmpeg().then(setFfmpegStatus);
-    void refreshLocalNetworkStatus();
-    desktopApi.getUpdateState().then(setUpdateState);
-    const unsubscribeUpdates = desktopApi.onUpdateState(setUpdateState);
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
@@ -342,7 +338,6 @@ export default function Settings() {
     } catch {
       // Ignore invalid saved pairing data.
     }
-    return unsubscribeUpdates;
   }, []);
 
   useEffect(() => {
@@ -628,10 +623,43 @@ export default function Settings() {
 
   useEffect(() => {
     if (activeSection !== 'network') return;
+    void refreshLocalNetworkStatus();
     void scanForPeers();
     const id = setInterval(() => void scanForPeers(), 8000);
     return () => clearInterval(id);
-  }, [activeSection, scanForPeers]);
+  }, [activeSection, refreshLocalNetworkStatus, scanForPeers]);
+
+  useEffect(() => {
+    if (activeSection !== 'about') return undefined;
+
+    let cancelled = false;
+    if (!ffmpegStatus) {
+      desktopApi.checkFFmpeg()
+        .then((status) => {
+          if (!cancelled) setFfmpegStatus(status);
+        })
+        .catch((error) => {
+          console.error('Failed to check FFmpeg:', error);
+          if (!cancelled) setFfmpegStatus({ available: false, path: null });
+        });
+    }
+
+    desktopApi.getUpdateState()
+      .then((state) => {
+        if (!cancelled) setUpdateState(state);
+      })
+      .catch((error) => {
+        console.error('Failed to read update state:', error);
+      });
+    const unsubscribeUpdates = desktopApi.onUpdateState((state) => {
+      if (!cancelled) setUpdateState(state);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribeUpdates();
+    };
+  }, [activeSection, ffmpegStatus]);
 
   useEffect(() => {
     if (!remoteLibraryRefreshKey) return;
@@ -736,9 +764,7 @@ export default function Settings() {
   };
 
   const handleSectionSelect = useCallback((sectionId: SettingsSection) => {
-    startTransition(() => {
-      setActiveSection((current) => nextSettingsSection(current, sectionId));
-    });
+    setActiveSection((current) => nextSettingsSection(current, sectionId));
   }, []);
 
   return (
@@ -746,7 +772,7 @@ export default function Settings() {
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
         <div className="mx-auto max-w-5xl pt-16">
           <div
-            className="fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
+            className="loom-no-drag fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
             style={{ borderRadius: 12 }}
           >
             {SETTINGS_SECTIONS.map((section) => {

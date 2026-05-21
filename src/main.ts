@@ -585,7 +585,7 @@ function isCompatibleDarwinBinary(binaryPath: string): boolean {
   if (process.platform !== 'darwin') return true;
 
   try {
-    const description = execFileSync('file', [binaryPath], { encoding: 'utf8' });
+    const description = execFileSync('file', [binaryPath], { encoding: 'utf8', timeout: 1000 });
     if (process.arch === 'arm64') {
       return description.includes('arm64');
     }
@@ -639,7 +639,7 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe'): string[] {
   ];
 
   try {
-    const whichResult = execFileSync('which', ['-a', executable], { encoding: 'utf8' })
+    const whichResult = execFileSync('which', ['-a', executable], { encoding: 'utf8', timeout: 1000 })
       .split(/\r?\n/)
       .map((value) => value.trim())
       .filter(Boolean);
@@ -651,7 +651,7 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe'): string[] {
 
 function hasFFmpegEncoder(binaryPath: string, encoder: string): boolean {
   try {
-    const output = execFileSync(binaryPath, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
+    const output = execFileSync(binaryPath, ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 3000 });
     return output.includes(encoder);
   } catch {
     return false;
@@ -1183,6 +1183,10 @@ function getLocalNetworkName(): string {
     if (ssid) return ssid;
   }
 
+  return getPrimaryLocalNetworkAddress() ? 'Connected locally' : 'No local network detected';
+}
+
+function getLocalNetworkNameFast(): string {
   return getPrimaryLocalNetworkAddress() ? 'Connected locally' : 'No local network detected';
 }
 
@@ -5754,7 +5758,7 @@ ipcMain.handle('network:status', () => {
     token,
     deviceId: settings.localNetworkDeviceId,
     deviceName: settings.localNetworkDeviceName || os.hostname(),
-    networkName: getLocalNetworkName(),
+    networkName: getLocalNetworkNameFast(),
     port: mediaServerPort,
     addresses: getLocalNetworkAddresses(),
     baseUrl: base,
@@ -5826,7 +5830,8 @@ ipcMain.handle('updates:install', () => {
 });
 
 ipcMain.handle('media:ffmpeg-available', () => {
-  return { available: findFFmpeg() !== null, path: findFFmpeg() };
+  const ffmpegPath = findFFmpeg();
+  return { available: ffmpegPath !== null, path: ffmpegPath };
 });
 
 ipcMain.handle('media:probe', (_event, filePath: string) => safeResult(() => probeMedia(filePath)));
