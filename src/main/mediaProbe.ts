@@ -34,10 +34,6 @@ function cacheProbeResult(cacheKey: string, result: ProbeResult): ProbeResult {
   return result;
 }
 
-export function clearProbeCache(): void {
-  probeCache.clear();
-}
-
 export function probeMedia(filePath: string): ProbeResult {
   assertLocalMediaPath(filePath);
   const cacheKey = probeCacheKey(filePath);

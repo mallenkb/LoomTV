@@ -1,0 +1,376 @@
+import { AnimatePresence, motion } from 'motion/react';
+import { Copy, Key, RefreshCw, Wifi } from 'lucide-react';
+import type React from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import type {
+  LocalNetworkPeer,
+  LocalNetworkStatus,
+  SharedLibrarySection,
+  SharedLibrarySnapshot,
+} from './Settings.types';
+
+type NetworkSettingsSectionProps = {
+  localNetworkStatus: LocalNetworkStatus | null;
+  isNetworkSharingOn: boolean;
+  isTogglingNetworkSharing: boolean;
+  currentNetworkName: string;
+  networkStatusMessage: string;
+  setLocalNetworkSharing: (enabled: boolean) => void;
+  copyNetworkValue: (value?: string | null) => void;
+  revokePairedDevice: (deviceId: string) => void;
+  discoveredPeers: LocalNetworkPeer[];
+  isScanningPeers: boolean;
+  scanForPeers: () => void;
+  remoteLibraryAddress: string;
+  setRemoteLibraryAddress: (value: string) => void;
+  remoteShareCode: string;
+  setRemoteShareCode: (value: string) => void;
+  showManualNetworkAddress: boolean;
+  setShowManualNetworkAddress: React.Dispatch<React.SetStateAction<boolean>>;
+  connectRemoteLibrary: () => void;
+  isConnectingRemoteLibrary: boolean;
+  remoteLibraryStatus: string;
+  sharedLibrarySnapshot: SharedLibrarySnapshot | null;
+  sharedLibrarySections: SharedLibrarySection[];
+  disconnectRemoteLibrary: () => void;
+};
+
+export default function NetworkSettingsSection({
+  localNetworkStatus,
+  isNetworkSharingOn,
+  isTogglingNetworkSharing,
+  currentNetworkName,
+  networkStatusMessage,
+  setLocalNetworkSharing,
+  copyNetworkValue,
+  revokePairedDevice,
+  discoveredPeers,
+  isScanningPeers,
+  scanForPeers,
+  remoteLibraryAddress,
+  setRemoteLibraryAddress,
+  remoteShareCode,
+  setRemoteShareCode,
+  showManualNetworkAddress,
+  setShowManualNetworkAddress,
+  connectRemoteLibrary,
+  isConnectingRemoteLibrary,
+  remoteLibraryStatus,
+  sharedLibrarySnapshot,
+  sharedLibrarySections,
+  disconnectRemoteLibrary,
+}: NetworkSettingsSectionProps) {
+  return (
+    <>
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Wifi className="h-4 w-4 text-[var(--loom-accent)]" />
+            Local Network Sharing
+          </CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Share this device's library with nearby LoomTV apps without internet.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="settings-panel-soft rounded-lg p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Sharing device</p>
+              <p className="mt-1 text-sm text-[var(--loom-muted)]">Turn on sharing, then give the other person this 6-digit share code.</p>
+            </div>
+            <div className="settings-panel-soft rounded-lg p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Connecting device</p>
+              <p className="mt-1 text-sm text-[var(--loom-muted)]">Join the same Wi-Fi network, enter the code below, then connect.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
+            <div>
+              <p className="text-sm font-semibold text-white">
+                {isTogglingNetworkSharing ? 'Updating sharing...' : isNetworkSharingOn ? 'Sharing is on' : 'Sharing is off'}
+              </p>
+              <p className="text-xs text-[var(--loom-muted)]">
+                {isTogglingNetworkSharing
+                  ? 'Preparing the local network address and share code.'
+                  : isNetworkSharingOn
+                  ? 'Only devices with this 6-digit code can read the network library or stream files.'
+                  : 'Turn on sharing to reveal this device address, library URL, and share code.'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              onClick={() => setLocalNetworkSharing(!isNetworkSharingOn)}
+              disabled={isTogglingNetworkSharing}
+              variant={isNetworkSharingOn ? 'outline' : 'default'}
+              className={`gap-2 ${isNetworkSharingOn ? 'border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50' : ''}`}
+            >
+              {isTogglingNetworkSharing ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wifi className="h-4 w-4" />
+              )}
+              {isTogglingNetworkSharing ? 'Updating...' : isNetworkSharingOn ? 'Turn Off' : 'Turn On'}
+            </Button>
+          </div>
+
+          <AnimatePresence initial={false}>
+            {isNetworkSharingOn && (
+              <motion.div
+                className="space-y-5"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="settings-panel-soft rounded-lg p-3">
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Device Address</p>
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate text-sm text-white">
+                        {localNetworkStatus?.baseUrl || 'No local network address found'}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyNetworkValue(localNetworkStatus?.baseUrl)}
+                        disabled={!localNetworkStatus?.baseUrl}
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
+                        aria-label="Copy device address"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="settings-panel-soft rounded-lg p-3">
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Share Code</p>
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate text-sm text-white">
+                        {localNetworkStatus?.token || 'Loading...'}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyNetworkValue(localNetworkStatus?.token)}
+                        disabled={!localNetworkStatus?.token}
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
+                        aria-label="Copy share code"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-panel-soft rounded-lg p-3">
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Network Library URL</p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate text-sm text-white">
+                      {localNetworkStatus?.libraryUrl || 'Turn on sharing to expose the network library'}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copyNetworkValue(localNetworkStatus?.libraryUrl)}
+                      disabled={!localNetworkStatus?.libraryUrl}
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:opacity-35"
+                      aria-label="Copy network library URL"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {localNetworkStatus?.addresses?.length ? (
+                  <p className="text-xs text-[var(--loom-faint)]">
+                    Network: {currentNetworkName} · Visible addresses: {localNetworkStatus.addresses.join(', ')}
+                  </p>
+                ) : (
+                  <p className="text-xs text-[var(--loom-faint)]">
+                    Connect this device to Wi-Fi or Ethernet to make it visible to other devices.
+                  </p>
+                )}
+
+                <div className="settings-panel-soft rounded-lg p-3">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Paired Devices</p>
+                  {(localNetworkStatus?.pairedDevices?.length || 0) === 0 ? (
+                    <p className="text-xs text-[var(--loom-faint)]">No devices have paired yet. Share the code above to pair a device.</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {localNetworkStatus?.pairedDevices?.map((device) => {
+                        const lastSeenLabel = new Date(device.lastSeenAt).toLocaleString();
+                        return (
+                          <li key={device.id} className="flex items-center justify-between rounded-md bg-[var(--loom-surface-2)] px-2 py-1.5">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold text-white">{device.name}</p>
+                              <p className="truncate text-[10px] text-[var(--loom-faint)]">Last seen {lastSeenLabel}{device.lastAddress ? ` · ${device.lastAddress}` : ''}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => revokePairedDevice(device.id)}
+                              className="ml-3 shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                            >
+                              Revoke
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {networkStatusMessage && <p className="text-sm text-[var(--loom-muted)]">{networkStatusMessage}</p>}
+        </CardContent>
+      </Card>
+
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Key className="h-4 w-4 text-[var(--loom-accent)]" />
+            Connect to Shared Library
+          </CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Use the 6-digit code from the sharing device. LoomTV will find it on the same network.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-400">
+              <Wifi className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Current Network</p>
+              <p className="truncate text-sm font-semibold text-white">{currentNetworkName}</p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Devices on this network</p>
+              <button
+                type="button"
+                onClick={scanForPeers}
+                disabled={isScanningPeers}
+                className="text-xs font-medium text-[var(--loom-accent)] hover:underline disabled:opacity-50"
+              >
+                {isScanningPeers ? 'Scanning...' : 'Rescan'}
+              </button>
+            </div>
+            {discoveredPeers.length === 0 ? (
+              <p className="text-xs text-[var(--loom-faint)]">
+                {isScanningPeers ? 'Looking for LoomTV devices...' : 'No other LoomTV devices found. Make sure sharing is on over there.'}
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {discoveredPeers.map((peer) => {
+                  const peerBaseUrl = `http://${peer.host}:${peer.port}`;
+                  const isSelected = remoteLibraryAddress === peerBaseUrl;
+                  return (
+                    <button
+                      key={peer.deviceId}
+                      type="button"
+                      onClick={() => {
+                        setRemoteLibraryAddress(peerBaseUrl);
+                        setShowManualNetworkAddress(true);
+                      }}
+                      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-[var(--loom-accent)]/15 text-white' : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
+                    >
+                      <span className="truncate font-medium">{peer.deviceName}</span>
+                      <span className="ml-3 shrink-0 text-[var(--loom-faint)]">{peer.host}:{peer.port}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={remoteShareCode}
+              onChange={(event) => setRemoteShareCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              aria-label="Share code"
+              className="h-10 w-44 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-sm font-semibold tracking-[0.28em] text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+            />
+            <Button
+              type="button"
+              onClick={connectRemoteLibrary}
+              disabled={isConnectingRemoteLibrary || !/^\d{6}$/.test(remoteShareCode)}
+              className="ml-auto gap-2 px-5"
+            >
+              <Wifi className="h-4 w-4" />
+              {isConnectingRemoteLibrary ? 'Connecting...' : 'Connect'}
+            </Button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowManualNetworkAddress((current) => !current)}
+            className="rounded-md text-xs font-medium text-[var(--loom-accent)] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-surface)]"
+          >
+            {showManualNetworkAddress ? 'Hide manual address' : 'Advanced: enter address manually'}
+          </button>
+
+          {showManualNetworkAddress && (
+            <input
+              type="text"
+              value={remoteLibraryAddress}
+              onChange={(event) => setRemoteLibraryAddress(event.target.value)}
+              placeholder="192.168.1.50:3847"
+              className="h-10 w-full min-w-0 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-sm text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
+            />
+          )}
+          {remoteLibraryStatus && <p className="text-sm text-[var(--loom-muted)]">{remoteLibraryStatus}</p>}
+        </CardContent>
+      </Card>
+
+      {sharedLibrarySnapshot && (
+        <Card className="settings-panel">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="text-white">Shared Library</CardTitle>
+                <CardDescription className="text-[var(--loom-muted)]">
+                  Connected to {sharedLibrarySnapshot.hostDeviceName || sharedLibrarySnapshot.baseUrl} · auto-refreshing
+                </CardDescription>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={disconnectRemoteLibrary}
+                className="shrink-0"
+              >
+                Disconnect
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-3 md:grid-cols-3">
+              {sharedLibrarySections.map((section) => (
+                <div key={section.title} className="settings-panel-soft rounded-lg p-3">
+                  <p className="text-sm font-semibold text-white">{section.title}</p>
+                  <p className="mb-3 text-xs text-[var(--loom-muted)]">{section.items.length} item{section.items.length === 1 ? '' : 's'}</p>
+                  <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+                    {section.items.length === 0 ? (
+                      <p className="text-xs text-[var(--loom-faint)]">Nothing shared here yet.</p>
+                    ) : (
+                      section.items.map((item, index) => (
+                        <p key={`${section.title}-${item.title || index}`} className="truncate text-xs text-[var(--loom-muted)]">
+                          {item.title || 'Untitled'}{item.year ? ` (${item.year})` : ''}
+                        </p>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </>
+  );
+}

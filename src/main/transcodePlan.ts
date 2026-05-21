@@ -7,7 +7,6 @@ import {
   subtitleFilterComplex,
   subtitleSelections,
   textSubtitleFilter,
-} from './transcodeFilters';
 } from './transcodeFilters.ts';
 
 export const TRANSCODE_READY_SEGMENTS = 2;
