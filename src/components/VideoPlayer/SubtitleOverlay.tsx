@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_SUBTITLE_OUTLINE_WIDTH } from './constants';
 import type { SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
@@ -12,19 +12,18 @@ interface SubtitleOverlayProps {
   visible: boolean;
 }
 
-function roundedTextOutline(width: number, color: string): string {
-  const radius = Math.round(width);
+function fallbackTextOutline(width: number, color: string): string {
+  const radius = Math.ceil(width);
   if (radius <= 0) return 'none';
 
   const shadows = new Set<string>();
-  const ringStep = radius > 10 ? 2 : 1;
-  for (let ring = 1; ring <= radius; ring += ringStep) {
-    const points = Math.max(16, Math.ceil((Math.PI * 2 * ring) / 2));
+  for (let ring = 1; ring <= radius; ring += 1) {
+    const points = Math.max(12, ring * 8);
     for (let index = 0; index < points; index += 1) {
       const angle = (index / points) * Math.PI * 2;
-      const x = Math.round(Math.cos(angle) * ring);
-      const y = Math.round(Math.sin(angle) * ring);
-      if (x !== 0 || y !== 0) shadows.add(`${x}px ${y}px 0 ${color}`);
+      const x = Math.cos(angle) * ring;
+      const y = Math.sin(angle) * ring;
+      shadows.add(`${x.toFixed(2)}px ${y.toFixed(2)}px 0 ${color}`);
     }
   }
 
@@ -69,7 +68,7 @@ function findActiveCueIndex(cues: SubtitleCue[], time: number, hintIndex: number
   return -1;
 }
 
-export default function SubtitleOverlay({
+function SubtitleOverlay({
   cues,
   videoRef,
   transcodeStartSecondsRef,
@@ -114,6 +113,13 @@ export default function SubtitleOverlay({
     return () => cancelAnimationFrame(frame);
   }, [sortedCues, videoRef, transcodeStartSecondsRef, streamIsTranscoded, style.delaySeconds, visible]);
 
+  const textShadow = useMemo(() => {
+    const outlineWidth = style.borderEnabled
+      ? Math.max(0, Math.min(MAX_SUBTITLE_OUTLINE_WIDTH, style.borderWidth))
+      : 0;
+    return fallbackTextOutline(Math.min(outlineWidth, 4), style.borderColor);
+  }, [style.borderEnabled, style.borderWidth, style.borderColor]);
+
   if (!visible || !text) return null;
 
   const fontSize = Math.round(style.fontSize * style.scale);
@@ -121,7 +127,6 @@ export default function SubtitleOverlay({
     ? Math.max(0, Math.min(MAX_SUBTITLE_OUTLINE_WIDTH, style.borderWidth))
     : 0;
   const verticalPosition = Math.max(0, Math.min(100, style.position));
-  const textShadow = roundedTextOutline(outlineWidth, style.borderColor);
   const lineHeight = style.backgroundEnabled ? 1.42 : 1.3;
   const subtitleTextStyle = {
     color: style.fontColor,
@@ -129,8 +134,10 @@ export default function SubtitleOverlay({
     fontWeight: 600,
     lineHeight,
     textShadow,
+    WebkitTextStroke: outlineWidth > 0 ? `${outlineWidth}px ${style.borderColor}` : undefined,
+    paintOrder: 'stroke fill',
     backgroundColor: style.backgroundEnabled ? style.backgroundColor : 'transparent',
-    padding: style.backgroundEnabled ? '0.06em 0.38em' : 0,
+    padding: style.backgroundEnabled ? '0.06em 0.38em' : '0 0.04em',
     borderRadius: style.backgroundEnabled ? '8px' : 0,
     boxDecorationBreak: 'clone',
     WebkitBoxDecorationBreak: 'clone',
@@ -149,3 +156,5 @@ export default function SubtitleOverlay({
     </div>
   );
 }
+
+export default memo(SubtitleOverlay);

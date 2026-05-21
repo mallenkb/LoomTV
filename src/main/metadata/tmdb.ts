@@ -8,6 +8,63 @@ export interface TMDBTVResult extends Partial<MediaItem> {
   tmdbSeasons?: { number: number; title: string; episodeCount: number }[];
 }
 
+interface TMDBPerson {
+  name?: string;
+  character?: string;
+  profile_path?: string | null;
+}
+
+interface TMDBGenre {
+  name?: string;
+}
+
+interface TMDBExternalIds {
+  imdb_id?: string;
+  tvdb_id?: string | number;
+}
+
+interface TMDBSeasonSummary {
+  season_number?: number;
+  name?: string;
+  episode_count?: number;
+}
+
+interface TMDBEpisode {
+  season_number?: number;
+  episode_number?: number;
+  name?: string;
+  overview?: string;
+  still_path?: string | null;
+  vote_average?: number;
+  air_date?: string;
+}
+
+interface TMDBMedia {
+  id?: number;
+  title?: string;
+  name?: string;
+  original_title?: string;
+  imdb_id?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  overview?: string;
+  vote_average?: number;
+  release_date?: string;
+  first_air_date?: string;
+  genres?: TMDBGenre[];
+  credits?: { cast?: TMDBPerson[] };
+  external_ids?: TMDBExternalIds;
+  seasons?: TMDBSeasonSummary[];
+}
+
+interface TMDBSearchResponse {
+  results?: TMDBMedia[];
+}
+
+interface TMDBSeasonResponse {
+  episodes?: TMDBEpisode[];
+}
+
 function normalizeTMDBCredential(value: string): string {
   return value.trim().replace(/^Bearer\s+/i, '');
 }
@@ -41,6 +98,11 @@ async function fetchTMDBJson<T>(path: string, tmdbCredential?: string): Promise<
   return (await response.json()) as T;
 }
 
+function tmdbSearchResults(searchData: TMDBSearchResponse | null): TMDBMedia[] {
+  const results = searchData?.results;
+  return Array.isArray(results) ? results : [];
+}
+
 function tmdbPoster(path: string | null | undefined): string {
   return path ? `${TMDB_IMAGE_BASE}/w500${path}` : '';
 }
@@ -48,9 +110,9 @@ function tmdbBackdrop(path: string | null | undefined): string {
   return path ? `${TMDB_IMAGE_BASE}/w1280${path}` : '';
 }
 
-function tmdbMovieResult(d: any, fallbackTitle: string): Partial<MediaItem> | null {
+function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<MediaItem> | null {
   if (!d) return null;
-  const cast = ((d.credits?.cast ?? []) as any[]).slice(0, 8).map((c: any) => ({
+  const cast = (d.credits?.cast ?? []).slice(0, 8).map((c) => ({
     name: c.name ?? '',
     character: c.character ?? '',
     image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
@@ -68,13 +130,13 @@ function tmdbMovieResult(d: any, fallbackTitle: string): Partial<MediaItem> | nu
     logoCandidates: tmdbLogoCandidates(d),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
-    genres: ((d.genres ?? []) as any[]).map((g: any) => g.name as string),
+    genres: (d.genres ?? []).map((g) => g.name as string),
     year: d.release_date ? new Date(d.release_date).getFullYear() : 0,
     cast,
   };
 }
 
-function tmdbMovieSearchResult(d: any, fallbackTitle: string): Partial<MediaItem> | null {
+function tmdbMovieSearchResult(d: TMDBMedia | null, fallbackTitle: string): Partial<MediaItem> | null {
   if (!d) return null;
   return {
     title: d.title || fallbackTitle,
@@ -100,11 +162,10 @@ export async function fetchTMDBMovieMetadataCandidates(
       `search/movie?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`,
       year ? `search/movie?query=${encodeURIComponent(title)}` : '',
     ].filter(Boolean);
-    const hits: any[] = [];
+    const hits: TMDBMedia[] = [];
     for (const searchPath of searchPaths) {
-      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-      const results = Array.isArray(searchData?.results) ? searchData.results : [];
-      hits.push(...results.slice(0, 6));
+      const searchData = await fetchTMDBJson<TMDBSearchResponse>(searchPath, tmdbCredential);
+      hits.push(...tmdbSearchResults(searchData).slice(0, 6));
     }
     return uniqueMetadataSearchHits(hits, (hit) => `tmdb-movie:${hit.id}`)
       .map((hit) => tmdbMovieSearchResult(hit, title))
@@ -127,16 +188,15 @@ export async function fetchTMDBMovieMetadata(
       `search/movie?query=${encodeURIComponent(title)}${year ? `&year=${year}` : ''}`,
       year ? `search/movie?query=${encodeURIComponent(title)}` : '',
     ].filter(Boolean);
-    let hit: any = null;
+    let hit: TMDBMedia | null = null;
     for (const searchPath of searchPaths) {
-      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-      const results = Array.isArray(searchData?.results) ? searchData.results : [];
-      hit = results.find((candidate: any) => movieHitMatchesLocal(candidate, localTitles, year)) || null;
+      const searchData = await fetchTMDBJson<TMDBSearchResponse>(searchPath, tmdbCredential);
+      hit = tmdbSearchResults(searchData).find((candidate) => movieHitMatchesLocal(candidate, localTitles, year)) || null;
       if (hit) break;
     }
     if (!hit) return null;
 
-    const d = await fetchTMDBJson<any>(`movie/${hit.id}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`movie/${hit.id}?append_to_response=credits,images,external_ids`, tmdbCredential);
     const result = tmdbMovieResult(d, hit.title || title);
     return result ? { ...result, year: result.year || year || 0 } : null;
   } catch (err) {
@@ -151,7 +211,7 @@ export async function fetchTMDBMovieMetadataById(
 ): Promise<Partial<MediaItem> | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {
-    const d = await fetchTMDBJson<any>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids`, tmdbCredential);
     return tmdbMovieResult(d, '');
   } catch (err) {
     console.error('[TMDB movie id]', err);
@@ -159,37 +219,35 @@ export async function fetchTMDBMovieMetadataById(
   }
 }
 
-async function tmdbTVResultFromDetails(d: any, fallbackTitle: string, tmdbCredential?: string): Promise<TMDBTVResult | null> {
+async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: string, tmdbCredential?: string): Promise<TMDBTVResult | null> {
   if (!d) return null;
 
-  const cast = ((d.credits?.cast ?? []) as any[]).slice(0, 8).map((c: any) => ({
+  const cast = (d.credits?.cast ?? []).slice(0, 8).map((c) => ({
     name: c.name ?? '',
     character: c.character ?? '',
     image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
   }));
 
-  const realSeasons: any[] = ((d.seasons ?? []) as any[]).filter(
-    (s: any) => s.season_number > 0,
-  );
+  const realSeasons = (d.seasons ?? []).filter((s) => (s.season_number ?? 0) > 0);
 
-  const tmdbSeasons = realSeasons.map((s: any) => ({
+  const tmdbSeasons = realSeasons.map((s) => ({
     number: s.season_number as number,
     title: (s.name as string) || `Season ${s.season_number}`,
     episodeCount: (s.episode_count as number) || 0,
   }));
 
   const seasonEpisodes = await Promise.all(
-    realSeasons.slice(0, 15).map(async (s: any) => {
+    realSeasons.slice(0, 15).map(async (s) => {
       try {
-        const epData = await fetchTMDBJson<any>(`tv/${d.id}/season/${s.season_number}`, tmdbCredential);
-        return ((epData?.episodes ?? []) as any[]);
+        const epData = await fetchTMDBJson<TMDBSeasonResponse>(`tv/${d.id}/season/${s.season_number}`, tmdbCredential);
+        return epData?.episodes ?? [];
       } catch {
-        return [] as any[];
+        return [] as TMDBEpisode[];
       }
     }),
   );
 
-  const episodes: EpisodeMeta[] = seasonEpisodes.flat().map((e: any) => ({
+  const episodes: EpisodeMeta[] = seasonEpisodes.flat().map((e) => ({
     season: e.season_number as number,
     number: e.episode_number as number,
     title: (e.name as string) || '',
@@ -212,7 +270,7 @@ async function tmdbTVResultFromDetails(d: any, fallbackTitle: string, tmdbCreden
     logoCandidates: tmdbLogoCandidates(d),
     summary: (d.overview as string) || '',
     rating: (d.vote_average as number) ?? 0,
-    genres: ((d.genres ?? []) as any[]).map((g: any) => g.name as string),
+    genres: (d.genres ?? []).map((g) => g.name as string),
     year: d.first_air_date ? new Date(d.first_air_date as string).getFullYear() : 0,
     cast,
     episodes,
@@ -220,7 +278,7 @@ async function tmdbTVResultFromDetails(d: any, fallbackTitle: string, tmdbCreden
   };
 }
 
-function tmdbTVSearchResult(d: any, fallbackTitle: string): TMDBTVResult | null {
+function tmdbTVSearchResult(d: TMDBMedia | null, fallbackTitle: string): TMDBTVResult | null {
   if (!d) return null;
   return {
     title: d.name || fallbackTitle,
@@ -246,11 +304,10 @@ export async function fetchTMDBTVMetadataCandidates(
       `search/tv?query=${encodeURIComponent(title)}${year ? `&first_air_date_year=${year}` : ''}`,
       year ? `search/tv?query=${encodeURIComponent(title)}` : '',
     ].filter(Boolean);
-    const hits: any[] = [];
+    const hits: TMDBMedia[] = [];
     for (const searchPath of searchPaths) {
-      const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-      const results = Array.isArray(searchData?.results) ? searchData.results : [];
-      hits.push(...results.slice(0, 6));
+      const searchData = await fetchTMDBJson<TMDBSearchResponse>(searchPath, tmdbCredential);
+      hits.push(...tmdbSearchResults(searchData).slice(0, 6));
     }
     return uniqueMetadataSearchHits(hits, (hit) => `tmdb-tv:${hit.id}`)
       .map((hit) => tmdbTVSearchResult(hit, title))
@@ -269,11 +326,11 @@ export async function fetchTMDBTVMetadata(
   if (!tmdbCredential) return null;
   try {
     const searchPath = `search/tv?query=${encodeURIComponent(title)}${year ? `&first_air_date_year=${year}` : ''}`;
-    const searchData = await fetchTMDBJson<any>(searchPath, tmdbCredential);
-    const hit = searchData?.results?.[0];
+    const searchData = await fetchTMDBJson<TMDBSearchResponse>(searchPath, tmdbCredential);
+    const hit = tmdbSearchResults(searchData)[0];
     if (!hit) return null;
 
-    const d = await fetchTMDBJson<any>(`tv/${hit.id}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`tv/${hit.id}?append_to_response=credits,images,external_ids`, tmdbCredential);
     const result = await tmdbTVResultFromDetails(d, hit.name || title, tmdbCredential);
     return result ? { ...result, year: result.year || year || 0 } : null;
   } catch (err) {
@@ -288,7 +345,7 @@ export async function fetchTMDBTVMetadataById(
 ): Promise<TMDBTVResult | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {
-    const d = await fetchTMDBJson<any>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids`, tmdbCredential);
     return tmdbTVResultFromDetails(d, '', tmdbCredential);
   } catch (err) {
     console.error('[TMDB TV id]', err);

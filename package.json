@@ -37,6 +37,7 @@
     "dist:dir": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --dir --publish=never",
     "release": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=always",
     "release:all-platforms": "corepack pnpm run release",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint --ext .ts,.tsx .",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts"
   },

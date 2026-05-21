@@ -1,4 +1,4 @@
-import type { ForgeConfig } from '@electron-forge/shared-types';
+import type { ForgeConfig, IForgeMaker } from '@electron-forge/shared-types';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,6 +11,7 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import type { MakerSquirrelConfig } from '@electron-forge/maker-squirrel';
 
 function hasBinary(binary: string): boolean {
   try {
@@ -21,8 +22,29 @@ function hasBinary(binary: string): boolean {
   }
 }
 
-function makeTargets() {
-  const makers = [
+function quoteSignToolValue(value: string): string {
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function squirrelSigningConfig(): Pick<MakerSquirrelConfig, 'certificateFile' | 'certificatePassword' | 'signWithParams'> {
+  const certificateFile = process.env.WINDOWS_CERTIFICATE_FILE || undefined;
+  const certificatePassword = process.env.WINDOWS_CERTIFICATE_PASSWORD || undefined;
+  const subjectName = process.env.WINDOWS_CERTIFICATE_SUBJECT || undefined;
+  const sha1 = process.env.WINDOWS_CERTIFICATE_SHA1 || undefined;
+  const signParams = [
+    subjectName ? `/n ${quoteSignToolValue(subjectName)}` : '',
+    sha1 ? `/sha1 ${quoteSignToolValue(sha1)}` : '',
+  ].filter(Boolean).join(' ');
+
+  return {
+    certificateFile,
+    certificatePassword,
+    signWithParams: !certificateFile && signParams ? signParams : undefined,
+  };
+}
+
+function makeTargets(): IForgeMaker[] {
+  const makers: IForgeMaker[] = [
     new MakerZIP({}, ['darwin', 'win32', 'linux']),
     new MakerDMG({
       icon: 'resources/icon.icns',
@@ -32,10 +54,7 @@ function makeTargets() {
   if (process.platform === 'win32' || (hasBinary('wine') && hasBinary('mono'))) {
     makers.push(new MakerSquirrel({
       setupIcon: 'resources/icon.ico',
-      certificateFile: process.env.WINDOWS_CERTIFICATE_FILE || undefined,
-      certificatePassword: process.env.WINDOWS_CERTIFICATE_PASSWORD || undefined,
-      certificateSubjectName: process.env.WINDOWS_CERTIFICATE_SUBJECT || undefined,
-      certificateSha1: process.env.WINDOWS_CERTIFICATE_SHA1 || undefined,
+      ...squirrelSigningConfig(),
     }));
   }
 
