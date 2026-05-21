@@ -7,7 +7,8 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmit": true
   },
   "include": ["vite.config.ts", "vite.main.config.ts", "vite.preload.config.ts", "vite.renderer.config.ts", "forge.config.ts"]
 }

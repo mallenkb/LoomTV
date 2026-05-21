@@ -3,6 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import { artworkCacheFileName, collectArtworkSourcesForCache, customArtworkReference } from './artworkCache';
+import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types';
 
 type JsonValue = unknown;
 
@@ -13,16 +14,98 @@ export type StoredProgress = {
   watched: boolean;
 };
 
+type ScanCacheFolderKind = 'movies' | 'tv' | 'anime' | 'auto';
+
+type ScanCacheEntry = {
+  version?: number;
+  folderKind: ScanCacheFolderKind;
+  signature: string;
+  fileCount: number;
+  itemCount: number;
+  scannedAt: number;
+};
+
 type LibraryData = {
-  movies: any[];
-  tvShows: any[];
-  animeShows: any[];
+  movies: MediaItem[];
+  tvShows: MediaItem[];
+  animeShows: MediaItem[];
   libraryFolders: string[];
   libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
-  scanCache?: Record<string, any>;
+  scanCache?: Record<string, ScanCacheEntry>;
 };
 
 type SettingsData = Record<string, unknown>;
+
+type SeasonEntry = { number: number; title: string; episodeCount: number };
+
+interface MediaItemRow {
+  id: string;
+  type: string;
+  title: string;
+  year: number;
+  poster: string;
+  backdrop: string;
+  logo: string;
+  summary: string;
+  rating: number;
+  file_path: string;
+  file_size: number | null;
+  last_played: number | null;
+  genres_json: string | null;
+  cast_json: string | null;
+  subtitles_json: string | null;
+  local_metadata_json: string | null;
+  provider_ids_json: string | null;
+  poster_candidates_json: string | null;
+  backdrop_candidates_json: string | null;
+  logo_candidates_json: string | null;
+}
+
+interface SeasonRow {
+  media_id: string;
+  number: number;
+  title: string;
+  episode_count: number;
+}
+
+interface EpisodeRow {
+  media_id: string;
+  season: number;
+  number: number;
+  title: string;
+  summary: string;
+  still: string;
+  rating: number;
+  air_date: string;
+  local_metadata_json: string | null;
+}
+
+interface EpisodeFileRow {
+  media_id: string;
+  season: number;
+  episode: number;
+  file_path: string;
+  title: string | null;
+  local_metadata_json: string | null;
+}
+
+interface ScanCacheRow {
+  folder_path: string;
+  version: number;
+  folder_kind: string;
+  signature: string;
+  file_count: number;
+  item_count: number;
+  scanned_at: number;
+}
+
+interface ProgressRow {
+  file_path: string;
+  position: number;
+  duration: number;
+  updated_at: number;
+  watched: number;
+}
 
 let db: Database.Database | null = null;
 
@@ -254,7 +337,7 @@ function durableArtworkSources(sources?: string[]): string[] {
   return Array.from(new Set((sources || []).map(durableArtworkSource).filter(Boolean)));
 }
 
-function applyDurableState(item: any, progress: Map<string, StoredProgress>, custom: Map<string, Map<string, string>>): any {
+function applyDurableState(item: MediaItem, progress: Map<string, StoredProgress>, custom: Map<string, Map<string, string>>): MediaItem {
   const next = { ...item };
   const itemCustom = custom.get(item.id);
   const itemProgress = progress.get(item.filePath);
@@ -266,7 +349,7 @@ function applyDurableState(item: any, progress: Map<string, StoredProgress>, cus
   next.posterCandidates = durableArtworkSources(next.posterCandidates);
   next.backdropCandidates = durableArtworkSources(next.backdropCandidates);
   next.logoCandidates = durableArtworkSources(next.logoCandidates);
-  next.episodes = (next.episodes || []).map((episode: any) => ({
+  next.episodes = (next.episodes || []).map((episode) => ({
     ...episode,
     still: durableArtworkSource(episode.still),
   }));
@@ -309,10 +392,10 @@ export function loadLibraryFromDatabase(): LibraryData | null {
   const folderGroups = folderGroupsFromRows(folderRows);
   const progress = getProgressMap();
   const custom = getCustomArtworkMap();
-  const rows = database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').all() as any[];
+  const rows = database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').all() as MediaItemRow[];
 
-  const seasonsByMedia = new Map<string, any[]>();
-  for (const row of database.prepare('SELECT * FROM seasons ORDER BY number ASC').all() as any[]) {
+  const seasonsByMedia = new Map<string, SeasonEntry[]>();
+  for (const row of database.prepare('SELECT * FROM seasons ORDER BY number ASC').all() as SeasonRow[]) {
     seasonsByMedia.set(row.media_id, [...(seasonsByMedia.get(row.media_id) || []), {
       number: row.number,
       title: row.title,
@@ -320,8 +403,8 @@ export function loadLibraryFromDatabase(): LibraryData | null {
     }]);
   }
 
-  const episodesByMedia = new Map<string, any[]>();
-  for (const row of database.prepare('SELECT * FROM episodes ORDER BY season ASC, number ASC').all() as any[]) {
+  const episodesByMedia = new Map<string, EpisodeMeta[]>();
+  for (const row of database.prepare('SELECT * FROM episodes ORDER BY season ASC, number ASC').all() as EpisodeRow[]) {
     episodesByMedia.set(row.media_id, [...(episodesByMedia.get(row.media_id) || []), {
       season: row.season,
       number: row.number,
@@ -334,8 +417,8 @@ export function loadLibraryFromDatabase(): LibraryData | null {
     }]);
   }
 
-  const episodeFilesByMedia = new Map<string, any[]>();
-  for (const row of database.prepare('SELECT * FROM episode_files ORDER BY season ASC, episode ASC').all() as any[]) {
+  const episodeFilesByMedia = new Map<string, EpisodeFile[]>();
+  for (const row of database.prepare('SELECT * FROM episode_files ORDER BY season ASC, episode ASC').all() as EpisodeFileRow[]) {
     episodeFilesByMedia.set(row.media_id, [...(episodeFilesByMedia.get(row.media_id) || []), {
       season: row.season,
       episode: row.episode,
@@ -345,11 +428,11 @@ export function loadLibraryFromDatabase(): LibraryData | null {
     }]);
   }
 
-  const scanCache = Object.fromEntries((database.prepare('SELECT * FROM scan_cache').all() as any[]).map((row) => [
+  const scanCache = Object.fromEntries((database.prepare('SELECT * FROM scan_cache').all() as ScanCacheRow[]).map((row): [string, ScanCacheEntry] => [
     row.folder_path,
     {
       version: row.version,
-      folderKind: row.folder_kind,
+      folderKind: row.folder_kind as ScanCacheFolderKind,
       signature: row.signature,
       fileCount: row.file_count,
       itemCount: row.item_count,
@@ -369,7 +452,7 @@ export function loadLibraryFromDatabase(): LibraryData | null {
   for (const row of rows) {
     const item = applyDurableState({
       id: row.id,
-      type: row.type,
+      type: row.type as MediaItem['type'],
       title: row.title,
       year: row.year,
       poster: row.poster,
@@ -504,13 +587,13 @@ export function saveSettingsToDatabase(settings: SettingsData): void {
 }
 
 export function getProgress(filePath: string): StoredProgress | null {
-  const row = getDb().prepare('SELECT * FROM playback_progress WHERE file_path = ?').get(filePath) as any;
+  const row = getDb().prepare('SELECT * FROM playback_progress WHERE file_path = ?').get(filePath) as ProgressRow | undefined;
   if (!row) return null;
   return { position: row.position, duration: row.duration, updatedAt: row.updated_at, watched: Boolean(row.watched) };
 }
 
 export function getAllProgress(): Record<string, StoredProgress> {
-  return Object.fromEntries((getDb().prepare('SELECT * FROM playback_progress').all() as any[]).map((row) => [
+  return Object.fromEntries((getDb().prepare('SELECT * FROM playback_progress').all() as ProgressRow[]).map((row): [string, StoredProgress] => [
     row.file_path,
     { position: row.position, duration: row.duration, updatedAt: row.updated_at, watched: Boolean(row.watched) },
   ]));
@@ -557,8 +640,8 @@ export function saveCustomArtwork(mediaId: string, target: string, dataUrl: stri
 }
 
 export function getCustomArtwork(mediaId: string): Record<string, string> {
-  return Object.fromEntries((getDb().prepare('SELECT target, data_url FROM custom_artwork WHERE media_id = ?').all(mediaId) as any[])
-    .map((row) => [row.target, row.data_url]));
+  return Object.fromEntries((getDb().prepare('SELECT target, data_url FROM custom_artwork WHERE media_id = ?').all(mediaId) as Array<{ target: string; data_url: string }>)
+    .map((row): [string, string] => [row.target, row.data_url]));
 }
 
 export function getCustomArtworkData(mediaId: string, target: string): { dataUrl: string; updatedAt: number } | null {
@@ -585,9 +668,16 @@ function getProgressMap(): Map<string, StoredProgress> {
 
 function getCustomArtworkMap(): Map<string, Map<string, string>> {
   const result = new Map<string, Map<string, string>>();
-  for (const row of getDb().prepare('SELECT media_id, target, data_url FROM custom_artwork').all() as any[]) {
-    if (!result.has(row.media_id)) result.set(row.media_id, new Map());
-    result.get(row.media_id)!.set(row.target, row.data_url);
+  const rows = getDb()
+    .prepare('SELECT media_id, target, data_url FROM custom_artwork')
+    .all() as Array<{ media_id: string; target: string; data_url: string }>;
+  for (const row of rows) {
+    let targetMap = result.get(row.media_id);
+    if (!targetMap) {
+      targetMap = new Map();
+      result.set(row.media_id, targetMap);
+    }
+    targetMap.set(row.target, row.data_url);
   }
   return result;
 }

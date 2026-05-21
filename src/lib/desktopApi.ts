@@ -1,11 +1,12 @@
 import packageJson from '../../package.json';
+import type { MediaItem, TVShow } from '@/contexts/LibraryContext';
 
 type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
 type LibraryPayload = {
-  movies: any[];
-  tvShows: any[];
-  animeShows?: any[];
+  movies: MediaItem[];
+  tvShows: TVShow[];
+  animeShows?: TVShow[];
   libraryFolders: string[];
   libraryFolderGroups?: LibraryFolderGroups;
 };

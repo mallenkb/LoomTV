@@ -1,5 +1,14 @@
 import path from 'node:path';
-import type { SubtitleStyleOptions, TranscodeOptions } from './mediaTypes';
+import type { TranscodeOptions } from './mediaTypes';
+import {
+  hasBitmapSubtitleSelection,
+  hasSubtitleSelection,
+  streamMap,
+  subtitleFilterComplex,
+  subtitleSelections,
+  textSubtitleFilter,
+} from './transcodeFilters';
+} from './transcodeFilters.ts';
 
 export const TRANSCODE_READY_SEGMENTS = 2;
 export const HLS_SEGMENT_SECONDS = 2;
@@ -39,74 +48,6 @@ interface BuildHlsArgsInput {
   mediaInfo?: HlsMediaInfo;
 }
 
-function streamMap(type: 'v' | 'a', selectedIndex?: number, optional = false): string {
-  const suffix = optional ? '?' : '';
-  return typeof selectedIndex === 'number' && selectedIndex >= 0
-    ? `0:${selectedIndex}${suffix}`
-    : `0:${type}:0${suffix}`;
-}
-
-function filterStream(selectedIndex?: number, fallback = '0:v:0'): string {
-  return typeof selectedIndex === 'number' && selectedIndex >= 0 ? `0:${selectedIndex}` : fallback;
-}
-
-function escapeSubtitleFilterPath(filePath: string): string {
-  return filePath
-    .replace(/\\/g, '\\\\')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "\\'");
-}
-
-function isBitmapSubtitle(codec?: string): boolean {
-  const normalized = (codec || '').toLowerCase();
-  return normalized.includes('pgs') || normalized.includes('dvd') || normalized.includes('dvb');
-}
-
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(min, Math.min(max, parsed));
-}
-
-function assColor(value: unknown, fallback: string): string {
-  const hex = typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
-  const red = hex.slice(1, 3);
-  const green = hex.slice(3, 5);
-  const blue = hex.slice(5, 7);
-  return `&H00${blue}${green}${red}`.toUpperCase();
-}
-
-function subtitleForceStyle(style?: SubtitleStyleOptions): string {
-  const fontSize = clampNumber(style?.fontSize, 55, 24, 96) * clampNumber(style?.scale, 1, 0.5, 2);
-  const position = clampNumber(style?.position, 92, 0, 100);
-  const marginV = Math.round((100 - position) * 6);
-  const borderWidth = clampNumber(style?.borderWidth, 3, 0, 10);
-
-  return [
-    `Fontsize=${Math.round(fontSize)}`,
-    `PrimaryColour=${assColor(style?.fontColor, '#ffffff')}`,
-    `OutlineColour=${assColor(style?.borderColor, '#000000')}`,
-    `BackColour=${assColor(style?.backgroundColor, '#000000')}`,
-    `Outline=${borderWidth}`,
-    'Shadow=0',
-    'Alignment=2',
-    `MarginV=${marginV}`,
-  ].join(',');
-}
-
-function textSubtitleFilter(
-  filePath: string,
-  subtitleOrdinal: number,
-  style?: SubtitleStyleOptions,
-  startSeconds = 0,
-): string {
-  const subtitleFilter = `subtitles='${escapeSubtitleFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style)}'`;
-  const seekOffset = Number.isFinite(startSeconds) && startSeconds > 0 ? Math.floor(startSeconds) : 0;
-  if (seekOffset <= 0) return `${subtitleFilter},format=yuv420p`;
-
-  return `setpts=PTS+${seekOffset}/TB,${subtitleFilter},setpts=PTS-${seekOffset}/TB,format=yuv420p`;
-}
-
 function isCopySafeVideo(mediaInfo?: HlsMediaInfo): boolean {
   const videoCodec = (mediaInfo?.videoCodec || '').toLowerCase();
   const videoProfile = (mediaInfo?.videoProfile || '').toLowerCase();
@@ -130,8 +71,8 @@ export function buildHlsArgs({
 }: BuildHlsArgsInput): string[] {
   const args: string[] = [];
   const hasAudio = options.audioTrackIndex !== -1;
-  const hasSubtitle = typeof options.subtitleTrackIndex === 'number' && options.subtitleTrackIndex >= 0;
-  const bitmapSubtitle = hasSubtitle && isBitmapSubtitle(options.subtitleCodec);
+  const hasSubtitle = hasSubtitleSelection(options);
+  const bitmapSubtitle = hasBitmapSubtitleSelection(options);
   const copyVideo = !hasSubtitle && isCopySafeVideo(mediaInfo);
   const copyAudio = hasAudio && isCopySafeAudio(mediaInfo);
 
@@ -148,11 +89,12 @@ export function buildHlsArgs({
   args.push('-i', filePath);
 
   if (bitmapSubtitle) {
+    const subtitleFilter = subtitleFilterComplex(filePath, options);
     args.push(
       '-filter_complex',
-      `[${filterStream(options.videoTrackIndex)}][0:${options.subtitleTrackIndex}]overlay,format=yuv420p[v]`,
+      subtitleFilter.filter,
       '-map',
-      '[v]',
+      `[${subtitleFilter.output}]`,
     );
   } else {
     args.push('-map', streamMap('v', options.videoTrackIndex));
@@ -168,7 +110,16 @@ export function buildHlsArgs({
     const subtitleOrdinal = typeof options.subtitleStreamOrdinal === 'number'
       ? options.subtitleStreamOrdinal
       : 0;
-    args.push('-vf', textSubtitleFilter(filePath, subtitleOrdinal, options.subtitleStyle, options.startSeconds));
+    const textSelections = subtitleSelections(options);
+    const primarySubtitle = textSelections.find((selection) => selection.placement === 'primary') || textSelections[0];
+    const secondarySubtitle = textSelections.find((selection) => selection !== primarySubtitle);
+    args.push('-vf', textSubtitleFilter(
+      filePath,
+      primarySubtitle?.streamOrdinal ?? subtitleOrdinal,
+      options.subtitleStyle,
+      options.startSeconds,
+      secondarySubtitle?.streamOrdinal,
+    ));
   } else if (!copyVideo && !bitmapSubtitle) {
     args.push('-vf', 'format=yuv420p');
   }

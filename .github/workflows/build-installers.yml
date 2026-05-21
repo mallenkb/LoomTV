@@ -60,6 +60,15 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
 
+      - name: Lint
+        run: corepack pnpm run lint
+
+      - name: Typecheck
+        run: corepack pnpm run typecheck
+
+      - name: Test
+        run: corepack pnpm test
+
       - name: Build installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
