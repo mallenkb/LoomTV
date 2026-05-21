@@ -10,7 +10,14 @@ function normalizeFanartKey(value?: string): string {
   return (value || '').trim();
 }
 
-async function fetchFanartJson(path: string, apiKey?: string): Promise<any | null> {
+interface FanartResponse {
+  hdmovielogo?: FanartImage[];
+  movielogo?: FanartImage[];
+  hdtvlogo?: FanartImage[];
+  clearlogo?: FanartImage[];
+}
+
+async function fetchFanartJson(path: string, apiKey?: string): Promise<FanartResponse | null> {
   const key = normalizeFanartKey(apiKey);
   if (!key) return null;
 
@@ -20,7 +27,7 @@ async function fetchFanartJson(path: string, apiKey?: string): Promise<any | nul
   const response = await fetch(url.toString());
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Fanart.tv request failed with ${response.status}`);
-  return response.json();
+  return (await response.json()) as FanartResponse;
 }
 
 function imageUrls(images: unknown): string[] {

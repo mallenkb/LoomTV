@@ -25,10 +25,15 @@ export function numericRating(value: unknown): number {
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const MAX_TMDB_LOGO_CANDIDATES = 6;
 
+interface TMDBLogoImage {
+  file_path?: string;
+  iso_639_1?: string | null;
+  vote_average?: number;
+}
+
 export function tmdbLogoCandidates(details: unknown): string[] {
-  const logos = Array.isArray((details as any)?.images?.logos)
-    ? (details as any).images.logos as any[]
-    : [];
+  const rawLogos = (details as { images?: { logos?: unknown } } | null | undefined)?.images?.logos;
+  const logos: TMDBLogoImage[] = Array.isArray(rawLogos) ? rawLogos : [];
 
   return Array.from(new Set(logos
     .filter((logo) => logo?.file_path && (logo.iso_639_1 === 'en' || logo.iso_639_1 === null))

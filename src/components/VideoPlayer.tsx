@@ -1874,20 +1874,26 @@ export default function VideoPlayer({
                   </h2>
                 )}
                 {(hasEpisodes || pauseEpisodeTitle) && (
-                  <div className="flex max-w-3xl min-w-0 items-baseline gap-3 text-white">
+                  <div className="flex max-w-3xl min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-white">
                     {hasEpisodes && (
                       <span className="shrink-0 text-[24px] font-semibold leading-tight text-white/85">
                         {epCode(currentSeason, currentEpisode)}
                       </span>
                     )}
                     {pauseEpisodeTitle && (
-                      <span className="min-w-0 truncate text-[24px] font-bold leading-tight">
+                      <span className="min-w-[8rem] flex-1 truncate text-[24px] font-bold leading-tight">
                         {pauseEpisodeTitle}
+                      </span>
+                    )}
+                    {pauseRating > 0 && (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold leading-none text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                        <Star className="h-4 w-4 fill-current" />
+                        {pauseRating.toFixed(1)}
                       </span>
                     )}
                   </div>
                 )}
-                {pauseRating > 0 && (
+                {pauseRating > 0 && !hasEpisodes && !pauseEpisodeTitle && (
                   <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
                     <Star className="h-4 w-4 fill-current" />
                     {pauseRating.toFixed(1)}

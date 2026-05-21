@@ -1,10 +1,56 @@
 import { yearFromDateString } from './helpers';
 import type { EpisodeMeta, TVMetadata } from './types';
 
-function tvmazeEpisodeToMeta(episode: any): EpisodeMeta {
+interface TVMazeImage {
+  medium?: string;
+  original?: string;
+}
+
+interface TVMazeEpisode {
+  season?: number;
+  number?: number;
+  name?: string;
+  summary?: string;
+  image?: TVMazeImage;
+  rating?: { average?: number };
+  airdate?: string;
+}
+
+interface TVMazeSeason {
+  number?: number;
+  name?: string;
+  episodeOrder?: number;
+}
+
+interface TVMazeCastEntry {
+  person?: { name?: string; image?: TVMazeImage };
+  character?: { name?: string };
+}
+
+interface TVMazeShow {
+  id?: number;
+  name?: string;
+  image?: TVMazeImage;
+  summary?: string;
+  rating?: { average?: number };
+  genres?: string[];
+  premiered?: string;
+  language?: string;
+  type?: string;
+  externals?: { imdb?: string; thetvdb?: string | number };
+  network?: { country?: { name?: string } };
+  webChannel?: { country?: { name?: string } };
+  _embedded?: { seasons?: TVMazeSeason[]; cast?: TVMazeCastEntry[] };
+}
+
+interface TVMazeSearchEntry {
+  show?: TVMazeShow;
+}
+
+function tvmazeEpisodeToMeta(episode: TVMazeEpisode): EpisodeMeta {
   return {
-    season: episode.season,
-    number: episode.number,
+    season: episode.season ?? 0,
+    number: episode.number ?? 0,
     title: episode.name || '',
     summary: episode.summary ? episode.summary.replace(/<[^>]*>/g, '') : '',
     still: episode.image?.medium || episode.image?.original || '',
@@ -16,7 +62,7 @@ function tvmazeEpisodeToMeta(episode: any): EpisodeMeta {
 async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
   const episodesRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
   if (!episodesRes.ok) return [];
-  const episodes: any[] = await episodesRes.json();
+  const episodes = (await episodesRes.json()) as TVMazeEpisode[];
   if (!Array.isArray(episodes)) return [];
   return episodes.map(tvmazeEpisodeToMeta).filter((episode) => episode.season > 0 && episode.number > 0);
 }
@@ -27,19 +73,19 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
   );
   if (!detailRes.ok) return null;
   const [details, episodes] = await Promise.all([
-    detailRes.json(),
+    detailRes.json() as Promise<TVMazeShow>,
     fetchTVEpisodesById(showId),
   ]);
 
   const seasons = (details._embedded?.seasons || [])
-    .filter((s: any) => s.number > 0)
-    .map((s: any) => ({
-      number: s.number,
+    .filter((s) => (s.number ?? 0) > 0)
+    .map((s) => ({
+      number: s.number ?? 0,
       title: s.name || `Season ${s.number}`,
-        episodeCount: s.episodeOrder || 0,
-      }));
+      episodeCount: s.episodeOrder || 0,
+    }));
 
-  const cast = (details._embedded?.cast || []).slice(0, 6).map((c: any) => ({
+  const cast = (details._embedded?.cast || []).slice(0, 6).map((c) => ({
     name: c.person?.name || '',
     character: c.character?.name || '',
     image: c.person?.image?.medium || '',
@@ -73,18 +119,19 @@ export async function fetchTVMetadata(title: string, localYear?: number): Promis
     const searchRes = await fetch(
       `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`,
     );
-    const searchData: any[] = await searchRes.json();
+    const searchData = (await searchRes.json()) as TVMazeSearchEntry[];
     if (!searchData || searchData.length === 0) return null;
 
-    let show = searchData[0].show;
+    let show = searchData[0]?.show;
     if (localYear) {
-      const yearMatch = searchData.find((r: any) => {
+      const yearMatch = searchData.find((r) => {
         const premiered = r.show?.premiered;
         return premiered && new Date(premiered).getFullYear() === localYear;
       });
-      if (yearMatch) show = yearMatch.show;
+      if (yearMatch?.show) show = yearMatch.show;
     }
 
+    if (!show?.id) return null;
     return fetchTVMetadataById(show.id, show.name || title, localYear);
   } catch (error) {
     console.error('TVmaze fetch error:', error);
@@ -95,11 +142,11 @@ export async function fetchTVMetadata(title: string, localYear?: number): Promis
 export async function fetchTVMetadataCandidates(title: string, localYear?: number): Promise<TVMetadata[]> {
   try {
     const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`);
-    const searchData: any[] = await searchRes.json();
+    const searchData = (await searchRes.json()) as TVMazeSearchEntry[];
     if (!Array.isArray(searchData) || searchData.length === 0) return [];
 
-    return await Promise.all(searchData.slice(0, 6).map(async (result: any) => {
-      const show = result.show || {};
+    return await Promise.all(searchData.slice(0, 6).map(async (result) => {
+      const show: TVMazeShow = result.show ?? {};
       if (show.id) {
         const details = await fetchTVMetadataById(show.id, show.name || title, localYear);
         if (details) return details;
