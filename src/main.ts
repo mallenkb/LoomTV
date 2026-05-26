@@ -1,71 +1,95 @@
 import {
   app,
-  BrowserWindow,
-  Menu,
   dialog,
   nativeImage,
   protocol,
   net,
   session,
-  autoUpdater as electronAutoUpdater,
 } from 'electron';
-import type { MenuItemConstructorOptions, OpenDialogOptions } from 'electron';
+import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import http from 'node:http';
-import type { Socket as NodeSocket } from 'node:net';
-import os from 'node:os';
-import { createHash, createHmac, randomBytes, randomInt, randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
-import { autoUpdater } from 'electron-updater';
 import {
   LOCAL_ACCESS_HEADER,
   LOCAL_ACCESS_QUERY_PARAM,
-  addLocalAccessToken,
   allowedCorsOrigin,
   createLocalAccessToken,
-  hasValidLocalAccessToken,
-  isLoopbackAddress,
   localAccessQuery,
-  normalizeRemoteAddress,
-  requestLanToken,
-  timingSafeStringEqual,
 } from './main/serverSecurity';
 import {
-  advertiseLanService,
   destroyLanDiscovery,
   discoverLanPeers,
-  unadvertiseLanService,
 } from './main/lanDiscovery';
-import {
-  appendH264EncoderOptions,
-  findFFmpeg,
-  findFFprobe,
-  preferredH264HardwareEncoder,
-} from './main/mediaBinaries';
+import { findFFmpeg } from './main/mediaBinaries';
 import {
   assertLocalMediaPath,
   canDirectPlay,
   probeMedia,
 } from './main/mediaProbe';
-import type { ApiResult, TranscodeOptions } from './main/mediaTypes';
+import type { ApiResult } from './main/mediaTypes';
 import {
   cleanupOldTranscodes,
-  serveHls,
   startTranscode,
   stopAllTranscodes,
   stopTranscode,
 } from './main/transcodeManager';
-import { buildEmbeddedSubtitleVttArgs } from './main/transcodePlan';
-import { getImageMimeType, getMimeType, getSubtitleMimeType } from './main/mimeTypes';
+import { probeMediaFile } from './main/mediaProbeFile';
+import { decodeDataUrl, readJsonBody, redirectToArtworkSource, safeEndResponse, writeJson } from './main/httpResponses';
+import { needsBrowserTranscoding } from './main/transcodeDecision';
+import { createLanSecurity } from './main/lanSecurity';
+import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
+import { createArtworkUrls } from './main/artworkUrls';
+import {
+  isImageFileName,
+  isMacSidecarFile,
+  isSubtitleFileName,
+  isVideoFileName,
+} from './main/fileClassification';
+import { createArtworkFinders } from './main/artworkFinders';
+import {
+  defaultLibraryFolderGroups,
+  detectLibraryFolderKind,
+  flattenLibraryFolders,
+  normalizeLibraryFolderGroups,
+} from './main/libraryFolders';
+import {
+  createSubtitleRecords,
+  fetchJikanEpisodesForLocalAnimeSeasons,
+  inferSeriesTitleFromEpisodeFiles,
+  isAnimeMetadata,
+  isLikelyAnimePath,
+  isSeriesMetadata,
+  isTVPattern,
+  mergeLocalSeasonsWithMetadata,
+  shouldTreatAsTV,
+} from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
-import { checkPairRateLimit, recordPairFailure, recordPairSuccess } from './main/pairRateLimit';
-import { normalizeProviderId, testMetadataKeys } from './main/metadataKeys';
+import { createWindow, getMainWindow, getWindowIconPath } from './main/windowManager';
+import {
+  getMediaServer,
+  getMediaServerPort,
+  getMediaServerSockets,
+  setMediaServer,
+  startMediaServer,
+} from './main/mediaServer';
+import {
+  buildUpdateMenu,
+  checkForUpdates,
+  clearUpdateQuitFallback,
+  configureAutoUpdater,
+  getUpdateState,
+  initAutoUpdater,
+  installDownloadedUpdate,
+  isUpdateInstalling,
+  stopUpdateCheckTimer,
+} from './main/autoUpdater';
+import type { UpdateState } from './main/autoUpdater';
+import { testMetadataKeys } from './main/metadataKeys';
 import {
   durableArtworkSource,
   durableArtworkSources,
-  isInlineArtworkSource,
 } from './main/artworkSources';
 import {
   cachedItemsAreComplete,
@@ -73,56 +97,29 @@ import {
   isTrustedLocalTagTitle,
   looksLikeLocalEpisodeFileTitle,
   mostCommonUsefulTitle,
-  srtToVtt,
 } from './main/libraryItemHelpers';
 import {
   mergeProviderIds,
-  parseIntegerTag,
   parseMetadataProviderIds,
-  providerIdsFromTags,
-  scrubTagText,
-  tagValue,
 } from './main/mediaTags';
 import type { MetadataProviderIds } from './main/mediaTags';
 import {
-  hasBitmapSubtitleSelection,
-  hasSubtitleSelection,
-  parseSubtitleStyle,
-  queryNumber,
-  streamMap,
-  subtitleFilterComplex,
-  subtitleSelections,
-  textSubtitleFilter,
-} from './main/transcodeFilters';
-import {
   getLocalNetworkAddresses,
-  getLocalNetworkName,
   getLocalNetworkNameFast,
-  getPrimaryLocalNetworkAddress,
-  isLoopbackHost,
 } from './main/networkInfo';
-import { cachedArtworkResponseHeaders, customArtworkReference, parseCustomArtworkReference } from './main/artworkCache';
-import {
-  closeServerForUpdateInstall,
-  trackServerConnections,
-} from './main/updateInstall';
+import { closeServerForUpdateInstall } from './main/updateInstall';
 import {
   backupDatabase,
   cacheLibraryArtwork,
   clearDatabase,
   getAllProgress,
-  getCachedArtwork,
-  getCustomArtwork,
-  getCustomArtworkData,
   getProgress,
   importCustomArtwork,
   importProgress,
   loadLibraryFromDatabase,
-  loadSettingsFromDatabase,
   saveCustomArtwork,
   saveLibraryToDatabase,
   saveProgress,
-  saveSettingsToDatabase,
 } from './main/database';
 import {
   cleanMediaTitle,
@@ -140,9 +137,7 @@ import {
 import type {
   EpisodeFile as MetadataEpisodeFile,
   EpisodeMeta as MetadataEpisodeMeta,
-  LocalMediaDetails as MetadataLocalMediaDetails,
   MediaItem as MetadataMediaItem,
-  TVMetadata as MetadataTVMetadata,
 } from './main/metadata/types';
 import { fetchOMDbMetadata, fetchOMDbMetadataById } from './main/metadata/omdb';
 import type { OMDbResponse } from './main/metadata/omdb';
@@ -156,7 +151,6 @@ import {
   fetchTMDBTVMetadataCandidates,
 } from './main/metadata/tmdb';
 import {
-  type JikanAnimeResult,
   fetchJikanMetadata,
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
@@ -164,9 +158,7 @@ import { fetchFanartMovieLogos, fetchFanartTVLogos } from './main/metadata/fanar
 
 type EpisodeMeta = MetadataEpisodeMeta;
 type EpisodeFile = MetadataEpisodeFile;
-type LocalMediaDetails = MetadataLocalMediaDetails;
 type MediaItem = MetadataMediaItem;
-type TVMetadata = MetadataTVMetadata;
 
 function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -202,12 +194,12 @@ if (!hasSingleInstanceLock) {
   app.quit();
 }
 
-let mainWindow: BrowserWindow | null = null;
 let isAppShuttingDown = false;
 
 function showOpenFolderDialog(options: OpenDialogOptions) {
-  return mainWindow
-    ? dialog.showOpenDialog(mainWindow, options)
+  const win = getMainWindow();
+  return win
+    ? dialog.showOpenDialog(win, options)
     : dialog.showOpenDialog(options);
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
@@ -215,72 +207,64 @@ const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const SCAN_CACHE_VERSION = 9;
 let libraryMutationVersion = 0;
 
-let mediaServerPort = 3847;
-let mediaServer: http.Server | null = null;
-const mediaServerSockets = new Set<NodeSocket>();
 const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
-const UPDATE_OWNER = 'mallenkb';
-const UPDATE_REPO = 'LoomTV';
-
-type UpdateStatus =
-  | 'idle'
-  | 'disabled'
-  | 'checking'
-  | 'available'
-  | 'downloading'
-  | 'downloaded'
-  | 'installing'
-  | 'not-available'
-  | 'error';
-
-interface UpdateState {
-  status: UpdateStatus;
-  currentVersion: string;
-  platform: NodeJS.Platform;
-  arch: string;
-  supported: boolean;
-  downloadPercent?: number;
-  latestVersion?: string;
-  releaseUrl?: string;
-  message?: string;
-  checkedAt?: string;
-}
-
-let updateState: UpdateState = {
-  status: 'idle',
-  currentVersion: app.getVersion(),
-  platform: process.platform,
-  arch: process.arch,
-  supported: isUpdaterSupportedPlatform(),
-};
-let updaterConfigured = false;
-let updateCheckInFlight = false;
-let updateCheckPromise: Promise<UpdateState> | null = null;
-let updateInstallStarted = false;
-let updatePromptInFlight = false;
-let updateCheckTimer: NodeJS.Timeout | null = null;
-let updateMenu: Menu | null = null;
-let updateQuitFallbackTimer: NodeJS.Timeout | null = null;
-let updateQuitFallbackCleanup: (() => void) | null = null;
-let downloadedUpdateFilePath: string | null = null;
-const AUTO_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
-const MAIN_WINDOW_NAME =
-  typeof MAIN_WINDOW_VITE_NAME === 'string' && MAIN_WINDOW_VITE_NAME ? MAIN_WINDOW_VITE_NAME : 'main_window';
 const ALLOWED_CORS_ORIGINS = new Set<string>(
   [MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : ''].filter(Boolean),
 );
 
-function isUpdaterSupportedPlatform(): boolean {
-  return process.platform === 'darwin'
-    || process.platform === 'win32'
-    || (process.platform === 'linux' && Boolean(process.env.APPIMAGE));
-}
+const {
+  isLoopbackRequest,
+  getLanServerBase,
+  isLanSharingEnabled,
+  getLanShareToken,
+  buildSignedLanUrl,
+  isSignedLanRequestValid,
+  authorizeLanRequest,
+  authorizeLocalRequest,
+  requireLocalOrLanAccess,
+  requireStreamAccess,
+  handleLanPairRequest,
+  libraryEtagFor,
+  syncLanAdvertisement,
+} = createLanSecurity({
+  loadSettings,
+  saveSettings,
+  localAccessToken: LOCAL_ACCESS_TOKEN,
+  libraryForLocalNetwork,
+});
+
+const {
+  getLocalImageUrl,
+  getLocalThumbnailUrl,
+  getEmbeddedThumbnailUrl,
+  isExternalArtworkUrl,
+  artworkDeliveryUrl,
+  remoteArtworkDeliveryUrl,
+  artworkDeliveryUrls,
+  customArtworkForRenderer,
+  subtitleRecordsForRenderer,
+  subtitleRecordsForLocalNetwork,
+  orderedArtworkCandidates,
+} = createArtworkUrls({
+  localAccessToken: LOCAL_ACCESS_TOKEN,
+  buildSignedLanUrl,
+});
+
+const {
+  getLocalFolderArtworkUrl,
+  getLocalMovieArtworkUrl,
+  getEmbeddedArtworkUrl,
+  hasPlayableVideoTrack,
+} = createArtworkFinders({
+  getLocalImageUrl,
+  getEmbeddedThumbnailUrl,
+});
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────
 
-interface LibraryData {
+export interface LibraryData {
   movies: MediaItem[];
   tvShows: MediaItem[];
   animeShows: MediaItem[];
@@ -295,12 +279,12 @@ type LibraryScanProgress = LibraryData & {
   totalFolders: number;
 };
 
-type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
+export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type ScanFolderKind = 'movies' | 'tv' | 'anime';
 type ScanCacheFolderKind = ScanFolderKind | 'auto';
 type LibraryScanMode = 'quick' | 'metadata' | 'full';
 
-interface LibraryFolderGroups {
+export interface LibraryFolderGroups {
   movies: string[];
   tvShows: string[];
   anime: string[];
@@ -318,19 +302,7 @@ interface ScanCacheEntry {
 
 type LibraryScanCache = Record<string, ScanCacheEntry>;
 
-interface ProbeMediaFileResult {
-  localMetadata?: LocalMediaDetails;
-  embeddedTitle?: string;
-  embeddedShowTitle?: string;
-  embeddedThumbnailStreamIndex?: number;
-  summary?: string;
-  year?: number;
-  season?: number;
-  episode?: number;
-  providerIds?: MetadataProviderIds;
-}
-
-interface AppSettings {
+export interface AppSettings {
   omdbApiKey?: string;
   tmdbApiKey?: string;
   metadataApiKeys?: Record<string, string>;
@@ -359,149 +331,6 @@ export type LanPairedDevice = {
   lastAddress?: string;
 };
 
-const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' | 'tmdbApiKey'>> = {
-  omdb: 'omdbApiKey',
-  tmdb: 'tmdbApiKey',
-};
-
-function normalizeSettings(raw: AppSettings): AppSettings {
-  const metadataApiKeys: Record<string, string> = {};
-  const rawKeys = raw.metadataApiKeys || {};
-  const autoSyncIntervalHours = Number(raw.autoSyncIntervalHours);
-  const defaultSidebarNavOrder = ['anime', 'tv', 'movies', 'others'];
-  const rawSidebarNavOrder = Array.isArray(raw.sidebarNavOrder) ? raw.sidebarNavOrder : [];
-  const sidebarNavOrder = [
-    ...rawSidebarNavOrder.filter((item) => defaultSidebarNavOrder.includes(item)),
-    ...defaultSidebarNavOrder.filter((item) => !rawSidebarNavOrder.includes(item)),
-  ];
-
-  for (const [provider, value] of Object.entries(rawKeys)) {
-    const providerId = normalizeProviderId(provider);
-    const apiKey = typeof value === 'string' ? value.trim() : '';
-    if (providerId && apiKey) metadataApiKeys[providerId] = apiKey;
-  }
-
-  if (raw.omdbApiKey?.trim()) metadataApiKeys.omdb = raw.omdbApiKey.trim();
-  if (raw.tmdbApiKey?.trim()) metadataApiKeys.tmdb = raw.tmdbApiKey.trim();
-
-  return {
-    ...raw,
-    omdbApiKey: metadataApiKeys.omdb || '',
-    tmdbApiKey: metadataApiKeys.tmdb || '',
-    metadataApiKeys,
-    autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
-      ? autoSyncIntervalHours
-      : 12,
-    playbackSkipBackSeconds: Number.isFinite(Number(raw.playbackSkipBackSeconds)) && Number(raw.playbackSkipBackSeconds) > 0
-      ? Number(raw.playbackSkipBackSeconds)
-      : 10,
-    playbackSkipForwardSeconds: Number.isFinite(Number(raw.playbackSkipForwardSeconds)) && Number(raw.playbackSkipForwardSeconds) > 0
-      ? Number(raw.playbackSkipForwardSeconds)
-      : 15,
-    sidebarNavOrder,
-    appThemeMode: 'dark',
-    appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
-      ? raw.appThemeColor
-      : 'yellow',
-    appDarkTheme: raw.appDarkTheme === 'default' || raw.appDarkTheme === 'justwatch' || raw.appDarkTheme === 'black'
-      ? raw.appDarkTheme
-      : 'black',
-    appLoaderStyle: raw.appLoaderStyle === 'logo-mark' || raw.appLoaderStyle === 'horizontal-logo' || raw.appLoaderStyle === 'play-mark'
-      ? raw.appLoaderStyle
-      : 'play-mark',
-    localNetworkSharingEnabled: Boolean(raw.localNetworkSharingEnabled),
-    localNetworkShareToken: raw.localNetworkShareToken && /^\d{6}$/.test(raw.localNetworkShareToken)
-      ? raw.localNetworkShareToken
-      : createLanShareCode(),
-    localNetworkDeviceId: typeof raw.localNetworkDeviceId === 'string' && raw.localNetworkDeviceId.length >= 8
-      ? raw.localNetworkDeviceId
-      : randomUUID(),
-    localNetworkDeviceName: typeof raw.localNetworkDeviceName === 'string' && raw.localNetworkDeviceName.trim()
-      ? raw.localNetworkDeviceName.trim().slice(0, 80)
-      : os.hostname(),
-    localNetworkHmacSecret: typeof raw.localNetworkHmacSecret === 'string' && /^[0-9a-f]{32,}$/i.test(raw.localNetworkHmacSecret)
-      ? raw.localNetworkHmacSecret
-      : randomBytes(32).toString('hex'),
-    localNetworkPairedDevices: Array.isArray(raw.localNetworkPairedDevices)
-      ? raw.localNetworkPairedDevices
-        .filter((entry): entry is LanPairedDevice =>
-          !!entry
-          && typeof entry.id === 'string'
-          && typeof entry.token === 'string'
-          && /^[0-9a-f]{32,}$/i.test(entry.token))
-        .map((entry) => ({
-          id: entry.id,
-          name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 80) : 'Unnamed device',
-          token: entry.token,
-          createdAt: Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : Date.now(),
-          lastSeenAt: Number.isFinite(entry.lastSeenAt) ? Number(entry.lastSeenAt) : Date.now(),
-          lastAddress: typeof entry.lastAddress === 'string' ? entry.lastAddress : undefined,
-        }))
-      : [],
-  };
-}
-
-function getMetadataApiKey(settings: AppSettings, providerId: string): string | undefined {
-  const normalized = normalizeSettings(settings);
-  const id = normalizeProviderId(providerId);
-  const directKey = normalized.metadataApiKeys?.[id]?.trim();
-  if (directKey) return directKey;
-
-  const legacyField = METADATA_KEY_ALIASES[id];
-  return legacyField ? normalized[legacyField]?.trim() || undefined : undefined;
-}
-
-async function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk.toString();
-    });
-    req.on('end', () => {
-      if (!body) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(body));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-function writeJson(res: http.ServerResponse, status: number, payload: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(payload));
-}
-
-function decodeDataUrl(dataUrl: string): { buffer: Buffer; mimeType: string } | null {
-  const match = dataUrl.match(/^data:([^;,]+)?;base64,(.+)$/s);
-  if (!match) return null;
-  return {
-    mimeType: match[1] || 'application/octet-stream',
-    buffer: Buffer.from(match[2], 'base64'),
-  };
-}
-
-function redirectToArtworkSource(res: http.ServerResponse, sourceUrl: string): void {
-  res.writeHead(302, {
-    Location: sourceUrl,
-    'Cache-Control': 'public, max-age=3600',
-  });
-  res.end();
-}
-
-function safeEndResponse(res: http.ServerResponse): void {
-  if (!res.writableEnded) res.end();
-}
-
-function createLanShareCode(): string {
-  return String(randomInt(0, 1_000_000)).padStart(6, '0');
-}
-
 async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
   try {
     const data = await fn();
@@ -509,28 +338,6 @@ async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
-}
-
-// ─── Settings ────────────────────────────────────────────────────────────────
-
-function loadSettings(): AppSettings {
-  const databaseSettings = loadSettingsFromDatabase();
-  if (databaseSettings) return normalizeSettings(databaseSettings as AppSettings);
-
-  try {
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const settings = normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')) as AppSettings);
-      saveSettingsToDatabase(settings as unknown as Record<string, unknown>);
-      return settings;
-    }
-  } catch {}
-  return normalizeSettings({});
-}
-
-function saveSettings(settings: AppSettings): void {
-  try {
-    saveSettingsToDatabase(normalizeSettings(settings) as unknown as Record<string, unknown>);
-  } catch {}
 }
 
 function clearAppData(): LibraryData {
@@ -546,400 +353,6 @@ function clearAppData(): LibraryData {
   return loadLibrary();
 }
 
-function needsTranscoding(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase();
-  return ['.mkv', '.avi', '.wmv', '.flv', '.mpg', '.mpeg', '.m2ts', '.3gp', '.ts'].includes(ext);
-}
-
-function needsBrowserTranscoding(filePath: string): boolean {
-  const ext = path.extname(filePath).toLowerCase();
-  if (needsTranscoding(filePath)) return true;
-  if (!['.mp4', '.m4v', '.mov', '.webm'].includes(ext)) return true;
-
-  const probe = probeMediaFile(filePath);
-  const videoCodec = (probe.localMetadata?.videoCodec || '').toLowerCase();
-  const videoProfile = (probe.localMetadata?.videoProfile || '').toLowerCase();
-  const pixelFormat = (probe.localMetadata?.pixelFormat || '').toLowerCase();
-  const audioCodec = (probe.localMetadata?.audioCodec || '').toLowerCase();
-
-  if (ext === '.webm') {
-    return !['vp8', 'vp9', 'av1'].includes(videoCodec) || !['opus', 'vorbis'].includes(audioCodec);
-  }
-
-  const safeH264 = videoCodec === 'h264'
-    && pixelFormat === 'yuv420p'
-    && !videoProfile.includes('10');
-
-  return !safeH264 || !['aac', 'mp3'].includes(audioCodec);
-}
-
-function getLocalImageUrl(filePath: string): string {
-  const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), LOCAL_ACCESS_TOKEN);
-  return `http://127.0.0.1:${mediaServerPort}/api/local-image?${params.toString()}`;
-}
-
-function getLocalThumbnailUrl(filePath: string, time = '00:03:00'): string {
-  const params = addLocalAccessToken(new URLSearchParams({ path: filePath, t: time }), LOCAL_ACCESS_TOKEN);
-  return `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
-}
-
-function getEmbeddedThumbnailUrl(filePath: string, streamIndex?: number): string {
-  const params = addLocalAccessToken(new URLSearchParams({ path: filePath, embedded: '1' }), LOCAL_ACCESS_TOKEN);
-  if (streamIndex !== undefined) params.set('stream', String(streamIndex));
-  return `http://127.0.0.1:${mediaServerPort}/api/thumbnail?${params.toString()}`;
-}
-
-function getRequestRemoteAddress(req: http.IncomingMessage): string {
-  return normalizeRemoteAddress(req.socket.remoteAddress);
-}
-
-function isLoopbackRequest(req: http.IncomingMessage): boolean {
-  return isLoopbackAddress(getRequestRemoteAddress(req));
-}
-
-function getLanServerBase(): string | null {
-  const address = getPrimaryLocalNetworkAddress();
-  return address ? `http://${address}:${mediaServerPort}` : null;
-}
-
-function isLanSharingEnabled(): boolean {
-  return Boolean(loadSettings().localNetworkSharingEnabled);
-}
-
-function getLanShareToken(): string {
-  const settings = loadSettings();
-  if (settings.localNetworkShareToken && /^\d{6}$/.test(settings.localNetworkShareToken)) {
-    return settings.localNetworkShareToken;
-  }
-
-  const token = createLanShareCode();
-  saveSettings({ ...settings, localNetworkShareToken: token });
-  return token;
-}
-
-function getLanHmacSecret(): string {
-  return loadSettings().localNetworkHmacSecret || '';
-}
-
-function requestToken(reqUrl: URL, req: http.IncomingMessage): string {
-  return requestLanToken(reqUrl, req.headers);
-}
-
-function findPairedDeviceByToken(token: string): LanPairedDevice | null {
-  if (!token) return null;
-  const settings = loadSettings();
-  const devices = settings.localNetworkPairedDevices || [];
-  for (const device of devices) {
-    if (timingSafeStringEqual(device.token, token)) return device;
-  }
-  return null;
-}
-
-function touchPairedDevice(deviceId: string, address: string): void {
-  const settings = loadSettings();
-  const devices = settings.localNetworkPairedDevices || [];
-  let changed = false;
-  const updated = devices.map((device) => {
-    if (device.id !== deviceId) return device;
-    changed = true;
-    return { ...device, lastSeenAt: Date.now(), lastAddress: address };
-  });
-  if (changed) saveSettings({ ...settings, localNetworkPairedDevices: updated });
-}
-
-function signLanPayload(payload: string): string {
-  return createHmac('sha256', getLanHmacSecret()).update(payload).digest('hex');
-}
-
-function buildSignedLanUrl(base: string, pathname: string, params: URLSearchParams, ttlSeconds = 24 * 60 * 60): string {
-  const expires = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const nonce = randomBytes(8).toString('hex');
-  const signingInput = `${pathname}?${params.toString()}|exp=${expires}|nonce=${nonce}`;
-  const sig = signLanPayload(signingInput);
-  params.set('exp', String(expires));
-  params.set('nonce', nonce);
-  params.set('sig', sig);
-  return `${base}${pathname}?${params.toString()}`;
-}
-
-function isSignedLanRequestValid(reqUrl: URL): boolean {
-  const sig = reqUrl.searchParams.get('sig');
-  const exp = reqUrl.searchParams.get('exp');
-  const nonce = reqUrl.searchParams.get('nonce');
-  if (!sig || !exp || !nonce) return false;
-
-  const expSeconds = Number(exp);
-  if (!Number.isFinite(expSeconds) || expSeconds < Math.floor(Date.now() / 1000)) return false;
-
-  const params = new URLSearchParams(reqUrl.searchParams);
-  params.delete('sig');
-  params.delete('exp');
-  params.delete('nonce');
-  const signingInput = `${reqUrl.pathname}?${params.toString()}|exp=${expSeconds}|nonce=${nonce}`;
-  return timingSafeStringEqual(sig, signLanPayload(signingInput));
-}
-
-function authorizeLanRequest(reqUrl: URL, req: http.IncomingMessage): { ok: boolean; device?: LanPairedDevice } {
-  if (!isLanSharingEnabled()) return { ok: false };
-  const token = requestToken(reqUrl, req);
-  if (!token) return { ok: false };
-
-  if (timingSafeStringEqual(token, getLanShareToken())) {
-    return { ok: true };
-  }
-
-  const device = findPairedDeviceByToken(token);
-  if (device) {
-    touchPairedDevice(device.id, getRequestRemoteAddress(req));
-    return { ok: true, device };
-  }
-
-  return { ok: false };
-}
-
-function authorizeLocalRequest(reqUrl: URL, req: http.IncomingMessage): boolean {
-  return isLoopbackRequest(req) && hasValidLocalAccessToken(reqUrl, req.headers, LOCAL_ACCESS_TOKEN);
-}
-
-function requireLocalOrLanAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
-  if (authorizeLocalRequest(reqUrl, req)) return true;
-  if (isLoopbackRequest(req)) {
-    res.writeHead(401, { 'Content-Type': 'text/plain' });
-    res.end('Local access token is required.');
-    return false;
-  }
-  if (authorizeLanRequest(reqUrl, req).ok) return true;
-
-  res.writeHead(isLanSharingEnabled() ? 401 : 403, { 'Content-Type': 'text/plain' });
-  res.end(isLanSharingEnabled() ? 'Local network pairing is required.' : 'Local network sharing is disabled.');
-  return false;
-}
-
-function requireStreamAccess(reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse): boolean {
-  if (authorizeLocalRequest(reqUrl, req)) return true;
-  if (isLoopbackRequest(req)) {
-    res.writeHead(401, { 'Content-Type': 'text/plain' });
-    res.end('Local access token is required.');
-    return false;
-  }
-  if (isLanSharingEnabled() && isSignedLanRequestValid(reqUrl)) return true;
-  if (authorizeLanRequest(reqUrl, req).ok) return true;
-
-  res.writeHead(isLanSharingEnabled() ? 401 : 403, { 'Content-Type': 'text/plain' });
-  res.end(isLanSharingEnabled() ? 'Local network pairing is required.' : 'Local network sharing is disabled.');
-  return false;
-}
-
-async function handleLanPairRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  if (!isLanSharingEnabled()) {
-    res.writeHead(403, { 'Content-Type': 'text/plain' });
-    res.end('Local network sharing is disabled.');
-    return;
-  }
-
-  const address = getRequestRemoteAddress(req);
-  const limit = checkPairRateLimit(address);
-  if (!limit.allowed) {
-    res.writeHead(429, {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Retry-After': String(Math.ceil((limit.retryAfterMs || 0) / 1000)),
-    });
-    res.end(JSON.stringify({ error: 'Too many failed pairing attempts. Try again later.' }));
-    return;
-  }
-
-  const body = await readJsonBody(req).catch(() => ({} as Record<string, unknown>));
-  const code = String(body.code || '').replace(/\D/g, '').slice(0, 6);
-  const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
-  const requestedDeviceId = String(body.deviceId || '').trim().slice(0, 64);
-
-  if (!timingSafeStringEqual(code, getLanShareToken())) {
-    recordPairFailure(address);
-    writeJson(res, 401, { error: 'The sharing code was not accepted.' });
-    return;
-  }
-
-  recordPairSuccess(address);
-  const settings = loadSettings();
-  const existing = (settings.localNetworkPairedDevices || []).find((device) => requestedDeviceId && device.id === requestedDeviceId);
-  const deviceId = existing?.id || requestedDeviceId || randomUUID();
-  const deviceToken = randomBytes(32).toString('hex');
-  const now = Date.now();
-  const updated: LanPairedDevice = {
-    id: deviceId,
-    name: deviceName,
-    token: deviceToken,
-    createdAt: existing?.createdAt || now,
-    lastSeenAt: now,
-    lastAddress: address,
-  };
-  const others = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
-  saveSettings({ ...settings, localNetworkPairedDevices: [...others, updated] });
-
-  const payload = libraryForLocalNetwork();
-  writeJson(res, 200, {
-    ok: true,
-    deviceId,
-    deviceToken,
-    hostDeviceId: settings.localNetworkDeviceId,
-    hostDeviceName: settings.localNetworkDeviceName || os.hostname(),
-    library: payload,
-    libraryEtag: libraryEtagFor(payload),
-  });
-}
-
-// ─── Library snapshot ETag ────────────────────────────────────────────────────
-
-function libraryEtagFor(payload: unknown): string {
-  return createHash('sha1').update(JSON.stringify(payload)).digest('hex');
-}
-
-// ─── mDNS advertisement sync ─────────────────────────────────────────────────
-
-function syncLanAdvertisement(): void {
-  const settings = loadSettings();
-  if (!settings.localNetworkSharingEnabled || !mediaServerPort) {
-    unadvertiseLanService();
-    return;
-  }
-  advertiseLanService({
-    port: mediaServerPort,
-    deviceId: settings.localNetworkDeviceId || randomUUID(),
-    deviceName: settings.localNetworkDeviceName || os.hostname(),
-    appVersion: app.getVersion(),
-  });
-}
-
-function isLocalMediaServerArtworkUrl(source: string): boolean {
-  try {
-    const parsed = new URL(source);
-    return isLoopbackHost(parsed.hostname)
-      && ['/api/thumbnail', '/api/local-image', '/api/cached-artwork', '/api/custom-artwork'].includes(parsed.pathname);
-  } catch {
-    return false;
-  }
-}
-
-function isExternalArtworkUrl(source: string): boolean {
-  try {
-    const parsed = new URL(source);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !isLoopbackHost(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function artworkDeliveryUrl(source?: string | null): string {
-  if (isInlineArtworkSource(source)) return String(source).trim();
-
-  const durableSource = durableArtworkSource(source);
-  if (!durableSource) return '';
-
-  const customArtwork = parseCustomArtworkReference(durableSource);
-  if (customArtwork) {
-    const params = addLocalAccessToken(new URLSearchParams({
-      mediaId: customArtwork.mediaId,
-      target: customArtwork.target,
-    }), LOCAL_ACCESS_TOKEN);
-    return `http://127.0.0.1:${mediaServerPort}/api/custom-artwork?${params.toString()}`;
-  }
-
-  if (isLocalMediaServerArtworkUrl(durableSource)) {
-    const parsed = new URL(durableSource);
-    parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-    return `http://127.0.0.1:${mediaServerPort}${parsed.pathname}${parsed.search}`;
-  }
-
-  if (isExternalArtworkUrl(durableSource)) {
-    const params = addLocalAccessToken(new URLSearchParams({ source: durableSource }), LOCAL_ACCESS_TOKEN);
-    return `http://127.0.0.1:${mediaServerPort}/api/cached-artwork?${params.toString()}`;
-  }
-
-  return durableSource;
-}
-
-function rewriteLocalServerUrlSigned(source: string, base: string): string {
-  try {
-    const parsed = new URL(source);
-    const params = new URLSearchParams(parsed.search);
-    params.delete('token');
-    return signedArtworkUrlForRemote(base, parsed.pathname, params);
-  } catch {
-    return source;
-  }
-}
-
-function remoteArtworkDeliveryUrl(source: string, base: string, _token: string): string {
-  if (!source) return '';
-  if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrlSigned(source, base);
-  if (isExternalArtworkUrl(source)) {
-    return signedArtworkUrlForRemote(base, '/api/cached-artwork', new URLSearchParams({ source }));
-  }
-  return source;
-}
-
-function artworkDeliveryUrls(sources?: string[]): string[] {
-  return Array.from(new Set((sources || []).map(artworkDeliveryUrl).filter(Boolean)));
-}
-
-function customArtworkForRenderer(mediaId: string): Record<string, string> {
-  const entries = Object.entries(getCustomArtwork(mediaId)).map(([target]) => [
-    target,
-    artworkDeliveryUrl(customArtworkReference(mediaId, target)),
-  ]);
-  return Object.fromEntries(entries);
-}
-
-function localSubtitleUrl(source: string): string {
-  const trimmed = source.trim();
-  if (!trimmed) return trimmed;
-
-  try {
-    const parsed = new URL(trimmed, `http://127.0.0.1:${mediaServerPort}`);
-    if (parsed.pathname !== '/subtitle') return source;
-    parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-    return /^https?:\/\//i.test(trimmed) ? parsed.toString() : `${parsed.pathname}${parsed.search}`;
-  } catch {
-    return source;
-  }
-}
-
-function signedSubtitleUrlForRemote(base: string, source: string): string {
-  const trimmed = source.trim();
-  if (!trimmed) return trimmed;
-
-  try {
-    const parsed = new URL(trimmed, base);
-    if (parsed.pathname !== '/subtitle') return source;
-    const params = new URLSearchParams(parsed.search);
-    params.delete(LOCAL_ACCESS_QUERY_PARAM);
-    params.delete('sig');
-    params.delete('exp');
-    params.delete('nonce');
-    return buildSignedLanUrl(base, parsed.pathname, params);
-  } catch {
-    return source;
-  }
-}
-
-function subtitleRecordsForRenderer(subtitles?: MediaItem['subtitles']): MediaItem['subtitles'] {
-  return subtitles?.map((subtitle) => ({
-    ...subtitle,
-    url: localSubtitleUrl(subtitle.url),
-  }));
-}
-
-function subtitleRecordsForLocalNetwork(subtitles: MediaItem['subtitles'] | undefined, base: string): MediaItem['subtitles'] {
-  return subtitles?.map((subtitle) => ({
-    ...subtitle,
-    url: signedSubtitleUrlForRemote(base, subtitle.url),
-  }));
-}
-
-function orderedArtworkCandidates(...urls: Array<string | null | undefined>): string[] {
-  return Array.from(new Set(urls.filter((url): url is string => Boolean(url?.trim()))));
-}
-
 function shouldSplitContainerFolder(folderPath: string, folderName: string, subDirs: fs.Dirent[]): boolean {
   const episodeBearingDirs = subDirs.filter((dir) => {
     try {
@@ -953,131 +366,6 @@ function shouldSplitContainerFolder(folderPath: string, folderName: string, subD
 
   const showLikeDirs = episodeBearingDirs.filter((dir) => !isGenericGroupingFolderTitle(dir.name));
   return showLikeDirs.length > 0 || (episodeBearingDirs.length > 1 && isGenericGroupingFolderTitle(folderName));
-}
-
-const mediaProbeCache = new Map<string, ProbeMediaFileResult>();
-
-function mediaProbeCacheKey(filePath: string): string | null {
-  try {
-    const stats = fs.statSync(filePath);
-    return `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`;
-  } catch {
-    return null;
-  }
-}
-
-function cacheProbeResult(cacheKey: string | null, result: ProbeMediaFileResult): ProbeMediaFileResult {
-  if (!cacheKey) return result;
-  if (mediaProbeCache.size > 5000) mediaProbeCache.clear();
-  mediaProbeCache.set(cacheKey, result);
-  return result;
-}
-
-function probeMediaFile(filePath: string): ProbeMediaFileResult {
-  const cacheKey = mediaProbeCacheKey(filePath);
-  if (cacheKey) {
-    const cached = mediaProbeCache.get(cacheKey);
-    if (cached) return cached;
-  }
-
-  const ffprobePath = findFFprobe();
-  if (!ffprobePath) return {};
-
-  try {
-    const raw = execFileSync(
-      ffprobePath,
-      [
-        '-v', 'quiet',
-        '-print_format', 'json',
-        '-show_format',
-        '-show_streams',
-        filePath,
-      ],
-      { encoding: 'utf8' },
-    );
-
-    const parsed = JSON.parse(raw) as {
-      format?: { duration?: string; bit_rate?: string; format_name?: string; tags?: Record<string, string> };
-      streams?: Array<{
-        index?: number;
-        codec_type?: string;
-        codec_name?: string;
-        profile?: string;
-        pix_fmt?: string;
-        width?: number;
-        height?: number;
-        channels?: number;
-        disposition?: Record<string, number>;
-        tags?: Record<string, string>;
-      }>;
-    };
-
-    const embeddedThumbnailStream = parsed.streams?.find((stream) =>
-      stream.index !== undefined
-      && (
-        stream.disposition?.attached_pic === 1
-        || (stream.codec_type === 'attachment' && /^(mjpeg|jpeg|png|webp|bmp)$/i.test(stream.codec_name || ''))
-      ),
-    );
-    const videoStream = parsed.streams?.find((stream) =>
-      stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1,
-    ) || parsed.streams?.find((stream) => stream.codec_type === 'video');
-    const audioStreams = parsed.streams?.filter((stream) => stream.codec_type === 'audio') || [];
-    const subtitleStreams = parsed.streams?.filter((stream) => stream.codec_type === 'subtitle') || [];
-    const tags = parsed.format?.tags || {};
-    const videoTags = videoStream?.tags || {};
-    const preferredTitle = scrubTagText(
-      tagValue(tags, 'title', 'name')
-      || tagValue(videoTags, 'title', 'name'),
-    );
-    const preferredShowTitle = scrubTagText(
-      tagValue(tags, 'show', 'showtitle', 'series', 'series_title', 'tvshow', 'tv_show', 'album')
-      || tagValue(videoTags, 'show', 'showtitle', 'series', 'series_title', 'tvshow', 'tv_show', 'album'),
-    );
-    const summary = scrubTagText(
-      tagValue(tags, 'description', 'comment', 'synopsis', 'overview', 'summary')
-      || tagValue(videoTags, 'description', 'comment', 'synopsis', 'overview', 'summary'),
-    );
-    const year = parseYearFromText(
-      tagValue(tags, 'date', 'year', 'originaldate', 'original_date', 'release_date', 'releasedate')
-      || tagValue(videoTags, 'date', 'year', 'originaldate', 'original_date', 'release_date', 'releasedate'),
-    );
-    const season = parseIntegerTag(
-      tagValue(tags, 'season_number', 'season', 'season_sort', 'part_number')
-      || tagValue(videoTags, 'season_number', 'season', 'season_sort', 'part_number'),
-    );
-    const episode = parseIntegerTag(
-      tagValue(tags, 'episode_sort', 'episode_id', 'episode_number', 'episode', 'track', 'tracknumber')
-      || tagValue(videoTags, 'episode_sort', 'episode_id', 'episode_number', 'episode', 'track', 'tracknumber'),
-    );
-
-    return cacheProbeResult(cacheKey, {
-      localMetadata: {
-        durationSeconds: parsed.format?.duration ? Math.round(parseFloat(parsed.format.duration)) : undefined,
-        width: videoStream?.width,
-        height: videoStream?.height,
-        videoCodec: videoStream?.codec_name,
-        videoProfile: videoStream?.profile,
-        pixelFormat: videoStream?.pix_fmt,
-        audioCodec: audioStreams[0]?.codec_name,
-        audioTracks: audioStreams.length || undefined,
-        subtitleTracks: subtitleStreams.length || undefined,
-        bitrateKbps: parsed.format?.bit_rate ? Math.round(parseInt(parsed.format.bit_rate, 10) / 1000) : undefined,
-        container: parsed.format?.format_name?.split(',')[0],
-      },
-      embeddedTitle: preferredTitle || undefined,
-      embeddedShowTitle: preferredShowTitle || undefined,
-      embeddedThumbnailStreamIndex: embeddedThumbnailStream?.index,
-      summary: summary || undefined,
-      year: year || undefined,
-      season,
-      episode,
-      providerIds: mergeProviderIds(providerIdsFromTags(tags), providerIdsFromTags(videoTags)),
-    });
-  } catch (error) {
-    console.error('ffprobe error for', filePath, error);
-    return cacheProbeResult(cacheKey, {});
-  }
 }
 
 function makeLocalEpisodeMeta(files: EpisodeFile[], seriesTitle?: string): EpisodeMeta[] {
@@ -1104,1024 +392,8 @@ function makeLocalEpisodeMeta(files: EpisodeFile[], seriesTitle?: string): Episo
 
 // ─── HTTP Media Server ────────────────────────────────────────────────────────
 
-function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse): boolean {
-  const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
-  const allowedOrigin = allowedCorsOrigin(origin, ALLOWED_CORS_ORIGINS);
-  res.setHeader('Vary', 'Origin');
-  if (!allowedOrigin) return !origin;
-
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Headers', `Range, Content-Type, Authorization, ${LOCAL_ACCESS_HEADER}`);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
-  return true;
-}
-
-function startMediaServer(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
-      const corsAllowed = applyCorsHeaders(req, res);
-
-      if (req.method === 'OPTIONS') {
-        res.writeHead(corsAllowed ? 204 : 403);
-        res.end();
-        return;
-      }
-
-      const reqUrl = new URL(req.url || '/', `http://127.0.0.1:${mediaServerPort}`);
-      const filePath = decodeURIComponent(reqUrl.searchParams.get('path') || '');
-      const startSec = parseFloat(reqUrl.searchParams.get('t') || '0');
-
-      if (reqUrl.pathname === '/api/ping') {
-        writeJson(res, 200, { ok: true, port: mediaServerPort });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/lan/info') {
-        const settings = loadSettings();
-        writeJson(res, 200, {
-          ok: true,
-          app: 'LoomTV',
-          deviceId: settings.localNetworkDeviceId,
-          deviceName: settings.localNetworkDeviceName || os.hostname(),
-          sharingEnabled: Boolean(settings.localNetworkSharingEnabled),
-          networkName: getLocalNetworkName(),
-          port: mediaServerPort,
-          addresses: getLocalNetworkAddresses(),
-        });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/lan/status') {
-        if (!isLoopbackRequest(req)) {
-          res.writeHead(403, { 'Content-Type': 'text/plain' });
-          res.end('LAN status is only available on this device.');
-          return;
-        }
-
-        const settings = loadSettings();
-        const token = getLanShareToken();
-        const base = getLanServerBase();
-        writeJson(res, 200, {
-          sharingEnabled: isLanSharingEnabled(),
-          token,
-          deviceId: settings.localNetworkDeviceId,
-          deviceName: settings.localNetworkDeviceName || os.hostname(),
-          networkName: getLocalNetworkName(),
-          port: mediaServerPort,
-          addresses: getLocalNetworkAddresses(),
-          baseUrl: base,
-          libraryUrl: base ? `${base}/api/lan/library` : null,
-          pairedDevices: settings.localNetworkPairedDevices || [],
-        });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/lan/pair' && req.method === 'POST') {
-        handleLanPairRequest(req, res).catch((error) => {
-          console.error('[lan/pair] error', error);
-          writeJson(res, 500, { error: 'Pairing failed' });
-        });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/lan/unpair' && req.method === 'POST') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
-        const authResult = authorizeLanRequest(reqUrl, req);
-        // Devices may self-revoke; loopback can revoke any device.
-        readJsonBody(req)
-          .catch((): Record<string, unknown> => ({}))
-          .then((body) => {
-            const settings = loadSettings();
-            const requestedId = String(body?.deviceId || authResult.device?.id || '');
-            if (!requestedId) {
-              writeJson(res, 400, { error: 'deviceId required' });
-              return;
-            }
-            if (!isLoopbackRequest(req) && authResult.device && authResult.device.id !== requestedId) {
-              writeJson(res, 403, { error: 'Cannot revoke other devices' });
-              return;
-            }
-            const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== requestedId);
-            saveSettings({ ...settings, localNetworkPairedDevices: remaining });
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('[lan/unpair] error', error);
-            writeJson(res, 500, { error: 'Unpair failed' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/lan/library') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
-        const payload = libraryForLocalNetwork();
-        const etag = `"${libraryEtagFor(payload)}"`;
-        const requestEtag = (req.headers['if-none-match'] || '') as string;
-        if (requestEtag && requestEtag === etag) {
-          res.writeHead(304, { ETag: etag });
-          res.end();
-          return;
-        }
-        res.setHeader('ETag', etag);
-        res.setHeader('Cache-Control', 'no-cache');
-        writeJson(res, 200, payload);
-        return;
-      }
-
-      // Stream-like endpoints accept signed LAN URLs.
-      const isStreamRoute = reqUrl.pathname === '/stream'
-        || reqUrl.pathname === '/subtitle'
-        || reqUrl.pathname.startsWith('/hls/');
-      const isArtworkRoute = reqUrl.pathname === '/api/cached-artwork'
-        || reqUrl.pathname === '/api/local-image'
-        || reqUrl.pathname === '/api/thumbnail';
-      const hasValidSignature = isLanSharingEnabled() && isSignedLanRequestValid(reqUrl);
-      const hasLocalAccess = authorizeLocalRequest(reqUrl, req);
-      if (!isStreamRoute && !(isArtworkRoute && (hasLocalAccess || hasValidSignature)) && !requireLocalOrLanAccess(reqUrl, req, res)) return;
-
-      if (reqUrl.pathname === '/api/library' && req.method === 'GET') {
-        writeJson(res, 200, libraryForRenderer());
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/library/scan' && req.method === 'POST') {
-        const scanVersion = libraryMutationVersion;
-        readJsonBody(req)
-          .catch((): Record<string, unknown> => ({}))
-          .then((body) => scanLibrary(loadLibrary(), {
-            force: Boolean(body.force),
-            mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
-          }))
-          .then(async (scanned) => {
-            if (saveLibraryFromScan(scanned, scanVersion)) {
-              await cacheArtworkNow(scanned);
-            }
-            writeJson(res, 200, libraryForRenderer());
-          })
-          .catch((error) => {
-            console.error('scan library API error:', error);
-            writeJson(res, 500, { error: 'Failed to scan library' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/library/add-folder' && req.method === 'POST') {
-        readJsonBody(req)
-          .catch((): Record<string, unknown> => ({}))
-          .then((body) => {
-            const requestedKind = String(body.kind || '');
-            const kind: LibraryFolderKind = requestedKind === 'tvShows' || requestedKind === 'anime' || requestedKind === 'movies' || requestedKind === 'others'
-              ? requestedKind
-              : 'movies';
-            return showOpenFolderDialog({ properties: ['openDirectory'] }).then((result) => ({ result, kind }));
-          })
-          .then(async (result) => {
-            if (result.result.canceled || result.result.filePaths.length === 0) {
-              writeJson(res, 200, null);
-              return;
-            }
-
-            const data = loadLibrary();
-            const newFolder = result.result.filePaths[0];
-            const updated = addFolderToLibrary(data, newFolder, result.kind);
-            saveLibraryMutation(updated);
-            const scanVersion = libraryMutationVersion;
-            const scanned = await scanLibrary(updated, { mode: 'quick' });
-            if (saveLibraryFromScan(scanned, scanVersion)) {
-              await cacheArtworkNow(scanned);
-            }
-            writeJson(res, 200, libraryForRenderer());
-          })
-          .catch((error) => {
-            console.error('add folder API error:', error);
-            writeJson(res, 500, { error: 'Failed to add folder' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/library/remove-folder' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            const data = loadLibrary();
-            const updated = removeFolderFromLibrary(data, String(body.folderPath || ''));
-            saveLibraryMutation(updated);
-            writeJson(res, 200, libraryForRenderer());
-          })
-          .catch((error) => {
-            console.error('remove folder API error:', error);
-            writeJson(res, 500, { error: 'Failed to remove folder' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/settings' && req.method === 'GET') {
-        writeJson(res, 200, loadSettings());
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/settings' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            saveSettings({ ...loadSettings(), ...(body as AppSettings) });
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('save settings API error:', error);
-            writeJson(res, 500, { error: 'Failed to save settings' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/metadata/test-keys' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => testMetadataKeys((body.keys || {}) as Record<string, string>))
-          .then((results) => writeJson(res, 200, results))
-          .catch((error) => {
-            console.error('metadata key test API error:', error);
-            writeJson(res, 500, { error: 'Failed to test metadata keys' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork/playback-logo' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => getPlaybackLogo(String(body.mediaId || '')))
-          .then((result) => writeJson(res, 200, result))
-          .catch((error) => {
-            console.error('playback logo API error:', error);
-            writeJson(res, 500, { error: 'Failed to fetch playback logo' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/progress' && req.method === 'GET') {
-        const requestedPath = reqUrl.searchParams.get('filePath') || '';
-        writeJson(res, 200, requestedPath ? getProgress(requestedPath) : getAllProgress());
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/progress' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            const file = String(body.filePath || '');
-            if (!file) {
-              writeJson(res, 400, { error: 'filePath is required' });
-              return;
-            }
-            writeJson(res, 200, saveProgress(file, Number(body.position) || 0, Number(body.duration) || 0));
-          })
-          .catch((error) => {
-            console.error('save progress API error:', error);
-            writeJson(res, 500, { error: 'Failed to save progress' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/progress/import' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            importProgress((body.progress || {}) as Record<string, number | { position?: number; duration?: number; updatedAt?: number }>);
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('import progress API error:', error);
-            writeJson(res, 500, { error: 'Failed to import progress' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork' && req.method === 'GET') {
-        writeJson(res, 200, customArtworkForRenderer(reqUrl.searchParams.get('mediaId') || ''));
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            saveCustomArtwork(String(body.mediaId || ''), String(body.target || ''), String(body.dataUrl || ''));
-            writeJson(res, 200, customArtworkForRenderer(String(body.mediaId || '')));
-          })
-          .catch((error) => {
-            console.error('save artwork API error:', error);
-            writeJson(res, 500, { error: 'Failed to save artwork' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork/refresh-official' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => refreshOfficialArtwork(String(body.mediaId || '')))
-          .then((artwork) => writeJson(res, 200, artwork))
-          .catch((error) => {
-            console.error('refresh official artwork API error:', error);
-            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to refresh official artwork' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork/official-candidates' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => getOfficialMetadataCandidates(String(body.mediaId || '')))
-          .then((candidates) => writeJson(res, 200, candidates))
-          .catch((error) => {
-            console.error('official metadata candidates API error:', error);
-            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to fetch official metadata candidates' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork/apply-official' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => applyOfficialMetadataCandidate(String(body.mediaId || ''), body.candidate as OfficialMetadataCandidate))
-          .then((artwork) => writeJson(res, 200, artwork))
-          .catch((error) => {
-            console.error('apply official metadata API error:', error);
-            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to apply official metadata' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork/import' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            importCustomArtwork((body.entries || {}) as Record<string, Record<string, string>>);
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('import artwork API error:', error);
-            writeJson(res, 500, { error: 'Failed to import artwork' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/database/backup' && req.method === 'POST') {
-        backupDatabase()
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('database backup API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to back up database' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/database/clear' && req.method === 'POST') {
-        try {
-          writeJson(res, 200, libraryForRenderer(clearAppData()));
-        } catch (error) {
-          console.error('database clear API error:', error);
-          writeJson(res, 500, { error: 'Failed to clear app data' });
-        }
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/ffmpeg') {
-        const ffmpegPath = findFFmpeg();
-        writeJson(res, 200, { available: ffmpegPath !== null, path: ffmpegPath });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/cached-artwork') {
-        const sourceUrl = reqUrl.searchParams.get('source') || '';
-        if (!sourceUrl || !isExternalArtworkUrl(sourceUrl)) {
-          res.writeHead(400);
-          res.end('Invalid artwork source');
-          return;
-        }
-
-        const cachedArtwork = getCachedArtwork(sourceUrl);
-        if (!cachedArtwork) {
-          redirectToArtworkSource(res, sourceUrl);
-          return;
-        }
-
-        if (cachedArtwork.cachePath) {
-          res.writeHead(200, cachedArtworkResponseHeaders(
-            cachedArtwork.mimeType,
-            cachedArtwork.byteLength,
-          ));
-          const stream = fs.createReadStream(cachedArtwork.cachePath);
-          stream.once('error', () => redirectToArtworkSource(res, sourceUrl));
-          stream.pipe(res);
-          return;
-        }
-
-        if (!cachedArtwork.dataUrl) {
-          redirectToArtworkSource(res, sourceUrl);
-          return;
-        }
-
-        const decoded = decodeDataUrl(cachedArtwork.dataUrl);
-        if (!decoded) {
-          redirectToArtworkSource(res, sourceUrl);
-          return;
-        }
-
-        res.writeHead(200, cachedArtworkResponseHeaders(
-          cachedArtwork.mimeType || decoded.mimeType,
-          decoded.buffer.byteLength,
-        ));
-        res.end(decoded.buffer);
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/custom-artwork') {
-        const mediaId = reqUrl.searchParams.get('mediaId') || '';
-        const target = reqUrl.searchParams.get('target') || '';
-        const artwork = mediaId && target ? getCustomArtworkData(mediaId, target) : null;
-        if (!artwork) {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
-
-        const decoded = decodeDataUrl(artwork.dataUrl);
-        if (!decoded) {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
-
-        res.writeHead(200, {
-          ...cachedArtworkResponseHeaders(decoded.mimeType, decoded.buffer.byteLength),
-          ETag: `"${createHash('sha1').update(artwork.dataUrl).digest('hex')}"`,
-        });
-        res.end(decoded.buffer);
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/local-image') {
-        if (!filePath || !isImageFileName(path.basename(filePath)) || !fs.existsSync(filePath)) {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
-
-        res.writeHead(200, {
-          'Content-Type': getImageMimeType(filePath),
-          'Cache-Control': 'public, max-age=3600',
-        });
-        const stream = fs.createReadStream(filePath);
-        stream.once('error', () => safeEndResponse(res));
-        stream.pipe(res);
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/thumbnail') {
-        const time = reqUrl.searchParams.get('t') || '00:01:00';
-        const embedded = reqUrl.searchParams.get('embedded') === '1';
-        const streamIndex = parseIntegerTag(reqUrl.searchParams.get('stream') || undefined);
-        const ffmpegPath = findFFmpeg();
-        if (!ffmpegPath || !filePath) {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'image/jpeg' });
-        const args = embedded
-          ? [
-              '-i', filePath,
-              ...(streamIndex !== undefined ? ['-map', `0:${streamIndex}`] : ['-map', '0:v:0']),
-              '-frames:v', '1',
-              '-f', 'image2',
-              '-vcodec', 'mjpeg',
-              '-q:v', '2',
-              'pipe:1',
-            ]
-          : ['-ss', time, '-i', filePath, '-vframes', '1', '-f', 'image2', '-vcodec', 'mjpeg', '-q:v', '2', 'pipe:1'];
-        try {
-          const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-          proc.stdout?.on('error', () => safeEndResponse(res));
-          proc.stdout?.pipe(res);
-          proc.once('error', (error) => {
-            console.error('thumbnail FFmpeg spawn error:', error);
-            safeEndResponse(res);
-          });
-          proc.stderr?.on('data', () => { /* drain stderr so the pipe never stalls */ });
-          req.on('close', () => {
-            if (!proc.killed) proc.kill('SIGKILL');
-          });
-        } catch (error) {
-          console.error('thumbnail FFmpeg spawn failed:', error);
-          safeEndResponse(res);
-        }
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/ffprobe') {
-        const ffprobePath = findFFprobe();
-        writeJson(res, 200, { available: ffprobePath !== null, path: ffprobePath });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/media-server-port') {
-        writeJson(res, 200, { port: mediaServerPort });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/media/probe' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => safeResult(() => probeMedia(String(body.filePath || ''))))
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('probe media API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to probe media' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/media/start-transcode' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => safeResult(() => startTranscode(
-            String(body.filePath || ''),
-            (body.options || {}) as TranscodeOptions,
-            `http://127.0.0.1:${mediaServerPort}`,
-          )))
-          .then((result) => result.ok && result.data
-            ? { ...result, data: { ...result.data, playlistUrl: appendLocalAccessTokenToUrl(result.data.playlistUrl) } }
-            : result)
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('start transcode API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to start transcoding' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/media/stop-transcode' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => safeResult(() => stopTranscode(String(body.sessionId || ''))))
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('stop transcode API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to stop transcoding' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/play-media' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            assertLocalMediaPath(String(body.filePath || ''));
-            writeJson(res, 200, {
-              ok: false,
-              error: 'Direct external playback is disabled. Use the in-app player.',
-            });
-          })
-          .catch((error) => {
-            console.error('play media API error:', error);
-            writeJson(res, 400, { ok: false, error: 'Invalid media path.' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/subtitle') {
-        if (!requireStreamAccess(reqUrl, req, res)) return;
-
-        if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('Not found');
-          return;
-        }
-
-        const streamOrdinal = queryNumber(reqUrl.searchParams.get('streamOrdinal'));
-        if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) {
-          const ffmpegPath = findFFmpeg();
-          if (!ffmpegPath) {
-            res.writeHead(503, { 'Content-Type': 'text/plain' });
-            res.end('FFmpeg is not available');
-            return;
-          }
-
-          res.writeHead(200, {
-            'Content-Type': 'text/vtt; charset=utf-8',
-            'Cache-Control': 'no-store',
-          });
-          try {
-            const proc = spawn(ffmpegPath, buildEmbeddedSubtitleVttArgs(filePath, streamOrdinal), { stdio: ['ignore', 'pipe', 'pipe'] });
-            proc.stdout?.on('error', () => safeEndResponse(res));
-            proc.stdout?.pipe(res);
-            proc.once('error', (error) => {
-              console.error('subtitle FFmpeg spawn error:', error);
-              safeEndResponse(res);
-            });
-            proc.stderr?.on('data', () => { /* drain stderr so the pipe never stalls */ });
-            req.on('close', () => {
-              if (!proc.killed) proc.kill('SIGKILL');
-            });
-          } catch (error) {
-            console.error('subtitle FFmpeg spawn failed:', error);
-            safeEndResponse(res);
-          }
-          return;
-        }
-
-        try {
-          const ext = path.extname(filePath).toLowerCase();
-          const body = fs.readFileSync(filePath, 'utf-8');
-          res.writeHead(200, {
-            'Content-Type': ext === '.srt' ? 'text/vtt; charset=utf-8' : getSubtitleMimeType(filePath),
-            'Cache-Control': 'no-store',
-          });
-          res.end(ext === '.srt' ? srtToVtt(body) : body);
-        } catch {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('Could not read subtitle');
-        }
-        return;
-      }
-
-      if (reqUrl.pathname.startsWith('/hls/') && !requireStreamAccess(reqUrl, req, res)) return;
-      if (serveHls(reqUrl, res, localAccessQuery(LOCAL_ACCESS_TOKEN))) return;
-
-      if (reqUrl.pathname !== '/stream') {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not found');
-        return;
-      }
-
-      if (!requireStreamAccess(reqUrl, req, res)) return;
-
-      if (!filePath || !fs.existsSync(filePath)) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not found');
-        return;
-      }
-
-      const ffmpegPath = findFFmpeg();
-      const streamOptions: TranscodeOptions = {
-        startSeconds: Number.isFinite(startSec) && startSec > 0 ? startSec : undefined,
-        videoTrackIndex: queryNumber(reqUrl.searchParams.get('video')),
-        audioTrackIndex: queryNumber(reqUrl.searchParams.get('audio')),
-        subtitleTrackIndex: queryNumber(reqUrl.searchParams.get('subtitle')),
-        subtitleStreamOrdinal: queryNumber(reqUrl.searchParams.get('subtitleOrdinal')),
-        subtitleCodec: reqUrl.searchParams.get('subtitleCodec') || undefined,
-        secondarySubtitleTrackIndex: queryNumber(reqUrl.searchParams.get('secondarySubtitle')),
-        secondarySubtitleStreamOrdinal: queryNumber(reqUrl.searchParams.get('secondarySubtitleOrdinal')),
-        secondarySubtitleCodec: reqUrl.searchParams.get('secondarySubtitleCodec') || undefined,
-        subtitleStyle: parseSubtitleStyle(reqUrl.searchParams.get('subtitleStyle')),
-        forceTranscode: reqUrl.searchParams.get('forceTranscode') === '1',
-      };
-      const hasSelectedTracks = typeof streamOptions.videoTrackIndex === 'number'
-        || typeof streamOptions.audioTrackIndex === 'number'
-        || typeof streamOptions.subtitleTrackIndex === 'number'
-        || typeof streamOptions.secondarySubtitleTrackIndex === 'number';
-
-      if ((streamOptions.forceTranscode || hasSelectedTracks || needsBrowserTranscoding(filePath)) && ffmpegPath) {
-        // ── Smart remux/transcode ────────────────────────────────────────────
-        // Probe to decide what actually needs re-encoding vs what can be copied.
-        // Copying streams is nearly instant (just remux); re-encoding is slow.
-        const probe = probeMediaFile(filePath);
-        const videoCodec = (probe.localMetadata?.videoCodec || '').toLowerCase();
-        const videoProfile = (probe.localMetadata?.videoProfile || '').toLowerCase();
-        const pixelFormat = (probe.localMetadata?.pixelFormat || '').toLowerCase();
-        const audioCodec = (probe.localMetadata?.audioCodec || '').toLowerCase();
-
-        // Keep browser-safe streams; everything else becomes H264/AAC.
-        const hasSubtitle = hasSubtitleSelection(streamOptions);
-        const bitmapSubtitle = hasBitmapSubtitleSelection(streamOptions);
-        const copyVideo = !hasSubtitle
-          && videoCodec === 'h264'
-          && pixelFormat === 'yuv420p'
-          && !videoProfile.includes('10');
-        const copyAudio = audioCodec === 'aac' || audioCodec === 'mp3';
-        const hardwareEncoder = copyVideo ? null : preferredH264HardwareEncoder(ffmpegPath);
-
-        console.log(`[stream] ${path.basename(filePath)} | video:${videoCodec}/${pixelFormat || 'unknown'}(${copyVideo ? 'copy' : hardwareEncoder || 'libx264'}) audio:${audioCodec}(${copyAudio ? 'copy' : 'encode'})`);
-
-        res.writeHead(200, {
-          'Content-Type': 'video/mp4',
-          'Transfer-Encoding': 'chunked',
-          'X-Video-Codec': videoCodec,
-          'X-Audio-Codec': audioCodec,
-        });
-
-        const args: string[] = ['-nostdin'];
-        if (typeof streamOptions.startSeconds === 'number' && streamOptions.startSeconds > 0) {
-          args.push('-ss', String(Math.floor(streamOptions.startSeconds)));
-        }
-        args.push('-i', filePath);
-
-        if (hasSubtitle && bitmapSubtitle) {
-          const subtitleFilter = subtitleFilterComplex(filePath, streamOptions);
-          args.push('-filter_complex', subtitleFilter.filter, '-map', `[${subtitleFilter.output}]`);
-        } else {
-          args.push('-map', streamMap('v', streamOptions.videoTrackIndex));
-        }
-
-        if (streamOptions.audioTrackIndex !== -1) {
-          args.push('-map', streamMap('a', streamOptions.audioTrackIndex, true));
-        }
-
-        args.push('-sn', '-dn', '-map_chapters', '-1', '-map_metadata', '-1');
-
-        if (hasSubtitle && !bitmapSubtitle) {
-          const textSelections = subtitleSelections(streamOptions);
-          const primarySubtitle = textSelections.find((selection) => selection.placement === 'primary') || textSelections[0];
-          const secondarySubtitle = textSelections.find((selection) => selection !== primarySubtitle);
-          args.push('-vf', textSubtitleFilter(
-            filePath,
-            primarySubtitle.streamOrdinal,
-            streamOptions.subtitleStyle,
-            streamOptions.startSeconds,
-            secondarySubtitle?.streamOrdinal,
-          ));
-        } else if (!copyVideo && !bitmapSubtitle) {
-          args.push('-vf', 'format=yuv420p');
-        }
-
-        args.push('-c:v', copyVideo ? 'copy' : hardwareEncoder || 'libx264');
-        if (hardwareEncoder) {
-          appendH264EncoderOptions(args, hardwareEncoder);
-        } else if (!copyVideo) {
-          args.push('-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main');
-        }
-
-        if (streamOptions.audioTrackIndex === -1) {
-          args.push('-an');
-        } else {
-          args.push('-c:a', copyAudio ? 'copy' : 'aac');
-          if (!copyAudio) args.push('-b:a', '192k', '-ac', '2');
-        }
-
-        args.push(
-          '-f', 'mp4',
-          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-          'pipe:1',
-        );
-
-        try {
-          const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-          proc.stdout?.on('error', () => safeEndResponse(res));
-          proc.stdout?.pipe(res);
-          req.on('close', () => {
-            if (!proc.killed) proc.kill('SIGKILL');
-          });
-          proc.stderr?.on('data', (d: Buffer) => console.log('[ffmpeg]', d.toString().trim().split('\n').pop()));
-          proc.once('error', (err) => {
-            console.error('FFmpeg spawn error:', err);
-            safeEndResponse(res);
-          });
-          proc.once('exit', (code) => {
-            if (code !== 0 && code !== null) console.warn(`[ffmpeg] exited with code ${code}`);
-            safeEndResponse(res);
-          });
-        } catch (error) {
-          console.error('FFmpeg spawn failed:', error);
-          safeEndResponse(res);
-        }
-      } else {
-        // Direct streaming with range request support (essential for seeking)
-        let stat: fs.Stats;
-        try {
-          stat = fs.statSync(filePath);
-        } catch {
-          res.writeHead(500);
-          res.end();
-          return;
-        }
-
-        const fileSize = stat.size;
-        const mimeType = getMimeType(filePath);
-        const range = req.headers.range;
-
-        if (range) {
-          const [startStr, endStr] = range.replace(/bytes=/, '').split('-');
-          const start = parseInt(startStr, 10);
-          const end = endStr ? parseInt(endStr, 10) : fileSize - 1;
-          const chunkSize = end - start + 1;
-
-          res.writeHead(206, {
-            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-            'Accept-Ranges': 'bytes',
-            'Content-Length': chunkSize,
-            'Content-Type': mimeType,
-          });
-
-          const stream = fs.createReadStream(filePath, { start, end });
-          stream.pipe(res);
-          req.on('close', () => stream.destroy());
-        } else {
-          res.writeHead(200, {
-            'Content-Length': fileSize,
-            'Accept-Ranges': 'bytes',
-            'Content-Type': mimeType,
-          });
-
-          const stream = fs.createReadStream(filePath);
-          stream.pipe(res);
-          req.on('close', () => stream.destroy());
-        }
-      }
-    };
-
-    const server = http.createServer(requestHandler);
-    mediaServer = server;
-    trackServerConnections(server, mediaServerSockets);
-
-    const tryListen = (port: number) => {
-      server.listen(port, '0.0.0.0', () => {
-        mediaServerPort = port;
-        console.log(`Media server on port ${port}`);
-        resolve(port);
-      });
-    };
-
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        tryListen(mediaServerPort + 1);
-      } else {
-        reject(err);
-      }
-    });
-
-    tryListen(mediaServerPort);
-  });
-}
-
-function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle: string): Map<number, string> {
-  const titlesBySeason = new Map<number, Map<string, { title: string; count: number }>>();
-
-  for (const file of episodeFiles) {
-    const title = seriesTitleFromEpisodeFileName(path.basename(file.filePath));
-    if (!title) continue;
-    const seasonTitles = titlesBySeason.get(file.season) || new Map<string, { title: string; count: number }>();
-    const key = title.toLowerCase();
-    const current = seasonTitles.get(key);
-    seasonTitles.set(key, { title, count: (current?.count || 0) + 1 });
-    titlesBySeason.set(file.season, seasonTitles);
-  }
-
-  const result = new Map<number, string>();
-  for (const [season, titles] of titlesBySeason) {
-    const best = [...titles.values()].sort((a, b) => b.count - a.count)[0];
-    result.set(season, best?.title || fallbackTitle);
-  }
-
-  if (!result.has(1)) result.set(1, fallbackTitle);
-  return result;
-}
-
-async function fetchJikanEpisodesForLocalAnimeSeasons(
-  episodeFiles: EpisodeFile[],
-  fallbackTitle: string,
-  firstSeasonMetadata?: JikanAnimeResult | null,
-): Promise<EpisodeMeta[]> {
-  const seasonTitles = inferAnimeSeasonSearchTitles(episodeFiles, fallbackTitle);
-  const results: EpisodeMeta[] = [];
-  const usedMalIds = new Set<number>();
-
-  for (const [season, title] of [...seasonTitles.entries()].sort(([a], [b]) => a - b)) {
-    let metadata = season === 1 ? firstSeasonMetadata : null;
-    if (!metadata || (metadata.malId && usedMalIds.has(metadata.malId))) {
-      metadata = await fetchJikanMetadata(title);
-    }
-    if (!metadata?.episodes?.length) continue;
-    if (metadata.malId) usedMalIds.add(metadata.malId);
-
-    results.push(...metadata.episodes.map((episode) => ({ ...episode, season })));
-  }
-
-  return results;
-}
-
-function mergeLocalSeasonsWithMetadata(
-  localSeasons: { number: number; title: string; episodeCount: number }[],
-  remoteSeasons?: { number: number; title: string; episodeCount: number }[],
-): { number: number; title: string; episodeCount: number }[] {
-  if (!remoteSeasons || remoteSeasons.length === 0) return localSeasons;
-
-  const remoteByNumber = new Map(remoteSeasons.map((season) => [season.number, season]));
-  return localSeasons.map((season) => {
-    const remote = remoteByNumber.get(season.number);
-    if (!remote) return season;
-    return {
-      number: season.number,
-      title: remote.title || season.title,
-      episodeCount: season.episodeCount,
-    };
-  });
-}
-
-function listFromApiValue(value?: string): string[] {
-  return (value || '')
-    .split(',')
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function isAnimeMetadata(
-  filePath: string,
-  title: string,
-  omdbData?: OMDbResponse | null,
-  tvMeta?: TVMetadata | null,
-): boolean {
-  if (isLikelyAnimePath(filePath, title)) return true;
-
-  const omdbGenres = listFromApiValue(omdbData?.Genre);
-  const omdbCountries = listFromApiValue(omdbData?.Country);
-  const omdbLanguages = listFromApiValue(omdbData?.Language);
-  const tvGenres = (tvMeta?.genres || []).map((genre) => genre.toLowerCase());
-  const tvLanguage = (tvMeta?.language || '').toLowerCase();
-  const tvCountry = (tvMeta?.country || '').toLowerCase();
-  const tvType = (tvMeta?.showType || '').toLowerCase();
-
-  if ([...omdbGenres, ...tvGenres].some((genre) => genre.includes('anime'))) return true;
-  if (tvType.includes('animation') && (tvLanguage.includes('japanese') || tvCountry.includes('japan'))) return true;
-  if (tvGenres.includes('animation') && (tvLanguage.includes('japanese') || tvCountry.includes('japan'))) return true;
-  if (omdbGenres.includes('animation') && (omdbCountries.includes('japan') || omdbLanguages.includes('japanese'))) return true;
-
-  return false;
-}
-
-function isSeriesMetadata(omdbData?: OMDbResponse | null, tvMeta?: TVMetadata | null): boolean {
-  const type = String(omdbData?.Type || '').toLowerCase();
-  return type === 'series' || type === 'episode' || Boolean(tvMeta?.episodes?.length || tvMeta?.seasons?.length);
-}
 
 // ─── Library scanning ─────────────────────────────────────────────────────────
-
-const VIDEO_EXTS = ['.mkv', '.mp4', '.avi', '.mov', '.webm', '.m4v', '.wmv', '.flv', '.mpg', '.mpeg', '.m2ts', '.3gp', '.ts'];
-const SUBTITLE_EXTS = ['.vtt', '.srt', '.ass', '.ssa'];
-const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.avif'];
-
-function isMacSidecarFile(fileName: string): boolean {
-  return fileName.startsWith('._') || fileName === '.DS_Store';
-}
-
-function isVideoFileName(fileName: string): boolean {
-  return !isMacSidecarFile(fileName) && VIDEO_EXTS.includes(path.extname(fileName).toLowerCase());
-}
-
-function isSubtitleFileName(fileName: string): boolean {
-  return !isMacSidecarFile(fileName) && SUBTITLE_EXTS.includes(path.extname(fileName).toLowerCase());
-}
-
-function isImageFileName(fileName: string): boolean {
-  return !isMacSidecarFile(fileName) && IMAGE_EXTS.includes(path.extname(fileName).toLowerCase());
-}
-
-function normalizedArtworkBaseName(fileName: string): string {
-  return path.basename(fileName, path.extname(fileName)).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function findLocalArtworkFile(folderPath: string, preferredBaseNames: string[]): string {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(folderPath, { withFileTypes: true });
-  } catch {
-    return '';
-  }
-
-  const preferred = preferredBaseNames.map((name) => normalizedArtworkBaseName(name)).filter(Boolean);
-  const candidates = entries
-    .filter((entry) => !entry.isDirectory() && isImageFileName(entry.name))
-    .map((entry) => {
-      const baseName = normalizedArtworkBaseName(entry.name);
-      const exactIndex = preferred.findIndex((name) => baseName === name);
-      const prefixIndex = preferred.findIndex((name) => baseName.startsWith(`${name} `));
-      const containsIndex = preferred.findIndex((name) => baseName.includes(name));
-      const score = exactIndex >= 0
-        ? exactIndex
-        : prefixIndex >= 0
-          ? 50 + prefixIndex
-          : containsIndex >= 0
-            ? 100 + containsIndex
-            : 1000;
-      return { name: entry.name, score };
-    })
-    .sort((a, b) => a.score - b.score || a.name.localeCompare(b.name));
-
-  return candidates[0] ? path.join(folderPath, candidates[0].name) : '';
-}
-
-function getLocalFolderArtworkUrl(folderPath: string, kind: 'poster' | 'backdrop'): string {
-  const preferred = kind === 'poster'
-    ? ['poster', 'folder', 'cover', 'thumbnail', 'thumb', 'default', 'movie']
-    : ['backdrop', 'fanart', 'background', 'landscape', 'banner'];
-  const imagePath = findLocalArtworkFile(folderPath, preferred);
-  return imagePath ? getLocalImageUrl(imagePath) : '';
-}
-
-function getLocalMovieArtworkUrl(videoPath: string, kind: 'poster' | 'backdrop'): string {
-  const folderPath = path.dirname(videoPath);
-  const baseName = path.basename(videoPath, path.extname(videoPath));
-  const preferred = kind === 'poster'
-    ? [baseName, `${baseName} poster`, 'poster', 'folder', 'cover', 'thumbnail', 'thumb', 'default', 'movie']
-    : [`${baseName} backdrop`, `${baseName} fanart`, 'backdrop', 'fanart', 'background', 'landscape', 'banner'];
-  const imagePath = findLocalArtworkFile(folderPath, preferred);
-  return imagePath ? getLocalImageUrl(imagePath) : '';
-}
-
-function getEmbeddedArtworkUrl(filePath: string, probe: ProbeMediaFileResult): string {
-  return probe.embeddedThumbnailStreamIndex !== undefined
-    ? getEmbeddedThumbnailUrl(filePath, probe.embeddedThumbnailStreamIndex)
-    : '';
-}
-
-function hasPlayableVideoTrack(probe: ReturnType<typeof probeMediaFile>): boolean {
-  return Boolean(probe.localMetadata?.videoCodec);
-}
 
 function getLibraryFolderSignature(folderPath: string): { signature: string; fileCount: number } | null {
   if (!fs.existsSync(folderPath)) return null;
@@ -2288,65 +560,6 @@ function extractSeasons(folderPath: string, folderName: string): { number: numbe
     console.error('extractSeasons error:', e);
   }
   return seasons.sort((a, b) => a.number - b.number);
-}
-
-function isTVPattern(folderName: string, files: string[]): boolean {
-  const lower = folderName.toLowerCase();
-  if (/season/i.test(lower)) return true;
-  if (/[Ss]\d{1,2}[Ee]\d{1,3}/.test(folderName)) return true;
-  const hasEpisodeFiles = files.some((f) => /[Ss]\d{1,2}[Ee]\d{1,3}/.test(f) || /[Ee]pisode/i.test(f));
-  return files.length > 2 && hasEpisodeFiles;
-}
-
-function createSubtitleRecords(basePath: string, subtitleFiles: string[]) {
-  return subtitleFiles.map((f) => {
-    const lm = f.match(/\[(\w{2,3})\]|\.(\w{2,3})\./i);
-    const lang = lm ? (lm[1] || lm[2] || 'en') : 'en';
-    return {
-      lang: lang.toLowerCase(),
-      label: lang.toUpperCase(),
-      url: `/subtitle?path=${encodeURIComponent(path.join(basePath, f))}`,
-    };
-  });
-}
-
-function isLikelyTVFromFileName(name: string): boolean {
-  return /[Ss]\d{1,2}[Ee]\d{1,3}/.test(name) || /(?:episode|ep|e)\s*\d{1,3}\b/i.test(name);
-}
-
-function seriesTitleFromEpisodeFileName(fileName: string): string | null {
-  const withoutExt = fileName.replace(/\.[^.]+$/, '');
-  const match = withoutExt.match(/^(.+?)[._ -]+[Ss]\s*\d{1,2}\s*[._ -]*[Ee]\s*\d{1,3}\b/);
-  if (!match) return null;
-  const title = cleanMediaTitle(match[1]).title;
-  return title && !/^(season|series|episode|ep)$/i.test(title) ? title : null;
-}
-
-function inferSeriesTitleFromEpisodeFiles(files: EpisodeFile[], fallbackTitle: string): string {
-  const counts = new Map<string, { title: string; count: number }>();
-  for (const file of files) {
-    const title = seriesTitleFromEpisodeFileName(path.basename(file.filePath));
-    if (!title) continue;
-    const key = title.toLowerCase();
-    counts.set(key, { title, count: (counts.get(key)?.count || 0) + 1 });
-  }
-
-  const best = [...counts.values()].sort((a, b) => b.count - a.count)[0];
-  if (!best) return fallbackTitle;
-  if (best.count === files.length || best.count >= Math.max(2, Math.ceil(files.length * 0.6))) return best.title;
-  return fallbackTitle;
-}
-
-function shouldTreatAsTV(
-  titleCandidate: string,
-  videoFiles: string[],
-  hasSeasonDirs: boolean,
-  representativeProbe?: { embeddedShowTitle?: string; season?: number; episode?: number },
-): boolean {
-  if (hasSeasonDirs) return true;
-  if (representativeProbe?.embeddedShowTitle) return true;
-  if (representativeProbe?.season || representativeProbe?.episode) return true;
-  return isTVPattern(titleCandidate, videoFiles) || videoFiles.some((file) => isLikelyTVFromFileName(file));
 }
 
 async function buildTVItemFromFolder(
@@ -2558,12 +771,6 @@ async function buildTVItemFromFolder(
     localMetadata: representativeProbe.localMetadata,
     providerIds: mergeProviderIds(providerIds, matchedTmdbTVMeta?.providerIds || {}, matchedTVMeta?.providerIds || {}),
   };
-}
-
-function isLikelyAnimePath(filePath: string, title = ''): boolean {
-  const value = `${filePath} ${title}`.toLowerCase();
-  return /(^|[\\/._ -])(anime|animes|donghua|ova|ona)([\\/._ -]|$)/i.test(value)
-    || /\b(horriblesubs|subsplease|erai-raws|judas|ember|commie|hakat[a]? ramen)\b/i.test(value);
 }
 
 async function buildMovieItemFromFile(
@@ -2795,53 +1002,6 @@ interface ScanContext {
   tmdbApiKey?: string;
   fanartApiKey?: string;
   folderKind?: ScanFolderKind;
-}
-
-function defaultLibraryFolderGroups(): LibraryFolderGroups {
-  return { movies: [], tvShows: [], anime: [], others: [] };
-}
-
-function flattenLibraryFolders(groups: LibraryFolderGroups): string[] {
-  return Array.from(new Set([...groups.movies, ...groups.tvShows, ...groups.anime, ...groups.others]));
-}
-
-function normalizeLibraryFolderGroups(data?: Partial<LibraryData>): LibraryFolderGroups {
-  const normalized = defaultLibraryFolderGroups();
-  const groups = data?.libraryFolderGroups;
-  if (groups) {
-    normalized.movies = [...(groups.movies || [])];
-    normalized.tvShows = [...(groups.tvShows || [])];
-    normalized.anime = [...(groups.anime || [])];
-    normalized.others = [...(groups.others || [])];
-  }
-
-  for (const folder of data?.libraryFolders || []) {
-    if (flattenLibraryFolders(normalized).includes(folder)) continue;
-    const detected = detectLibraryFolderKind(folder);
-    if (detected === 'movies') normalized.movies.push(folder);
-    else if (detected === 'tv') normalized.tvShows.push(folder);
-    else if (detected === 'anime') normalized.anime.push(folder);
-    else normalized.others.push(folder);
-  }
-
-  return {
-    movies: Array.from(new Set(normalized.movies)),
-    tvShows: Array.from(new Set(normalized.tvShows)),
-    anime: Array.from(new Set(normalized.anime)),
-    others: Array.from(new Set(normalized.others)),
-  };
-}
-
-function normalizeFolderKindName(folderPath: string): string {
-  return path.basename(folderPath).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function detectLibraryFolderKind(folderPath: string): ScanContext['folderKind'] {
-  const name = normalizeFolderKindName(folderPath);
-  if (/^(movies?|films?|cinema)$/.test(name)) return 'movies';
-  if (/^(tv|tv shows?|television|shows?|series)$/.test(name)) return 'tv';
-  if (/^(anime|animes|donghua)$/.test(name)) return 'anime';
-  return undefined;
 }
 
 async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promise<MediaItem | null> {
@@ -3411,10 +1571,6 @@ function signedStreamUrlForRemote(base: string, filePath: string): string {
   return buildSignedLanUrl(base, '/stream', new URLSearchParams({ path: filePath }));
 }
 
-function signedArtworkUrlForRemote(base: string, pathname: string, params: URLSearchParams): string {
-  return buildSignedLanUrl(base, pathname, params);
-}
-
 function itemForLocalNetwork(item: MediaItem, base: string, token: string): MediaItem {
   const poster = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.poster), base, token);
   const backdrop = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.backdrop), base, token);
@@ -3445,7 +1601,7 @@ function itemForLocalNetwork(item: MediaItem, base: string, token: string): Medi
 }
 
 function libraryForLocalNetwork(): LibraryData {
-  const base = getLanServerBase() || `http://127.0.0.1:${mediaServerPort}`;
+  const base = getLanServerBase() || `http://127.0.0.1:${getMediaServerPort()}`;
   const token = getLanShareToken();
   const data = loadLibrary();
   return {
@@ -3511,7 +1667,7 @@ type OfficialArtworkRefreshResult = {
   logoCandidates: string[];
 };
 
-type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
+export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   id: string;
   source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
   title: string;
@@ -4124,20 +2280,6 @@ function removeFolderFromLibrary(data: LibraryData, folderPath: string): Library
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 
-function getWindowIconPath(): string | null {
-  const iconFileName = process.platform === 'win32' ? 'icon.ico' : 'icon.png';
-  const candidates = [
-    path.join(process.resourcesPath, iconFileName),
-    path.join(process.resourcesPath, 'icon', iconFileName),
-    path.join(app.getAppPath(), 'resources', iconFileName),
-    path.join(__dirname, '../resources', iconFileName),
-    path.join(process.resourcesPath, 'icon.png'),
-    path.join(app.getAppPath(), 'resources', 'icon.png'),
-  ];
-
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
-}
-
 function applyAppIcon() {
   const iconPath = getWindowIconPath();
   if (!iconPath) return;
@@ -4197,671 +2339,10 @@ function configureRendererSecurityPolicy(): void {
   });
 }
 
-function createWindow() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
-    return;
-  }
-
-  const windowOptions: ConstructorParameters<typeof BrowserWindow>[0] = {
-    width: 1280,
-    height: 800,
-    minWidth: 960,
-    minHeight: 540,
-    title: 'LoomTV',
-    frame: process.platform === 'darwin',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
-    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 16 } : undefined,
-    backgroundColor: '#1a1a1a',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      webSecurity: true,
-    },
-  };
-  const iconPath = getWindowIconPath();
-  if (iconPath) {
-    windowOptions.icon = iconPath;
-  }
-
-  mainWindow = new BrowserWindow(windowOptions);
-
-  mainWindow.on('ready-to-show', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.show();
-    mainWindow.focus();
-  });
-
-  if (MAIN_WINDOW_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_DEV_SERVER_URL);
-  } else {
-    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`));
-  }
-
-  mainWindow.webContents.on('did-finish-load', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    const platformClass = `platform-${process.platform}`;
-    void mainWindow.webContents.executeJavaScript(
-      `document.body.classList.add(${JSON.stringify(platformClass)})`,
-    );
-  });
-
-  mainWindow.on('closed', () => { mainWindow = null; });
-}
-
-// ─── App updates ─────────────────────────────────────────────────────────────
-
-function emitUpdateState() {
-  BrowserWindow.getAllWindows().forEach((window) => {
-    window.webContents.send('updates:state', updateState);
-  });
-  void refreshUpdateMenu();
-}
-
-function setUpdateState(nextState: Partial<UpdateState>) {
-  updateState = {
-    ...updateState,
-    ...nextState,
-    currentVersion: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    supported: isUpdaterSupportedPlatform(),
-  };
-  emitUpdateState();
-  return updateState;
-}
-
-function showUpdateDialog(message: string, detail: string, type: 'info' | 'warning' | 'error' = 'info'): void {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  void dialog.showMessageBox(mainWindow, {
-    type,
-    title: 'LoomTV Updates',
-    message,
-    detail,
-    buttons: ['OK'],
-  });
-}
-
-function normalizeReleaseVersion(value?: string): string {
-  return String(value || '').trim().replace(/^v/i, '');
-}
-
-function compareReleaseVersions(left?: string, right?: string): number {
-  const leftParts = normalizeReleaseVersion(left).split('.').map((part) => Number.parseInt(part, 10) || 0);
-  const rightParts = normalizeReleaseVersion(right).split('.').map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < length; index++) {
-    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
-    if (difference !== 0) return difference > 0 ? 1 : -1;
-  }
-
-  return 0;
-}
-
-async function checkLatestGitHubRelease(): Promise<UpdateState> {
-  setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
-
-  try {
-    const response = await fetch(`https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': `LoomTV/${app.getVersion()}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Update check returned ${response.status}`);
-    }
-
-    const release = await response.json() as { tag_name?: string; html_url?: string };
-    const latestVersion = normalizeReleaseVersion(release.tag_name);
-    const currentVersion = app.getVersion();
-    const hasUpdate = compareReleaseVersions(latestVersion, currentVersion) > 0;
-
-    return setUpdateState({
-      status: hasUpdate ? 'available' : 'not-available',
-      latestVersion,
-      releaseUrl: release.html_url,
-      checkedAt: new Date().toISOString(),
-      message: hasUpdate
-        ? `LoomTV ${latestVersion} is available.`
-        : `LoomTV is up to date at ${currentVersion}.`,
-    });
-  } catch (error) {
-    return setUpdateState({
-      status: 'error',
-      message: error instanceof Error ? error.message : String(error),
-      checkedAt: new Date().toISOString(),
-    });
-  }
-}
-
-function showUpdateDownloadedPrompt() {
-  if (updatePromptInFlight || !mainWindow || mainWindow.isDestroyed()) return;
-  updatePromptInFlight = true;
-
-  const stateMessage = updateState.message || 'An update is available.';
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: 'Update Ready',
-    message: 'LoomTV update downloaded',
-    detail: `${stateMessage} Restart now to apply the update.`,
-    buttons: ['Restart and Update', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-  })
-    .then((response) => {
-      if (response.response === 0) {
-        void installDownloadedUpdate();
-      }
-    })
-    .finally(() => {
-      updatePromptInFlight = false;
-    });
-}
-
-function clearUpdateQuitFallback(): void {
-  if (updateQuitFallbackTimer) {
-    clearTimeout(updateQuitFallbackTimer);
-    updateQuitFallbackTimer = null;
-  }
-  if (updateQuitFallbackCleanup) {
-    updateQuitFallbackCleanup();
-    updateQuitFallbackCleanup = null;
-  }
-}
-
-function scheduleUpdateQuitFallback(): void {
-  clearUpdateQuitFallback();
-  const fallbackDelayMs = process.platform === 'darwin' ? 15000 : 3000;
-
-  const clearFallbackOnceQuitStarts = () => clearUpdateQuitFallback();
-  app.once('before-quit', clearFallbackOnceQuitStarts);
-  electronAutoUpdater.once('before-quit-for-update', clearFallbackOnceQuitStarts);
-  updateQuitFallbackCleanup = () => {
-    app.removeListener('before-quit', clearFallbackOnceQuitStarts);
-    electronAutoUpdater.removeListener('before-quit-for-update', clearFallbackOnceQuitStarts);
-  };
-
-  updateQuitFallbackTimer = setTimeout(() => {
-    updateQuitFallbackTimer = null;
-    if (updateQuitFallbackCleanup) {
-      updateQuitFallbackCleanup();
-      updateQuitFallbackCleanup = null;
-    }
-
-    if (!updateInstallStarted) return;
-
-    console.warn('[updates] quitAndInstall did not begin app shutdown; forcing LoomTV to quit.');
-    app.quit();
-  }, fallbackDelayMs);
-  updateQuitFallbackTimer.unref?.();
-}
-
-function getMacUpdaterPendingInfoPath(updateFilePath: string): string {
-  return path.join(path.dirname(updateFilePath), 'update-info.json');
-}
-
-async function sha512Base64(filePath: string): Promise<string> {
-  const hash = createHash('sha512');
-  await new Promise<void>((resolve, reject) => {
-    const stream = fs.createReadStream(filePath);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('error', reject);
-    stream.on('end', resolve);
-  });
-  return hash.digest('base64');
-}
-
-async function verifyMacUpdateZip(updateFilePath: string): Promise<void> {
-  const infoPath = getMacUpdaterPendingInfoPath(updateFilePath);
-  const rawInfo = await fs.promises.readFile(infoPath, 'utf8');
-  const info = JSON.parse(rawInfo) as { sha512?: string; fileName?: string };
-  if (!info.sha512) throw new Error('Downloaded update metadata is missing a sha512 checksum.');
-
-  const actualSha512 = await sha512Base64(updateFilePath);
-  if (actualSha512 !== info.sha512) {
-    throw new Error('Downloaded update checksum did not match the release metadata.');
-  }
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<void> {
-  await verifyMacUpdateZip(updateFilePath);
-
-  const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
-  const helperPath = path.join(helperDir, 'install-update.sh');
-  const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-  const canonicalAppPath = path.join('/Applications', `${app.getName()}.app`);
-  const legacyAppPath = runningAppPath.startsWith('/Applications/')
-    && runningAppPath !== canonicalAppPath
-    ? runningAppPath
-    : null;
-  const targetAppPath = canonicalAppPath;
-  const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
-  const extractDir = path.join(helperDir, 'extracted');
-  const logPath = path.join(helperDir, 'install.log');
-  const parentPid = String(process.pid);
-
-  const script = `#!/bin/sh
-set -eu
-LOG=${shellQuote(logPath)}
-exec >> "$LOG" 2>&1
-echo "Starting LoomTV macOS update install at $(date)"
-PARENT_PID=${shellQuote(parentPid)}
-UPDATE_ZIP=${shellQuote(updateFilePath)}
-EXTRACT_DIR=${shellQuote(extractDir)}
-TARGET_APP=${shellQuote(targetAppPath)}
-BACKUP_APP=${shellQuote(backupAppPath)}
-LEGACY_APP=${shellQuote(legacyAppPath || '')}
-
-while kill -0 "$PARENT_PID" >/dev/null 2>&1; do
-  sleep 0.25
-done
-
-rm -rf "$EXTRACT_DIR"
-mkdir -p "$EXTRACT_DIR"
-/usr/bin/ditto -x -k "$UPDATE_ZIP" "$EXTRACT_DIR"
-
-if [ ! -d "$EXTRACT_DIR/LoomTV.app" ]; then
-  echo "Extracted update did not contain LoomTV.app"
-  exit 1
-fi
-
-if [ -n "$LEGACY_APP" ]; then
-  echo "Replacing legacy app bundle path $LEGACY_APP with canonical bundle $TARGET_APP"
-fi
-
-rm -rf "$BACKUP_APP"
-if [ -d "$TARGET_APP" ]; then
-  /bin/mv "$TARGET_APP" "$BACKUP_APP"
-fi
-
-if ! /usr/bin/ditto "$EXTRACT_DIR/LoomTV.app" "$TARGET_APP"; then
-  echo "Failed to copy updated app, restoring previous app"
-  rm -rf "$TARGET_APP"
-  if [ -d "$BACKUP_APP" ]; then
-    /bin/mv "$BACKUP_APP" "$TARGET_APP"
-  fi
-  exit 1
-fi
-
-/usr/bin/xattr -dr com.apple.quarantine "$TARGET_APP" >/dev/null 2>&1 || true
-/usr/bin/open "$TARGET_APP"
-echo "Finished LoomTV macOS update install at $(date)"
-`;
-
-  await fs.promises.writeFile(helperPath, script, { mode: 0o755 });
-
-  const child = spawn('/bin/sh', [helperPath], {
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
-
-  setTimeout(() => {
-    app.quit();
-  }, 250);
-}
-
-function refreshUpdateMenu() {
-  if (!updateMenu) return;
-
-  const installMenuItem = updateMenu.getMenuItemById('loomtv-install-update');
-  if (installMenuItem) {
-    installMenuItem.enabled = updateState.status === 'downloaded';
-    installMenuItem.visible = updateState.status === 'downloaded';
-  }
-
-  const checkMenuItem = updateMenu.getMenuItemById('loomtv-check-updates');
-  if (checkMenuItem) {
-    checkMenuItem.enabled = !updateCheckInFlight;
-    checkMenuItem.label = updateCheckInFlight ? 'Checking for Updates...' : 'Check for Updates...';
-  }
-}
-
-function buildUpdateMenu() {
-  const updateItems: MenuItemConstructorOptions[] = [
-    {
-      id: 'loomtv-check-updates',
-      label: 'Check for Updates...',
-      click: () => {
-        void handleManualUpdateCheck();
-      },
-    },
-    {
-      id: 'loomtv-install-update',
-      label: 'Install Downloaded Update...',
-      visible: updateState.status === 'downloaded',
-      enabled: updateState.status === 'downloaded',
-      click: () => {
-        if (updateState.status === 'downloaded') void installDownloadedUpdate();
-      },
-    },
-  ];
-
-  const template: MenuItemConstructorOptions[] = process.platform === 'darwin'
-    ? [
-        {
-          label: app.name,
-          submenu: [
-            { role: 'about' },
-            ...updateItems,
-            { type: 'separator' },
-            { role: 'services' },
-            { type: 'separator' },
-            { role: 'hide' },
-            { role: 'hideOthers' },
-            { role: 'unhide' },
-            { type: 'separator' },
-            { role: 'quit' },
-          ],
-        },
-        {
-          label: 'Edit',
-          submenu: [
-            { role: 'undo' },
-            { role: 'redo' },
-            { type: 'separator' },
-            { role: 'cut' },
-            { role: 'copy' },
-            { role: 'paste' },
-            { role: 'selectAll' },
-          ],
-        },
-        {
-          label: 'View',
-          submenu: [
-            { role: 'reload' },
-            { role: 'forceReload' },
-            { role: 'toggleDevTools' },
-            { type: 'separator' },
-            { role: 'resetZoom' },
-            { role: 'zoomIn' },
-            { role: 'zoomOut' },
-            { type: 'separator' },
-            { role: 'togglefullscreen' },
-          ],
-        },
-        {
-          label: 'Window',
-          submenu: [
-            { role: 'minimize' },
-            { role: 'zoom' },
-            { type: 'separator' },
-            { role: 'front' },
-          ],
-        },
-      ]
-    : [
-        {
-          label: 'File',
-          submenu: [
-            ...updateItems,
-            { type: 'separator' },
-            { role: 'quit' },
-          ],
-        },
-        {
-          label: 'Edit',
-          submenu: [
-            { role: 'undo' },
-            { role: 'redo' },
-            { type: 'separator' },
-            { role: 'cut' },
-            { role: 'copy' },
-            { role: 'paste' },
-            { role: 'selectAll' },
-          ],
-        },
-        {
-          label: 'View',
-          submenu: [
-            { role: 'reload' },
-            { role: 'forceReload' },
-            { role: 'toggleDevTools' },
-            { type: 'separator' },
-            { role: 'resetZoom' },
-            { role: 'zoomIn' },
-            { role: 'zoomOut' },
-            { type: 'separator' },
-            { role: 'togglefullscreen' },
-          ],
-        },
-      ];
-
-  updateMenu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(updateMenu);
-}
-
-async function handleManualUpdateCheck() {
-  const checkedState = await checkForUpdates();
-
-  if (checkedState.status === 'checking') {
-    showUpdateDialog(
-      'Checking for updates',
-      'LoomTV is already checking for an update. You’ll get notified when it completes.',
-    );
-    return;
-  }
-
-  if (checkedState.status === 'downloading' || checkedState.status === 'available') {
-    showUpdateDialog(
-      'Update check in progress',
-      'An update is being checked and downloaded in the background.',
-    );
-    return;
-  }
-
-  if (checkedState.status === 'downloaded') {
-    showUpdateDownloadedPrompt();
-    return;
-  }
-
-  if (checkedState.status === 'not-available') {
-    showUpdateDialog('No update found', `You’re already on LoomTV ${checkedState.currentVersion}.`);
-    return;
-  }
-
-  if (checkedState.status === 'disabled') {
-    showUpdateDialog('Updates are not available', checkedState.message || 'Updates are not available in this environment.');
-    return;
-  }
-
-  if (checkedState.status === 'error') {
-    showUpdateDialog('Update check failed', checkedState.message || 'Could not check for updates.', 'warning');
-  }
-}
-
-async function installDownloadedUpdate() {
-  if (updateInstallStarted) return updateState;
-  if (updateState.status !== 'downloaded') return updateState;
-  updateInstallStarted = true;
-
-  setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
-
-  // Drain playback/server work before quitAndInstall. Active HTTP streams can
-  // keep the process alive after every window has closed, which leaves the
-  // downloaded installer waiting for LoomTV to exit.
-  try {
-    stopAllTranscodes();
-    destroyLanDiscovery();
-    const serverToClose = mediaServer;
-    mediaServer = null;
-    await closeServerForUpdateInstall(serverToClose, mediaServerSockets);
-    if (updateCheckTimer) {
-      clearInterval(updateCheckTimer);
-      updateCheckTimer = null;
-    }
-  } catch (error) {
-    console.warn('[updates] pre-install cleanup failed:', error);
-  }
-
-  if (process.platform === 'darwin' && downloadedUpdateFilePath) {
-    try {
-      await installMacUpdateWithoutSquirrel(downloadedUpdateFilePath);
-    } catch (error) {
-      updateInstallStarted = false;
-      setUpdateState({
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-        checkedAt: new Date().toISOString(),
-      });
-    }
-    return updateState;
-  }
-
-  // Let electron-updater own the window close and app quit sequence. Destroying
-  // windows manually before this call can bypass the updater's normal restart
-  // path and leave the app sitting on "Restarting...".
-  // Force-restart after install. Without isForceRunAfter:true the NSIS/AppImage
-  // installer can exit silently without relaunching the app.
-  // - isSilent:true skips the NSIS UI on Windows (DMG on macOS ignores this).
-  // - autoInstallOnAppQuit was set to false at configure time so this call is
-  //   the single source of truth for installing.
-  setTimeout(() => {
-    try {
-      scheduleUpdateQuitFallback();
-      autoUpdater.quitAndInstall(true, true);
-    } catch (error) {
-      clearUpdateQuitFallback();
-      updateInstallStarted = false;
-      setUpdateState({
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-        checkedAt: new Date().toISOString(),
-      });
-    }
-  }, 250);
-
-  return updateState;
-}
-
-function configureAutoUpdater() {
-  if (updaterConfigured) return;
-  updaterConfigured = true;
-
-  if (!updateState.supported) {
-    setUpdateState({
-      status: 'disabled',
-      message: 'Automatic updates are available in packaged macOS, Windows, and Linux AppImage builds.',
-    });
-    return;
-  }
-
-  if (!app.isPackaged) {
-    setUpdateState({
-      status: 'disabled',
-      message: 'Automatic updates are enabled after LoomTV is packaged and published.',
-    });
-    return;
-  }
-
-  autoUpdater.autoDownload = true;
-  // We control the install moment via quitAndInstall(true, true). Letting
-  // electron-updater also install on natural app quit would double-install
-  // and race the relaunch.
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.setFeedURL({
-    provider: 'github',
-    owner: UPDATE_OWNER,
-    repo: UPDATE_REPO,
-  });
-
-  autoUpdater.on('checking-for-update', () => {
-    setUpdateState({ status: 'checking', message: 'Checking for updates...' });
-  });
-
-  autoUpdater.on('update-available', () => {
-    setUpdateState({ status: 'available', message: 'Update available, downloading...' });
-  });
-
-  autoUpdater.on('download-progress', (progress) => {
-    if (!progress?.percent) return;
-    setUpdateState({
-      status: 'downloading',
-      downloadPercent: Math.round(progress.percent),
-      message: `Downloading update ${Math.round(progress.percent)}%`,
-    });
-  });
-
-  autoUpdater.on('update-not-available', () => {
-    setUpdateState({
-      status: 'not-available',
-      message: 'LoomTV is up to date.',
-      checkedAt: new Date().toISOString(),
-    });
-  });
-
-  autoUpdater.on('update-downloaded', (event) => {
-    downloadedUpdateFilePath = event.downloadedFile;
-    setUpdateState({
-      status: 'downloaded',
-      message: 'Update downloaded. Restart LoomTV to install it.',
-      checkedAt: new Date().toISOString(),
-    });
-    showUpdateDownloadedPrompt();
-  });
-
-  autoUpdater.on('error', (error) => {
-    if (updateState.status === 'installing') {
-      updateInstallStarted = false;
-      clearUpdateQuitFallback();
-    }
-    setUpdateState({
-      status: 'error',
-      message: error instanceof Error ? error.message : String(error),
-      checkedAt: new Date().toISOString(),
-    });
-  });
-
-  updateCheckTimer = setInterval(() => {
-    if (!updateCheckInFlight && updateState.supported && app.isPackaged) {
-      void checkForUpdates();
-    }
-  }, AUTO_UPDATE_CHECK_INTERVAL_MS);
-}
-
-async function checkForUpdates(): Promise<UpdateState> {
-  configureAutoUpdater();
-  if (!updateState.supported || !app.isPackaged) {
-    return checkLatestGitHubRelease();
-  }
-  if (updateCheckInFlight || updateState.status === 'downloading' || updateState.status === 'downloaded') {
-    return updateCheckPromise || updateState;
-  }
-
-  updateCheckInFlight = true;
-  setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
-  updateCheckPromise = autoUpdater.checkForUpdates()
-    .then(() => updateState)
-    .catch((error) => {
-      setUpdateState({
-        status: 'error',
-        message: error instanceof Error ? error.message : String(error),
-        checkedAt: new Date().toISOString(),
-      });
-      return updateState;
-    })
-    .finally(() => {
-      updateCheckInFlight = false;
-      updateCheckPromise = null;
-      refreshUpdateMenu();
-    });
-  return updateCheckPromise;
-}
-
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
 registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateState>({
-  getMediaServerPort: () => mediaServerPort,
+  getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
   showOpenFolderDialog,
   loadLibrary,
@@ -4898,7 +2379,7 @@ registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateS
   importCustomArtwork,
   backupDatabase,
   clearAppData,
-  getUpdateState: () => updateState,
+  getUpdateState,
   checkForUpdates,
   installDownloadedUpdate,
   findFFmpeg,
@@ -4915,11 +2396,67 @@ registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateS
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
+export const mediaServerDeps = {
+  ALLOWED_CORS_ORIGINS,
+  LOCAL_ACCESS_HEADER,
+  LOCAL_ACCESS_TOKEN,
+  addFolderToLibrary,
+  allowedCorsOrigin,
+  appendLocalAccessTokenToUrl,
+  applyOfficialMetadataCandidate,
+  authorizeLanRequest,
+  authorizeLocalRequest,
+  cacheArtworkNow,
+  clearAppData,
+  customArtworkForRenderer,
+  decodeDataUrl,
+  getLanServerBase,
+  getLanShareToken,
+  getLibraryMutationVersion: () => libraryMutationVersion,
+  getOfficialMetadataCandidates,
+  getPlaybackLogo,
+  handleLanPairRequest,
+  isExternalArtworkUrl,
+  isImageFileName,
+  isLanSharingEnabled,
+  isLoopbackRequest,
+  isSignedLanRequestValid,
+  libraryEtagFor,
+  libraryForLocalNetwork,
+  libraryForRenderer,
+  loadLibrary,
+  loadSettings,
+  localAccessQuery,
+  needsBrowserTranscoding,
+  readJsonBody,
+  redirectToArtworkSource,
+  refreshOfficialArtwork,
+  removeFolderFromLibrary,
+  requireLocalOrLanAccess,
+  requireStreamAccess,
+  safeEndResponse,
+  safeResult,
+  saveLibraryFromScan,
+  saveLibraryMutation,
+  saveSettings,
+  scanLibrary,
+  showOpenFolderDialog,
+  writeJson,
+};
+
 app.whenReady().then(async () => {
   applyAppIcon();
   cleanupOldTranscodes();
-  await startMediaServer();
+  await startMediaServer(mediaServerDeps);
   syncLanAdvertisement();
+  initAutoUpdater({
+    getMainWindow,
+    closeMediaServer: async () => {
+      const serverToClose = getMediaServer();
+      setMediaServer(null);
+      await closeServerForUpdateInstall(serverToClose, getMediaServerSockets());
+    },
+  });
   buildUpdateMenu();
 
   // ── plexserver:// protocol handler ──────────────────────────────────────────
@@ -4930,7 +2467,7 @@ app.whenReady().then(async () => {
     try {
       const parsed = new URL(request.url);
       parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-      const targetUrl = `http://127.0.0.1:${mediaServerPort}${parsed.pathname}${parsed.search}`;
+      const targetUrl = `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
 
       // Forward Range header so video seeking works correctly
       const headers: Record<string, string> = {};
@@ -4957,7 +2494,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('second-instance', () => {
-  if (updateInstallStarted) return;
+  if (isUpdateInstalling()) return;
   if (!app.isReady()) return;
   if (isAppShuttingDown) return;
   createWindow();
@@ -4966,7 +2503,7 @@ app.on('second-instance', () => {
 app.on('window-all-closed', () => {
   // Don't tear down twice when quitAndInstall is closing windows — it issues
   // its own quit and the install path needs a clean exit.
-  if (updateInstallStarted) return;
+  if (isUpdateInstalling()) return;
   if (isAppShuttingDown) return;
   stopAllTranscodes();
   destroyLanDiscovery();
@@ -4974,7 +2511,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (updateInstallStarted) return;
+  if (isUpdateInstalling()) return;
   if (isAppShuttingDown) return;
   createWindow();
 });
@@ -4984,19 +2521,17 @@ app.on('before-quit', () => {
   clearUpdateQuitFallback();
   // Skip if quitAndInstall already drained these — re-running close() on a
   // null server can throw and abort the install path.
-  if (!updateInstallStarted) {
+  if (!isUpdateInstalling()) {
     stopAllTranscodes();
   }
-  if (updateCheckTimer) {
-    clearInterval(updateCheckTimer);
-    updateCheckTimer = null;
-  }
-  if (mediaServer) {
+  stopUpdateCheckTimer();
+  const serverToClose = getMediaServer();
+  if (serverToClose) {
     try {
-      mediaServer.close();
+      serverToClose.close();
     } catch {
       // Ignore close errors during quit.
     }
-    mediaServer = null;
+    setMediaServer(null);
   }
 });
