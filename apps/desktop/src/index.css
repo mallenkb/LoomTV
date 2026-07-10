@@ -1,0 +1,813 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #060d17;
+  --color-foreground: #ffffff;
+  --color-card: #101a28;
+  --color-card-foreground: #ffffff;
+  --color-popover: #101a28;
+  --color-popover-foreground: #ffffff;
+  --color-primary: #fbc500;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #172235;
+  --color-secondary-foreground: #ffffff;
+  --color-muted: #172235;
+  --color-muted-foreground: #9aa7b8;
+  --color-accent: #172235;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #243348;
+  --color-input: #172235;
+  --color-ring: #fbc500;
+  
+  --radius-sm: 0.25rem;
+  --radius: 0.5rem;
+  --radius-lg: 0.75rem;
+}
+
+:root {
+  --loom-bg: #060d17;
+  --loom-surface: #101a28;
+  --loom-surface-2: #0b1420;
+  --loom-surface-3: #172235;
+  --loom-text: #ffffff;
+  --loom-muted: #9aa7b8;
+  --loom-faint: #647287;
+  --loom-border: #243348;
+  --loom-sidebar: #080f19;
+  --loom-accent: #fbc500;
+  --loom-accent-hover: #ffd43b;
+  --loom-accent-foreground: #08101a;
+  --loom-accent-foreground-muted: #1d2a39;
+  --loom-logo-word: #ffffff;
+  --loom-panel: rgba(16, 26, 40, 0.82);
+  --loom-panel-border: rgba(148, 163, 184, 0.18);
+  --loom-focus-glow: rgba(251, 197, 0, 0.28);
+  --loom-body-start: #08111d;
+  --loom-body-end: #050a12;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  background: var(--loom-bg);
+  color: var(--loom-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+:where(button:not(:disabled), a[href], [role="button"]:not([aria-disabled="true"]), summary) {
+  cursor: pointer;
+}
+
+:where(button:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
+}
+
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.loom-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 7px;
+  border-radius: 9999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--loom-accent) 0%,
+      var(--loom-accent) var(--loom-volume-pct, 100%),
+      rgba(255, 255, 255, 0.28) var(--loom-volume-pct, 100%),
+      rgba(255, 255, 255, 0.28) 100%
+    );
+  cursor: pointer;
+}
+
+.loom-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.loom-volume-slider::-moz-range-thumb {
+  width: 22px;
+  height: 14px;
+  border: none;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.page-bottom-safe {
+  padding-bottom: calc(1.5rem + var(--loom-page-bottom-safe, 0px));
+}
+
+.page-bottom-safe-lg {
+  padding-bottom: calc(2rem + var(--loom-page-bottom-safe, 0px));
+}
+
+@keyframes player-flash {
+  0%   { opacity: 0; transform: scale(0.7); }
+  20%  { opacity: 1; transform: scale(1.05); }
+  70%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.2); }
+}
+
+.player-center-flash {
+  animation: player-flash 0.6s ease-out forwards;
+}
+
+@keyframes player-side-panel-in {
+  0% {
+    opacity: 0;
+    transform: translateX(28px);
+    filter: blur(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+
+.player-side-panel {
+  animation: player-side-panel-in 220ms cubic-bezier(0.2, 0.85, 0.25, 1) both;
+}
+
+.loom-app-shell {
+  background: var(--loom-bg);
+}
+
+.loom-page {
+  background: var(--loom-bg);
+}
+
+body.platform-darwin .loom-sidebar-brand {
+  padding-top: 2.75rem;
+}
+
+.loom-sidebar-drag-region {
+  display: none;
+}
+
+body.platform-darwin .loom-sidebar-drag-region {
+  -webkit-app-region: drag;
+  position: absolute;
+  inset: 0;
+}
+
+body.platform-darwin .loom-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+body.platform-darwin :where(a[href], button, input, select, textarea, label, summary, [role="button"], [contenteditable="true"]) {
+  -webkit-app-region: no-drag;
+}
+
+.loom-main-drag-region {
+  display: none;
+}
+
+body.platform-darwin .loom-main-drag-region {
+  -webkit-app-region: drag;
+  position: fixed;
+  left: 12rem;
+  right: 0;
+  top: 0;
+  z-index: 35;
+  display: block;
+  height: 4.5rem;
+}
+
+.loom-player-drag-region {
+  display: none;
+}
+
+body.platform-darwin .loom-player-drag-region {
+  -webkit-app-region: drag;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 39;
+  display: block;
+  height: 5.4rem;
+}
+
+body.platform-darwin .loom-player-root:fullscreen .loom-player-drag-region {
+  display: none;
+}
+
+.loom-player-top-control {
+  top: 1.5rem;
+}
+
+body.platform-darwin .loom-player-top-control {
+  top: 2.5rem;
+}
+
+:fullscreen .loom-player-top-control {
+  top: 1.5rem;
+}
+
+.loom-detail-hero-fade {
+  background:
+    linear-gradient(180deg, rgba(8, 15, 25, 0.14) 0%, rgba(8, 15, 25, 0.44) 58%, var(--loom-sidebar) 100%),
+    linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.52) 18%, rgba(8, 15, 25, 0.08) 48%, rgba(8, 15, 25, 0.58) 100%);
+}
+
+.loom-detail-side-fade-left {
+  background: linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.7) 42%, transparent 100%);
+}
+
+.loom-detail-side-fade-right {
+  background: linear-gradient(270deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.68) 42%, transparent 100%);
+}
+
+.loom-section-title {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.loom-poster-frame {
+  background: var(--loom-surface);
+}
+
+.loom-poster-link:hover .loom-poster-frame {
+  box-shadow: none;
+}
+
+.loom-poster-link:focus-visible {
+  outline: none;
+}
+
+.loom-poster-link:focus-visible .loom-poster-frame {
+  box-shadow: 0 0 0 2px var(--loom-focus-ring);
+}
+
+.loom-chip {
+  border-color: rgba(245, 196, 81, 0.38);
+  background: rgba(0, 0, 0, 0.72);
+  color: #F5C451 !important;
+}
+
+.loom-chip svg {
+  color: #F5C451 !important;
+}
+
+.loom-rating {
+  color: #F5C451 !important;
+}
+
+.loom-rating svg {
+  color: #F5C451 !important;
+}
+
+.settings-panel {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
+  background: var(--loom-surface);
+}
+
+.settings-panel-soft {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  background: var(--loom-surface-2);
+}
+
+.settings-action-tile {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  background: var(--loom-surface-2);
+}
+
+.settings-action-tile:hover {
+  border-color: color-mix(in srgb, var(--loom-accent) 42%, var(--loom-border));
+  background: var(--loom-surface-3);
+}
+
+.loom-settings-mobile-menu,
+.loom-settings-mobile-detail-bar {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  body {
+    overflow: hidden;
+  }
+
+  .loom-app-shell {
+    display: block;
+    min-height: 100vh;
+  }
+
+  .loom-app-shell > aside {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 60;
+    width: auto;
+    height: 4.9rem;
+    flex-direction: row;
+    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    background: color-mix(in srgb, var(--loom-sidebar) 94%, transparent);
+    box-shadow: 0 -18px 42px rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(18px);
+  }
+
+  .loom-app-shell > aside .loom-sidebar-brand {
+    display: none;
+  }
+
+  .loom-app-shell > aside nav {
+    width: 100%;
+    padding: 0.45rem 0.5rem calc(0.45rem + env(safe-area-inset-bottom));
+    flex-direction: row;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .loom-app-shell > aside nav > .relative {
+    display: grid;
+    flex: 1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0.125rem;
+  }
+
+  .loom-app-shell > aside nav > .relative > span {
+    display: none;
+  }
+
+  .loom-app-shell > aside nav > .relative > a:not(.loom-mobile-nav-link) {
+    display: none;
+  }
+
+  .loom-app-shell > aside nav > .relative > a.loom-mobile-nav-link {
+    display: flex;
+  }
+
+  .loom-app-shell > aside nav a {
+    margin: 0;
+    height: 3.35rem;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.2rem;
+    padding: 0.35rem 0.15rem;
+    border-radius: 0.8rem;
+  }
+
+  .loom-app-shell > aside nav a[aria-current="page"] {
+    background: var(--loom-surface-3);
+    color: var(--loom-text);
+  }
+
+  .loom-app-shell > aside nav a svg {
+    width: 1.2rem;
+    height: 1.2rem;
+  }
+
+  .loom-app-shell > aside nav a span {
+    max-width: 100%;
+    font-size: 0.68rem;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .loom-app-shell > aside nav > .mt-auto,
+  .loom-app-shell > aside nav > .flex:last-child {
+    display: none;
+  }
+
+  .loom-app-shell main {
+    height: 100vh;
+    padding-bottom: calc(4.9rem + env(safe-area-inset-bottom));
+  }
+
+  .loom-main-drag-region,
+  body.platform-darwin .loom-main-drag-region {
+    display: none;
+  }
+
+  .loom-library-search {
+    left: 0;
+    top: max(0.75rem, env(safe-area-inset-top));
+    padding-inline: 0.875rem;
+  }
+
+  .loom-library-search-inner > .loom-no-drag {
+    max-width: none;
+    height: 2.85rem;
+    border-radius: 0.85rem;
+  }
+
+  .loom-library-search-inner {
+    height: 2.85rem;
+    max-width: none;
+  }
+
+  .loom-library-search-slot button {
+    height: 2.85rem;
+    border-radius: 0.85rem;
+    padding-inline: 0.75rem;
+  }
+
+  .loom-library-search-slot button span {
+    max-width: 7.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .loom-page > .page-bottom-safe,
+  .loom-page > div > .page-bottom-safe,
+  .loom-page > .page-bottom-safe-lg,
+  .loom-page > div > .page-bottom-safe-lg {
+    padding: 5rem 0.875rem calc(6.25rem + var(--loom-page-bottom-safe, 0px) + env(safe-area-inset-bottom));
+  }
+
+  .loom-page.loom-settings-menu-open > .page-bottom-safe,
+  .loom-page.loom-settings-detail-open > .page-bottom-safe {
+    padding: 1rem 1rem calc(6.25rem + var(--loom-page-bottom-safe, 0px) + env(safe-area-inset-bottom));
+  }
+
+  .loom-page .loom-section-title,
+  .loom-page h2.text-2xl,
+  .loom-page h3.text-2xl {
+    font-size: 1.25rem;
+    line-height: 1.55rem;
+  }
+
+  .loom-page section {
+    margin-bottom: 1.5rem;
+  }
+
+  .loom-page .flex.gap-6.overflow-x-auto {
+    gap: 0.85rem;
+    padding-right: 0;
+  }
+
+  .loom-poster-link {
+    width: clamp(7rem, 32vw, 9rem) !important;
+    max-width: clamp(7rem, 32vw, 9rem) !important;
+  }
+
+  .loom-poster-link h4 {
+    font-size: 0.78rem;
+  }
+
+  .loom-poster-link p {
+    font-size: 0.68rem;
+  }
+
+  .loom-chip {
+    height: 1.45rem;
+    padding-inline: 0.4rem;
+    font-size: 0.65rem;
+  }
+
+  .loom-page .mb-2.flex.flex-wrap.items-center.justify-between {
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.75rem;
+  }
+
+  .loom-page .mb-2.flex.flex-wrap.items-center.justify-between > h2 {
+    min-width: 0;
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  .loom-page .mb-2.flex.flex-wrap.items-center.justify-between > .relative {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .loom-page .mb-2.flex.flex-wrap.items-center.justify-between > .relative > button {
+    width: auto;
+    justify-content: center;
+    height: 2.35rem;
+    max-width: 10rem;
+  }
+
+  .loom-page .min-h-\[calc\(100vh-220px\)\],
+  .loom-page .min-h-\[calc\(100vh-260px\)\] {
+    min-height: calc(100vh - 12rem);
+  }
+
+  .loom-page .grid.gap-3.sm\:grid-cols-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .loom-settings-tabs {
+    display: none;
+  }
+
+  .loom-settings-content {
+    padding-top: 0;
+  }
+
+  .loom-settings-mobile-menu {
+    display: block;
+    padding-top: 0.25rem;
+  }
+
+  .loom-settings-mobile-profile {
+    display: grid;
+    justify-items: center;
+    padding: 1.1rem 1rem 2.15rem;
+    text-align: center;
+  }
+
+  .loom-settings-mobile-logo {
+    display: grid;
+    width: 4.5rem;
+    height: 4.5rem;
+    place-items: center;
+    border-radius: 9999px;
+    background:
+      radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.72), transparent 17%),
+      radial-gradient(circle at 70% 75%, color-mix(in srgb, var(--loom-accent) 82%, white), transparent 36%),
+      linear-gradient(145deg, color-mix(in srgb, var(--loom-accent) 92%, white), var(--loom-accent) 48%, var(--loom-surface-3));
+    color: var(--loom-accent-foreground);
+    font-size: 1.15rem;
+    font-weight: 800;
+    border: 1px solid color-mix(in srgb, var(--loom-accent) 55%, var(--loom-panel-border));
+    box-shadow:
+      0 18px 38px rgba(0, 0, 0, 0.36),
+      0 0 0 6px color-mix(in srgb, var(--loom-accent) 10%, transparent);
+  }
+
+  .loom-settings-mobile-profile h1 {
+    margin-top: 0.8rem;
+    color: white;
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.1;
+  }
+
+  .loom-settings-mobile-profile p {
+    margin-top: 0.45rem;
+    max-width: 18rem;
+    color: var(--loom-muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+
+  .loom-settings-mobile-list {
+    display: grid;
+    gap: 0.1rem;
+    padding-bottom: 1rem;
+  }
+
+  .loom-settings-mobile-list button {
+    display: grid;
+    min-height: 3.35rem;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    color: white;
+    font-size: 1.05rem;
+    font-weight: 650;
+    line-height: 1.2;
+    text-align: left;
+  }
+
+  .loom-settings-mobile-list button svg {
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .loom-settings-mobile-list button:last-child {
+    border-bottom: 0;
+  }
+
+  .loom-settings-mobile-detail-bar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 1.35rem;
+  }
+
+  .loom-settings-mobile-detail-bar button {
+    display: grid;
+    width: 2rem;
+    height: 2rem;
+    place-items: center;
+    color: var(--loom-accent);
+    margin-left: -0.35rem;
+  }
+
+  .loom-settings-mobile-detail-bar h1 {
+    min-width: 0;
+    overflow: hidden;
+    color: white;
+    font-size: 1.55rem;
+    font-weight: 800;
+    line-height: 1.1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .loom-settings-menu-open .loom-settings-mobile-detail-bar,
+  .loom-settings-menu-open .loom-settings-sections {
+    display: none;
+  }
+
+  .loom-settings-detail-open .loom-settings-mobile-menu {
+    display: none;
+  }
+
+  .settings-panel,
+  .settings-panel-soft {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .loom-settings-detail-open .settings-panel,
+  .loom-settings-detail-open .settings-panel-soft,
+  .loom-settings-detail-open .settings-action-tile {
+    border-radius: 12px;
+  }
+
+  .loom-settings-detail-open .settings-panel > div:first-child {
+    padding: 16px;
+  }
+
+  .loom-settings-detail-open .settings-panel > div:last-child {
+    padding: 0 16px 16px;
+  }
+
+  .loom-settings-detail-open .settings-panel > div:only-child {
+    padding: 16px;
+  }
+
+  .loom-settings-detail-open .settings-panel-soft,
+  .loom-settings-detail-open .settings-action-tile {
+    padding: 16px;
+  }
+
+  .settings-panel .min-w-56 {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .settings-panel .settings-key-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) repeat(3, 2.5rem);
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .settings-panel .settings-key-row input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .settings-panel .settings-key-row button {
+    width: 2.5rem;
+    min-width: 0;
+  }
+
+  .settings-panel .settings-key-row-custom {
+    grid-template-columns: minmax(0, 1fr) repeat(3, 2.5rem);
+  }
+
+  .settings-panel .settings-key-row-custom input:first-child {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .settings-panel .settings-key-row-new {
+    grid-template-columns: minmax(0, 1fr) 2.5rem;
+  }
+
+  .settings-panel .settings-key-row-new input:first-child {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .loom-page .relative.h-\[45vh\],
+  .loom-page .relative.h-\[50vh\] {
+    height: 62vh;
+    min-height: 29rem;
+  }
+
+  .loom-detail-hero-fade {
+    background:
+      linear-gradient(180deg, rgba(8, 15, 25, 0.08) 0%, rgba(8, 15, 25, 0.42) 32%, var(--loom-sidebar) 92%),
+      linear-gradient(90deg, rgba(8, 15, 25, 0.74) 0%, rgba(8, 15, 25, 0.12) 100%);
+  }
+
+  .loom-detail-side-fade-left,
+  .loom-detail-side-fade-right {
+    display: none;
+  }
+
+  .loom-page .loom-no-drag.fixed:not(.loom-settings-tabs) {
+    left: 0.875rem !important;
+    top: max(0.75rem, env(safe-area-inset-top)) !important;
+    height: 2.35rem;
+    padding-inline: 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  .loom-page .relative.h-\[45vh\] > .absolute.bottom-0,
+  .loom-page .relative.h-\[50vh\] > .absolute.bottom-0 {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: end;
+    gap: 0.85rem;
+    padding: 5.5rem 1rem 1rem;
+  }
+
+  .loom-page .relative.h-\[45vh\] h1,
+  .loom-page .relative.h-\[50vh\] h1 {
+    font-size: clamp(1.85rem, 9vw, 2.4rem);
+    line-height: 1.04;
+    margin-bottom: 0.6rem;
+  }
+
+  .loom-page .relative.h-\[45vh\] .text-sm,
+  .loom-page .relative.h-\[50vh\] .text-sm {
+    gap: 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  .loom-page .relative.h-\[45vh\] button.h-16,
+  .loom-page .relative.h-\[50vh\] button.h-16 {
+    width: 100%;
+    min-width: 0;
+    height: 3.45rem;
+    justify-content: center;
+  }
+
+  .loom-page .page-bottom-safe-lg.p-8 {
+    padding: 1rem 1rem calc(6.75rem + env(safe-area-inset-bottom));
+  }
+
+  .loom-page .grid.grid-cols-2.md\:grid-cols-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .loom-page .flex.cursor-pointer.items-center.gap-4.p-4 {
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem;
+  }
+
+  .loom-page .flex.cursor-pointer.items-center.gap-4.p-4 .w-28 {
+    width: 5.6rem;
+    height: 3.2rem;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 760px) {
+  .loom-page > .page-bottom-safe,
+  .loom-page > div > .page-bottom-safe,
+  .loom-page > .page-bottom-safe-lg,
+  .loom-page > div > .page-bottom-safe-lg {
+    padding-inline: 1.5rem;
+  }
+
+  .loom-poster-link {
+    width: 9.75rem !important;
+    max-width: 9.75rem !important;
+  }
+}

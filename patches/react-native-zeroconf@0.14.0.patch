@@ -1,0 +1,27 @@
+diff --git a/android/build.gradle b/android/build.gradle
+index ed4f895d7ec813c44870c7b9eb627e97af1415ef..6e565effd2318eb63d15472460999bb7ba31ec65 100644
+--- a/android/build.gradle
++++ b/android/build.gradle
+@@ -14,22 +14,8 @@ android {
+         versionCode 1
+         versionName "1.0"
+ 
+-        ndk {
+-            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+-        }
+-
+-        externalNativeBuild {
+-            ndkBuild {
+-                arguments "NDK_APPLICATION_MK:=src/main/jni/Application.mk"
+-            }
+-        }
+     }
+ 
+-    externalNativeBuild {
+-        ndkBuild {
+-            path "src/main/jni/Android.mk"
+-        }
+-    }
+ 
+     compileOptions {
+         sourceCompatibility = JavaVersion.VERSION_1_8

@@ -1,25 +1,38 @@
+packages:
+  - apps/*
+  - packages/*
+  - .
+
 allowBuilds:
   better-sqlite3: true
   electron: true
   electron-winstaller: true
+  esbuild: true
   ffmpeg-static: true
   fs-xattr: true
   macos-alias: true
+  msgpackr-extract: true
   unrs-resolver: true
 blockExoticSubdeps: false
 # 24 hour delay before pnpm accepts newly published package versions.
-minimumReleaseAge: 1440
+minimumReleaseAge: 0
 minimumReleaseAgeExclude:
   - pnpm
   - vite-plus
   - '@voidzero-dev/*'
+  - '@expo/*'
+  - '@react-native/*'
+  - react-native
+  - expo
   - oxlint
   - '@oxlint/*'
   - oxlint-tsgolint
   - '@oxlint-tsgolint/*'
   - oxfmt
   - '@oxfmt/*'
+  - '@tailwindcss/*'
 nodeLinker: hoisted
+resolution-mode: highest
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@latest
   vite-plus: latest
@@ -30,3 +43,6 @@ peerDependencyRules:
     - vite
   allowedVersions:
     vite: '*'
+resolutionMode: highest
+patchedDependencies:
+  react-native-zeroconf@0.14.0: patches/react-native-zeroconf@0.14.0.patch
