@@ -1,41 +1,88 @@
-import { SETTINGS_SECTIONS, type SettingsSection } from './Settings.helpers';
+import {
+  ChevronRight,
+  Database,
+  FolderCog,
+  MonitorPlay,
+  Palette,
+  Share2,
+  type LucideIcon,
+} from 'lucide-react';
+import {
+  SETTINGS_GROUP_LABELS,
+  SETTINGS_SECTIONS,
+  type SettingsSection,
+} from './Settings.helpers';
 
 type SettingsTabsProps = {
   activeSection: SettingsSection;
   onSelect: (section: SettingsSection) => void;
 };
 
+const SECTION_ICONS: Record<SettingsSection, LucideIcon> = {
+  library: FolderCog,
+  playback: MonitorPlay,
+  metadata: Database,
+  network: Share2,
+  theme: Palette,
+  about: Database,
+};
+
 export default function SettingsTabs({ activeSection, onSelect }: SettingsTabsProps) {
   return (
-    <div
-      className="loom-settings-tabs loom-no-drag fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
-      style={{ borderRadius: 12 }}
+    <nav
+      aria-label="Settings sections"
+      className="loom-settings-tabs loom-no-drag sticky top-6 rounded-2xl border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-3 backdrop-blur-md"
     >
-      {SETTINGS_SECTIONS.map((section) => {
-        const isActive = activeSection === section.id;
-        return (
-          <button
-            key={section.id}
-            type="button"
-            onClick={() => onSelect(section.id)}
-            aria-pressed={isActive}
-            className={`relative h-9 rounded-[8px] px-4 text-sm font-medium transition-colors ${
-              isActive
-                ? 'text-[var(--loom-accent-foreground)]'
-                : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
-            }`}
-            style={{ borderRadius: 8 }}
-          >
-            {isActive && (
-              <span
-                className="absolute inset-0 rounded-[8px] bg-[var(--loom-accent)]"
-                style={{ borderRadius: 8 }}
-              />
-            )}
-            <span className="relative z-10">{section.label}</span>
-          </button>
-        );
-      })}
-    </div>
+      <div className="border-b border-[var(--loom-panel-border)] px-2 pb-4 pt-1">
+        <p className="text-lg font-bold text-white">Settings</p>
+        <p className="mt-1 text-xs leading-5 text-[var(--loom-muted)]">
+          Choose a task. Related controls stay together.
+        </p>
+      </div>
+
+      <div className="loom-no-drag space-y-4 pt-4">
+        {SETTINGS_SECTIONS.map((section, index) => {
+          const isActive = activeSection === section.id;
+          const startsGroup = index === 0 || SETTINGS_SECTIONS[index - 1].group !== section.group;
+          const Icon = SECTION_ICONS[section.id];
+
+          return (
+            <div key={section.id}>
+              {startsGroup && (
+                <p className="mb-1.5 px-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--loom-faint)]">
+                  {SETTINGS_GROUP_LABELS[section.group]}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => onSelect(section.id)}
+                aria-pressed={isActive}
+                className={`group flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors ${
+                  isActive
+                    ? 'bg-[var(--loom-surface-3)] text-white ring-1 ring-[var(--loom-accent)]/35'
+                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-2)] hover:text-white'
+                }`}
+              >
+                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+                  isActive
+                    ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
+                    : 'bg-[var(--loom-surface-2)] text-[var(--loom-faint)] group-hover:text-[var(--loom-accent)]'
+                }`}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold leading-5">{section.label}</span>
+                  <span className="block truncate text-[11px] leading-4 text-[var(--loom-faint)]">
+                    {section.description}
+                  </span>
+                </span>
+                <ChevronRight className={`h-4 w-4 shrink-0 ${isActive ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-faint)]'}`} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </nav>
   );
 }

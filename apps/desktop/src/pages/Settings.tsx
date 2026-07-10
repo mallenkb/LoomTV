@@ -558,13 +558,13 @@ export default function Settings() {
     },
     {
       key: 'anime' as const,
-      title: 'Anime / Animations',
+      title: 'Anime',
       description: 'Folders added here always scan into Anime.',
       folders: libraryFolderGroups.anime || [],
     },
     {
       key: 'others' as const,
-      title: 'Others',
+      title: 'Other Media',
       description: 'Folders added here are scanned with automatic type detection.',
       folders: libraryFolderGroups.others || [],
     },
@@ -645,19 +645,24 @@ export default function Settings() {
   return (
     <div className={`loom-page h-full overflow-y-auto ${isMobileSettingsMenuOpen ? 'loom-settings-menu-open' : 'loom-settings-detail-open'}`}>
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
-        <div className="loom-settings-content mx-auto max-w-5xl pt-16">
-          <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} />
+        <div className="loom-settings-content mx-auto max-w-6xl pt-6">
+          <div className="loom-settings-desktop-layout">
+            <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} />
+            <div className="loom-settings-detail-column min-w-0">
 
           <div className="loom-settings-mobile-menu">
             <div className="loom-settings-mobile-profile">
               <div className="loom-settings-mobile-logo">LT</div>
               <h1>Loom Media Server</h1>
-              <p>Manage your library, playback, network, metadata, theme, and app details.</p>
+              <p>Choose what you want to manage. Related controls stay together.</p>
             </div>
             <div className="loom-settings-mobile-list">
               {SETTINGS_SECTIONS.map((section) => (
                 <button key={section.id} type="button" onClick={() => handleSectionSelect(section.id)}>
-                  <span>{section.label}</span>
+                  <span className="min-w-0">
+                    <span className="block">{section.label}</span>
+                    <span className="mt-1 block text-xs font-normal text-[var(--loom-muted)]">{section.description}</span>
+                  </span>
                   <ChevronRight className="h-5 w-5" />
                 </button>
               ))}
@@ -688,11 +693,6 @@ export default function Settings() {
             folderStatuses={libraryFolderStatuses}
             addLibraryFolder={addLibraryFolder}
             removeLibraryFolder={removeLibraryFolder}
-            sidebarNavOrder={sidebarNavOrder}
-            draggedSidebarItem={draggedSidebarItem}
-            setDraggedSidebarItem={setDraggedSidebarItem}
-            onSidebarOrderDrop={handleSidebarOrderDrop}
-            moveSidebarItem={moveSidebarItem}
             isScanning={isScanning}
             scanProgress={scanProgress}
             movieCount={movies.length}
@@ -704,11 +704,6 @@ export default function Settings() {
             refreshLibrary={refreshLibrary}
             autoSyncIntervalHours={autoSyncIntervalHours}
             setAutoSyncIntervalHours={setAutoSyncIntervalHours}
-            backupStatus={backupStatus}
-            clearDataStatus={clearDataStatus}
-            isClearingData={isClearingData}
-            onBackupDatabase={() => void handleBackupDatabase()}
-            onClearAppData={() => void handleClearAppData()}
           />
         )}
 
@@ -772,7 +767,17 @@ export default function Settings() {
           />
         )}
 
-        {activeSection === 'theme' && <ThemeSettingsSection theme={theme} setTheme={setTheme} />}
+        {activeSection === 'theme' && (
+          <ThemeSettingsSection
+            theme={theme}
+            setTheme={setTheme}
+            sidebarNavOrder={sidebarNavOrder}
+            draggedSidebarItem={draggedSidebarItem}
+            setDraggedSidebarItem={setDraggedSidebarItem}
+            onSidebarOrderDrop={handleSidebarOrderDrop}
+            moveSidebarItem={moveSidebarItem}
+          />
+        )}
 
         {activeSection === 'about' && (
           <AboutSettingsSection
@@ -786,9 +791,16 @@ export default function Settings() {
             updateButtonLabel={updateButtonLabel}
             updateStatusCopy={updateStatusCopy}
             onUpdateAction={() => void handleUpdateAction()}
+            backupStatus={backupStatus}
+            clearDataStatus={clearDataStatus}
+            isClearingData={isClearingData}
+            onBackupDatabase={() => void handleBackupDatabase()}
+            onClearAppData={() => void handleClearAppData()}
           />
         )}
 
+          </div>
+            </div>
           </div>
         </div>
       </div>
