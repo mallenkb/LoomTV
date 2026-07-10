@@ -1,6 +1,7 @@
-import { CheckCircle, Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { CheckCircle, ChevronDown, Download, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
 import type React from 'react';
 import LoomLoader from '@/components/LoomLoader';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { APP_VERSION, desktopApi, type UpdateState } from '@/lib/desktopApi';
 import type { AppThemeSettings } from '@/lib/theme';
@@ -28,6 +29,11 @@ type AboutSettingsSectionProps = {
   updateButtonLabel: string;
   updateStatusCopy: string;
   onUpdateAction: () => void;
+  backupStatus: string;
+  clearDataStatus: string;
+  isClearingData: boolean;
+  onBackupDatabase: () => void;
+  onClearAppData: () => void;
 };
 
 export default function AboutSettingsSection({
@@ -41,6 +47,11 @@ export default function AboutSettingsSection({
   updateButtonLabel,
   updateStatusCopy,
   onUpdateAction,
+  backupStatus,
+  clearDataStatus,
+  isClearingData,
+  onBackupDatabase,
+  onClearAppData,
 }: AboutSettingsSectionProps) {
   return (
     <div className="space-y-4">
@@ -129,6 +140,73 @@ export default function AboutSettingsSection({
       </div>
 
       <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="text-white">Your data</CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Back up this device or start over. Clearing data is kept separate from routine library controls.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3">
+            <div className="settings-panel-soft rounded-xl p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="max-w-xl">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Download className="h-4 w-4 text-[var(--loom-accent)]" />
+                    Database backup
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--loom-muted)]">
+                    Save library metadata, artwork, playback progress, and settings to a local file.
+                  </p>
+                </div>
+                <Button onClick={onBackupDatabase} variant="outline" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Back up database
+                </Button>
+              </div>
+              {backupStatus && <p className="mt-3 min-w-0 truncate text-sm text-[var(--loom-muted)]">{backupStatus}</p>}
+            </div>
+
+            <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="max-w-xl">
+                  <p className="flex items-center gap-2 text-sm font-semibold text-white">
+                    <Trash2 className="h-4 w-4 text-red-400" />
+                    Clear app data
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--loom-muted)]">
+                    Remove folders, metadata, artwork, playback progress, and settings from this device.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={onClearAppData}
+                  disabled={isClearingData}
+                  variant="outline"
+                  className="gap-2 border-red-500/30 bg-red-500/10 text-red-100 hover:border-red-400/45 hover:bg-red-500/20 hover:text-red-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {isClearingData ? 'Clearing...' : 'Clear app data'}
+                </Button>
+              </div>
+              {clearDataStatus && <p className="mt-3 text-sm text-[var(--loom-muted)]">{clearDataStatus}</p>}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <details className="settings-panel group rounded-2xl p-4">
+        <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 rounded-xl px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]">
+          <span>
+            <span className="block text-sm font-semibold text-white">Technical details &amp; legal</span>
+            <span className="mt-0.5 block text-xs leading-5 text-[var(--loom-muted)]">
+              Metadata sources, bundled tools, and third-party licenses.
+            </span>
+          </span>
+          <ChevronDown className="h-5 w-5 shrink-0 text-[var(--loom-accent)] transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="mt-4 space-y-4">
+      <Card className="settings-panel-soft">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white">Metadata &amp; Artwork Sources</CardTitle>
           <CardDescription className="text-[var(--loom-faint)] text-xs">
@@ -157,7 +235,7 @@ export default function AboutSettingsSection({
         </CardContent>
       </Card>
 
-      <Card className="settings-panel">
+      <Card className="settings-panel-soft">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white">Bundled Media Tools</CardTitle>
           <CardDescription className="text-[var(--loom-faint)] text-xs leading-5">
@@ -191,7 +269,7 @@ export default function AboutSettingsSection({
         </CardContent>
       </Card>
 
-      <Card className="settings-panel">
+      <Card className="settings-panel-soft">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white">Third-Party Libraries</CardTitle>
           <CardDescription className="text-[var(--loom-faint)] text-xs">
@@ -231,6 +309,8 @@ export default function AboutSettingsSection({
           </div>
         </CardContent>
       </Card>
+        </div>
+      </details>
     </div>
   );
 }
