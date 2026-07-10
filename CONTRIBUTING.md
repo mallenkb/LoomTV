@@ -1,6 +1,6 @@
-# Contributing to LoomTV
+# Contributing to Loom Media Server
 
-LoomTV is a local-first desktop media library and player for movies, TV shows, and anime that users already own or are authorized to use. Contributions should keep that boundary clear: the project does not provide, host, download, or sell media.
+Loom Media Server is a local-first desktop media library and player for movies, TV shows, and anime that users already own or are authorized to use. Contributions should keep that boundary clear: the project does not provide, host, download, or sell media.
 
 ## Ways to Contribute
 
@@ -8,7 +8,7 @@ LoomTV is a local-first desktop media library and player for movies, TV shows, a
 - Improve tests around media classification, playback planning, local server security, updater behavior, and renderer utilities.
 - Improve documentation for installation, release workflows, platform quirks, and provider setup.
 - Help with cross-platform packaging issues on macOS, Windows, and Linux.
-- Propose small UX improvements that keep LoomTV focused on local media management.
+- Propose small UX improvements that keep Loom Media Server focused on local media management.
 
 ## Development Setup
 
@@ -43,7 +43,7 @@ Desktop-specific commands are also available:
 ```sh
 corepack pnpm desktop:typecheck
 corepack pnpm desktop:test
-corepack pnpm --filter loomtv-desktop dist
+corepack pnpm --filter loom-media-server-desktop dist
 ```
 
 ## Project Structure
@@ -67,7 +67,7 @@ docs/        Screenshots, release notes, future work, and implementation notes.
 
 ## Security and Privacy Boundaries
 
-LoomTV handles local files, metadata provider API keys, local network access, updater flows, and bundled media tooling. Treat changes in these areas as higher risk.
+Loom Media Server handles local files, metadata provider API keys, local network access, updater flows, and bundled media tooling. Treat changes in these areas as higher risk.
 
 Use extra care when touching:
 
