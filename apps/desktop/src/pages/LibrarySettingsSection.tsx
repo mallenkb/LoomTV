@@ -1,7 +1,6 @@
-import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Clock, Download, FolderPlus, GripVertical, HardDrive, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, FolderPlus, HardDrive, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { SIDEBAR_NAV_LABELS, type SidebarNavItemId } from './Settings.helpers';
 import type { LibraryFolderSection, LibraryFolderStatus } from './Settings.types';
 
 const AUTO_SYNC_OPTIONS = [
@@ -21,11 +20,6 @@ type LibrarySettingsSectionProps = {
   folderStatuses: LibraryFolderStatus[];
   addLibraryFolder: (kind: LibraryFolderSection['key']) => void;
   removeLibraryFolder: (folder: string) => void;
-  sidebarNavOrder: SidebarNavItemId[];
-  draggedSidebarItem: SidebarNavItemId | null;
-  setDraggedSidebarItem: (item: SidebarNavItemId | null) => void;
-  onSidebarOrderDrop: (targetId: SidebarNavItemId) => void;
-  moveSidebarItem: (itemId: SidebarNavItemId, direction: -1 | 1) => void;
   isScanning: boolean;
   scanProgress: number;
   movieCount: number;
@@ -37,11 +31,6 @@ type LibrarySettingsSectionProps = {
   refreshLibrary: () => void;
   autoSyncIntervalHours: number;
   setAutoSyncIntervalHours: (hours: number) => void | Promise<void>;
-  backupStatus: string;
-  clearDataStatus: string;
-  isClearingData: boolean;
-  onBackupDatabase: () => void;
-  onClearAppData: () => void;
 };
 
 export default function LibrarySettingsSection({
@@ -49,11 +38,6 @@ export default function LibrarySettingsSection({
   folderStatuses,
   addLibraryFolder,
   removeLibraryFolder,
-  sidebarNavOrder,
-  draggedSidebarItem,
-  setDraggedSidebarItem,
-  onSidebarOrderDrop,
-  moveSidebarItem,
   isScanning,
   scanProgress,
   movieCount,
@@ -65,11 +49,6 @@ export default function LibrarySettingsSection({
   refreshLibrary,
   autoSyncIntervalHours,
   setAutoSyncIntervalHours,
-  backupStatus,
-  clearDataStatus,
-  isClearingData,
-  onBackupDatabase,
-  onClearAppData,
 }: LibrarySettingsSectionProps) {
   const statusByPath = new Map(folderStatuses.map((status) => [status.path, status]));
   const unavailableCount = folderStatuses.filter((status) => status.state === 'unavailable').length;
@@ -114,9 +93,9 @@ export default function LibrarySettingsSection({
                     <p className="text-sm font-semibold text-white">{section.title}</p>
                     <p className="text-xs text-[var(--loom-muted)]">{section.description}</p>
                   </div>
-                  <Button onClick={() => addLibraryFolder(section.key)} className="gap-2 shrink-0">
+                  <Button onClick={() => addLibraryFolder(section.key)} variant="outline" className="gap-2 shrink-0">
                     <FolderPlus className="w-4 h-4" />
-                    Add
+                    Add folder
                   </Button>
                 </div>
 
@@ -134,7 +113,7 @@ export default function LibrarySettingsSection({
                           type="button"
                           onClick={() => removeLibraryFolder(folder)}
                           aria-label={`Remove ${folder}`}
-                          className="text-red-500 hover:text-red-400 p-1 shrink-0"
+                          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -145,65 +124,6 @@ export default function LibrarySettingsSection({
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Sidebar Order</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Drag the middle sidebar items into the order you want.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-2">
-            {sidebarNavOrder.map((itemId, index) => (
-              <div
-                key={itemId}
-                draggable
-                onDragStart={() => setDraggedSidebarItem(itemId)}
-                onDragEnd={() => setDraggedSidebarItem(null)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => onSidebarOrderDrop(itemId)}
-                className={`flex cursor-grab items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors active:cursor-grabbing ${
-                  draggedSidebarItem === itemId
-                    ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/10'
-                    : 'border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] hover:border-[var(--loom-accent)]/35'
-                }`}
-              >
-                <GripVertical className="h-4 w-4 shrink-0 text-[var(--loom-faint)]" />
-                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-xs font-semibold text-[var(--loom-accent)]">
-                  {index + 1}
-                </span>
-                <span className="min-w-0 flex-1 text-sm font-medium text-white">
-                  {SIDEBAR_NAV_LABELS[itemId]}
-                </span>
-                <div className="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => moveSidebarItem(itemId, -1)}
-                    disabled={index === 0}
-                    aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} up`}
-                    className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveSidebarItem(itemId, 1)}
-                    disabled={index === sidebarNavOrder.length - 1}
-                    aria-label={`Move ${SIDEBAR_NAV_LABELS[itemId]} down`}
-                    className="grid h-8 w-8 place-items-center rounded-md text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-[var(--loom-faint)]">
-            Home stays pinned first. Settings and refresh stay pinned at the bottom.
-          </p>
         </CardContent>
       </Card>
 
@@ -284,61 +204,6 @@ export default function LibrarySettingsSection({
         </CardContent>
       </Card>
 
-      <Card className="settings-panel">
-        <CardHeader>
-          <CardTitle className="text-white">Data Management</CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Back up the database or clear this device's local Loom Media Server data.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3">
-            <div className="settings-panel-soft rounded-xl p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="flex items-center gap-2 text-sm font-semibold text-white">
-                    <Download className="h-4 w-4 text-[var(--loom-accent)]" />
-                    Database Backup
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--loom-muted)]">
-                    Saves a copy of the local SQLite database with library metadata, artwork, progress, and settings.
-                  </p>
-                </div>
-                <Button onClick={onBackupDatabase} variant="outline" className="gap-2">
-                  <Download className="h-4 w-4" />
-                  Back Up Database
-                </Button>
-              </div>
-              {backupStatus && <p className="mt-3 min-w-0 truncate text-sm text-[var(--loom-muted)]">{backupStatus}</p>}
-            </div>
-
-            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="flex items-center gap-2 text-sm font-semibold text-white">
-                    <Trash2 className="h-4 w-4 text-red-400" />
-                    Clear App Data
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--loom-muted)]">
-                    Removes saved library folders, scanned metadata, artwork, watch progress, and settings.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  onClick={onClearAppData}
-                  disabled={isClearingData}
-                  variant="outline"
-                  className="gap-2 border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {isClearingData ? 'Clearing...' : 'Clear Data'}
-                </Button>
-              </div>
-              {clearDataStatus && <p className="mt-3 text-sm text-[var(--loom-muted)]">{clearDataStatus}</p>}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </>
   );
 }
