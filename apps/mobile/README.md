@@ -1,12 +1,12 @@
 # LoomTV Mobile
 
-LoomTV Mobile is an Expo React Native companion app for browsing and playing a paired LoomTV desktop library from another device.
+LoomTV Mobile is an Expo React Native companion app in progress for browsing and playing a paired Loom Media Player desktop library from another device.
 
-The current target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in LoomTV desktop settings. Internet remote streaming is not documented as supported yet and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
+The current development target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in Loom Media Player desktop settings. Internet remote streaming is not documented as supported yet and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
 
-## Current Capabilities
+## Current In-Progress Capabilities
 
-- Pair with a LoomTV desktop host using a desktop base URL and 6-digit pairing code.
+- Pair with a Loom Media Player desktop host using a desktop base URL and 6-digit pairing code.
 - Browse Home, Movies, TV Shows, Anime, Settings, detail pages, and episode lists.
 - Load the paired desktop library over the local network.
 - Play direct mobile-compatible streams with `expo-video`.
@@ -24,7 +24,7 @@ The workspace includes Convex functions and schema for longer-term companion wor
 - Playback progress
 - Remote playback control commands
 
-The mobile app currently pairs directly with the desktop LAN API. Convex support should be treated as foundation for sync/control workflows until the full production path is documented.
+The mobile app currently pairs directly with the desktop LAN API while the production companion-client path is still being refined. Convex support should be treated as foundation for sync/control workflows until the full production path is documented.
 
 ## Development
 
@@ -44,7 +44,7 @@ corepack pnpm mobile:web
 
 ## Pairing Flow
 
-1. Start LoomTV desktop.
+1. Start Loom Media Player desktop.
 2. Enable local network sharing in desktop Settings.
 3. Note the desktop address and 6-digit pairing code.
 4. Open LoomTV Mobile on a device connected to the same network.
@@ -60,7 +60,7 @@ corepack pnpm mobile:web
 
 ## Known Limits
 
-- The mobile app is an MVP companion client.
+- The mobile app is an MVP companion client in progress.
 - Same-LAN streaming is the first supported target.
 - Mobile playback support depends on platform codec support or successful HLS/transcode fallback.
 - Setup, diagnostics, and error recovery still need polish.

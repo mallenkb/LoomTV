@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1024" viewBox="0 0 1280 1024" role="img" aria-labelledby="title desc">
-  <title id="title">LoomTV empty library home screen</title>
-  <desc id="desc">Dark LoomTV desktop window with sidebar navigation, search, and first library folder buttons.</desc>
+  <title id="title">Loom Media Server empty library home screen</title>
+  <desc id="desc">Dark Loom Media Server desktop window with sidebar navigation, search, and first library folder buttons.</desc>
   <rect width="1280" height="1024" fill="#000"/>
   <rect x="56" y="39" width="1176" height="923" rx="14" fill="#1a1a1a" stroke="#4a4a4a"/>
   <rect x="57" y="40" width="1174" height="30" rx="13" fill="#202020"/>
   <circle cx="72" cy="54" r="7" fill="#ff4b55"/>
   <circle cx="95" cy="54" r="7" fill="#ffc13b"/>
   <circle cx="118" cy="54" r="7" fill="#2fd05f"/>
-  <text x="140" y="59" fill="#9d9d9d" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700">LoomTV</text>
+  <text x="140" y="59" fill="#9d9d9d" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700">Loom Media Server</text>
   <rect x="57" y="70" width="191" height="891" fill="#242424"/>
   <line x1="248" y1="70" x2="248" y2="961" stroke="#333"/>
 
@@ -47,7 +47,7 @@
     <rect x="294" y="26" width="31" height="26" rx="3" fill="none" stroke="#ffc13b" stroke-width="3"/>
     <path d="M294 31 H308 L312 36 H325 M310 39 V49 M305 44 H315" fill="none" stroke="#ffc13b" stroke-width="2.4" stroke-linecap="round"/>
     <text x="166" y="129" fill="#fff" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700">Add your first library folder</text>
-    <text x="100" y="165" fill="#a5a5a5" font-family="Inter, Arial, sans-serif" font-size="15">Choose where LoomTV should look for your movies, TV shows, or</text>
+    <text x="100" y="165" fill="#a5a5a5" font-family="Inter, Arial, sans-serif" font-size="15">Choose where Loom Media Server should look for your movies, TV shows, or</text>
     <text x="166" y="188" fill="#a5a5a5" font-family="Inter, Arial, sans-serif" font-size="15">anime. The folder will be scanned right away.</text>
     <rect x="1" y="228" width="199" height="47" rx="12" fill="#ffc13b"/>
     <rect x="212" y="228" width="198" height="47" rx="12" fill="#1b1b1b" stroke="#343434"/>
