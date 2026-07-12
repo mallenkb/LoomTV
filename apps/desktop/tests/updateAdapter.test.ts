@@ -22,22 +22,22 @@ test('update adapter starts automatic checks after the startup delay and on the 
     startupDelayMs: 10,
     checkIntervalMs: 20,
     getState: () => createState('idle'),
-    configure: () => {},
+    configure: () => undefined,
     checkForUpdates: async () => {
       checks += 1;
       return createState('not-available');
     },
-    promptForDownloadedUpdate: () => {},
+    promptForDownloadedUpdate: () => undefined,
     setTimeout: (callback) => {
       scheduledTimeouts.push(callback);
       return 1;
     },
-    clearTimeout: () => {},
+    clearTimeout: () => undefined,
     setInterval: (callback) => {
       scheduledIntervals.push(callback);
       return 2;
     },
-    clearInterval: () => {},
+    clearInterval: () => undefined,
   });
 
   adapter.start();
@@ -55,16 +55,16 @@ test('update adapter checks once per day by default', () => {
 
   const adapter = createUpdateAdapter({
     getState: () => createState('idle'),
-    configure: () => {},
+    configure: () => undefined,
     checkForUpdates: async () => createState('not-available'),
-    promptForDownloadedUpdate: () => {},
+    promptForDownloadedUpdate: () => undefined,
     setTimeout: () => 1,
-    clearTimeout: () => {},
+    clearTimeout: () => undefined,
     setInterval: (_callback, delayMs) => {
       scheduledIntervalMs = delayMs;
       return 2;
     },
-    clearInterval: () => {},
+    clearInterval: () => undefined,
   });
 
   adapter.start();
@@ -78,15 +78,15 @@ test('update adapter prompts when an automatic check finds a downloaded update',
 
   const adapter = createUpdateAdapter({
     getState: () => createState('idle'),
-    configure: () => {},
+    configure: () => undefined,
     checkForUpdates: async () => createState('downloaded'),
     promptForDownloadedUpdate: () => {
       prompts += 1;
     },
     setTimeout: () => 1,
-    clearTimeout: () => {},
+    clearTimeout: () => undefined,
     setInterval: () => 2,
-    clearInterval: () => {},
+    clearInterval: () => undefined,
   });
 
   await adapter.checkNow();
@@ -101,16 +101,16 @@ test('update adapter skips automatic checks while an update is busy', async () =
     let checks = 0;
     const adapter = createUpdateAdapter({
       getState: () => createState(status),
-      configure: () => {},
+      configure: () => undefined,
       checkForUpdates: async () => {
         checks += 1;
         return createState('not-available');
       },
-      promptForDownloadedUpdate: () => {},
+      promptForDownloadedUpdate: () => undefined,
       setTimeout: () => 1,
-      clearTimeout: () => {},
+      clearTimeout: () => undefined,
       setInterval: () => 2,
-      clearInterval: () => {},
+      clearInterval: () => undefined,
     });
 
     await adapter.checkNow();

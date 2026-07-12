@@ -164,7 +164,6 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
     loadSettings,
     localAccessQuery,
     readJsonBody,
-    redirectToArtworkSource,
     refreshOfficialArtwork,
     removeFolderFromLibrary,
     requireLocalOrLanAccess,
