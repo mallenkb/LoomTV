@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import * as Brightness from 'expo-brightness';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -22,6 +22,7 @@ import {
   type StyleProp,
   Text,
   TextInput,
+  useColorScheme,
   useWindowDimensions,
   View,
   type ViewStyle,
@@ -36,10 +37,12 @@ import Zeroconf, { type ZeroconfService } from 'react-native-zeroconf';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect as SvgRect, Stop } from 'react-native-svg';
 import {
   AudioTracksIcon,
+  AutoThemeIcon,
   BackIcon,
   CheckIcon,
   ChevronRightIcon,
   CloseIcon,
+  FilterIcon,
   FolderIcon,
   LoomLogo,
   PauseIcon,
@@ -50,6 +53,9 @@ import {
   SkipBackIcon,
   SkipForwardIcon,
   SpeedIcon,
+  MoonIcon,
+  SunIcon,
+  RoundedPlayIcon,
   StarIcon,
   SubtitlesIcon,
   navIcons,
@@ -57,8 +63,38 @@ import {
 } from './components/LoomIcons';
 
 type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
-type SettingsSection = 'library' | 'network';
+type SettingsSection = 'library' | 'network' | 'appearance';
+type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched' | 'missing-metadata' | 'missing-artwork';
 type PlayerVerticalGesture = 'brightness' | 'volume';
+type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
+type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
+type PlayerRotation = 0 | 90 | 180 | 270;
+
+const PLAYER_ASPECT_OPTIONS: { value: PlayerAspectRatio; label: string }[] = [
+  { value: 'default', label: 'Default' },
+  { value: '4 / 3', label: '4:3' },
+  { value: '16 / 9', label: '16:9' },
+  { value: '16 / 10', label: '16:10' },
+  { value: '21 / 9', label: '21:9' },
+  { value: '5 / 4', label: '5:4' },
+];
+
+const PLAYER_CROP_OPTIONS: { value: PlayerCropMode; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: '4 / 3', label: '4:3' },
+  { value: '16 / 9', label: '16:9' },
+  { value: '16 / 10', label: '16:10' },
+  { value: '21 / 9', label: '21:9' },
+  { value: '5 / 4', label: '5:4' },
+  { value: 'custom', label: 'Custom…' },
+];
+
+const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
+  { value: 0, label: '0°' },
+  { value: 90, label: '90°' },
+  { value: 180, label: '180°' },
+  { value: 270, label: '270°' },
+];
 
 type LocalMediaTrack = {
   index: number;
@@ -93,6 +129,14 @@ type SubtitleRecord = {
   url: string;
 };
 
+type EpisodeMeta = {
+  season: number;
+  number: number;
+  title?: string;
+  summary?: string;
+  rating?: number;
+};
+
 type EpisodeFile = {
   season: number;
   episode: number;
@@ -102,6 +146,12 @@ type EpisodeFile = {
   still?: string;
   subtitles?: SubtitleRecord[];
   localMetadata?: LocalMediaDetails;
+};
+
+type CastMember = {
+  name: string;
+  character?: string;
+  image?: string;
 };
 
 type MediaItem = {
@@ -116,6 +166,8 @@ type MediaItem = {
   summary?: string;
   rating?: number;
   genres?: string[];
+  cast?: CastMember[];
+  episodes?: EpisodeMeta[];
   filePath: string;
   lastPlayed?: number;
   subtitles?: SubtitleRecord[];
@@ -161,11 +213,16 @@ type DiscoveredHost = {
 
 const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v1';
 const MOBILE_DEVICE_ID_KEY = 'loomtv.mobile-device-id.v1';
+const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
 
 type MobileThemeSettings = {
+  appThemeMode?: string;
   appThemeColor?: string;
   appDarkTheme?: string;
 };
+
+type MobileThemeMode = 'auto' | 'dark' | 'light';
+type ResolvedMobileThemeMode = Exclude<MobileThemeMode, 'auto'>;
 
 type MobileThemeColors = {
   accent: string;
@@ -325,6 +382,16 @@ const MOBILE_DARK_THEMES: Record<string, Pick<MobileThemeColors, 'bg' | 'panel' 
   },
 };
 
+const MOBILE_LIGHT_THEME: Pick<MobileThemeColors, 'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'> = {
+  bg: '#f4f6f8',
+  panel: '#ffffff',
+  panel2: '#eef2f5',
+  border: '#dce3e9',
+  muted: '#525252',
+  faint: '#737373',
+  themeLabel: 'Light',
+};
+
 const DEFAULT_MOBILE_THEME: MobileThemeColors = {
   ...MOBILE_ACCENTS.yellow,
   ...MOBILE_DARK_THEMES.black,
@@ -354,12 +421,13 @@ const navItems: { id: LibraryKind; label: string; Icon: (props: IconProps) => Re
   { id: 'anime', label: 'Anime', Icon: navIcons.anime },
   { id: 'tv', label: 'TV Shows', Icon: navIcons.tv },
   { id: 'movies', label: 'Movies', Icon: navIcons.movies },
-  { id: 'settings', label: 'More', Icon: navIcons.settings },
+  { id: 'settings', label: 'Settings', Icon: navIcons.settings },
 ];
 
 const settingsSections: { id: SettingsSection; label: string; description: string }[] = [
   { id: 'library', label: 'Library', description: 'Refresh and review the paired desktop library.' },
   { id: 'network', label: 'Network', description: 'Pairing status and desktop connection details.' },
+  { id: 'appearance', label: 'Appearance', description: 'Choose a light or dark theme for this device.' },
 ];
 
 function normalizeBaseUrl(value: string): string {
@@ -469,11 +537,14 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function mobileThemeFromSettings(settings?: MobileThemeSettings): MobileThemeColors {
+function mobileThemeFromSettings(settings?: MobileThemeSettings, mode: ResolvedMobileThemeMode = 'dark'): MobileThemeColors {
+  const accentTheme = MOBILE_ACCENTS[settings?.appThemeColor || ''] || MOBILE_ACCENTS.yellow;
+  const light = mode === 'light';
   return {
-    ...(MOBILE_ACCENTS[settings?.appThemeColor || ''] || MOBILE_ACCENTS.yellow),
-    ...(MOBILE_DARK_THEMES[settings?.appDarkTheme || ''] || MOBILE_DARK_THEMES.black),
-    text: '#ffffff',
+    ...accentTheme,
+    ...(light ? MOBILE_LIGHT_THEME : MOBILE_DARK_THEMES[settings?.appDarkTheme || ''] || MOBILE_DARK_THEMES.black),
+    accentForeground: light && settings?.appThemeColor === 'yellow' ? '#000000' : accentTheme.accentForeground,
+    text: light ? '#000000' : '#ffffff',
   };
 }
 
@@ -540,6 +611,37 @@ function episodePlayTarget(item: MediaItem, ep: EpisodeFile, progress?: Record<s
       ...(item.backdropCandidates || []),
       item.poster,
       ...(item.posterCandidates || []),
+    ].filter(Boolean) as string[],
+  };
+}
+
+function playTargetForItem(item: MediaItem, progress: Record<string, StoredProgress>): PlayTarget {
+  const episodes = sortedEpisodes(item);
+  if (item.type !== 'movie' && episodes.length > 0) {
+    const nextUp = episodes.find((episode) => {
+      const state = progressStateFor(progress, episode.filePath, episode.localMetadata?.durationSeconds);
+      return !state.watched;
+    }) || episodes[0];
+    return episodePlayTarget(item, nextUp, progress);
+  }
+
+  const streamPath = streamPathFor(item);
+  const state = progressStateFor(progress, streamPath, item.localMetadata?.durationSeconds);
+  return {
+    title: item.title,
+    subtitle: item.year ? String(item.year) : undefined,
+    streamPath,
+    transcode: shouldTranscode(item),
+    localMetadata: item.localMetadata,
+    subtitles: item.subtitles,
+    startPosition: state.inProgress ? state.position : 0,
+    mediaId: item.id,
+    thumbnail: item.poster || item.backdrop,
+    thumbnailCandidates: [
+      item.poster,
+      ...(item.posterCandidates || []),
+      item.backdrop,
+      ...(item.backdropCandidates || []),
     ].filter(Boolean) as string[],
   };
 }
@@ -980,6 +1082,48 @@ function matchesQuery(item: MediaItem, query: string): boolean {
   ].some((value) => value.toLowerCase().includes(needle));
 }
 
+function matchesMobileLibraryFilter(
+  item: MediaItem,
+  filter: MobileLibraryFilter,
+  progress: Record<string, StoredProgress>,
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'missing-metadata') {
+    return !(
+      item.summary?.trim()
+      || (item.rating || 0) > 0
+      || item.genres?.length
+      || item.episodes?.some((episode) => episode.title || episode.rating)
+    );
+  }
+  if (filter === 'missing-artwork') {
+    return !(
+      item.poster
+      || item.backdrop
+      || item.posterCandidates?.length
+      || item.backdropCandidates?.length
+    );
+  }
+
+  if (item.type === 'movie') {
+    const state = progressStateFor(progress, item.filePath, item.localMetadata?.durationSeconds);
+    if (filter === 'in-progress') return state.inProgress;
+    if (filter === 'watched') return state.watched;
+    return !state.inProgress && !state.watched;
+  }
+
+  const episodeStates = (item.episodeFiles || []).map((episode) => (
+    progressStateFor(progress, episode.filePath, episode.localMetadata?.durationSeconds)
+  ));
+  const watchedCount = episodeStates.filter((state) => state.watched).length;
+  const inProgress = episodeStates.some((state) => state.inProgress);
+  const watched = episodeStates.length > 0 && watchedCount === episodeStates.length;
+  const partiallyWatched = watchedCount > 0;
+  if (filter === 'in-progress') return inProgress;
+  if (filter === 'watched') return watched;
+  return !inProgress && !partiallyWatched;
+}
+
 function sectionTitle(kind: LibraryKind): string {
   if (kind === 'settings') return 'Settings';
   if (kind === 'tv') return 'TV Shows';
@@ -1144,6 +1288,7 @@ export default function App() {
 function AppRoot() {
   const { height, width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const systemColorScheme = useColorScheme();
   const isTablet = Math.min(width, height) >= 760;
 
   const [baseUrl, setBaseUrl] = useState('');
@@ -1158,11 +1303,14 @@ function AppRoot() {
   const [activeKind, setActiveKind] = useState<LibraryKind>('home');
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [libraryFilter, setLibraryFilter] = useState<MobileLibraryFilter>('all');
   const [detailItem, setDetailItem] = useState<MediaItem | null>(null);
   const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
   const [miniPlayerTarget, setMiniPlayerTarget] = useState<PlayTarget | null>(null);
   const playerReturnItemRef = useRef<MediaItem | null>(null);
   const detailItemCacheRef = useRef(new Map<string, MediaItem>());
+  const lastDetailByKindRef = useRef(new Map<LibraryKind, MediaItem>());
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [streamOptions, setStreamOptions] = useState<StreamOptions>({});
   const shouldAutoplayRef = useRef(false);
@@ -1180,7 +1328,25 @@ function AppRoot() {
   const [isServerOffline, setIsServerOffline] = useState(false);
   const [playbackError, setPlaybackError] = useState('');
   const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
+  const [homeHeaderPinned, setHomeHeaderPinned] = useState(false);
+  const homeScrollY = useRef(new Animated.Value(0)).current;
+  const homeHeaderOpacity = homeScrollY.interpolate({
+    inputRange: [72, 132],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const homeHeaderTranslateY = homeScrollY.interpolate({
+    inputRange: [72, 132],
+    outputRange: [-8, 0],
+    extrapolate: 'clamp',
+  });
   const [mobileTheme, setMobileTheme] = useState<MobileThemeColors>(DEFAULT_MOBILE_THEME);
+  const [mobileThemeMode, setMobileThemeMode] = useState<MobileThemeMode>('dark');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  const resolvedMobileThemeMode: ResolvedMobileThemeMode = mobileThemeMode === 'auto'
+    ? (systemColorScheme === 'light' ? 'light' : 'dark')
+    : mobileThemeMode;
+  const [remoteThemeSettings, setRemoteThemeSettings] = useState<MobileThemeSettings>();
   const libraryListRef = useRef<FlatList<MediaItem> | null>(null);
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const scrollOffsetsRef = useRef<Record<LibraryKind, number>>({
@@ -1200,16 +1366,68 @@ function AppRoot() {
   applyMobileThemeGlobals(mobileTheme, themedStyles);
 
   const navigateToKind = useCallback((kind: LibraryKind) => {
-    setDetailItem(null);
+    if (kind === activeKind) {
+      lastDetailByKindRef.current.delete(kind);
+      setDetailItem(null);
+      setSearchOpen(false);
+      setQuery('');
+      setFilterOpen(false);
+      setLibraryFilter('all');
+      if (kind === 'settings') setSettingsSection(null);
+      scrollOffsetsRef.current[kind] = 0;
+      if (kind === 'settings') {
+        settingsScrollRef.current?.scrollTo({ y: 0, animated: true });
+      } else {
+        libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      }
+      setHomeHeaderPinned(false);
+      homeScrollY.setValue(0);
+      return;
+    }
+    if (detailItem) lastDetailByKindRef.current.set(activeKind, detailItem);
+    setDetailItem(kind === 'settings' ? null : lastDetailByKindRef.current.get(kind) || null);
     setSearchOpen(false);
     setQuery('');
+    setFilterOpen(false);
+    setLibraryFilter('all');
     setActiveKind(kind);
+    setHomeHeaderPinned(false);
+    homeScrollY.setValue(0);
+  }, [activeKind, detailItem, homeScrollY]);
+
+  const selectMobileTheme = useCallback((next: MobileThemeMode) => {
+    setMobileThemeMode(next);
+    void SecureStore.setItemAsync(MOBILE_THEME_MODE_KEY, next).catch(() => {});
   }, []);
 
   const rememberMainScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offset = event.nativeEvent.contentOffset.y;
     if (query) return;
-    scrollOffsetsRef.current[activeKind] = event.nativeEvent.contentOffset.y;
-  }, [activeKind, query]);
+    scrollOffsetsRef.current[activeKind] = offset;
+    if (activeKind === 'settings') {
+      setHomeHeaderPinned(false);
+      return;
+    }
+    homeScrollY.setValue(offset);
+    const shouldPin = offset > 104;
+    setHomeHeaderPinned((current) => current === shouldPin ? current : shouldPin);
+  }, [activeKind, homeScrollY, query]);
+
+  useEffect(() => {
+    if (activeKind !== 'settings' && !query) return;
+    setHomeHeaderPinned(false);
+    homeScrollY.setValue(0);
+  }, [activeKind, homeScrollY, query]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    setHomeHeaderPinned(false);
+    homeScrollY.setValue(0);
+    const frame = requestAnimationFrame(() => {
+      libraryListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [homeScrollY, searchOpen]);
 
   useEffect(() => {
     if (query) return;
@@ -1228,6 +1446,11 @@ function AppRoot() {
     let cancelled = false;
     void SecureStore.getItemAsync(MOBILE_DEVICE_ID_KEY)
       .then((deviceId) => { if (!cancelled && deviceId) mobileDeviceIdRef.current = deviceId; })
+      .catch(() => {});
+    void SecureStore.getItemAsync(MOBILE_THEME_MODE_KEY)
+      .then((mode) => {
+        if (!cancelled && (mode === 'auto' || mode === 'light' || mode === 'dark')) setMobileThemeMode(mode);
+      })
       .catch(() => {});
     void SecureStore.getItemAsync(SAVED_CONNECTION_KEY)
       .then((stored) => {
@@ -1332,7 +1555,7 @@ function AppRoot() {
     })
       .then((response) => (response.ok ? response.json() as Promise<MobileThemeSettings> : undefined))
       .then((settings) => {
-        if (settings) setMobileTheme(mobileThemeFromSettings(settings));
+        if (settings) setRemoteThemeSettings(settings);
       })
       .catch(() => {});
   }, [connection]);
@@ -1352,7 +1575,7 @@ function AppRoot() {
     fetch(`${nextBaseUrl}/api/settings`)
       .then((response) => (response.ok ? response.json() as Promise<MobileThemeSettings> : undefined))
       .then((settings) => {
-        if (!cancelled && settings) setMobileTheme(mobileThemeFromSettings(settings));
+        if (!cancelled && settings) setRemoteThemeSettings(settings);
       })
       .catch(() => {});
 
@@ -1361,18 +1584,30 @@ function AppRoot() {
     };
   }, [baseUrl, connection]);
 
+  useEffect(() => {
+    setMobileTheme(mobileThemeFromSettings(remoteThemeSettings, resolvedMobileThemeMode));
+  }, [remoteThemeSettings, resolvedMobileThemeMode]);
+
   const library = connection?.library || {};
   const grouped = useMemo(() => collections(library), [library]);
   const everything = useMemo(() => allItems(library), [library]);
+  const filterSource = useMemo(() => {
+    if (activeKind === 'settings') return EMPTY_ITEMS;
+    return activeKind === 'home' ? everything : grouped[activeKind === 'others' ? 'others' : activeKind];
+  }, [activeKind, everything, grouped]);
+  const hasActiveFilters = libraryFilter !== 'all';
   const continueWatching = useMemo(
     () => everything.filter((item) => item.lastPlayed).sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0)).slice(0, 16),
     [everything],
   );
   const visibleItems = useMemo(() => {
     if (activeKind === 'settings') return [];
-    const source = activeKind === 'home' ? everything : grouped[activeKind === 'others' ? 'others' : activeKind];
-    return source.filter((item) => matchesQuery(item, query));
-  }, [activeKind, everything, grouped, query]);
+    const filtered = filterSource.filter((item) => (
+      matchesQuery(item, query)
+      && matchesMobileLibraryFilter(item, libraryFilter, progress)
+    ));
+    return filtered;
+  }, [activeKind, filterSource, libraryFilter, progress, query]);
 
   useEffect(() => {
     for (const item of everything) {
@@ -1383,8 +1618,24 @@ function AppRoot() {
   const openDetailItem = useCallback((item: MediaItem) => {
     const cached = detailItemCacheRef.current.get(item.id) || item;
     detailItemCacheRef.current.set(cached.id, cached);
+    lastDetailByKindRef.current.set(activeKind, cached);
+    setFilterOpen(false);
     setDetailItem(cached);
-  }, []);
+  }, [activeKind]);
+
+  const closeDetail = useCallback(() => {
+    lastDetailByKindRef.current.delete(activeKind);
+    setDetailItem(null);
+  }, [activeKind]);
+
+  const playHomeItem = useCallback((item: MediaItem) => {
+    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+    playerReturnItemRef.current = item;
+    setDetailItem(null);
+    setMiniPlayerTarget(null);
+    setStreamOptions({});
+    setPlayTarget(playTargetForItem(item, progress));
+  }, [progress]);
 
   const streamOptionsKey = useMemo(() => JSON.stringify(streamOptions), [streamOptions]);
 
@@ -1615,9 +1866,12 @@ function AppRoot() {
     if (returnItemId && detailItem?.id !== returnItemId) {
       const cachedReturnItem = detailItemCacheRef.current.get(returnItemId)
         || allItems(connection?.library || {}).find((item) => item.id === returnItemId);
-      if (cachedReturnItem) setDetailItem(cachedReturnItem);
+      if (cachedReturnItem) {
+        lastDetailByKindRef.current.set(activeKind, cachedReturnItem);
+        setDetailItem(cachedReturnItem);
+      }
     }
-  }, [connection?.library, detailItem?.id, playTarget, player]);
+  }, [activeKind, connection?.library, detailItem?.id, playTarget, player]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -1626,7 +1880,11 @@ function AppRoot() {
         return true;
       }
       if (detailItem) {
-        setDetailItem(null);
+        closeDetail();
+        return true;
+      }
+      if (filterOpen) {
+        setFilterOpen(false);
         return true;
       }
       if (searchOpen) {
@@ -1642,7 +1900,7 @@ function AppRoot() {
     });
 
     return () => subscription.remove();
-  }, [activeKind, closePlayer, detailItem, playTarget, searchOpen]);
+  }, [activeKind, closeDetail, closePlayer, detailItem, filterOpen, playTarget, searchOpen]);
 
   useEffect(() => {
     if (!playTarget || !playbackUrl) return undefined;
@@ -1958,11 +2216,12 @@ function AppRoot() {
       onRefresh={refreshLibrary}
     />
   );
-  const showHomeRails = activeKind === 'home' && !query;
+  const showHomeRails = activeKind === 'home' && !query && !searchOpen && !hasActiveFilters;
+  const showSearchEmpty = Boolean(query.trim());
 
   return (
     <View style={styles.app}>
-      <StatusBar style="light" />
+      <StatusBar style={text === '#ffffff' ? 'light' : 'dark'} />
       {!connection ? (
         <PairingScreen
           baseUrl={baseUrl}
@@ -2006,6 +2265,7 @@ function AppRoot() {
                 scrollEventThrottle={120}
               >
                 <SettingsScreen
+                  activeSection={settingsSection}
                   connection={connection}
                   counts={{
                     anime: grouped.anime.length,
@@ -2015,6 +2275,7 @@ function AppRoot() {
                   }}
                   isTablet={isTablet}
                   isRefreshing={isRefreshing}
+                  mobileThemeMode={mobileThemeMode}
                   onDisconnect={() => {
                     void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
                     setSavedConnection(null);
@@ -2022,6 +2283,7 @@ function AppRoot() {
                     setBaseUrl('');
                     setShareCode('');
                     setDetailItem(null);
+                    lastDetailByKindRef.current.clear();
                     setPlayTarget(null);
                     setMiniPlayerTarget(null);
                     playerReturnItemRef.current = null;
@@ -2035,6 +2297,8 @@ function AppRoot() {
                     setIsServerOffline(false);
                   }}
                   onRefresh={refreshLibrary}
+                  onSelectTheme={selectMobileTheme}
+                  setActiveSection={setSettingsSection}
                 />
               </ScrollView>
             ) : (
@@ -2043,21 +2307,37 @@ function AppRoot() {
                 baseUrl={connection.baseUrl}
                 contentContainerStyle={mainContentPadding}
                 isTablet={isTablet}
-                items={showHomeRails ? EMPTY_ITEMS : visibleItems}
+                items={searchOpen && !query.trim() ? EMPTY_ITEMS : showHomeRails ? EMPTY_ITEMS : visibleItems}
                 listRef={libraryListRef}
                 onScroll={rememberMainScroll}
-                showEmpty={!showHomeRails}
+                showEmpty={showHomeRails ? false : (searchOpen ? showSearchEmpty : true)}
                 onSelect={openDetailItem}
                 refreshControl={libraryRefreshControl}
                 header={(
-                  <View style={{ gap: 18 }}>
+                  <View style={{ gap: 12 }}>
                     <Header
                       activeKind={activeKind}
+                      filterOpen={filterOpen}
+                      hasActiveFilters={hasActiveFilters}
                       searchOpen={searchOpen}
-                      setSearchOpen={setSearchOpen}
+                      setFilterOpen={setFilterOpen}
+                      setSearchOpen={(value) => {
+                        setSearchOpen(value);
+                        if (value) setFilterOpen(false);
+                      }}
                       query={query}
                       setQuery={setQuery}
                     />
+                    {activeKind !== 'settings' && filterOpen ? (
+                      <LibraryFilters
+                        activeFilter={libraryFilter}
+                        hasActiveFilters={hasActiveFilters}
+                        onChange={(value) => {
+                          setLibraryFilter(value);
+                          setFilterOpen(false);
+                        }}
+                      />
+                    ) : null}
                     {error ? (
                       <View style={styles.errorCard}>
                         <Text selectable style={styles.errorText}>{error}</Text>
@@ -2082,6 +2362,7 @@ function AppRoot() {
                         grouped={grouped}
                         isTablet={isTablet}
                         onOpenKind={navigateToKind}
+                        onResume={playHomeItem}
                         onSelect={openDetailItem}
                       />
                     ) : null}
@@ -2089,6 +2370,66 @@ function AppRoot() {
                 )}
               />
             )}
+            {activeKind !== 'settings' && !searchOpen ? (
+              <Animated.View
+                pointerEvents={homeHeaderPinned ? 'auto' : 'none'}
+                style={[
+                  styles.homeStickyHeader,
+                  {
+                    opacity: homeHeaderOpacity,
+                    paddingTop: insets.top,
+                    transform: [{ translateY: homeHeaderTranslateY }],
+                  },
+                ]}
+              >
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.homeStickyBackground,
+                    {
+                      backgroundColor: resolvedMobileThemeMode === 'light'
+                        ? 'rgba(255,255,255,0.9)'
+                        : 'rgba(0,0,0,0.9)',
+                      borderBottomWidth: 0,
+                    },
+                  ]}
+                />
+                <LoomLogo
+                  width={86}
+                  height={24}
+                  accent={accent}
+                  wordColor={resolvedMobileThemeMode === 'light' ? '#000000' : '#ffffff'}
+                />
+                <View style={styles.headerActions}>
+                  {activeKind !== 'settings' ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
+                      accessibilityState={{ expanded: filterOpen }}
+                      onPress={() => {
+                        const nextOpen = !filterOpen;
+                        setFilterOpen(nextOpen);
+                        if (nextOpen) libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                      }}
+                      style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
+                    >
+                      <FilterIcon size={20} color={filterOpen || hasActiveFilters ? accent : (resolvedMobileThemeMode === 'light' ? '#000000' : '#ffffff')} />
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Search"
+                    onPress={() => {
+                      setFilterOpen(false);
+                      setSearchOpen(true);
+                    }}
+                    style={({ pressed }) => [styles.topBarIconButton, pressed && styles.pressed]}
+                  >
+                    <SearchIcon size={23} color={resolvedMobileThemeMode === 'light' ? '#000000' : '#ffffff'} />
+                  </Pressable>
+                </View>
+              </Animated.View>
+            ) : null}
             {!isTablet && !searchOpen ? (
               <BottomNav
                 activeKind={activeKind}
@@ -2109,7 +2450,7 @@ function AppRoot() {
         progress={progress}
         artworkRefreshError={artworkRefreshError}
         isRefreshingArtwork={Boolean(detailItem && refreshingArtworkId === detailItem.id)}
-        onClose={() => setDetailItem(null)}
+        onClose={closeDetail}
         onOpenKind={navigateToKind}
         onPlay={(target) => {
           void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
@@ -2372,17 +2713,24 @@ function PairingScreen({
 
 function Header({
   activeKind,
+  filterOpen,
+  hasActiveFilters,
   query,
   searchOpen,
+  setFilterOpen,
   setQuery,
   setSearchOpen,
 }: {
   activeKind: LibraryKind;
+  filterOpen: boolean;
+  hasActiveFilters: boolean;
   query: string;
   searchOpen: boolean;
+  setFilterOpen: (value: boolean) => void;
   setQuery: (value: string) => void;
   setSearchOpen: (value: boolean) => void;
 }) {
+  const canFilter = activeKind !== 'settings';
   if (searchOpen) {
     return (
       <View style={styles.header}>
@@ -2398,6 +2746,17 @@ function Header({
             style={styles.searchInput}
             value={query}
           />
+          {canFilter ? (
+            <Pressable
+              onPress={() => setFilterOpen(!filterOpen)}
+              accessibilityRole="button"
+              accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
+              accessibilityState={{ expanded: filterOpen }}
+              style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
+            >
+              <FilterIcon size={19} color={filterOpen || hasActiveFilters ? accent : muted} />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => {
               setSearchOpen(false);
@@ -2419,14 +2778,90 @@ function Header({
       <View style={styles.brandRow}>
         <LoomLogo width={86} height={24} accent={accent} wordColor={text} />
       </View>
-      <Pressable
-        onPress={() => setSearchOpen(true)}
-        accessibilityRole="button"
-        accessibilityLabel="Search"
-        style={({ pressed }) => [styles.topBarIconButton, pressed && styles.pressed]}
-      >
-        <SearchIcon size={23} color={text} />
-      </Pressable>
+      <View style={styles.headerActions}>
+        {canFilter ? (
+          <Pressable
+            onPress={() => setFilterOpen(!filterOpen)}
+            accessibilityRole="button"
+            accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
+            accessibilityState={{ expanded: filterOpen }}
+            style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
+          >
+            <FilterIcon size={20} color={filterOpen || hasActiveFilters ? accent : text} />
+          </Pressable>
+        ) : null}
+        <Pressable
+          onPress={() => setSearchOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Search"
+          style={({ pressed }) => [styles.topBarIconButton, pressed && styles.pressed]}
+        >
+          <SearchIcon size={23} color={text} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function LibraryFilters({
+  activeFilter,
+  hasActiveFilters,
+  onChange,
+}: {
+  activeFilter: MobileLibraryFilter;
+  hasActiveFilters: boolean;
+  onChange: (value: MobileLibraryFilter) => void;
+}) {
+  const groups: { label: string; options: { id: MobileLibraryFilter; label: string }[] }[] = [
+    {
+      label: 'Watch status',
+      options: [
+        { id: 'all', label: 'All' },
+        { id: 'in-progress', label: 'In Progress' },
+        { id: 'unwatched', label: 'Unwatched' },
+        { id: 'watched', label: 'Watched' },
+      ],
+    },
+    {
+      label: 'Library gaps',
+      options: [
+        { id: 'missing-metadata', label: 'Missing Metadata' },
+        { id: 'missing-artwork', label: 'Missing Artwork' },
+      ],
+    },
+  ];
+
+  return (
+    <View style={styles.filterPanel}>
+      <View style={styles.filterPanelHeader}>
+        <Text style={styles.filterPanelTitle}>Filters</Text>
+        {hasActiveFilters ? (
+          <Pressable onPress={() => onChange('all')} accessibilityRole="button" accessibilityLabel="Clear filters">
+            <Text style={styles.filterClearText}>Clear all</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {groups.map((group) => (
+        <View key={group.label} style={styles.filterGroup}>
+          <Text style={styles.filterLabel}>{group.label}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipRow}>
+            {group.options.map((option) => {
+              const selected = activeFilter === option.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => onChange(option.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.pressed]}
+                >
+                  <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>{option.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      ))}
     </View>
   );
 }
@@ -2538,8 +2973,8 @@ function BottomNav({ activeKind, setActiveKind }: { activeKind: LibraryKind; set
     return (
       <BlurView
         intensity={70}
-        tint="systemChromeMaterialDark"
-        style={[styles.bottomNav, styles.bottomNavBlur, { paddingBottom: Math.max(insets.bottom, 10) }]}
+        tint={text === '#ffffff' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
+        style={[styles.bottomNav, styles.bottomNavBlur, text !== '#ffffff' && styles.bottomNavLight, { paddingBottom: Math.max(insets.bottom, 10) }]}
       >
         {items}
       </BlurView>
@@ -2547,7 +2982,7 @@ function BottomNav({ activeKind, setActiveKind }: { activeKind: LibraryKind; set
   }
 
   return (
-    <View style={[styles.bottomNav, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+    <View style={[styles.bottomNav, text !== '#ffffff' && styles.bottomNavLight, { paddingBottom: Math.max(insets.bottom, 10) }]}>
       {items}
     </View>
   );
@@ -2613,7 +3048,7 @@ function MiniPlayerStrip({
         onPress={onDismiss}
         style={({ pressed }) => [styles.miniPlayerDismiss, pressed && styles.pressed]}
       >
-        <CloseIcon size={18} color={muted} />
+        <CloseIcon size={18} color="#ffffff" />
       </Pressable>
     </>
   );
@@ -2726,25 +3161,38 @@ function DetailContent({
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
-  const { height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const isLightTheme = text !== '#ffffff';
   const entrance = useEntrance(16);
+  const detailScrollY = useRef(new Animated.Value(0)).current;
+  const stickyHeaderOpacity = detailScrollY.interpolate({
+    inputRange: [90, 160],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const stickyHeaderTitleTranslateY = detailScrollY.interpolate({
+    inputRange: [90, 160],
+    outputRange: [-6, 0],
+    extrapolate: 'clamp',
+  });
   const episodes = useMemo(() => sortedEpisodes(item), [item]);
   const cacheBust = artworkCacheBusters[item.id];
   const heroSources = useMemo(() => {
     const episodeArtwork = episodes.flatMap((episode) => [episode.still, episode.thumbnail]);
     return imageUrlsFor(baseUrl, [
-      item.poster,
-      ...(item.posterCandidates || []),
       item.backdrop,
       ...(item.backdropCandidates || []),
+      item.poster,
+      ...(item.posterCandidates || []),
       ...episodeArtwork,
     ], cacheBust);
   }, [baseUrl, cacheBust, episodes, item.backdrop, item.backdropCandidates, item.poster, item.posterCandidates]);
   const isSeries = item.type !== 'movie' && episodes.length > 0;
+  const hasEpisodeTab = item.type !== 'movie';
   const seasonNumbers = Array.from(new Set(episodes.map((ep) => ep.season))).sort((a, b) => a - b);
   const [selectedSeason, setSelectedSeason] = useState(seasonNumbers[0] ?? 1);
-  const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const [seasonPickerOpen, setSeasonPickerOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<'episodes' | 'details'>(hasEpisodeTab ? 'episodes' : 'details');
   const seasonEpisodes = episodes.filter((ep) => ep.season === selectedSeason);
 
   useEffect(() => {
@@ -2807,12 +3255,17 @@ function DetailContent({
 
   return (
     <Animated.View style={[styles.overlay, entrance]}>
-      <StatusBar style="light" />
-      <ScrollView
+      <StatusBar style={text === '#ffffff' ? 'light' : 'dark'} />
+      <Animated.ScrollView
         contentContainerStyle={[styles.detailScroll, { paddingBottom: detailBottomPadding }]}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: detailScrollY } } }],
+          { useNativeDriver: true },
+        )}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.detailHero, { height: Math.round(windowHeight * 0.58) }]}>
+        <View style={styles.detailHero}>
           <FallbackImage
             sources={heroSources}
             style={styles.detailBackdrop}
@@ -2838,101 +3291,99 @@ function DetailContent({
 
           <PressableScale
             scaleTo={0.97}
-            style={styles.playButton}
+            style={[styles.playButton, text !== '#ffffff' && styles.playButtonLight]}
             onPress={onPressPlay}
             accessibilityRole="button"
             accessibilityLabel={`${watchLabel} ${item.title}`}
           >
-              <PlayIcon size={22} color={accentForeground} />
-            <Text style={styles.playButtonText}>{watchLabel}</Text>
+              <PlayIcon size={22} color={text !== '#ffffff' ? '#ffffff' : accentForeground} />
+            <Text style={[styles.playButtonText, text !== '#ffffff' && styles.playButtonTextLight]}>{watchLabel}</Text>
           </PressableScale>
           {artworkRefreshError ? <Text selectable style={styles.detailErrorText}>{artworkRefreshError}</Text> : null}
 
-          {item.summary ? (
-            <View style={styles.detailSummaryBlock}>
-              <Text selectable numberOfLines={summaryExpanded ? undefined : 3} style={styles.detailSummary}>
-                {item.summary}
-              </Text>
+          {hasEpisodeTab ? (
+            <View style={styles.detailTabs} accessibilityRole="tablist">
               <Pressable
-                onPress={() => setSummaryExpanded((current) => !current)}
-                accessibilityRole="button"
-                accessibilityLabel={summaryExpanded ? 'Show less summary' : 'Show more summary'}
-                style={({ pressed }) => [styles.detailSummaryToggle, pressed && styles.pressed]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: detailTab === 'episodes' }}
+                onPress={() => setDetailTab('episodes')}
+                style={({ pressed }) => [styles.detailTabButton, pressed && styles.pressed]}
               >
-                <Text style={styles.detailSummaryToggleText}>
-                  {summaryExpanded ? 'Show less' : 'Show more'}
-                </Text>
+                <Text style={[styles.detailTabLabel, detailTab === 'episodes' && styles.detailTabLabelActive]}>Episodes</Text>
+                {detailTab === 'episodes' ? <View style={styles.detailTabIndicator} /> : null}
+              </Pressable>
+              <Pressable
+                accessibilityRole="tab"
+                accessibilityState={{ selected: detailTab === 'details' }}
+                onPress={() => setDetailTab('details')}
+                style={({ pressed }) => [styles.detailTabButton, pressed && styles.pressed]}
+              >
+                <Text style={[styles.detailTabLabel, detailTab === 'details' && styles.detailTabLabelActive]}>Details</Text>
+                {detailTab === 'details' ? <View style={styles.detailTabIndicator} /> : null}
               </Pressable>
             </View>
           ) : null}
 
-          {isSeries ? (
+          {detailTab === 'details' || !hasEpisodeTab ? (
+            <DetailInfo baseUrl={baseUrl} cacheBust={cacheBust} item={item} />
+          ) : isSeries ? (
             <View style={styles.episodesSection}>
-              {seasonNumbers.length > 1 ? (
-                <>
-                  <Text style={styles.episodesHeading}>
-                    {seasonNumbers.length} Seasons
-                  </Text>
-                  <FlatList
-                    contentContainerStyle={styles.seasonRailContent}
-                    data={seasonNumbers}
-                    horizontal
-                    keyExtractor={(season) => String(season)}
-                    renderItem={({ item: season }) => {
-                      const first = episodes.find((ep) => ep.season === season);
-                      const artSources = imageUrlsFor(baseUrl, [first?.still, first?.thumbnail], cacheBust);
-                      const count = episodes.filter((ep) => ep.season === season).length;
-                      const isActive = season === selectedSeason;
-                      return (
-                        <PressableScale
-                          onPress={() => setSelectedSeason(season)}
-                          scaleTo={0.95}
-                          style={styles.seasonCard}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: isActive }}
-                        >
-                          <View style={[styles.seasonCardFrame, isActive && styles.seasonCardFrameActive]}>
-                            <FallbackImage
-                              sources={artSources}
-                              style={styles.seasonCardImage}
-                              altFallback={(
-                                <View style={styles.seasonCardFallback}>
-                                  <Text style={styles.seasonCardFallbackText}>{season}</Text>
-                                </View>
-                              )}
-                            />
-                          </View>
-                          <Text style={[styles.seasonCardTitle, isActive && styles.seasonCardTitleActive]}>Season {season}</Text>
-                          <Text style={styles.seasonCardMeta}>{count} {count === 1 ? 'episode' : 'episodes'}</Text>
-                        </PressableScale>
-                      );
-                    }}
-                    showsHorizontalScrollIndicator={false}
-                    getItemLayout={(_data, index) => ({ length: 148, offset: (148 + 12) * index, index })}
-                    removeClippedSubviews
-                  />
-                  <Text style={styles.episodesSubheading}>Season {selectedSeason}</Text>
-                </>
-              ) : (
-                <Text style={styles.episodesHeading}>Episodes</Text>
-              )}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Choose season"
+                accessibilityState={{ expanded: seasonPickerOpen }}
+                onPress={() => setSeasonPickerOpen((current) => !current)}
+                style={({ pressed }) => [styles.seasonPicker, pressed && styles.pressed]}
+              >
+                <Text style={styles.seasonPickerText}>Season {selectedSeason}</Text>
+                <View style={[styles.seasonPickerChevron, seasonPickerOpen && styles.seasonPickerChevronOpen]}>
+                  <ChevronRightIcon size={20} color={text} />
+                </View>
+              </Pressable>
+              {seasonPickerOpen ? (
+                <View style={styles.seasonPickerMenu}>
+                  {seasonNumbers.map((season) => (
+                    <Pressable
+                      key={season}
+                      accessibilityRole="menuitem"
+                      accessibilityState={{ selected: season === selectedSeason }}
+                      onPress={() => {
+                        setSelectedSeason(season);
+                        setSeasonPickerOpen(false);
+                      }}
+                      style={({ pressed }) => [styles.seasonPickerOption, season === selectedSeason && styles.seasonPickerOptionActive, pressed && styles.pressed]}
+                    >
+                      <Text style={[styles.seasonPickerOptionText, season === selectedSeason && styles.seasonPickerOptionTextActive]}>Season {season}</Text>
+                      <Text style={styles.seasonPickerOptionMeta}>
+                        {episodes.filter((ep) => ep.season === season).length} episodes
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
               <View style={styles.episodeList}>
-                {seasonEpisodes.map((ep) => (
-                  <EpisodeRow
-                    key={`${ep.season}-${ep.episode}`}
-                    baseUrl={baseUrl}
-                    cacheBust={cacheBust}
-                    episode={ep}
-                    fallbackSources={[
-                      item.backdrop,
-                      ...(item.backdropCandidates || []),
-                      item.poster,
-                      ...(item.posterCandidates || []),
-                    ]}
-                    progress={progressStateFor(progress, ep.filePath, ep.localMetadata?.durationSeconds)}
-                    onPress={() => onPlay(episodePlayTarget(item, ep, progress))}
-                  />
-                ))}
+                {seasonEpisodes.map((ep) => {
+                  const episodeDetails = item.episodes?.find((candidate) =>
+                    candidate.season === ep.season && candidate.number === ep.episode,
+                  );
+                  return (
+                    <EpisodeRow
+                      key={`${ep.season}-${ep.episode}`}
+                      baseUrl={baseUrl}
+                      cacheBust={cacheBust}
+                      episode={ep}
+                      fallbackSources={[
+                        item.backdrop,
+                        ...(item.backdropCandidates || []),
+                        item.poster,
+                        ...(item.posterCandidates || []),
+                      ]}
+                      progress={progressStateFor(progress, ep.filePath, ep.localMetadata?.durationSeconds)}
+                      summary={episodeDetails?.summary}
+                      onPress={() => onPlay(episodePlayTarget(item, ep, progress))}
+                    />
+                  );
+                })}
               </View>
             </View>
           ) : item.type !== 'movie' ? (
@@ -2945,37 +3396,134 @@ function DetailContent({
             </View>
           ) : null}
         </View>
-      </ScrollView>
-      <Pressable
-        style={({ pressed }) => [styles.detailBack, { top: insets.top + 8 }, pressed && styles.pressed]}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel="Back"
+      </Animated.ScrollView>
+      <Animated.View
+        pointerEvents="box-none"
+        style={[styles.detailTopBar, { paddingTop: insets.top + 8 }]}
       >
-        <BackIcon size={24} color={text} />
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [
-          styles.detailRefreshPosterButton,
-          { top: insets.top + 10 },
-          isRefreshingArtwork && styles.disabledButton,
-          pressed && styles.pressed,
-        ]}
-        onPress={() => onRefreshArtwork(item)}
-        disabled={isRefreshingArtwork}
-        accessibilityRole="button"
-        accessibilityLabel={`Refresh poster for ${item.title}`}
-      >
-        {isRefreshingArtwork ? (
-          <ActivityIndicator color={accent} size="small" />
-        ) : (
-          <RefreshIcon size={20} color="#ffffff" />
-        )}
-      </Pressable>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.detailTopBarBackground,
+            {
+              backgroundColor: isLightTheme ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)',
+              borderBottomWidth: 0,
+              opacity: stickyHeaderOpacity,
+            },
+          ]}
+        />
+        <Pressable
+          style={({ pressed }) => [styles.detailTopAction, pressed && styles.pressed]}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
+          <BackIcon size={24} color="#ffffff" />
+        </Pressable>
+        <Animated.Text
+          numberOfLines={1}
+          style={[
+            styles.detailStickyTitle,
+            {
+              color: isLightTheme ? '#000000' : '#ffffff',
+              opacity: stickyHeaderOpacity,
+              transform: [{ translateY: stickyHeaderTitleTranslateY }],
+            },
+          ]}
+        >
+          {item.title}
+        </Animated.Text>
+        <Pressable
+          style={({ pressed }) => [styles.detailTopAction, isRefreshingArtwork && styles.disabledButton, pressed && styles.pressed]}
+          onPress={() => onRefreshArtwork(item)}
+          disabled={isRefreshingArtwork}
+          accessibilityRole="button"
+          accessibilityLabel={`Refresh poster for ${item.title}`}
+        >
+          {isRefreshingArtwork ? (
+            <ActivityIndicator color={accent} size="small" />
+          ) : (
+            <RefreshIcon size={20} color="#ffffff" />
+          )}
+        </Pressable>
+      </Animated.View>
       {!isTablet ? (
         <BottomNav activeKind={activeKind} setActiveKind={onOpenKind} />
       ) : null}
     </Animated.View>
+  );
+}
+
+function DetailInfo({
+  baseUrl,
+  cacheBust,
+  item,
+}: {
+  baseUrl: string;
+  cacheBust?: string;
+  item: MediaItem;
+}) {
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const cast = (item.cast || []).filter((actor) => actor.name.trim()).slice(0, 8);
+
+  return (
+    <View style={styles.detailsPanel}>
+      {item.summary ? (
+        <View style={styles.detailSummaryBlock}>
+          <Text selectable numberOfLines={summaryExpanded ? undefined : 4} style={styles.detailSummary}>
+            {item.summary}
+          </Text>
+          <Pressable
+            onPress={() => setSummaryExpanded((current) => !current)}
+            accessibilityRole="button"
+            accessibilityLabel={summaryExpanded ? 'Show less summary' : 'Show more summary'}
+            style={({ pressed }) => [styles.detailSummaryToggle, pressed && styles.pressed]}
+          >
+            <Text style={styles.detailSummaryToggleText}>
+              {summaryExpanded ? 'Show less' : 'Show more'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {cast.length > 0 ? (
+        <View style={styles.castSection}>
+          <Text style={styles.detailsSectionHeading}>Cast</Text>
+          <FlatList
+            contentContainerStyle={styles.castRailContent}
+            data={cast}
+            horizontal
+            keyExtractor={(actor) => `${actor.name}-${actor.character || ''}`}
+            renderItem={({ item: actor }) => {
+              const actorSources = imageUrlsFor(baseUrl, [actor.image], cacheBust);
+              return (
+                <View style={styles.castCard}>
+                  <View style={styles.castAvatar}>
+                    <FallbackImage
+                      sources={actorSources}
+                      style={styles.castAvatarImage}
+                      resizeMode="cover"
+                      altFallback={(
+                        <View style={styles.castAvatarFallback}>
+                          <Text style={styles.castAvatarFallbackText}>{actor.name.charAt(0).toUpperCase()}</Text>
+                        </View>
+                      )}
+                    />
+                  </View>
+                  <Text numberOfLines={1} style={styles.castName}>{actor.name}</Text>
+                  {actor.character ? <Text numberOfLines={1} style={styles.castCharacter}>{actor.character}</Text> : null}
+                </View>
+              );
+            }}
+            showsHorizontalScrollIndicator={false}
+          />
+        </View>
+      ) : null}
+
+      {!item.summary && cast.length === 0 ? (
+        <Text style={styles.detailsEmpty}>No additional details available.</Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -3109,6 +3657,7 @@ function EpisodeRow({
   episode,
   fallbackSources,
   progress,
+  summary,
   onPress,
 }: {
   baseUrl: string;
@@ -3116,6 +3665,7 @@ function EpisodeRow({
   episode: EpisodeFile;
   fallbackSources: Array<string | undefined>;
   progress: ReturnType<typeof progressStateFor>;
+  summary?: string;
   onPress: () => void;
 }) {
   const thumbnailSources = useMemo(
@@ -3145,6 +3695,9 @@ function EpisodeRow({
             </View>
           )}
         />
+        <View style={styles.episodePlayBadge}>
+          <PlayIcon size={16} color="#ffffff" />
+        </View>
         {progress.watched ? (
           <View style={styles.watchedBadge}>
             <CheckIcon size={12} color="#06130a" />
@@ -3157,19 +3710,17 @@ function EpisodeRow({
         ) : null}
       </View>
       <View style={styles.episodeInfo}>
-        <View style={styles.episodeTitleRow}>
-          <Text numberOfLines={1} style={[styles.episodeTitle, progress.watched && styles.episodeTitleWatched]}>
-            {episode.title || `Episode ${episode.episode}`}
+        <Text numberOfLines={2} style={[styles.episodeTitle, progress.watched && styles.episodeTitleWatched]}>
+          {episode.episode}. {episode.title || `Episode ${episode.episode}`}
+        </Text>
+        <View style={styles.episodeMetaRow}>
+          <Text style={styles.episodeMeta}>
+            {episode.localMetadata?.durationSeconds ? formatDuration(episode.localMetadata.durationSeconds) : 'Runtime unknown'}
           </Text>
           {progress.inProgress ? <Text style={styles.resumePill}>Resume</Text> : null}
         </View>
-        <Text style={styles.episodeMeta}>
-          {[episodeCode(episode.season, episode.episode), episode.localMetadata?.durationSeconds ? formatDuration(episode.localMetadata.durationSeconds) : null]
-            .filter(Boolean)
-            .join(' · ')}
-        </Text>
+        {summary ? <Text numberOfLines={1} ellipsizeMode="tail" style={styles.episodeSummary}>{summary}</Text> : null}
       </View>
-      <PlayIcon size={18} color={progress.watched ? faint : muted} />
     </PressableScale>
   );
 }
@@ -3237,7 +3788,7 @@ function PlayerSkipButton({
       accessibilityRole="button"
       accessibilityLabel={`${direction === 'back' ? 'Back' : 'Forward'} ${amount} seconds`}
     >
-      <Icon size={iconSize} color={text} />
+      <Icon size={iconSize} color="#ffffff" />
       <Text style={styles.playerSkipLabel}>{amount}</Text>
     </Pressable>
   );
@@ -3254,6 +3805,46 @@ function PlayerMenuRow({ label, selected, onPress }: { label: string; selected: 
       <Text numberOfLines={2} style={[styles.playerMenuRowText, selected && styles.playerMenuRowTextActive]}>{label}</Text>
       {selected ? <CheckIcon size={16} color={accent} /> : null}
     </Pressable>
+  );
+}
+
+function PlayerSegmentedControl<T extends string | number>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.playerSegmentScroll}
+    >
+      <View style={styles.playerSegmented}>
+        {options.map((option, index) => (
+          <Fragment key={String(option.value)}>
+            {index > 0 ? <View style={styles.playerSegmentDivider} /> : null}
+            <Pressable
+              onPress={() => onChange(option.value)}
+              style={({ pressed }) => [
+                styles.playerSegment,
+                value === option.value && styles.playerSegmentActive,
+                pressed && styles.pressed,
+              ]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: value === option.value }}
+            >
+              <Text style={[styles.playerSegmentText, value === option.value && styles.playerSegmentTextActive]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          </Fragment>
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -3283,6 +3874,9 @@ function PlayerContent({
   const insets = useSafeAreaInsets();
   const { width: playerWidth } = useWindowDimensions();
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState<PlayerAspectRatio>('default');
+  const [cropMode, setCropMode] = useState<PlayerCropMode>('none');
+  const [rotation, setRotation] = useState<PlayerRotation>(0);
   const entrance = useEntrance();
   const controlsOpacity = useRef(new Animated.Value(1)).current;
   const [isPlaying, setIsPlaying] = useState(() => Boolean(player.playing));
@@ -3290,7 +3884,7 @@ function PlayerContent({
   const [duration, setDuration] = useState(0);
   const [trackWidth, setTrackWidth] = useState(0);
   const [interactionTick, setInteractionTick] = useState(0);
-  const [menu, setMenu] = useState<'none' | 'speed' | 'audio' | 'subtitles'>('none');
+  const [menu, setMenu] = useState<'none' | 'video' | 'speed' | 'audio' | 'subtitles'>('none');
   const [playbackRate, setPlaybackRate] = useState(1);
   const [nativeAudioTracks, setNativeAudioTracks] = useState<AudioTrack[]>([]);
   const [nativeSubtitleTracks, setNativeSubtitleTracks] = useState<SubtitleTrack[]>([]);
@@ -3574,7 +4168,7 @@ function PlayerContent({
     },
   }), [playerWidth, player]);
 
-  const toggleMenu = (nextMenu: 'speed' | 'audio' | 'subtitles') => {
+  const toggleMenu = (nextMenu: 'video' | 'speed' | 'audio' | 'subtitles') => {
     bumpControls();
     setMenu((current) => (current === nextMenu ? 'none' : nextMenu));
   };
@@ -3754,18 +4348,33 @@ function PlayerContent({
 
   const progressFractionValue = duration > 0 ? Math.min(1, position / duration) : 0;
   const displayLabels = playerDisplayLabels(target);
+  const controlVerticalPadding = Math.max(insets.top, insets.bottom, 16);
+  const aspectRatioValue = aspectRatio === 'default' ? undefined : aspectRatio;
+  const cropRatio = cropMode !== 'none' && cropMode !== 'custom' ? cropMode : undefined;
+  const videoFrameRatio = cropRatio || aspectRatioValue;
+  const menuWidth = Math.max(
+    250,
+    Math.min(360, playerWidth - Math.max(insets.left, 20) - Math.max(insets.right, 20) - 16),
+  );
 
   return (
     <Animated.View style={[styles.overlay, styles.playerRoot, entrance]}>
       <StatusBar style="light" hidden />
       {playbackUrl ? (
         <>
-          <VideoView
-            contentFit="contain"
-            nativeControls={false}
-            player={player}
-            style={styles.playerVideo}
-          />
+          <View
+            style={[
+              styles.playerVideoFrame,
+              videoFrameRatio ? { aspectRatio: videoFrameRatio, maxHeight: '100%', width: '100%' } : styles.playerVideoFrameFill,
+            ]}
+          >
+            <VideoView
+              contentFit={cropMode === 'none' ? 'contain' : 'cover'}
+              nativeControls={false}
+              player={player}
+              style={[styles.playerVideo, rotation === 0 ? null : { transform: [{ rotate: `${rotation}deg` }] }]}
+            />
+          </View>
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => setControlsVisible((visible) => !visible)}
@@ -3791,34 +4400,52 @@ function PlayerContent({
               style={[
                 styles.playerControls,
                 {
-                  paddingBottom: Math.max(insets.bottom, 20) + 8,
+                  paddingBottom: controlVerticalPadding,
                   paddingLeft: Math.max(insets.left, 18),
                   paddingRight: Math.max(insets.right, 18),
-                  paddingTop: Math.max(insets.top, 16) + 4,
+                  paddingTop: controlVerticalPadding,
                 },
               ]}
               pointerEvents="box-none"
             >
-              <View style={styles.playerTopRow}>
+              <View
+                style={[
+                  styles.playerTopRow,
+                  {
+                    marginHorizontal: -Math.max(insets.left, 18),
+                    marginTop: -controlVerticalPadding,
+                  },
+                ]}
+              >
                 <Pressable
-                  style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
+                  style={({ pressed }) => [styles.playerIconButton, styles.playerCloseControl, pressed && styles.pressed]}
                   onPress={onClose}
                   accessibilityRole="button"
                   accessibilityLabel="Close player"
                 >
-                  <CloseIcon size={26} color={text} />
+                  <CloseIcon size={26} color="#ffffff" />
                 </Pressable>
                 <Text numberOfLines={1} ellipsizeMode="tail" style={styles.playerTopTitle}>
                   {displayLabels.topTitle}
                 </Text>
                 <View style={styles.playerOptionsPill}>
                   <Pressable
+                    onPress={() => toggleMenu('video')}
+                    style={({ pressed }) => [styles.playerFitButton, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Video framing settings"
+                  >
+                    <Text style={[styles.playerFitLabel, (menu === 'video' || cropMode !== 'none') && styles.playerFitLabelActive]}>
+                      {cropMode === 'none' ? 'Fit' : 'Crop'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
                     onPress={() => toggleMenu('subtitles')}
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Subtitles"
                   >
-                    <SubtitlesIcon size={22} color={menu === 'subtitles' ? accent : text} />
+                    <SubtitlesIcon size={22} color={menu === 'subtitles' ? accent : '#ffffff'} />
                   </Pressable>
                   <Pressable
                     onPress={() => toggleMenu('audio')}
@@ -3826,7 +4453,7 @@ function PlayerContent({
                     accessibilityRole="button"
                     accessibilityLabel="Audio tracks"
                   >
-                    <AudioTracksIcon size={22} color={menu === 'audio' ? accent : text} />
+                    <AudioTracksIcon size={22} color={menu === 'audio' ? accent : '#ffffff'} />
                   </Pressable>
                   <Pressable
                     onPress={() => toggleMenu('speed')}
@@ -3834,7 +4461,7 @@ function PlayerContent({
                     accessibilityRole="button"
                     accessibilityLabel="Playback speed"
                   >
-                    <SpeedIcon size={22} color={menu === 'speed' ? accent : text} />
+                    <SpeedIcon size={22} color={menu === 'speed' ? accent : '#ffffff'} />
                   </Pressable>
                 </View>
               </View>
@@ -3864,7 +4491,7 @@ function PlayerContent({
                   </View>
                 </View>
 
-              <View style={styles.playerBottomBlock} pointerEvents="box-none">
+              <View style={[styles.playerBottomBlock, { bottom: controlVerticalPadding }]} pointerEvents="box-none">
                 <Text numberOfLines={1} ellipsizeMode="tail" style={styles.playerTitle}>
                   {displayLabels.bottomTitle}
                 </Text>
@@ -3892,14 +4519,51 @@ function PlayerContent({
                 <View
                   style={[
                     styles.playerMenuPanel,
+                    menu === 'video' && { width: menuWidth },
                     { right: Math.max(insets.right, 20), top: Math.max(insets.top, 16) + 56 },
                   ]}
                 >
                   <Text style={styles.playerMenuTitle}>
-                    {menu === 'speed' ? 'Playback Speed' : menu === 'audio' ? 'Audio' : 'Subtitles'}
+                    {menu === 'video' ? 'Video' : menu === 'speed' ? 'Playback Speed' : menu === 'audio' ? 'Audio' : 'Subtitles'}
                   </Text>
                   <ScrollView style={styles.playerMenuScroll}>
-                    {menu === 'speed' ? (
+                    {menu === 'video' ? (
+                      <View style={styles.playerVideoSettings}>
+                        <View style={styles.playerSettingBlock}>
+                          <Text style={styles.playerSettingLabel}>Aspect ratio:</Text>
+                          <PlayerSegmentedControl
+                            options={PLAYER_ASPECT_OPTIONS}
+                            value={aspectRatio}
+                            onChange={(value) => {
+                              bumpControls();
+                              setAspectRatio(value);
+                            }}
+                          />
+                        </View>
+                        <View style={styles.playerSettingBlock}>
+                          <Text style={styles.playerSettingLabel}>Crop:</Text>
+                          <PlayerSegmentedControl
+                            options={PLAYER_CROP_OPTIONS}
+                            value={cropMode}
+                            onChange={(value) => {
+                              bumpControls();
+                              setCropMode(value);
+                            }}
+                          />
+                        </View>
+                        <View>
+                          <Text style={styles.playerSettingLabel}>Rotation:</Text>
+                          <PlayerSegmentedControl
+                            options={PLAYER_ROTATION_OPTIONS}
+                            value={rotation}
+                            onChange={(value) => {
+                              bumpControls();
+                              setRotation(value);
+                            }}
+                          />
+                        </View>
+                      </View>
+                    ) : menu === 'speed' ? (
                       [0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
                         <PlayerMenuRow
                           key={rate}
@@ -3972,7 +4636,7 @@ function PlayerContent({
             accessibilityRole="button"
             accessibilityLabel="Close player"
           >
-            <CloseIcon size={24} color={text} />
+            <CloseIcon size={24} color="#ffffff" />
           </Pressable>
         </>
       )}
@@ -3981,21 +4645,28 @@ function PlayerContent({
 }
 
 function SettingsScreen({
+  activeSection,
   connection,
   counts,
   isTablet,
   isRefreshing,
+  mobileThemeMode,
   onDisconnect,
   onRefresh,
+  onSelectTheme,
+  setActiveSection,
 }: {
+  activeSection: SettingsSection | null;
   connection: Connection;
   counts: Record<'anime' | 'tv' | 'movies' | 'others', number>;
   isTablet: boolean;
   isRefreshing: boolean;
+  mobileThemeMode: MobileThemeMode;
   onDisconnect: () => void;
   onRefresh: () => void;
+  onSelectTheme: (mode: MobileThemeMode) => void;
+  setActiveSection: (section: SettingsSection | null) => void;
 }) {
-  const [activeSection, setActiveSection] = useState<SettingsSection | null>(null);
   const active = settingsSections.find((section) => section.id === activeSection);
 
   if (active) {
@@ -4038,16 +4709,67 @@ function SettingsScreen({
       </View>
       <View style={styles.settingsList}>
         {settingsSections.map((section) => (
-          <Pressable
-            key={section.id}
-            style={({ pressed }) => [styles.settingsListItem, pressed && styles.pressed]}
-            onPress={() => setActiveSection(section.id)}
-            accessibilityRole="button"
-          >
-            <Text selectable style={styles.settingsListText}>{section.label}</Text>
-            <ChevronRightIcon size={22} color="rgba(255,255,255,0.55)" />
-          </Pressable>
+          <Fragment key={section.id}>
+            {section.id === 'appearance' ? (
+              <View style={[styles.settingsListItem, styles.settingsAppearanceRow]}>
+                <Text selectable style={styles.settingsListText}>{section.label}</Text>
+                <Text selectable style={styles.settingsListValue}>
+                  {mobileThemeMode === 'auto' ? 'Auto' : mobileThemeMode === 'light' ? 'Light' : 'Dark'}
+                </Text>
+              </View>
+            ) : (
+              <Pressable
+                style={({ pressed }) => [styles.settingsListItem, pressed && styles.pressed]}
+                onPress={() => setActiveSection(section.id)}
+                accessibilityRole="button"
+              >
+                <Text selectable style={styles.settingsListText}>{section.label}</Text>
+                <ChevronRightIcon size={22} color={muted} />
+              </Pressable>
+            )}
+            {section.id === 'appearance' ? (
+              <MobileThemePicker mode={mobileThemeMode} onSelectTheme={onSelectTheme} />
+            ) : null}
+          </Fragment>
         ))}
+      </View>
+    </View>
+  );
+}
+
+function MobileThemePicker({ mode, onSelectTheme }: { mode: MobileThemeMode; onSelectTheme: (mode: MobileThemeMode) => void }) {
+  const options: { value: MobileThemeMode; label: string; Icon: (props: IconProps) => ReactElement }[] = [
+    { value: 'auto', label: 'Auto', Icon: AutoThemeIcon },
+    { value: 'light', label: 'Light mode', Icon: SunIcon },
+    { value: 'dark', label: 'Dark mode', Icon: MoonIcon },
+  ];
+
+  return (
+    <View style={styles.settingsThemePicker}>
+      <View style={styles.settingsThemeOptions}>
+        {options.map((option) => {
+          const selected = mode === option.value;
+          const Icon = option.Icon;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="radio"
+              accessibilityLabel={`${option.label} theme`}
+              accessibilityState={{ selected }}
+              onPress={() => onSelectTheme(option.value)}
+              style={({ pressed }) => [
+                styles.settingsThemeOption,
+                selected && styles.settingsThemeOptionActive,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Icon size={24} color={selected ? accent : muted} />
+              <Text selectable style={[styles.settingsThemeOptionText, selected && styles.settingsThemeOptionTextActive]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
     </View>
   );
@@ -4153,6 +4875,7 @@ function HomeSections({
   grouped,
   isTablet,
   onOpenKind,
+  onResume,
   onSelect,
 }: {
   artworkCacheBusters: Record<string, string>;
@@ -4161,19 +4884,115 @@ function HomeSections({
   grouped: ReturnType<typeof collections>;
   isTablet: boolean;
   onOpenKind: (kind: LibraryKind) => void;
+  onResume: (item: MediaItem) => void;
   onSelect: (item: MediaItem) => void;
 }) {
   const hasItems = grouped.anime.length > 0 || grouped.tv.length > 0 || grouped.movies.length > 0 || grouped.others.length > 0;
+  const latestItem = continueWatching[0];
+  const remainingContinueWatching = continueWatching.slice(1);
 
   return (
     <View style={styles.sections}>
-      {continueWatching.length > 0 ? (
-        <Rail title="Continue Watching" artworkCacheBusters={artworkCacheBusters} items={continueWatching} baseUrl={baseUrl} onSelect={onSelect} />
+      {latestItem ? (
+        <ResumeHero
+          artworkCacheBusters={artworkCacheBusters}
+          baseUrl={baseUrl}
+          item={latestItem}
+          onOpen={() => onSelect(latestItem)}
+          onResume={() => onResume(latestItem)}
+        />
+      ) : null}
+      {remainingContinueWatching.length > 0 ? (
+        <Rail title="Continue Watching" artworkCacheBusters={artworkCacheBusters} items={remainingContinueWatching} baseUrl={baseUrl} onSelect={onSelect} />
       ) : null}
       <Rail title="Anime" artworkCacheBusters={artworkCacheBusters} items={grouped.anime.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('anime')} />
       <Rail title="TV Shows" artworkCacheBusters={artworkCacheBusters} items={grouped.tv.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('tv')} />
       <Rail title="Movies" artworkCacheBusters={artworkCacheBusters} items={grouped.movies.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('movies')} />
       {!hasItems ? <EmptyLibrary isTablet={isTablet} /> : null}
+    </View>
+  );
+}
+
+function ResumeHero({
+  artworkCacheBusters,
+  baseUrl,
+  item,
+  onOpen,
+  onResume,
+}: {
+  artworkCacheBusters: Record<string, string>;
+  baseUrl: string;
+  item: MediaItem;
+  onOpen: () => void;
+  onResume: () => void;
+}) {
+  const cacheBust = artworkCacheBusters[item.id];
+  const isLightTheme = text !== '#ffffff';
+  const heroFadeMiddleOpacity = isLightTheme ? 0.58 : 0.45;
+  const heroFadeBottomOpacity = isLightTheme ? 0.9 : 0.84;
+  const sources = useMemo(
+    () => imageUrlsFor(baseUrl, [
+      item.poster,
+      ...(item.posterCandidates || []),
+      item.backdrop,
+      ...(item.backdropCandidates || []),
+    ], cacheBust),
+    [baseUrl, cacheBust, item.backdrop, item.backdropCandidates, item.poster, item.posterCandidates],
+  );
+  const meta = [
+    item.type === 'movie' ? 'Movie' : item.type === 'anime' ? 'Anime' : 'TV Show',
+    item.year ? String(item.year) : null,
+    item.type === 'movie' ? (item.localMetadata?.durationSeconds ? formatDuration(item.localMetadata.durationSeconds) : null) : seasonCountLabel(item),
+  ].filter(Boolean).join('  ·  ');
+
+  return (
+    <View style={styles.resumeHero}>
+      <PressableScale
+        accessibilityLabel={`Open ${item.title}`}
+        accessibilityRole="button"
+        onPress={onOpen}
+        scaleTo={0.985}
+        style={styles.resumeHeroMain}
+      >
+        <FallbackImage
+          sources={sources}
+          style={styles.resumeHeroImage}
+          resizeMode="cover"
+          altFallback={(
+            <View style={[styles.resumeHeroImage, styles.posterFallback]}>
+              <PlayMark size={40} color={accent} />
+            </View>
+          )}
+        />
+        <Svg pointerEvents="none" style={styles.resumeHeroShade} viewBox="0 0 1 1" preserveAspectRatio="none">
+          <Defs>
+            <SvgLinearGradient id="resumeHeroBottomFade" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0.6" stopColor="#050505" stopOpacity={0.05} />
+              <Stop offset="0.8" stopColor="#050505" stopOpacity={heroFadeMiddleOpacity} />
+              <Stop offset="1" stopColor="#050505" stopOpacity={heroFadeBottomOpacity} />
+            </SvgLinearGradient>
+          </Defs>
+          <SvgRect x="0" y="0" width="1" height="1" fill="url(#resumeHeroBottomFade)" />
+        </Svg>
+        <View pointerEvents="none" style={styles.resumeHeroCopy}>
+          <View style={styles.resumeHeroTag}>
+            <Text style={styles.resumeHeroTagText}>Resume</Text>
+          </View>
+          <View style={styles.resumeHeroTextBlock}>
+            <Text numberOfLines={2} style={styles.resumeHeroTitle}>{item.title}</Text>
+            {meta ? <Text numberOfLines={1} style={styles.resumeHeroMeta}>{meta}</Text> : null}
+          </View>
+        </View>
+      </PressableScale>
+      <Pressable
+        accessibilityLabel={`Resume ${item.title}`}
+        accessibilityRole="button"
+        hitSlop={8}
+        onPress={onResume}
+        style={({ pressed }) => [styles.resumeHeroPlay, pressed && styles.resumeHeroPlayPressed]}
+      >
+        <RoundedPlayIcon size={22} color={accentForeground} />
+      </Pressable>
     </View>
   );
 }
@@ -4359,6 +5178,16 @@ const PosterCard = memo(function PosterCard({
             <PlayMark size={26} color={accent} />
           </View>
         )}
+        {item.rating && item.rating > 0 ? (
+          <View
+            accessibilityLabel={`Rated ${item.rating.toFixed(1)} out of 10`}
+            accessibilityRole="text"
+            style={styles.posterRatingBadge}
+          >
+            <StarIcon size={11} color="#f5c451" />
+            <Text style={styles.posterRatingText}>{item.rating.toFixed(1)}</Text>
+          </View>
+        ) : null}
       </View>
       <Text selectable numberOfLines={2} ellipsizeMode="tail" style={styles.posterTitle}>{item.title}</Text>
       <Text selectable numberOfLines={1} style={styles.metaText}>{meta}</Text>
@@ -4382,6 +5211,13 @@ function EmptyLibrary({ isTablet }: { isTablet: boolean }) {
 
 function createStyles(theme: MobileThemeColors) {
   const { accent, accentSoft, accentBorder, accentForeground, bg, panel, panel2, border, text, muted, faint } = theme;
+  const surface = text === '#ffffff' ? '#080808' : panel2;
+  const dangerText = text === '#ffffff' ? '#ff9a8f' : '#b42318';
+  const errorTextColor = text === '#ffffff' ? '#ff8c78' : '#b42318';
+  const ratingSurface = text === '#ffffff' ? 'rgba(245,196,81,0.15)' : '#fff1bf';
+  const posterRatingSurface = text === '#ffffff' ? 'rgba(245,196,81,0.5)' : '#fff1bf';
+  const ratingBorder = text === '#ffffff' ? 'rgba(245,196,81,0.24)' : '#f5c451';
+  const ratingText = text === '#ffffff' ? '#f5c451' : '#000000';
   return StyleSheet.create({
   app: {
     backgroundColor: bg,
@@ -4472,7 +5308,7 @@ function createStyles(theme: MobileThemeColors) {
   },
   hostCard: {
     alignItems: 'center',
-    backgroundColor: '#080808',
+    backgroundColor: surface,
     borderColor: border,
     borderRadius: 12,
     borderWidth: 1,
@@ -4507,7 +5343,7 @@ function createStyles(theme: MobileThemeColors) {
   },
   emptyDiscoveryCard: {
     alignItems: 'center',
-    backgroundColor: '#080808',
+    backgroundColor: surface,
     borderColor: border,
     borderRadius: 12,
     borderWidth: 1,
@@ -4563,7 +5399,7 @@ function createStyles(theme: MobileThemeColors) {
     textAlign: 'center',
   },
   savedHostCard: {
-    backgroundColor: '#080808',
+    backgroundColor: surface,
     borderColor: border,
     borderRadius: 14,
     borderWidth: 1,
@@ -4591,7 +5427,7 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
   },
   input: {
-    backgroundColor: '#080808',
+    backgroundColor: surface,
     borderColor: border,
     borderRadius: 10,
     borderWidth: 1,
@@ -4636,7 +5472,7 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '700',
   },
   errorText: {
-    color: '#ff8c78',
+    color: errorTextColor,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -4655,7 +5491,7 @@ function createStyles(theme: MobileThemeColors) {
     flexDirection: 'row',
   },
   sideNav: {
-    backgroundColor: '#080808',
+    backgroundColor: surface,
     borderRightColor: border,
     borderRightWidth: 1,
     gap: 18,
@@ -4692,7 +5528,7 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
   },
   sideNavLabelActive: {
-    color: text,
+    color: accent,
   },
   sideNavCount: {
     color: faint,
@@ -4729,14 +5565,102 @@ function createStyles(theme: MobileThemeColors) {
   topBarRow: {
     alignItems: 'center',
     flexDirection: 'row',
+    marginHorizontal: -4,
     justifyContent: 'space-between',
     minHeight: 44,
+  },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 2,
+  },
+  homeStickyHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    left: 0,
+    paddingBottom: 4,
+    paddingHorizontal: 12,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 10,
+  },
+  homeStickyBackground: {
+    backgroundColor: text === '#ffffff' ? 'rgba(18,18,18,0.97)' : 'rgba(255,255,255,0.97)',
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   topBarIconButton: {
     alignItems: 'center',
     height: 44,
     justifyContent: 'center',
     width: 44,
+  },
+  filterButtonActive: {
+    backgroundColor: accentSoft,
+    borderRadius: 14,
+  },
+  filterPanel: {
+    backgroundColor: panel,
+    borderColor: border,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 14,
+    padding: 14,
+  },
+  filterPanelHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  filterPanelTitle: {
+    color: text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  filterClearText: {
+    color: accent,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  filterGroup: {
+    gap: 8,
+  },
+  filterLabel: {
+    color: muted,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  filterChipRow: {
+    gap: 8,
+    paddingRight: 4,
+  },
+  filterChip: {
+    alignItems: 'center',
+    backgroundColor: panel2,
+    borderColor: border,
+    borderRadius: 999,
+    borderWidth: 1,
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  filterChipSelected: {
+    backgroundColor: accent,
+    borderColor: accent,
+  },
+  filterChipText: {
+    color: muted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterChipTextSelected: {
+    color: accentForeground,
   },
   railTitleRow: {
     alignItems: 'center',
@@ -4787,6 +5711,8 @@ function createStyles(theme: MobileThemeColors) {
     color: text,
     flex: 1,
     fontSize: 16,
+    fontWeight: '400',
+    letterSpacing: 0,
   },
   metaText: {
     color: muted,
@@ -4796,6 +5722,93 @@ function createStyles(theme: MobileThemeColors) {
   },
   sections: {
     gap: 20,
+  },
+  resumeHero: {
+    aspectRatio: 0.94,
+    backgroundColor: panel2,
+    borderColor: border,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '100%',
+  },
+  resumeHeroMain: {
+    flex: 1,
+  },
+  resumeHeroImage: {
+    height: '100%',
+    width: '100%',
+  },
+  resumeHeroShade: {
+    bottom: 0,
+    height: '100%',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 1,
+  },
+  resumeHeroCopy: {
+    bottom: 0,
+    left: 0,
+    padding: 12,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 2,
+  },
+  resumeHeroTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(8, 8, 8, 0.9)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  resumeHeroTagText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.1,
+  },
+  resumeHeroTextBlock: {
+    bottom: 12,
+    left: 12,
+    position: 'absolute',
+    right: 78,
+  },
+  resumeHeroTitle: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 32,
+  },
+  resumeHeroMeta: {
+    color: 'rgba(255,255,255,0.84)',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 7,
+  },
+  resumeHeroPlay: {
+    alignItems: 'center',
+    backgroundColor: accent,
+    borderRadius: 28,
+    borderWidth: 0,
+    bottom: 12,
+    elevation: 4,
+    height: 56,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 12,
+    shadowColor: '#000',
+    shadowOffset: { height: 3, width: 0 },
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    width: 56,
+  },
+  resumeHeroPlayPressed: {
+    opacity: 0.78,
+    transform: [{ scale: 0.94 }],
   },
   rail: {
     gap: 10,
@@ -4837,6 +5850,27 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
     lineHeight: 18,
     marginTop: 8,
+  },
+  posterRatingBadge: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: posterRatingSurface,
+    borderColor: ratingBorder,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 3,
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  posterRatingText: {
+    color: ratingText,
+    fontSize: 11,
+    fontWeight: '800',
+    lineHeight: 13,
   },
   emptyLibrary: {
     alignItems: 'center',
@@ -4943,11 +5977,54 @@ function createStyles(theme: MobileThemeColors) {
     gap: 16,
     minHeight: 56,
   },
+  settingsAppearanceRow: {
+    borderBottomWidth: 0,
+  },
+  settingsListValue: {
+    color: muted,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   settingsListText: {
     color: text,
     flex: 1,
     fontSize: 17,
     fontWeight: '600',
+  },
+  settingsThemePicker: {
+    gap: 10,
+    paddingBottom: 16,
+    paddingHorizontal: 0,
+    paddingTop: 2,
+  },
+  settingsThemeOptions: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  settingsThemeOption: {
+    alignItems: 'center',
+    backgroundColor: panel2,
+    borderColor: border,
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    gap: 7,
+    justifyContent: 'center',
+    minHeight: 86,
+    paddingHorizontal: 12,
+  },
+  settingsThemeOptionActive: {
+    backgroundColor: accentSoft,
+    borderColor: accent,
+  },
+  settingsThemeOptionText: {
+    color: muted,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  settingsThemeOptionTextActive: {
+    color: accent,
   },
   settingsDetailHeader: {
     alignItems: 'center',
@@ -4993,7 +6070,7 @@ function createStyles(theme: MobileThemeColors) {
     lineHeight: 20,
   },
   settingsValue: {
-    backgroundColor: '#080808',
+    backgroundColor: surface,
     borderColor: border,
     borderRadius: 10,
     borderWidth: 1,
@@ -5075,7 +6152,7 @@ function createStyles(theme: MobileThemeColors) {
     minHeight: 48,
   },
   settingsDangerButtonText: {
-    color: '#ff9a8f',
+    color: dangerText,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -5094,6 +6171,10 @@ function createStyles(theme: MobileThemeColors) {
   bottomNavBlur: {
     backgroundColor: 'transparent',
     overflow: 'hidden',
+  },
+  bottomNavLight: {
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderColor: border,
   },
   bottomNavRow: {
     alignItems: 'center',
@@ -5119,7 +6200,7 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
   },
   bottomNavLabelActive: {
-    color: text,
+    color: accent,
   },
   miniPlayerWrap: {
     left: 12,
@@ -5129,7 +6210,7 @@ function createStyles(theme: MobileThemeColors) {
   },
   miniPlayerStrip: {
     alignItems: 'center',
-    backgroundColor: 'rgba(34,34,34,0.88)',
+    backgroundColor: 'rgba(0,0,0,0.92)',
     borderColor: 'rgba(255,255,255,0.13)',
     borderRadius: 14,
     borderWidth: 1,
@@ -5143,7 +6224,7 @@ function createStyles(theme: MobileThemeColors) {
     shadowRadius: 18,
   },
   miniPlayerBlur: {
-    backgroundColor: 'rgba(36,36,36,0.58)',
+    backgroundColor: 'rgba(0,0,0,0.84)',
   },
   miniPlayerMain: {
     alignItems: 'center',
@@ -5191,13 +6272,13 @@ function createStyles(theme: MobileThemeColors) {
     minWidth: 0,
   },
   miniPlayerTitle: {
-    color: text,
+    color: '#ffffff',
     fontSize: 14,
     fontWeight: '800',
     lineHeight: 19,
   },
   miniPlayerMeta: {
-    color: muted,
+    color: 'rgba(255,255,255,0.72)',
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 17,
@@ -5228,6 +6309,7 @@ function createStyles(theme: MobileThemeColors) {
     paddingBottom: 48,
   },
   detailHero: {
+    aspectRatio: 4 / 3,
     position: 'relative',
     width: '100%',
   },
@@ -5238,6 +6320,43 @@ function createStyles(theme: MobileThemeColors) {
     right: 0,
     top: 0,
     width: '100%',
+  },
+  detailTopBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    left: 0,
+    paddingBottom: 8,
+    paddingHorizontal: 12,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 6,
+  },
+  detailTopBarBackground: {
+    backgroundColor: 'rgba(18,18,18,0.97)',
+    borderBottomColor: border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  detailTopAction: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 22,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  detailStickyTitle: {
+    color: '#ffffff',
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   detailBack: {
     alignItems: 'center',
@@ -5322,7 +6441,7 @@ function createStyles(theme: MobileThemeColors) {
     width: 40,
   },
   posterSheetError: {
-    color: '#ff9b8d',
+    color: errorTextColor,
     fontSize: 13,
     fontWeight: '700',
     marginBottom: 10,
@@ -5345,7 +6464,7 @@ function createStyles(theme: MobileThemeColors) {
     gap: 12,
   },
   posterCandidateImage: {
-    backgroundColor: '#0d0d0d',
+    backgroundColor: surface,
     borderRadius: 10,
     height: 112,
     overflow: 'hidden',
@@ -5386,7 +6505,8 @@ function createStyles(theme: MobileThemeColors) {
   },
   posterCandidateRating: {
     alignItems: 'center',
-    backgroundColor: 'rgba(245,196,81,0.15)',
+    backgroundColor: ratingSurface,
+    borderColor: ratingBorder,
     borderRadius: 999,
     flexDirection: 'row',
     gap: 4,
@@ -5394,7 +6514,7 @@ function createStyles(theme: MobileThemeColors) {
     paddingVertical: 3,
   },
   posterCandidateRatingText: {
-    color: '#f5c451',
+    color: ratingText,
     fontSize: 11,
     fontWeight: '900',
     lineHeight: 14,
@@ -5406,7 +6526,7 @@ function createStyles(theme: MobileThemeColors) {
     marginTop: 7,
   },
   posterCandidateCover: {
-    backgroundColor: '#0d0d0d',
+    backgroundColor: surface,
     borderRadius: 9,
     height: 52,
     overflow: 'hidden',
@@ -5414,7 +6534,7 @@ function createStyles(theme: MobileThemeColors) {
   },
   posterCandidateCoverFallback: {
     alignItems: 'center',
-    backgroundColor: '#0d0d0d',
+    backgroundColor: surface,
     borderRadius: 9,
     height: 52,
     justifyContent: 'center',
@@ -5513,8 +6633,8 @@ function createStyles(theme: MobileThemeColors) {
   detailRatingRow: {
     alignItems: 'center',
     alignSelf: 'center',
-    backgroundColor: 'rgba(245,196,81,0.15)',
-    borderColor: 'rgba(245,196,81,0.24)',
+    backgroundColor: ratingSurface,
+    borderColor: ratingBorder,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: 'row',
@@ -5523,14 +6643,14 @@ function createStyles(theme: MobileThemeColors) {
     paddingVertical: 5,
   },
   detailRatingText: {
-    color: '#f5c451',
+    color: ratingText,
     fontSize: 14,
     fontWeight: '800',
   },
   detailBody: {
     gap: 16,
     marginTop: -32,
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
   },
   playButton: {
     alignItems: 'center',
@@ -5540,15 +6660,21 @@ function createStyles(theme: MobileThemeColors) {
     gap: 10,
     justifyContent: 'center',
     marginTop: 6,
-    minHeight: 56,
+    minHeight: 48,
+  },
+  playButtonLight: {
+    backgroundColor: '#000000',
   },
   playButtonText: {
     color: '#0b0b0b',
     fontSize: 18,
     fontWeight: '700',
   },
+  playButtonTextLight: {
+    color: '#ffffff',
+  },
   detailErrorText: {
-    color: '#ff8c78',
+    color: errorTextColor,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -5570,9 +6696,98 @@ function createStyles(theme: MobileThemeColors) {
     fontSize: 14,
     fontWeight: '800',
   },
+  detailTabs: {
+    borderBottomColor: border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 28,
+    marginTop: 2,
+  },
+  detailTabButton: {
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 2,
+    position: 'relative',
+  },
+  detailTabLabel: {
+    color: muted,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  detailTabLabelActive: {
+    color: text,
+  },
+  detailTabIndicator: {
+    backgroundColor: text,
+    bottom: -1,
+    height: 3,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+  },
+  detailsPanel: {
+    gap: 22,
+    paddingTop: 4,
+  },
+  detailsSectionHeading: {
+    color: text,
+    fontSize: 21,
+    fontWeight: '700',
+  },
+  castSection: {
+    gap: 12,
+  },
+  castRailContent: {
+    gap: 14,
+    paddingRight: 20,
+  },
+  castCard: {
+    alignItems: 'center',
+    gap: 4,
+    width: 82,
+  },
+  castAvatar: {
+    backgroundColor: panel2,
+    borderRadius: 34,
+    height: 68,
+    overflow: 'hidden',
+    width: 68,
+  },
+  castAvatarImage: {
+    height: '100%',
+    width: '100%',
+  },
+  castAvatarFallback: {
+    alignItems: 'center',
+    backgroundColor: panel2,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  castAvatarFallbackText: {
+    color: accent,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  castName: {
+    color: text,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  castCharacter: {
+    color: muted,
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  detailsEmpty: {
+    color: muted,
+    fontSize: 14,
+    lineHeight: 21,
+  },
   episodesSection: {
     gap: 12,
     paddingTop: 4,
+    position: 'relative',
   },
   episodesHeading: {
     color: text,
@@ -5584,6 +6799,68 @@ function createStyles(theme: MobileThemeColors) {
     fontSize: 15,
     fontWeight: '700',
     marginTop: 4,
+  },
+  seasonPicker: {
+    alignItems: 'center',
+    backgroundColor: panel,
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 48,
+    paddingHorizontal: 18,
+  },
+  seasonPickerText: {
+    color: text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  seasonPickerChevron: {
+    transform: [{ rotate: '90deg' }],
+  },
+  seasonPickerChevronOpen: {
+    transform: [{ rotate: '-90deg' }],
+  },
+  seasonPickerMenu: {
+    backgroundColor: panel,
+    borderColor: border,
+    borderRadius: 12,
+    borderWidth: 1,
+    elevation: 10,
+    gap: 2,
+    left: 0,
+    padding: 6,
+    position: 'absolute',
+    right: 0,
+    shadowColor: '#000',
+    shadowOffset: { height: 8, width: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    top: 72,
+    zIndex: 10,
+  },
+  seasonPickerOption: {
+    alignItems: 'center',
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 46,
+    paddingHorizontal: 12,
+  },
+  seasonPickerOptionActive: {
+    backgroundColor: panel2,
+  },
+  seasonPickerOptionText: {
+    color: muted,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  seasonPickerOptionTextActive: {
+    color: text,
+  },
+  seasonPickerOptionMeta: {
+    color: faint,
+    fontSize: 12,
+    fontWeight: '600',
   },
   seasonRailContent: {
     gap: 12,
@@ -5632,17 +6909,13 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
   },
   episodeList: {
-    gap: 8,
+    gap: 14,
   },
   episodeRow: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
+    alignItems: 'flex-start',
     flexDirection: 'row',
-    gap: 12,
-    padding: 12,
+    gap: 14,
+    paddingVertical: 4,
   },
   episodeRowWatched: {
     opacity: 0.62,
@@ -5650,10 +6923,10 @@ function createStyles(theme: MobileThemeColors) {
   episodeThumb: {
     backgroundColor: panel2,
     borderRadius: 8,
-    height: 54,
+    aspectRatio: 16 / 9,
     overflow: 'hidden',
     position: 'relative',
-    width: 86,
+    width: '38%',
   },
   episodeThumbImage: {
     height: '100%',
@@ -5663,6 +6936,19 @@ function createStyles(theme: MobileThemeColors) {
     alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
+  },
+  episodePlayBadge: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    left: '50%',
+    marginLeft: -18,
+    marginTop: -18,
+    position: 'absolute',
+    top: '50%',
+    width: 36,
   },
   episodeIndex: {
     alignItems: 'center',
@@ -5681,8 +6967,9 @@ function createStyles(theme: MobileThemeColors) {
   episodeInfo: {
     flex: 1,
     gap: 3,
+    minWidth: 0,
   },
-  episodeTitleRow: {
+  episodeMetaRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
@@ -5690,8 +6977,9 @@ function createStyles(theme: MobileThemeColors) {
   episodeTitle: {
     color: text,
     flex: 1,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 21,
   },
   episodeTitleWatched: {
     color: muted,
@@ -5700,6 +6988,11 @@ function createStyles(theme: MobileThemeColors) {
     color: faint,
     fontSize: 12,
     fontWeight: '600',
+  },
+  episodeSummary: {
+    color: muted,
+    fontSize: 13,
+    lineHeight: 18,
   },
   resumePill: {
     color: accent,
@@ -5758,25 +7051,34 @@ function createStyles(theme: MobileThemeColors) {
     flex: 1,
     width: '100%',
   },
+  playerVideoFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  playerVideoFrameFill: {
+    flex: 1,
+    width: '100%',
+  },
   playerStatus: {
     alignItems: 'center',
     gap: 14,
     paddingHorizontal: 32,
   },
   playerStatusText: {
-    color: muted,
+    color: 'rgba(255,255,255,0.72)',
     fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
   },
   playerStatusTitle: {
-    color: text,
+    color: '#ffffff',
     fontSize: 18,
     fontWeight: '700',
     textAlign: 'center',
   },
   playerRecoveryText: {
-    color: faint,
+    color: 'rgba(255,255,255,0.64)',
     fontSize: 13,
     lineHeight: 19,
     maxWidth: 420,
@@ -5784,7 +7086,7 @@ function createStyles(theme: MobileThemeColors) {
   },
   playerStatusButton: {
     alignItems: 'center',
-    borderColor: border,
+    borderColor: 'rgba(255,255,255,0.28)',
     borderRadius: 11,
     borderWidth: 1,
     minHeight: 46,
@@ -5792,7 +7094,7 @@ function createStyles(theme: MobileThemeColors) {
     paddingHorizontal: 18,
   },
   playerStatusButtonText: {
-    color: text,
+    color: '#ffffff',
     fontSize: 14,
     fontWeight: '700',
   },
@@ -5816,19 +7118,22 @@ function createStyles(theme: MobileThemeColors) {
   },
   playerTopRow: {
     alignItems: 'center',
+    backgroundColor: '#000000',
     flexDirection: 'row',
     gap: 4,
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   playerTopTitle: {
-    color: muted,
+    color: 'rgba(255,255,255,0.82)',
     flex: 1,
     fontSize: 14,
     fontVariant: ['tabular-nums'],
     fontWeight: '800',
   },
   playerTitle: {
-    color: text,
+    color: '#ffffff',
     fontSize: 21,
     fontWeight: '800',
   },
@@ -5838,12 +7143,77 @@ function createStyles(theme: MobileThemeColors) {
     justifyContent: 'center',
     width: 44,
   },
+  playerCloseControl: {
+    backgroundColor: 'rgba(18,18,18,0.78)',
+    borderRadius: 22,
+  },
   playerOptionsPill: {
     alignItems: 'center',
     backgroundColor: 'rgba(18,18,18,0.72)',
     borderRadius: 999,
     flexDirection: 'row',
     paddingHorizontal: 6,
+  },
+  playerFitButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  playerFitLabel: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  playerFitLabelActive: {
+    color: accent,
+  },
+  playerVideoSettings: {
+    paddingHorizontal: 6,
+    paddingBottom: 8,
+  },
+  playerSettingBlock: {
+    marginBottom: 16,
+  },
+  playerSettingLabel: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  playerSegmentScroll: {
+    flexGrow: 0,
+  },
+  playerSegmented: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  playerSegment: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 14,
+  },
+  playerSegmentActive: {
+    backgroundColor: accent,
+    borderRadius: 12,
+  },
+  playerSegmentText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  playerSegmentTextActive: {
+    color: '#ffffff',
+  },
+  playerSegmentDivider: {
+    backgroundColor: 'rgba(255,255,255,0.24)',
+    height: 24,
+    width: 1,
   },
   playerCenterOverlay: {
     alignItems: 'center',
@@ -5882,7 +7252,7 @@ function createStyles(theme: MobileThemeColors) {
     top: '50%',
   },
   playerSkipLabel: {
-    color: text,
+    color: '#ffffff',
     fontSize: 9,
     fontWeight: '800',
     marginTop: 1,
@@ -5915,7 +7285,7 @@ function createStyles(theme: MobileThemeColors) {
     justifyContent: 'space-between',
   },
   playerTime: {
-    color: text,
+    color: '#ffffff',
     fontSize: 12,
     fontVariant: ['tabular-nums'],
     fontWeight: '600',
@@ -5938,7 +7308,7 @@ function createStyles(theme: MobileThemeColors) {
     paddingHorizontal: 6,
   },
   playerMenuTitle: {
-    color: muted,
+    color: 'rgba(255,255,255,0.72)',
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.8,
@@ -5956,7 +7326,7 @@ function createStyles(theme: MobileThemeColors) {
     paddingHorizontal: 12,
   },
   playerMenuRowText: {
-    color: text,
+    color: '#ffffff',
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
@@ -5966,7 +7336,7 @@ function createStyles(theme: MobileThemeColors) {
     color: accent,
   },
   playerMenuEmpty: {
-    color: faint,
+    color: 'rgba(255,255,255,0.64)',
     fontSize: 13,
     lineHeight: 19,
     paddingHorizontal: 12,
@@ -6007,7 +7377,7 @@ function createStyles(theme: MobileThemeColors) {
     width: 164,
   },
   playerGestureTitle: {
-    color: text,
+    color: '#ffffff',
     fontSize: 13,
     fontWeight: '800',
   },
@@ -6025,7 +7395,7 @@ function createStyles(theme: MobileThemeColors) {
     height: '100%',
   },
   playerGestureValue: {
-    color: muted,
+    color: 'rgba(255,255,255,0.72)',
     fontSize: 12,
     fontWeight: '700',
     marginTop: 6,

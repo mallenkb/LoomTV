@@ -1,7 +1,70 @@
 import { X } from 'lucide-react';
 import { ScrollArea } from '../ui/scroll-area';
 import { clampSidePanelWidth, trackLabel } from './helpers';
-import type { AspectMode, ControlTab, MediaTrack, SubtitleStyleSettings } from './types';
+import type {
+  AspectMode,
+  ControlTab,
+  CropMode,
+  MediaTrack,
+  RotationMode,
+  SubtitleStyleSettings,
+} from './types';
+
+const ASPECT_OPTIONS: { value: AspectMode; label: string }[] = [
+  { value: 'default', label: 'Default' },
+  { value: '4 / 3', label: '4:3' },
+  { value: '16 / 9', label: '16:9' },
+  { value: '16 / 10', label: '16:10' },
+  { value: '21 / 9', label: '21:9' },
+  { value: '5 / 4', label: '5:4' },
+];
+
+const CROP_OPTIONS: { value: CropMode; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: '4 / 3', label: '4:3' },
+  { value: '16 / 9', label: '16:9' },
+  { value: '16 / 10', label: '16:10' },
+  { value: '21 / 9', label: '21:9' },
+  { value: '5 / 4', label: '5:4' },
+  { value: 'custom', label: 'Custom…' },
+];
+
+const ROTATION_OPTIONS: { value: RotationMode; label: string }[] = [
+  { value: 0, label: '0°' },
+  { value: 90, label: '90°' },
+  { value: 180, label: '180°' },
+  { value: 270, label: '270°' },
+];
+
+function SegmentedSetting<T extends string | number>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl bg-white/10">
+      <div className="flex min-w-max">
+        {options.map((option, index) => (
+          <div key={String(option.value)} className="flex items-center">
+            {index > 0 && <span className="h-6 w-px shrink-0 bg-white/20" aria-hidden="true" />}
+            <button
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`min-h-10 whitespace-nowrap px-3 text-sm transition-colors ${value === option.value ? 'rounded-xl bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'text-white/75 hover:text-white'}`}
+              aria-pressed={value === option.value}
+            >
+              {option.label}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface PlayerSettingsPanelProps {
   mediaPanelWidth: number;
@@ -22,6 +85,10 @@ interface PlayerSettingsPanelProps {
   selectVideoTrack: (trackIndex: number) => void;
   aspectMode: AspectMode;
   setAspectMode: (mode: AspectMode) => void;
+  cropMode: CropMode;
+  setCropMode: (mode: CropMode) => void;
+  rotation: RotationMode;
+  setRotation: (rotation: RotationMode) => void;
   playbackRate: number;
   setPlaybackRate: (rate: number) => void;
   audioTracks: MediaTrack[];
@@ -52,6 +119,10 @@ export default function PlayerSettingsPanel({
   selectVideoTrack,
   aspectMode,
   setAspectMode,
+  cropMode,
+  setCropMode,
+  rotation,
+  setRotation,
   playbackRate,
   setPlaybackRate,
   audioTracks,
@@ -143,18 +214,20 @@ export default function PlayerSettingsPanel({
                 </div>
               </div>
 
-              <div>
-                <p className="mb-2 text-xs font-semibold text-white">Aspect ratio</p>
-                <div className="flex flex-wrap gap-1">
-                  {(['default', 'contain', 'fill', '4 / 3', '16 / 9', '21 / 9'] as AspectMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      onClick={() => setAspectMode(mode)}
-                      className={`rounded-md px-3 py-1.5 text-xs transition-colors ${aspectMode === mode ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/75 hover:bg-white/15'}`}
-                    >
-                      {mode === 'fill' ? 'Crop' : mode}
-                    </button>
-                  ))}
+              <div className="space-y-4">
+                <div>
+                  <p className="mb-2 text-xs font-semibold text-white">Aspect ratio</p>
+                  <SegmentedSetting options={ASPECT_OPTIONS} value={aspectMode} onChange={setAspectMode} />
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold text-white">Crop</p>
+                  <SegmentedSetting options={CROP_OPTIONS} value={cropMode} onChange={setCropMode} />
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold text-white">Rotation</p>
+                  <SegmentedSetting options={ROTATION_OPTIONS} value={rotation} onChange={setRotation} />
                 </div>
               </div>
 

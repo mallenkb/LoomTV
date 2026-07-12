@@ -36,10 +36,12 @@ import {
 import type {
   AspectMode,
   ControlTab,
+  CropMode,
   EpisodeFile,
   EpisodeMeta,
   MediaTrack,
   PlayerState,
+  RotationMode,
   SubtitleStyleSettings,
   VideoPlayerProps,
 } from './VideoPlayer/types';
@@ -196,6 +198,8 @@ export default function VideoPlayer({
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
+  const [cropMode, setCropMode] = useState<CropMode>('none');
+  const [rotation, setRotation] = useState<RotationMode>(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
@@ -1889,8 +1893,15 @@ export default function VideoPlayer({
   const subtitleCueShadow = subtitleStyle.borderWidth > 0
     ? `-${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px -${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, -${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}, ${subtitleStyle.borderWidth}px ${subtitleStyle.borderWidth}px 0 ${subtitleStyle.borderColor}`
     : 'none';
+  const aspectRatio = aspectMode === 'default' ? undefined : aspectMode;
+  const cropRatio = cropMode !== 'none' && cropMode !== 'custom' ? cropMode : undefined;
+  const videoFrameRatio = cropRatio || aspectRatio;
+  const videoFrameStyle: React.CSSProperties = videoFrameRatio
+    ? { aspectRatio: videoFrameRatio, maxHeight: '100%', width: '100%' }
+    : { height: '100%', width: '100%' };
   const videoStyle: React.CSSProperties = {
-    ...(aspectMode.includes('/') ? { aspectRatio: aspectMode } : {}),
+    objectFit: cropMode === 'none' ? 'contain' : 'cover',
+    transform: rotation === 0 ? undefined : `rotate(${rotation}deg)`,
     ...(fullscreen ? { objectPosition: 'center 24px' } : {}),
   };
 
@@ -1965,35 +1976,40 @@ export default function VideoPlayer({
           onClose={handleClose}
         />
 
-        <video
-          ref={videoRef}
-          className={`w-full h-full ${aspectMode === 'fill' ? 'object-cover' : 'object-contain'}`}
-          style={videoStyle}
-          preload="auto"
+        <div
+          className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
+          style={videoFrameStyle}
         >
-          {subtitles.map((subtitle, index) => {
-            const trackIndex = -1000 - index;
-            return (
-              <track
-                key={`${subtitle.url}-${index}`}
-                kind="subtitles"
-                src={subtitleSource(subtitle.url, serverBase)}
-                srcLang={subtitle.lang || 'en'}
-                label={subtitle.label || subtitle.lang || `Subtitle ${index + 1}`}
-                default={subtitlesDefaultEnabled && selectedSubtitleTrackIndex === trackIndex}
-              />
-            );
-          })}
-        </video>
+          <video
+            ref={videoRef}
+            className="h-full w-full"
+            style={videoStyle}
+            preload="auto"
+          >
+            {subtitles.map((subtitle, index) => {
+              const trackIndex = -1000 - index;
+              return (
+                <track
+                  key={`${subtitle.url}-${index}`}
+                  kind="subtitles"
+                  src={subtitleSource(subtitle.url, serverBase)}
+                  srcLang={subtitle.lang || 'en'}
+                  label={subtitle.label || subtitle.lang || `Subtitle ${index + 1}`}
+                  default={subtitlesDefaultEnabled && selectedSubtitleTrackIndex === trackIndex}
+                />
+              );
+            })}
+          </video>
 
-        <SubtitleOverlay
-          cues={subtitleCues}
-          videoRef={videoRef}
-          transcodeStartSecondsRef={transcodeStartSecondsRef}
-          streamIsTranscoded={streamIsTranscoded}
-          style={subtitleStyle}
-          visible={showSubtitleOverlay}
-        />
+          <SubtitleOverlay
+            cues={subtitleCues}
+            videoRef={videoRef}
+            transcodeStartSecondsRef={transcodeStartSecondsRef}
+            streamIsTranscoded={streamIsTranscoded}
+            style={subtitleStyle}
+            visible={showSubtitleOverlay}
+          />
+        </div>
 
         <PauseOverlay
           visible={paused && playerState === 'ready'}
@@ -2104,6 +2120,10 @@ export default function VideoPlayer({
           selectVideoTrack={selectVideoTrack}
           aspectMode={aspectMode}
           setAspectMode={setAspectMode}
+          cropMode={cropMode}
+          setCropMode={setCropMode}
+          rotation={rotation}
+          setRotation={setRotation}
           playbackRate={playbackRate}
           setPlaybackRate={setPlaybackRate}
           audioTracks={audioTracks}
