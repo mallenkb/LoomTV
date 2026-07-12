@@ -181,7 +181,7 @@ export function saveTrackPreference(scope: string, type: TrackPreferenceType, tr
     };
     all[scope] = nextPreferences;
     localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify(all));
-    void desktopApi.savePlaybackTrackPreferences(scope, nextPreferences).catch(() => {});
+    void desktopApi.savePlaybackTrackPreferences(scope, nextPreferences).catch(() => undefined);
   } catch (_error) {
     // Track selection still applies for the current session.
   }

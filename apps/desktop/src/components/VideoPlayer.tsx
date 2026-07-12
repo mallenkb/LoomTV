@@ -1515,7 +1515,7 @@ export default function VideoPlayer({
     bar.addEventListener('pointermove', handleMove);
     bar.addEventListener('pointerup', handleUp);
     bar.addEventListener('pointercancel', handleUp);
-  }, [duration, seekTo, updatePlaybackSnapshot]);
+  }, [clearNextEpisodeCountdown, duration, seekTo, updatePlaybackSnapshot]);
 
   const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!duration) return;
