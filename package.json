@@ -20,7 +20,6 @@
     "mobile:web": "pnpm --filter @loom-media-server/mobile web",
     "convex:dev": "convex dev",
     "convex:deploy": "convex deploy",
-    "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
