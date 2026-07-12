@@ -61,13 +61,13 @@ jobs:
         run: corepack pnpm install --frozen-lockfile
 
       - name: Lint
-        run: corepack pnpm run lint
+        run: corepack pnpm --filter loom-media-server-desktop lint
 
       - name: Typecheck
-        run: corepack pnpm run typecheck
+        run: corepack pnpm --filter loom-media-server-desktop typecheck
 
       - name: Test
-        run: corepack pnpm test
+        run: corepack pnpm --filter loom-media-server-desktop test
 
       - name: Build installers
         env:
@@ -103,27 +103,27 @@ jobs:
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            corepack pnpm run release
+            corepack pnpm --filter loom-media-server-desktop run release
           else
-            corepack pnpm run dist
+            corepack pnpm --filter loom-media-server-desktop run dist
           fi
 
       - name: Verify packaged runtime dependencies
-        run: corepack pnpm run verify:runtime
+        run: corepack pnpm --filter loom-media-server-desktop run verify:runtime
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
-            out/builder/**/*.dmg
-            out/builder/**/*.zip
-            out/builder/**/*.exe
-            out/builder/**/*.deb
-            out/builder/**/*.rpm
-            out/builder/**/*.AppImage
-            out/builder/**/*.blockmap
-            out/builder/**/*.yml
-            out/builder/**/*.yaml
-            out/builder/**/*.json
+            apps/desktop/out/builder/**/*.dmg
+            apps/desktop/out/builder/**/*.zip
+            apps/desktop/out/builder/**/*.exe
+            apps/desktop/out/builder/**/*.deb
+            apps/desktop/out/builder/**/*.rpm
+            apps/desktop/out/builder/**/*.AppImage
+            apps/desktop/out/builder/**/*.blockmap
+            apps/desktop/out/builder/**/*.yml
+            apps/desktop/out/builder/**/*.yaml
+            apps/desktop/out/builder/**/*.json
           if-no-files-found: error
