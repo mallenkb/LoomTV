@@ -57,7 +57,7 @@
     "@electron-forge/shared-types": "7.11.1",
     "@electron/asar": "4.2.0",
     "@electron/fuses": "1.8.0",
-    "@electron/rebuild": "3.7.2",
+    "@electron/rebuild": "4.0.4",
     "@tailwindcss/postcss": "4.2.4",
     "@types/electron-squirrel-startup": "1.0.2",
     "@types/node": "18.19.130",
