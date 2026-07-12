@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.37](docs/releases/v1.0.37.md): ships the refreshed desktop architecture, packaging pipeline, and library/playback/settings improvements.
 - [Loom Media Server 1.0.35](docs/releases/v1.0.35.md): fixes the Electron Settings tab freeze and keeps the top chrome from swallowing tab clicks.
 - [Loom Media Server 1.0.34](docs/releases/v1.0.34.md): keeps subtitles behind the playback overlays so controls remain readable.
 - [Loom Media Server 1.0.31](docs/releases/v1.0.31.md): fixes fullscreen Back behavior and tightens fullscreen video/top-control spacing.
