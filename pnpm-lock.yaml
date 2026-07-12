@@ -112,8 +112,8 @@ importers:
         specifier: 1.8.0
         version: 1.8.0
       '@electron/rebuild':
-        specifier: 3.7.2
-        version: 3.7.2
+        specifier: 4.0.4
+        version: 4.0.4
       '@tailwindcss/postcss':
         specifier: 4.2.4
         version: 4.2.4
