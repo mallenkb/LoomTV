@@ -53,6 +53,10 @@
   color-scheme: light;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 body {
   background: var(--loom-bg);
   color: var(--loom-text);
@@ -172,6 +176,47 @@ body {
   background: var(--loom-bg);
 }
 
+/* Most of the app uses theme tokens, but these utility classes predate the
+   theme system. Keep their intent while making the light palette readable. */
+:root[data-theme="light"] .loom-page [class~="text-white"],
+:root[data-theme="light"] .loom-page [class~="text-white\/90"],
+:root[data-theme="light"] .loom-page [class~="text-white\/85"],
+:root[data-theme="light"] .loom-page [class~="text-white\/80"],
+:root[data-theme="light"] .loom-page [class~="text-white\/75"],
+:root[data-theme="light"] .loom-page [class~="text-white\/65"],
+:root[data-theme="light"] .loom-page [class~="text-white\/60"],
+:root[data-theme="light"] .loom-page [class~="text-white\/55"],
+:root[data-theme="light"] .loom-page [class~="text-white\/50"],
+:root[data-theme="light"] .loom-page [class~="text-white\/45"] {
+  color: var(--loom-text) !important;
+}
+
+:root[data-theme="light"] .loom-app-shell > aside [class~="text-white"] {
+  color: var(--loom-text) !important;
+}
+
+/* Detail hero copy sits over artwork and should retain its high-contrast
+   treatment; the metadata below it follows the light theme. */
+:root[data-theme="light"] .loom-detail-page [class~="h-[50vh]"] [class~="text-white"],
+:root[data-theme="light"] .loom-detail-page [class~="h-[50vh]"] [class~="text-white\/60"],
+:root[data-theme="light"] .loom-detail-page [class~="h-[45vh]"] [class~="text-white"],
+:root[data-theme="light"] .loom-detail-page [class~="h-[45vh]"] [class~="text-white\/60"] {
+  color: #ffffff !important;
+}
+
+:root[data-theme="light"] .loom-page input,
+:root[data-theme="light"] .loom-page select,
+:root[data-theme="light"] .loom-page textarea {
+  color: var(--loom-text);
+}
+
+:root[data-theme="light"] .loom-settings-mobile-profile h1,
+:root[data-theme="light"] .loom-settings-mobile-list button,
+:root[data-theme="light"] .loom-settings-mobile-list button svg,
+:root[data-theme="light"] .loom-settings-mobile-detail-bar h1 {
+  color: var(--loom-text);
+}
+
 .loom-page {
   background: var(--loom-bg);
 }
@@ -245,17 +290,37 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .loom-detail-hero-fade {
-  background:
-    linear-gradient(180deg, rgba(8, 15, 25, 0.14) 0%, rgba(8, 15, 25, 0.44) 58%, var(--loom-sidebar) 100%),
-    linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.52) 18%, rgba(8, 15, 25, 0.08) 48%, rgba(8, 15, 25, 0.58) 100%);
+  background: linear-gradient(180deg, transparent 0%, transparent 10%, color-mix(in srgb, var(--loom-bg) 24%, transparent) 34%, color-mix(in srgb, var(--loom-bg) 68%, transparent) 72%, var(--loom-bg) 100%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  pointer-events: none;
 }
 
-.loom-detail-side-fade-left {
-  background: linear-gradient(90deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.7) 42%, transparent 100%);
+:root[data-theme="light"] .loom-detail-hero-fade {
+  background: linear-gradient(180deg, transparent 0%, transparent 10%, color-mix(in srgb, var(--loom-bg) 18%, transparent) 34%, color-mix(in srgb, var(--loom-bg) 58%, transparent) 72%, var(--loom-bg) 100%);
 }
 
-.loom-detail-side-fade-right {
-  background: linear-gradient(270deg, var(--loom-sidebar) 0%, rgba(8, 15, 25, 0.68) 42%, transparent 100%);
+.loom-detail-cover {
+  background: var(--loom-sidebar);
+}
+
+.loom-detail-cover-image {
+  position: absolute;
+  overflow: hidden;
+}
+
+.loom-detail-cover-image::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--loom-sidebar) 0%, color-mix(in srgb, var(--loom-sidebar) 68%, transparent) 8%, color-mix(in srgb, var(--loom-sidebar) 20%, transparent) 20%, transparent 28%, transparent 72%, color-mix(in srgb, var(--loom-sidebar) 20%, transparent) 80%, color-mix(in srgb, var(--loom-sidebar) 68%, transparent) 92%, var(--loom-sidebar) 100%);
+  box-shadow: inset 2px 0 0 var(--loom-sidebar), inset -2px 0 0 var(--loom-sidebar);
+}
+
+:root[data-theme="light"] .loom-detail-cover-image::after {
+  background: linear-gradient(90deg, var(--loom-sidebar) 0%, color-mix(in srgb, var(--loom-sidebar) 58%, transparent) 8%, color-mix(in srgb, var(--loom-sidebar) 20%, transparent) 20%, transparent 28%, transparent 72%, color-mix(in srgb, var(--loom-sidebar) 20%, transparent) 80%, color-mix(in srgb, var(--loom-sidebar) 58%, transparent) 92%, var(--loom-sidebar) 100%);
 }
 
 .loom-section-title {
@@ -279,10 +344,17 @@ body.platform-darwin .loom-player-top-control {
   box-shadow: 0 0 0 2px var(--loom-focus-ring);
 }
 
-.loom-chip {
-  border-color: rgba(245, 196, 81, 0.38);
-  background: rgba(0, 0, 0, 0.72);
+:root[data-theme="dark"] .loom-chip,
+:root:not([data-theme]) .loom-chip {
+  border-color: rgba(245, 196, 81, 0.42);
+  background: rgba(0, 0, 0, 0.78);
   color: #F5C451 !important;
+}
+
+:root[data-theme="light"] .loom-chip {
+  border-color: #F5C451;
+  background: #FFF1BF;
+  color: #000000 !important;
 }
 
 .loom-chip svg {
@@ -722,6 +794,15 @@ body.platform-darwin .loom-player-top-control {
   }
 }
 
+:root[data-theme="light"] .loom-app-shell > aside {
+  border-top-color: var(--loom-border);
+  box-shadow: 0 -18px 42px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] .loom-settings-mobile-list button:not(:last-child) {
+  border-bottom-color: var(--loom-border);
+}
+
 @media (max-width: 640px) {
   .loom-page .relative.h-\[45vh\],
   .loom-page .relative.h-\[50vh\] {
@@ -730,9 +811,7 @@ body.platform-darwin .loom-player-top-control {
   }
 
   .loom-detail-hero-fade {
-    background:
-      linear-gradient(180deg, rgba(8, 15, 25, 0.08) 0%, rgba(8, 15, 25, 0.42) 32%, var(--loom-sidebar) 92%),
-      linear-gradient(90deg, rgba(8, 15, 25, 0.74) 0%, rgba(8, 15, 25, 0.12) 100%);
+    background: linear-gradient(180deg, rgba(8, 15, 25, 0.08) 0%, rgba(8, 15, 25, 0.42) 32%, color-mix(in srgb, var(--loom-bg) 84%, transparent) 100%);
   }
 
   .loom-detail-side-fade-left,

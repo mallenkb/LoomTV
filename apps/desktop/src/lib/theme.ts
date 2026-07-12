@@ -1,4 +1,4 @@
-export type AppThemeMode = 'dark';
+export type AppThemeMode = 'dark' | 'light';
 export type AppThemeColor = 'red' | 'blue' | 'orange' | 'yellow';
 export type AppDarkTheme = 'default' | 'justwatch' | 'black';
 export type AppLoaderStyle = 'play-mark' | 'logo-mark' | 'horizontal-logo';
@@ -90,8 +90,8 @@ export const DARK_THEMES: Record<AppDarkTheme, {
   },
 };
 
-function normalizeThemeMode(_value?: string): AppThemeMode {
-  return 'dark';
+export function normalizeThemeMode(value?: string): AppThemeMode {
+  return value === 'light' ? 'light' : 'dark';
 }
 
 export function normalizeThemeColor(value?: string): AppThemeColor {
@@ -118,6 +118,24 @@ export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
   const darkTheme = normalizeDarkTheme(settings.darkTheme);
   const palette = THEME_COLORS[color];
   const darkPalette = DARK_THEMES[darkTheme];
+  const lightPalette = {
+    bg: '#f4f6f8',
+    surface: '#ffffff',
+    surface2: '#f8fafc',
+    surface3: '#eef2f5',
+    sidebar: '#ffffff',
+    muted: '#52606d',
+    faint: '#7b8794',
+    border: '#dce3e9',
+    panel: 'rgba(255, 255, 255, 0.94)',
+    panelBorder: 'rgba(15, 23, 42, 0.12)',
+    bodyStart: '#f7f9fb',
+    bodyEnd: '#eef2f5',
+  };
+  const themePalette = mode === 'light' ? lightPalette : darkPalette;
+  const foreground = mode === 'light' ? '#17212b' : '#ffffff';
+  const accentForeground = mode === 'light' && color === 'yellow' ? '#17212b' : palette.foreground;
+  const accentForegroundMuted = mode === 'light' && color === 'yellow' ? '#344454' : palette.foregroundMuted;
   const root = document.documentElement;
 
   root.dataset.theme = mode;
@@ -125,25 +143,43 @@ export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
   root.dataset.darkTheme = darkTheme;
   root.style.setProperty('--loom-accent', palette.hex);
   root.style.setProperty('--loom-accent-hover', palette.hover);
-  root.style.setProperty('--loom-accent-foreground', palette.foreground);
-  root.style.setProperty('--loom-accent-foreground-muted', palette.foregroundMuted);
+  root.style.setProperty('--loom-accent-foreground', accentForeground);
+  root.style.setProperty('--loom-accent-foreground-muted', accentForegroundMuted);
   root.style.setProperty('--color-primary', palette.hex);
   root.style.setProperty('--color-ring', palette.hex);
-  root.style.setProperty('--color-primary-foreground', palette.foreground);
+  root.style.setProperty('--color-primary-foreground', accentForeground);
 
-  root.style.setProperty('--loom-bg', darkPalette.bg);
-  root.style.setProperty('--loom-surface', darkPalette.surface);
-  root.style.setProperty('--loom-surface-2', darkPalette.surface2);
-  root.style.setProperty('--loom-surface-3', darkPalette.surface3);
-  root.style.setProperty('--loom-text', '#ffffff');
-  root.style.setProperty('--loom-muted', darkPalette.muted);
-  root.style.setProperty('--loom-faint', darkPalette.faint);
-  root.style.setProperty('--loom-border', darkPalette.border);
-  root.style.setProperty('--loom-sidebar', darkPalette.sidebar);
-  root.style.setProperty('--loom-logo-word', '#ffffff');
-  root.style.setProperty('--loom-panel', darkPalette.panel);
-  root.style.setProperty('--loom-panel-border', darkPalette.panelBorder);
-  root.style.setProperty('--loom-focus-glow', 'rgba(251, 197, 0, 0.28)');
-  root.style.setProperty('--loom-body-start', darkPalette.bodyStart);
-  root.style.setProperty('--loom-body-end', darkPalette.bodyEnd);
+  root.style.setProperty('--loom-bg', themePalette.bg);
+  root.style.setProperty('--loom-surface', themePalette.surface);
+  root.style.setProperty('--loom-surface-2', themePalette.surface2);
+  root.style.setProperty('--loom-surface-3', themePalette.surface3);
+  root.style.setProperty('--loom-text', foreground);
+  root.style.setProperty('--loom-muted', themePalette.muted);
+  root.style.setProperty('--loom-faint', themePalette.faint);
+  root.style.setProperty('--loom-border', themePalette.border);
+  root.style.setProperty('--loom-sidebar', themePalette.sidebar);
+  root.style.setProperty('--loom-logo-word', foreground);
+  root.style.setProperty('--loom-panel', themePalette.panel);
+  root.style.setProperty('--loom-panel-border', themePalette.panelBorder);
+  root.style.setProperty('--loom-focus-ring', palette.hex);
+  root.style.setProperty('--loom-focus-glow', mode === 'light' ? 'rgba(34, 92, 255, 0.18)' : 'rgba(251, 197, 0, 0.28)');
+  root.style.setProperty('--loom-body-start', themePalette.bodyStart);
+  root.style.setProperty('--loom-body-end', themePalette.bodyEnd);
+
+  // Keep shadcn/Tailwind primitives in sync with the runtime theme.
+  root.style.setProperty('--color-background', themePalette.bg);
+  root.style.setProperty('--color-foreground', foreground);
+  root.style.setProperty('--color-card', themePalette.surface);
+  root.style.setProperty('--color-card-foreground', foreground);
+  root.style.setProperty('--color-popover', themePalette.surface);
+  root.style.setProperty('--color-popover-foreground', foreground);
+  root.style.setProperty('--color-secondary', themePalette.surface3);
+  root.style.setProperty('--color-secondary-foreground', foreground);
+  root.style.setProperty('--color-muted', themePalette.surface3);
+  root.style.setProperty('--color-muted-foreground', themePalette.muted);
+  root.style.setProperty('--color-accent', themePalette.surface3);
+  root.style.setProperty('--color-accent-foreground', foreground);
+  root.style.setProperty('--color-border', themePalette.border);
+  root.style.setProperty('--color-input', themePalette.surface2);
+  root.style.setProperty('color-scheme', mode);
 }

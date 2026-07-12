@@ -183,8 +183,8 @@ function mediaLink(item: MediaItem): string {
 function RatingBadge({ rating }: { rating?: number }) {
   if (!rating || rating <= 0) return null;
   return (
-    <div className="loom-chip absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-semibold backdrop-blur-md">
-      <Star className="h-3.5 w-3.5" fill="currentColor" />
+    <div className="loom-chip absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-full border px-2 text-[11px] font-semibold backdrop-blur-md">
+      <Star className="h-3 w-3" fill="currentColor" />
       {rating.toFixed(1)}
     </div>
   );

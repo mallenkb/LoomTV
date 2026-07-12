@@ -1,6 +1,8 @@
 export type PlayerState = 'loading' | 'ready' | 'error';
 export type ControlTab = 'video' | 'audio' | 'subtitles';
-export type AspectMode = 'default' | 'contain' | 'fill' | '4 / 3' | '16 / 9' | '21 / 9';
+export type AspectMode = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
+export type CropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
+export type RotationMode = 0 | 90 | 180 | 270;
 export type TrackPreferenceType = 'audio' | 'subtitle';
 
 export type SubtitleStyleSettings = {

@@ -376,11 +376,11 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
                 onError={() => setThumbnailFailed(true)}
               />
             ) : (
-              <span className="flex h-full w-full items-center justify-center text-[10px] text-white/40">Loom Media Server</span>
+              <span className="flex h-full w-full items-center justify-center text-[10px] text-[var(--loom-faint)]">Loom Media Server</span>
             )}
           </span>
           <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate text-[20px] font-semibold text-white">{candidate.title}</span>
+            <span className="block truncate text-[20px] font-semibold text-[var(--loom-text)]">{candidate.title}</span>
             <span className="mt-1 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
           </span>
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] shadow-[0_0_0_5px_rgba(251,197,0,0.12),0_12px_24px_rgba(0,0,0,0.30)]">
@@ -399,7 +399,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
               event.stopPropagation();
               setDismissedKey(candidate.key);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
             aria-label="Hide continue watching"
           >
             <X className="h-4 w-4" />
