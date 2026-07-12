@@ -6,6 +6,7 @@ import {
   applyTheme,
   normalizeDarkTheme,
   normalizeLoaderStyle,
+  normalizeThemeMode,
   normalizeThemeColor,
 } from '@/lib/theme';
 
@@ -20,7 +21,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {}): AppThemeSettings {
   return {
-    mode: 'dark',
+    mode: normalizeThemeMode(settings.mode),
     color: normalizeThemeColor(settings.color),
     darkTheme: normalizeDarkTheme(settings.darkTheme),
     loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
@@ -56,10 +57,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     void desktopApi.getSettings()
       .then((settings) => {
         if (!mounted) return;
-        const hasSavedTheme = Boolean(settings.appThemeColor || settings.appDarkTheme || settings.appLoaderStyle);
+        const hasSavedTheme = Boolean(settings.appThemeMode || settings.appThemeColor || settings.appDarkTheme || settings.appLoaderStyle);
         const cachedTheme = readCachedTheme();
         const loadedTheme = hasSavedTheme
           ? normalizeThemeSettings({
+              mode: settings.appThemeMode,
               color: settings.appThemeColor,
               darkTheme: settings.appDarkTheme,
               loaderStyle: settings.appLoaderStyle,

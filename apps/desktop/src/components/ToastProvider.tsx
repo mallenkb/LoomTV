@@ -62,20 +62,20 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto flex gap-3 rounded-lg border border-white/10 bg-[var(--loom-surface)]/95 p-3 text-white shadow-2xl backdrop-blur-md"
+              className="pointer-events-auto flex gap-3 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface)]/95 p-3 text-[var(--loom-text)] shadow-2xl backdrop-blur-md"
             >
               <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${tone.accent}`} />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold leading-5">{toast.title}</div>
                 {toast.description && (
-                  <div className="mt-0.5 text-xs leading-5 text-white/65">{toast.description}</div>
+                  <div className="mt-0.5 text-xs leading-5 text-[var(--loom-muted)]">{toast.description}</div>
                 )}
               </div>
               <button
                 type="button"
                 aria-label="Dismiss notification"
                 onClick={() => dismissToast(toast.id)}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
               >
                 <X className="h-4 w-4" />
               </button>

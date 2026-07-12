@@ -120,6 +120,14 @@ export function SearchIcon({ size = 24, color = '#ffffff' }: IconProps) {
   );
 }
 
+export function FilterIcon({ size = 24, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" />
+    </Svg>
+  );
+}
+
 export function RefreshIcon({ size = 24, color = '#ffffff' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -131,10 +139,53 @@ export function RefreshIcon({ size = 24, color = '#ffffff' }: IconProps) {
   );
 }
 
+export function SunIcon({ size = 24, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round">
+      <Circle cx={12} cy={12} r={3.5} />
+      <Path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42" />
+    </Svg>
+  );
+}
+
+export function AutoThemeIcon({ size = 24, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={12} r={8} stroke={color} strokeWidth={1.8} />
+      <Path d="M12 4a8 8 0 0 0 0 16V4Z" fill={color} />
+    </Svg>
+  );
+}
+
+export function MoonIcon({ size = 24, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M20.7 15.2A8.5 8.5 0 0 1 8.8 3.3 8.5 8.5 0 1 0 20.7 15.2Z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
+
 export function PlayIcon({ size = 24, color = '#ffffff' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Path d="M8 5v14l11-7L8 5z" fill={color} />
+    </Svg>
+  );
+}
+
+export function RoundedPlayIcon({ size = 24, color = '#ffffff' }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M8.8 5.5 17.3 11c.95.62.95 1.38 0 2l-8.5 5.5C7.6 19.27 6.5 18.7 6.5 17.6V6.4c0-1.1 1.1-1.67 2.3-.9Z"
+        fill={color}
+        stroke={color}
+        strokeLinejoin="round"
+        strokeWidth={1.25}
+      />
     </Svg>
   );
 }

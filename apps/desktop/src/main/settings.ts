@@ -92,7 +92,7 @@ export function normalizeSettings(raw: AppSettings): AppSettings {
       ? Number(raw.playbackSkipForwardSeconds)
       : 15,
     sidebarNavOrder,
-    appThemeMode: 'dark',
+    appThemeMode: raw.appThemeMode === 'light' ? 'light' : 'dark',
     appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
       ? raw.appThemeColor
       : 'yellow',

@@ -218,20 +218,19 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const handleBack = () => navigate(backTarget);
 
   return (
-    <div className="loom-page h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1440px]">
-      <div className="relative h-[50vh] w-full">
-        <SafeArtwork
-          key={heroKey}
-          src={heroArtwork}
-          alt={movie.title}
-          className="h-full w-full"
-          imgClassName="object-cover"
-          fallback={<div className="h-full w-full" />}
-        />
+    <div className="loom-page loom-detail-page h-full overflow-y-auto">
+      <div className="loom-detail-cover relative h-[50vh] w-full overflow-hidden">
+        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[1440px] -translate-x-1/2">
+          <SafeArtwork
+            key={heroKey}
+            src={heroArtwork}
+            alt={movie.title}
+            className="h-full w-full"
+            imgClassName="object-cover"
+            fallback={<div className="h-full w-full" />}
+          />
+        </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
-        <div className="loom-detail-side-fade-left pointer-events-none absolute inset-y-0 left-0 w-40" />
-        <div className="loom-detail-side-fade-right pointer-events-none absolute inset-y-0 right-0 w-40" />
         <ArtworkEditorControls
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}
@@ -253,7 +252,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           Back
         </button>
 
-        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-6 p-8">
+        <div className="absolute bottom-0 left-0 right-0">
+          <div className="mx-auto flex max-w-[1440px] items-end gap-6 p-8">
           <SafeArtwork
             key={posterKey}
             src={posterArtwork}
@@ -320,9 +320,11 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </span>
             </span>
           </Button>
+          </div>
         </div>
       </div>
 
+      <div className="mx-auto max-w-[1440px]">
       <div className="page-bottom-safe-lg p-8">
         {movie.summary && (
           <section className="mb-8">

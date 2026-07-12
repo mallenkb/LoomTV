@@ -3,27 +3,14 @@ import type { UpdateState } from '@/lib/desktopApi';
 
 export type SettingsSection = 'library' | 'playback' | 'network' | 'metadata' | 'theme' | 'about';
 export type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
-export type SettingsGroup = 'media' | 'connections' | 'personalize' | 'system';
 
-export const SETTINGS_GROUP_LABELS: Record<SettingsGroup, string> = {
-  media: 'Media',
-  connections: 'Connections',
-  personalize: 'Personalize',
-  system: 'System',
-};
-
-export const SETTINGS_SECTIONS: {
-  id: SettingsSection;
-  label: string;
-  description: string;
-  group: SettingsGroup;
-}[] = [
-  { id: 'library', label: 'Library', description: 'Folders, scans, and sync', group: 'media' },
-  { id: 'playback', label: 'Player', description: 'Playback and seek defaults', group: 'media' },
-  { id: 'metadata', label: 'Metadata & Subtitles', description: 'Artwork, provider access, and downloads', group: 'media' },
-  { id: 'network', label: 'Sharing & Devices', description: 'Host or join a library', group: 'connections' },
-  { id: 'theme', label: 'Appearance', description: 'Theme, accent, loader, and navigation', group: 'personalize' },
-  { id: 'about', label: 'App & Data', description: 'Updates, backup, reset, and legal', group: 'system' },
+export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: 'library', label: 'Library' },
+  { id: 'playback', label: 'Playback' },
+  { id: 'network', label: 'Network' },
+  { id: 'metadata', label: 'Metadata API Keys' },
+  { id: 'theme', label: 'Theme' },
+  { id: 'about', label: 'About' },
 ];
 
 export const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';

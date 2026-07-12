@@ -340,20 +340,19 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const handleBack = () => navigate(backTarget);
 
   return (
-    <div className="loom-page h-full overflow-y-auto">
-      <div className="mx-auto max-w-[1440px]">
+    <div className="loom-page loom-detail-page h-full overflow-y-auto">
       {/* Hero backdrop */}
-      <div className="relative h-[45vh] w-full">
-        <SafeArtwork
-          src={heroArtwork}
-          alt={show.title}
-          className="h-full w-full"
-          imgClassName="object-cover"
-          fallback={<div className="h-full w-full" />}
-        />
+      <div className="loom-detail-cover relative h-[45vh] w-full overflow-hidden">
+        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[1440px] -translate-x-1/2">
+          <SafeArtwork
+            src={heroArtwork}
+            alt={show.title}
+            className="h-full w-full"
+            imgClassName="object-cover"
+            fallback={<div className="h-full w-full" />}
+          />
+        </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
-        <div className="loom-detail-side-fade-left pointer-events-none absolute inset-y-0 left-0 w-40" />
-        <div className="loom-detail-side-fade-right pointer-events-none absolute inset-y-0 right-0 w-40" />
         <ArtworkEditorControls
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}
@@ -380,7 +379,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           Back
         </button>
 
-        <div className="absolute bottom-0 left-0 right-0 p-8 flex gap-6 items-end">
+        <div className="absolute bottom-0 left-0 right-0">
+          <div className="mx-auto flex max-w-[1440px] items-end gap-6 p-8">
           <SafeArtwork
             src={posterArtwork}
             alt={show.title}
@@ -436,9 +436,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
+          </div>
         </div>
       </div>
 
+      <div className="mx-auto max-w-[1440px]">
       <div className="page-bottom-safe-lg p-8">
         {show.summary && (
           <section className="mb-8">
