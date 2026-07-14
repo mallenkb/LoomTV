@@ -77,7 +77,7 @@ function AnimeSolidIcon({ className }: { className?: string }) {
   return <AnimeIcon className={className} solid />;
 }
 
-function HomeIcon({ className }: { className?: string }) {
+function _HomeIcon({ className }: { className?: string }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -99,11 +99,11 @@ function HomeSmileSolidIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M12.5227 1.33636C12.1804 1.24368 11.8196 1.24368 11.4773 1.33636C11.0799 1.44395 10.7454 1.7066 10.4784 1.91623L10.4037 1.97465L3.54373 7.31012C3.1671 7.6024 2.83529 7.85991 2.58803 8.19421C2.37104 8.48759 2.20939 8.8181 2.11103 9.1695C1.99895 9.56992 1.9994 9.98993 1.99992 10.4667L1.99999 17.8385C1.99997 18.3657 1.99995 18.8204 2.03056 19.195C2.06286 19.5904 2.13417 19.9836 2.32697 20.362C2.61459 20.9264 3.07353 21.3854 3.63802 21.673C4.0164 21.8658 4.40961 21.9371 4.80496 21.9694C5.17953 22 5.63428 22 6.16142 22H17.8386C18.3657 22 18.8204 22 19.195 21.9694C19.5904 21.9371 19.9836 21.8658 20.362 21.673C20.9264 21.3854 21.3854 20.9264 21.673 20.362C21.8658 19.9836 21.8658 19.5904 21.9694 19.195C22 18.8204 22 18.3657 22 17.8386L22.0001 10.4667C22.0006 9.98993 22.001 9.56992 21.8889 9.1695C21.7906 8.8181 21.6289 8.48759 21.4119 8.19421C21.1647 7.8599 20.8329 7.6024 20.4562 7.31011L13.5962 1.97465L13.5216 1.91623C13.2546 1.7066 12.92 1.44395 12.5227 1.33636ZM9.09444 13.7507C8.95678 13.2159 8.4116 12.8939 7.87675 13.0316C7.34189 13.1692 7.01991 13.7144 7.15757 14.2493C7.71257 16.4056 9.66882 18 12 18C14.3312 18 16.2874 16.4056 16.8424 14.2493C16.9801 13.7144 16.6581 13.1692 16.1232 13.0316C15.5884 12.8939 15.0432 13.2156 14.9055 13.7507C14.5724 15.0449 13.3965 16 12 16C10.6035 16 9.42753 15.0449 9.09444 13.7507Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd" /></svg>;
 }
 
-function HomeSolidIcon({ className }: { className?: string }) {
+function _HomeSolidIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true"><path d="M12.5227 1.33636C12.1804 1.24368 11.8196 1.24368 11.4773 1.33636C11.0799 1.44395 10.7454 1.7066 10.4784 1.91623L3.54373 7.31012C3.1671 7.6024 2.83529 7.85991 2.58803 8.19421C2.37104 8.48759 2.20939 8.8181 2.11103 9.1695C1.99895 9.56992 1.9994 9.98993 1.99992 10.4667L1.99999 17.8385C1.99997 18.3657 1.99995 18.8204 2.03056 19.195C2.06286 19.5904 2.13417 19.9836 2.32697 20.362C2.61459 20.9264 3.07353 21.3854 3.63802 21.673C4.0164 21.8658 4.40961 21.9371 4.80496 21.9694C5.17953 22 5.63428 22 6.16142 22H17.8386C18.3657 22 18.8204 22 19.195 21.9694C19.5904 21.9371 19.9836 21.8658 20.362 21.673C20.9264 21.3854 21.3854 20.9264 21.673 20.362C21.8658 19.9836 21.9371 19.5904 21.9694 19.195C22 18.8204 22 18.3657 22 17.8386L22.0001 10.4667C22.0006 9.98993 22.001 9.56992 21.8889 9.1695C21.7908 8.8181 21.6289 8.48759 21.4119 8.19421C21.1647 7.8599 20.8329 7.6024 20.4562 7.31011L13.5962 1.97465C13.2546 1.7066 12.92 1.44395 12.5227 1.33636Z" /></svg>;
 }
 
-function HomeSolidReferenceIcon({ className }: { className?: string }) {
+function _HomeSolidReferenceIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true"><path d="M12 2.5L2 10.8V20C2 21.1046 2.89543 22 4 22H20C21.1046 22 22 21.1046 22 20V10.8L12 2.5ZM10 20V15H14V20H10Z" fillRule="evenodd" /></svg>;
 }
 
@@ -111,7 +111,7 @@ function FilmNavIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M2 12H22M2 7H7M17 7H22M2 17H7M17 17H22M7 22V2M17 22V2M6.8 22H17.2C18.8802 22 19.7202 22 20.362 21.673C20.9265 21.3854 21.3854 20.9265 21.673 20.362C22 19.7202 22 18.8802 22 17.2V6.8C22 5.11984 22 4.27976 21.673 3.63803C21.3854 3.07354 20.9265 2.6146 20.362 2.32698C19.7202 2 18.8802 2 17.2 2H6.8C5.11984 2 4.27976 2 3.63803 2.32698C3.07354 2.6146 2.6146 3.07354 2.32698 3.63803C2 4.27976 2 5.11984 2 6.8V17.2C2 18.8802 2 19.7202 2.32698 20.362C2.6146 20.9265 3.07354 21.3854 3.63803 21.673C4.27976 22 5.11984 22 6.8 22Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function FilmNavSolidIcon({ className }: { className?: string }) {
+function _FilmNavSolidIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M1 7h5V3h2v4h3V3h2v4h3V3h2v4h3v2h-3v5h3v2h-3v4h-2v-4h-3v4h-2v-4H8v4H6v-4H1v-2h5V9H1V7Zm7 2v5h3V9H8Zm5 0v5h3V9h-3Z" fill="currentColor" fillRule="evenodd" /></svg>;
 }
 
@@ -123,11 +123,11 @@ function TVNavSolidIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M7.625 2.219a1 1 0 1 0-1.25 1.562L9.149 6H6.759C3 6 1 8 1 11.759v4.482C1 20 3 22 6.759 22h10.482C21 22 23 20 23 16.241v-4.482C23 8 21 6 17.241 6h-2.39l2.774-2.219a1 1 0 1 0-1.25-1.562L12 5.719 7.625 2.219Z" fill="currentColor" /></svg>;
 }
 
-function SettingsNavIcon({ className }: { className?: string }) {
+function _SettingsNavIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
-function SettingsNavSolidIcon({ className }: { className?: string }) {
+function _SettingsNavSolidIcon({ className }: { className?: string }) {
   return <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="currentColor" /></svg>;
 }
 
@@ -153,6 +153,7 @@ function SettingsNavSolidExactIcon({ className }: { className?: string }) {
 export default function Sidebar() {
   const location = useLocation();
   const { state, scanLibrary } = useLibrary();
+  const { libraryFolderGroups } = state;
   const isSettingsActive = location.pathname === '/settings';
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
@@ -185,21 +186,21 @@ export default function Sidebar() {
       homeNavItem,
       ...navOrder.map((itemId) => sidebarNavItems[itemId]).filter((item) => {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        return state.libraryFolderGroups[folderKey as keyof typeof state.libraryFolderGroups]?.length > 0;
+        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
       }),
     ],
-    [navOrder, state.libraryFolderGroups],
+    [navOrder, libraryFolderGroups],
   );
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
       ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        return state.libraryFolderGroups[folderKey as keyof typeof state.libraryFolderGroups]?.length > 0;
+        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
       }),
       settingsNavItem,
     ],
-    [state.libraryFolderGroups],
+    [libraryFolderGroups],
   );
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
