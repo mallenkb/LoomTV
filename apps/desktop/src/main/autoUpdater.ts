@@ -5,13 +5,15 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { stopAllTranscodes } from './transcodeManager';
 import { destroyLanDiscovery } from './lanDiscovery';
 import { createUpdateAdapter } from './updateAdapter';
 
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
+const execFileAsync = promisify(execFile);
 export type UpdateStatus =
   | 'idle'
   | 'disabled'
@@ -273,22 +275,60 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+async function extractMacUpdate(updateFilePath: string, extractDir: string): Promise<string> {
+  await fs.promises.mkdir(extractDir, { recursive: true });
+  await execFileAsync('/usr/bin/ditto', ['-x', '-k', updateFilePath, extractDir]);
+
+  const entries = await fs.promises.readdir(extractDir, { withFileTypes: true });
+  const appBundles = entries
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith('.app'))
+    .map((entry) => path.join(extractDir, entry.name));
+
+  if (appBundles.length !== 1) {
+    throw new Error(`Downloaded update must contain exactly one macOS app bundle; found ${appBundles.length}.`);
+  }
+
+  await fs.promises.access(path.join(appBundles[0], 'Contents', 'Info.plist'), fs.constants.R_OK);
+  return appBundles[0];
+}
+
+async function waitForChildToSpawn(child: ReturnType<typeof spawn>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', reject);
+  });
+}
+
 async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<void> {
   await verifyMacUpdateZip(updateFilePath);
 
   const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
   const helperPath = path.join(helperDir, 'install-update.sh');
   const runningAppPath = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '');
-  const canonicalAppPath = path.join('/Applications', `${app.getName()}.app`);
-  const legacyAppPath = runningAppPath.startsWith('/Applications/')
-    && runningAppPath !== canonicalAppPath
-    ? runningAppPath
-    : null;
-  const targetAppPath = canonicalAppPath;
+  if (!runningAppPath.endsWith('.app')) {
+    throw new Error(`Could not resolve the running macOS app bundle from ${app.getPath('exe')}.`);
+  }
+
+  // Replace the bundle that was actually launched. The product was renamed
+  // from LoomTV to Loom Media Server, so deriving this path from app.getName()
+  // can install a second app while leaving the user's Dock icon on the old one.
+  const targetAppPath = runningAppPath;
   const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
   const extractDir = path.join(helperDir, 'extracted');
   const logPath = path.join(helperDir, 'install.log');
   const parentPid = String(process.pid);
+  let sourceAppPath: string;
+
+  try {
+    sourceAppPath = await extractMacUpdate(updateFilePath, extractDir);
+
+    // Fail while the current app is still open, so a permissions problem can
+    // be shown instead of silently quitting and stranding the update.
+    await fs.promises.access(path.dirname(targetAppPath), fs.constants.W_OK);
+  } catch (error) {
+    await fs.promises.rm(helperDir, { recursive: true, force: true });
+    throw error;
+  }
 
   const script = `#!/bin/sh
 set -eu
@@ -296,59 +336,83 @@ LOG=${shellQuote(logPath)}
 exec >> "$LOG" 2>&1
 echo "Starting Loom Media Server macOS update install at $(date)"
 PARENT_PID=${shellQuote(parentPid)}
-UPDATE_ZIP=${shellQuote(updateFilePath)}
-EXTRACT_DIR=${shellQuote(extractDir)}
+SOURCE_APP=${shellQuote(sourceAppPath)}
 TARGET_APP=${shellQuote(targetAppPath)}
 BACKUP_APP=${shellQuote(backupAppPath)}
-LEGACY_APP=${shellQuote(legacyAppPath || '')}
 
 while kill -0 "$PARENT_PID" >/dev/null 2>&1; do
   sleep 0.25
 done
-
-rm -rf "$EXTRACT_DIR"
-mkdir -p "$EXTRACT_DIR"
-/usr/bin/ditto -x -k "$UPDATE_ZIP" "$EXTRACT_DIR"
-
-if [ ! -d "$EXTRACT_DIR/Loom Media Server.app" ]; then
-  echo "Extracted update did not contain Loom Media Server.app"
-  exit 1
-fi
-
-if [ -n "$LEGACY_APP" ]; then
-  echo "Replacing legacy app bundle path $LEGACY_APP with canonical bundle $TARGET_APP"
-fi
 
 rm -rf "$BACKUP_APP"
 if [ -d "$TARGET_APP" ]; then
   /bin/mv "$TARGET_APP" "$BACKUP_APP"
 fi
 
-if ! /usr/bin/ditto "$EXTRACT_DIR/Loom Media Server.app" "$TARGET_APP"; then
-  echo "Failed to copy updated app, restoring previous app"
+restore_previous_app() {
+  echo "Restoring previous app bundle"
   rm -rf "$TARGET_APP"
   if [ -d "$BACKUP_APP" ]; then
     /bin/mv "$BACKUP_APP" "$TARGET_APP"
+    /usr/bin/open -n "$TARGET_APP" || true
   fi
+}
+
+if ! /usr/bin/ditto "$SOURCE_APP" "$TARGET_APP"; then
+  echo "Failed to copy updated app, restoring previous app"
+  restore_previous_app
   exit 1
 fi
 
 /usr/bin/xattr -dr com.apple.quarantine "$TARGET_APP" >/dev/null 2>&1 || true
-/usr/bin/open "$TARGET_APP"
+
+if ! /usr/bin/open -n "$TARGET_APP"; then
+  echo "Failed to relaunch updated app"
+  restore_previous_app
+  exit 1
+fi
+
+TARGET_EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$TARGET_APP/Contents/Info.plist")
+LAUNCHED=0
+ATTEMPT=0
+while [ "$ATTEMPT" -lt 20 ]; do
+  if /usr/bin/pgrep -f "$TARGET_APP/Contents/MacOS/$TARGET_EXECUTABLE" >/dev/null 2>&1; then
+    LAUNCHED=1
+    break
+  fi
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep 0.5
+done
+
+if [ "$LAUNCHED" -ne 1 ]; then
+  echo "Updated app did not stay running after relaunch"
+  restore_previous_app
+  exit 1
+fi
+
+rm -rf "$BACKUP_APP" "$SOURCE_APP"
 echo "Finished Loom Media Server macOS update install at $(date)"
 `;
 
-  await fs.promises.writeFile(helperPath, script, { mode: 0o755 });
-
-  const child = spawn('/bin/sh', [helperPath], {
-    detached: true,
-    stdio: 'ignore',
-  });
+  let child: ReturnType<typeof spawn>;
+  try {
+    await fs.promises.writeFile(helperPath, script, { mode: 0o755 });
+    child = spawn('/bin/sh', [helperPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    await waitForChildToSpawn(child);
+  } catch (error) {
+    await fs.promises.rm(helperDir, { recursive: true, force: true });
+    throw error;
+  }
   child.unref();
 
-  setTimeout(() => {
-    app.quit();
-  }, 250);
+  // app.quit() can emit before-quit yet remain alive because of a lingering
+  // Electron/Node handle. The installer cannot replace the bundle until this
+  // PID exits, so force the already-drained process down after a short grace.
+  setTimeout(() => app.exit(0), 5000);
+  app.quit();
 }
 
 function refreshUpdateMenu() {

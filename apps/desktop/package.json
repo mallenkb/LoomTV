@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "Loom Media Server",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.1.1",
@@ -101,6 +101,7 @@
     "appId": "com.mallenkb.loommediaserver",
     "productName": "Loom Media Server",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactBuildCompleted": "scripts/prepare-mac-update-archive.cjs",
     "directories": {
       "output": "out/builder"
     },
