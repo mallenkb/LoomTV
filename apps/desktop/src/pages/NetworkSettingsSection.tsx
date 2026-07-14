@@ -77,7 +77,7 @@ export default function NetworkSettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4">
             <div>
               <p className="text-sm font-semibold text-white">
                 {isTogglingNetworkSharing ? 'Updating sharing...' : isNetworkSharingOn ? 'Sharing is on' : 'Sharing is off'}
@@ -115,13 +115,13 @@ export default function NetworkSettingsSection({
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               >
-                <div className="rounded-xl border border-[var(--loom-accent)]/25 bg-[var(--loom-accent)]/10 p-4">
+                <div className="rounded-xl bg-[var(--loom-accent)]/10 p-4">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
                     <CheckCircle2 className="h-4 w-4 text-[var(--loom-accent)]" />
                     Pair a phone or tablet
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1.3fr_.7fr]">
-                    <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] p-3">
+                    <div className="rounded-lg bg-[var(--loom-bg)] p-3">
                       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Desktop address</p>
                       <div className="flex items-center gap-2">
                         <code className="min-w-0 flex-1 truncate text-base font-semibold text-white">
@@ -138,7 +138,7 @@ export default function NetworkSettingsSection({
                         </button>
                       </div>
                     </div>
-                    <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] p-3">
+                    <div className="rounded-lg bg-[var(--loom-bg)] p-3">
                       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">6-digit code</p>
                       <div className="flex items-center gap-2">
                         <code className="min-w-0 flex-1 text-2xl font-black tracking-[0.22em] text-white">
@@ -251,7 +251,7 @@ export default function NetworkSettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+          <div className="flex items-center gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-400">
               <Wifi className="h-4 w-4" />
             </span>
@@ -261,7 +261,7 @@ export default function NetworkSettingsSection({
             </div>
           </div>
 
-          <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+          <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Devices on this network</p>
               <button

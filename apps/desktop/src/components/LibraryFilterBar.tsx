@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ListFilter } from 'lucide-react';
+import { Check } from 'lucide-react';
+import { FilterFunnelIcon } from '@/components/LoomIcons';
 import {
   issueLibraryFilterOptions,
   libraryFilterOptions,
@@ -56,7 +57,7 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
             : 'border-[var(--loom-accent)] bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
         }`}
       >
-        <ListFilter className="h-3.5 w-3.5" />
+        <FilterFunnelIcon className="h-3.5 w-3.5" />
         <span>{activeOption?.label || 'All'}</span>
       </button>
 

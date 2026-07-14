@@ -136,6 +136,7 @@ export default function Settings() {
   });
   const [isMobileSettingsMenuOpen, setIsMobileSettingsMenuOpen] = useState(true);
   const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
+  const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
@@ -196,6 +197,7 @@ export default function Settings() {
         ),
       );
       setSidebarNavOrder(normalizeSidebarNavOrder(s.sidebarNavOrder));
+      setCustomFolderNames(s.customFolderNames || {});
       setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
       setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
     });
@@ -208,6 +210,15 @@ export default function Settings() {
       // Ignore invalid saved pairing data.
     }
   }, []);
+
+  const renameFolder = useCallback((folder: string, name: string) => {
+    const trimmed = name.trim();
+    const next = { ...customFolderNames };
+    if (trimmed && trimmed !== folder) next[folder] = trimmed;
+    else delete next[folder];
+    setCustomFolderNames(next);
+    void desktopApi.saveSettings({ customFolderNames: next });
+  }, [customFolderNames]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
@@ -688,6 +699,8 @@ export default function Settings() {
             folderStatuses={libraryFolderStatuses}
             addLibraryFolder={addLibraryFolder}
             removeLibraryFolder={removeLibraryFolder}
+            customFolderNames={customFolderNames}
+            onRenameFolder={renameFolder}
             sidebarNavOrder={sidebarNavOrder}
             draggedSidebarItem={draggedSidebarItem}
             setDraggedSidebarItem={setDraggedSidebarItem}
