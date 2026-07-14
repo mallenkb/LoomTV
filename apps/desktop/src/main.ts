@@ -1285,6 +1285,89 @@ async function scanFolder(
   return items;
 }
 
+function episodeKey(episode: Pick<EpisodeMeta, 'season' | 'number'>): string {
+  return `${episode.season}-${episode.number}`;
+}
+
+function episodeFileKey(episodeFile: Pick<EpisodeFile, 'season' | 'episode'>): string {
+  return `${episodeFile.season}-${episodeFile.episode}`;
+}
+
+function preserveExistingItemDuringScan(fresh: MediaItem, existing?: MediaItem): MediaItem {
+  if (!existing) return fresh;
+
+  const episodeFiles = new Map<string, EpisodeFile>();
+  for (const episodeFile of existing.episodeFiles || []) {
+    episodeFiles.set(episodeFileKey(episodeFile), episodeFile);
+  }
+  for (const episodeFile of fresh.episodeFiles || []) {
+    const key = episodeFileKey(episodeFile);
+    const saved = episodeFiles.get(key);
+    episodeFiles.set(key, saved ? { ...episodeFile, ...saved } : episodeFile);
+  }
+
+  const localEpisodeKeys = new Set(episodeFiles.keys());
+  const episodes = new Map<string, EpisodeMeta>();
+  for (const episode of existing.episodes || []) {
+    const key = episodeKey(episode);
+    if (localEpisodeKeys.size === 0 || localEpisodeKeys.has(key)) episodes.set(key, episode);
+  }
+  for (const episode of fresh.episodes || []) {
+    const key = episodeKey(episode);
+    if (!episodes.has(key) && (localEpisodeKeys.size === 0 || localEpisodeKeys.has(key))) {
+      episodes.set(key, episode);
+    }
+  }
+
+  const seasonCounts = new Map<number, number>();
+  for (const episodeFile of episodeFiles.values()) {
+    seasonCounts.set(episodeFile.season, (seasonCounts.get(episodeFile.season) || 0) + 1);
+  }
+  const seasons = new Map<number, NonNullable<MediaItem['seasons']>[number]>();
+  for (const season of existing.seasons || []) seasons.set(season.number, season);
+  for (const season of fresh.seasons || []) {
+    if (!seasons.has(season.number)) seasons.set(season.number, season);
+  }
+  for (const [number, count] of seasonCounts) {
+    const season = seasons.get(number);
+    seasons.set(number, {
+      number,
+      title: season?.title || `Season ${String(number).padStart(2, '0')}`,
+      episodeCount: count,
+    });
+  }
+
+  // A scan owns filesystem-derived fields, but an existing library record owns
+  // its chosen metadata and artwork. In particular, keep the complete artwork
+  // candidate lists so cache pruning cannot discard a user's selected image.
+  return {
+    ...fresh,
+    title: existing.title || fresh.title,
+    year: existing.year || fresh.year,
+    poster: existing.poster || fresh.poster,
+    backdrop: existing.backdrop || fresh.backdrop,
+    logo: existing.logo || fresh.logo,
+    posterCandidates: existing.posterCandidates?.length ? existing.posterCandidates : fresh.posterCandidates,
+    backdropCandidates: existing.backdropCandidates?.length ? existing.backdropCandidates : fresh.backdropCandidates,
+    logoCandidates: existing.logoCandidates?.length ? existing.logoCandidates : fresh.logoCandidates,
+    summary: existing.summary || fresh.summary,
+    rating: existing.rating || fresh.rating,
+    genres: existing.genres?.length ? existing.genres : fresh.genres,
+    cast: existing.cast?.length ? existing.cast : fresh.cast,
+    providerIds: mergeProviderIds(existing.providerIds || {}, fresh.providerIds || {}),
+    lastPlayed: existing.lastPlayed || fresh.lastPlayed,
+    seasons: seasons.size > 0
+      ? [...seasons.values()].sort((a, b) => a.number - b.number)
+      : fresh.seasons,
+    episodes: episodes.size > 0
+      ? [...episodes.values()].sort((a, b) => a.season - b.season || a.number - b.number)
+      : fresh.episodes,
+    episodeFiles: episodeFiles.size > 0
+      ? [...episodeFiles.values()].sort((a, b) => a.season - b.season || a.episode - b.episode)
+      : fresh.episodeFiles,
+  };
+}
+
 async function scanLibrary(
   data: LibraryData,
   options: { force?: boolean; mode?: LibraryScanMode; onProgress?: (snapshot: LibraryScanProgress) => void | Promise<void> } = {},
@@ -1410,10 +1493,19 @@ async function scanLibrary(
     folderKind: ScanCacheFolderKind,
   ) => {
     for (const folder of folders) {
+      const cachedItems = cachedItemsForFolder(folder, folderKind);
+      const cachedItemsById = new Map(cachedItems.map((item) => [item.id, item]));
+      const cachedItemsByPath = new Map(cachedItems.map((item) => [item.filePath, item]));
+      const preserveItems = (items: MediaItem[]) => mode === 'metadata'
+        ? items
+        : items.map((item) => preserveExistingItemDuringScan(
+          item,
+          cachedItemsById.get(item.id) || cachedItemsByPath.get(item.filePath),
+        ));
       const folderStatus = folderStatusFor(folder, folderKind);
       if (folderStatus.state === 'unavailable') {
-        const cachedItems = cachedItemsForFolder(folder, folderKind, { preserveUnavailable: true });
-        appendItems(cachedItems, folderKind);
+        const unavailableItems = cachedItemsForFolder(folder, folderKind, { preserveUnavailable: true });
+        appendItems(unavailableItems, folderKind);
         if (previousScanCache[folder]) nextScanCache[folder] = previousScanCache[folder];
         processedFolders.add(folder);
         scannedFolders++;
@@ -1425,14 +1517,12 @@ async function scanLibrary(
       const cachedEntry = previousScanCache[folder];
 
       if (
-        mode !== 'full'
-        && folderSignature
+        folderSignature
         && cachedEntry?.version === SCAN_CACHE_VERSION
         && cachedEntry?.folderKind === folderKind
         && cachedEntry.signature === folderSignature.signature
         && (cachedEntry.subtitleProfile || '') === subtitleProfile
       ) {
-        const cachedItems = cachedItemsForFolder(folder, folderKind);
         const metadataIsFresh = mode !== 'metadata' || Date.now() - (cachedEntry.scannedAt || 0) < 7 * 24 * 60 * 60 * 1000;
         if (metadataIsFresh && cachedItems.length === cachedEntry.itemCount && cachedItemsAreComplete(cachedItems)) {
           appendItems(cachedItems, folderKind);
@@ -1449,11 +1539,11 @@ async function scanLibrary(
       const items = directItem
         ? [directItem]
         : await scanFolder(folder, folderCtx, async (partialItems) => {
-          appendItems(partialItems, folderKind);
+          appendItems(preserveItems(partialItems), folderKind);
           await publishProgress(false);
         });
 
-      if (directItem) appendItems(items, folderKind);
+      if (directItem) appendItems(preserveItems(items), folderKind);
       if (folderSignature) {
         nextScanCache[folder] = {
           version: SCAN_CACHE_VERSION,
