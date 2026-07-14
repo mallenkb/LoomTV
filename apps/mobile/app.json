@@ -5,7 +5,8 @@
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#15151B",
     "ios": {
       "requireFullScreen": true,
       "supportsTablet": true,

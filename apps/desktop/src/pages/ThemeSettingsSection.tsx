@@ -100,7 +100,7 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
           <div className="space-y-7">
             <div>
               <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Preview</p>
-              <div className="grid gap-4 rounded-lg bg-[var(--loom-bg)] p-4 ring-1 ring-white/10 lg:grid-cols-[minmax(0,1fr)_13rem]">
+              <div className="grid gap-4 rounded-lg bg-[var(--loom-bg)] p-4 lg:grid-cols-[minmax(0,1fr)_13rem]">
                 <div className="flex min-h-52 items-center justify-center rounded-lg bg-[var(--loom-surface-2)] p-8">
                   <LoomBrandLockup className="h-32 w-auto" />
                 </div>

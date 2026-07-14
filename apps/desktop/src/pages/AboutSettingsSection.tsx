@@ -205,7 +205,7 @@ export default function AboutSettingsSection({
               <span>License</span>
               <span />
             </div>
-            <div className="max-h-72 overflow-y-auto divide-y divide-[var(--loom-panel-border)]">
+            <div className="max-h-72 overflow-y-auto divide-y divide-[rgba(148,163,184,0.30)]">
               {THIRD_PARTY_DEPENDENCIES.map((dependency) => (
                 <div
                   key={dependency.name}

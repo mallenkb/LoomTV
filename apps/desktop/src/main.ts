@@ -331,6 +331,7 @@ export interface AppSettings {
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
   sidebarNavOrder?: string[];
+  customFolderNames?: Record<string, string>;
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
   appDarkTheme?: 'default' | 'justwatch' | 'black';
