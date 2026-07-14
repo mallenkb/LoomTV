@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.39](docs/releases/v1.0.39.md): refreshes navigation icons, library layout sizing, settings presentation, and library-section visibility across the app surfaces.
 - [Loom Media Server 1.0.38](docs/releases/v1.0.38.md): fixes macOS update replacement and automatic relaunch across the LoomTV-to-Loom Media Server rename.
 - [Loom Media Server 1.0.37](docs/releases/v1.0.37.md): ships the refreshed desktop architecture, packaging pipeline, and library/playback/settings improvements.
 - [Loom Media Server 1.0.35](docs/releases/v1.0.35.md): fixes the Electron Settings tab freeze and keeps the top chrome from swallowing tab clicks.
