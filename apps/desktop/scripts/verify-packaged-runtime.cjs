@@ -20,7 +20,10 @@ function fail(message) {
 
 function resourcesDir(packageDir) {
   if (platform === 'darwin') {
-    return path.join(packageDir, 'Loom Media Server.app', 'Contents', 'Resources');
+    const appBundle = ['LoomTV.app', 'Loom Media Server.app']
+      .map((name) => path.join(packageDir, name))
+      .find(exists) || path.join(packageDir, 'LoomTV.app');
+    return path.join(appBundle, 'Contents', 'Resources');
   }
   return path.join(packageDir, 'resources');
 }
