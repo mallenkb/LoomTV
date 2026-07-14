@@ -126,37 +126,6 @@ function showUpdateDialog(message: string, detail: string, type: 'info' | 'warni
   });
 }
 
-function getUpdateErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function isMissingUpdateFeedError(error: unknown): boolean {
-  const message = getUpdateErrorMessage(error).toLowerCase();
-  return (
-    message.includes('cannot find latest-')
-    || message.includes('could not fetch a valid release')
-    || message.includes('404')
-    || message.includes('not found')
-  );
-}
-
-function handleUpdateError(error: unknown): UpdateState {
-  if (isMissingUpdateFeedError(error)) {
-    return setUpdateState({
-      status: 'not-available',
-      message: 'No published update is available yet. Please try again shortly.',
-      checkedAt: new Date().toISOString(),
-    });
-  }
-
-  console.warn('[updates] Failed to check for or download an update:', error);
-  return setUpdateState({
-    status: 'error',
-    message: 'Could not check for updates. Please try again later.',
-    checkedAt: new Date().toISOString(),
-  });
-}
-
 function normalizeReleaseVersion(value?: string): string {
   return String(value || '').trim().replace(/^v/i, '');
 }
@@ -745,7 +714,11 @@ export function configureAutoUpdater() {
       updateInstallStarted = false;
       clearUpdateQuitFallback();
     }
-    handleUpdateError(error);
+    setUpdateState({
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+      checkedAt: new Date().toISOString(),
+    });
   });
 
 }
@@ -776,7 +749,12 @@ export async function checkForUpdates(): Promise<UpdateState> {
   updateCheckPromise = autoUpdater.checkForUpdates()
     .then(() => updateState)
     .catch((error) => {
-      return handleUpdateError(error);
+      setUpdateState({
+        status: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        checkedAt: new Date().toISOString(),
+      });
+      return updateState;
     })
     .finally(() => {
       updateCheckInFlight = false;

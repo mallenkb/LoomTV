@@ -125,39 +125,25 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish GitHub release
+    name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: make
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
       - name: Download installer artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release-artifacts
+          pattern: loomtv-*
+          path: release-assets
           merge-multiple: true
 
-      - name: Publish release assets
+      - name: Publish complete release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${{ github.ref_name }}"
-          mkdir -p release-upload
-          while IFS= read -r file; do
-            name="$(basename "$file")"
-            name="${name// /.}"
-            if [ -e "release-upload/$name" ]; then
-              parent="$(basename "$(dirname "$file")")"
-              name="${parent}-${name}"
-            fi
-            cp "$file" "release-upload/$name"
-          done < <(find release-artifacts -maxdepth 4 -type f)
-          find release-upload -maxdepth 1 -type f -print | sort
-          gh release delete "$tag" --yes 2>/dev/null || true
-          gh release create "$tag" \
-            --title "Loom Media Server $tag" \
-            --generate-notes \
-            release-upload/*
+          mapfile -d '' assets < <(find release-assets -type f -print0)
+          gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
