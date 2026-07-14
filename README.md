@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.41](docs/releases/v1.0.41.md): removes desktop CI and React warnings and keeps playback-rate updates isolated from media source binding.
 - [Loom Media Server 1.0.40](docs/releases/v1.0.40.md): preserves existing library metadata, artwork selections, and episode state during folder scans.
 - [Loom Media Server 1.0.39](docs/releases/v1.0.39.md): refreshes navigation icons, library layout sizing, settings presentation, and library-section visibility across the app surfaces.
 - [Loom Media Server 1.0.38](docs/releases/v1.0.38.md): fixes macOS update replacement and automatic relaunch across the LoomTV-to-Loom Media Server rename.
