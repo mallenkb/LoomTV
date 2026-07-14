@@ -130,6 +130,19 @@ export default function VideoPlayer({
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const transcodeSessionIdRef = useRef<string | null>(null);
+  const pendingSourceSwapRef = useRef<{
+    streamUrl: string;
+    previousSessionId: string | null;
+    nextSessionId: string;
+    position: number;
+    wasPaused: boolean;
+    volume: number;
+    muted: boolean;
+    playbackRate: number;
+    seekable: boolean;
+    transcodeStartSeconds: number;
+  } | null>(null);
+  const trackChangeGenerationRef = useRef(0);
   const loadTokenRef = useRef(0);
   const sourceLoadTokenRef = useRef(0);
   const playerActiveRef = useRef(true);
@@ -392,13 +405,19 @@ export default function VideoPlayer({
   }, [currentEpisode, currentSeason, hasEpisodes, playableEpisodeFiles]);
 
   const stopTranscodeSession = useCallback(async () => {
-    const sessionId = transcodeSessionIdRef.current;
-    if (!sessionId) return;
+    const sessionIds = new Set([
+      transcodeSessionIdRef.current,
+      pendingSourceSwapRef.current?.previousSessionId,
+      pendingSourceSwapRef.current?.nextSessionId,
+    ].filter((sessionId): sessionId is string => Boolean(sessionId)));
     transcodeSessionIdRef.current = null;
-    try {
-      await desktopApi.media.stopTranscode(sessionId);
-    } catch (_error) {
-      // Non-fatal cleanup failure.
+    pendingSourceSwapRef.current = null;
+    for (const sessionId of sessionIds) {
+      try {
+        await desktopApi.media.stopTranscode(sessionId);
+      } catch (_error) {
+        // Non-fatal cleanup failure.
+      }
     }
   }, []);
 
@@ -626,6 +645,7 @@ export default function VideoPlayer({
       keepReadyDuringRestart?: boolean;
       deferStopCurrent?: boolean;
       seekGeneration?: number;
+      trackChangeGeneration?: number;
     } = {},
   ) => {
     if (!playerActiveRef.current) return;
@@ -641,9 +661,11 @@ export default function VideoPlayer({
       ? 0
       : Math.floor(clampedStartSeconds);
     hlsRecoveryAttemptsRef.current = 0;
-    transcodeStartSecondsRef.current = safeStartSeconds;
-    updatePlaybackSnapshot(safeStartSeconds, durationHint || playbackDurationRef.current, { forceReact: true });
     const keepReady = Boolean(options.keepReadyDuringRestart && hasPlayableDataRef.current);
+    if (!keepReady) {
+      transcodeStartSecondsRef.current = safeStartSeconds;
+      updatePlaybackSnapshot(safeStartSeconds, durationHint || playbackDurationRef.current, { forceReact: true });
+    }
     if (!keepReady) {
       setPlayerState('loading');
       setStatusMessage(
@@ -692,20 +714,46 @@ export default function VideoPlayer({
         void desktopApi.media.stopTranscode(transcodeResult.data.sessionId);
         return;
       }
+      if (
+        options.trackChangeGeneration !== undefined
+        && options.trackChangeGeneration !== trackChangeGenerationRef.current
+      ) {
+        void desktopApi.media.stopTranscode(transcodeResult.data.sessionId);
+        return;
+      }
 
-      transcodeSessionIdRef.current = transcodeResult.data.sessionId;
       // Seekable streams expose the whole timeline on an absolute VOD playlist,
       // so there is no per-window offset and seeking is native. The linear
       // fallback (unknown duration) keeps the window-relative offset.
-      streamIsSeekableRef.current = Boolean(transcodeResult.data.seekable);
-      transcodeStartSecondsRef.current = transcodeResult.data.seekable
+      const nextSeekable = Boolean(transcodeResult.data.seekable);
+      const nextTranscodeStartSeconds = nextSeekable
         ? 0
         : (transcodeResult.data.startSeconds ?? safeStartSeconds);
+      if (options.deferStopCurrent) {
+        const video = videoRef.current;
+        const swapPosition = clampSeconds(playbackPositionRef.current, durationHint || undefined);
+        pendingSourceSwapRef.current = {
+          streamUrl: transcodeResult.data.playlistUrl,
+          previousSessionId: previousSessionId && previousSessionId !== transcodeResult.data.sessionId
+            ? previousSessionId
+            : null,
+          nextSessionId: transcodeResult.data.sessionId,
+          position: swapPosition,
+          wasPaused: video?.paused ?? userPausedRef.current,
+          volume: video?.volume ?? 1,
+          muted: video?.muted ?? false,
+          playbackRate: video?.playbackRate ?? 1,
+          seekable: nextSeekable,
+          transcodeStartSeconds: nextTranscodeStartSeconds,
+        };
+        suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
+      } else {
+        transcodeSessionIdRef.current = transcodeResult.data.sessionId;
+        streamIsSeekableRef.current = nextSeekable;
+        transcodeStartSecondsRef.current = nextTranscodeStartSeconds;
+      }
       setStreamIsTranscoded(true);
       setStreamUrl(transcodeResult.data.playlistUrl);
-      if (options.deferStopCurrent && previousSessionId && previousSessionId !== transcodeResult.data.sessionId) {
-        void desktopApi.media.stopTranscode(previousSessionId);
-      }
       if (!keepReady) {
         setPlayerState('loading');
         setStatusMessage('Loading local stream...');
@@ -831,20 +879,49 @@ export default function VideoPlayer({
     if (!video || !streamUrl) return;
 
     const sourceToken = ++sourceLoadTokenRef.current;
+    const pendingSwap = pendingSourceSwapRef.current?.streamUrl === streamUrl
+      ? pendingSourceSwapRef.current
+      : null;
+    if (pendingSwap) {
+      transcodeSessionIdRef.current = pendingSwap.nextSessionId;
+      streamIsSeekableRef.current = pendingSwap.seekable;
+      transcodeStartSecondsRef.current = pendingSwap.transcodeStartSeconds;
+    }
     const isHlsSource = /\.m3u8(\?|$)/i.test(streamUrl);
     let isManagedHls = false;
-    const resumeSeconds = getPlayableStartPosition(filePath, probedDurationRef.current);
+    const resumeSeconds = pendingSwap?.position ?? getPlayableStartPosition(filePath, probedDurationRef.current);
     // For a seekable VOD transcode, begin loading at the intended absolute
     // position (resume or the spot a track-change restart was issued from).
-    const hlsStartPosition = streamIsSeekableRef.current ? Math.max(0, playbackPositionRef.current) : 0;
+    const hlsStartPosition = pendingSwap
+      ? Math.max(0, pendingSwap.seekable
+        ? pendingSwap.position
+        : pendingSwap.position - pendingSwap.transcodeStartSeconds)
+      : streamIsSeekableRef.current
+        ? Math.max(0, playbackPositionRef.current)
+        : 0;
 
     clearHls();
     hlsRecoveryAttemptsRef.current = 0;
     hasPlayableDataRef.current = false;
-    setPlayerState('loading');
-    setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Loading stream...');
+    if (!pendingSwap) {
+      setPlayerState('loading');
+      setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Loading stream...');
+      setPaused(true);
+    }
     setErrorMessage(null);
-    setPaused(true);
+    userPausedRef.current = pendingSwap?.wasPaused ?? userPausedRef.current;
+    video.volume = pendingSwap?.volume ?? video.volume;
+    video.muted = pendingSwap?.muted ?? video.muted;
+    video.playbackRate = pendingSwap?.playbackRate ?? playbackRate;
+
+    const completePendingSwap = () => {
+      const pending = pendingSourceSwapRef.current;
+      if (!pending || pending.streamUrl !== streamUrl) return;
+      pendingSourceSwapRef.current = null;
+      if (pending.previousSessionId && pending.previousSessionId !== transcodeSessionIdRef.current) {
+        void desktopApi.media.stopTranscode(pending.previousSessionId);
+      }
+    };
 
     const playIfAllowed = () => {
       if (!playerActiveRef.current || userPausedRef.current) {
@@ -952,6 +1029,7 @@ export default function VideoPlayer({
 
     const onLoadStart = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
+      if (pendingSwap) return;
       if (hasPlayableDataRef.current || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
       setPlayerState('loading');
       setStatusMessage(streamIsTranscoded ? 'Loading local stream...' : 'Buffering...');
@@ -960,6 +1038,7 @@ export default function VideoPlayer({
 
     const onWaiting = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
+      if (pendingSwap) return;
       if (hasPlayableDataRef.current || video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return;
       setPlayerState('loading');
       setStatusMessage('Buffering...');
@@ -1014,7 +1093,12 @@ export default function VideoPlayer({
       const mediaDuration = Number.isFinite(video.duration) ? video.duration : 0;
       updatePlaybackSnapshot(playbackPositionRef.current, probedDurationRef.current || mediaDuration, { forceReact: true });
       applyNativeTextTrackVisibilityRef.current();
-      if (!streamIsTranscoded && resumeSeconds > 10 && mediaDuration) {
+      if (pendingSwap && resumeSeconds > 0 && mediaDuration) {
+        const streamPosition = pendingSwap.seekable
+          ? resumeSeconds
+          : Math.max(0, resumeSeconds - pendingSwap.transcodeStartSeconds);
+        video.currentTime = Math.min(streamPosition, Math.max(0, video.duration - 0.1));
+      } else if (!streamIsTranscoded && resumeSeconds > 10 && mediaDuration) {
         video.currentTime = Math.min(resumeSeconds, Math.max(0, video.duration - 0.1));
       }
     };
@@ -1026,6 +1110,7 @@ export default function VideoPlayer({
       transcodeSeekActiveRef.current = false;
       setPlayerState('ready');
       setStatusMessage('');
+      completePendingSwap();
       playIfAllowed();
     };
 
@@ -1038,6 +1123,7 @@ export default function VideoPlayer({
       setStatusMessage('');
       userPausedRef.current = false;
       setPaused(false);
+      completePendingSwap();
     };
 
     const onEnded = () => {
@@ -1101,7 +1187,7 @@ export default function VideoPlayer({
     video.addEventListener('ended', onEnded);
     video.addEventListener('error', onError);
     video.preload = 'auto';
-    video.autoplay = !userPausedRef.current;
+    video.autoplay = !(pendingSwap?.wasPaused ?? userPausedRef.current);
     if (!isManagedHls) {
       video.load();
       playIfAllowed();
@@ -1556,25 +1642,15 @@ export default function VideoPlayer({
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
     hlsTranscodeRestartAttemptsRef.current = 0;
-    void startTranscodedFallback(position, { force: true, allowNearEnd: true });
-  }, [applyNativeTextTrackVisibility, position, startTranscodedFallback, streamUrl]);
-
-  const reloadSourceForDirectPlayback = useCallback(() => {
-    if (!streamUrl) return;
-    applyNativeTextTrackVisibility();
-    didTryTranscodeRef.current = false;
-    hlsTranscodeRestartAttemptsRef.current = 0;
-    const currentPosition = playbackPositionRef.current || position;
-    const currentDuration = probedDurationRef.current || playbackDurationRef.current || duration;
-    if (currentPosition > 0 && currentDuration > 0) {
-      void savePlaybackProgress(filePath, currentPosition, currentDuration);
-    }
-    setStreamIsTranscoded(false);
-    setPlayerState('loading');
-    setStatusMessage('Loading stream...');
-    setErrorMessage(null);
-    setReloadToken((value) => value + 1);
-  }, [applyNativeTextTrackVisibility, duration, filePath, position, streamUrl]);
+    const generation = ++trackChangeGenerationRef.current;
+    void startTranscodedFallback(playbackPositionRef.current, {
+      force: true,
+      allowNearEnd: true,
+      keepReadyDuringRestart: true,
+      deferStopCurrent: true,
+      trackChangeGeneration: generation,
+    });
+  }, [applyNativeTextTrackVisibility, startTranscodedFallback, streamUrl]);
 
   const selectedSubtitleIsBurnedIn = useCallback(() => {
     const selected = selectedEmbeddedSubtitle(probeTracksRef.current, selectedSubtitleTrackIndexRef.current);
@@ -1652,21 +1728,23 @@ export default function VideoPlayer({
   }, [clearNextEpisodeCountdown]);
 
   const selectVideoTrack = useCallback((trackIndex: number) => {
+    if (selectedVideoTrackIndexRef.current === trackIndex) return;
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
     restartForTrackChange();
   }, [restartForTrackChange]);
 
   const selectAudioTrack = useCallback((trackIndex: number) => {
+    if (selectedAudioTrackIndexRef.current === trackIndex) return;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'audio');
     saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
-    setSharedTrackPreferences(loadTrackPreferences(trackPreferenceScopeKey));
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
     restartForTrackChange();
   }, [restartForTrackChange, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
+    if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
     const enabled = trackIndex >= 0 || trackIndex <= -1000;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'subtitle');
     const playbackAction = subtitleTrackPlaybackAction({
@@ -1675,7 +1753,6 @@ export default function VideoPlayer({
       activeSubtitleIsBurnedIn: selectedSubtitleIsBurnedIn(),
     });
     saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
-    setSharedTrackPreferences(loadTrackPreferences(trackPreferenceScopeKey));
     subtitlesDefaultEnabledRef.current = enabled;
     setSubtitlesDefaultEnabled(enabled);
     saveSubtitlesDefaultEnabled(enabled);
@@ -1686,7 +1763,7 @@ export default function VideoPlayer({
       return;
     }
     if (playbackAction === 'reload-source') {
-      reloadSourceForDirectPlayback();
+      restartForTrackChange();
       return;
     }
     if (trackIndex <= -1000 || trackIndex < 0 || selectedTrack) {
@@ -1696,7 +1773,6 @@ export default function VideoPlayer({
     applyNativeTextTrackVisibility();
   }, [
     applyNativeTextTrackVisibility,
-    reloadSourceForDirectPlayback,
     restartForTrackChange,
     selectedSubtitleIsBurnedIn,
     trackPreferenceScopeKey,

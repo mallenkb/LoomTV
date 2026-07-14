@@ -63,7 +63,7 @@ import {
 
 type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
 type SettingsSection = 'library' | 'network' | 'appearance';
-type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched' | 'missing-metadata' | 'missing-artwork';
+type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched';
 type MobileSearchScope = 'all' | 'genre:drama' | 'genre:animation' | 'genre:action-adventure' | 'genre:comedy';
 type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
@@ -1104,22 +1104,6 @@ function matchesMobileLibraryFilter(
   progress: Record<string, StoredProgress>,
 ): boolean {
   if (filter === 'all') return true;
-  if (filter === 'missing-metadata') {
-    return !(
-      item.summary?.trim()
-      || (item.rating || 0) > 0
-      || item.genres?.length
-      || item.episodes?.some((episode) => episode.title || episode.rating)
-    );
-  }
-  if (filter === 'missing-artwork') {
-    return !(
-      item.poster
-      || item.backdrop
-      || item.posterCandidates?.length
-      || item.backdropCandidates?.length
-    );
-  }
 
   if (item.type === 'movie') {
     const state = progressStateFor(progress, item.filePath, item.localMetadata?.durationSeconds);
@@ -1337,15 +1321,26 @@ function AppRoot() {
   const [playbackError, setPlaybackError] = useState('');
   const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
   const [homeHeaderPinned, setHomeHeaderPinned] = useState(false);
-  const homeScrollY = useRef(new Animated.Value(0)).current;
-  const homeHeaderOpacity = homeScrollY.interpolate({
-    inputRange: [72, 132],
-    outputRange: [0, 1],
+  const homeHeaderPinnedRef = useRef(false);
+  const updateHomeHeaderPinned = useCallback((pinned: boolean) => {
+    if (homeHeaderPinnedRef.current === pinned) return;
+    homeHeaderPinnedRef.current = pinned;
+    setHomeHeaderPinned(pinned);
+  }, []);
+  const homeHeaderAnimation = useRef(new Animated.Value(0)).current;
+  const homeHeaderOpacity = homeHeaderAnimation.interpolate({
+    inputRange: [0, 0.35, 1],
+    outputRange: [0, 0.45, 1],
     extrapolate: 'clamp',
   });
-  const homeHeaderTranslateY = homeScrollY.interpolate({
-    inputRange: [72, 132],
-    outputRange: [-8, 0],
+  const homeHeaderTranslateY = homeHeaderAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-14, 0],
+    extrapolate: 'clamp',
+  });
+  const homeHeaderScale = homeHeaderAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.985, 1],
     extrapolate: 'clamp',
   });
   const [mobileTheme, setMobileTheme] = useState<MobileThemeColors>(DEFAULT_MOBILE_THEME);
@@ -1389,8 +1384,7 @@ function AppRoot() {
       } else {
         libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
       }
-      setHomeHeaderPinned(false);
-      homeScrollY.setValue(0);
+      updateHomeHeaderPinned(false);
       return;
     }
     if (detailItem) lastDetailByKindRef.current.set(activeKind, detailItem);
@@ -1401,9 +1395,8 @@ function AppRoot() {
     setFilterOpen(false);
     setLibraryFilter('all');
     setActiveKind(kind);
-    setHomeHeaderPinned(false);
-    homeScrollY.setValue(0);
-  }, [activeKind, detailItem, homeScrollY]);
+    updateHomeHeaderPinned(false);
+  }, [activeKind, detailItem, updateHomeHeaderPinned]);
 
   const selectMobileTheme = useCallback((next: MobileThemeMode) => {
     setMobileThemeMode(next);
@@ -1415,29 +1408,47 @@ function AppRoot() {
     if (query) return;
     scrollOffsetsRef.current[activeKind] = offset;
     if (activeKind === 'settings') {
-      setHomeHeaderPinned(false);
+      updateHomeHeaderPinned(false);
       return;
     }
-    homeScrollY.setValue(offset);
-    const shouldPin = offset > 104;
-    setHomeHeaderPinned((current) => current === shouldPin ? current : shouldPin);
-  }, [activeKind, homeScrollY, query]);
+    const shouldPin = offset > (homeHeaderPinnedRef.current ? 84 : 112);
+    updateHomeHeaderPinned(shouldPin);
+  }, [activeKind, query, updateHomeHeaderPinned]);
+
+  useEffect(() => {
+    const animation = homeHeaderPinned
+      ? Animated.spring(homeHeaderAnimation, {
+          damping: 22,
+          isInteraction: false,
+          mass: 0.72,
+          stiffness: 250,
+          toValue: 1,
+          useNativeDriver: true,
+        })
+      : Animated.timing(homeHeaderAnimation, {
+          duration: 150,
+          easing: Easing.out(Easing.cubic),
+          isInteraction: false,
+          toValue: 0,
+          useNativeDriver: true,
+        });
+    animation.start();
+    return () => animation.stop();
+  }, [homeHeaderAnimation, homeHeaderPinned]);
 
   useEffect(() => {
     if (activeKind !== 'settings' && !query) return;
-    setHomeHeaderPinned(false);
-    homeScrollY.setValue(0);
-  }, [activeKind, homeScrollY, query]);
+    updateHomeHeaderPinned(false);
+  }, [activeKind, query, updateHomeHeaderPinned]);
 
   useEffect(() => {
     if (!searchOpen) return;
-    setHomeHeaderPinned(false);
-    homeScrollY.setValue(0);
+    updateHomeHeaderPinned(false);
     const frame = requestAnimationFrame(() => {
       libraryListRef.current?.scrollToOffset({ offset: 0, animated: false });
     });
     return () => cancelAnimationFrame(frame);
-  }, [homeScrollY, searchOpen]);
+  }, [searchOpen, updateHomeHeaderPinned]);
 
   useEffect(() => {
     if (query) return;
@@ -2383,7 +2394,7 @@ function AppRoot() {
                   {
                     opacity: homeHeaderOpacity,
                     paddingTop: insets.top,
-                    transform: [{ translateY: homeHeaderTranslateY }],
+                    transform: [{ translateY: homeHeaderTranslateY }, { scale: homeHeaderScale }],
                   },
                 ]}
               >
@@ -2879,8 +2890,6 @@ function LibraryFilters({
     { id: 'in-progress', label: 'In Progress' },
     { id: 'unwatched', label: 'Unwatched' },
     { id: 'watched', label: 'Watched' },
-    { id: 'missing-metadata', label: 'Missing Metadata' },
-    { id: 'missing-artwork', label: 'Missing Artwork' },
   ];
 
   return (
@@ -3314,7 +3323,12 @@ function DetailContent({
     + (hasMiniPlayer ? 82 : 0);
 
   return (
-    <Animated.View style={[styles.overlay, entrance]}>
+    <Animated.View
+      onTouchStart={() => {
+        if (seasonPickerOpen) setSeasonPickerOpen(false);
+      }}
+      style={[styles.overlay, entrance]}
+    >
       <StatusBar style={text === '#ffffff' ? 'light' : 'dark'} />
       <Animated.ScrollView
         contentContainerStyle={[styles.detailScroll, { paddingBottom: detailBottomPadding }]}
@@ -3388,39 +3402,44 @@ function DetailContent({
             <DetailInfo baseUrl={baseUrl} cacheBust={cacheBust} item={item} />
           ) : isSeries ? (
             <View style={styles.episodesSection}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Choose season"
-                accessibilityState={{ expanded: seasonPickerOpen }}
-                onPress={() => setSeasonPickerOpen((current) => !current)}
-                style={({ pressed }) => [styles.seasonPicker, pressed && styles.pressed]}
+              <View
+                onTouchStart={(event) => event.stopPropagation()}
+                style={styles.seasonPickerContainer}
               >
-                <Text style={styles.seasonPickerText}>Season {selectedSeason}</Text>
-                <View style={[styles.seasonPickerChevron, seasonPickerOpen && styles.seasonPickerChevronOpen]}>
-                  <ChevronRightIcon size={20} color={text} />
-                </View>
-              </Pressable>
-              {seasonPickerOpen ? (
-                <View style={styles.seasonPickerMenu}>
-                  {seasonNumbers.map((season) => (
-                    <Pressable
-                      key={season}
-                      accessibilityRole="menuitem"
-                      accessibilityState={{ selected: season === selectedSeason }}
-                      onPress={() => {
-                        setSelectedSeason(season);
-                        setSeasonPickerOpen(false);
-                      }}
-                      style={({ pressed }) => [styles.seasonPickerOption, season === selectedSeason && styles.seasonPickerOptionActive, pressed && styles.pressed]}
-                    >
-                      <Text style={[styles.seasonPickerOptionText, season === selectedSeason && styles.seasonPickerOptionTextActive]}>Season {season}</Text>
-                      <Text style={styles.seasonPickerOptionMeta}>
-                        {episodes.filter((ep) => ep.season === season).length} episodes
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Choose season"
+                  accessibilityState={{ expanded: seasonPickerOpen }}
+                  onPress={() => setSeasonPickerOpen((current) => !current)}
+                  style={({ pressed }) => [styles.seasonPicker, pressed && styles.pressed]}
+                >
+                  <Text style={styles.seasonPickerText}>Season {selectedSeason}</Text>
+                  <View style={[styles.seasonPickerChevron, seasonPickerOpen && styles.seasonPickerChevronOpen]}>
+                    <ChevronRightIcon size={20} color={text} />
+                  </View>
+                </Pressable>
+                {seasonPickerOpen ? (
+                  <View style={styles.seasonPickerMenu}>
+                    {seasonNumbers.map((season) => (
+                      <Pressable
+                        key={season}
+                        accessibilityRole="menuitem"
+                        accessibilityState={{ selected: season === selectedSeason }}
+                        onPress={() => {
+                          setSelectedSeason(season);
+                          setSeasonPickerOpen(false);
+                        }}
+                        style={({ pressed }) => [styles.seasonPickerOption, season === selectedSeason && styles.seasonPickerOptionActive, pressed && styles.pressed]}
+                      >
+                        <Text style={[styles.seasonPickerOptionText, season === selectedSeason && styles.seasonPickerOptionTextActive]}>Season {season}</Text>
+                        <Text style={styles.seasonPickerOptionMeta}>
+                          {episodes.filter((ep) => ep.season === season).length} episodes
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
               <View style={styles.episodeList}>
                 {seasonEpisodes.map((ep) => {
                   const episodeDetails = item.episodes?.find((candidate) =>
@@ -4928,10 +4947,6 @@ function SettingsMetric({ metric }: { metric: LibraryMetric }) {
   );
 }
 
-type HeroEntry = {
-  item: MediaItem;
-};
-
 function HomeSections({
   artworkCacheBusters,
   baseUrl,
@@ -4953,33 +4968,35 @@ function HomeSections({
 }) {
   const hasItems = grouped.anime.length > 0 || grouped.tv.length > 0 || grouped.movies.length > 0 || grouped.others.length > 0;
 
-  // Featured carousel: show only the three most recently played titles first,
-  // then use fresh library picks only when fewer than three are available.
-  const heroEntries = useMemo<HeroEntry[]>(() => {
+  // Keep one featured title fixed while Home remains mounted. Playback progress
+  // updates `lastPlayed`, but that should not replace the cover already shown.
+  const heroCandidates = useMemo<MediaItem[]>(() => {
     const picked = new Set<string>();
-    const entries: HeroEntry[] = [];
-    for (const item of continueWatching) {
-      if (entries.length >= 3) break;
-      picked.add(item.id);
-      entries.push({ item });
-    }
-    for (const item of [...grouped.anime, ...grouped.tv, ...grouped.movies]) {
-      if (entries.length >= 3) break;
+    const items: MediaItem[] = [];
+    for (const item of [...continueWatching, ...grouped.anime, ...grouped.tv, ...grouped.movies]) {
       if (picked.has(item.id)) continue;
       picked.add(item.id);
-      entries.push({ item });
+      items.push(item);
     }
-    return entries;
+    return items;
   }, [continueWatching, grouped]);
+  const [heroItemId, setHeroItemId] = useState(() => heroCandidates[0]?.id || '');
+
+  useEffect(() => {
+    const availableIds = new Set(heroCandidates.map((item) => item.id));
+    setHeroItemId((current) => availableIds.has(current) ? current : heroCandidates[0]?.id || '');
+  }, [heroCandidates]);
+
+  const heroItem = heroCandidates.find((item) => item.id === heroItemId);
 
   return (
     <View style={styles.sections}>
-      {heroEntries.length > 0 ? (
-        <HeroCarousel
+      {heroItem ? (
+        <HomeHero
           artworkCacheBusters={artworkCacheBusters}
           baseUrl={baseUrl}
-          entries={heroEntries}
           isTablet={isTablet}
+          item={heroItem}
           onPlay={onResume}
           onSelect={onSelect}
         />
@@ -4995,59 +5012,40 @@ function HomeSections({
   );
 }
 
-// Edge-to-edge paged carousel of tall poster cards with a play button inside
-// each card, mirroring Coupang Play's home hero. The negative margin cancels
-// the feed's horizontal padding so neighbor cards peek in from both edges.
-function HeroCarousel({
+// A fixed featured card. This deliberately is not horizontally scrollable:
+// diagonal vertical gestures must never snap Home to a different cover.
+function HomeHero({
   artworkCacheBusters,
   baseUrl,
-  entries,
   isTablet,
+  item,
   onPlay,
   onSelect,
 }: {
   artworkCacheBusters: Record<string, string>;
   baseUrl: string;
-  entries: HeroEntry[];
   isTablet: boolean;
+  item: MediaItem;
   onPlay: (item: MediaItem) => void;
   onSelect: (item: MediaItem) => void;
 }) {
   const { width } = useWindowDimensions();
   const contentWidth = isTablet ? width - 220 : width;
-  const cardWidth = Math.min(contentWidth - 56, 460);
+  const cardWidth = isTablet ? Math.min(contentWidth - 56, 460) : contentWidth - 32;
   const cardHeight = Math.round(cardWidth * 1.42);
-  const gap = 12;
-  const sidePadding = Math.max(16, (contentWidth - cardWidth) / 2);
 
   return (
-    <FlatList
-      style={styles.heroCarousel}
-      data={entries}
-      horizontal
-      keyExtractor={(entry) => entry.item.id}
-      renderItem={({ item: entry }) => (
-        <HeroCard
-          baseUrl={baseUrl}
-          cacheBust={artworkCacheBusters[entry.item.id]}
-          height={cardHeight}
-          item={entry.item}
-          onPlay={() => onPlay(entry.item)}
-          onSelect={() => onSelect(entry.item)}
-          width={cardWidth}
-        />
-      )}
-      showsHorizontalScrollIndicator={false}
-      snapToInterval={cardWidth + gap}
-      snapToAlignment="start"
-      decelerationRate="fast"
-      disableIntervalMomentum
-      contentContainerStyle={{ gap, paddingHorizontal: sidePadding }}
-      getItemLayout={(_data, index) => ({ length: cardWidth + gap, offset: (cardWidth + gap) * index, index })}
-      initialNumToRender={2}
-      maxToRenderPerBatch={3}
-      windowSize={5}
-    />
+    <View style={styles.heroCarousel}>
+      <HeroCard
+        baseUrl={baseUrl}
+        cacheBust={artworkCacheBusters[item.id]}
+        height={cardHeight}
+        item={item}
+        onPlay={() => onPlay(item)}
+        onSelect={() => onSelect(item)}
+        width={cardWidth}
+      />
+    </View>
   );
 }
 
@@ -5068,12 +5066,10 @@ function HeroCard({
   onSelect: () => void;
   width: number;
 }) {
+  const canonicalPoster = item.poster || item.posterCandidates?.[0];
   const sources = useMemo(
-    () => imageUrlsFor(baseUrl, [
-      item.poster,
-      ...(item.posterCandidates || []),
-    ], cacheBust),
-    [baseUrl, cacheBust, item.poster, item.posterCandidates],
+    () => imageUrlsFor(baseUrl, [canonicalPoster], cacheBust),
+    [baseUrl, cacheBust, canonicalPoster],
   );
   const meta = [
     item.type === 'movie' ? 'Movie' : item.type === 'anime' ? 'Anime' : 'TV Show',
@@ -5118,7 +5114,7 @@ function HeroCard({
           onPress={onPlay}
           style={({ pressed }) => [styles.heroPlayButton, pressed && styles.heroPlayButtonPressed]}
         >
-          <PlayIcon size={18} color={accentForeground} />
+          <PlayIcon size={22} color={accentForeground} />
           <Text style={styles.heroPlayButtonText}>{item.lastPlayed ? 'Resume' : 'Play'}</Text>
         </Pressable>
       </View>
@@ -5243,7 +5239,7 @@ function LibraryList({
       contentInsetAdjustmentBehavior="never"
       keyboardShouldPersistTaps="handled"
       onScroll={onScroll}
-      scrollEventThrottle={120}
+      scrollEventThrottle={16}
       showsVerticalScrollIndicator={false}
       initialNumToRender={9}
       maxToRenderPerBatch={9}
@@ -5891,6 +5887,7 @@ function createStyles(theme: MobileThemeColors) {
     color: text === '#ffffff' ? '#171717' : '#ffffff',
   },
   heroCarousel: {
+    alignItems: 'center',
     marginHorizontal: -16,
   },
   heroCard: {
@@ -5930,9 +5927,9 @@ function createStyles(theme: MobileThemeColors) {
   heroPlayButton: {
     alignItems: 'center',
     backgroundColor: accent,
-    borderRadius: 10,
+    borderRadius: 999,
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
     height: 52,
     justifyContent: 'center',
     marginTop: 6,
@@ -5943,7 +5940,7 @@ function createStyles(theme: MobileThemeColors) {
   },
   heroPlayButtonText: {
     color: accentForeground,
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '700',
   },
   posterBadge: {
@@ -6166,9 +6163,7 @@ function createStyles(theme: MobileThemeColors) {
   settingsThemeOption: {
     alignItems: 'center',
     backgroundColor: panel2,
-    borderColor: border,
     borderRadius: 12,
-    borderWidth: 1,
     flex: 1,
     gap: 7,
     justifyContent: 'center',
@@ -6177,7 +6172,6 @@ function createStyles(theme: MobileThemeColors) {
   },
   settingsThemeOptionActive: {
     backgroundColor: accentSoft,
-    borderColor: accent,
   },
   settingsThemeOptionText: {
     color: muted,
@@ -6821,7 +6815,7 @@ function createStyles(theme: MobileThemeColors) {
     gap: 10,
     justifyContent: 'center',
     marginTop: 6,
-    minHeight: 48,
+    minHeight: 52,
   },
   playButtonLight: {
     backgroundColor: '#000000',
@@ -6964,11 +6958,17 @@ function createStyles(theme: MobileThemeColors) {
   seasonPicker: {
     alignItems: 'center',
     backgroundColor: panel,
+    borderColor: border,
     borderRadius: 12,
+    borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     minHeight: 48,
     paddingHorizontal: 18,
+  },
+  seasonPickerContainer: {
+    position: 'relative',
+    zIndex: 20,
   },
   seasonPickerText: {
     color: text,
@@ -6986,18 +6986,18 @@ function createStyles(theme: MobileThemeColors) {
     borderColor: border,
     borderRadius: 12,
     borderWidth: 1,
-    elevation: 10,
+    elevation: 12,
     gap: 2,
     left: 0,
+    marginTop: 4,
     padding: 6,
     position: 'absolute',
     right: 0,
-    shadowColor: '#000',
+    shadowColor: '#000000',
     shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.3,
     shadowRadius: 14,
-    top: 72,
-    zIndex: 10,
+    top: '100%',
   },
   seasonPickerOption: {
     alignItems: 'center',
