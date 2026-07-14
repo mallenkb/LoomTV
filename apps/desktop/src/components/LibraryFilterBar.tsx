@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { FilterFunnelIcon } from '@/components/LoomIcons';
 import {
-  issueLibraryFilterOptions,
   libraryFilterOptions,
   primaryLibraryFilterOptions,
   type LibraryFilter,
@@ -49,33 +48,27 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
         type="button"
         aria-haspopup="menu"
         aria-expanded={filterOpen}
-        aria-label="Filter library"
+        aria-label={`Filter library, ${activeOption?.label || 'All'}`}
+        title={`Filter: ${activeOption?.label || 'All'}`}
         onClick={() => setFilterOpen((open) => !open)}
-        className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors ${
+        className={`inline-flex h-12 w-12 items-center justify-center rounded-lg border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
           activeFilter === 'all'
             ? 'border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-muted)] hover:bg-white/10 hover:text-white'
             : 'border-[var(--loom-accent)] bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
         }`}
       >
-        <FilterFunnelIcon className="h-3.5 w-3.5" />
-        <span>{activeOption?.label || 'All'}</span>
+        <FilterFunnelIcon className="h-4 w-4" />
       </button>
 
       {filterOpen && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-md border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
+          className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
         >
           <FilterMenuGroup
             label="Watch status"
             activeFilter={activeFilter}
             options={primaryLibraryFilterOptions}
-            onChoose={chooseFilter}
-          />
-          <FilterMenuGroup
-            label="Library gaps"
-            activeFilter={activeFilter}
-            options={issueLibraryFilterOptions}
             onChoose={chooseFilter}
           />
         </div>
