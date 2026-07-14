@@ -1,4 +1,5 @@
-import { Search, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import { SearchSmIcon } from '@/components/LoomIcons';
 import type { ReactNode } from 'react';
 
 interface LibrarySearchProps {
@@ -13,7 +14,7 @@ export default function LibrarySearch({ value, onChange, placeholder = 'Search l
     <div className="loom-library-search pointer-events-none fixed left-48 right-0 top-4 z-40 flex justify-center px-4">
       <div className="loom-library-search-inner flex w-full max-w-3xl items-center justify-center gap-2">
         <div className="loom-no-drag pointer-events-auto flex h-12 min-w-0 flex-1 items-center gap-3 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-4 text-white shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-colors focus-within:border-[var(--loom-accent)]/70 focus-within:shadow-[0_16px_42px_rgba(0,0,0,0.34),0_0_0_3px_var(--loom-focus-glow)]">
-          <Search className="h-5 w-5 shrink-0 text-[var(--loom-muted)]" />
+          <SearchSmIcon className="h-5 w-5 shrink-0 text-[var(--loom-muted)]" />
           <input
             type="text"
             value={value}

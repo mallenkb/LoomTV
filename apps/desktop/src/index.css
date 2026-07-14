@@ -370,17 +370,22 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .settings-panel {
-  border: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
-  background: var(--loom-surface);
-}
-
-.settings-panel-soft {
-  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  border: 0 !important;
   background: var(--loom-surface-2);
 }
 
+.settings-panel-soft {
+  border: 0 !important;
+  background: var(--loom-surface-2);
+}
+
+.settings-folder-row {
+  border: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
+  background: var(--loom-surface-3);
+}
+
 .settings-action-tile {
-  border: 1px solid color-mix(in srgb, var(--loom-border) 58%, transparent);
+  border: 0 !important;
   background: var(--loom-surface-2);
 }
 

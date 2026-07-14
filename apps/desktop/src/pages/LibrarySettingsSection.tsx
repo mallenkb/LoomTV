@@ -1,4 +1,5 @@
-import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Clock, Download, FolderPlus, GripVertical, HardDrive, RefreshCw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Clock, Download, FolderPlus, GripVertical, HardDrive, Pencil, RefreshCw, Trash2, X } from 'lucide-react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { SIDEBAR_NAV_LABELS, type SidebarNavItemId } from './Settings.helpers';
@@ -21,6 +22,8 @@ type LibrarySettingsSectionProps = {
   folderStatuses: LibraryFolderStatus[];
   addLibraryFolder: (kind: LibraryFolderSection['key']) => void;
   removeLibraryFolder: (folder: string) => void;
+  customFolderNames: Record<string, string>;
+  onRenameFolder: (folder: string, name: string) => void;
   sidebarNavOrder: SidebarNavItemId[];
   draggedSidebarItem: SidebarNavItemId | null;
   setDraggedSidebarItem: (item: SidebarNavItemId | null) => void;
@@ -49,6 +52,8 @@ export default function LibrarySettingsSection({
   folderStatuses,
   addLibraryFolder,
   removeLibraryFolder,
+  customFolderNames,
+  onRenameFolder,
   sidebarNavOrder,
   draggedSidebarItem,
   setDraggedSidebarItem,
@@ -74,6 +79,8 @@ export default function LibrarySettingsSection({
   const statusByPath = new Map(folderStatuses.map((status) => [status.path, status]));
   const unavailableCount = folderStatuses.filter((status) => status.state === 'unavailable').length;
   const networkFolderCount = folderStatuses.filter((status) => status.isNetworkLike).length;
+  const [editingFolder, setEditingFolder] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
 
   return (
     <>
@@ -108,7 +115,7 @@ export default function LibrarySettingsSection({
           )}
           <div className="space-y-3">
             {folderSections.map((section) => (
-              <div key={section.key} className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3">
+              <div key={section.key} className="rounded-lg bg-[var(--loom-surface-2)] p-3">
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-white">{section.title}</p>
@@ -120,16 +127,22 @@ export default function LibrarySettingsSection({
                   </Button>
                 </div>
 
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col divide-y divide-[rgba(148,163,184,0.30)]">
                   {section.folders.length === 0 ? (
                     <p className="text-[var(--loom-faint)] text-sm py-2">No {section.title.toLowerCase()} folders added</p>
                   ) : (
                     section.folders.map((folder) => (
-                      <div key={folder} className="settings-panel-soft flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm text-white">
+                      <div key={folder} className="settings-folder-row flex items-center justify-between gap-3 rounded-lg px-3 py-3 text-sm text-white">
                         <div className="min-w-0 flex-1">
-                          <span className="block truncate">{folder}</span>
+                          {editingFolder === folder ? (
+                            <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); onRenameFolder(folder, editingName); setEditingFolder(null); }}>
+                              <input autoFocus value={editingName} onChange={(event) => setEditingName(event.target.value)} className="min-w-0 flex-1 rounded border border-[var(--loom-accent)] bg-[var(--loom-bg)] px-2 py-1 text-sm text-white outline-none" aria-label={`Rename ${folder}`} />
+                              <button type="submit" className="text-[var(--loom-accent)]">Save</button>
+                            </form>
+                          ) : <span className="block truncate">{customFolderNames[folder] || folder}</span>}
                           <FolderStatusLine status={statusByPath.get(folder)} />
                         </div>
+                        {editingFolder !== folder && <button type="button" onClick={() => { setEditingFolder(folder); setEditingName(customFolderNames[folder] || folder); }} aria-label={`Rename ${folder}`} className="p-1 text-[var(--loom-muted)] hover:text-white"><Pencil className="h-4 w-4" /></button>}
                         <button
                           type="button"
                           onClick={() => removeLibraryFolder(folder)}

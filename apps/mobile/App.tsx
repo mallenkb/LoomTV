@@ -55,7 +55,6 @@ import {
   SpeedIcon,
   MoonIcon,
   SunIcon,
-  RoundedPlayIcon,
   StarIcon,
   SubtitlesIcon,
   navIcons,
@@ -65,6 +64,7 @@ import {
 type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
 type SettingsSection = 'library' | 'network' | 'appearance';
 type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched' | 'missing-metadata' | 'missing-artwork';
+type MobileSearchScope = 'all' | 'genre:drama' | 'genre:animation' | 'genre:action-adventure' | 'genre:comedy';
 type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
@@ -354,13 +354,13 @@ const MOBILE_ACCENTS: Record<string, Pick<MobileThemeColors, 'accent' | 'accentS
 
 const MOBILE_DARK_THEMES: Record<string, Pick<MobileThemeColors, 'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'>> = {
   black: {
-    bg: '#0a0a0a',
-    panel: '#141414',
-    panel2: '#101010',
-    border: '#262626',
-    muted: '#a3a3a3',
-    faint: '#737373',
-    themeLabel: 'Black',
+    bg: '#15151b',
+    panel: '#202127',
+    panel2: '#1a1b21',
+    border: '#34363f',
+    muted: '#b8b8c0',
+    faint: '#7e808b',
+    themeLabel: 'Cinematic',
   },
   default: {
     bg: '#1a1a1a',
@@ -416,12 +416,22 @@ const imageRetryDelayMs = 12000;
 const imageCacheBustQueryParam = 'loomtvImageBust';
 const serverOfflineHint = 'The desktop app or Local Network Sharing may be off. LoomTV will reconnect automatically when it becomes available.';
 
-const navItems: { id: LibraryKind; label: string; Icon: (props: IconProps) => ReactElement }[] = [
-  { id: 'home', label: 'Home', Icon: navIcons.home },
-  { id: 'anime', label: 'Anime', Icon: navIcons.anime },
-  { id: 'tv', label: 'TV Shows', Icon: navIcons.tv },
-  { id: 'movies', label: 'Movies', Icon: navIcons.movies },
-  { id: 'settings', label: 'Settings', Icon: navIcons.settings },
+const navItems: { id: LibraryKind; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement }[] = [
+  { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive },
+  { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive },
+  { id: 'tv', label: 'TV Shows', Icon: navIcons.tv, ActiveIcon: navIcons.tvActive },
+  { id: 'movies', label: 'Movies', Icon: navIcons.movies, ActiveIcon: navIcons.moviesActive },
+  { id: 'settings', label: 'Settings', Icon: navIcons.settings, ActiveIcon: navIcons.settingsActive },
+];
+
+// Coupang Play-style top category tabs shown under the logo on library pages.
+// The bottom nav shrinks to Home / Search / Settings; these tabs carry the
+// library kinds instead.
+const homeTabs: { id: LibraryKind; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement }[] = [
+  { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive },
+  { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive },
+  { id: 'tv', label: 'TV Shows', Icon: navIcons.tv, ActiveIcon: navIcons.tvActive },
+  { id: 'movies', label: 'Movies', Icon: navIcons.movies, ActiveIcon: navIcons.moviesActive },
 ];
 
 const settingsSections: { id: SettingsSection; label: string; description: string }[] = [
@@ -1082,6 +1092,12 @@ function matchesQuery(item: MediaItem, query: string): boolean {
   ].some((value) => value.toLowerCase().includes(needle));
 }
 
+function matchesMobileSearchScope(item: MediaItem, scope: MobileSearchScope): boolean {
+  if (scope === 'all') return true;
+  const genre = scope.replace('genre:', '').replace('-', ' ');
+  return (item.genres || []).some((itemGenre) => itemGenre.toLowerCase().includes(genre));
+}
+
 function matchesMobileLibraryFilter(
   item: MediaItem,
   filter: MobileLibraryFilter,
@@ -1122,15 +1138,6 @@ function matchesMobileLibraryFilter(
   if (filter === 'in-progress') return inProgress;
   if (filter === 'watched') return watched;
   return !inProgress && !partiallyWatched;
-}
-
-function sectionTitle(kind: LibraryKind): string {
-  if (kind === 'settings') return 'Settings';
-  if (kind === 'tv') return 'TV Shows';
-  if (kind === 'movies') return 'Movies';
-  if (kind === 'anime') return 'Anime';
-  if (kind === 'others') return 'Others';
-  return 'Home';
 }
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -1303,6 +1310,7 @@ function AppRoot() {
   const [activeKind, setActiveKind] = useState<LibraryKind>('home');
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchScope, setSearchScope] = useState<MobileSearchScope>('all');
   const [filterOpen, setFilterOpen] = useState(false);
   const [libraryFilter, setLibraryFilter] = useState<MobileLibraryFilter>('all');
   const [detailItem, setDetailItem] = useState<MediaItem | null>(null);
@@ -1371,6 +1379,7 @@ function AppRoot() {
       setDetailItem(null);
       setSearchOpen(false);
       setQuery('');
+      setSearchScope('all');
       setFilterOpen(false);
       setLibraryFilter('all');
       if (kind === 'settings') setSettingsSection(null);
@@ -1388,6 +1397,7 @@ function AppRoot() {
     setDetailItem(kind === 'settings' ? null : lastDetailByKindRef.current.get(kind) || null);
     setSearchOpen(false);
     setQuery('');
+    setSearchScope('all');
     setFilterOpen(false);
     setLibraryFilter('all');
     setActiveKind(kind);
@@ -1602,12 +1612,14 @@ function AppRoot() {
   );
   const visibleItems = useMemo(() => {
     if (activeKind === 'settings') return [];
-    const filtered = filterSource.filter((item) => (
+    const source = searchOpen ? everything : filterSource;
+    const filtered = source.filter((item) => (
       matchesQuery(item, query)
-      && matchesMobileLibraryFilter(item, libraryFilter, progress)
+      && (!searchOpen || matchesMobileSearchScope(item, searchScope))
+      && (searchOpen || matchesMobileLibraryFilter(item, libraryFilter, progress))
     ));
     return filtered;
-  }, [activeKind, filterSource, libraryFilter, progress, query]);
+  }, [activeKind, everything, filterSource, libraryFilter, progress, query, searchOpen, searchScope]);
 
   useEffect(() => {
     for (const item of everything) {
@@ -1890,6 +1902,7 @@ function AppRoot() {
       if (searchOpen) {
         setSearchOpen(false);
         setQuery('');
+        setSearchScope('all');
         return true;
       }
       if (activeKind !== 'home') {
@@ -2243,17 +2256,7 @@ function AppRoot() {
           onPair={pairWithDesktop}
         />
       ) : (
-        <View style={[styles.shell, isTablet && styles.shellTablet]}>
-          {isTablet ? (
-            <SideNav
-              activeKind={activeKind}
-              counts={{ anime: grouped.anime.length, tv: grouped.tv.length, movies: grouped.movies.length, others: grouped.others.length }}
-              hostName={connection.hostDeviceName}
-              isRefreshing={isRefreshing}
-              onRefresh={refreshLibrary}
-              setActiveKind={navigateToKind}
-            />
-          ) : null}
+        <View style={styles.shell}>
           <View style={styles.main}>
             {activeKind === 'settings' ? (
               <ScrollView
@@ -2291,6 +2294,7 @@ function AppRoot() {
                     setStreamOptions({});
                     setSearchOpen(false);
                     setQuery('');
+                    setSearchScope('all');
                     setActiveKind('home');
                     setArtworkCacheBusters({});
                     setError('');
@@ -2303,39 +2307,40 @@ function AppRoot() {
               </ScrollView>
             ) : (
               <LibraryList
-                artworkCacheBusters={artworkCacheBusters}
-                baseUrl={connection.baseUrl}
-                contentContainerStyle={mainContentPadding}
-                isTablet={isTablet}
-                items={searchOpen && !query.trim() ? EMPTY_ITEMS : showHomeRails ? EMPTY_ITEMS : visibleItems}
-                listRef={libraryListRef}
-                onScroll={rememberMainScroll}
-                showEmpty={showHomeRails ? false : (searchOpen ? showSearchEmpty : true)}
-                onSelect={openDetailItem}
-                refreshControl={libraryRefreshControl}
-                header={(
+                  artworkCacheBusters={artworkCacheBusters}
+                  baseUrl={connection.baseUrl}
+                  contentContainerStyle={mainContentPadding}
+                  isTablet={isTablet}
+                  items={searchOpen && !query.trim() ? EMPTY_ITEMS : showHomeRails ? EMPTY_ITEMS : visibleItems}
+                  listRef={libraryListRef}
+                  onScroll={rememberMainScroll}
+                  showEmpty={showHomeRails ? false : (searchOpen ? showSearchEmpty : true)}
+                  onSelect={openDetailItem}
+                  refreshControl={libraryRefreshControl}
+                  header={(
                   <View style={{ gap: 12 }}>
                     <Header
                       activeKind={activeKind}
                       filterOpen={filterOpen}
                       hasActiveFilters={hasActiveFilters}
+                      onSelectKind={navigateToKind}
+                      searchScope={searchScope}
                       searchOpen={searchOpen}
                       setFilterOpen={setFilterOpen}
+                      setSearchScope={setSearchScope}
                       setSearchOpen={(value) => {
                         setSearchOpen(value);
-                        if (value) setFilterOpen(false);
+                        setFilterOpen(false);
+                        setLibraryFilter('all');
+                        setSearchScope('all');
                       }}
                       query={query}
                       setQuery={setQuery}
                     />
-                    {activeKind !== 'settings' && filterOpen ? (
+                    {filterOpen ? (
                       <LibraryFilters
                         activeFilter={libraryFilter}
-                        hasActiveFilters={hasActiveFilters}
-                        onChange={(value) => {
-                          setLibraryFilter(value);
-                          setFilterOpen(false);
-                        }}
+                        onChange={setLibraryFilter}
                       />
                     ) : null}
                     {error ? (
@@ -2367,7 +2372,7 @@ function AppRoot() {
                       />
                     ) : null}
                   </View>
-                )}
+                  )}
               />
             )}
             {activeKind !== 'settings' && !searchOpen ? (
@@ -2389,7 +2394,7 @@ function AppRoot() {
                     {
                       backgroundColor: resolvedMobileThemeMode === 'light'
                         ? 'rgba(255,255,255,0.9)'
-                        : 'rgba(0,0,0,0.9)',
+                        : 'rgba(21,21,27,0.9)',
                       borderBottomWidth: 0,
                     },
                   ]}
@@ -2401,26 +2406,26 @@ function AppRoot() {
                   wordColor={resolvedMobileThemeMode === 'light' ? '#000000' : '#ffffff'}
                 />
                 <View style={styles.headerActions}>
-                  {activeKind !== 'settings' ? (
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
-                      accessibilityState={{ expanded: filterOpen }}
-                      onPress={() => {
-                        const nextOpen = !filterOpen;
-                        setFilterOpen(nextOpen);
-                        if (nextOpen) libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
-                      }}
-                      style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
-                    >
-                      <FilterIcon size={20} color={filterOpen || hasActiveFilters ? accent : (resolvedMobileThemeMode === 'light' ? '#000000' : '#ffffff')} />
-                    </Pressable>
-                  ) : null}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
+                    accessibilityState={{ expanded: filterOpen }}
+                    onPress={() => {
+                      const nextOpen = !filterOpen;
+                      setFilterOpen(nextOpen);
+                      if (nextOpen) libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
+                    }}
+                    style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
+                  >
+                    <FilterIcon size={20} color={filterOpen || hasActiveFilters ? accent : (resolvedMobileThemeMode === 'light' ? '#000000' : '#ffffff')} />
+                  </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Search"
                     onPress={() => {
                       setFilterOpen(false);
+                      setLibraryFilter('all');
+                      setSearchScope('all');
                       setSearchOpen(true);
                     }}
                     style={({ pressed }) => [styles.topBarIconButton, pressed && styles.pressed]}
@@ -2430,7 +2435,7 @@ function AppRoot() {
                 </View>
               </Animated.View>
             ) : null}
-            {!isTablet && !searchOpen ? (
+            {!searchOpen ? (
               <BottomNav
                 activeKind={activeKind}
                 setActiveKind={navigateToKind}
@@ -2452,6 +2457,14 @@ function AppRoot() {
         isRefreshingArtwork={Boolean(detailItem && refreshingArtworkId === detailItem.id)}
         onClose={closeDetail}
         onOpenKind={navigateToKind}
+        onOpenSearch={() => {
+          closeDetail();
+          setFilterOpen(false);
+          setLibraryFilter('all');
+          setSearchScope('all');
+          setQuery('');
+          setSearchOpen(true);
+        }}
         onPlay={(target) => {
           void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
           playerReturnItemRef.current = detailItem;
@@ -2715,37 +2728,81 @@ function Header({
   activeKind,
   filterOpen,
   hasActiveFilters,
+  onSelectKind,
   query,
+  searchScope,
   searchOpen,
   setFilterOpen,
   setQuery,
+  setSearchScope,
   setSearchOpen,
 }: {
   activeKind: LibraryKind;
   filterOpen: boolean;
   hasActiveFilters: boolean;
+  onSelectKind: (kind: LibraryKind) => void;
   query: string;
+  searchScope: MobileSearchScope;
   searchOpen: boolean;
   setFilterOpen: (value: boolean) => void;
   setQuery: (value: string) => void;
+  setSearchScope: (value: MobileSearchScope) => void;
   setSearchOpen: (value: boolean) => void;
 }) {
   const canFilter = activeKind !== 'settings';
   if (searchOpen) {
     return (
-      <View style={styles.header}>
-        <View style={styles.searchBox}>
-          <SearchIcon size={20} color={muted} />
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-            onChangeText={setQuery}
-            placeholder={`Search ${sectionTitle(activeKind).toLowerCase()}`}
-            placeholderTextColor={faint}
-            style={styles.searchInput}
-            value={query}
-          />
+      <View style={styles.searchHeader}>
+        <View style={styles.searchHeaderRow}>
+          <View style={styles.searchBox}>
+            <SearchIcon size={19} color={muted} />
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              onChangeText={setQuery}
+              placeholder="Search titles, genres, or years"
+              placeholderTextColor={faint}
+              returnKeyType="search"
+              style={styles.searchInput}
+              value={query}
+            />
+            {query ? (
+              <Pressable
+                hitSlop={8}
+                onPress={() => setQuery('')}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+                style={({ pressed }) => [styles.searchClearButton, pressed && styles.pressed]}
+              >
+                <CloseIcon size={16} color={muted} />
+              </Pressable>
+            ) : null}
+          </View>
+          <Pressable
+            onPress={() => {
+              setSearchOpen(false);
+              setQuery('');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel search"
+            style={({ pressed }) => [styles.searchCancelButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.searchCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+        <SearchScopeFilters activeScope={searchScope} onChange={setSearchScope} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.header}>
+      <View style={styles.topBarRow}>
+        <View style={styles.brandRow}>
+          <LoomLogo width={86} height={24} accent={accent} wordColor={text} />
+        </View>
+        <View style={styles.headerActions}>
           {canFilter ? (
             <Pressable
               onPress={() => setFilterOpen(!filterOpen)}
@@ -2754,115 +2811,99 @@ function Header({
               accessibilityState={{ expanded: filterOpen }}
               style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
             >
-              <FilterIcon size={19} color={filterOpen || hasActiveFilters ? accent : muted} />
+              <FilterIcon size={20} color={filterOpen || hasActiveFilters ? accent : text} />
             </Pressable>
           ) : null}
           <Pressable
-            onPress={() => {
-              setSearchOpen(false);
-              setQuery('');
-            }}
+            onPress={() => setSearchOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel="Close search"
-            style={({ pressed }) => [pressed && styles.pressed]}
+            accessibilityLabel="Search"
+            style={({ pressed }) => [styles.topBarIconButton, pressed && styles.pressed]}
           >
-            <CloseIcon size={20} color={muted} />
+            <SearchIcon size={23} color={text} />
           </Pressable>
         </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={[styles.header, styles.topBarRow]}>
-      <View style={styles.brandRow}>
-        <LoomLogo width={86} height={24} accent={accent} wordColor={text} />
-      </View>
-      <View style={styles.headerActions}>
-        {canFilter ? (
-          <Pressable
-            onPress={() => setFilterOpen(!filterOpen)}
-            accessibilityRole="button"
-            accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
-            accessibilityState={{ expanded: filterOpen }}
-            style={({ pressed }) => [styles.topBarIconButton, filterOpen && styles.filterButtonActive, pressed && styles.pressed]}
-          >
-            <FilterIcon size={20} color={filterOpen || hasActiveFilters ? accent : text} />
-          </Pressable>
-        ) : null}
-        <Pressable
-          onPress={() => setSearchOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Search"
-          style={({ pressed }) => [styles.topBarIconButton, pressed && styles.pressed]}
-        >
-          <SearchIcon size={23} color={text} />
-        </Pressable>
       </View>
     </View>
   );
 }
 
+function SearchScopeFilters({
+  activeScope,
+  onChange,
+}: {
+  activeScope: MobileSearchScope;
+  onChange: (value: MobileSearchScope) => void;
+}) {
+  const options: { id: MobileSearchScope; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'genre:drama', label: 'Drama' },
+    { id: 'genre:animation', label: 'Animation' },
+    { id: 'genre:action-adventure', label: 'Action & Adventure' },
+    { id: 'genre:comedy', label: 'Comedy' },
+  ];
+  return (
+    <ScrollView
+      horizontal
+      keyboardShouldPersistTaps="handled"
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.filterChipRow}
+    >
+      {options.map((option) => {
+        const selected = activeScope === option.id;
+        return (
+            <Pressable
+              key={option.id}
+              onPress={() => onChange(option.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.pressed]}
+            >
+              <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>{option.label}</Text>
+            </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 function LibraryFilters({
   activeFilter,
-  hasActiveFilters,
   onChange,
 }: {
   activeFilter: MobileLibraryFilter;
-  hasActiveFilters: boolean;
   onChange: (value: MobileLibraryFilter) => void;
 }) {
-  const groups: { label: string; options: { id: MobileLibraryFilter; label: string }[] }[] = [
-    {
-      label: 'Watch status',
-      options: [
-        { id: 'all', label: 'All' },
-        { id: 'in-progress', label: 'In Progress' },
-        { id: 'unwatched', label: 'Unwatched' },
-        { id: 'watched', label: 'Watched' },
-      ],
-    },
-    {
-      label: 'Library gaps',
-      options: [
-        { id: 'missing-metadata', label: 'Missing Metadata' },
-        { id: 'missing-artwork', label: 'Missing Artwork' },
-      ],
-    },
+  const options: { id: MobileLibraryFilter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'in-progress', label: 'In Progress' },
+    { id: 'unwatched', label: 'Unwatched' },
+    { id: 'watched', label: 'Watched' },
+    { id: 'missing-metadata', label: 'Missing Metadata' },
+    { id: 'missing-artwork', label: 'Missing Artwork' },
   ];
 
   return (
-    <View style={styles.filterPanel}>
-      <View style={styles.filterPanelHeader}>
-        <Text style={styles.filterPanelTitle}>Filters</Text>
-        {hasActiveFilters ? (
-          <Pressable onPress={() => onChange('all')} accessibilityRole="button" accessibilityLabel="Clear filters">
-            <Text style={styles.filterClearText}>Clear all</Text>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.filterChipRow}
+    >
+      {options.map((option) => {
+        const selected = activeFilter === option.id;
+        return (
+          <Pressable
+            key={option.id}
+            onPress={() => onChange(option.id)}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.pressed]}
+          >
+            <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>{option.label}</Text>
           </Pressable>
-        ) : null}
-      </View>
-      {groups.map((group) => (
-        <View key={group.label} style={styles.filterGroup}>
-          <Text style={styles.filterLabel}>{group.label}</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipRow}>
-            {group.options.map((option) => {
-              const selected = activeFilter === option.id;
-              return (
-                <Pressable
-                  key={option.id}
-                  onPress={() => onChange(option.id)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  style={({ pressed }) => [styles.filterChip, selected && styles.filterChipSelected, pressed && styles.pressed]}
-                >
-                  <Text style={[styles.filterChipText, selected && styles.filterChipTextSelected]}>{option.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-      ))}
-    </View>
+        );
+      })}
+    </ScrollView>
   );
 }
 
@@ -2891,7 +2932,7 @@ function SideNav({
       <View style={styles.sideNavItems}>
         {navItems.map((item) => {
           const isActive = activeKind === item.id;
-          const Icon = item.Icon;
+          const Icon = isActive ? (item.ActiveIcon || item.Icon) : item.Icon;
           return (
             <Pressable
               key={item.id}
@@ -2921,7 +2962,7 @@ function BottomNavItem({
   isActive,
   onPress,
 }: {
-  item: { id: LibraryKind; label: string; Icon: (props: IconProps) => ReactElement };
+  item: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement };
   isActive: boolean;
   onPress: () => void;
 }) {
@@ -2934,8 +2975,8 @@ function BottomNavItem({
       bounciness: 9,
     }).start();
   }, [active, isActive]);
-  const iconScale = active.interpolate({ inputRange: [0, 1], outputRange: [1, 1.14] });
-  const Icon = item.Icon;
+  const iconScale = active.interpolate({ inputRange: [0, 1], outputRange: [1, 1] });
+  const Icon = isActive ? (item.ActiveIcon || item.Icon) : item.Icon;
   return (
     <Pressable
       style={styles.bottomNavButton}
@@ -2952,16 +2993,30 @@ function BottomNavItem({
   );
 }
 
-function BottomNav({ activeKind, setActiveKind }: { activeKind: LibraryKind; setActiveKind: (kind: LibraryKind) => void }) {
+// The bottom nav mirrors the primary library destinations and settings.
+function BottomNav({
+  activeKind,
+  setActiveKind,
+}: {
+  activeKind: LibraryKind;
+  setActiveKind: (kind: LibraryKind) => void;
+}) {
   const insets = useSafeAreaInsets();
+  const bottomItems: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement; isActive: boolean; onPress: () => void }[] = [
+    { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive, isActive: activeKind === 'home', onPress: () => setActiveKind('home') },
+    { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive, isActive: activeKind === 'anime', onPress: () => setActiveKind('anime') },
+    { id: 'tv', label: 'TV Shows', Icon: navIcons.tv, ActiveIcon: navIcons.tvActive, isActive: activeKind === 'tv', onPress: () => setActiveKind('tv') },
+    { id: 'movies', label: 'Movies', Icon: navIcons.movies, ActiveIcon: navIcons.moviesActive, isActive: activeKind === 'movies', onPress: () => setActiveKind('movies') },
+    { id: 'settings', label: 'Settings', Icon: navIcons.settings, ActiveIcon: navIcons.settingsActive, isActive: activeKind === 'settings', onPress: () => setActiveKind('settings') },
+  ];
   const items = (
     <View style={styles.bottomNavRow}>
-      {navItems.map((item) => (
+      {bottomItems.map((item) => (
         <BottomNavItem
           key={item.id}
           item={item}
-          isActive={activeKind === item.id}
-          onPress={() => setActiveKind(item.id)}
+          isActive={item.isActive}
+          onPress={item.onPress}
         />
       ))}
     </View>
@@ -3078,6 +3133,7 @@ function DetailModal({
   progress,
   onClose,
   onOpenKind,
+  onOpenSearch,
   onPlay,
   onRefreshArtwork,
 }: {
@@ -3092,6 +3148,7 @@ function DetailModal({
   progress: Record<string, StoredProgress>;
   onClose: () => void;
   onOpenKind: (kind: LibraryKind) => void;
+  onOpenSearch: () => void;
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
@@ -3111,6 +3168,7 @@ function DetailModal({
       progress={progress}
       onClose={onClose}
       onOpenKind={onOpenKind}
+      onOpenSearch={onOpenSearch}
       onPlay={onPlay}
       onRefreshArtwork={onRefreshArtwork}
     />
@@ -3144,6 +3202,7 @@ function DetailContent({
   progress,
   onClose,
   onOpenKind,
+  onOpenSearch,
   onPlay,
   onRefreshArtwork,
 }: {
@@ -3158,6 +3217,7 @@ function DetailContent({
   progress: Record<string, StoredProgress>;
   onClose: () => void;
   onOpenKind: (kind: LibraryKind) => void;
+  onOpenSearch: () => void;
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
@@ -4868,6 +4928,10 @@ function SettingsMetric({ metric }: { metric: LibraryMetric }) {
   );
 }
 
+type HeroEntry = {
+  item: MediaItem;
+};
+
 function HomeSections({
   artworkCacheBusters,
   baseUrl,
@@ -4888,22 +4952,40 @@ function HomeSections({
   onSelect: (item: MediaItem) => void;
 }) {
   const hasItems = grouped.anime.length > 0 || grouped.tv.length > 0 || grouped.movies.length > 0 || grouped.others.length > 0;
-  const latestItem = continueWatching[0];
-  const remainingContinueWatching = continueWatching.slice(1);
+
+  // Featured carousel: show only the three most recently played titles first,
+  // then use fresh library picks only when fewer than three are available.
+  const heroEntries = useMemo<HeroEntry[]>(() => {
+    const picked = new Set<string>();
+    const entries: HeroEntry[] = [];
+    for (const item of continueWatching) {
+      if (entries.length >= 3) break;
+      picked.add(item.id);
+      entries.push({ item });
+    }
+    for (const item of [...grouped.anime, ...grouped.tv, ...grouped.movies]) {
+      if (entries.length >= 3) break;
+      if (picked.has(item.id)) continue;
+      picked.add(item.id);
+      entries.push({ item });
+    }
+    return entries;
+  }, [continueWatching, grouped]);
 
   return (
     <View style={styles.sections}>
-      {latestItem ? (
-        <ResumeHero
+      {heroEntries.length > 0 ? (
+        <HeroCarousel
           artworkCacheBusters={artworkCacheBusters}
           baseUrl={baseUrl}
-          item={latestItem}
-          onOpen={() => onSelect(latestItem)}
-          onResume={() => onResume(latestItem)}
+          entries={heroEntries}
+          isTablet={isTablet}
+          onPlay={onResume}
+          onSelect={onSelect}
         />
       ) : null}
-      {remainingContinueWatching.length > 0 ? (
-        <Rail title="Continue Watching" artworkCacheBusters={artworkCacheBusters} items={remainingContinueWatching} baseUrl={baseUrl} onSelect={onSelect} />
+      {continueWatching.length > 0 ? (
+        <Rail title="Continue Watching" artworkCacheBusters={artworkCacheBusters} items={continueWatching} baseUrl={baseUrl} onSelect={onSelect} />
       ) : null}
       <Rail title="Anime" artworkCacheBusters={artworkCacheBusters} items={grouped.anime.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('anime')} />
       <Rail title="TV Shows" artworkCacheBusters={artworkCacheBusters} items={grouped.tv.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('tv')} />
@@ -4913,92 +4995,140 @@ function HomeSections({
   );
 }
 
-function ResumeHero({
+// Edge-to-edge paged carousel of tall poster cards with a play button inside
+// each card, mirroring Coupang Play's home hero. The negative margin cancels
+// the feed's horizontal padding so neighbor cards peek in from both edges.
+function HeroCarousel({
   artworkCacheBusters,
   baseUrl,
-  item,
-  onOpen,
-  onResume,
+  entries,
+  isTablet,
+  onPlay,
+  onSelect,
 }: {
   artworkCacheBusters: Record<string, string>;
   baseUrl: string;
-  item: MediaItem;
-  onOpen: () => void;
-  onResume: () => void;
+  entries: HeroEntry[];
+  isTablet: boolean;
+  onPlay: (item: MediaItem) => void;
+  onSelect: (item: MediaItem) => void;
 }) {
-  const cacheBust = artworkCacheBusters[item.id];
-  const isLightTheme = text !== '#ffffff';
-  const heroFadeMiddleOpacity = isLightTheme ? 0.58 : 0.45;
-  const heroFadeBottomOpacity = isLightTheme ? 0.9 : 0.84;
+  const { width } = useWindowDimensions();
+  const contentWidth = isTablet ? width - 220 : width;
+  const cardWidth = Math.min(contentWidth - 56, 460);
+  const cardHeight = Math.round(cardWidth * 1.42);
+  const gap = 12;
+  const sidePadding = Math.max(16, (contentWidth - cardWidth) / 2);
+
+  return (
+    <FlatList
+      style={styles.heroCarousel}
+      data={entries}
+      horizontal
+      keyExtractor={(entry) => entry.item.id}
+      renderItem={({ item: entry }) => (
+        <HeroCard
+          baseUrl={baseUrl}
+          cacheBust={artworkCacheBusters[entry.item.id]}
+          height={cardHeight}
+          item={entry.item}
+          onPlay={() => onPlay(entry.item)}
+          onSelect={() => onSelect(entry.item)}
+          width={cardWidth}
+        />
+      )}
+      showsHorizontalScrollIndicator={false}
+      snapToInterval={cardWidth + gap}
+      snapToAlignment="start"
+      decelerationRate="fast"
+      disableIntervalMomentum
+      contentContainerStyle={{ gap, paddingHorizontal: sidePadding }}
+      getItemLayout={(_data, index) => ({ length: cardWidth + gap, offset: (cardWidth + gap) * index, index })}
+      initialNumToRender={2}
+      maxToRenderPerBatch={3}
+      windowSize={5}
+    />
+  );
+}
+
+function HeroCard({
+  baseUrl,
+  cacheBust,
+  height,
+  item,
+  onPlay,
+  onSelect,
+  width,
+}: {
+  baseUrl: string;
+  cacheBust?: string;
+  height: number;
+  item: MediaItem;
+  onPlay: () => void;
+  onSelect: () => void;
+  width: number;
+}) {
   const sources = useMemo(
     () => imageUrlsFor(baseUrl, [
       item.poster,
       ...(item.posterCandidates || []),
-      item.backdrop,
-      ...(item.backdropCandidates || []),
     ], cacheBust),
-    [baseUrl, cacheBust, item.backdrop, item.backdropCandidates, item.poster, item.posterCandidates],
+    [baseUrl, cacheBust, item.poster, item.posterCandidates],
   );
   const meta = [
     item.type === 'movie' ? 'Movie' : item.type === 'anime' ? 'Anime' : 'TV Show',
     item.year ? String(item.year) : null,
     item.type === 'movie' ? (item.localMetadata?.durationSeconds ? formatDuration(item.localMetadata.durationSeconds) : null) : seasonCountLabel(item),
-  ].filter(Boolean).join('  ·  ');
+  ].filter(Boolean).join(' · ');
 
   return (
-    <View style={styles.resumeHero}>
-      <PressableScale
-        accessibilityLabel={`Open ${item.title}`}
-        accessibilityRole="button"
-        onPress={onOpen}
-        scaleTo={0.985}
-        style={styles.resumeHeroMain}
-      >
-        <FallbackImage
-          sources={sources}
-          style={styles.resumeHeroImage}
-          resizeMode="cover"
-          altFallback={(
-            <View style={[styles.resumeHeroImage, styles.posterFallback]}>
-              <PlayMark size={40} color={accent} />
-            </View>
-          )}
-        />
-        <Svg pointerEvents="none" style={styles.resumeHeroShade} viewBox="0 0 1 1" preserveAspectRatio="none">
-          <Defs>
-            <SvgLinearGradient id="resumeHeroBottomFade" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0.6" stopColor="#050505" stopOpacity={0.05} />
-              <Stop offset="0.8" stopColor="#050505" stopOpacity={heroFadeMiddleOpacity} />
-              <Stop offset="1" stopColor="#050505" stopOpacity={heroFadeBottomOpacity} />
-            </SvgLinearGradient>
-          </Defs>
-          <SvgRect x="0" y="0" width="1" height="1" fill="url(#resumeHeroBottomFade)" />
-        </Svg>
-        <View pointerEvents="none" style={styles.resumeHeroCopy}>
-          <View style={styles.resumeHeroTag}>
-            <Text style={styles.resumeHeroTagText}>Resume</Text>
+    <PressableScale
+      accessibilityLabel={`Open ${item.title}`}
+      accessibilityRole="button"
+      onPress={onSelect}
+      scaleTo={0.98}
+      style={[styles.heroCard, { height, width }]}
+    >
+      <FallbackImage
+        sources={sources}
+        style={styles.heroCardImage}
+        resizeMode="cover"
+        altFallback={(
+          <View style={[styles.heroCardImage, styles.posterFallback]}>
+            <PlayMark size={40} color={accent} />
           </View>
-          <View style={styles.resumeHeroTextBlock}>
-            <Text numberOfLines={2} style={styles.resumeHeroTitle}>{item.title}</Text>
-            {meta ? <Text numberOfLines={1} style={styles.resumeHeroMeta}>{meta}</Text> : null}
-          </View>
-        </View>
-      </PressableScale>
-      <Pressable
-        accessibilityLabel={`Resume ${item.title}`}
-        accessibilityRole="button"
-        hitSlop={8}
-        onPress={onResume}
-        style={({ pressed }) => [styles.resumeHeroPlay, pressed && styles.resumeHeroPlayPressed]}
-      >
-        <RoundedPlayIcon size={22} color={accentForeground} />
-      </Pressable>
-    </View>
+        )}
+      />
+      <Svg pointerEvents="none" style={styles.heroCardShade} viewBox="0 0 1 1" preserveAspectRatio="none">
+        <Defs>
+          <SvgLinearGradient id="heroCardBottomFade" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0.45" stopColor="#050505" stopOpacity={0} />
+            <Stop offset="0.74" stopColor="#050505" stopOpacity={0.55} />
+            <Stop offset="1" stopColor="#050505" stopOpacity={0.92} />
+          </SvgLinearGradient>
+        </Defs>
+        <SvgRect x="0" y="0" width="1" height="1" fill="url(#heroCardBottomFade)" />
+      </Svg>
+      <View style={styles.heroCardFooter}>
+        <Text numberOfLines={2} style={styles.heroCardTitle}>{item.title}</Text>
+        {meta ? <Text numberOfLines={1} style={styles.heroCardMeta}>{meta}</Text> : null}
+        <Pressable
+          accessibilityLabel={`${item.lastPlayed ? 'Resume' : 'Play'} ${item.title}`}
+          accessibilityRole="button"
+          onPress={onPlay}
+          style={({ pressed }) => [styles.heroPlayButton, pressed && styles.heroPlayButtonPressed]}
+        >
+          <PlayIcon size={18} color={accentForeground} />
+          <Text style={styles.heroPlayButtonText}>{item.lastPlayed ? 'Resume' : 'Play'}</Text>
+        </Pressable>
+      </View>
+    </PressableScale>
   );
 }
 
 function Rail({
   artworkCacheBusters,
+  badgeLabel,
   baseUrl,
   items,
   onPressTitle,
@@ -5006,6 +5136,7 @@ function Rail({
   title,
 }: {
   artworkCacheBusters: Record<string, string>;
+  badgeLabel?: string;
   baseUrl: string;
   items: MediaItem[];
   onPressTitle?: () => void;
@@ -5031,7 +5162,7 @@ function Rail({
         horizontal
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <PosterCard baseUrl={baseUrl} cacheBust={artworkCacheBusters[item.id]} item={item} onSelect={onSelect} width={128} />
+          <PosterCard badgeLabel={badgeLabel} baseUrl={baseUrl} cacheBust={artworkCacheBusters[item.id]} item={item} onSelect={onSelect} width={128} />
         )}
         showsHorizontalScrollIndicator={false}
         // Poster cells are a fixed 128px wide with a 14px gap, so the list can
@@ -5127,12 +5258,14 @@ function LibraryList({
 // app re-renders for unrelated reasons — e.g. the periodic progress sync during
 // playback. Without memo, every such re-render walks hundreds of posters.
 const PosterCard = memo(function PosterCard({
+  badgeLabel,
   baseUrl,
   cacheBust,
   item,
   onSelect,
   width,
 }: {
+  badgeLabel?: string;
   baseUrl: string;
   cacheBust?: string;
   item: MediaItem;
@@ -5188,6 +5321,12 @@ const PosterCard = memo(function PosterCard({
             <Text style={styles.posterRatingText}>{item.rating.toFixed(1)}</Text>
           </View>
         ) : null}
+        {badgeLabel ? (
+          <View style={styles.posterBadge}>
+            <View style={styles.posterBadgeDot} />
+            <Text style={styles.posterBadgeText}>{badgeLabel}</Text>
+          </View>
+        ) : null}
       </View>
       <Text selectable numberOfLines={2} ellipsizeMode="tail" style={styles.posterTitle}>{item.title}</Text>
       <Text selectable numberOfLines={1} style={styles.metaText}>{meta}</Text>
@@ -5211,12 +5350,12 @@ function EmptyLibrary({ isTablet }: { isTablet: boolean }) {
 
 function createStyles(theme: MobileThemeColors) {
   const { accent, accentSoft, accentBorder, accentForeground, bg, panel, panel2, border, text, muted, faint } = theme;
-  const surface = text === '#ffffff' ? '#080808' : panel2;
+  const surface = panel2;
   const dangerText = text === '#ffffff' ? '#ff9a8f' : '#b42318';
   const errorTextColor = text === '#ffffff' ? '#ff8c78' : '#b42318';
   const ratingSurface = text === '#ffffff' ? 'rgba(245,196,81,0.15)' : '#fff1bf';
-  const posterRatingSurface = text === '#ffffff' ? 'rgba(245,196,81,0.5)' : '#fff1bf';
-  const ratingBorder = text === '#ffffff' ? 'rgba(245,196,81,0.24)' : '#f5c451';
+  const posterRatingSurface = text === '#ffffff' ? 'rgba(0,0,0,0.78)' : '#fff1bf';
+  const ratingBorder = text === '#ffffff' ? 'rgba(245,196,81,0.42)' : '#f5c451';
   const ratingText = text === '#ffffff' ? '#f5c451' : '#000000';
   return StyleSheet.create({
   app: {
@@ -5553,6 +5692,9 @@ function createStyles(theme: MobileThemeColors) {
   main: {
     flex: 1,
   },
+  swipeContainer: {
+    flex: 1,
+  },
   scrollContent: {
     gap: 18,
     padding: 16,
@@ -5587,7 +5729,7 @@ function createStyles(theme: MobileThemeColors) {
     zIndex: 10,
   },
   homeStickyBackground: {
-    backgroundColor: text === '#ffffff' ? 'rgba(18,18,18,0.97)' : 'rgba(255,255,255,0.97)',
+    backgroundColor: text === '#ffffff' ? 'rgba(21,21,27,0.97)' : 'rgba(255,255,255,0.97)',
     bottom: 0,
     left: 0,
     position: 'absolute',
@@ -5601,58 +5743,23 @@ function createStyles(theme: MobileThemeColors) {
     width: 44,
   },
   filterButtonActive: {
-    backgroundColor: accentSoft,
+    backgroundColor: panel2,
     borderRadius: 14,
-  },
-  filterPanel: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 14,
-    padding: 14,
-  },
-  filterPanelHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  filterPanelTitle: {
-    color: text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  filterClearText: {
-    color: accent,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  filterGroup: {
-    gap: 8,
-  },
-  filterLabel: {
-    color: muted,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
   },
   filterChipRow: {
     gap: 8,
-    paddingRight: 4,
+    paddingRight: 16,
   },
   filterChip: {
     alignItems: 'center',
-    backgroundColor: panel2,
-    borderColor: border,
+    backgroundColor: panel,
     borderRadius: 999,
-    borderWidth: 1,
-    minHeight: 34,
+    minHeight: 40,
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
   },
   filterChipSelected: {
-    backgroundColor: accent,
-    borderColor: accent,
+    backgroundColor: text === '#ffffff' ? '#ffffff' : '#000000',
   },
   filterChipText: {
     color: muted,
@@ -5660,7 +5767,7 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
   },
   filterChipTextSelected: {
-    color: accentForeground,
+    color: text === '#ffffff' ? '#000000' : '#ffffff',
   },
   railTitleRow: {
     alignItems: 'center',
@@ -5696,20 +5803,52 @@ function createStyles(theme: MobileThemeColors) {
     justifyContent: 'center',
     width: 44,
   },
+  searchHeader: {
+    gap: 12,
+  },
+  searchHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
   searchBox: {
     alignItems: 'center',
     backgroundColor: panel,
     borderColor: border,
-    borderRadius: 13,
+    borderRadius: 10,
     borderWidth: 1,
+    flex: 1,
     flexDirection: 'row',
-    gap: 10,
-    minHeight: 48,
-    paddingHorizontal: 14,
+    gap: 9,
+    minWidth: 0,
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  searchClearButton: {
+    alignItems: 'center',
+    backgroundColor: panel2,
+    borderRadius: 999,
+    height: 24,
+    justifyContent: 'center',
+    width: 24,
+  },
+  searchCancelButton: {
+    alignItems: 'center',
+    flexShrink: 0,
+    minHeight: 44,
+    justifyContent: 'center',
+    width: 56,
+  },
+  searchCancelText: {
+    color: text,
+    fontSize: 15,
+    fontWeight: '600',
   },
   searchInput: {
     color: text,
     flex: 1,
+    minWidth: 0,
     fontSize: 16,
     fontWeight: '400',
     letterSpacing: 0,
@@ -5723,100 +5862,122 @@ function createStyles(theme: MobileThemeColors) {
   sections: {
     gap: 20,
   },
-  resumeHero: {
-    aspectRatio: 0.94,
+  homeTabStrip: {
+    marginHorizontal: -16,
+  },
+  homeTabRow: {
+    gap: 8,
+    paddingHorizontal: 16,
+  },
+  homeTab: {
+    alignItems: 'center',
+    backgroundColor: panel,
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 7,
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  homeTabActive: {
+    backgroundColor: text === '#ffffff' ? '#ffffff' : '#171717',
+  },
+  homeTabText: {
+    color: muted,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  homeTabTextActive: {
+    color: text === '#ffffff' ? '#171717' : '#ffffff',
+  },
+  heroCarousel: {
+    marginHorizontal: -16,
+  },
+  heroCard: {
     backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 20,
+    borderRadius: 14,
     overflow: 'hidden',
     position: 'relative',
-    width: '100%',
   },
-  resumeHeroMain: {
-    flex: 1,
+  heroCardImage: {
+    ...StyleSheet.absoluteFillObject,
   },
-  resumeHeroImage: {
-    height: '100%',
-    width: '100%',
-  },
-  resumeHeroShade: {
-    bottom: 0,
-    height: '100%',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
+  heroCardShade: {
+    ...StyleSheet.absoluteFillObject,
     zIndex: 1,
   },
-  resumeHeroCopy: {
+  heroCardFooter: {
     bottom: 0,
+    gap: 8,
     left: 0,
-    padding: 12,
+    padding: 16,
     position: 'absolute',
     right: 0,
-    top: 0,
     zIndex: 2,
   },
-  resumeHeroTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(8, 8, 8, 0.9)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  resumeHeroTagText: {
+  heroCardTitle: {
     color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.1,
-  },
-  resumeHeroTextBlock: {
-    bottom: 12,
-    left: 12,
-    position: 'absolute',
-    right: 78,
-  },
-  resumeHeroTitle: {
-    color: '#ffffff',
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     letterSpacing: -0.4,
-    lineHeight: 32,
+    lineHeight: 30,
   },
-  resumeHeroMeta: {
-    color: 'rgba(255,255,255,0.84)',
+  heroCardMeta: {
+    color: 'rgba(255,255,255,0.82)',
     fontSize: 13,
-    fontWeight: '700',
-    marginTop: 7,
+    fontWeight: '600',
   },
-  resumeHeroPlay: {
+  heroPlayButton: {
     alignItems: 'center',
     backgroundColor: accent,
-    borderRadius: 28,
-    borderWidth: 0,
-    bottom: 12,
-    elevation: 4,
-    height: 56,
+    borderRadius: 10,
+    flexDirection: 'row',
+    gap: 8,
+    height: 52,
     justifyContent: 'center',
-    position: 'absolute',
-    right: 12,
-    shadowColor: '#000',
-    shadowOffset: { height: 3, width: 0 },
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    width: 56,
+    marginTop: 6,
+    width: '100%',
   },
-  resumeHeroPlayPressed: {
-    opacity: 0.78,
-    transform: [{ scale: 0.94 }],
+  heroPlayButtonPressed: {
+    opacity: 0.82,
+  },
+  heroPlayButtonText: {
+    color: accentForeground,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  posterBadge: {
+    alignItems: 'center',
+    backgroundColor: '#e5232e',
+    borderRadius: 4,
+    flexDirection: 'row',
+    gap: 4,
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    position: 'absolute',
+    top: 6,
+  },
+  posterBadgeDot: {
+    backgroundColor: '#ffd28a',
+    borderRadius: 999,
+    height: 4,
+    width: 4,
+  },
+  posterBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.1,
   },
   rail: {
     gap: 10,
   },
   sectionTitle: {
     color: text,
-    fontSize: 22,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.3,
   },
   railContent: {
     gap: 14,
@@ -6157,8 +6318,8 @@ function createStyles(theme: MobileThemeColors) {
     fontWeight: '700',
   },
   bottomNav: {
-    backgroundColor: 'rgba(18,18,18,0.98)',
-    borderColor: '#252525',
+    backgroundColor: text === '#ffffff' ? 'rgba(21,21,27,0.96)' : 'rgba(255,255,255,0.94)',
+    borderColor: border,
     borderTopWidth: 1,
     bottom: 0,
     left: 0,
@@ -6334,7 +6495,7 @@ function createStyles(theme: MobileThemeColors) {
     zIndex: 6,
   },
   detailTopBarBackground: {
-    backgroundColor: 'rgba(18,18,18,0.97)',
+    backgroundColor: 'rgba(21,21,27,0.97)',
     borderBottomColor: border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     bottom: 0,
