@@ -912,7 +912,7 @@ export default function VideoPlayer({
     userPausedRef.current = pendingSwap?.wasPaused ?? userPausedRef.current;
     video.volume = pendingSwap?.volume ?? video.volume;
     video.muted = pendingSwap?.muted ?? video.muted;
-    video.playbackRate = pendingSwap?.playbackRate ?? playbackRate;
+    video.playbackRate = pendingSwap?.playbackRate ?? video.playbackRate;
 
     const completePendingSwap = () => {
       const pending = pendingSourceSwapRef.current;
