@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "Loom Media Server",
-  "version": "1.0.42",
+  "version": "1.0.43",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.1.1",
