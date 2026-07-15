@@ -920,7 +920,13 @@ export default function VideoPlayer({
           requestedStartPosition > 10 ? { startSeconds: requestedStartPosition } : {},
         );
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-        if (stream.playbackMode === 'transcode') {
+        if (stream.playbackMode === 'transcode' || stream.isTranscoded) {
+          // Chunked FFmpeg MP4 streams are only seekable inside the currently
+          // encoded window. Starting one at a resume position makes backward
+          // scrubs clamp to that window's beginning, and mixed stream-copy /
+          // audio-encode output can also begin on different source timestamps.
+          // The on-demand HLS stream keeps one absolute, full-duration timeline
+          // and materializes whichever segment the user requests.
           await startTranscodedFallback(initialResumePositionRef.current, {
             force: true,
             allowNearEnd: true,
@@ -1245,10 +1251,10 @@ export default function VideoPlayer({
     const onEnded = () => {
       const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
       const totalDuration = probedDurationRef.current || (Number.isFinite(video.duration) ? video.duration : 0);
-      const endedPosition = clampSeconds(
-        streamIsTranscoded ? transcodeStartSecondsRef.current + currentTime : currentTime,
-        totalDuration || undefined,
-      );
+      const endedPosition = clampSeconds(absoluteMediaSeconds(currentTime, {
+        mode: streamIsTranscoded && !streamIsSeekableRef.current ? 'offset' : 'absolute',
+        offsetSeconds: transcodeStartSecondsRef.current,
+      }), totalDuration || undefined);
       const nearEnoughToComplete = totalDuration > 0
         && totalDuration - endedPosition <= Math.max(END_COMPLETION_TOLERANCE_SECONDS, REPLAY_FROM_START_REMAINING_SECONDS);
       if (nearEnoughToComplete) {
@@ -1665,12 +1671,17 @@ export default function VideoPlayer({
 
     // Only the linear fallback (unknown duration) needs an encoder restart.
     if (streamIsTranscoded && !streamIsSeekableRef.current) {
+      const streamOffset = transcodeStartSecondsRef.current;
       const streamPosition = playerSecondsForAbsolute(nextPosition, {
         mode: 'offset',
-        offsetSeconds: transcodeStartSecondsRef.current,
+        offsetSeconds: streamOffset,
       });
       const streamDuration = directDuration || undefined;
-      const canSeekInCurrentStream = streamPosition >= 0
+      // playerSecondsForAbsolute clamps positions before the current window to
+      // zero. Treating that zero as seekable is what made a backward scrub snap
+      // straight back to the original resume point instead of reloading there.
+      const targetIsInsideCurrentWindow = nextPosition >= streamOffset;
+      const canSeekInCurrentStream = targetIsInsideCurrentWindow
         && !options.restartTranscoded
         && isTimeBuffered(video.buffered, streamPosition);
 
