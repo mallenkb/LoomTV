@@ -349,16 +349,27 @@ export default function VideoPlayer({
     const request = isEpisodePlayback
       ? { mediaId, season: currentSeason, episode: currentEpisode }
       : { mediaId };
-    const load = () => desktopApi.getMediaSegments(request)
-      .then((response) => {
-        if (!cancelled) setMediaSegments(response.segments);
-      })
-      .catch((error) => console.warn('[VideoPlayer] skip marker lookup failed', error));
+    let refreshTimer: number | null = null;
+    const retryDelays = [5000, 15000];
+    const load = async (attempt = 0) => {
+      try {
+        const response = await desktopApi.getMediaSegments(request);
+        if (cancelled) return;
+        setMediaSegments(response.segments);
+        if (response.segments.length === 0 && attempt < retryDelays.length) {
+          refreshTimer = window.setTimeout(() => void load(attempt + 1), retryDelays[attempt]);
+        }
+      } catch (error) {
+        if (!cancelled) console.warn('[VideoPlayer] skip marker lookup failed', error);
+        if (!cancelled && attempt < retryDelays.length) {
+          refreshTimer = window.setTimeout(() => void load(attempt + 1), retryDelays[attempt]);
+        }
+      }
+    };
     void load();
-    const refreshTimer = window.setTimeout(() => void load(), 5000);
     return () => {
       cancelled = true;
-      window.clearTimeout(refreshTimer);
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
     };
   }, [currentEpisode, currentSeason, episodeFiles.length, episodes.length, filePath, mediaId]);
 
