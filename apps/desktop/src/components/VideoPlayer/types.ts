@@ -89,6 +89,7 @@ export interface VideoPlayerProps {
   episodeFiles?: EpisodeFile[];
   currentSeason?: number;
   currentEpisode?: number;
+  startPosition?: number;
   onClose: () => void;
   onEpisodeChange?: (filePath: string, season: number, episode: number) => void;
 }

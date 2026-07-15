@@ -4,7 +4,12 @@ import test from 'node:test';
 import { DEFAULT_SUBTITLE_STYLE, SUBTITLE_STYLE_KEY } from '../src/components/VideoPlayer/constants.ts';
 import {
   clampSubtitleDelay,
+  hasReachedInitialResumePosition,
+  initialHlsStartPosition,
+  initialStreamOffset,
   isTimeBuffered,
+  playbackProgressForExit,
+  resolveInitialPlaybackPosition,
   transcodeSeekRestartOptions,
   isEditableShortcutTarget,
   isPlayerControlTarget,
@@ -135,6 +140,65 @@ test('buffered seek checks tolerate tiny boundary drift without treating gaps as
   assert.equal(isTimeBuffered(buffered, 39.8), true);
   assert.equal(isTimeBuffered(buffered, 9.4), false);
   assert.equal(isTimeBuffered(null, 15), false);
+});
+
+test('continue-watching positions take precedence over a later progress-cache lookup', () => {
+  assert.equal(resolveInitialPlaybackPosition(195, 0), 195);
+  assert.equal(resolveInitialPlaybackPosition(undefined, 195), 195);
+  assert.equal(resolveInitialPlaybackPosition(Number.NaN, 195), 195);
+});
+
+test('initial resume remains pending until the media element reaches the requested position', () => {
+  assert.equal(hasReachedInitialResumePosition(0, 238), false);
+  assert.equal(hasReachedInitialResumePosition(Number.NaN, 238), false);
+  assert.equal(hasReachedInitialResumePosition(237.2, 238), true);
+  assert.equal(hasReachedInitialResumePosition(0, 8), true);
+});
+
+test('windowed direct streams retain the requested absolute resume offset', () => {
+  assert.equal(initialStreamOffset(238.9, true), 238);
+  assert.equal(initialStreamOffset(238.9, false), 0);
+  assert.equal(initialStreamOffset(Number.NaN, true), 0);
+});
+
+test('HLS starts at the resume position unless a windowed transcode already starts there', () => {
+  assert.equal(initialHlsStartPosition({
+    resumePosition: 195,
+    streamIsTranscoded: false,
+    streamIsSeekable: false,
+  }), 195);
+  assert.equal(initialHlsStartPosition({
+    resumePosition: 195,
+    streamIsTranscoded: true,
+    streamIsSeekable: true,
+  }), 195);
+  assert.equal(initialHlsStartPosition({
+    resumePosition: 195,
+    streamIsTranscoded: true,
+    streamIsSeekable: false,
+  }), 0);
+});
+
+test('closing captures the latest absolute position for direct and windowed transcode playback', () => {
+  assert.deepEqual(playbackProgressForExit({
+    videoPosition: 198,
+    snapshotPosition: 195,
+    transcodeStartSeconds: 0,
+    streamIsTranscoded: false,
+    probedDuration: 1628,
+    snapshotDuration: 1628,
+    videoDuration: 1628,
+  }), { position: 198, duration: 1628 });
+
+  assert.deepEqual(playbackProgressForExit({
+    videoPosition: 3,
+    snapshotPosition: 195,
+    transcodeStartSeconds: 195,
+    streamIsTranscoded: true,
+    probedDuration: 1628,
+    snapshotDuration: 1628,
+    videoDuration: 120,
+  }), { position: 198, duration: 1628 });
 });
 
 test('transcoded seek restarts keep the current stream alive while preparing the next one', () => {

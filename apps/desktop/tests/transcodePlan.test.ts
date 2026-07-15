@@ -177,6 +177,26 @@ test('HLS args re-encode when subtitles must be burned in', () => {
   assert.ok(args.includes('-force_key_frames'));
 });
 
+test('subtitle filter paths survive apostrophes and filter-special characters', () => {
+  const args = buildHlsArgs({
+    filePath: "/media/The Terror of Tal'Dorei [SEV].mkv",
+    outputPath,
+    options: {
+      subtitleTrackIndex: 2,
+      subtitleStreamOrdinal: 0,
+      subtitleCodec: 'ass',
+    },
+    preset: 'software',
+    mediaInfo: { videoCodec: 'hevc', audioCodec: 'eac3' },
+  });
+
+  const filter = args[args.indexOf('-vf') + 1] || '';
+  const escaped = '\\'.repeat(3);
+  assert.ok(filter.startsWith('subtitles=filename='));
+  assert.ok(filter.includes(`Tal${escaped}'Dorei ${escaped}[SEV${escaped}].mkv\\:si=0`));
+  assert.equal(filter.includes("subtitles='"), false);
+});
+
 test('embedded subtitle extraction emits a WebVTT stream from the selected subtitle ordinal', () => {
   assert.deepEqual(buildEmbeddedSubtitleVttArgs('/media/movie.mkv', 2), [
     '-nostdin',

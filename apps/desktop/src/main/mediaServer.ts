@@ -44,6 +44,8 @@ import { testMetadataKeys } from './metadataKeys';
 import type { TranscodeOptions } from './mediaTypes';
 import { browserPlaybackPlan } from './transcodeDecision';
 import { isSubtitleFileName } from './fileClassification';
+import { streamStartFailure } from './streamStartErrors';
+import { canWriteResponse, handleResponseErrors, pipeResponse } from './httpResponses';
 import type { AppSettings, LibraryFolderKind, OfficialMetadataCandidate } from '../main';
 
 type MediaServerDeps = typeof import('../main').mediaServerDeps;
@@ -180,6 +182,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
   } = deps;
   return new Promise((resolve, reject) => {
     const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
+      handleResponseErrors(res);
       const corsAllowed = applyCorsHeaders(req, res, deps);
 
       if (req.method === 'OPTIONS') {
@@ -338,13 +341,23 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           .then(async (body) => {
             const base = getLanServerBase();
             if (!base) {
-              writeJson(res, 500, { ok: false, error: 'LAN server address is unavailable.' });
+              writeJson(res, 500, {
+                ok: false,
+                code: 'LAN_ADDRESS_UNAVAILABLE',
+                error: 'The desktop network address is unavailable. Restart Local Network Sharing, then retry.',
+                retryable: true,
+              });
               return;
             }
 
             const filePath = String(body.filePath || '');
             if (!filePath || !fs.existsSync(filePath)) {
-              writeJson(res, 404, { ok: false, error: 'Media file was not found.' });
+              writeJson(res, 404, {
+                ok: false,
+                code: 'MEDIA_NOT_FOUND',
+                error: 'The media file is unavailable. Reconnect its NAS or storage location, then retry.',
+                retryable: true,
+              });
               return;
             }
 
@@ -352,7 +365,12 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
             const subtitleFilePaths = [options.subtitleFilePath, options.secondarySubtitleFilePath].filter(Boolean) as string[];
             for (const subtitleFilePath of subtitleFilePaths) {
               if (!fs.existsSync(subtitleFilePath) || !isSubtitleFileName(subtitleFilePath)) {
-                writeJson(res, 404, { ok: false, error: 'Subtitle file was not found.' });
+                writeJson(res, 404, {
+                  ok: false,
+                  code: 'SUBTITLE_NOT_FOUND',
+                  error: 'The selected subtitle file is unavailable. Reconnect its NAS or storage location, then retry.',
+                  retryable: true,
+                });
                 return;
               }
             }
@@ -365,7 +383,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           })
           .catch((error) => {
             console.error('LAN start HLS API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to start mobile stream.' });
+            writeJson(res, 500, { ok: false, ...streamStartFailure(error) });
           });
         return;
       }
@@ -658,6 +676,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         }
 
         const sendArtwork = (cachedArtwork: NonNullable<ReturnType<typeof getCachedArtwork>>) => {
+          if (!canWriteResponse(res)) return;
           if (cachedArtwork.cachePath) {
             res.writeHead(200, cachedArtworkResponseHeaders(
               cachedArtwork.mimeType,
@@ -665,8 +684,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
               isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
             ));
             const stream = fs.createReadStream(cachedArtwork.cachePath);
-            stream.once('error', () => res.destroy());
-            stream.pipe(res);
+            pipeResponse(stream, res);
             return;
           }
 
@@ -745,8 +763,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           'Cache-Control': isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : 'public, max-age=3600',
         });
         const stream = fs.createReadStream(filePath);
-        stream.once('error', () => safeEndResponse(res));
-        stream.pipe(res);
+        pipeResponse(stream, res);
         return;
       }
 
@@ -786,15 +803,14 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
             try {
               const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
               proc.once('exit', release);
-              proc.stdout?.on('error', () => safeEndResponse(res));
-              proc.stdout?.pipe(res);
+              if (proc.stdout) pipeResponse(proc.stdout, res);
               proc.once('error', (error) => {
                 console.error('thumbnail FFmpeg spawn error:', error);
                 release();
                 safeEndResponse(res);
               });
               proc.stderr?.on('data', () => { /* drain stderr so the pipe never stalls */ });
-              req.on('close', () => {
+              res.once('close', () => {
                 if (!proc.killed) proc.kill('SIGKILL');
               });
             } catch (error) {
@@ -905,15 +921,14 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
               try {
                 const proc = spawn(ffmpegPath, buildEmbeddedSubtitleVttArgs(filePath, streamOrdinal), { stdio: ['ignore', 'pipe', 'pipe'] });
                 proc.once('exit', release);
-                proc.stdout?.on('error', () => safeEndResponse(res));
-                proc.stdout?.pipe(res);
+                if (proc.stdout) pipeResponse(proc.stdout, res);
                 proc.once('error', (error) => {
                   console.error('subtitle FFmpeg spawn error:', error);
                   release();
                   safeEndResponse(res);
                 });
                 proc.stderr?.on('data', () => { /* drain stderr so the pipe never stalls */ });
-                req.on('close', () => {
+                res.once('close', () => {
                   if (!proc.killed) proc.kill('SIGKILL');
                 });
               } catch (error) {
@@ -1071,7 +1086,6 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           // previous process, and the global playback cap holds across
           // in-app playback and LAN sharing.
           registerPlaybackProcess(proc, `stream:${filePath}`, `${playbackPlan.mode} stream for ${path.basename(filePath)}`);
-          proc.stdout?.on('error', () => safeEndResponse(res));
           // While the client keeps consuming output this stream counts as
           // active, so cap eviction prefers genuinely idle encoders.
           let lastStreamTouch = 0;
@@ -1082,8 +1096,8 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
               touchPlaybackProcess(proc);
             }
           });
-          proc.stdout?.pipe(res);
-          req.on('close', () => {
+          if (proc.stdout) pipeResponse(proc.stdout, res);
+          res.once('close', () => {
             if (!proc.killed) proc.kill('SIGKILL');
           });
           proc.stderr?.on('data', (d: Buffer) => console.log('[ffmpeg]', d.toString().trim().split('\n').pop()));
@@ -1093,7 +1107,9 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           });
           proc.once('exit', (code) => {
             if (code !== 0 && code !== null) console.warn(`[ffmpeg] exited with code ${code}`);
-            safeEndResponse(res);
+            // stdout owns the response lifecycle. Ending here can race its
+            // final buffered chunk and trigger ERR_STREAM_WRITE_AFTER_END.
+            if (!proc.stdout) safeEndResponse(res);
           });
         } catch (error) {
           console.error('FFmpeg spawn failed:', error);
@@ -1128,8 +1144,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           });
 
           const stream = fs.createReadStream(filePath, { start, end });
-          stream.pipe(res);
-          req.on('close', () => stream.destroy());
+          pipeResponse(stream, res);
         } else {
           res.writeHead(200, {
             'Content-Length': fileSize,
@@ -1138,8 +1153,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           });
 
           const stream = fs.createReadStream(filePath);
-          stream.pipe(res);
-          req.on('close', () => stream.destroy());
+          pipeResponse(stream, res);
         }
       }
     };

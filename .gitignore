@@ -87,3 +87,7 @@ dist/
 
 # Electron-Forge
 out/
+
+# Apple distribution artifacts
+*.mobileprovision
+*.provisionprofile

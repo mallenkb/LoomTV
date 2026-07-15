@@ -140,19 +140,6 @@ const config: ForgeConfig = {
       for (const outputPath of packageResult.outputPaths) {
         prunePackagedFfmpegResources(outputPath, packageResult.platform);
       }
-
-      if (packageResult.platform !== 'darwin') {
-        return;
-      }
-
-      for (const outputPath of packageResult.outputPaths) {
-        const appPath = path.join(outputPath, 'Loom Media Server.app');
-        if (fs.existsSync(appPath)) {
-          execFileSync('codesign', ['--force', '--deep', '--sign', '-', appPath], {
-            stdio: 'inherit',
-          });
-        }
-      }
     },
   },
   packagerConfig: {

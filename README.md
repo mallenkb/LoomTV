@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.42](docs/releases/v1.0.42.md): improves desktop playback recovery, transcoding behavior, and macOS release validation.
 - [Loom Media Server 1.0.41](docs/releases/v1.0.41.md): removes desktop CI and React warnings and keeps playback-rate updates isolated from media source binding.
 - [Loom Media Server 1.0.40](docs/releases/v1.0.40.md): preserves existing library metadata, artwork selections, and episode state during folder scans.
 - [Loom Media Server 1.0.39](docs/releases/v1.0.39.md): refreshes navigation icons, library layout sizing, settings presentation, and library-section visibility across the app surfaces.
@@ -178,6 +179,26 @@ For release automation:
   - macOS/Windows release builds should be signed in CI for reliable install/update trust.
   - mac signing: configure Electron Builder signing secrets such as `CSC_LINK` and `CSC_KEY_PASSWORD`; notarization also needs Apple credentials such as `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
   - Windows signing: configure Electron Builder signing secrets such as `CSC_LINK` and `CSC_KEY_PASSWORD`.
+
+### macOS external distribution
+
+For a public download site, macOS releases must use a **Developer ID Application** certificate and Apple notarization. The desktop release workflow already passes the required credentials to Electron Builder and will notarize tagged macOS releases when these GitHub Actions secrets are present:
+
+- `MACOS_CSC_LINK`: base64-encoded Developer ID Application `.p12`
+- `MACOS_CSC_KEY_PASSWORD`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+The current Apple Developer account cannot create Developer ID certificates because that action is restricted to the Account Holder. Mac App Distribution certificates are not a substitute for external-site distribution; they are for the Mac App Store.
+
+Until a Developer ID certificate is available, a limited ad-hoc archive can be produced on macOS with:
+
+```sh
+corepack pnpm --filter loom-media-server-desktop dist:adhoc
+```
+
+Ad-hoc builds are not notarized, are not suitable as a normal public release, and require users to approve the first launch manually.
 
 ## Metadata Setup
 

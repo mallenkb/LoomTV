@@ -57,6 +57,7 @@ interface ContinueWatchingBarProps {
     currentEpisode?: number,
     mediaId?: string,
     artwork?: ContinueCandidate['onPlayArgs'][8],
+    startPosition?: number,
   ) => void;
 }
 
@@ -283,7 +284,11 @@ function findLatestCandidate(
 export default function ContinueWatchingBar({ isHidden = false, onPlay }: ContinueWatchingBarProps) {
   const { state } = useLibrary();
   const [progress, setProgress] = useState<Record<string, StoredProgress>>(() => loadProgress());
-  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [dismissedCandidate, setDismissedCandidate] = useState<{
+    key: string;
+    position: number;
+    updatedAt: number;
+  } | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [thumbnailFallbackUrl, setThumbnailFallbackUrl] = useState('');
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
@@ -313,11 +318,13 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   );
 
   useEffect(() => {
-    if (candidate?.key !== dismissedKey) return;
-    if (candidate.fraction <= 0 || candidate.fraction >= WATCHED_THRESHOLD) {
-      setDismissedKey(null);
+    if (!candidate || candidate.key !== dismissedCandidate?.key) return;
+    const hasNewPlayback = candidate.updatedAt > dismissedCandidate.updatedAt
+      || candidate.position > dismissedCandidate.position + 1;
+    if (hasNewPlayback || candidate.fraction <= 0 || candidate.fraction >= WATCHED_THRESHOLD) {
+      setDismissedCandidate(null);
     }
-  }, [candidate, dismissedKey]);
+  }, [candidate, dismissedCandidate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -350,9 +357,9 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
     };
   }, [candidate]);
 
-  if (isHidden || !candidate || dismissedKey === candidate.key) return null;
+  if (isHidden || !candidate || dismissedCandidate?.key === candidate.key) return null;
 
-  const playCandidate = () => onPlay(...candidate.onPlayArgs);
+  const playCandidate = () => onPlay(...candidate.onPlayArgs, candidate.position);
   const thumbnailSrc = thumbnailFailed ? thumbnailFallbackUrl : thumbnailUrl;
 
   return (
@@ -391,13 +398,21 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
             tabIndex={0}
             onClick={(event) => {
               event.stopPropagation();
-              setDismissedKey(candidate.key);
+              setDismissedCandidate({
+                key: candidate.key,
+                position: candidate.position,
+                updatedAt: candidate.updatedAt,
+              });
             }}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();
               event.stopPropagation();
-              setDismissedKey(candidate.key);
+              setDismissedCandidate({
+                key: candidate.key,
+                position: candidate.position,
+                updatedAt: candidate.updatedAt,
+              });
             }}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
             aria-label="Hide continue watching"
