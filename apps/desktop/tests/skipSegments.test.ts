@@ -168,8 +168,9 @@ test('bounded fingerprint alignment detects repeated windows and scores support'
   const other = { frames: [...Array.from({ length: 20 }, next), ...repeated], durationMs: 32_000, windowStartMs: 0 };
   const match = bestFingerprintMatch(target, other, { minDurationMs: 15_000, maxDurationMs: 180_000, minSimilarity: 0.85 });
   assert.ok(match);
-  assert.ok((match?.similarity || 0) >= 0.99);
-  assert.ok(scoreFingerprintMatches([match!, match!, match!, match!]) >= 0.90);
+  if (!match) throw new Error('Expected a fingerprint match.');
+  assert.ok(match.similarity >= 0.99);
+  assert.ok(scoreFingerprintMatches([match, match, match, match]) >= 0.90);
 });
 
 function movieFrame(kind: 'credits' | 'scene', variation = 0): Uint8Array {
@@ -195,7 +196,9 @@ test('bounded movie detector preserves a post-credit scene between two credits i
   ];
   const detected = detectMovieCreditIntervals(Buffer.concat(frames.map((frame) => Buffer.from(frame))), 0, 175_000);
   assert.equal(detected.length, 2);
-  assert.ok(detected[0].endMs !== null && detected[0].endMs! < detected[1].startMs);
+  const firstEndMs = detected[0]?.endMs;
+  const secondStartMs = detected[1]?.startMs;
+  assert.ok(firstEndMs !== null && firstEndMs !== undefined && secondStartMs !== undefined && firstEndMs < secondStartMs);
   assert.equal(detected[1].endMs, null);
   assert.ok(detected.every((interval) => interval.confidence >= 0.90));
 });
