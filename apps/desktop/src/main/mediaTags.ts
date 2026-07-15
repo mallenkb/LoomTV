@@ -2,6 +2,8 @@ export interface MetadataProviderIds {
   tmdbId?: string;
   imdbId?: string;
   tvdbId?: string;
+  malId?: string;
+  malIdBySeason?: Record<string, string>;
 }
 
 export function parseMetadataProviderIds(value: string): MetadataProviderIds {
@@ -22,6 +24,11 @@ export function mergeProviderIds(...sources: MetadataProviderIds[]): MetadataPro
     tmdbId: merged.tmdbId || source.tmdbId,
     imdbId: merged.imdbId || source.imdbId,
     tvdbId: merged.tvdbId || source.tvdbId,
+    malId: merged.malId || source.malId,
+    malIdBySeason: {
+      ...(merged.malIdBySeason || {}),
+      ...(source.malIdBySeason || {}),
+    },
   }), {});
 }
 

@@ -145,6 +145,19 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     };
   }, [show?.backdrop, show?.backdropCandidates?.length, show?.episodeFiles, show?.id, show?.poster, show?.posterCandidates?.length]);
 
+  useEffect(() => {
+    if (!show?.id) return;
+    const ordered = (show.episodeFiles || []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode);
+    const currentIndex = Math.max(0, ordered.findIndex((file) => {
+      const progress = getProgressState(file.filePath, file.localMetadata?.durationSeconds);
+      return progress.inProgress || !progress.watched;
+    }));
+    const timers = ordered.slice(currentIndex, currentIndex + 3).map((file, index) => window.setTimeout(() => {
+      void desktopApi.getMediaSegments({ mediaId: show.id, season: file.season, episode: file.episode }).catch(() => undefined);
+    }, 100 + index * 150));
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [show?.episodeFiles, show?.id]);
+
   if (!show) {
     return (
       <div className="loom-page h-full overflow-y-auto">

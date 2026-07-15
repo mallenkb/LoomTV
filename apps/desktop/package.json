@@ -14,11 +14,11 @@
     "preinstall": "node scripts/enforce-pnpm.cjs",
     "prestart": "node scripts/enforce-pnpm.cjs",
     "prebuild": "node scripts/enforce-pnpm.cjs",
-    "prepackage": "node scripts/enforce-pnpm.cjs",
-    "premake": "node scripts/enforce-pnpm.cjs",
-    "predist": "node scripts/enforce-pnpm.cjs",
-    "prepublish": "node scripts/enforce-pnpm.cjs",
-    "prerelease": "node scripts/enforce-pnpm.cjs",
+    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
+    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
+    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
+    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
+    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
     "prelint": "node scripts/enforce-pnpm.cjs",
     "start": "electron-forge start",
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
@@ -125,6 +125,10 @@
       {
         "from": "resources/icon.icns",
         "to": "icon.icns"
+      },
+      {
+        "from": "resources/fpcalc/NOTICE.md",
+        "to": "fpcalc/NOTICE.md"
       }
     ],
     "asar": true,
@@ -148,6 +152,10 @@
         {
           "from": "resources/ffmpeg/mac",
           "to": "ffmpeg/mac"
+        },
+        {
+          "from": "resources/fpcalc/mac",
+          "to": "fpcalc/mac"
         }
       ],
       "hardenedRuntime": true,
@@ -177,6 +185,10 @@
         {
           "from": "resources/ffmpeg/win",
           "to": "ffmpeg/win"
+        },
+        {
+          "from": "resources/fpcalc/win",
+          "to": "fpcalc/win"
         }
       ],
       "target": [
@@ -203,6 +215,10 @@
         {
           "from": "resources/ffmpeg/linux",
           "to": "ffmpeg/linux"
+        },
+        {
+          "from": "resources/fpcalc/linux",
+          "to": "fpcalc/linux"
         }
       ],
       "target": [

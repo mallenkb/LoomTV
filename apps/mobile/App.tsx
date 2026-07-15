@@ -32,7 +32,15 @@ import { BlurView } from 'expo-blur';
 import { Image as ExpoImage, type ImageContentFit } from 'expo-image';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SecureStore from 'expo-secure-store';
-import { VideoView, useVideoPlayer, type AudioTrack, type SubtitleTrack, type VideoSource } from 'expo-video';
+import {
+  VideoView,
+  useVideoPlayer,
+  type AudioTrack,
+  type PlayerError,
+  type SubtitleTrack,
+  type VideoPlayerStatus,
+  type VideoSource,
+} from 'expo-video';
 import Zeroconf, { type ZeroconfService } from 'react-native-zeroconf';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect as SvgRect, Stop } from 'react-native-svg';
 import {
@@ -60,6 +68,15 @@ import {
   navIcons,
   type IconProps,
 } from './components/LoomIcons';
+import {
+  playbackFailureFromResponse,
+  playbackFailureFromUnknown,
+  playbackLoadFailure,
+  recoveryActionFor,
+  restorePortraitWithRetry,
+  type PlaybackFailure,
+} from './playbackRecovery';
+import { mobileAbsoluteMediaSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
 
 type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
 type SettingsSection = 'library' | 'network' | 'appearance';
@@ -242,7 +259,9 @@ type MobileThemeColors = {
 type ApiResult<T> = {
   ok: boolean;
   data?: T;
+  code?: string;
   error?: string;
+  retryable?: boolean;
 };
 
 type HlsSession = {
@@ -318,8 +337,23 @@ type PlayTarget = {
   subtitles?: SubtitleRecord[];
   startPosition?: number;
   mediaId?: string;
+  mediaType?: MediaItem['type'];
+  season?: number;
+  episode?: number;
   thumbnail?: string;
   thumbnailCandidates?: string[];
+};
+
+type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
+type MediaSegment = {
+  id: string;
+  type: MediaSegmentType;
+  startMs: number;
+  endMs: number | null;
+  confidence: number;
+  source: 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'chromaprint';
+  mediaDurationMs: number;
+  updatedAt: string;
 };
 
 type PlayerAudioOption = {
@@ -613,6 +647,9 @@ function episodePlayTarget(item: MediaItem, ep: EpisodeFile, progress?: Record<s
     subtitles: ep.subtitles || item.subtitles,
     startPosition: state?.inProgress ? state.position : 0,
     mediaId: item.id,
+    mediaType: item.type,
+    season: ep.season,
+    episode: ep.episode,
     thumbnail: ep.still || ep.thumbnail || item.backdrop || item.poster,
     thumbnailCandidates: [
       ep.still,
@@ -646,6 +683,7 @@ function playTargetForItem(item: MediaItem, progress: Record<string, StoredProgr
     subtitles: item.subtitles,
     startPosition: state.inProgress ? state.position : 0,
     mediaId: item.id,
+    mediaType: item.type,
     thumbnail: item.poster || item.backdrop,
     thumbnailCandidates: [
       item.poster,
@@ -656,10 +694,15 @@ function playTargetForItem(item: MediaItem, progress: Record<string, StoredProgr
   };
 }
 
-function videoSourceFor(playbackUrl: string, target?: PlayTarget | null): VideoSource {
+function isHlsPlaybackUrl(playbackUrl: string): boolean {
+  return playbackUrl.includes('.m3u8') || playbackUrl.includes('/hls/');
+}
+
+function videoSourceFor(playbackUrl: string, target?: PlayTarget | null, deviceToken?: string): VideoSource {
   return {
     uri: playbackUrl,
-    contentType: playbackUrl.includes('.m3u8') ? 'hls' : 'auto',
+    contentType: isHlsPlaybackUrl(playbackUrl) ? 'hls' : 'auto',
+    headers: deviceToken ? { Authorization: `Bearer ${deviceToken}` } : undefined,
     metadata: target ? {
       title: target.title,
       artist: target.subtitle,
@@ -698,7 +741,8 @@ function playerDisplayLabels(target: PlayTarget): { topTitle: string; bottomTitl
 }
 
 function hasStreamOptions(options: StreamOptions): boolean {
-  return typeof options.audioTrackIndex === 'number'
+  return Boolean(options.forceTranscode)
+    || typeof options.audioTrackIndex === 'number'
     || typeof options.subtitleTrackIndex === 'number'
     || Boolean(options.subtitleFilePath);
 }
@@ -1300,7 +1344,13 @@ function AppRoot() {
   const [detailItem, setDetailItem] = useState<MediaItem | null>(null);
   const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
   const [miniPlayerTarget, setMiniPlayerTarget] = useState<PlayTarget | null>(null);
+  const orientationLockQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const desiredOrientationLockRef = useRef<ScreenOrientation.OrientationLock | null>(null);
+  const appliedOrientationLockRef = useRef<ScreenOrientation.OrientationLock | null>(null);
   const playerReturnItemRef = useRef<MediaItem | null>(null);
+  const closingPlayerRef = useRef(false);
+  const windowSizeRef = useRef({ height, width });
+  windowSizeRef.current = { height, width };
   const detailItemCacheRef = useRef(new Map<string, MediaItem>());
   const lastDetailByKindRef = useRef(new Map<LibraryKind, MediaItem>());
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
@@ -1318,7 +1368,8 @@ function AppRoot() {
   const [isPreparingStream, setIsPreparingStream] = useState(false);
   const [error, setError] = useState('');
   const [isServerOffline, setIsServerOffline] = useState(false);
-  const [playbackError, setPlaybackError] = useState('');
+  const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null);
+  const [streamRetryNonce, setStreamRetryNonce] = useState(0);
   const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
   const [homeHeaderPinned, setHomeHeaderPinned] = useState(false);
   const homeHeaderPinnedRef = useRef(false);
@@ -1562,9 +1613,21 @@ function AppRoot() {
   }, [connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag]);
 
   // Browsing is portrait; video playback is locked to either landscape direction.
+  // Serialize and deduplicate native lock requests: overlapping lockAsync calls can
+  // deadlock Expo's iOS orientation registry while it dispatches an orientation event.
   useEffect(() => {
     const lock = playTarget ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP;
-    void ScreenOrientation.lockAsync(lock).catch(() => {});
+    if (desiredOrientationLockRef.current === lock && appliedOrientationLockRef.current === lock) return;
+
+    desiredOrientationLockRef.current = lock;
+    orientationLockQueueRef.current = orientationLockQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        if (desiredOrientationLockRef.current !== lock || appliedOrientationLockRef.current === lock) return;
+        await ScreenOrientation.lockAsync(lock);
+        appliedOrientationLockRef.current = lock;
+      })
+      .catch(() => {});
   }, [playTarget]);
 
   useEffect(() => {
@@ -1652,7 +1715,6 @@ function AppRoot() {
   }, [activeKind]);
 
   const playHomeItem = useCallback((item: MediaItem) => {
-    void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
     playerReturnItemRef.current = item;
     setDetailItem(null);
     setMiniPlayerTarget(null);
@@ -1689,10 +1751,10 @@ function AppRoot() {
           return;
         }
 
-        await player.replaceAsync(videoSourceFor(playbackUrl, playTarget));
+        await player.replaceAsync(videoSourceFor(playbackUrl, playTarget, connection?.deviceToken));
       } catch (nextError) {
         if (!cancelled) {
-          setPlaybackError(nextError instanceof Error ? nextError.message : 'Could not load this stream.');
+          setPlaybackFailure(playbackLoadFailure());
         }
       }
     }
@@ -1701,13 +1763,55 @@ function AppRoot() {
     return () => {
       cancelled = true;
     };
-  }, [playbackUrl, player]);
+  }, [connection?.deviceToken, playbackUrl, player]);
 
   useEffect(() => {
     if (!playbackUrl) return;
 
-    const statusSubscription = player.addListener?.('statusChange', (payload: { status: string }) => {
+    const retryWithCompatibleStream = () => {
+      if (isHlsPlaybackUrl(playbackUrl) || streamOptions.forceTranscode) return false;
+
+      let resumePosition = 0;
+      try {
+        resumePosition = Number(player.currentTime || pendingSeekRef.current || 0);
+      } catch {
+        resumePosition = pendingSeekRef.current || 0;
+      }
+
+      shouldAutoplayRef.current = true;
+      userPausedRef.current = false;
+      setPlaybackUrl(null);
+      setPlaybackFailure(null);
+      setStreamOptions((current) => ({
+        ...current,
+        forceTranscode: true,
+        ...(resumePosition > 2 ? { startSeconds: resumePosition } : {}),
+      }));
+      return true;
+    };
+
+    const directPlaybackTimeout = !isHlsPlaybackUrl(playbackUrl) && !streamOptions.forceTranscode
+      ? setTimeout(() => {
+          if (player.status !== 'readyToPlay') retryWithCompatibleStream();
+        }, 12000)
+      : null;
+
+    const statusSubscription = player.addListener?.('statusChange', (payload: {
+      status: VideoPlayerStatus;
+      error?: PlayerError;
+    }) => {
+      if (payload.status === 'error') {
+        if (directPlaybackTimeout) clearTimeout(directPlaybackTimeout);
+        if (retryWithCompatibleStream()) return;
+
+        shouldAutoplayRef.current = false;
+        setPlaybackUrl(null);
+        setPlaybackFailure(playbackLoadFailure());
+        return;
+      }
+
       if (payload.status === 'readyToPlay' && shouldAutoplayRef.current && !userPausedRef.current) {
+        if (directPlaybackTimeout) clearTimeout(directPlaybackTimeout);
         try {
           if (pendingSeekRef.current > 10) {
             player.currentTime = pendingSeekRef.current;
@@ -1724,8 +1828,6 @@ function AppRoot() {
     const playingSubscription = player.addListener?.('playingChange', (event: { isPlaying: boolean }) => {
       if (event.isPlaying) {
         userPausedRef.current = false;
-      } else {
-        userPausedRef.current = true;
       }
     });
 
@@ -1739,12 +1841,13 @@ function AppRoot() {
     });
 
     return () => {
+      if (directPlaybackTimeout) clearTimeout(directPlaybackTimeout);
       statusSubscription?.remove?.();
       playingSubscription?.remove?.();
       sourceChangeSubscription?.remove?.();
       endSubscription?.remove?.();
     };
-  }, [playbackUrl, player]);
+  }, [playbackUrl, player, streamOptions.forceTranscode]);
 
   useEffect(() => {
     if (!playbackUrl) return;
@@ -1769,7 +1872,7 @@ function AppRoot() {
         return;
       }
 
-      setPlaybackError('');
+      setPlaybackFailure(null);
       setIsPreparingStream(true);
       try {
         const shouldUseHls = playTarget.transcode || hasStreamOptions(streamOptions);
@@ -1797,13 +1900,17 @@ function AppRoot() {
         });
         const result = (await response.json()) as ApiResult<HlsSession>;
         if (!response.ok || !result.ok || !result.data?.playlistUrl) {
-          throw new Error(result.error || `Could not prepare stream (${response.status}).`);
+          if (!cancelled) {
+            setPlaybackUrl(null);
+            setPlaybackFailure(playbackFailureFromResponse(response.status, result));
+          }
+          return;
         }
         if (!cancelled) setPlaybackUrl(playbackUrlWithAnchor(result.data.playlistUrl, options.startSeconds));
       } catch (nextError) {
         if (!cancelled) {
           setPlaybackUrl(null);
-          setPlaybackError(nextError instanceof Error ? nextError.message : 'Could not prepare this stream.');
+          setPlaybackFailure(playbackFailureFromUnknown(nextError));
         }
       } finally {
         if (!cancelled) setIsPreparingStream(false);
@@ -1814,7 +1921,13 @@ function AppRoot() {
     return () => {
       cancelled = true;
     };
-  }, [connection?.baseUrl, connection?.deviceToken, playTarget, streamOptionsKey]);
+  }, [connection?.baseUrl, connection?.deviceToken, playTarget, streamOptionsKey, streamRetryNonce]);
+
+  const retryPlayback = useCallback(() => {
+    setPlaybackFailure(null);
+    setPlaybackUrl(null);
+    setStreamRetryNonce((current) => current + 1);
+  }, []);
 
   async function syncPlaybackProgress(target = playTarget) {
     if (!connection || !target) return;
@@ -1857,12 +1970,12 @@ function AppRoot() {
     }
   }
 
-  const closePlayer = useCallback(() => {
-    // Touch the native player defensively: if it is already torn down, the
-    // currentTime getter throws, and bailing out here used to leave the
-    // landscape player mounted in a portrait window (black screen below a
-    // squashed video). The portrait re-lock is handled by the playTarget
-    // effect, which fires after the player has actually unmounted.
+  const closePlayer = useCallback(async () => {
+    if (closingPlayerRef.current) return;
+    closingPlayerRef.current = true;
+
+    // Keep the player mounted until Expo confirms the portrait lock. This
+    // prevents the library from being revealed in a stale landscape layout.
     let resumePosition = 0;
     try {
       resumePosition = Number(player.currentTime || 0);
@@ -1873,33 +1986,55 @@ function AppRoot() {
     const target = playTarget;
     const returnItemId = playerReturnItemRef.current?.id || target?.mediaId || '';
     void syncPlaybackProgress(playTarget || undefined);
-    setPlayTarget(null);
-    setPlaybackUrl(null);
-    setStreamOptions({});
-    setPlaybackError('');
-    if (target) {
-      setMiniPlayerTarget({
-        ...target,
-        startPosition: Number.isFinite(resumePosition) && resumePosition > 0
-          ? resumePosition
-          : target.startPosition,
-      });
+
+    const portraitLock = ScreenOrientation.OrientationLock.PORTRAIT_UP;
+    desiredOrientationLockRef.current = portraitLock;
+    await orientationLockQueueRef.current.catch(() => {});
+    const portraitRestored = await restorePortraitWithRetry(
+      () => ScreenOrientation.lockAsync(portraitLock),
+      () => ScreenOrientation.unlockAsync(),
+    );
+    appliedOrientationLockRef.current = portraitRestored ? portraitLock : null;
+
+    // lockAsync can resolve before React Native publishes the new window frame.
+    // Keep the black player overlay mounted until the portrait-sized root has
+    // committed so the library never appears with the old landscape height.
+    for (let frame = 0; frame < 12; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (windowSizeRef.current.height >= windowSizeRef.current.width) break;
     }
-    playerReturnItemRef.current = null;
-    if (returnItemId && detailItem?.id !== returnItemId) {
-      const cachedReturnItem = detailItemCacheRef.current.get(returnItemId)
-        || allItems(connection?.library || {}).find((item) => item.id === returnItemId);
-      if (cachedReturnItem) {
-        lastDetailByKindRef.current.set(activeKind, cachedReturnItem);
-        setDetailItem(cachedReturnItem);
+
+    try {
+      setPlayTarget(null);
+      setPlaybackUrl(null);
+      setStreamOptions({});
+      setPlaybackFailure(null);
+      if (target && !playbackFailure) {
+        setMiniPlayerTarget({
+          ...target,
+          startPosition: Number.isFinite(resumePosition) && resumePosition > 0
+            ? resumePosition
+            : target.startPosition,
+        });
       }
+      playerReturnItemRef.current = null;
+      if (returnItemId && detailItem?.id !== returnItemId) {
+        const cachedReturnItem = detailItemCacheRef.current.get(returnItemId)
+          || allItems(connection?.library || {}).find((item) => item.id === returnItemId);
+        if (cachedReturnItem) {
+          lastDetailByKindRef.current.set(activeKind, cachedReturnItem);
+          setDetailItem(cachedReturnItem);
+        }
+      }
+    } finally {
+      closingPlayerRef.current = false;
     }
-  }, [activeKind, connection?.library, detailItem?.id, playTarget, player]);
+  }, [activeKind, connection?.library, detailItem?.id, playTarget, playbackFailure, player]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (playTarget) {
-        closePlayer();
+        void closePlayer();
         return true;
       }
       if (detailItem) {
@@ -2477,7 +2612,6 @@ function AppRoot() {
           setSearchOpen(true);
         }}
         onPlay={(target) => {
-          void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
           playerReturnItemRef.current = detailItem;
           setMiniPlayerTarget(null);
           setStreamOptions({});
@@ -2505,7 +2639,6 @@ function AppRoot() {
         onDismiss={() => setMiniPlayerTarget(null)}
         onOpen={() => {
           if (!miniPlayerTarget) return;
-          void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
           playerReturnItemRef.current = detailItem;
           setStreamOptions({});
           setPlayTarget(miniPlayerTarget);
@@ -2518,11 +2651,12 @@ function AppRoot() {
         deviceToken={connection?.deviceToken || ''}
         isPreparing={isPreparingStream}
         target={playTarget}
-        error={playbackError}
+        failure={playbackFailure}
         playbackUrl={playbackUrl}
         player={player}
         streamOptions={streamOptions}
-        onClose={closePlayer}
+        onClose={() => { void closePlayer(); }}
+        onRetry={retryPlayback}
         onStreamOptionsChange={setStreamOptions}
       />
     </View>
@@ -3807,10 +3941,11 @@ function EpisodeRow({
 function PlayerModal({
   baseUrl,
   deviceToken,
-  error,
+  failure,
   isPreparing,
   target,
   onClose,
+  onRetry,
   onStreamOptionsChange,
   playbackUrl,
   player,
@@ -3818,10 +3953,11 @@ function PlayerModal({
 }: {
   baseUrl: string;
   deviceToken: string;
-  error: string;
+  failure: PlaybackFailure | null;
   isPreparing: boolean;
   target: PlayTarget | null;
   onClose: () => void;
+  onRetry: () => void;
   onStreamOptionsChange: (options: StreamOptions) => void;
   playbackUrl: string | null;
   player: ReturnType<typeof useVideoPlayer>;
@@ -3834,10 +3970,11 @@ function PlayerModal({
       key={target.streamPath}
       baseUrl={baseUrl}
       deviceToken={deviceToken}
-      error={error}
+      failure={failure}
       isPreparing={isPreparing}
       target={target}
       onClose={onClose}
+      onRetry={onRetry}
       onStreamOptionsChange={onStreamOptionsChange}
       playbackUrl={playbackUrl}
       player={player}
@@ -3930,10 +4067,11 @@ function PlayerSegmentedControl<T extends string | number>({
 function PlayerContent({
   baseUrl,
   deviceToken,
-  error,
+  failure,
   isPreparing,
   target,
   onClose,
+  onRetry,
   onStreamOptionsChange,
   playbackUrl,
   player,
@@ -3941,10 +4079,11 @@ function PlayerContent({
 }: {
   baseUrl: string;
   deviceToken: string;
-  error: string;
+  failure: PlaybackFailure | null;
   isPreparing: boolean;
   target: PlayTarget;
   onClose: () => void;
+  onRetry: () => void;
   onStreamOptionsChange: (options: StreamOptions) => void;
   playbackUrl: string | null;
   player: ReturnType<typeof useVideoPlayer>;
@@ -3969,6 +4108,8 @@ function PlayerContent({
   const [nativeSubtitleTracks, setNativeSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [activeAudioKey, setActiveAudioKey] = useState('');
   const [activeSubtitleKey, setActiveSubtitleKey] = useState('off');
+  const [mediaSegments, setMediaSegments] = useState<MediaSegment[]>([]);
+  const recoveryAction = failure ? recoveryActionFor(failure) : null;
   const [trackPreferences, setTrackPreferences] = useState<PlaybackTrackPreferences>({});
   const [gestureLevel, setGestureLevel] = useState<{ kind: PlayerVerticalGesture; value: number } | null>(null);
   const preferenceScope = useMemo(() => playbackPreferenceScope(target), [target.mediaId, target.streamPath]);
@@ -4079,6 +4220,41 @@ function PlayerContent({
   }, [baseUrl, deviceToken, preferenceScope]);
 
   useEffect(() => {
+    setMediaSegments([]);
+    if (!baseUrl || !deviceToken || !target.mediaId || target.mediaType === 'movie'
+      || typeof target.season !== 'number' || typeof target.episode !== 'number') return;
+    const controller = new AbortController();
+    let cancelled = false;
+    const params = new URLSearchParams({
+      mediaId: target.mediaId,
+      season: String(target.season),
+      episode: String(target.episode),
+    });
+    const load = async () => {
+      try {
+        const response = await fetch(`${baseUrl}/api/playback/segments?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${deviceToken}` },
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const payload = await response.json() as { segments?: MediaSegment[] };
+        if (!cancelled && Array.isArray(payload.segments)) setMediaSegments(payload.segments);
+      } catch (error) {
+        if (!cancelled && !(error instanceof Error && error.name === 'AbortError')) {
+          console.warn('[mobile-player] skip marker lookup failed', error);
+        }
+      }
+    };
+    void load();
+    const refreshTimer = setTimeout(() => void load(), 5000);
+    return () => {
+      cancelled = true;
+      clearTimeout(refreshTimer);
+      controller.abort();
+    };
+  }, [baseUrl, deviceToken, target.episode, target.mediaId, target.mediaType, target.season]);
+
+  useEffect(() => {
     if (!activeAudioKey && audioOptions[0]) setActiveAudioKey(audioOptions[0].key);
   }, [activeAudioKey, audioOptions]);
 
@@ -4097,7 +4273,7 @@ function PlayerContent({
     };
 
     const timeSubscription = player.addListener?.('timeUpdate', (event: { currentTime: number }) => {
-      setPosition(Number(event.currentTime) || 0);
+      setPosition(mobileAbsoluteMediaSeconds(Number(event.currentTime) || 0));
       const nextDuration = Number(player.duration || 0);
       if (Number.isFinite(nextDuration) && nextDuration > 0) setDuration(nextDuration);
     });
@@ -4166,7 +4342,8 @@ function PlayerContent({
 
   const seekToSeconds = (seconds: number) => {
     bumpControls();
-    const nextTime = Math.max(0, duration > 0 ? Math.min(duration, seconds) : seconds);
+    const absoluteTime = Math.max(0, duration > 0 ? Math.min(duration, seconds) : seconds);
+    const nextTime = mobilePlayerSecondsForAbsolute(absoluteTime);
     // Transcoded streams are served as a full VOD playlist whose segments the
     // desktop materializes on demand, so every jump — direct-play or HLS — is a
     // native player seek. Restarting the transcode per skip (the old path) forced
@@ -4426,6 +4603,17 @@ function PlayerContent({
   };
 
   const progressFractionValue = duration > 0 ? Math.min(1, position / duration) : 0;
+  const activeMediaSegment = useMemo(() => mediaSegments.find((segment) => {
+    if (segment.type === 'preview') return false;
+    const endSeconds = (segment.endMs ?? segment.mediaDurationMs) / 1000;
+    return position >= segment.startMs / 1000 && position < endSeconds - 0.25;
+  }) || null, [mediaSegments, position]);
+  const activeSegmentLabel = activeMediaSegment ? ({
+    intro: 'Intro',
+    recap: 'Recap',
+    credits: 'Credits',
+    preview: 'Preview',
+  } as const)[activeMediaSegment.type] : '';
   const displayLabels = playerDisplayLabels(target);
   const controlVerticalPadding = Math.max(insets.top, insets.bottom, 16);
   const aspectRatioValue = aspectRatio === 'default' ? undefined : aspectRatio;
@@ -4470,6 +4658,18 @@ function PlayerContent({
               </View>
               <Text style={styles.playerGestureValue}>{Math.round(gestureLevel.value * 100)}%</Text>
             </View>
+          ) : null}
+          {activeMediaSegment ? (
+            <Pressable
+              onPress={() => seekToSeconds(activeMediaSegment.endMs === null
+                ? Math.max(activeMediaSegment.startMs / 1000, activeMediaSegment.mediaDurationMs / 1000 - 1)
+                : activeMediaSegment.endMs / 1000)}
+              style={({ pressed }) => [styles.playerSegmentSkip, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={`Skip ${activeSegmentLabel}`}
+            >
+              <Text style={styles.playerSegmentSkipText}>Skip {activeSegmentLabel}</Text>
+            </Pressable>
           ) : null}
           <Animated.View
             style={[StyleSheet.absoluteFill, { opacity: controlsOpacity }]}
@@ -4695,17 +4895,34 @@ function PlayerContent({
           <View style={styles.playerStatus}>
             {isPreparing ? <ActivityIndicator color={accent} size="large" /> : null}
             <Text selectable style={styles.playerStatusText}>
-              {error || (isPreparing ? 'Preparing stream…' : 'Starting playback…')}
+              {failure?.message || (isPreparing ? 'Preparing stream…' : 'Starting playback…')}
             </Text>
             <Text selectable numberOfLines={2} style={styles.playerStatusTitle}>{target.title}</Text>
-            {error ? (
+            {failure ? (
               <>
-                <Text selectable style={styles.playerRecoveryText}>
-                  The desktop may be offline, the NAS share may need to reconnect, or this file may require a transcode the host could not start.
-                </Text>
-                <Pressable style={({ pressed }) => [styles.playerStatusButton, pressed && styles.pressed]} onPress={onClose}>
-                  <Text style={styles.playerStatusButtonText}>Back to library</Text>
-                </Pressable>
+                {recoveryAction ? (
+                  <Text selectable style={styles.playerRecoveryText}>{recoveryAction.description}</Text>
+                ) : null}
+                <View style={styles.playerRecoveryActions}>
+                  {recoveryAction ? (
+                    <Pressable
+                      style={({ pressed }) => [styles.playerStatusButton, styles.playerStatusButtonPrimary, pressed && styles.pressed]}
+                      onPress={onRetry}
+                      accessibilityRole="button"
+                      accessibilityLabel={recoveryAction.label}
+                    >
+                      <Text style={styles.playerStatusButtonPrimaryText}>{recoveryAction.label}</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable
+                    style={({ pressed }) => [styles.playerStatusButton, pressed && styles.pressed]}
+                    onPress={onClose}
+                    accessibilityRole="button"
+                    accessibilityLabel="Back to library"
+                  >
+                    <Text style={styles.playerStatusButtonText}>Back to library</Text>
+                  </Pressable>
+                </View>
               </>
             ) : null}
           </View>
@@ -7245,6 +7462,13 @@ function createStyles(theme: MobileThemeColors) {
     maxWidth: 420,
     textAlign: 'center',
   },
+  playerRecoveryActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+  },
   playerStatusButton: {
     alignItems: 'center',
     borderColor: 'rgba(255,255,255,0.28)',
@@ -7253,6 +7477,15 @@ function createStyles(theme: MobileThemeColors) {
     minHeight: 46,
     justifyContent: 'center',
     paddingHorizontal: 18,
+  },
+  playerStatusButtonPrimary: {
+    backgroundColor: accent,
+    borderColor: accent,
+  },
+  playerStatusButtonPrimaryText: {
+    color: '#000000',
+    fontSize: 14,
+    fontWeight: '800',
   },
   playerStatusButtonText: {
     color: '#ffffff',
@@ -7270,7 +7503,6 @@ function createStyles(theme: MobileThemeColors) {
     width: 44,
   },
   playerControls: {
-    backgroundColor: 'rgba(0,0,0,0.42)',
     bottom: 0,
     left: 0,
     position: 'absolute',
@@ -7279,7 +7511,6 @@ function createStyles(theme: MobileThemeColors) {
   },
   playerTopRow: {
     alignItems: 'center',
-    backgroundColor: '#000000',
     flexDirection: 'row',
     gap: 4,
     justifyContent: 'space-between',
@@ -7536,6 +7767,25 @@ function createStyles(theme: MobileThemeColors) {
     position: 'absolute',
     top: '50%',
     width: 164,
+  },
+  playerSegmentSkip: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(12,12,12,0.86)',
+    borderColor: 'rgba(255,255,255,0.28)',
+    borderRadius: 10,
+    borderWidth: 1,
+    bottom: 94,
+    minHeight: 44,
+    paddingHorizontal: 20,
+    position: 'absolute',
+    right: 28,
+    justifyContent: 'center',
+    zIndex: 40,
+  },
+  playerSegmentSkipText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
   },
   playerGestureTitle: {
     color: '#ffffff',

@@ -27,6 +27,9 @@ interface PlaybackMeta {
 }
 
 const playbackProcesses = new Map<ChildProcess, PlaybackMeta>();
+const playbackActivityLeases = new Map<string, { label: string; touchedAt: number }>();
+const analysisProcesses = new Set<ChildProcess>();
+let lastPlaybackActivityAt = 0;
 
 function killProcess(proc: ChildProcess): void {
   try {
@@ -34,6 +37,57 @@ function killProcess(proc: ChildProcess): void {
   } catch {
     // The process may already be gone.
   }
+}
+
+function interruptAnalysis(): void {
+  for (const proc of [...analysisProcesses]) killProcess(proc);
+  analysisProcesses.clear();
+}
+
+function notePlaybackActivity(): void {
+  lastPlaybackActivityAt = Date.now();
+  interruptAnalysis();
+}
+
+export function setPlaybackActivityLease(key: string, active: boolean, label = key): void {
+  const safeKey = String(key || '').trim();
+  if (!safeKey) return;
+  if (active) {
+    playbackActivityLeases.set(safeKey, { label, touchedAt: Date.now() });
+    notePlaybackActivity();
+  } else {
+    playbackActivityLeases.delete(safeKey);
+    lastPlaybackActivityAt = Date.now();
+  }
+}
+
+export function acquirePlaybackActivityLease(key: string, label = key): () => void {
+  setPlaybackActivityLease(key, true, label);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    setPlaybackActivityLease(key, false, label);
+  };
+}
+
+export function registerAnalysisProcess(proc: ChildProcess): void {
+  if (isPlaybackActivityActive()) {
+    killProcess(proc);
+    return;
+  }
+  analysisProcesses.add(proc);
+  const forget = () => analysisProcesses.delete(proc);
+  proc.once('exit', forget);
+  proc.once('error', forget);
+}
+
+export function isPlaybackActivityActive(): boolean {
+  return playbackActivityLeases.size > 0 || playbackProcesses.size > 0;
+}
+
+export function millisecondsSincePlaybackActivity(): number {
+  return lastPlaybackActivityAt ? Date.now() - lastPlaybackActivityAt : Number.POSITIVE_INFINITY;
 }
 
 function evictLeastRecentPlayback(): void {
@@ -57,6 +111,7 @@ function evictLeastRecentPlayback(): void {
  * global cap is enforced across in-app playback and LAN sharing combined.
  */
 export function registerPlaybackProcess(proc: ChildProcess, key: string, label: string): void {
+  notePlaybackActivity();
   for (const [existing, meta] of [...playbackProcesses]) {
     if (existing !== proc && meta.key === key) {
       killProcess(existing);
@@ -78,7 +133,10 @@ export function registerPlaybackProcess(proc: ChildProcess, key: string, label: 
 export function touchPlaybackProcess(proc: ChildProcess | null | undefined): void {
   if (!proc) return;
   const meta = playbackProcesses.get(proc);
-  if (meta) meta.lastTouchAt = Date.now();
+  if (meta) {
+    meta.lastTouchAt = Date.now();
+    lastPlaybackActivityAt = meta.lastTouchAt;
+  }
 }
 
 interface ToolWaiter {
@@ -137,11 +195,15 @@ export function acquireFfmpegToolSlot(label: string): Promise<() => void> {
 export function killAllManagedFfmpeg(): void {
   for (const proc of [...playbackProcesses.keys()]) killProcess(proc);
   playbackProcesses.clear();
+  interruptAnalysis();
+  playbackActivityLeases.clear();
 }
 
-export function managedFfmpegCounts(): { playback: number; tools: number; queuedTools: number } {
+export function managedFfmpegCounts(): { playback: number; playbackLeases: number; analysis: number; tools: number; queuedTools: number } {
   return {
     playback: playbackProcesses.size,
+    playbackLeases: playbackActivityLeases.size,
+    analysis: analysisProcesses.size,
     tools: activeToolCount,
     queuedTools: toolWaiters.length,
   };

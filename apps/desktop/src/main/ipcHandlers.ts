@@ -9,6 +9,7 @@ import { getMimeType } from './mimeTypes';
 import type { ApiResult, ProbeResult, TranscodeOptions, TranscodeSession } from './mediaTypes';
 import type { MetadataKeyTestResult } from './metadataKeys';
 import type { BrowserPlaybackPlan } from './transcodeDecision';
+import type { ManualMediaSegmentInput, MediaSegmentRequest, MediaSegmentResponse } from './skipSegments/types';
 
 export type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 export type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -82,6 +83,13 @@ export interface IpcHandlerDependencies<
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => void;
   getPlaybackTrackPreferences: (scope?: string) => unknown;
   savePlaybackTrackPreferences: (scope: string, preferences: unknown) => unknown;
+  getMediaSegments: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
+  saveManualMediaSegment: (input: ManualMediaSegmentInput) => MediaSegmentResponse;
+  deleteManualMediaSegment: (input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
+  undoManualMediaSegment: (input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
+  setPlaybackActivityLease: (key: string, active: boolean, label?: string) => void;
+  getLocalSegmentAnalysisStatus: () => unknown;
+  analyzeLocalSegmentSeason: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
   customArtworkForRenderer: (mediaId: string) => unknown;
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => void;
   getOfficialMetadataCandidates: (mediaId: string) => unknown;
@@ -293,6 +301,21 @@ export function registerIpcHandlers<
   ipcMain.handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope));
   ipcMain.handle('playback-track-preferences:save', (_event, scope: string, preferences: unknown) =>
     deps.savePlaybackTrackPreferences(scope, preferences || {}));
+  ipcMain.handle('playback:segments:get', (_event, request: MediaSegmentRequest) =>
+    deps.getMediaSegments(request || { mediaId: '' }));
+  ipcMain.handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) =>
+    deps.saveManualMediaSegment(input));
+  ipcMain.handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) =>
+    deps.deleteManualMediaSegment(input));
+  ipcMain.handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) =>
+    deps.undoManualMediaSegment(input));
+  ipcMain.handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
+    deps.setPlaybackActivityLease(key, Boolean(active), label);
+    return true;
+  });
+  ipcMain.handle('playback:analysis:status', () => deps.getLocalSegmentAnalysisStatus());
+  ipcMain.handle('playback:analysis:season', (_event, mediaId: string, season: number) =>
+    deps.analyzeLocalSegmentSeason(String(mediaId || ''), Number(season) || 1));
   ipcMain.handle('artwork:get', (_event, mediaId: string) => deps.customArtworkForRenderer(mediaId));
   ipcMain.handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
     deps.saveCustomArtwork(mediaId, target, dataUrl);
