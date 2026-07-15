@@ -59,8 +59,8 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 export function theIntroDbLookupKey(
   ids: MetadataProviderIds,
-  season: number,
-  episode: number,
+  season?: number,
+  episode?: number,
 ): string | null {
   const identity = ids.tmdbId
     ? `tmdb:${ids.tmdbId}`
@@ -69,13 +69,16 @@ export function theIntroDbLookupKey(
       : ids.imdbId
         ? `imdb:${ids.imdbId}`
         : '';
-  return identity ? `${identity}:s${season}:e${episode}` : null;
+  if (!identity) return null;
+  return season === undefined || episode === undefined
+    ? `${identity}:movie`
+    : `${identity}:s${season}:e${episode}`;
 }
 
 export async function fetchTheIntroDbSegments(input: {
   ids: MetadataProviderIds;
-  season: number;
-  episode: number;
+  season?: number;
+  episode?: number;
   durationMs: number;
 }): Promise<ProviderLookupResult> {
   const lookupKey = theIntroDbLookupKey(input.ids, input.season, input.episode);
@@ -85,8 +88,10 @@ export async function fetchTheIntroDbSegments(input: {
   if (input.ids.tmdbId) url.searchParams.set('tmdb_id', input.ids.tmdbId);
   else if (input.ids.tvdbId) url.searchParams.set('tvdb_id', input.ids.tvdbId);
   else if (input.ids.imdbId) url.searchParams.set('imdb_id', input.ids.imdbId);
-  url.searchParams.set('season', String(input.season));
-  url.searchParams.set('episode', String(input.episode));
+  if (input.season !== undefined && input.episode !== undefined) {
+    url.searchParams.set('season', String(input.season));
+    url.searchParams.set('episode', String(input.episode));
+  }
   url.searchParams.set('duration_ms', String(Math.round(input.durationMs)));
 
   try {

@@ -2,13 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bestFingerprintMatch, scoreFingerprintMatches } from '../src/main/skipSegments/fingerprintMatcher.ts';
 import {
+  detectMovieCreditIntervals,
+  MOVIE_CREDIT_FRAME_HEIGHT,
+  MOVIE_CREDIT_FRAME_WIDTH,
+} from '../src/main/skipSegments/movieCreditsDetector.ts';
+import {
   chapterType,
   deduplicateProviderSegments,
   durationIsCompatible,
   normalizeSegment,
   resolveCandidates,
 } from '../src/main/skipSegments/normalize.ts';
-import { fetchAniSkipSegments, fetchTheIntroDbSegments } from '../src/main/skipSegments/providers.ts';
+import { fetchAniSkipSegments, fetchTheIntroDbSegments, theIntroDbLookupKey } from '../src/main/skipSegments/providers.ts';
 import type { MediaSegmentCandidate } from '../src/main/skipSegments/types.ts';
 
 function candidate(source: MediaSegmentCandidate['source'], confidence: number): MediaSegmentCandidate {
@@ -56,6 +61,23 @@ test('same-source overlaps deduplicate while conflicting intervals are rejected'
   ], 1_000_000).length, 0);
 });
 
+test('disjoint movie credits survive provider normalization and source resolution', () => {
+  const base = { type: 'credits' as const, source: 'theintrodb' as const, confidence: 0.92 };
+  const normalized = deduplicateProviderSegments([
+    { ...base, startMs: 6_000_000, endMs: 6_180_000 },
+    { ...base, startMs: 6_000_500, endMs: 6_180_000 },
+    { ...base, startMs: 6_240_000, endMs: null },
+  ], 6_600_000);
+  assert.equal(normalized.length, 2);
+  const candidates = normalized.map((segment, index): MediaSegmentCandidate => ({
+    ...segment,
+    id: `credits-${index}`,
+    mediaId: 'movie', season: 0, episode: 0, filePath: '/movie.mkv', fileRevision: 'movie-revision',
+    status: 'active', mediaDurationMs: 6_600_000, updatedAt: '2026-01-01T00:00:00.000Z',
+  }));
+  assert.deepEqual(resolveCandidates(candidates).map((segment) => segment.startMs), [6_000_000, 6_240_000]);
+});
+
 test('TheIntroDB normalization handles open credits and duration mismatch', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
@@ -70,6 +92,37 @@ test('TheIntroDB normalization handles open credits and duration mismatch', asyn
 
     globalThis.fetch = async () => new Response(JSON.stringify({ duration_ms: 900_000, intro: [{ start_ms: 0, end_ms: 90_000 }] }), { status: 200 });
     assert.equal((await fetchTheIntroDbSegments({ ids: { tmdbId: '1399' }, season: 1, episode: 1, durationMs: 1_400_000 })).kind, 'empty');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('TheIntroDB movie lookup omits episode coordinates and preserves movie segments', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    return new Response(JSON.stringify({
+      tmdb_id: 550,
+      type: 'movie',
+      intro: [{ start_ms: null, end_ms: 119_000 }],
+      credits: [
+        { start_ms: 8_000_000, end_ms: 8_100_000 },
+        { start_ms: 8_160_000, end_ms: null },
+      ],
+    }), { status: 200 });
+  };
+  try {
+    assert.equal(theIntroDbLookupKey({ tmdbId: '550' }), 'tmdb:550:movie');
+    const result = await fetchTheIntroDbSegments({ ids: { tmdbId: '550' }, durationMs: 8_300_000 });
+    const url = new URL(requestedUrl);
+    assert.equal(url.searchParams.has('season'), false);
+    assert.equal(url.searchParams.has('episode'), false);
+    assert.equal(result.kind, 'success');
+    if (result.kind === 'success') {
+      assert.equal(result.segments.filter((segment) => segment.type === 'credits').length, 2);
+      assert.equal(result.segments.find((segment) => segment.type === 'intro')?.startMs, 0);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -117,4 +170,37 @@ test('bounded fingerprint alignment detects repeated windows and scores support'
   assert.ok(match);
   assert.ok((match?.similarity || 0) >= 0.99);
   assert.ok(scoreFingerprintMatches([match!, match!, match!, match!]) >= 0.90);
+});
+
+function movieFrame(kind: 'credits' | 'scene', variation = 0): Uint8Array {
+  const width = MOVIE_CREDIT_FRAME_WIDTH;
+  const height = MOVIE_CREDIT_FRAME_HEIGHT;
+  const frame = new Uint8Array(width * height);
+  if (kind === 'scene') {
+    for (let index = 0; index < frame.length; index += 1) frame[index] = 70 + ((index * 17 + variation * 29) % 150);
+    return frame;
+  }
+  frame.fill(10);
+  for (let y = 8; y < height - 6; y += 7) {
+    for (let x = 28 + (y % 3); x < width - 28; x += 5) frame[y * width + x] = 235;
+  }
+  return frame;
+}
+
+test('bounded movie detector preserves a post-credit scene between two credits intervals', () => {
+  const frames = [
+    ...Array.from({ length: 100 }, () => movieFrame('credits')),
+    ...Array.from({ length: 20 }, (_, index) => movieFrame('scene', index)),
+    ...Array.from({ length: 55 }, () => movieFrame('credits')),
+  ];
+  const detected = detectMovieCreditIntervals(Buffer.concat(frames.map((frame) => Buffer.from(frame))), 0, 175_000);
+  assert.equal(detected.length, 2);
+  assert.ok(detected[0].endMs !== null && detected[0].endMs! < detected[1].startMs);
+  assert.equal(detected[1].endMs, null);
+  assert.ok(detected.every((interval) => interval.confidence >= 0.90));
+});
+
+test('movie detector refuses ordinary ending footage without sustained credit evidence', () => {
+  const frames = Array.from({ length: 120 }, (_, index) => movieFrame('scene', index));
+  assert.deepEqual(detectMovieCreditIntervals(Buffer.concat(frames.map((frame) => Buffer.from(frame))), 0, 120_000), []);
 });

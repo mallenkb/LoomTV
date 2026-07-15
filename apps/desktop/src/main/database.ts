@@ -330,7 +330,7 @@ function migrate(database: Database.Database): void {
       source TEXT NOT NULL,
       media_duration_ms INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
-      PRIMARY KEY (file_revision, type)
+      PRIMARY KEY (file_revision, id)
     );
 
     CREATE TABLE IF NOT EXISTS segment_manual_history (
@@ -384,6 +384,37 @@ function migrate(database: Database.Database): void {
   ensureColumn(database, 'scan_cache', 'subtitle_profile', "TEXT NOT NULL DEFAULT ''");
   migrateArtworkCacheColumns(database);
   migrateLibraryFoldersKind(database);
+  migrateMediaSegmentsPrimaryKey(database);
+}
+
+function migrateMediaSegmentsPrimaryKey(database: Database.Database): void {
+  const columns = database.prepare('PRAGMA table_info(media_segments)').all() as Array<{ name: string; pk: number }>;
+  const primaryKey = columns.filter((column) => column.pk > 0).sort((a, b) => a.pk - b.pk).map((column) => column.name);
+  if (primaryKey.join(',') === 'file_revision,id') return;
+  database.exec(`
+    ALTER TABLE media_segments RENAME TO media_segments_old;
+
+    CREATE TABLE media_segments (
+      file_revision TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'credits', 'preview')),
+      id TEXT NOT NULL,
+      start_ms INTEGER NOT NULL,
+      end_ms INTEGER,
+      confidence REAL NOT NULL,
+      source TEXT NOT NULL,
+      media_duration_ms INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (file_revision, id)
+    );
+
+    INSERT OR REPLACE INTO media_segments (
+      file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
+    )
+    SELECT file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
+    FROM media_segments_old;
+
+    DROP TABLE media_segments_old;
+  `);
 }
 
 function migrateMediaItemArtworkColumns(database: Database.Database): void {

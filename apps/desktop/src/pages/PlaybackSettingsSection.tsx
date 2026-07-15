@@ -64,9 +64,9 @@ export default function PlaybackSettingsSection({
               className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
             />
             <span>
-              <span className="block text-sm font-medium text-white">Experimental local intro/credits analysis</span>
+              <span className="block text-sm font-medium text-white">Automatic local intro and credits analysis</span>
               <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">
-                Opt-in Chromaprint fallback. It runs one bounded background worker only while idle and never during playback or transcoding.
+                Fills provider gaps after library scans. One bounded background worker runs only while idle on AC power and pauses for playback or transcoding.
               </span>
             </span>
           </label>

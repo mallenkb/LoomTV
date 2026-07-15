@@ -102,6 +102,7 @@ interface PlayerSettingsPanelProps {
   subtitleCueFontSize: number;
   updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string) => void;
   applySubtitleStyleToStream: () => void;
+  onCorrectSkipTiming: () => void;
 }
 
 export default function PlayerSettingsPanel({
@@ -136,6 +137,7 @@ export default function PlayerSettingsPanel({
   subtitleCueFontSize,
   updateSubtitleStyle,
   applySubtitleStyleToStream,
+  onCorrectSkipTiming,
 }: PlayerSettingsPanelProps) {
   return (
     <aside
@@ -251,6 +253,17 @@ export default function PlayerSettingsPanel({
                   <span>4x</span>
                 </div>
               </div>
+
+              <details className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold text-white/55">Advanced</summary>
+                <button
+                  type="button"
+                  onClick={onCorrectSkipTiming}
+                  className="mt-3 w-full rounded-md bg-white/10 px-3 py-2 text-left text-xs text-white/75 transition-colors hover:bg-white/15 hover:text-white"
+                >
+                  Correct automatic skip timing
+                </button>
+              </details>
             </div>
           )}
 

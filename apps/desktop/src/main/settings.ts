@@ -91,6 +91,7 @@ export function normalizeSettings(raw: AppSettings): AppSettings {
     playbackSkipForwardSeconds: Number.isFinite(Number(raw.playbackSkipForwardSeconds)) && Number(raw.playbackSkipForwardSeconds) > 0
       ? Number(raw.playbackSkipForwardSeconds)
       : 15,
+    localSkipAnalysisEnabled: raw.localSkipAnalysisEnabled !== false,
     sidebarNavOrder,
     appThemeMode: raw.appThemeMode === 'light' ? 'light' : 'dark',
     appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
