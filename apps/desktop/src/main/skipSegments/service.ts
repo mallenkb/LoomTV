@@ -297,12 +297,20 @@ export function createSkipSegmentService(deps: {
     context: SegmentContext,
     source: Extract<MediaSegmentSource, 'theintrodb' | 'aniskip'>,
     segments: NormalizedSegmentInput[],
-    expiresAt: number,
   ): MediaSegment[] {
+    const fresh = segments.map((segment) => makeCandidate(context, segment));
+    const refreshedTypes = new Set(fresh.map((segment) => segment.type));
+    const lastKnown = getSegmentCandidates(context.fileRevision)
+      .filter((candidate) => candidate.source === source && !refreshedTypes.has(candidate.type))
+      .map((candidate) => ({ ...candidate, expiresAt: undefined }));
+
+    // Provider responses can occasionally be partial. Replace the types they
+    // returned, but retain a previously verified timestamp for omitted types.
+    // The file revision remains the invalidation boundary for these markers.
     return replaceSegmentCandidatesForSource(
       context.fileRevision,
       source,
-      segments.map((segment) => makeCandidate(context, segment, { expiresAt })),
+      [...lastKnown, ...fresh],
     );
   }
 
@@ -322,12 +330,14 @@ export function createSkipSegmentService(deps: {
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
       return {
-        segments: applyProviderSegments(context, provider, cached.segments, cached.staleUntil),
+        segments: cached.status === 'success'
+          ? applyProviderSegments(context, provider, cached.segments)
+          : getResolvedMediaSegments(context.fileRevision),
         kind: cached.status === 'success' ? 'success' : 'empty',
       };
     }
     if (cached?.status === 'success' && cached.staleUntil > now) {
-      const staleSegments = applyProviderSegments(context, provider, cached.segments, cached.staleUntil);
+      const staleSegments = applyProviderSegments(context, provider, cached.segments);
       void refreshProvider(context, provider, lookupKey, bucket);
       return { segments: staleSegments, kind: 'success' };
     }
@@ -372,7 +382,10 @@ export function createSkipSegmentService(deps: {
       expiresAt,
       staleUntil,
     });
-    applyProviderSegments(context, provider, result.segments, staleUntil);
+    // An empty refresh is not strong enough evidence to erase a timestamp that
+    // already worked for this exact file. A later successful response can still
+    // replace it, and a changed file naturally receives a new file revision.
+    if (result.kind === 'success') applyProviderSegments(context, provider, result.segments);
     return result;
   }
 
@@ -389,7 +402,13 @@ export function createSkipSegmentService(deps: {
     if (context.item.type === 'anime') {
       const aniSkip = await providerSegments(context, 'aniskip', waitForProvider);
       segments = aniSkip.segments;
-      if (aniSkip.kind !== 'success') segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
+      const aniSkipTypes = new Set(segments.map((segment) => segment.type));
+      // AniSkip frequently has an opening without an ending (or vice versa).
+      // Let TheIntroDB fill whichever primary marker is missing; source
+      // precedence still keeps AniSkip for any type it did return.
+      if (aniSkip.kind !== 'success' || !aniSkipTypes.has('intro') || !aniSkipTypes.has('credits')) {
+        segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
+      }
     } else {
       segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
     }
@@ -408,7 +427,9 @@ export function createSkipSegmentService(deps: {
     return { segments, revision: segmentRevision(segments) };
   }
 
-  const getSegments = (request: MediaSegmentRequest) => resolveSegments(request, true);
+  // Active playback waits for the bounded provider lookup so the response that
+  // reaches the player already contains timestamps committed to SQLite.
+  const getSegments = (request: MediaSegmentRequest) => resolveSegments(request, true, true);
 
   function warmLibrary(library: LibraryLike = deps.loadLibrary()): void {
     const generation = ++warmGeneration;
