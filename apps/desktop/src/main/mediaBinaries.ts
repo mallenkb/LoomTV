@@ -13,7 +13,7 @@ function platformFolder(): 'win' | 'mac' | 'linux' {
   return 'linux';
 }
 
-function binaryName(name: 'ffmpeg' | 'ffprobe'): string {
+function binaryName(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string {
   return process.platform === 'win32' ? `${name}.exe` : name;
 }
 
@@ -58,7 +58,7 @@ function bundledBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
   ]);
 }
 
-function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe'): string[] {
+function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string[] {
   const executable = binaryName(name);
   const candidates = [
     `/opt/homebrew/bin/${executable}`,
@@ -182,4 +182,16 @@ export function findFFprobe(): string | null {
   }
 
   return firstExistingBinary(systemBinaryCandidates('ffprobe'));
+}
+
+export function findFpcalc(): string | null {
+  const executable = binaryName('fpcalc');
+  const relative = path.join('fpcalc', platformFolder(), executable);
+  return firstExistingBinary([
+    process.env.LOOMTV_FPCALC_PATH,
+    path.join(process.resourcesPath || '', relative),
+    path.join(app.getAppPath(), 'resources', relative),
+    path.join(process.cwd(), 'resources', relative),
+    ...systemBinaryCandidates('fpcalc'),
+  ]);
 }

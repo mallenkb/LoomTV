@@ -88,6 +88,11 @@ dist/
 # Electron-Forge
 out/
 
+# Pinned fpcalc release binaries are checksum-fetched before packaging.
+apps/desktop/resources/fpcalc/mac/fpcalc
+apps/desktop/resources/fpcalc/linux/fpcalc
+apps/desktop/resources/fpcalc/win/fpcalc.exe
+
 # Apple distribution artifacts
 *.mobileprovision
 *.provisionprofile

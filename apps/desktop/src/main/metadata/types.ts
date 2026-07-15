@@ -14,6 +14,8 @@ export interface LocalMediaTrack {
 }
 
 export interface LocalMediaDetails {
+  fileSize?: number;
+  modifiedAtMs?: number;
   durationSeconds?: number;
   width?: number;
   height?: number;
@@ -26,6 +28,7 @@ export interface LocalMediaDetails {
   tracks?: LocalMediaTrack[];
   bitrateKbps?: number;
   container?: string;
+  chapters?: { startMs: number; endMs: number; title: string }[];
 }
 
 export interface EpisodeMeta {
@@ -77,6 +80,8 @@ export interface MediaItem {
     tmdbId?: string;
     imdbId?: string;
     tvdbId?: string;
+    malId?: string;
+    malIdBySeason?: Record<string, string>;
   };
 }
 

@@ -69,6 +69,14 @@ jobs:
       - name: Test
         run: corepack pnpm --filter loom-media-server-desktop test
 
+      - name: Typecheck mobile
+        if: runner.os == 'Linux'
+        run: corepack pnpm --filter @loom-media-server/mobile typecheck
+
+      - name: Test mobile recovery
+        if: runner.os == 'Linux'
+        run: corepack pnpm --filter @loom-media-server/mobile test
+
       - name: Build installers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,6 +89,16 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
+          node apps/desktop/scripts/fetch-fpcalc.cjs
+
+          if [[ "$RUNNER_OS" == "macOS" && "${GITHUB_REF}" == refs/tags/v* ]]; then
+            : "${MACOS_CSC_LINK:?MACOS_CSC_LINK is required for tagged macOS releases}"
+            : "${MACOS_CSC_KEY_PASSWORD:?MACOS_CSC_KEY_PASSWORD is required for tagged macOS releases}"
+            : "${APPLE_ID:?APPLE_ID is required for tagged macOS releases}"
+            : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required for tagged macOS releases}"
+            : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for tagged macOS releases}"
+          fi
+
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             if [[ -n "${MACOS_CSC_LINK:-}" ]]; then
               export CSC_LINK="$MACOS_CSC_LINK"

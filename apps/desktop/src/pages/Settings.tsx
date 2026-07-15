@@ -139,6 +139,8 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
+  const [localSkipAnalysisEnabled, setLocalSkipAnalysisEnabled] = useState(false);
+  const [localAnalysisStatus, setLocalAnalysisStatus] = useState('Checking fpcalc…');
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
@@ -200,6 +202,12 @@ export default function Settings() {
       setCustomFolderNames(s.customFolderNames || {});
       setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
       setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
+      setLocalSkipAnalysisEnabled(Boolean(s.localSkipAnalysisEnabled));
+    });
+    void desktopApi.getLocalSegmentAnalysisStatus().then((status) => {
+      setLocalAnalysisStatus(status.available
+        ? `Ready${status.helperPath ? ` · ${status.helperPath}` : ''}`
+        : status.message || 'fpcalc is not available.');
     });
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
@@ -324,7 +332,10 @@ export default function Settings() {
     await desktopApi.saveSettings({
       playbackSkipBackSeconds: normalizedBack,
       playbackSkipForwardSeconds: normalizedForward,
+      localSkipAnalysisEnabled,
     });
+    const status = await desktopApi.getLocalSegmentAnalysisStatus();
+    setLocalAnalysisStatus(status.available ? `Ready${status.helperPath ? ` · ${status.helperPath}` : ''}` : status.message || 'fpcalc is not available.');
   };
 
   const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
@@ -689,6 +700,9 @@ export default function Settings() {
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   onSkipBackChange={setPlaybackSkipBackSeconds}
                   onSkipForwardChange={setPlaybackSkipForwardSeconds}
+                  localSkipAnalysisEnabled={localSkipAnalysisEnabled}
+                  onLocalSkipAnalysisChange={setLocalSkipAnalysisEnabled}
+                  localAnalysisStatus={localAnalysisStatus}
                   onSave={() => void handleSavePlaybackSettings()}
                 />
               )}
