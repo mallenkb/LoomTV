@@ -126,7 +126,8 @@ async function generateFingerprint(
   registerAnalysisProcess(fpcalc);
   lowerPriority(ffmpeg);
   lowerPriority(fpcalc);
-  ffmpeg.stdout?.pipe(fpcalc.stdin!);
+  if (!ffmpeg.stdout || !fpcalc.stdin) throw new Error('Unable to connect media analysis processes.');
+  ffmpeg.stdout.pipe(fpcalc.stdin);
   ffmpeg.stderr?.resume();
   fpcalc.stderr?.resume();
   const output = await collectOutput(fpcalc);
