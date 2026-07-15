@@ -55,7 +55,10 @@ async function main() {
     const extracted = path.join(temporary, 'extracted');
     fs.mkdirSync(extracted);
     fs.writeFileSync(archivePath, archive);
-    const unpack = spawnSync('tar', ['-xf', archivePath, '-C', extracted], { encoding: 'utf8' });
+    const tarArgs = process.platform === 'win32'
+      ? ['--force-local', '-xf', archivePath, '-C', extracted]
+      : ['-xf', archivePath, '-C', extracted];
+    const unpack = spawnSync('tar', tarArgs, { encoding: 'utf8' });
     if (unpack.status !== 0) throw new Error(unpack.stderr || `Could not extract ${name}.`);
     const binary = findFile(extracted, process.platform === 'win32' ? 'fpcalc.exe' : 'fpcalc');
     if (!binary) throw new Error(`${name} did not contain fpcalc.`);
