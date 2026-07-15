@@ -31,7 +31,6 @@ function retryAfterMs(response: Response): number | undefined {
 async function providerFetch(url: URL): Promise<{ response: Response; payload?: unknown }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  timer.unref?.();
   try {
     const response = await fetch(url, {
       headers: { Accept: 'application/json', 'User-Agent': 'LoomTV/skip-markers' },

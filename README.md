@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.44](docs/releases/v1.0.44.md): fixes skip-marker provider timeouts so desktop CI and playback recovery complete reliably.
 - [Loom Media Server 1.0.43](docs/releases/v1.0.43.md): adds desktop skip-marker analysis, playback prompts, and packaged fingerprint support.
 - [Loom Media Server 1.0.42](docs/releases/v1.0.42.md): improves desktop playback recovery, transcoding behavior, and macOS release validation.
 - [Loom Media Server 1.0.41](docs/releases/v1.0.41.md): removes desktop CI and React warnings and keeps playback-rate updates isolated from media source binding.
