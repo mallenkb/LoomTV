@@ -1314,13 +1314,12 @@ function preserveExistingItemDuringScan(fresh: MediaItem, existing?: MediaItem):
   if (!existing) return fresh;
 
   const episodeFiles = new Map<string, EpisodeFile>();
-  for (const episodeFile of existing.episodeFiles || []) {
-    episodeFiles.set(episodeFileKey(episodeFile), episodeFile);
-  }
   for (const episodeFile of fresh.episodeFiles || []) {
     const key = episodeFileKey(episodeFile);
-    const saved = episodeFiles.get(key);
-    episodeFiles.set(key, saved ? { ...episodeFile, ...saved } : episodeFile);
+    // Full scans own filesystem-derived episode data. User-facing episode
+    // metadata is preserved separately below, so stale probes/subtitle lists
+    // must not overwrite a freshly scanned file record.
+    episodeFiles.set(key, episodeFile);
   }
 
   const localEpisodeKeys = new Set(episodeFiles.keys());
@@ -1341,7 +1340,9 @@ function preserveExistingItemDuringScan(fresh: MediaItem, existing?: MediaItem):
     seasonCounts.set(episodeFile.season, (seasonCounts.get(episodeFile.season) || 0) + 1);
   }
   const seasons = new Map<number, NonNullable<MediaItem['seasons']>[number]>();
-  for (const season of existing.seasons || []) seasons.set(season.number, season);
+  for (const season of existing.seasons || []) {
+    if (seasonCounts.has(season.number)) seasons.set(season.number, season);
+  }
   for (const season of fresh.seasons || []) {
     if (!seasons.has(season.number)) seasons.set(season.number, season);
   }
@@ -1409,6 +1410,12 @@ async function scanLibrary(
   const movies: MediaItem[] = [];
   const tvShows: MediaItem[] = [];
   const animeShows: MediaItem[] = [];
+  const scannedItemIds = new Set<string>();
+  const existingItems = [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])];
+  const existingItemsById = new Map(existingItems.map((item) => [item.id, item]));
+  const existingItemsByPath = new Map(existingItems
+    .filter((item) => item.filePath)
+    .map((item) => [path.resolve(item.filePath), item]));
   const previousScanCache = data.scanCache || {};
   const nextScanCache: LibraryScanCache = {};
   const totalFolders = flattenLibraryFolders(folderGroups).length;
@@ -1416,19 +1423,25 @@ async function scanLibrary(
   const folderStatusesByPath = new Map<string, LibraryFolderStatus>();
   let scannedFolders = 0;
 
-  const appendItem = (item: MediaItem) => {
-    if (item.type === 'anime') animeShows.push({ ...item, type: 'anime' });
-    else if (item.type === 'tv') tvShows.push({ ...item, type: 'tv' });
-    else movies.push({ ...item, type: 'movie' });
+  const appendItem = (item: MediaItem, folderKind: ScanCacheFolderKind = 'auto') => {
+    const type: MediaItem['type'] = folderKind === 'movies'
+      ? 'movie'
+      : folderKind === 'anime'
+        ? 'anime'
+        : folderKind === 'tv'
+          ? 'tv'
+          : item.type;
+    const next = { ...item, type };
+    const identity = next.id || (next.filePath ? createMediaItemId(next.filePath) : '');
+    if (identity && scannedItemIds.has(identity)) return;
+    if (identity) scannedItemIds.add(identity);
+    if (type === 'anime') animeShows.push(next);
+    else if (type === 'tv') tvShows.push(next);
+    else movies.push(next);
   };
 
   const appendItems = (items: MediaItem[], folderKind: ScanCacheFolderKind) => {
-    for (const item of items) {
-      if (folderKind === 'movies') movies.push({ ...item, type: 'movie' });
-      else if (folderKind === 'anime') animeShows.push({ ...item, type: 'anime' });
-      else if (folderKind === 'tv') tvShows.push({ ...item, type: 'tv' });
-      else appendItem(item);
-    }
+    for (const item of items) appendItem(item, folderKind);
   };
 
   const folderStatusFor = (folder: string, folderKind: ScanCacheFolderKind): LibraryFolderStatus => {
@@ -1512,12 +1525,17 @@ async function scanLibrary(
     for (const folder of folders) {
       const cachedItems = cachedItemsForFolder(folder, folderKind);
       const cachedItemsById = new Map(cachedItems.map((item) => [item.id, item]));
-      const cachedItemsByPath = new Map(cachedItems.map((item) => [item.filePath, item]));
+      const cachedItemsByPath = new Map(cachedItems
+        .filter((item) => item.filePath)
+        .map((item) => [path.resolve(item.filePath), item]));
       const preserveItems = (items: MediaItem[]) => mode === 'metadata'
         ? items
         : items.map((item) => preserveExistingItemDuringScan(
           item,
-          cachedItemsById.get(item.id) || cachedItemsByPath.get(item.filePath),
+          existingItemsById.get(item.id)
+            || (item.filePath ? existingItemsByPath.get(path.resolve(item.filePath)) : undefined)
+            || cachedItemsById.get(item.id)
+            || (item.filePath ? cachedItemsByPath.get(path.resolve(item.filePath)) : undefined),
         ));
       const folderStatus = folderStatusFor(folder, folderKind);
       if (folderStatus.state === 'unavailable') {
@@ -1534,7 +1552,8 @@ async function scanLibrary(
       const cachedEntry = previousScanCache[folder];
 
       if (
-        folderSignature
+        mode !== 'full'
+        && folderSignature
         && cachedEntry?.version === SCAN_CACHE_VERSION
         && cachedEntry?.folderKind === folderKind
         && cachedEntry.signature === folderSignature.signature
@@ -1559,8 +1578,9 @@ async function scanLibrary(
           appendItems(preserveItems(partialItems), folderKind);
           await publishProgress(false);
         });
+      const uniqueItems = Array.from(new Map(items.map((item) => [item.id, item])).values());
 
-      if (directItem) appendItems(preserveItems(items), folderKind);
+      if (directItem) appendItems(preserveItems(uniqueItems), folderKind);
       if (folderSignature) {
         nextScanCache[folder] = {
           version: SCAN_CACHE_VERSION,
@@ -1568,7 +1588,7 @@ async function scanLibrary(
           signature: folderSignature.signature,
           subtitleProfile,
           fileCount: folderSignature.fileCount,
-          itemCount: items.length,
+          itemCount: uniqueItems.length,
           scannedAt: Date.now(),
         };
       }
@@ -1638,7 +1658,7 @@ function sanitizeStoredItem(item: MediaItem): MediaItem | null {
   const withStableIdentity = (next: MediaItem): MediaItem => {
     const localTitle = localTitleFromPath(next.filePath);
     return next.filePath
-      ? { ...next, id: createMediaItemId(next.filePath), title: localTitle || next.title }
+      ? { ...next, id: createMediaItemId(next.filePath), title: next.title || localTitle || '' }
       : next;
   };
 
