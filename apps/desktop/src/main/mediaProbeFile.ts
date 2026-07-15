@@ -26,10 +26,14 @@ function streamType(value?: string): LocalMediaTrack['type'] {
   return 'unknown';
 }
 
-function mediaProbeCacheKey(filePath: string): string | null {
+function mediaProbeCacheIdentity(filePath: string): { key: string; size: number; modifiedAtMs: number } | null {
   try {
     const stats = fs.statSync(filePath);
-    return `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`;
+    return {
+      key: `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`,
+      size: stats.size,
+      modifiedAtMs: Math.round(stats.mtimeMs),
+    };
   } catch {
     return null;
   }
@@ -43,7 +47,8 @@ function cacheProbeResult(cacheKey: string | null, result: ProbeMediaFileResult)
 }
 
 export function probeMediaFile(filePath: string): ProbeMediaFileResult {
-  const cacheKey = mediaProbeCacheKey(filePath);
+  const identity = mediaProbeCacheIdentity(filePath);
+  const cacheKey = identity?.key || null;
   if (cacheKey) {
     const cached = mediaProbeCache.get(cacheKey);
     if (cached) return cached;
@@ -60,6 +65,7 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
         '-print_format', 'json',
         '-show_format',
         '-show_streams',
+        '-show_chapters',
         filePath,
       ],
       { encoding: 'utf8' },
@@ -77,6 +83,11 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
         height?: number;
         channels?: number;
         disposition?: Record<string, number>;
+        tags?: Record<string, string>;
+      }>;
+      chapters?: Array<{
+        start_time?: string;
+        end_time?: string;
         tags?: Record<string, string>;
       }>;
     };
@@ -138,6 +149,8 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
 
     return cacheProbeResult(cacheKey, {
       localMetadata: {
+        fileSize: identity?.size,
+        modifiedAtMs: identity?.modifiedAtMs,
         durationSeconds: parsed.format?.duration ? Math.round(parseFloat(parsed.format.duration)) : undefined,
         width: videoStream?.width,
         height: videoStream?.height,
@@ -150,6 +163,13 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
         tracks: mediaTracks.length ? mediaTracks : undefined,
         bitrateKbps: parsed.format?.bit_rate ? Math.round(parseInt(parsed.format.bit_rate, 10) / 1000) : undefined,
         container: parsed.format?.format_name?.split(',')[0],
+        chapters: (parsed.chapters || []).flatMap((chapter) => {
+          const startSeconds = Number(chapter.start_time);
+          const endSeconds = Number(chapter.end_time);
+          const title = scrubTagText(tagValue(chapter.tags || {}, 'title', 'name'));
+          if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || endSeconds <= startSeconds || !title) return [];
+          return [{ startMs: Math.round(startSeconds * 1000), endMs: Math.round(endSeconds * 1000), title }];
+        }),
       },
       embeddedTitle: preferredTitle || undefined,
       embeddedShowTitle: preferredShowTitle || undefined,

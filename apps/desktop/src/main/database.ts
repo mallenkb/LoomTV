@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import Database from 'better-sqlite3';
 import { artworkCacheFileName, collectArtworkSourcesForCache, customArtworkReference } from './artworkCache';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types';
+import { resolveCandidates } from './skipSegments/normalize';
+import type {
+  MediaSegment,
+  MediaSegmentCandidate,
+  MediaSegmentSource,
+  ProviderCacheEntry,
+} from './skipSegments/types';
 
 type JsonValue = unknown;
 
@@ -269,6 +276,88 @@ function migrate(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS playback_track_preferences (
       scope TEXT PRIMARY KEY,
       preferences_json TEXT NOT NULL DEFAULT '{}',
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS segment_source_cache (
+      provider TEXT NOT NULL,
+      lookup_key TEXT NOT NULL,
+      duration_bucket INTEGER NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('success', 'empty')),
+      segments_json TEXT NOT NULL DEFAULT '[]',
+      fetched_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      stale_until INTEGER NOT NULL,
+      PRIMARY KEY (provider, lookup_key, duration_bucket)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_segment_source_cache_expiry
+      ON segment_source_cache(expires_at);
+
+    CREATE TABLE IF NOT EXISTS media_segment_candidates (
+      id TEXT PRIMARY KEY,
+      media_id TEXT NOT NULL,
+      season INTEGER NOT NULL,
+      episode INTEGER NOT NULL,
+      file_path TEXT NOT NULL,
+      file_revision TEXT NOT NULL,
+      release_key TEXT,
+      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'credits', 'preview')),
+      start_ms INTEGER NOT NULL,
+      end_ms INTEGER,
+      confidence REAL NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('manual', 'chapter', 'theintrodb', 'aniskip', 'chromaprint')),
+      status TEXT NOT NULL CHECK (status IN ('active', 'review', 'rejected')),
+      media_duration_ms INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      expires_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_media_segment_candidates_revision
+      ON media_segment_candidates(file_revision, type, source);
+    CREATE INDEX IF NOT EXISTS idx_media_segment_candidates_episode
+      ON media_segment_candidates(media_id, season, episode, source);
+    CREATE INDEX IF NOT EXISTS idx_media_segment_candidates_release
+      ON media_segment_candidates(release_key, source);
+
+    CREATE TABLE IF NOT EXISTS media_segments (
+      file_revision TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'credits', 'preview')),
+      id TEXT NOT NULL,
+      start_ms INTEGER NOT NULL,
+      end_ms INTEGER,
+      confidence REAL NOT NULL,
+      source TEXT NOT NULL,
+      media_duration_ms INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (file_revision, type)
+    );
+
+    CREATE TABLE IF NOT EXISTS segment_manual_history (
+      history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      candidate_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      snapshot_json TEXT,
+      changed_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS media_fingerprints (
+      file_revision TEXT NOT NULL,
+      audio_track INTEGER NOT NULL,
+      window_type TEXT NOT NULL CHECK (window_type IN ('intro', 'credits')),
+      algorithm_version TEXT NOT NULL,
+      fingerprint_json TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (file_revision, audio_track, window_type, algorithm_version)
+    );
+
+    CREATE TABLE IF NOT EXISTS segment_analysis_state (
+      job_key TEXT PRIMARY KEY,
+      media_id TEXT NOT NULL,
+      season INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      detail TEXT,
       updated_at INTEGER NOT NULL
     );
 
@@ -693,6 +782,401 @@ export function savePlaybackTrackPreferences(scope: string, preferences: Playbac
   return stored;
 }
 
+type SegmentCandidateRow = {
+  id: string;
+  media_id: string;
+  season: number;
+  episode: number;
+  file_path: string;
+  file_revision: string;
+  release_key: string | null;
+  type: MediaSegmentCandidate['type'];
+  start_ms: number;
+  end_ms: number | null;
+  confidence: number;
+  source: MediaSegmentCandidate['source'];
+  status: MediaSegmentCandidate['status'];
+  media_duration_ms: number;
+  updated_at: number;
+  expires_at: number | null;
+};
+
+function candidateFromRow(row: SegmentCandidateRow): MediaSegmentCandidate {
+  return {
+    id: row.id,
+    mediaId: row.media_id,
+    season: row.season,
+    episode: row.episode,
+    filePath: row.file_path,
+    fileRevision: row.file_revision,
+    releaseKey: row.release_key || undefined,
+    type: row.type,
+    startMs: row.start_ms,
+    endMs: row.end_ms,
+    confidence: row.confidence,
+    source: row.source,
+    status: row.status,
+    mediaDurationMs: row.media_duration_ms,
+    updatedAt: new Date(row.updated_at).toISOString(),
+    expiresAt: row.expires_at || undefined,
+  };
+}
+
+function insertSegmentCandidate(database: Database.Database, candidate: MediaSegmentCandidate): void {
+  database.prepare(`
+    INSERT OR REPLACE INTO media_segment_candidates (
+      id, media_id, season, episode, file_path, file_revision, release_key,
+      type, start_ms, end_ms, confidence, source, status, media_duration_ms,
+      updated_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    candidate.id,
+    candidate.mediaId,
+    candidate.season,
+    candidate.episode,
+    candidate.filePath,
+    candidate.fileRevision,
+    candidate.releaseKey || null,
+    candidate.type,
+    candidate.startMs,
+    candidate.endMs,
+    candidate.confidence,
+    candidate.source,
+    candidate.status,
+    candidate.mediaDurationMs,
+    Date.parse(candidate.updatedAt) || Date.now(),
+    candidate.expiresAt || null,
+  );
+}
+
+export function getSegmentSourceCache(
+  provider: ProviderCacheEntry['provider'],
+  lookupKey: string,
+  durationBucket: number,
+): ProviderCacheEntry | null {
+  const row = getDb().prepare(`
+    SELECT provider, lookup_key, duration_bucket, status, segments_json, fetched_at, expires_at, stale_until
+    FROM segment_source_cache
+    WHERE provider = ? AND lookup_key = ? AND duration_bucket = ?
+  `).get(provider, lookupKey, durationBucket) as {
+    provider: ProviderCacheEntry['provider'];
+    lookup_key: string;
+    duration_bucket: number;
+    status: ProviderCacheEntry['status'];
+    segments_json: string;
+    fetched_at: number;
+    expires_at: number;
+    stale_until: number;
+  } | undefined;
+  if (!row) return null;
+  return {
+    provider: row.provider,
+    lookupKey: row.lookup_key,
+    durationBucket: row.duration_bucket,
+    status: row.status,
+    segments: jsonParse(row.segments_json, []),
+    fetchedAt: row.fetched_at,
+    expiresAt: row.expires_at,
+    staleUntil: row.stale_until,
+  };
+}
+
+export function saveSegmentSourceCache(entry: ProviderCacheEntry): void {
+  getDb().prepare(`
+    INSERT OR REPLACE INTO segment_source_cache (
+      provider, lookup_key, duration_bucket, status, segments_json, fetched_at, expires_at, stale_until
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    entry.provider,
+    entry.lookupKey,
+    entry.durationBucket,
+    entry.status,
+    jsonString(entry.segments),
+    entry.fetchedAt,
+    entry.expiresAt,
+    entry.staleUntil,
+  );
+}
+
+export function getSegmentCandidates(fileRevision: string): MediaSegmentCandidate[] {
+  const rows = getDb().prepare(`
+    SELECT * FROM media_segment_candidates
+    WHERE file_revision = ? AND (expires_at IS NULL OR expires_at > ?)
+  `).all(fileRevision, Date.now()) as SegmentCandidateRow[];
+  return rows.map(candidateFromRow);
+}
+
+export function getManualSegmentCandidates(mediaId: string, season: number, episode: number): MediaSegmentCandidate[] {
+  const rows = getDb().prepare(`
+    SELECT * FROM media_segment_candidates
+    WHERE media_id = ? AND season = ? AND episode = ? AND source = 'manual'
+  `).all(mediaId, season, episode) as SegmentCandidateRow[];
+  return rows.map(candidateFromRow);
+}
+
+export function replaceSegmentCandidatesForSource(
+  fileRevision: string,
+  source: Exclude<MediaSegmentSource, 'manual'>,
+  candidates: MediaSegmentCandidate[],
+): MediaSegment[] {
+  const database = getDb();
+  const existing = (database.prepare(`
+    SELECT * FROM media_segment_candidates WHERE file_revision = ? AND source = ?
+  `).all(fileRevision, source) as SegmentCandidateRow[]).map(candidateFromRow);
+  const comparable = (candidate: MediaSegmentCandidate) => JSON.stringify({
+    id: candidate.id,
+    mediaId: candidate.mediaId,
+    season: candidate.season,
+    episode: candidate.episode,
+    filePath: candidate.filePath,
+    fileRevision: candidate.fileRevision,
+    releaseKey: candidate.releaseKey || null,
+    type: candidate.type,
+    startMs: candidate.startMs,
+    endMs: candidate.endMs,
+    confidence: candidate.confidence,
+    source: candidate.source,
+    status: candidate.status,
+    mediaDurationMs: candidate.mediaDurationMs,
+    expiresAt: candidate.expiresAt || null,
+  });
+  if (existing.length === candidates.length
+    && existing.map(comparable).sort().join('\n') === candidates.map(comparable).sort().join('\n')) {
+    return getResolvedMediaSegments(fileRevision);
+  }
+  const tx = database.transaction(() => {
+    database.prepare('DELETE FROM media_segment_candidates WHERE file_revision = ? AND source = ?').run(fileRevision, source);
+    for (const candidate of candidates) insertSegmentCandidate(database, candidate);
+    return refreshResolvedSegments(fileRevision, database);
+  });
+  return tx();
+}
+
+export function saveManualSegmentCandidate(candidate: MediaSegmentCandidate): MediaSegment[] {
+  const database = getDb();
+  const tx = database.transaction(() => {
+    const existing = database.prepare(`
+      SELECT * FROM media_segment_candidates
+      WHERE file_revision = ? AND type = ? AND source = 'manual'
+    `).all(candidate.fileRevision, candidate.type) as SegmentCandidateRow[];
+    for (const row of existing) {
+      database.prepare(`
+        INSERT INTO segment_manual_history (candidate_id, action, snapshot_json, changed_at)
+        VALUES (?, 'replace', ?, ?)
+      `).run(row.id, jsonString(candidateFromRow(row)), Date.now());
+      database.prepare('DELETE FROM media_segment_candidates WHERE id = ?').run(row.id);
+      if (row.file_revision !== candidate.fileRevision) refreshResolvedSegments(row.file_revision, database);
+    }
+    insertSegmentCandidate(database, candidate);
+    return refreshResolvedSegments(candidate.fileRevision, database);
+  });
+  return tx();
+}
+
+export function deleteManualSegmentCandidate(
+  fileRevision: string,
+  type: MediaSegmentCandidate['type'],
+): MediaSegment[] {
+  const database = getDb();
+  const tx = database.transaction(() => {
+    const rows = database.prepare(`
+      SELECT * FROM media_segment_candidates
+      WHERE file_revision = ? AND type = ? AND source = 'manual'
+    `).all(fileRevision, type) as SegmentCandidateRow[];
+    const revisions = new Set(rows.map((row) => row.file_revision));
+    for (const row of rows) {
+      database.prepare(`
+        INSERT INTO segment_manual_history (candidate_id, action, snapshot_json, changed_at)
+        VALUES (?, 'delete', ?, ?)
+      `).run(row.id, jsonString(candidateFromRow(row)), Date.now());
+      database.prepare('DELETE FROM media_segment_candidates WHERE id = ?').run(row.id);
+    }
+    let resolved: MediaSegment[] = [];
+    for (const revision of revisions) resolved = refreshResolvedSegments(revision, database);
+    return resolved;
+  });
+  return tx();
+}
+
+export function undoManualSegmentCandidate(
+  fileRevision: string,
+  type: MediaSegmentCandidate['type'],
+): MediaSegment[] {
+  const database = getDb();
+  const tx = database.transaction(() => {
+    const history = database.prepare(`
+      SELECT history_id, snapshot_json FROM segment_manual_history
+      WHERE snapshot_json IS NOT NULL ORDER BY changed_at DESC, history_id DESC LIMIT 200
+    `).all() as Array<{ history_id: number; snapshot_json: string }>;
+    const match = history.map((row) => ({
+      row,
+      candidate: jsonParse<MediaSegmentCandidate | null>(row.snapshot_json, null),
+    })).find(({ candidate }) => candidate?.fileRevision === fileRevision && candidate.type === type && candidate.source === 'manual');
+    if (!match?.candidate) return getResolvedMediaSegments(fileRevision);
+    database.prepare(`DELETE FROM media_segment_candidates WHERE file_revision = ? AND type = ? AND source = 'manual'`).run(fileRevision, type);
+    insertSegmentCandidate(database, { ...match.candidate, updatedAt: new Date().toISOString() });
+    database.prepare('DELETE FROM segment_manual_history WHERE history_id = ?').run(match.row.history_id);
+    return refreshResolvedSegments(fileRevision, database);
+  });
+  return tx();
+}
+
+export function reassociateManualSegmentCandidate(
+  candidateId: string,
+  fileRevision: string,
+  filePath: string,
+): MediaSegment[] {
+  const database = getDb();
+  const tx = database.transaction(() => {
+    database.prepare(`
+      UPDATE media_segment_candidates SET file_revision = ?, file_path = ?, updated_at = ?
+      WHERE id = ? AND source = 'manual'
+    `).run(fileRevision, filePath, Date.now(), candidateId);
+    return refreshResolvedSegments(fileRevision, database);
+  });
+  return tx();
+}
+
+export function markManualSegmentCandidateForReview(candidateId: string): void {
+  getDb().prepare(`
+    UPDATE media_segment_candidates SET status = 'review', updated_at = ?
+    WHERE id = ? AND source = 'manual' AND status != 'review'
+  `).run(Date.now(), candidateId);
+}
+
+function refreshResolvedSegments(fileRevision: string, database = getDb()): MediaSegment[] {
+  const candidates = (database.prepare(`
+    SELECT * FROM media_segment_candidates
+    WHERE file_revision = ? AND (expires_at IS NULL OR expires_at > ?)
+  `).all(fileRevision, Date.now()) as SegmentCandidateRow[]).map(candidateFromRow);
+  const segments = resolveCandidates(candidates);
+  database.prepare('DELETE FROM media_segments WHERE file_revision = ?').run(fileRevision);
+  const insert = database.prepare(`
+    INSERT INTO media_segments (
+      file_revision, type, id, start_ms, end_ms, confidence, source,
+      media_duration_ms, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const segment of segments) {
+    insert.run(
+      fileRevision,
+      segment.type,
+      segment.id,
+      segment.startMs,
+      segment.endMs,
+      segment.confidence,
+      segment.source,
+      segment.mediaDurationMs,
+      Date.parse(segment.updatedAt) || Date.now(),
+    );
+  }
+  return segments;
+}
+
+export function getResolvedMediaSegments(fileRevision: string): MediaSegment[] {
+  return resolveCandidates(getSegmentCandidates(fileRevision));
+}
+
+export type StoredMediaFingerprint = {
+  fileRevision: string;
+  audioTrack: number;
+  windowType: 'intro' | 'credits';
+  algorithmVersion: string;
+  fingerprintJson: string;
+  durationMs: number;
+  updatedAt: number;
+};
+
+export function getMediaFingerprint(
+  fileRevision: string,
+  audioTrack: number,
+  windowType: StoredMediaFingerprint['windowType'],
+  algorithmVersion: string,
+): StoredMediaFingerprint | null {
+  const row = getDb().prepare(`
+    SELECT file_revision, audio_track, window_type, algorithm_version, fingerprint_json, duration_ms, updated_at
+    FROM media_fingerprints
+    WHERE file_revision = ? AND audio_track = ? AND window_type = ? AND algorithm_version = ?
+  `).get(fileRevision, audioTrack, windowType, algorithmVersion) as {
+    file_revision: string; audio_track: number; window_type: StoredMediaFingerprint['windowType'];
+    algorithm_version: string; fingerprint_json: string; duration_ms: number; updated_at: number;
+  } | undefined;
+  return row ? {
+    fileRevision: row.file_revision,
+    audioTrack: row.audio_track,
+    windowType: row.window_type,
+    algorithmVersion: row.algorithm_version,
+    fingerprintJson: row.fingerprint_json,
+    durationMs: row.duration_ms,
+    updatedAt: row.updated_at,
+  } : null;
+}
+
+export function saveMediaFingerprint(value: StoredMediaFingerprint): void {
+  getDb().prepare(`
+    INSERT OR REPLACE INTO media_fingerprints (
+      file_revision, audio_track, window_type, algorithm_version, fingerprint_json, duration_ms, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    value.fileRevision,
+    value.audioTrack,
+    value.windowType,
+    value.algorithmVersion,
+    value.fingerprintJson,
+    value.durationMs,
+    value.updatedAt,
+  );
+}
+
+export function saveSegmentAnalysisState(
+  jobKey: string,
+  mediaId: string,
+  season: number,
+  state: string,
+  detail = '',
+): void {
+  getDb().prepare(`
+    INSERT OR REPLACE INTO segment_analysis_state (job_key, media_id, season, state, detail, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(jobKey, mediaId, season, state, detail, Date.now());
+}
+
+export function getSegmentAnalysisStates(mediaId?: string): Array<{
+  jobKey: string; mediaId: string; season: number; state: string; detail: string; updatedAt: number;
+}> {
+  const rows = (mediaId
+    ? getDb().prepare('SELECT * FROM segment_analysis_state WHERE media_id = ? ORDER BY updated_at DESC').all(mediaId)
+    : getDb().prepare('SELECT * FROM segment_analysis_state ORDER BY updated_at DESC').all()) as Array<{
+      job_key: string; media_id: string; season: number; state: string; detail: string; updated_at: number;
+    }>;
+  return rows.map((row) => ({
+    jobKey: row.job_key,
+    mediaId: row.media_id,
+    season: row.season,
+    state: row.state,
+    detail: row.detail,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export function cleanupOrphanedAutomaticSegments(limit = 250): number {
+  const database = getDb();
+  const rows = database.prepare(`
+    SELECT id, file_revision FROM media_segment_candidates
+    WHERE source != 'manual'
+      AND file_path NOT IN (SELECT file_path FROM episode_files)
+    LIMIT ?
+  `).all(Math.max(1, Math.min(1000, limit))) as Array<{ id: string; file_revision: string }>;
+  if (!rows.length) return 0;
+  const tx = database.transaction(() => {
+    const remove = database.prepare('DELETE FROM media_segment_candidates WHERE id = ?');
+    for (const row of rows) remove.run(row.id);
+    for (const revision of new Set(rows.map((row) => row.file_revision))) refreshResolvedSegments(revision, database);
+  });
+  tx();
+  return rows.length;
+}
+
 export function saveProgress(filePath: string, position: number, duration: number): StoredProgress {
   const safePosition = Number.isFinite(position) ? Math.max(0, position) : 0;
   const safeDuration = Number.isFinite(duration) ? Math.max(0, duration) : 0;
@@ -907,6 +1391,12 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
 export function clearDatabase(): void {
   const database = getDb();
   database.exec(`
+    DELETE FROM segment_manual_history;
+    DELETE FROM media_segments;
+    DELETE FROM media_segment_candidates;
+    DELETE FROM segment_source_cache;
+    DELETE FROM media_fingerprints;
+    DELETE FROM segment_analysis_state;
     DELETE FROM artwork_cache;
     DELETE FROM custom_artwork;
     DELETE FROM playback_progress;

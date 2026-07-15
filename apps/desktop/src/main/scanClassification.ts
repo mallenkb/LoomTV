@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { cleanMediaTitle } from './metadata/helpers';
+import { isConfidentAnimeSeasonMapping } from './animeSeasonMapping';
 import { fetchJikanMetadata } from './metadata/jikan';
 import type { JikanAnimeResult } from './metadata/jikan';
 import type { OMDbResponse } from './metadata/omdb';
@@ -97,23 +98,32 @@ export async function fetchJikanEpisodesForLocalAnimeSeasons(
   episodeFiles: EpisodeFile[],
   fallbackTitle: string,
   firstSeasonMetadata?: JikanAnimeResult | null,
-): Promise<EpisodeMeta[]> {
+): Promise<{ episodes: EpisodeMeta[]; malIdBySeason: Record<string, string> }> {
   const seasonTitles = inferAnimeSeasonSearchTitles(episodeFiles, fallbackTitle);
   const results: EpisodeMeta[] = [];
   const usedMalIds = new Set<number>();
+  const malIdBySeason: Record<string, string> = {};
 
   for (const [season, title] of [...seasonTitles.entries()].sort(([a], [b]) => a - b)) {
     let metadata = season === 1 ? firstSeasonMetadata : null;
     if (!metadata || (metadata.malId && usedMalIds.has(metadata.malId))) {
       metadata = await fetchJikanMetadata(title);
     }
-    if (!metadata?.episodes?.length) continue;
-    if (metadata.malId) usedMalIds.add(metadata.malId);
+    if (!metadata?.episodes?.length || !metadata.malId || usedMalIds.has(metadata.malId)) continue;
+    const localEpisodes = episodeFiles.filter((file) => file.season === season);
+    // AniSkip is keyed to a specific MAL entry. Prefer no marker to a plausible
+    // but wrong cour: require title agreement, a unique MAL id, and coverage of
+    // the local episode numbering before persisting the season mapping.
+    if (!isConfidentAnimeSeasonMapping(metadata, title, localEpisodes, usedMalIds)) continue;
+    if (metadata.malId) {
+      usedMalIds.add(metadata.malId);
+      malIdBySeason[String(season)] = String(metadata.malId);
+    }
 
     results.push(...metadata.episodes.map((episode) => ({ ...episode, season })));
   }
 
-  return results;
+  return { episodes: results, malIdBySeason };
 }
 
 export function mergeLocalSeasonsWithMetadata(

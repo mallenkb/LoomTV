@@ -121,6 +121,8 @@ if (exists(sqliteNative)) {
 
 const bundledFfmpeg = path.join(resources, 'ffmpeg', platformFolder(), binaryName('ffmpeg'));
 const bundledFfprobe = path.join(resources, 'ffmpeg', platformFolder(), binaryName('ffprobe'));
+const bundledFpcalc = path.join(resources, 'fpcalc', platformFolder(), platform === 'win32' ? 'fpcalc.exe' : 'fpcalc');
+const fpcalcNotice = path.join(resources, 'fpcalc', 'NOTICE.md');
 const staticFfmpeg = path.join(
   unpacked,
   'node_modules',
@@ -143,6 +145,14 @@ if (!exists(bundledFfmpeg) && !exists(staticFfmpeg)) {
 
 if (!exists(bundledFfprobe) && !exists(staticFfprobe)) {
   fail(`Missing bundled ffprobe. Checked ${bundledFfprobe} and ${staticFfprobe}`);
+}
+
+if (!exists(bundledFpcalc)) {
+  fail(`Missing bundled fpcalc. Checked ${bundledFpcalc}`);
+}
+
+if (!exists(fpcalcNotice)) {
+  fail(`Missing fpcalc distribution notice. Checked ${fpcalcNotice}`);
 }
 
 if (process.exitCode) process.exit(process.exitCode);

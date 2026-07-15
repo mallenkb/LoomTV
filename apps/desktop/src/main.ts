@@ -123,6 +123,7 @@ import {
   backupDatabase,
   cacheLibraryArtwork,
   clearDatabase,
+  cleanupOrphanedAutomaticSegments,
   getAllProgress,
   getPlaybackTrackPreferences,
   getProgress,
@@ -168,6 +169,9 @@ import {
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
 import { fetchFanartMovieLogos, fetchFanartTVLogos } from './main/metadata/fanart';
+import { createSkipSegmentService } from './main/skipSegments/service';
+import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
+import { setPlaybackActivityLease } from './main/ffmpegGovernor';
 
 type EpisodeMeta = MetadataEpisodeMeta;
 type EpisodeFile = MetadataEpisodeFile;
@@ -330,6 +334,7 @@ export interface AppSettings {
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
+  localSkipAnalysisEnabled?: boolean;
   sidebarNavOrder?: string[];
   customFolderNames?: Record<string, string>;
   appThemeMode?: 'dark' | 'light';
@@ -776,14 +781,14 @@ async function buildTVItemFromFolder(
     || year;
   const jikanEpisodesForLocalSeasons = finalType === 'anime'
     ? await fetchJikanEpisodesForLocalAnimeSeasons(episodeFiles, searchTitle, matchedJikanMeta)
-    : [];
+    : { episodes: [], malIdBySeason: {} };
 
   // ── Merge episode metadata onto local files ────────────────────────────────
   // Keep provider priority per field so anime can use TVmaze titles while Jikan
   // fills episode scores that TVmaze often leaves empty.
   const mergedEpisodes = mergeEpisodeMetadataSources(localEpisodes, [
     matchedTVMeta?.episodes,
-    finalType === 'anime' && jikanEpisodesForLocalSeasons.length > 0 ? jikanEpisodesForLocalSeasons : null,
+    finalType === 'anime' && jikanEpisodesForLocalSeasons.episodes.length > 0 ? jikanEpisodesForLocalSeasons.episodes : null,
     matchedTmdbTVMeta?.episodes,
   ]);
   const mergedEpisodeTitleByKey = new Map(
@@ -818,7 +823,15 @@ async function buildTVItemFromFolder(
     episodeFiles: mergedEpisodeFiles,
     subtitles,
     localMetadata: representativeProbe.localMetadata,
-    providerIds: mergeProviderIds(providerIds, matchedTmdbTVMeta?.providerIds || {}, matchedTVMeta?.providerIds || {}),
+    providerIds: mergeProviderIds(
+      providerIds,
+      matchedTmdbTVMeta?.providerIds || {},
+      matchedTVMeta?.providerIds || {},
+      finalType === 'anime' ? {
+        malId: matchedJikanMeta?.malId ? String(matchedJikanMeta.malId) : undefined,
+        malIdBySeason: jikanEpisodesForLocalSeasons.malIdBySeason,
+      } : {},
+    ),
   };
 }
 
@@ -1005,6 +1018,10 @@ async function buildMovieItemFromFile(
       matchedTmdbData?.providerIds || {},
       matchedTmdbTVMeta?.providerIds || {},
       matchedTVMeta?.providerIds || {},
+      finalType === 'anime' && matchedJikanMeta?.malId ? {
+        malId: String(matchedJikanMeta.malId),
+        malIdBySeason: { '1': String(matchedJikanMeta.malId) },
+      } : {},
     ),
   };
 
@@ -1898,6 +1915,7 @@ function saveLibraryMutation(data: LibraryData): void {
 function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
   saveLibrary(data);
+  cleanupOrphanedAutomaticSegments();
   return true;
 }
 
@@ -2588,6 +2606,9 @@ function configureRendererSecurityPolicy(): void {
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
+const skipSegmentService = createSkipSegmentService({ loadLibrary, probeMediaFile });
+const localSegmentAnalysis = createLocalSegmentAnalysis({ loadLibrary, loadSettings, probeMediaFile });
+
 registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateState>({
   getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
@@ -2620,6 +2641,13 @@ registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateS
   importProgress,
   getPlaybackTrackPreferences,
   savePlaybackTrackPreferences: (scope, preferences) => savePlaybackTrackPreferences(scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[1]),
+  getMediaSegments: skipSegmentService.getSegments,
+  saveManualMediaSegment: skipSegmentService.saveManualSegment,
+  deleteManualMediaSegment: skipSegmentService.deleteManualSegment,
+  undoManualMediaSegment: skipSegmentService.undoManualSegment,
+  setPlaybackActivityLease,
+  getLocalSegmentAnalysisStatus: localSegmentAnalysis.status,
+  analyzeLocalSegmentSeason: localSegmentAnalysis.analyze,
   customArtworkForRenderer,
   saveCustomArtwork,
   getOfficialMetadataCandidates,
@@ -2665,6 +2693,7 @@ export const mediaServerDeps = {
   getLibraryMutationVersion: () => libraryMutationVersion,
   getOfficialMetadataCandidates,
   getPlaybackTrackPreferences,
+  getMediaSegments: skipSegmentService.getSegments,
   getPlaybackLogo,
   handleLanPairRequest,
   isExternalArtworkUrl,
@@ -2702,6 +2731,7 @@ app.whenReady().then(async () => {
   applyAppIcon();
   cleanupOldTranscodes();
   await startMediaServer(mediaServerDeps);
+  localSegmentAnalysis.startScheduler();
   syncLanAdvertisement();
   const trayIconPath = getWindowIconPath();
   if (trayIconPath) {

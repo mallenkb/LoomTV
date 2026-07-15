@@ -20,7 +20,7 @@ import {
 import { parseIntegerTag } from './mediaTags';
 import { srtToVtt } from './libraryItemHelpers';
 import { serveHls, startTranscode, stopTranscode } from './transcodeManager';
-import { acquireFfmpegToolSlot, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
+import { acquireFfmpegToolSlot, acquirePlaybackActivityLease, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { buildEmbeddedSubtitleVttArgs } from './transcodePlan';
 import { cachedArtworkResponseHeaders } from './artworkCache';
 import { assertLocalMediaPath, probeMedia } from './mediaProbe';
@@ -152,6 +152,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
     getLanShareToken,
     getLibraryMutationVersion,
     getOfficialMetadataCandidates,
+    getMediaSegments,
     getPlaybackLogo,
     handleLanPairRequest,
     isExternalArtworkUrl,
@@ -577,6 +578,26 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
+      if (reqUrl.pathname === '/api/playback/segments' && req.method === 'GET') {
+        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+        const mediaId = reqUrl.searchParams.get('mediaId') || '';
+        if (!mediaId) {
+          writeJson(res, 400, { error: 'mediaId is required' });
+          return;
+        }
+        const seasonValue = reqUrl.searchParams.get('season');
+        const episodeValue = reqUrl.searchParams.get('episode');
+        void getMediaSegments({
+          mediaId,
+          season: seasonValue === null ? undefined : Number(seasonValue),
+          episode: episodeValue === null ? undefined : Number(episodeValue),
+        }).then((result) => writeJson(res, 200, result)).catch((error) => {
+          console.error('playback segments API error:', error);
+          writeJson(res, 500, { error: 'Failed to load playback segments' });
+        });
+        return;
+      }
+
       if (reqUrl.pathname === '/api/artwork' && req.method === 'GET') {
         writeJson(res, 200, customArtworkForRenderer(reqUrl.searchParams.get('mediaId') || ''));
         return;
@@ -978,6 +999,13 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         res.end('Not found');
         return;
       }
+
+      const releaseStreamLease = acquirePlaybackActivityLease(
+        `http-stream:${Date.now()}:${Math.random().toString(36).slice(2)}`,
+        `stream ${path.basename(filePath)}`,
+      );
+      res.once('close', releaseStreamLease);
+      res.once('finish', releaseStreamLease);
 
       const ffmpegPath = findFFmpeg();
       const streamOptions: TranscodeOptions = {

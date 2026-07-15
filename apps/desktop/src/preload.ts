@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     autoSyncIntervalHours?: number;
     playbackSkipBackSeconds?: number;
     playbackSkipForwardSeconds?: number;
+    localSkipAnalysisEnabled?: boolean;
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';
     appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
@@ -104,6 +105,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
   getPlaybackTrackPreferences: (scope?: string) => ipcRenderer.invoke('playback-track-preferences:get', scope),
   savePlaybackTrackPreferences: (scope: string, preferences: unknown) =>
     ipcRenderer.invoke('playback-track-preferences:save', scope, preferences),
+  getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) =>
+    ipcRenderer.invoke('playback:segments:get', request),
+  saveManualMediaSegment: (input: unknown) => ipcRenderer.invoke('playback:segments:save-manual', input),
+  deleteManualMediaSegment: (input: unknown) => ipcRenderer.invoke('playback:segments:delete-manual', input),
+  undoManualMediaSegment: (input: unknown) => ipcRenderer.invoke('playback:segments:undo-manual', input),
+  setPlaybackActivity: (key: string, active: boolean, label?: string) => ipcRenderer.invoke('playback:activity', key, active, label),
+  getLocalSegmentAnalysisStatus: () => ipcRenderer.invoke('playback:analysis:status'),
+  analyzeLocalSegmentSeason: (mediaId: string, season: number) => ipcRenderer.invoke('playback:analysis:season', mediaId, season),
   getCustomArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:get', mediaId),
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => ipcRenderer.invoke('artwork:save', mediaId, target, dataUrl),
   getOfficialMetadataCandidates: (mediaId: string) => ipcRenderer.invoke('artwork:official-candidates', mediaId),

@@ -37,6 +37,7 @@ type SettingsPayload = {
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
+  localSkipAnalysisEnabled?: boolean;
   sidebarNavOrder?: string[];
   customFolderNames?: Record<string, string>;
   appThemeMode?: 'dark' | 'light';
@@ -184,6 +185,33 @@ export type PlaybackTrackPreferences = {
   audio?: TrackPreference;
   subtitle?: TrackPreference;
 };
+export type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
+export type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'chromaprint';
+export type MediaSegment = {
+  id: string;
+  type: MediaSegmentType;
+  startMs: number;
+  endMs: number | null;
+  confidence: number;
+  source: MediaSegmentSource;
+  mediaDurationMs: number;
+  updatedAt: string;
+};
+export type MediaSegmentRequest = { mediaId: string; season?: number; episode?: number };
+export type MediaSegmentResponse = { segments: MediaSegment[]; revision: string };
+export type ManualMediaSegmentInput = MediaSegmentRequest & {
+  type: MediaSegmentType;
+  startMs: number;
+  endMs: number | null;
+};
+export type LocalSegmentAnalysisStatus = {
+  enabled: boolean;
+  available: boolean;
+  helperPath: string | null;
+  state: 'disabled' | 'idle' | 'queued' | 'running' | 'paused' | 'unavailable' | 'error';
+  message?: string;
+  jobs?: Array<{ jobKey: string; mediaId: string; season: number; state: string; detail: string; updatedAt: number }>;
+};
 export type OfficialArtworkResult = {
   thumbnail?: string;
   cover?: string;
@@ -233,6 +261,13 @@ declare global {
       importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
       getPlaybackTrackPreferences?: (scope?: string) => Promise<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>;
       savePlaybackTrackPreferences?: (scope: string, preferences: PlaybackTrackPreferences) => Promise<PlaybackTrackPreferences>;
+      getMediaSegments?: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
+      saveManualMediaSegment?: (input: ManualMediaSegmentInput) => Promise<MediaSegmentResponse>;
+      deleteManualMediaSegment?: (input: MediaSegmentRequest & { type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
+      undoManualMediaSegment?: (input: MediaSegmentRequest & { type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
+      setPlaybackActivity?: (key: string, active: boolean, label?: string) => Promise<boolean>;
+      getLocalSegmentAnalysisStatus?: () => Promise<LocalSegmentAnalysisStatus>;
+      analyzeLocalSegmentSeason?: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
       getCustomArtwork?: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
       getOfficialMetadataCandidates?: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
@@ -655,6 +690,44 @@ export const desktopApi = {
       method: 'POST',
       body: JSON.stringify({ scope, preferences }),
     });
+  },
+
+  async getMediaSegments(request: MediaSegmentRequest): Promise<MediaSegmentResponse> {
+    if (window.desktopApi?.getMediaSegments) return window.desktopApi.getMediaSegments(request);
+    const params = new URLSearchParams({ mediaId: request.mediaId });
+    if (typeof request.season === 'number') params.set('season', String(request.season));
+    if (typeof request.episode === 'number') params.set('episode', String(request.episode));
+    return fetchJson<MediaSegmentResponse>(`/api/playback/segments?${params.toString()}`);
+  },
+
+  async saveManualMediaSegment(input: ManualMediaSegmentInput): Promise<MediaSegmentResponse> {
+    if (!window.desktopApi?.saveManualMediaSegment) throw new Error('Manual markers are available in the desktop app.');
+    return window.desktopApi.saveManualMediaSegment(input);
+  },
+
+  async deleteManualMediaSegment(input: MediaSegmentRequest & { type: MediaSegmentType }): Promise<MediaSegmentResponse> {
+    if (!window.desktopApi?.deleteManualMediaSegment) throw new Error('Manual markers are available in the desktop app.');
+    return window.desktopApi.deleteManualMediaSegment(input);
+  },
+
+  async undoManualMediaSegment(input: MediaSegmentRequest & { type: MediaSegmentType }): Promise<MediaSegmentResponse> {
+    if (!window.desktopApi?.undoManualMediaSegment) throw new Error('Manual markers are available in the desktop app.');
+    return window.desktopApi.undoManualMediaSegment(input);
+  },
+
+  async setPlaybackActivity(key: string, active: boolean, label?: string): Promise<boolean> {
+    if (!window.desktopApi?.setPlaybackActivity) return false;
+    return window.desktopApi.setPlaybackActivity(key, active, label);
+  },
+
+  async getLocalSegmentAnalysisStatus(): Promise<LocalSegmentAnalysisStatus> {
+    if (!window.desktopApi?.getLocalSegmentAnalysisStatus) return { enabled: false, available: false, helperPath: null, state: 'unavailable' };
+    return window.desktopApi.getLocalSegmentAnalysisStatus();
+  },
+
+  async analyzeLocalSegmentSeason(mediaId: string, season: number): Promise<MediaSegmentResponse> {
+    if (!window.desktopApi?.analyzeLocalSegmentSeason) throw new Error('Local analysis is available in the desktop app.');
+    return window.desktopApi.analyzeLocalSegmentSeason(mediaId, season);
   },
 
   async getCustomArtwork(mediaId: string): Promise<Record<string, string>> {
