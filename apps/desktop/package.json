@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "Loom Media Server",
-  "version": "1.0.41",
+  "version": "1.0.42",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.1.1",
@@ -35,6 +35,8 @@
     "publish": "corepack pnpm run release",
     "dist": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=never",
     "dist:dir": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --dir --publish=never",
+    "dist:adhoc": "corepack pnpm run rebuild:natives && corepack pnpm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir --publish=never && bash scripts/sign-mac-adhoc.sh",
+    "verify:mac-release": "bash scripts/verify-mac-release.sh",
     "release": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=always",
     "release:all-platforms": "corepack pnpm run release",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",

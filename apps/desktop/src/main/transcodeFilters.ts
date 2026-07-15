@@ -18,10 +18,16 @@ function filterStream(selectedIndex?: number, fallback = '0:v:0'): string {
 }
 
 function escapeFilterPath(filePath: string): string {
-  return filePath
-    .replace(/\\/g, '\\\\')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "\\'");
+  // Filtergraph parsing, the subtitles filter's option parser, and libass each
+  // consume an escape layer. Quoting the filename cannot represent an embedded
+  // apostrophe, so keep it unquoted and escape every filter-special character
+  // through all three layers. Backslashes need two escaped characters per layer.
+  const escapedSpecial = '\\'.repeat(3);
+  return Array.from(filePath, (character) => {
+    if (character === '\\') return '\\'.repeat(6);
+    if (`:'[],;`.includes(character)) return `${escapedSpecial}${character}`;
+    return character;
+  }).join('');
 }
 
 function isBitmapSubtitleCodec(codec?: string): boolean {
@@ -135,7 +141,7 @@ function subtitleFilterSegment(
   style?: SubtitleStyleOptions,
   placement: SubtitlePlacement = 'primary',
 ): string {
-  return `subtitles='${escapeFilterPath(filePath)}':si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style, placement)}'`;
+  return `subtitles=filename=${escapeFilterPath(filePath)}\\:si=${subtitleOrdinal}:force_style='${subtitleForceStyle(style, placement)}'`;
 }
 
 export function textSubtitleFilter(
