@@ -33,6 +33,7 @@ interface NowPlaying {
   episodeFiles?: EpisodeFile[];
   currentSeason?: number;
   currentEpisode?: number;
+  startPosition?: number;
 }
 
 export default function App() {
@@ -65,8 +66,20 @@ function AppShell() {
     currentEpisode?: number,
     mediaId?: string,
     artwork?: NowPlaying['artwork'],
+    startPosition?: number,
   ) => {
-    setNowPlaying({ mediaId, filePath, title, artwork, subtitles, episodes, episodeFiles, currentSeason, currentEpisode });
+    setNowPlaying({
+      mediaId,
+      filePath,
+      title,
+      artwork,
+      subtitles,
+      episodes,
+      episodeFiles,
+      currentSeason,
+      currentEpisode,
+      startPosition,
+    });
   }, []);
 
   /** Called when the user picks a different episode from the panel. */
@@ -80,7 +93,14 @@ function AppShell() {
       const episodeSubtitles = prev.episodeFiles?.find((item) =>
         item.filePath === filePath && item.season === season && item.episode === episode,
       )?.subtitles;
-      return { ...prev, filePath, subtitles: episodeSubtitles || [], currentSeason: season, currentEpisode: episode };
+      return {
+        ...prev,
+        filePath,
+        subtitles: episodeSubtitles || [],
+        currentSeason: season,
+        currentEpisode: episode,
+        startPosition: undefined,
+      };
     });
   }, []);
 
@@ -121,6 +141,7 @@ function AppShell() {
           episodeFiles={nowPlaying.episodeFiles}
           currentSeason={nowPlaying.currentSeason}
           currentEpisode={nowPlaying.currentEpisode}
+          startPosition={nowPlaying.startPosition}
           onEpisodeChange={handleEpisodeSelect}
           onClose={handleClose}
         />

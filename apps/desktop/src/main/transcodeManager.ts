@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { appendQueryToHlsPlaylist } from './hlsPlaylist';
 import { killAllManagedFfmpeg, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { findFFmpeg } from './mediaBinaries';
+import { pipeResponse } from './httpResponses';
 import { assertLocalMediaPath, probeMedia } from './mediaProbe';
 import {
   HLS_SEGMENT_SECONDS,
@@ -640,7 +641,7 @@ function sendHlsFile(filePath: string, res: http.ServerResponse, playlistQuerySt
     res.end(appendQueryToHlsPlaylist(fs.readFileSync(filePath, 'utf8'), playlistQueryString));
     return;
   }
-  fs.createReadStream(filePath).pipe(res);
+  pipeResponse(fs.createReadStream(filePath), res);
 }
 
 function notFound(res: http.ServerResponse): void {
