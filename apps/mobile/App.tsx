@@ -4224,31 +4224,40 @@ function PlayerContent({
     if (!baseUrl || !deviceToken || !target.mediaId) return;
     const controller = new AbortController();
     let cancelled = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const retryDelays = [5000, 15000];
     const params = new URLSearchParams({ mediaId: target.mediaId });
     if (target.mediaType !== 'movie' && typeof target.season === 'number' && typeof target.episode === 'number') {
       params.set('season', String(target.season));
       params.set('episode', String(target.episode));
     }
-    const load = async () => {
+    const load = async (attempt = 0) => {
       try {
         const response = await fetch(`${baseUrl}/api/playback/segments?${params.toString()}`, {
           headers: { Authorization: `Bearer ${deviceToken}` },
           signal: controller.signal,
         });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error(`Skip marker lookup failed (${response.status}).`);
         const payload = await response.json() as { segments?: MediaSegment[] };
-        if (!cancelled && Array.isArray(payload.segments)) setMediaSegments(payload.segments);
+        if (cancelled) return;
+        const segments = Array.isArray(payload.segments) ? payload.segments : [];
+        setMediaSegments(segments);
+        if (segments.length === 0 && attempt < retryDelays.length) {
+          refreshTimer = setTimeout(() => void load(attempt + 1), retryDelays[attempt]);
+        }
       } catch (error) {
         if (!cancelled && !(error instanceof Error && error.name === 'AbortError')) {
           console.warn('[mobile-player] skip marker lookup failed', error);
         }
+        if (!cancelled && attempt < retryDelays.length) {
+          refreshTimer = setTimeout(() => void load(attempt + 1), retryDelays[attempt]);
+        }
       }
     };
     void load();
-    const refreshTimer = setTimeout(() => void load(), 5000);
     return () => {
       cancelled = true;
-      clearTimeout(refreshTimer);
+      if (refreshTimer !== null) clearTimeout(refreshTimer);
       controller.abort();
     };
   }, [baseUrl, deviceToken, target.episode, target.mediaId, target.mediaType, target.season]);

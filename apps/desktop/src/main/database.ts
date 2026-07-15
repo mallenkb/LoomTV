@@ -385,6 +385,18 @@ function migrate(database: Database.Database): void {
   migrateArtworkCacheColumns(database);
   migrateLibraryFoldersKind(database);
   migrateMediaSegmentsPrimaryKey(database);
+  makeProviderSegmentsDurable(database);
+}
+
+function makeProviderSegmentsDurable(database: Database.Database): void {
+  // A provider cache expiry controls when Loom should refresh remote data; it
+  // must not make a timestamp that was already matched to this exact file
+  // disappear. File revisions invalidate stale matches when the media changes.
+  database.prepare(`
+    UPDATE media_segment_candidates
+    SET expires_at = NULL
+    WHERE source IN ('theintrodb', 'aniskip') AND expires_at IS NOT NULL
+  `).run();
 }
 
 function migrateMediaSegmentsPrimaryKey(database: Database.Database): void {
@@ -1195,7 +1207,14 @@ export function cleanupOrphanedAutomaticSegments(limit = 250): number {
   const rows = database.prepare(`
     SELECT id, file_revision FROM media_segment_candidates
     WHERE source != 'manual'
-      AND file_path NOT IN (SELECT file_path FROM episode_files)
+      AND NOT EXISTS (
+        SELECT 1 FROM episode_files WHERE episode_files.file_path = media_segment_candidates.file_path
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM media_items
+        WHERE media_items.file_path = media_segment_candidates.file_path
+          AND media_items.file_path != ''
+      )
     LIMIT ?
   `).all(Math.max(1, Math.min(1000, limit))) as Array<{ id: string; file_revision: string }>;
   if (!rows.length) return 0;
