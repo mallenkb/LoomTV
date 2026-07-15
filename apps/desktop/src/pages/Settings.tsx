@@ -139,7 +139,7 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
-  const [localSkipAnalysisEnabled, setLocalSkipAnalysisEnabled] = useState(false);
+  const [localSkipAnalysisEnabled, setLocalSkipAnalysisEnabled] = useState(true);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState('Checking fpcalc…');
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
@@ -202,7 +202,7 @@ export default function Settings() {
       setCustomFolderNames(s.customFolderNames || {});
       setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
       setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
-      setLocalSkipAnalysisEnabled(Boolean(s.localSkipAnalysisEnabled));
+      setLocalSkipAnalysisEnabled(s.localSkipAnalysisEnabled !== false);
     });
     void desktopApi.getLocalSegmentAnalysisStatus().then((status) => {
       setLocalAnalysisStatus(status.available

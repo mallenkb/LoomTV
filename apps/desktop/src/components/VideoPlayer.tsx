@@ -90,6 +90,7 @@ import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
+import { activeSkipSegmentAt, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
 import {
   clampSubtitleDelay,
   hasReachedInitialResumePosition,
@@ -240,7 +241,11 @@ export default function VideoPlayer({
   const [markerEnd, setMarkerEnd] = useState('90');
   const [markerSaving, setMarkerSaving] = useState(false);
   const [markerError, setMarkerError] = useState<string | null>(null);
-  const [markerAnalysisMessage, setMarkerAnalysisMessage] = useState('');
+  const playerStateRef = useRef<PlayerState>(playerState);
+
+  useEffect(() => {
+    playerStateRef.current = playerState;
+  }, [playerState]);
 
   useEffect(() => {
     const key = playbackActivityKeyRef.current;
@@ -338,9 +343,12 @@ export default function VideoPlayer({
 
   useEffect(() => {
     setMediaSegments([]);
-    if (!mediaId || episodes.length === 0 || episodeFiles.length === 0) return;
+    if (!mediaId) return;
     let cancelled = false;
-    const request = { mediaId, season: currentSeason, episode: currentEpisode };
+    const isEpisodePlayback = episodes.length > 0 && episodeFiles.length > 0;
+    const request = isEpisodePlayback
+      ? { mediaId, season: currentSeason, episode: currentEpisode }
+      : { mediaId };
     const load = () => desktopApi.getMediaSegments(request)
       .then((response) => {
         if (!cancelled) setMediaSegments(response.segments);
@@ -352,7 +360,7 @@ export default function VideoPlayer({
       cancelled = true;
       window.clearTimeout(refreshTimer);
     };
-  }, [currentEpisode, currentSeason, episodeFiles.length, episodes.length, mediaId]);
+  }, [currentEpisode, currentSeason, episodeFiles.length, episodes.length, filePath, mediaId]);
 
   useEffect(() => {
     pauseLogoSources.slice(0, 3).forEach((source) => {
@@ -1156,6 +1164,7 @@ export default function VideoPlayer({
     };
 
     const onTime = () => {
+      if (sourceToken !== sourceLoadTokenRef.current) return;
       if (!initialResumeApplied) {
         applyInitialResume();
         if (!initialResumeApplied) return;
@@ -1175,6 +1184,12 @@ export default function VideoPlayer({
         updatePlaybackSnapshot(nextPosition, totalDuration, {
           forceReact: totalDuration > 0 && totalDuration - nextPosition <= END_COMPLETION_TOLERANCE_SECONDS,
         });
+      }
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && playerStateRef.current === 'error') {
+        hasPlayableDataRef.current = true;
+        playerStateRef.current = 'ready';
+        setPlayerState('ready');
+        setErrorMessage(null);
       }
       if (nextPosition > 10 && totalDuration > 0 && now - lastProgressSaveRef.current >= PROGRESS_SAVE_INTERVAL_MS) {
         lastProgressSaveRef.current = now;
@@ -2147,17 +2162,10 @@ export default function VideoPlayer({
     && position / duration >= WATCHED_THRESHOLD
     && !isScrubbingRef.current,
   );
-  const activeMediaSegment = useMemo(() => mediaSegments.find((segment) => {
-    if (segment.type === 'preview') return false;
-    const endSeconds = (segment.endMs ?? segment.mediaDurationMs) / 1000;
-    return position >= segment.startMs / 1000 && position < endSeconds - 0.25;
-  }) || null, [mediaSegments, position]);
-  const markerLabel = (type: MediaSegmentType) => ({
-    intro: 'Intro',
-    recap: 'Recap',
-    credits: 'Credits',
-    preview: 'Preview',
-  })[type];
+  const activeMediaSegment = useMemo(
+    () => activeSkipSegmentAt(mediaSegments, position),
+    [mediaSegments, position],
+  );
   const selectMarkerType = (type: MediaSegmentType) => {
     setMarkerType(type);
     const existing = mediaSegments.find((segment) => segment.type === type);
@@ -2239,19 +2247,6 @@ export default function VideoPlayer({
     }
   };
   const editorSegment = mediaSegments.find((segment) => segment.type === markerType);
-  const analyzeCurrentSeason = async () => {
-    if (!mediaId) return;
-    setMarkerAnalysisMessage('Analyzing this season in the background…');
-    try {
-      await desktopApi.analyzeLocalSegmentSeason(mediaId, currentSeason);
-      const response = await desktopApi.getMediaSegments({ mediaId, season: currentSeason, episode: currentEpisode });
-      setMediaSegments(response.segments);
-      setMarkerAnalysisMessage('Season analysis completed.');
-    } catch (error) {
-      setMarkerAnalysisMessage(error instanceof Error ? error.message : 'Season analysis failed.');
-    }
-  };
-
   return (
     <div className="loom-player-root fixed inset-0 z-50 flex bg-black" ref={containerRef}>
       <style>
@@ -2368,7 +2363,7 @@ export default function VideoPlayer({
           />
         )}
 
-        {activeMediaSegment && playerState === 'ready' && !showMarkerEditor && (
+        {shouldShowSkipPrompt(activeMediaSegment, showMarkerEditor) && activeMediaSegment && (
           <button
             type="button"
             onClick={(event) => {
@@ -2380,7 +2375,7 @@ export default function VideoPlayer({
             }}
             className="absolute bottom-32 right-8 z-40 rounded-md border border-white/25 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-md transition hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
           >
-            Skip {markerLabel(activeMediaSegment.type)}
+            Skip {skipPromptLabel(activeMediaSegment.type, hasEpisodes)}
           </button>
         )}
 
@@ -2392,13 +2387,10 @@ export default function VideoPlayer({
             <section className="w-full max-w-md rounded-xl border border-white/15 bg-zinc-950 p-5 text-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Edit skip marker">
               <div className="mb-5 flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">Skip marker</h2>
-                  <p className="mt-1 text-xs text-white/55">Times are absolute episode seconds and override automatic sources.</p>
+                  <h2 className="text-lg font-semibold">Correct skip timing</h2>
+                  <p className="mt-1 text-xs text-white/55">Optional file-specific correction for automatic markers.</p>
                 </div>
-                <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => void analyzeCurrentSeason()} className="rounded px-2 py-1 text-xs text-white/65 hover:bg-white/10 hover:text-white">Analyze season</button>
-                  <button type="button" onClick={() => setShowMarkerEditor(false)} className="rounded px-2 py-1 text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close marker editor">Close</button>
-                </div>
+                <button type="button" onClick={() => setShowMarkerEditor(false)} className="rounded px-2 py-1 text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close marker editor">Close</button>
               </div>
               <label className="block text-xs font-medium uppercase tracking-wide text-white/60">
                 Segment
@@ -2429,7 +2421,6 @@ export default function VideoPlayer({
                 </p>
               )}
               {markerError && <p className="mt-3 text-sm text-red-300" role="alert">{markerError}</p>}
-              {markerAnalysisMessage && <p className="mt-3 text-xs text-white/55" role="status">{markerAnalysisMessage}</p>}
               <div className="mt-5 flex items-center justify-between gap-3">
                 <div className="flex gap-1">
                   <button type="button" disabled={markerSaving} onClick={() => void resetMarker()} className="rounded-md px-2 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-50">Reset</button>
@@ -2477,7 +2468,6 @@ export default function VideoPlayer({
           openEpisodePanel={openEpisodePanel}
           openSubtitlesPanel={openSubtitlesPanel}
           openMediaPanel={openMediaPanel}
-          openMarkerEditor={openMarkerEditor}
           toggleFullscreen={toggleFullscreen}
         />
       </div>
@@ -2515,6 +2505,10 @@ export default function VideoPlayer({
           subtitleCueFontSize={subtitleCueFontSize}
           updateSubtitleStyle={updateSubtitleStyle}
           applySubtitleStyleToStream={applySubtitleStyleToStream}
+          onCorrectSkipTiming={() => {
+            setShowMediaPanel(false);
+            openMarkerEditor();
+          }}
         />
       )}
 

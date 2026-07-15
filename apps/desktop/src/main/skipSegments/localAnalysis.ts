@@ -22,6 +22,11 @@ import { findFFmpeg, findFpcalc } from '../mediaBinaries';
 import type { EpisodeFile, MediaItem } from '../metadata/types';
 import type { ProbeMediaFileResult } from '../mediaProbeFile';
 import { bestFingerprintMatch, scoreFingerprintMatches, type FingerprintMatch, type FingerprintWindow } from './fingerprintMatcher';
+import {
+  detectMovieCreditIntervals,
+  MOVIE_CREDIT_FRAME_HEIGHT,
+  MOVIE_CREDIT_FRAME_WIDTH,
+} from './movieCreditsDetector';
 import { segmentRevision } from './normalize';
 import type { MediaSegmentCandidate, MediaSegmentResponse, SegmentAnalysisStatus } from './types';
 
@@ -29,7 +34,7 @@ const ALGORITHM_VERSION = 'loom-chromaprint-v1-11025-mono';
 const SAMPLE_RATE = 11025;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
-type LibraryLike = { tvShows?: MediaItem[]; animeShows?: MediaItem[] };
+type LibraryLike = { movies?: MediaItem[]; tvShows?: MediaItem[]; animeShows?: MediaItem[] };
 type AnalysisContext = {
   item: MediaItem;
   file: EpisodeFile;
@@ -188,6 +193,25 @@ async function refinedCreditsStart(
   });
 }
 
+async function movieCreditIntervals(context: AnalysisContext, ffmpegPath: string) {
+  if (isPlaybackActivityActive()) throw new Error('Playback became active; analysis was queued again.');
+  const windowDurationMs = Math.min(15 * 60_000, context.durationMs);
+  const windowStartMs = Math.max(0, context.durationMs - windowDurationMs);
+  const proc = spawn(ffmpegPath, [
+    '-hide_banner', '-loglevel', 'error',
+    '-ss', String(windowStartMs / 1000), '-t', String(windowDurationMs / 1000),
+    '-i', context.file.filePath,
+    '-an', '-threads', '1',
+    '-vf', `fps=1,scale=${MOVIE_CREDIT_FRAME_WIDTH}:${MOVIE_CREDIT_FRAME_HEIGHT}:flags=fast_bilinear,format=gray`,
+    '-pix_fmt', 'gray', '-f', 'rawvideo', 'pipe:1',
+  ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  registerAnalysisProcess(proc);
+  lowerPriority(proc);
+  proc.stderr?.resume();
+  const rawFrames = await collectOutput(proc);
+  return detectMovieCreditIntervals(rawFrames, windowStartMs, context.durationMs);
+}
+
 export function createLocalSegmentAnalysis(deps: {
   loadLibrary: () => LibraryLike;
   loadSettings: () => { localSkipAnalysisEnabled?: boolean };
@@ -220,8 +244,32 @@ export function createLocalSegmentAnalysis(deps: {
       });
   }
 
+  function movieContext(mediaId: string): AnalysisContext | null {
+    const item = (deps.loadLibrary().movies || []).find((candidate) => candidate.id === mediaId);
+    if (!item || item.type !== 'movie' || !item.filePath || !fs.existsSync(item.filePath)) return null;
+    const probe = item.localMetadata ? { localMetadata: item.localMetadata } : deps.probeMediaFile(item.filePath);
+    const durationMs = Math.round((item.localMetadata?.durationSeconds || probe.localMetadata?.durationSeconds || 0) * 1000);
+    if (!durationMs) return null;
+    const file: EpisodeFile = {
+      season: 0,
+      episode: 0,
+      filePath: item.filePath,
+      subtitles: item.subtitles,
+      localMetadata: item.localMetadata || probe.localMetadata,
+    };
+    const audio = audioIdentity(file);
+    return {
+      item,
+      file,
+      durationMs,
+      audioTrack: audio.index,
+      audioLanguage: audio.language,
+      fileRevision: automaticRevision(file.filePath, durationMs, audio.index, audio.language),
+    };
+  }
+
   async function analyze(mediaId: string, season: number): Promise<MediaSegmentResponse> {
-    if (!deps.loadSettings().localSkipAnalysisEnabled) throw new Error('Enable experimental local skip analysis in Playback settings first.');
+    if (deps.loadSettings().localSkipAnalysisEnabled === false) throw new Error('Enable automatic local skip analysis in Playback settings first.');
     if (running) return running;
     const task = (async () => {
       const fpcalcPath = findFpcalc();
@@ -301,16 +349,68 @@ export function createLocalSegmentAnalysis(deps: {
     try { return await task; } finally { running = null; }
   }
 
+  async function analyzeMovie(mediaId: string): Promise<MediaSegmentResponse> {
+    if (deps.loadSettings().localSkipAnalysisEnabled === false) throw new Error('Enable automatic local skip analysis in Playback settings first.');
+    if (running) return running;
+    const task = (async () => {
+      const ffmpegPath = findFFmpeg();
+      if (!ffmpegPath) throw new Error('FFmpeg was not found. Provider and chapter markers remain available.');
+      const context = movieContext(mediaId);
+      if (!context) throw new Error('That movie file is unavailable.');
+      const jobKey = `movie:${mediaId}:${context.fileRevision}:credits-v1`;
+      saveSegmentAnalysisState(jobKey, mediaId, 0, 'running', 'Inspecting the final 15 minutes for movie credits');
+      try {
+        const intervals = await movieCreditIntervals(context, ffmpegPath);
+        const candidates: MediaSegmentCandidate[] = [];
+        for (const interval of intervals) {
+          const startMs = await refinedCreditsStart(context, interval.startMs, ffmpegPath);
+          candidates.push({
+            id: hashId(context.fileRevision, 'chromaprint', 'movie-credits', startMs, interval.endMs),
+            mediaId,
+            season: 0,
+            episode: 0,
+            filePath: context.file.filePath,
+            fileRevision: context.fileRevision,
+            type: 'credits',
+            startMs,
+            endMs: interval.endMs,
+            confidence: interval.confidence,
+            source: 'chromaprint',
+            status: 'active',
+            mediaDurationMs: context.durationMs,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        replaceSegmentCandidatesForSource(context.fileRevision, 'chromaprint', candidates);
+        saveSegmentAnalysisState(
+          jobKey,
+          mediaId,
+          0,
+          'complete',
+          candidates.length ? `Detected ${candidates.length} movie credits interval${candidates.length === 1 ? '' : 's'}` : 'No high-confidence movie credits found',
+        );
+        const segments = getResolvedMediaSegments(context.fileRevision);
+        return { segments, revision: segmentRevision(segments) };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Movie credits analysis failed.';
+        saveSegmentAnalysisState(jobKey, mediaId, 0, message.includes('Playback became active') ? 'queued' : 'error', message);
+        throw error;
+      }
+    })();
+    running = task;
+    try { return await task; } finally { running = null; }
+  }
+
   function status(): SegmentAnalysisStatus & { jobs: ReturnType<typeof getSegmentAnalysisStates> } {
     const helperPath = findFpcalc();
-    const enabled = Boolean(deps.loadSettings().localSkipAnalysisEnabled);
+    const enabled = deps.loadSettings().localSkipAnalysisEnabled !== false;
     const jobs = getSegmentAnalysisStates();
     return {
       enabled,
       available: Boolean(helperPath && findFFmpeg()),
       helperPath,
       state: running ? 'running' : !enabled ? 'disabled' : helperPath ? 'idle' : 'unavailable',
-      message: helperPath ? undefined : 'Install fpcalc or set LOOMTV_FPCALC_PATH. Provider and manual markers still work.',
+      message: helperPath ? undefined : 'Install fpcalc or set LOOMTV_FPCALC_PATH. Provider and chapter markers still work.',
       jobs,
     };
   }
@@ -320,22 +420,43 @@ export function createLocalSegmentAnalysis(deps: {
     powerMonitor.on('on-ac', () => { onAcPower = true; });
     powerMonitor.on('on-battery', () => { onAcPower = false; });
     scheduler = setInterval(() => {
-      if (running || !onAcPower || !deps.loadSettings().localSkipAnalysisEnabled) return;
+      if (running || !onAcPower || deps.loadSettings().localSkipAnalysisEnabled === false) return;
       if (powerMonitor.getSystemIdleTime() < 300 || isPlaybackActivityActive() || millisecondsSincePlaybackActivity() < 60_000) return;
       const library = deps.loadLibrary();
-      const targets = [...(library.tvShows || []), ...(library.animeShows || [])].flatMap((item) =>
+      const seasonTargets = [...(library.tvShows || []), ...(library.animeShows || [])].flatMap((item) =>
         [...new Set((item.episodeFiles || []).map((file) => file.season))].map((season) => ({ mediaId: item.id, season })));
-      const target = targets.find(({ mediaId, season }) => {
+      const seasonTarget = seasonTargets.find(({ mediaId, season }) => {
         const revisions = contexts(mediaId, season).map((context) => context.fileRevision);
         const jobKey = `season:${mediaId}:${season}:${hashId(...revisions)}`;
-        return revisions.length >= 3 && !getSegmentAnalysisStates(mediaId).some((job) => job.jobKey === jobKey && job.state === 'complete');
+        const needsLocalFallback = revisions.some((revision) => {
+          const reliableTypes = new Set(getResolvedMediaSegments(revision)
+            .filter((segment) => segment.source !== 'chromaprint')
+            .map((segment) => segment.type));
+          return !reliableTypes.has('intro') || !reliableTypes.has('credits');
+        });
+        return revisions.length >= 3
+          && needsLocalFallback
+          && !getSegmentAnalysisStates(mediaId).some((job) => job.jobKey === jobKey && job.state === 'complete');
       });
-      if (target) void analyze(target.mediaId, target.season).catch(() => undefined);
+      if (seasonTarget) {
+        void analyze(seasonTarget.mediaId, seasonTarget.season).catch(() => undefined);
+        return;
+      }
+      const movieTarget = (library.movies || []).map((item) => movieContext(item.id)).find((context) => {
+        if (!context) return false;
+        const hasReliableCredits = getResolvedMediaSegments(context.fileRevision)
+          .some((segment) => segment.type === 'credits' && segment.source !== 'chromaprint');
+        const jobKey = `movie:${context.item.id}:${context.fileRevision}:credits-v1`;
+        const completed = getSegmentAnalysisStates(context.item.id)
+          .some((job) => job.jobKey === jobKey && job.state === 'complete');
+        return !hasReliableCredits && !completed;
+      });
+      if (movieTarget) void analyzeMovie(movieTarget.item.id).catch(() => undefined);
     }, 60_000);
     scheduler.unref?.();
   }
 
-  return { analyze, status, startScheduler };
+  return { analyze, analyzeMovie, status, startScheduler };
 }
 
 export type LocalSegmentAnalysis = ReturnType<typeof createLocalSegmentAnalysis>;

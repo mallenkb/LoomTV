@@ -2,7 +2,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ListOrdered,
-  Tags,
   Maximize,
   Minimize,
   Pause,
@@ -49,7 +48,6 @@ interface PlayerControlBarProps {
   openEpisodePanel: () => void;
   openSubtitlesPanel: () => void;
   openMediaPanel: () => void;
-  openMarkerEditor: () => void;
   toggleFullscreen: () => void;
 }
 
@@ -85,7 +83,6 @@ export default function PlayerControlBar({
   openEpisodePanel,
   openSubtitlesPanel,
   openMediaPanel,
-  openMarkerEditor,
   toggleFullscreen,
 }: PlayerControlBarProps) {
   return (
@@ -255,18 +252,6 @@ export default function PlayerControlBar({
         >
           <SlidersHorizontal className="h-5 w-5" strokeWidth={2.25} />
         </button>
-
-        {hasEpisodes && (
-          <button
-            type="button"
-            onClick={openMarkerEditor}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-            title="Edit skip markers"
-            aria-label="Edit skip markers"
-          >
-            <Tags className="h-5 w-5" strokeWidth={2.25} />
-          </button>
-        )}
 
         <button
           type="button"

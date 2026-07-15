@@ -1912,10 +1912,13 @@ function saveLibraryMutation(data: LibraryData): void {
   saveLibrary(data);
 }
 
+let warmSkipSegmentsAfterScan: (data: LibraryData) => void = () => undefined;
+
 function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
   saveLibrary(data);
   cleanupOrphanedAutomaticSegments();
+  warmSkipSegmentsAfterScan(data);
   return true;
 }
 
@@ -2608,6 +2611,7 @@ function configureRendererSecurityPolicy(): void {
 
 const skipSegmentService = createSkipSegmentService({ loadLibrary, probeMediaFile });
 const localSegmentAnalysis = createLocalSegmentAnalysis({ loadLibrary, loadSettings, probeMediaFile });
+warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 
 registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateState>({
   getMediaServerPort: () => getMediaServerPort(),
@@ -2732,6 +2736,7 @@ app.whenReady().then(async () => {
   cleanupOldTranscodes();
   await startMediaServer(mediaServerDeps);
   localSegmentAnalysis.startScheduler();
+  skipSegmentService.warmLibrary(loadLibrary());
   syncLanAdvertisement();
   const trayIconPath = getWindowIconPath();
   if (trayIconPath) {

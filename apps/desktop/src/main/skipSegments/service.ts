@@ -197,9 +197,40 @@ export function createSkipSegmentService(deps: {
   loadLibrary: () => LibraryLike;
   probeMediaFile: (filePath: string) => ProbeMediaFileResult;
 }) {
+  let warmGeneration = 0;
+
   function contextFor(request: MediaSegmentRequest): SegmentContext | null {
     const item = findItem(deps.loadLibrary(), String(request.mediaId || ''));
-    if (!item || item.type === 'movie') return null;
+    if (!item) return null;
+    if (item.type === 'movie') {
+      if (!item.filePath || !fs.existsSync(item.filePath)) return null;
+      const episodeFile: EpisodeFile = {
+        season: 0,
+        episode: 0,
+        filePath: item.filePath,
+        subtitles: item.subtitles,
+        localMetadata: item.localMetadata,
+      };
+      const probe = item.localMetadata
+        ? { localMetadata: item.localMetadata }
+        : deps.probeMediaFile(item.filePath);
+      const durationSeconds = item.localMetadata?.durationSeconds || probe.localMetadata?.durationSeconds || 0;
+      if (!durationSeconds) return null;
+      const durationMs = Math.round(durationSeconds * 1000);
+      const audioTrack = defaultAudioTrack(episodeFile);
+      return {
+        item,
+        episodeFile,
+        mediaId: item.id,
+        season: 0,
+        episode: 0,
+        filePath: item.filePath,
+        fileRevision: fileRevision(item.filePath, durationMs, audioTrack, item.localMetadata),
+        durationMs,
+        providerIds: item.providerIds || {},
+        probe,
+      };
+    }
     const sorted = (item.episodeFiles || []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode);
     const episodeFile = sorted.find((file) =>
       (request.season === undefined || file.season === Number(request.season))
@@ -278,10 +309,13 @@ export function createSkipSegmentService(deps: {
   async function providerSegments(
     context: SegmentContext,
     provider: ProviderCacheEntry['provider'],
+    waitForRefresh = false,
   ): Promise<{ segments: MediaSegment[]; kind: ProviderLookupResult['kind'] }> {
     const lookupKey = provider === 'aniskip'
       ? aniSkipLookupKey(context.providerIds.malId, context.episode)
-      : theIntroDbLookupKey(context.providerIds, context.season, context.episode);
+      : context.item.type === 'movie'
+        ? theIntroDbLookupKey(context.providerIds)
+        : theIntroDbLookupKey(context.providerIds, context.season, context.episode);
     if (!lookupKey) return { segments: getResolvedMediaSegments(context.fileRevision), kind: 'empty' };
     const bucket = durationBucket(context.durationMs);
     const cached = getSegmentSourceCache(provider, lookupKey, bucket);
@@ -296,6 +330,10 @@ export function createSkipSegmentService(deps: {
       const staleSegments = applyProviderSegments(context, provider, cached.segments, cached.staleUntil);
       void refreshProvider(context, provider, lookupKey, bucket);
       return { segments: staleSegments, kind: 'success' };
+    }
+    if (waitForRefresh) {
+      const result = await refreshProvider(context, provider, lookupKey, bucket);
+      return { segments: getResolvedMediaSegments(context.fileRevision), kind: result.kind };
     }
     void refreshProvider(context, provider, lookupKey, bucket).catch((error) => {
       console.warn(`[skip-segments] ${provider} refresh failed:`, error);
@@ -317,8 +355,7 @@ export function createSkipSegmentService(deps: {
       })
       : fetchTheIntroDbSegments({
         ids: context.providerIds,
-        season: context.season,
-        episode: context.episode,
+        ...(context.item.type === 'movie' ? {} : { season: context.season, episode: context.episode }),
         durationMs: context.durationMs,
       }));
     if (result.kind !== 'success' && result.kind !== 'empty') return result;
@@ -339,18 +376,22 @@ export function createSkipSegmentService(deps: {
     return result;
   }
 
-  async function resolveSegments(request: MediaSegmentRequest, prefetchAdjacent: boolean): Promise<MediaSegmentResponse> {
+  async function resolveSegments(
+    request: MediaSegmentRequest,
+    prefetchAdjacent: boolean,
+    waitForProvider = false,
+  ): Promise<MediaSegmentResponse> {
     const context = contextFor(request);
     if (!context) return { segments: [], revision: segmentRevision([]) };
     syncChapters(context);
     reassociateManualIfNeeded(context);
     let segments = getResolvedMediaSegments(context.fileRevision);
     if (context.item.type === 'anime') {
-      const aniSkip = await providerSegments(context, 'aniskip');
+      const aniSkip = await providerSegments(context, 'aniskip', waitForProvider);
       segments = aniSkip.segments;
-      if (aniSkip.kind !== 'success') segments = (await providerSegments(context, 'theintrodb')).segments;
+      if (aniSkip.kind !== 'success') segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
     } else {
-      segments = (await providerSegments(context, 'theintrodb')).segments;
+      segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
     }
     if (prefetchAdjacent) {
       const ordered = (context.item.episodeFiles || []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode);
@@ -369,9 +410,31 @@ export function createSkipSegmentService(deps: {
 
   const getSegments = (request: MediaSegmentRequest) => resolveSegments(request, true);
 
+  function warmLibrary(library: LibraryLike = deps.loadLibrary()): void {
+    const generation = ++warmGeneration;
+    const requests: MediaSegmentRequest[] = [
+      ...(library.movies || []).map((item) => ({ mediaId: item.id })),
+      ...[...(library.tvShows || []), ...(library.animeShows || [])].flatMap((item) =>
+        (item.episodeFiles || []).map((file) => ({ mediaId: item.id, season: file.season, episode: file.episode }))),
+    ];
+    const timer = setTimeout(() => {
+      void (async () => {
+        for (const request of requests) {
+          if (generation !== warmGeneration) return;
+          await resolveSegments(request, false, true).catch(() => undefined);
+          await new Promise<void>((resolve) => {
+            const pause = setTimeout(resolve, 100);
+            pause.unref?.();
+          });
+        }
+      })();
+    }, 250);
+    timer.unref?.();
+  }
+
   function saveManualSegment(input: ManualMediaSegmentInput): MediaSegmentResponse {
     const context = contextFor(input);
-    if (!context) throw new Error('That episode file is unavailable.');
+    if (!context) throw new Error('That media file is unavailable.');
     const normalized = normalizeSegment({
       type: input.type,
       startMs: input.startMs,
@@ -407,7 +470,7 @@ export function createSkipSegmentService(deps: {
     return { segments, revision: segmentRevision(segments) };
   }
 
-  return { getSegments, saveManualSegment, deleteManualSegment, undoManualSegment };
+  return { getSegments, warmLibrary, saveManualSegment, deleteManualSegment, undoManualSegment };
 }
 
 export type SkipSegmentService = ReturnType<typeof createSkipSegmentService>;
