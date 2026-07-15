@@ -251,6 +251,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const runLibraryScan = async (mode: 'quick' | 'metadata' | 'full') => {
     if (isScanningRef.current) return;
+    isScanningRef.current = true;
     dispatch({ type: 'SET_SCANNING', payload: true });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
@@ -259,6 +260,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Failed to scan library:', error);
     } finally {
+      isScanningRef.current = false;
       dispatch({ type: 'SET_SCANNING', payload: false });
       dispatch({ type: 'SET_LOADING', payload: false });
     }
@@ -315,7 +317,6 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    isScanningRef.current = state.isScanning;
     hasConfiguredFoldersRef.current = hasConfiguredFolders(state);
   }, [state]);
 
@@ -348,6 +349,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         }
 
         if (hasConfiguredFolders(cached)) {
+          isScanningRef.current = true;
           dispatch({ type: 'SET_SCANNING', payload: true });
           const scanned = await desktopApi.scanLibrary('quick');
           if (cancelled) return;
@@ -357,6 +359,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         console.error('Failed to load library:', error);
       } finally {
         if (!cancelled) {
+          isScanningRef.current = false;
           dispatch({ type: 'SET_SCANNING', payload: false });
           dispatch({ type: 'SET_LOADING', payload: false });
         }
@@ -375,6 +378,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       if (isScanningRef.current || !hasConfiguredFoldersRef.current) return;
 
       void (async () => {
+        isScanningRef.current = true;
         dispatch({ type: 'SET_SCANNING', payload: true });
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
         try {
@@ -383,6 +387,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           console.error('Failed to auto sync library:', error);
         } finally {
+          isScanningRef.current = false;
           dispatch({ type: 'SET_SCANNING', payload: false });
           dispatch({ type: 'SET_LOADING', payload: false });
         }
