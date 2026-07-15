@@ -57,13 +57,23 @@ export function resolveCandidates(candidates: MediaSegmentCandidate[]): MediaSeg
   }
 
   return [...byType.entries()]
-    .map(([, values]) => values.sort((a, b) => {
+    .flatMap(([type, values]) => {
+      const ranked = values.sort((a, b) => {
       const sourceOrder = SOURCE_PRIORITY[a.source] - SOURCE_PRIORITY[b.source];
       if (sourceOrder !== 0) return sourceOrder;
       if (a.source === 'aniskip' && b.source === 'theintrodb') return -1;
       if (a.source === 'theintrodb' && b.source === 'aniskip') return 1;
       return b.updatedAt.localeCompare(a.updatedAt);
-    })[0])
+      });
+      const winner = ranked[0];
+      if (!winner) return [];
+      // Movies can have a credits block, a post-credit scene, and another
+      // credits block. Preserve every non-overlapping credits interval from
+      // the winning source while retaining one winner for other marker types.
+      return type === 'credits'
+        ? ranked.filter((candidate) => candidate.source === winner.source)
+        : [winner];
+    })
     .filter(Boolean)
     .sort((a, b) => a.startMs - b.startMs || TYPE_ORDER[a.type] - TYPE_ORDER[b.type])
     .map(({ id, type, startMs, endMs, confidence, source, mediaDurationMs, updatedAt }) => ({
@@ -111,13 +121,24 @@ export function deduplicateProviderSegments(segments: NormalizedSegmentInput[], 
       start: segment.startMs,
       end: segment.endMs ?? mediaDurationMs,
     })).sort((a, b) => (b.end - b.start) - (a.end - a.start));
-    const anchor = intervals[0];
-    const compatible = intervals.every((candidate) => {
-      const overlap = Math.max(0, Math.min(anchor.end, candidate.end) - Math.max(anchor.start, candidate.start));
-      const shortest = Math.min(anchor.end - anchor.start, candidate.end - candidate.start);
+    const overlapsEnough = (left: typeof intervals[number], right: typeof intervals[number]) => {
+      const overlap = Math.max(0, Math.min(left.end, right.end) - Math.max(left.start, right.start));
+      const shortest = Math.min(left.end - left.start, right.end - right.start);
       return shortest > 0 && overlap / shortest >= 0.5;
-    });
-    if (compatible) result.push(anchor.segment);
+    };
+    if (type === 'credits') {
+      const clusters: Array<typeof intervals> = [];
+      for (const interval of intervals.sort((a, b) => a.start - b.start)) {
+        const cluster = clusters.find((values) => values.some((value) => overlapsEnough(value, interval)));
+        if (cluster) cluster.push(interval);
+        else clusters.push([interval]);
+      }
+      result.push(...clusters.map((cluster) => cluster.sort((a, b) =>
+        (b.end - b.start) - (a.end - a.start) || b.segment.confidence - a.segment.confidence)[0].segment));
+      continue;
+    }
+    const anchor = intervals[0];
+    if (intervals.every((candidate) => overlapsEnough(anchor, candidate))) result.push(anchor.segment);
   }
-  return result;
+  return result.sort((a, b) => a.startMs - b.startMs);
 }

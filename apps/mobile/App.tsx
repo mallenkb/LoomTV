@@ -4221,15 +4221,14 @@ function PlayerContent({
 
   useEffect(() => {
     setMediaSegments([]);
-    if (!baseUrl || !deviceToken || !target.mediaId || target.mediaType === 'movie'
-      || typeof target.season !== 'number' || typeof target.episode !== 'number') return;
+    if (!baseUrl || !deviceToken || !target.mediaId) return;
     const controller = new AbortController();
     let cancelled = false;
-    const params = new URLSearchParams({
-      mediaId: target.mediaId,
-      season: String(target.season),
-      episode: String(target.episode),
-    });
+    const params = new URLSearchParams({ mediaId: target.mediaId });
+    if (target.mediaType !== 'movie' && typeof target.season === 'number' && typeof target.episode === 'number') {
+      params.set('season', String(target.season));
+      params.set('episode', String(target.episode));
+    }
     const load = async () => {
       try {
         const response = await fetch(`${baseUrl}/api/playback/segments?${params.toString()}`, {
@@ -4611,7 +4610,7 @@ function PlayerContent({
   const activeSegmentLabel = activeMediaSegment ? ({
     intro: 'Intro',
     recap: 'Recap',
-    credits: 'Credits',
+    credits: target.mediaType === 'movie' ? 'Credits' : 'Outro',
     preview: 'Preview',
   } as const)[activeMediaSegment.type] : '';
   const displayLabels = playerDisplayLabels(target);
