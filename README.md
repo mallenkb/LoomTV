@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.49](docs/releases/v1.0.49.md): republishes the current desktop build with fresh installers and updater metadata.
 - [Loom Media Server 1.0.48](docs/releases/v1.0.48.md): improves skip-analysis scheduling, manual scan responsiveness, playback protection, and library coverage reporting.
 - [Loom Media Server 1.0.47](docs/releases/v1.0.47.md): makes intro/outro skipping easier to discover while keeping advanced analysis and manual timestamp controls available on demand.
 - [Loom Media Server 1.0.46](docs/releases/v1.0.46.md): hardens desktop library scans against duplicate items, stale metadata, and overlapping scan runs.
