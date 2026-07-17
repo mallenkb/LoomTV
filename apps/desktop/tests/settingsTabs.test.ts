@@ -6,17 +6,11 @@ import {
   nextSettingsSection,
   remoteLibraryRefreshIdentity,
 } from '../src/lib/settingsTabs.ts';
+import { buildNetworkStatus, ffmpegAvailability } from '../src/main/ipcHandlerPolicy.ts';
 
 const settingsPageSource = () => readFileSync(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8');
-const ipcHandlersSource = () => readFileSync(new URL('../src/main/ipcHandlers.ts', import.meta.url), 'utf8');
 const settingsTabsSource = () => readFileSync(new URL('../src/pages/SettingsTabs.tsx', import.meta.url), 'utf8');
 const stylesheetSource = () => readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
-
-function ipcHandlerSource(source: string, channel: string): string {
-  const handlerStart = source.indexOf(`ipcMain.handle('${channel}'`);
-  const handlerEnd = source.indexOf('\n  });', handlerStart);
-  return handlerStart >= 0 && handlerEnd >= 0 ? source.slice(handlerStart, handlerEnd) : '';
-}
 
 test('settings tab selection keeps the current section when the selected tab is already active', () => {
   assert.equal(nextSettingsSection('network', 'network'), 'network');
@@ -61,24 +55,33 @@ test('settings page defers Electron-only status probes until their tabs are acti
 });
 
 test('network status IPC avoids synchronous Wi-Fi name probing', () => {
-  const source = ipcHandlersSource();
-  const handler = ipcHandlerSource(source, 'network:status');
+  let fastNameCalls = 0;
+  const status = buildNetworkStatus({
+    loadSettings: () => ({}),
+    getLanShareToken: () => 'token',
+    getLanServerBase: () => 'http://127.0.0.1:3847',
+    isLanSharingEnabled: () => true,
+    getLocalNetworkNameFast: () => {
+      fastNameCalls += 1;
+      return 'Local network';
+    },
+    getMediaServerPort: () => 3847,
+    getLocalNetworkAddresses: () => ['127.0.0.1'],
+  });
 
-  assert.notEqual(handler, '', 'Expected to find the network status IPC handler.');
-  assert.equal(
-    handler.includes('getLocalNetworkName()'),
-    false,
-    'The renderer network status IPC should not synchronously shell out for the Wi-Fi name.',
-  );
+  assert.equal(fastNameCalls, 1);
+  assert.equal(status.networkName, 'Local network');
 });
 
 test('FFmpeg status IPC resolves the binary path once', () => {
-  const source = ipcHandlersSource();
-  const handler = ipcHandlerSource(source, 'media:ffmpeg-available');
-  const findCalls = handler.match(/findFFmpeg\(\)/g) || [];
+  let findCalls = 0;
+  const status = ffmpegAvailability(() => {
+    findCalls += 1;
+    return '/usr/local/bin/ffmpeg';
+  });
 
-  assert.notEqual(handler, '', 'Expected to find the FFmpeg availability IPC handler.');
-  assert.equal(findCalls.length, 1, 'The FFmpeg availability IPC handler should not run discovery twice.');
+  assert.equal(findCalls, 1);
+  assert.deepEqual(status, { available: true, path: '/usr/local/bin/ffmpeg' });
 });
 
 test('settings tab strip opts out of the macOS drag area', () => {

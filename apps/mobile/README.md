@@ -14,18 +14,6 @@ The current development target is same-LAN remote playback: the desktop app rema
 - Save playback progress back to the paired desktop host.
 - Show continue-watching and watched/progress states from synced progress.
 
-## Backend Foundation
-
-The workspace includes Convex functions and schema for longer-term companion workflows:
-
-- Host registration and heartbeat
-- Pairing codes and paired device tokens
-- Media and episode sync records
-- Playback progress
-- Remote playback control commands
-
-The mobile app currently pairs directly with the desktop LAN API while the production companion-client path is still being refined. Convex support should be treated as foundation for sync/control workflows until the full production path is documented.
-
 ## Development
 
 From the repository root:

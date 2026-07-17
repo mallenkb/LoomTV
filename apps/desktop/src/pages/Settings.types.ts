@@ -43,6 +43,9 @@ export type SharedLibrarySnapshot = {
   baseUrl: string;
   deviceId: string;
   deviceToken: string;
+  accessTokenExpiresAt?: number;
+  refreshToken?: string;
+  refreshTokenExpiresAt?: number;
   hostDeviceId?: string;
   hostDeviceName?: string;
   connectedAt: number;

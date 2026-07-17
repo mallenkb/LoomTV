@@ -1,5 +1,28 @@
 import type { SubtitleStyleOptions, TranscodeOptions } from './mediaTypes';
 
+export type H264HardwareEncoder = 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv';
+
+export function appendH264EncoderOptions(args: string[], encoder: H264HardwareEncoder): void {
+  if (encoder === 'h264_videotoolbox') {
+    args.push(
+      '-allow_sw', '1',
+      '-realtime', '1',
+      '-b:v', '6500k',
+      '-maxrate', '8500k',
+      '-bufsize', '12000k',
+      '-profile:v', 'main',
+    );
+    return;
+  }
+
+  if (encoder === 'h264_nvenc') {
+    args.push('-preset', 'p4', '-cq', '23', '-b:v', '0');
+    return;
+  }
+
+  args.push('-global_quality', '23', '-look_ahead', '0');
+}
+
 export function queryNumber(value: string | null): number | undefined {
   if (value === null || value.trim() === '') return undefined;
   const parsed = Number(value);

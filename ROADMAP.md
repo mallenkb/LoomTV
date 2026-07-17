@@ -6,11 +6,11 @@ This roadmap captures the current direction for Loom Media Server. It is intenti
 
 ### 1. Stabilize the Monorepo
 
-Move the desktop app, mobile client, and backend functions into a clear workspace structure without breaking existing desktop releases.
+Keep the desktop app and mobile client in a clear workspace structure without breaking existing desktop releases.
 
 Expected outcomes:
 
-- Clear package boundaries under `apps/desktop`, `apps/mobile`, and `convex`
+- Clear package boundaries under `apps/desktop` and `apps/mobile`
 - Consistent pnpm workspace scripts
 - CI that runs linting, typechecking, tests, and installer builds from the workspace root
 - README and contributor docs that match the repository layout
@@ -81,7 +81,7 @@ Current in-progress foundation:
 - Mobile playback work through `expo-video`.
 - HLS/transcode startup work for formats that need a mobile-compatible stream.
 - Playback progress sync work back to the desktop host.
-- Convex schema and functions for hosts, paired devices, media sync, playback progress, and remote control commands.
+- Direct, authenticated desktop-to-mobile LAN sync for library and playback state.
 
 Near-term outcomes:
 

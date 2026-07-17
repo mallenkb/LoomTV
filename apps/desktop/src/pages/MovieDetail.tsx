@@ -9,7 +9,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
-import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
+import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 
@@ -94,7 +94,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const { state, refreshLibrary } = useLibrary();
   const [movie, setMovie] = useState<MediaItem | null>(null);
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
-  const [progressTick, setProgressTick] = useState(0);
+  const progressTick = useProgressRefreshRevision();
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [detailsReady, setDetailsReady] = useState(false);
 
@@ -149,21 +149,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
       cancelled = true;
     };
   }, [movie?.backdrop, movie?.backdropCandidates?.length, movie?.filePath, movie?.localMetadata?.durationSeconds, movie?.poster, movie?.posterCandidates?.length]);
-
-  useEffect(() => {
-    const bump = () => setProgressTick((value) => value + 1);
-    void hydrateProgressFromDatabase().then(bump);
-    const interval = window.setInterval(bump, 2000);
-    window.addEventListener('focus', bump);
-    window.addEventListener('storage', bump);
-    window.addEventListener('loomtv-progress', bump);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', bump);
-      window.removeEventListener('storage', bump);
-      window.removeEventListener('loomtv-progress', bump);
-    };
-  }, []);
 
   if (!movie) {
     return (

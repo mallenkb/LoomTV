@@ -21,6 +21,9 @@ export interface MediaItem {
   filePath: string;
   fileSize?: number;
   lastPlayed?: number;
+  seasons?: { number: number; title: string; episodeCount: number }[];
+  episodes?: EpisodeMeta[];
+  episodeFiles?: EpisodeFile[];
   subtitles?: { lang: string; label: string; url: string }[];
   localMetadata?: LocalMediaDetails;
   providerIds?: {
@@ -176,6 +179,13 @@ function libraryReducer(state: LibraryState, action: LibraryAction): LibraryStat
   }
 }
 
+function normalizeShows(items: MediaItem[] | undefined): TVShow[] {
+  return (items || []).map((item) => ({
+    ...item,
+    seasons: item.seasons || [],
+  }));
+}
+
 interface LibraryContextType {
   state: LibraryState;
   dispatch: React.Dispatch<LibraryAction>;
@@ -220,13 +230,20 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const applyLibraryData = useCallback((data: {
     movies?: MediaItem[];
-    tvShows?: TVShow[];
-    animeShows?: TVShow[];
+    tvShows?: MediaItem[];
+    animeShows?: MediaItem[];
     libraryFolders?: string[];
     libraryFolderGroups?: Partial<LibraryFolderGroups>;
     libraryFolderStatuses?: LibraryFolderStatus[];
   }) => {
-    dispatch({ type: 'SET_LIBRARY_DATA', payload: data });
+    dispatch({
+      type: 'SET_LIBRARY_DATA',
+      payload: {
+        ...data,
+        tvShows: normalizeShows(data.tvShows),
+        animeShows: normalizeShows(data.animeShows),
+      },
+    });
   }, []);
 
   const applyScanProgress = (progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {

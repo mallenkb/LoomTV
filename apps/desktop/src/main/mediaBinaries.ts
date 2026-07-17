@@ -5,7 +5,17 @@ import { execFileSync } from 'node:child_process';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 
-export type H264HardwareEncoder = 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv';
+export { appendH264EncoderOptions, type H264HardwareEncoder } from './transcodeFilters.ts';
+import type { H264HardwareEncoder } from './transcodeFilters.ts';
+
+let cachedFFmpegPath: string | null | undefined;
+let cachedFFprobePath: string | null | undefined;
+let cachedFpcalcPath: string | null | undefined;
+let ffmpegCheckedAt = 0;
+let ffprobeCheckedAt = 0;
+let fpcalcCheckedAt = 0;
+const MISSING_BINARY_CACHE_MS = 30_000;
+const encoderCache = new Map<string, { size: number; modifiedAtMs: number; encoder: H264HardwareEncoder | null }>();
 
 function platformFolder(): 'win' | 'mac' | 'linux' {
   if (process.platform === 'win32') return 'win';
@@ -91,36 +101,28 @@ function hasFFmpegEncoder(binaryPath: string, encoder: string): boolean {
 }
 
 export function preferredH264HardwareEncoder(binaryPath: string): H264HardwareEncoder | null {
-  const candidates: H264HardwareEncoder[] =
-    process.platform === 'darwin'
-      ? ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv']
-      : ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox'];
+  try {
+    const stats = fs.statSync(binaryPath);
+    const cached = encoderCache.get(binaryPath);
+    if (cached && cached.size === stats.size && cached.modifiedAtMs === stats.mtimeMs) return cached.encoder;
 
-  return candidates.find((encoder) => hasFFmpegEncoder(binaryPath, encoder)) || null;
-}
-
-export function appendH264EncoderOptions(args: string[], encoder: H264HardwareEncoder): void {
-  if (encoder === 'h264_videotoolbox') {
-    args.push(
-      '-allow_sw', '1',
-      '-realtime', '1',
-      '-b:v', '6500k',
-      '-maxrate', '8500k',
-      '-bufsize', '12000k',
-      '-profile:v', 'main',
-    );
-    return;
+    const candidates: H264HardwareEncoder[] =
+      process.platform === 'darwin'
+        ? ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv']
+        : ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox'];
+    const encoder = candidates.find((candidate) => hasFFmpegEncoder(binaryPath, candidate)) || null;
+    encoderCache.set(binaryPath, { size: stats.size, modifiedAtMs: stats.mtimeMs, encoder });
+    return encoder;
+  } catch {
+    return null;
   }
-
-  if (encoder === 'h264_nvenc') {
-    args.push('-preset', 'p4', '-cq', '23', '-b:v', '0');
-    return;
-  }
-
-  args.push('-global_quality', '23', '-look_ahead', '0');
 }
 
 export function findFFmpeg(): string | null {
+  if (cachedFFmpegPath !== undefined
+    && (cachedFFmpegPath ? fs.existsSync(cachedFFmpegPath) : Date.now() - ffmpegCheckedAt < MISSING_BINARY_CACHE_MS)) {
+    return cachedFFmpegPath;
+  }
   const bundled = bundledBinary('ffmpeg');
   const appNodeModule = path.join(
     app.getAppPath(),
@@ -138,19 +140,37 @@ export function findFFmpeg(): string | null {
 
   for (const candidate of candidates) {
     const binary = existingCompatibleBinary(candidate);
-    if (binary && preferredH264HardwareEncoder(binary)) return binary;
+    if (binary && preferredH264HardwareEncoder(binary)) {
+      cachedFFmpegPath = binary;
+      ffmpegCheckedAt = Date.now();
+      return binary;
+    }
   }
 
-  return firstExistingBinary(candidates);
+  cachedFFmpegPath = firstExistingBinary(candidates);
+  ffmpegCheckedAt = Date.now();
+  return cachedFFmpegPath;
 }
 
 export function findFFprobe(): string | null {
+  if (cachedFFprobePath !== undefined
+    && (cachedFFprobePath ? fs.existsSync(cachedFFprobePath) : Date.now() - ffprobeCheckedAt < MISSING_BINARY_CACHE_MS)) {
+    return cachedFFprobePath;
+  }
   const bundled = bundledBinary('ffprobe');
-  if (bundled) return bundled;
+  if (bundled) {
+    cachedFFprobePath = bundled;
+    ffprobeCheckedAt = Date.now();
+    return bundled;
+  }
 
   try {
     const staticBinary = existingCompatibleBinary(ffprobeStatic?.path);
-    if (staticBinary) return staticBinary;
+    if (staticBinary) {
+      cachedFFprobePath = staticBinary;
+      ffprobeCheckedAt = Date.now();
+      return staticBinary;
+    }
   } catch {
     // Fall through.
   }
@@ -159,7 +179,11 @@ export function findFFprobe(): string | null {
     if (ffmpegStatic) {
       const sibling = path.join(path.dirname(ffmpegStatic), binaryName('ffprobe'));
       const siblingBinary = existingCompatibleBinary(sibling);
-      if (siblingBinary) return siblingBinary;
+      if (siblingBinary) {
+        cachedFFprobePath = siblingBinary;
+        ffprobeCheckedAt = Date.now();
+        return siblingBinary;
+      }
     }
   } catch {
     // Fall through.
@@ -176,22 +200,34 @@ export function findFFprobe(): string | null {
       process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe',
     );
     const bundledModuleBinary = existingCompatibleBinary(candidate);
-    if (bundledModuleBinary) return bundledModuleBinary;
+    if (bundledModuleBinary) {
+      cachedFFprobePath = bundledModuleBinary;
+      ffprobeCheckedAt = Date.now();
+      return bundledModuleBinary;
+    }
   } catch {
     // Fall through.
   }
 
-  return firstExistingBinary(systemBinaryCandidates('ffprobe'));
+  cachedFFprobePath = firstExistingBinary(systemBinaryCandidates('ffprobe'));
+  ffprobeCheckedAt = Date.now();
+  return cachedFFprobePath;
 }
 
 export function findFpcalc(): string | null {
+  if (cachedFpcalcPath !== undefined
+    && (cachedFpcalcPath ? fs.existsSync(cachedFpcalcPath) : Date.now() - fpcalcCheckedAt < MISSING_BINARY_CACHE_MS)) {
+    return cachedFpcalcPath;
+  }
   const executable = binaryName('fpcalc');
   const relative = path.join('fpcalc', platformFolder(), executable);
-  return firstExistingBinary([
+  cachedFpcalcPath = firstExistingBinary([
     process.env.LOOMTV_FPCALC_PATH,
     path.join(process.resourcesPath || '', relative),
     path.join(app.getAppPath(), 'resources', relative),
     path.join(process.cwd(), 'resources', relative),
     ...systemBinaryCandidates('fpcalc'),
   ]);
+  fpcalcCheckedAt = Date.now();
+  return cachedFpcalcPath;
 }

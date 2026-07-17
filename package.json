@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-workspace",
   "private": true,
-  "packageManager": "pnpm@11.1.1",
+  "packageManager": "pnpm@11.13.1+sha512.b2fc7683b8a6525414e7d13e1ba28caaddde96bf66ec540bfaeb7e702b81f3e0be4d1f295edf7f9fe0396740a8dce4509c582ddf79891f4543fea32d37645f25",
   "overrides": {
     "string-width": "4.2.3",
     "@expo/cli>wrap-ansi>string-width": "4.2.3",
@@ -18,12 +18,7 @@
     "mobile:ios": "pnpm --filter @loom-media-server/mobile ios",
     "mobile:android": "pnpm --filter @loom-media-server/mobile android",
     "mobile:web": "pnpm --filter @loom-media-server/mobile web",
-    "convex:dev": "convex dev",
-    "convex:deploy": "convex deploy",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
-  },
-  "devDependencies": {
-    "convex": "^1.39.1"
   }
 }

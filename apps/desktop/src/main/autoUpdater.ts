@@ -10,11 +10,12 @@ import { promisify } from 'node:util';
 import { stopAllTranscodes } from './transcodeManager';
 import { destroyLanDiscovery } from './lanDiscovery';
 import { createUpdateAdapter } from './updateAdapter';
+import { safeFetch } from './safeFetch';
 
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
 const execFileAsync = promisify(execFile);
-export type UpdateStatus =
+type UpdateStatus =
   | 'idle'
   | 'disabled'
   | 'checking'
@@ -147,12 +148,12 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
   setUpdateState({ status: 'checking', downloadPercent: undefined, message: 'Checking for updates...' });
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`, {
+    const response = await safeFetch(`https://api.github.com/repos/${UPDATE_OWNER}/${UPDATE_REPO}/releases/latest`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': `LoomMediaServer/${app.getVersion()}`,
       },
-    });
+    }, { allowedHosts: ['api.github.com'], retries: 2 });
 
     if (!response.ok) {
       throw new Error(`Update check returned ${response.status}`);
@@ -181,7 +182,7 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
   }
 }
 
-export function showUpdateDownloadedPrompt() {
+function showUpdateDownloadedPrompt() {
   const mainWindow = deps.getMainWindow();
   if (updatePromptInFlight || !mainWindow || mainWindow.isDestroyed()) return;
   updatePromptInFlight = true;
@@ -545,7 +546,7 @@ export function buildUpdateMenu() {
   Menu.setApplicationMenu(updateMenu);
 }
 
-export async function handleManualUpdateCheck() {
+async function handleManualUpdateCheck() {
   const checkedState = await checkForUpdates();
 
   if (checkedState.status === 'checking') {
@@ -643,7 +644,7 @@ export async function installDownloadedUpdate() {
   return updateState;
 }
 
-export function configureAutoUpdater() {
+function configureAutoUpdater() {
   if (updaterConfigured) return;
   updaterConfigured = true;
 

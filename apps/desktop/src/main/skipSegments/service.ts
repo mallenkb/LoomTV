@@ -4,27 +4,25 @@ import { createHash } from 'node:crypto';
 import {
   deleteManualSegmentCandidate,
   getManualSegmentCandidates,
-  getResolvedMediaSegments,
   getSegmentCandidates,
   getSegmentSourceCache,
-  markManualSegmentCandidateForReview,
-  reassociateManualSegmentCandidate,
   replaceSegmentCandidatesForSource,
   saveManualSegmentCandidate,
   saveSegmentSourceCache,
   undoManualSegmentCandidate,
-} from '../database';
+} from '../database.ts';
 import type { MetadataProviderIds } from '../mediaTags';
 import type { EpisodeFile, MediaItem } from '../metadata/types';
 import type { ProbeMediaFileResult } from '../mediaProbeFile';
-import { chapterType, normalizeSegment, segmentRevision } from './normalize';
+import { chapterType, normalizeSegment, resolveCandidates, segmentRevision } from './normalize.ts';
+import { mediaFileRevision } from './fileIdentity.ts';
 import {
   aniSkipLookupKey,
   fetchAniSkipSegments,
   fetchTheIntroDbSegments,
   theIntroDbLookupKey,
   type ProviderLookupResult,
-} from './providers';
+} from './providers.ts';
 import type {
   ManualMediaSegmentInput,
   MediaSegment,
@@ -35,6 +33,7 @@ import type {
   NormalizedSegmentInput,
   ProviderCacheEntry,
 } from './types';
+import type { SkipAnalysisSettings } from '../../shared/desktopProtocol.ts';
 
 type LibraryLike = {
   movies?: MediaItem[];
@@ -86,21 +85,7 @@ function defaultAudioLanguage(item: EpisodeFile): string {
   return audio?.language || 'und';
 }
 
-function fileRevision(
-  filePath: string,
-  durationMs: number,
-  audioTrack: number,
-  known?: { fileSize?: number; modifiedAtMs?: number },
-): string {
-  const stats = typeof known?.fileSize === 'number' && typeof known.modifiedAtMs === 'number' ? null : fs.statSync(filePath);
-  return hashId(
-    path.resolve(filePath),
-    known?.fileSize ?? stats?.size,
-    Math.round(known?.modifiedAtMs ?? stats?.mtimeMs ?? 0),
-    Math.round(durationMs),
-    audioTrack,
-  );
-}
+export { mediaFileRevision } from './fileIdentity.ts';
 
 function releaseKey(filePath: string, durationMs: number, audioTrack: number, audioLanguage: string): string {
   const stats = fs.statSync(filePath);
@@ -129,8 +114,14 @@ function durationBucket(durationMs: number): number {
 }
 
 function providerIdsForSeason(ids: MetadataProviderIds | undefined, season: number): MetadataProviderIds {
-  const malId = ids?.malIdBySeason?.[String(season)] || ids?.malId;
-  return { ...(ids || {}), ...(malId ? { malId } : {}) };
+  // AniSkip is keyed to one MAL entry per cour. The show-level MAL id describes
+  // season 1, so it must never stand in for an unmapped later season — that
+  // returns season-1 timestamps that pass the duration filter yet sit at the
+  // wrong offsets. Prefer no marker to a plausible but wrong cour.
+  const malId = ids?.malIdBySeason?.[String(season)] || (season === 1 ? ids?.malId : undefined);
+  const seasonIds = { ...(ids || {}) };
+  delete seasonIds.malId;
+  return { ...seasonIds, ...(malId ? { malId } : {}) };
 }
 
 function findItem(library: LibraryLike, mediaId: string): MediaItem | null {
@@ -196,8 +187,46 @@ async function queuedLookup(
 export function createSkipSegmentService(deps: {
   loadLibrary: () => LibraryLike;
   probeMediaFile: (filePath: string) => ProbeMediaFileResult;
+  loadSettings?: () => { skipAnalysis?: SkipAnalysisSettings };
 }) {
   let warmGeneration = 0;
+
+  function policyFor(context: SegmentContext): {
+    excluded: boolean;
+    mode: 'full' | 'chapter-only' | 'providers-only';
+    enabledTypes?: SkipAnalysisSettings['enabledTypes'];
+    durationLimits?: SkipAnalysisSettings['durationLimits'];
+    suppressIntro: boolean;
+  } {
+    const settings = deps.loadSettings?.().skipAnalysis;
+    if (!settings) return { excluded: false, mode: 'full', suppressIntro: false };
+    const resolvedPath = path.resolve(context.filePath);
+    const excluded = (context.item.type !== 'movie' && context.season === 0 && !settings.analyzeSpecials)
+      || (context.item.type === 'movie' ? settings.exclusions.movieIds : settings.exclusions.seriesIds).includes(context.mediaId)
+      || settings.exclusions.seasons.includes(`${context.mediaId}:${context.season}`)
+      || settings.exclusions.paths.some((entry) => resolvedPath === path.resolve(entry) || resolvedPath.startsWith(`${path.resolve(entry)}${path.sep}`));
+    return {
+      excluded,
+      mode: settings.seasonOverrides[`${context.mediaId}:${context.season}`] || 'full',
+      enabledTypes: settings.enabledTypes,
+      durationLimits: settings.durationLimits,
+      suppressIntro: settings.suppressFirstEpisodeIntro && context.episode === 1,
+    };
+  }
+
+  function policyPermits(
+    context: SegmentContext,
+    policy: ReturnType<typeof policyFor>,
+    segment: Pick<NormalizedSegmentInput, 'type' | 'startMs' | 'endMs'>,
+  ): boolean {
+    if (policy.enabledTypes?.[segment.type] === false || (segment.type === 'intro' && policy.suppressIntro)) return false;
+    const limits = context.item.type === 'movie' && segment.type === 'credits'
+      ? policy.durationLimits?.movieCredits
+      : policy.durationLimits?.[segment.type];
+    if (!limits) return true;
+    const durationMs = (segment.endMs ?? context.durationMs) - segment.startMs;
+    return durationMs >= limits.minSeconds * 1000 && durationMs <= limits.maxSeconds * 1000;
+  }
 
   function contextFor(request: MediaSegmentRequest): SegmentContext | null {
     const item = findItem(deps.loadLibrary(), String(request.mediaId || ''));
@@ -225,7 +254,7 @@ export function createSkipSegmentService(deps: {
         season: 0,
         episode: 0,
         filePath: item.filePath,
-        fileRevision: fileRevision(item.filePath, durationMs, audioTrack, item.localMetadata),
+        fileRevision: mediaFileRevision(item.filePath, durationMs, audioTrack, item.localMetadata),
         durationMs,
         providerIds: item.providerIds || {},
         probe,
@@ -251,7 +280,7 @@ export function createSkipSegmentService(deps: {
       season: episodeFile.season,
       episode: episodeFile.episode,
       filePath: episodeFile.filePath,
-      fileRevision: fileRevision(episodeFile.filePath, durationMs, audioTrack, episodeFile.localMetadata),
+      fileRevision: mediaFileRevision(episodeFile.filePath, durationMs, audioTrack, episodeFile.localMetadata),
       durationMs,
       providerIds: providerIdsForSeason(item.providerIds, episodeFile.season),
       probe,
@@ -259,9 +288,13 @@ export function createSkipSegmentService(deps: {
   }
 
   function syncChapters(context: SegmentContext): void {
+    const policy = policyFor(context);
+    const enabledTypes = policy.enabledTypes;
     const candidates = (context.probe.localMetadata?.chapters || []).flatMap((chapter) => {
       const type = chapterType(chapter.title);
-      if (!type) return [];
+      if (!type || enabledTypes?.[type] === false || !policyPermits(context, policy, {
+        type, startMs: chapter.startMs, endMs: chapter.endMs,
+      })) return [];
       const normalized = normalizeSegment({
         type,
         startMs: chapter.startMs,
@@ -274,23 +307,19 @@ export function createSkipSegmentService(deps: {
     replaceSegmentCandidatesForSource(context.fileRevision, 'chapter', candidates);
   }
 
-  function reassociateManualIfNeeded(context: SegmentContext): void {
-    if (getSegmentCandidates(context.fileRevision).some((candidate) => candidate.source === 'manual')) return;
-    const manual = getManualSegmentCandidates(context.mediaId, context.season, context.episode);
-    if (!manual.length) return;
+  function resolvedSegmentsForContext(context: SegmentContext): MediaSegment[] {
+    const current = getSegmentCandidates(context.fileRevision);
+    if (current.some((candidate) => candidate.source === 'manual')) return resolveCandidates(current);
     const currentReleaseKey = releaseKey(
       context.filePath,
       context.durationMs,
       defaultAudioTrack(context.episodeFile),
       defaultAudioLanguage(context.episodeFile),
     );
-    for (const candidate of manual) {
-      if (candidate.releaseKey && candidate.releaseKey === currentReleaseKey) {
-        reassociateManualSegmentCandidate(candidate.id, context.fileRevision, context.filePath);
-      } else {
-        markManualSegmentCandidateForReview(candidate.id);
-      }
-    }
+    const compatibleManual = getManualSegmentCandidates(context.mediaId, context.season, context.episode)
+      .filter((candidate) => candidate.releaseKey === currentReleaseKey)
+      .map((candidate) => ({ ...candidate, fileRevision: context.fileRevision, filePath: context.filePath }));
+    return resolveCandidates([...current, ...compatibleManual]);
   }
 
   function applyProviderSegments(
@@ -298,10 +327,16 @@ export function createSkipSegmentService(deps: {
     source: Extract<MediaSegmentSource, 'theintrodb' | 'aniskip'>,
     segments: NormalizedSegmentInput[],
   ): MediaSegment[] {
-    const fresh = segments.map((segment) => makeCandidate(context, segment));
+    const policy = policyFor(context);
+    const enabledTypes = policy.enabledTypes;
+    const permitted = (segment: Pick<NormalizedSegmentInput, 'type' | 'startMs' | 'endMs'>) =>
+      enabledTypes?.[segment.type] !== false && policyPermits(context, policy, segment);
+    const fresh = segments.filter(permitted).map((segment) => makeCandidate(context, segment));
     const refreshedTypes = new Set(fresh.map((segment) => segment.type));
     const lastKnown = getSegmentCandidates(context.fileRevision)
-      .filter((candidate) => candidate.source === source && !refreshedTypes.has(candidate.type))
+      .filter((candidate) => candidate.source === source
+        && permitted(candidate)
+        && !refreshedTypes.has(candidate.type))
       .map((candidate) => ({ ...candidate, expiresAt: undefined }));
 
     // Provider responses can occasionally be partial. Replace the types they
@@ -324,31 +359,30 @@ export function createSkipSegmentService(deps: {
       : context.item.type === 'movie'
         ? theIntroDbLookupKey(context.providerIds)
         : theIntroDbLookupKey(context.providerIds, context.season, context.episode);
-    if (!lookupKey) return { segments: getResolvedMediaSegments(context.fileRevision), kind: 'empty' };
+    if (!lookupKey) return { segments: resolvedSegmentsForContext(context), kind: 'empty' };
     const bucket = durationBucket(context.durationMs);
     const cached = getSegmentSourceCache(provider, lookupKey, bucket);
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
+      if (cached.status === 'success') applyProviderSegments(context, provider, cached.segments);
       return {
-        segments: cached.status === 'success'
-          ? applyProviderSegments(context, provider, cached.segments)
-          : getResolvedMediaSegments(context.fileRevision),
+        segments: resolvedSegmentsForContext(context),
         kind: cached.status === 'success' ? 'success' : 'empty',
       };
     }
     if (cached?.status === 'success' && cached.staleUntil > now) {
-      const staleSegments = applyProviderSegments(context, provider, cached.segments);
+      applyProviderSegments(context, provider, cached.segments);
       void refreshProvider(context, provider, lookupKey, bucket);
-      return { segments: staleSegments, kind: 'success' };
+      return { segments: resolvedSegmentsForContext(context), kind: 'success' };
     }
     if (waitForRefresh) {
       const result = await refreshProvider(context, provider, lookupKey, bucket);
-      return { segments: getResolvedMediaSegments(context.fileRevision), kind: result.kind };
+      return { segments: resolvedSegmentsForContext(context), kind: result.kind };
     }
     void refreshProvider(context, provider, lookupKey, bucket).catch((error) => {
       console.warn(`[skip-segments] ${provider} refresh failed:`, error);
     });
-    return { segments: getResolvedMediaSegments(context.fileRevision), kind: cached?.status || 'retry' };
+    return { segments: resolvedSegmentsForContext(context), kind: cached?.status || 'retry' };
   }
 
   async function refreshProvider(
@@ -396,9 +430,30 @@ export function createSkipSegmentService(deps: {
   ): Promise<MediaSegmentResponse> {
     const context = contextFor(request);
     if (!context) return { segments: [], revision: segmentRevision([]) };
-    syncChapters(context);
-    reassociateManualIfNeeded(context);
-    let segments = getResolvedMediaSegments(context.fileRevision);
+    const policy = policyFor(context);
+    if (policy.excluded) {
+      for (const source of ['chapter', 'aniskip', 'theintrodb', 'chromaprint'] as const) {
+        replaceSegmentCandidatesForSource(context.fileRevision, source, []);
+      }
+      const segments = resolvedSegmentsForContext(context);
+      return { segments, revision: segmentRevision(segments) };
+    }
+    if (policy.mode === 'providers-only') replaceSegmentCandidatesForSource(context.fileRevision, 'chapter', []);
+    else syncChapters(context);
+    const localCandidates = getSegmentCandidates(context.fileRevision)
+      .filter((candidate) => candidate.source === 'chromaprint');
+    const permittedLocalCandidates = localCandidates.filter((candidate) => policyPermits(context, policy, candidate));
+    if (permittedLocalCandidates.length !== localCandidates.length) {
+      replaceSegmentCandidatesForSource(context.fileRevision, 'chromaprint', permittedLocalCandidates);
+    }
+    if (policy.mode !== 'full') replaceSegmentCandidatesForSource(context.fileRevision, 'chromaprint', []);
+    if (policy.mode === 'chapter-only') {
+      replaceSegmentCandidatesForSource(context.fileRevision, 'aniskip', []);
+      replaceSegmentCandidatesForSource(context.fileRevision, 'theintrodb', []);
+      const segments = resolvedSegmentsForContext(context);
+      return { segments, revision: segmentRevision(segments) };
+    }
+    let segments: MediaSegment[];
     if (context.item.type === 'anime') {
       const aniSkip = await providerSegments(context, 'aniskip', waitForProvider);
       segments = aniSkip.segments;
@@ -464,7 +519,7 @@ export function createSkipSegmentService(deps: {
       confidence: 1,
     }, context.durationMs);
     if (!normalized) throw new Error('The manual marker timestamps are invalid.');
-    const candidate = makeCandidate(context, normalized, {
+    const generatedCandidate = makeCandidate(context, normalized, {
       releaseKey: releaseKey(
         context.filePath,
         context.durationMs,
@@ -472,26 +527,25 @@ export function createSkipSegmentService(deps: {
         defaultAudioLanguage(context.episodeFile),
       ),
     });
-    const segments = saveManualSegmentCandidate(candidate);
+    const candidate = input.candidateId ? { ...generatedCandidate, id: input.candidateId } : generatedCandidate;
+    const segments = saveManualSegmentCandidate(candidate, input.candidateId);
     return { segments, revision: segmentRevision(segments) };
   }
 
-  function deleteManualSegment(input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }): MediaSegmentResponse {
+  function deleteManualSegment(input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }): MediaSegmentResponse {
     const context = contextFor(input);
     if (!context) throw new Error('That episode file is unavailable.');
-    deleteManualSegmentCandidate(context.fileRevision, input.type);
-    const segments = getResolvedMediaSegments(context.fileRevision);
+    deleteManualSegmentCandidate(context.fileRevision, input.type, input.candidateId);
+    const segments = resolvedSegmentsForContext(context);
     return { segments, revision: segmentRevision(segments) };
   }
 
-  function undoManualSegment(input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }): MediaSegmentResponse {
+  function undoManualSegment(input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }): MediaSegmentResponse {
     const context = contextFor(input);
     if (!context) throw new Error('That episode file is unavailable.');
-    const segments = undoManualSegmentCandidate(context.fileRevision, input.type);
+    const segments = undoManualSegmentCandidate(context.fileRevision, input.type, input.candidateId);
     return { segments, revision: segmentRevision(segments) };
   }
 
   return { getSegments, warmLibrary, saveManualSegment, deleteManualSegment, undoManualSegment };
 }
-
-export type SkipSegmentService = ReturnType<typeof createSkipSegmentService>;

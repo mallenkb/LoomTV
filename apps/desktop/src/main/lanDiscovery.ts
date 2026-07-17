@@ -1,10 +1,8 @@
 /**
  * mDNS/Bonjour advertise + browse for LoomTV LAN sharing.
  *
- * Service type: `_loomtv._tcp`. TXT records expose deviceId, deviceName, and
- * the app version so peers can be listed and filtered without hitting any
- * HTTP endpoint first. Replaces the legacy subnet-scan discovery (which
- * broadcast the share code to every IP on the LAN).
+ * Service type: `_loomtv._tcp`. TXT records are deliberately limited to
+ * protocol metadata and never contain pairing credentials or API secrets.
  */
 import { Bonjour, type Service } from 'bonjour-service';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -13,11 +11,10 @@ const SERVICE_TYPE = 'loomtv';
 
 export type LanAdvertiseOptions = {
   port: number;
-  deviceId: string;
+  instanceId: string;
   deviceName: string;
-  appVersion: string;
-  baseUrl?: string;
-  pairCode?: string;
+  protocolVersion: '2';
+  certFingerprint?: string;
 };
 
 export type LanPeer = {
@@ -94,11 +91,10 @@ function advertiseWithMacDnsSd(opts: LanAdvertiseOptions): boolean {
       '_loomtv._tcp',
       'local.',
       String(opts.port),
-      `deviceId=${opts.deviceId}`,
-      `deviceName=${opts.deviceName}`,
-      `appVersion=${opts.appVersion}`,
-      ...(opts.baseUrl ? [`baseUrl=${opts.baseUrl}`] : []),
-      ...(opts.pairCode ? [`pairCode=${opts.pairCode}`] : []),
+      `protocolVersion=${opts.protocolVersion}`,
+      `instanceId=${opts.instanceId}`,
+      `port=${opts.port}`,
+      ...(opts.certFingerprint ? [`certFingerprint=${opts.certFingerprint}`] : []),
     ], {
       stdio: 'ignore',
     });
@@ -133,11 +129,10 @@ export function advertiseLanService(opts: LanAdvertiseOptions): void {
       type: SERVICE_TYPE,
       port: opts.port,
       txt: {
-        deviceId: opts.deviceId,
-        deviceName: opts.deviceName,
-        appVersion: opts.appVersion,
-        ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
-        ...(opts.pairCode ? { pairCode: opts.pairCode } : {}),
+        protocolVersion: opts.protocolVersion,
+        instanceId: opts.instanceId,
+        port: String(opts.port),
+        ...(opts.certFingerprint ? { certFingerprint: opts.certFingerprint } : {}),
       },
     });
   } catch (error) {
@@ -190,9 +185,10 @@ export function discoverLanPeers(timeoutMs: number, excludeDeviceId?: string): P
     }
     const handleService = (service: Service) => {
       const txt = (service.txt || {}) as Record<string, string>;
-      const deviceId = String(txt.deviceId || '').trim();
-      const deviceName = String(txt.deviceName || service.name || '').trim();
-      const appVersion = String(txt.appVersion || '').trim();
+      if (String(txt.protocolVersion || '') !== '2') return;
+      const deviceId = String(txt.instanceId || '').trim();
+      const deviceName = String(service.name || '').trim();
+      const appVersion = 'protocol-v2';
       if (!deviceId || (excludeDeviceId && deviceId === excludeDeviceId)) return;
 
       const addresses = (service.addresses || []).filter((address) => /^[0-9.]+$/.test(address));

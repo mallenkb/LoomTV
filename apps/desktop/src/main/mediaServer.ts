@@ -6,49 +6,73 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { Socket as NodeSocket } from 'node:net';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './mimeTypes';
-import { appendH264EncoderOptions, findFFmpeg, findFFprobe, preferredH264HardwareEncoder } from './mediaBinaries';
+import { findFFmpeg, preferredH264HardwareEncoder } from './mediaBinaries';
 import {
-  hasBitmapSubtitleSelection,
-  hasSubtitleSelection,
   parseSubtitleStyle,
   queryNumber,
-  streamMap,
-  subtitleFilterComplex,
-  subtitleSelections,
-  textSubtitleFilter,
 } from './transcodeFilters';
 import { parseIntegerTag } from './mediaTags';
 import { srtToVtt } from './libraryItemHelpers';
-import { serveHls, startTranscode, stopTranscode } from './transcodeManager';
+import { serveHls, startTranscode } from './transcodeManager';
 import { acquireFfmpegToolSlot, acquirePlaybackActivityLease, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { buildEmbeddedSubtitleVttArgs } from './transcodePlan';
 import { cachedArtworkResponseHeaders } from './artworkCache';
-import { assertLocalMediaPath, probeMedia } from './mediaProbe';
 import { trackServerConnections } from './updateInstall';
 import {
-  backupDatabase,
   cacheArtworkSource,
   getAllProgress,
   getCachedArtwork,
   getCustomArtworkData,
   getPlaybackTrackPreferences,
-  getProgress,
-  importCustomArtwork,
-  importProgress,
-  saveCustomArtwork,
   savePlaybackTrackPreferences,
   saveProgress,
 } from './database';
 import { getLocalNetworkAddresses, getLocalNetworkName } from './networkInfo';
-import { testMetadataKeys } from './metadataKeys';
 import type { TranscodeOptions } from './mediaTypes';
 import { browserPlaybackPlan } from './transcodeDecision';
 import { isSubtitleFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
+import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
 import { canWriteResponse, handleResponseErrors, pipeResponse } from './httpResponses';
-import type { AppSettings, LibraryFolderKind, OfficialMetadataCandidate } from '../main';
+import {
+  deviceHasLanScope,
+  mediaServerRouteAccess,
+  type LanRouteScope,
+} from './lanRoutePolicy';
+import type { AppSettings, LanPairedDevice } from './appContracts.ts';
+import { buildBrowserStreamArgs } from './streamTranscodePlan.ts';
+import type { LibraryPayload, MediaSegmentResponse } from '../shared/desktopProtocol.ts';
 
-type MediaServerDeps = typeof import('../main').mediaServerDeps;
+export interface MediaServerDependencies {
+  ALLOWED_CORS_ORIGINS: ReadonlySet<string>;
+  LOCAL_ACCESS_HEADER: string;
+  LOCAL_ACCESS_TOKEN: string;
+  allowedCorsOrigin: (origin: string | undefined, allowedOrigins: ReadonlySet<string>) => string | null;
+  authorizeLanRequest: (reqUrl: URL, req: http.IncomingMessage) => { ok: boolean; device?: LanPairedDevice };
+  authorizeLocalRequest: (reqUrl: URL, req: http.IncomingMessage) => boolean;
+  decodeDataUrl: (dataUrl: string) => { buffer: Buffer; mimeType: string } | null;
+  getLanServerBase: () => string | null;
+  getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) => Promise<MediaSegmentResponse>;
+  handleLanPairRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
+  handleLanRefreshRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
+  isExternalArtworkUrl: (source: string) => boolean;
+  isImageFileName: (fileName: string) => boolean;
+  isLanSharingEnabled: () => boolean;
+  isLoopbackRequest: (req: http.IncomingMessage) => boolean;
+  isSignedLanRequestValid: (reqUrl: URL) => boolean;
+  libraryEtagFor: (payload: unknown) => string;
+  libraryForLocalNetwork: () => LibraryPayload;
+  loadLibrary: () => { libraryFolders: string[] };
+  loadSettings: () => AppSettings;
+  localAccessQuery: (token: string) => string;
+  readJsonBody: (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
+  requireLocalOrLanAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
+  requireStreamAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
+  requestToken: (reqUrl: URL, req: http.IncomingMessage) => string;
+  safeEndResponse: (res: http.ServerResponse) => void;
+  saveSettings: (settings: AppSettings) => void;
+  writeJson: (res: http.ServerResponse, status: number, payload: unknown) => void;
+}
 
 let mediaServer: http.Server | null = null;
 let mediaServerPort = 3847;
@@ -91,11 +115,11 @@ function writeLanLandingPage(
 <title>Loom Media Server</title>
 <style>
 :root{color-scheme:dark;--bg:#050505;--panel:#101010;--line:#2a2a2a;--text:#fff;--muted:#a4a4a4;--accent:#fbc500;}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:grid;place-items:center;padding:24px}
+*{box-sizing:border-box;letter-spacing:normal!important}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:grid;place-items:center;padding:24px}
 main{width:min(680px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.38)}
 .brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}.mark{width:38px;height:38px;border-radius:12px;background:var(--accent);display:grid;place-items:center;color:#08101a;font-weight:900}.name{font-size:24px;font-weight:800}
-.eyebrow{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}h1{font-size:clamp(28px,7vw,44px);line-height:1.06;margin:0 0 12px}p{margin:0;color:var(--muted)}
-.box{border:1px solid var(--line);border-radius:14px;background:#080808;padding:16px;margin-top:18px}.label{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#767676;margin-bottom:6px}.value{font:700 18px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all}
+.eyebrow{font-size:12px;font-weight:800;text-transform:uppercase;color:var(--accent);margin-bottom:8px}h1{font-size:clamp(28px,7vw,44px);line-height:1.06;margin:0 0 12px}p{margin:0;color:var(--muted)}
+.box{border:1px solid var(--line);border-radius:14px;background:#080808;padding:16px;margin-top:18px}.label{font-size:12px;font-weight:800;text-transform:uppercase;color:#767676;margin-bottom:6px}.value{font:700 18px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all}
 ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:var(--text)}footer{margin-top:22px;border-top:1px solid var(--line);padding-top:16px;font-size:13px;color:#7b7b7b}
 </style>
 </head>
@@ -109,7 +133,7 @@ ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:
 <ol>
 <li>Open <b>LoomTV mobile</b>, not this browser page.</li>
 <li>In the mobile app, choose <b>Pair device</b>.</li>
-<li>Enter this desktop address and the <b>6-digit code shown in desktop Settings &gt; Network</b>.</li>
+<li>Enter this desktop address and the <b>one-time pairing secret shown in desktop Settings &gt; Network</b>.</li>
 </ol>
 <footer>${htmlEscape(details.deviceName)} &middot; ${htmlEscape(details.networkName)}</footer>
 </main>
@@ -122,7 +146,7 @@ ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:
   res.end(body);
 }
 
-function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse, deps: MediaServerDeps): boolean {
+function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse, deps: MediaServerDependencies): boolean {
   const { allowedCorsOrigin, ALLOWED_CORS_ORIGINS, LOCAL_ACCESS_HEADER } = deps;
   const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
   const allowedOrigin = allowedCorsOrigin(origin, ALLOWED_CORS_ORIGINS);
@@ -136,25 +160,16 @@ function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse, d
   return true;
 }
 
-export function startMediaServer(deps: MediaServerDeps): Promise<number> {
+export function startMediaServer(deps: MediaServerDependencies): Promise<number> {
   const {
     LOCAL_ACCESS_TOKEN,
-    addFolderToLibrary,
-    appendLocalAccessTokenToUrl,
-    applyOfficialMetadataCandidate,
     authorizeLanRequest,
     authorizeLocalRequest,
-    cacheArtworkNow,
-    clearAppData,
-    customArtworkForRenderer,
     decodeDataUrl,
     getLanServerBase,
-    getLanShareToken,
-    getLibraryMutationVersion,
-    getOfficialMetadataCandidates,
     getMediaSegments,
-    getPlaybackLogo,
     handleLanPairRequest,
+    handleLanRefreshRequest,
     isExternalArtworkUrl,
     isImageFileName,
     isLanSharingEnabled,
@@ -162,23 +177,15 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
     isSignedLanRequestValid,
     libraryEtagFor,
     libraryForLocalNetwork,
-    libraryForRenderer,
     loadLibrary,
     loadSettings,
     localAccessQuery,
     readJsonBody,
-    refreshOfficialArtwork,
-    removeFolderFromLibrary,
     requireLocalOrLanAccess,
     requireStreamAccess,
     requestToken,
     safeEndResponse,
-    safeResult,
-    saveLibraryFromScan,
-    saveLibraryMutation,
     saveSettings,
-    scanLibrary,
-    showOpenFolderDialog,
     writeJson,
   } = deps;
   return new Promise((resolve, reject) => {
@@ -191,9 +198,50 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         res.end();
         return;
       }
+      if (!corsAllowed && !isLoopbackRequest(req)) {
+        writeJson(res, 403, { error: 'Browser origins are not accepted by the LAN API.' });
+        return;
+      }
 
       const reqUrl = new URL(req.url || '/', `http://127.0.0.1:${mediaServerPort}`);
-      const filePath = decodeURIComponent(reqUrl.searchParams.get('path') || '');
+      const routeAccess = mediaServerRouteAccess(reqUrl.pathname, req.method || 'GET');
+      const requireV2Scope = (requiredScope: LanRouteScope): boolean => {
+        if (authorizeLocalRequest(reqUrl, req)) return true;
+        if (isLoopbackRequest(req)) {
+          writeJson(res, 401, { error: 'Authenticated desktop access is required.' });
+          return false;
+        }
+        const authorization = authorizeLanRequest(reqUrl, req);
+        const device = authorization.device;
+        const authorized = Boolean(device && deviceHasLanScope(device.scopes, requiredScope));
+        if (!authorized) {
+          writeJson(res, authorization.ok ? 403 : 401, {
+            error: authorization.ok
+              ? `The paired device does not have the ${requiredScope} scope.`
+              : 'A valid paired-device access token is required.',
+          });
+        }
+        return authorized;
+      };
+      const requestedPath = reqUrl.searchParams.get('path') || '';
+      const resourceId = reqUrl.searchParams.get('resourceId') || '';
+      let libraryRoots: string[] | null = null;
+      const getLibraryRoots = (): string[] => {
+        libraryRoots ??= loadLibrary().libraryFolders || [];
+        return libraryRoots;
+      };
+      let filePath = requestedPath;
+      if (!isLoopbackRequest(req)) {
+        filePath = resourceId
+          ? (() => {
+              try {
+                return resolveLocalResource(resourceId, new Set(['media', 'subtitle', 'image']), getLibraryRoots());
+              } catch {
+                return '';
+              }
+            })()
+          : '';
+      }
       const startSec = parseFloat(reqUrl.searchParams.get('t') || '0');
 
       if (req.method === 'GET' && (reqUrl.pathname === '/' || reqUrl.pathname === '/pair')) {
@@ -211,7 +259,6 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         writeJson(res, 200, {
           ok: true,
           port: mediaServerPort,
-          localAccessToken: isLoopbackRequest(req) ? LOCAL_ACCESS_TOKEN : undefined,
         });
         return;
       }
@@ -231,32 +278,15 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/lan/status') {
-        if (!isLoopbackRequest(req)) {
-          res.writeHead(403, { 'Content-Type': 'text/plain' });
-          res.end('LAN status is only available on this device.');
-          return;
-        }
-
-        const settings = loadSettings();
-        const token = getLanShareToken();
-        const base = getLanServerBase();
-        writeJson(res, 200, {
-          sharingEnabled: isLanSharingEnabled(),
-          token,
-          deviceId: settings.localNetworkDeviceId,
-          deviceName: settings.localNetworkDeviceName || os.hostname(),
-          networkName: getLocalNetworkName(),
-          port: mediaServerPort,
-          addresses: getLocalNetworkAddresses(),
-          baseUrl: base,
-          libraryUrl: base ? `${base}/api/lan/library` : null,
-          pairedDevices: settings.localNetworkPairedDevices || [],
+      if (routeAccess.kind === 'legacy') {
+        writeJson(res, 426, {
+          error: 'This LoomTV client must be upgraded and paired again using LAN protocol v2.',
+          protocolVersion: 2,
         });
         return;
       }
 
-      if (reqUrl.pathname === '/api/lan/pair' && req.method === 'POST') {
+      if (reqUrl.pathname === '/api/v2/pair' && req.method === 'POST') {
         handleLanPairRequest(req, res).catch((error) => {
           console.error('[lan/pair] error', error);
           writeJson(res, 500, { error: 'Pairing failed' });
@@ -264,8 +294,16 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/lan/unpair' && req.method === 'POST') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname === '/api/v2/auth/refresh' && req.method === 'POST') {
+        handleLanRefreshRequest(req, res).catch((error) => {
+          console.error('[lan/refresh] error', error);
+          writeJson(res, 500, { error: 'Credential refresh failed' });
+        });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/unpair' && req.method === 'POST') {
+        if (!requireV2Scope('device:self')) return;
         const authResult = authorizeLanRequest(reqUrl, req);
         // Devices may self-revoke; loopback can revoke any device.
         readJsonBody(req)
@@ -292,8 +330,8 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/lan/library') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname === '/api/v2/library' && req.method === 'GET') {
+        if (!requireV2Scope('catalog:read')) return;
         const payload = libraryForLocalNetwork();
         const etag = `"${libraryEtagFor(payload)}"`;
         const requestEtag = (req.headers['if-none-match'] || '') as string;
@@ -308,35 +346,9 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/lan/artwork/refresh' && req.method === 'POST') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
-        readJsonBody(req)
-          .then(async (body) => {
-            const mediaId = String(body.mediaId || '');
-            if (!mediaId) {
-              writeJson(res, 400, { ok: false, error: 'mediaId required' });
-              return;
-            }
-            const artwork = await refreshOfficialArtwork(mediaId);
-            const library = libraryForLocalNetwork();
-            writeJson(res, 200, {
-              ok: true,
-              data: {
-                artwork,
-                library,
-                libraryEtag: libraryEtagFor(library),
-              },
-            });
-          })
-          .catch((error) => {
-            console.error('LAN refresh artwork API error:', error);
-            writeJson(res, 500, { ok: false, error: error instanceof Error ? error.message : 'Failed to refresh artwork.' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/lan/start-hls' && req.method === 'POST') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname === '/api/v2/start-hls' && req.method === 'POST') {
+        if (!requireV2Scope('media:stream')) return;
         const token = requestToken(reqUrl, req);
         readJsonBody(req)
           .then(async (body) => {
@@ -351,7 +363,13 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
               return;
             }
 
-            const filePath = String(body.filePath || '');
+            const mediaResourceId = String(body.mediaId || '');
+            let filePath = '';
+            try {
+              filePath = resolveLocalResource(mediaResourceId, new Set(['media']), loadLibrary().libraryFolders || []);
+            } catch {
+              // The 404 response below intentionally does not reveal path details.
+            }
             if (!filePath || !fs.existsSync(filePath)) {
               writeJson(res, 404, {
                 ok: false,
@@ -362,10 +380,19 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
               return;
             }
 
-            const options = (body.options || {}) as TranscodeOptions;
-            const subtitleFilePaths = [options.subtitleFilePath, options.secondarySubtitleFilePath].filter(Boolean) as string[];
-            for (const subtitleFilePath of subtitleFilePaths) {
-              if (!fs.existsSync(subtitleFilePath) || !isSubtitleFileName(subtitleFilePath)) {
+            const options = { ...((body.options || {}) as TranscodeOptions) };
+            for (const field of ['subtitleFilePath', 'secondarySubtitleFilePath'] as const) {
+              const subtitleResourceId = options[field];
+              if (!subtitleResourceId) continue;
+              try {
+                const subtitleFilePath = resolveLocalResource(
+                  subtitleResourceId,
+                  new Set(['subtitle']),
+                  loadLibrary().libraryFolders || [],
+                );
+                if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
+                options[field] = subtitleFilePath;
+              } catch {
                 writeJson(res, 404, {
                   ok: false,
                   code: 'SUBTITLE_NOT_FOUND',
@@ -389,146 +416,71 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
+      if (routeAccess.kind === 'ipc-only') {
+        writeJson(res, 410, { error: 'This operation is available only through validated Electron IPC.' });
+        return;
+      }
+
       // Stream-like endpoints accept signed LAN URLs.
-      const isStreamRoute = reqUrl.pathname === '/stream'
-        || reqUrl.pathname === '/subtitle'
-        || reqUrl.pathname.startsWith('/hls/');
-      const isArtworkRoute = reqUrl.pathname === '/api/cached-artwork'
-        || reqUrl.pathname === '/api/local-image'
-        || reqUrl.pathname === '/api/thumbnail'
-        || reqUrl.pathname === '/api/custom-artwork';
+      const isStreamRoute = routeAccess.kind === 'stream';
+      const isArtworkRoute = routeAccess.kind === 'artwork';
       const hasValidSignature = isLanSharingEnabled() && isSignedLanRequestValid(reqUrl);
       const isCacheableLanImageRequest = hasValidSignature && reqUrl.searchParams.get(LAN_IMAGE_CACHE_QUERY_PARAM) === '1';
       const hasLocalAccess = authorizeLocalRequest(reqUrl, req);
-      if (!isStreamRoute && !(isArtworkRoute && (hasLocalAccess || hasValidSignature)) && !requireLocalOrLanAccess(reqUrl, req, res)) return;
+      const scope = routeAccess.kind === 'scoped' ? routeAccess.scope : null;
+      if (!isLoopbackRequest(req) && !isStreamRoute && !(isArtworkRoute && hasValidSignature) && !scope) {
+        writeJson(res, 403, { error: 'This operation is only available to the desktop application.' });
+        return;
+      }
+      if (
+        !isStreamRoute
+        && !(isArtworkRoute && (hasLocalAccess || hasValidSignature))
+        && !(scope ? requireV2Scope(scope) : requireLocalOrLanAccess(reqUrl, req, res))
+      ) return;
 
-      if (reqUrl.pathname === '/api/library' && req.method === 'GET') {
-        writeJson(res, 200, libraryForRenderer());
+      if (reqUrl.pathname === '/api/v2/client-config' && req.method === 'GET') {
+        const settings = loadSettings();
+        writeJson(res, 200, {
+          appThemeMode: settings.appThemeMode,
+          appThemeColor: settings.appThemeColor,
+          appDarkTheme: settings.appDarkTheme,
+          appLoaderStyle: settings.appLoaderStyle,
+          playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
+          playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+        });
         return;
       }
 
-      if (reqUrl.pathname === '/api/library/scan' && req.method === 'POST') {
-        const scanVersion = getLibraryMutationVersion();
+
+
+
+
+
+
+
+
+      if (reqUrl.pathname === '/api/v2/progress' && req.method === 'GET') {
+        const secret = loadSettings().localNetworkHmacSecret || '';
+        writeJson(res, 200, Object.fromEntries(
+          Object.entries(getAllProgress()).map(([storedPath, progress]) => [
+            registerResource(secret, 'media', storedPath),
+            progress,
+          ]),
+        ));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/progress' && req.method === 'POST') {
         readJsonBody(req)
-          .catch((): Record<string, unknown> => ({}))
-          .then((body) => scanLibrary(loadLibrary(), {
-            force: Boolean(body.force),
-            mode: body.mode === 'metadata' || body.mode === 'full' ? body.mode : 'quick',
-          }))
-          .then(async (scanned) => {
-            if (saveLibraryFromScan(scanned, scanVersion)) {
-              await cacheArtworkNow(scanned);
+          .then((body) => {
+            let file = '';
+            try {
+              file = resolveLocalResource(String(body.mediaId || ''), new Set(['media']), loadLibrary().libraryFolders || []);
+            } catch {
+              // Avoid revealing whether a resource identifier exists.
             }
-            writeJson(res, 200, libraryForRenderer());
-          })
-          .catch((error) => {
-            console.error('scan library API error:', error);
-            writeJson(res, 500, { error: 'Failed to scan library' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/library/add-folder' && req.method === 'POST') {
-        readJsonBody(req)
-          .catch((): Record<string, unknown> => ({}))
-          .then((body) => {
-            const requestedKind = String(body.kind || '');
-            const kind: LibraryFolderKind = requestedKind === 'tvShows' || requestedKind === 'anime' || requestedKind === 'movies' || requestedKind === 'others'
-              ? requestedKind
-              : 'movies';
-            return showOpenFolderDialog({ properties: ['openDirectory'] }).then((result) => ({ result, kind }));
-          })
-          .then(async (result) => {
-            if (result.result.canceled || result.result.filePaths.length === 0) {
-              writeJson(res, 200, null);
-              return;
-            }
-
-            const data = loadLibrary();
-            const newFolder = result.result.filePaths[0];
-            const updated = addFolderToLibrary(data, newFolder, result.kind);
-            saveLibraryMutation(updated);
-            const scanVersion = getLibraryMutationVersion();
-            const scanned = await scanLibrary(updated, { mode: 'quick' });
-            if (saveLibraryFromScan(scanned, scanVersion)) {
-              await cacheArtworkNow(scanned);
-            }
-            writeJson(res, 200, libraryForRenderer());
-          })
-          .catch((error) => {
-            console.error('add folder API error:', error);
-            writeJson(res, 500, { error: 'Failed to add folder' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/library/remove-folder' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            const data = loadLibrary();
-            const updated = removeFolderFromLibrary(data, String(body.folderPath || ''));
-            saveLibraryMutation(updated);
-            writeJson(res, 200, libraryForRenderer());
-          })
-          .catch((error) => {
-            console.error('remove folder API error:', error);
-            writeJson(res, 500, { error: 'Failed to remove folder' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/settings' && req.method === 'GET') {
-        writeJson(res, 200, loadSettings());
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/settings' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            saveSettings({ ...loadSettings(), ...(body as AppSettings) });
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('save settings API error:', error);
-            writeJson(res, 500, { error: 'Failed to save settings' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/metadata/test-keys' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => testMetadataKeys((body.keys || {}) as Record<string, string>))
-          .then((results) => writeJson(res, 200, results))
-          .catch((error) => {
-            console.error('metadata key test API error:', error);
-            writeJson(res, 500, { error: 'Failed to test metadata keys' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/artwork/playback-logo' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => getPlaybackLogo(String(body.mediaId || '')))
-          .then((result) => writeJson(res, 200, result))
-          .catch((error) => {
-            console.error('playback logo API error:', error);
-            writeJson(res, 500, { error: 'Failed to fetch playback logo' });
-          });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/progress' && req.method === 'GET') {
-        const requestedPath = reqUrl.searchParams.get('filePath') || '';
-        writeJson(res, 200, requestedPath ? getProgress(requestedPath) : getAllProgress());
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/progress' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            const file = String(body.filePath || '');
             if (!file) {
-              writeJson(res, 400, { error: 'filePath is required' });
+              writeJson(res, 400, { error: 'mediaId is required' });
               return;
             }
             writeJson(res, 200, saveProgress(file, Number(body.position) || 0, Number(body.duration) || 0));
@@ -540,28 +492,14 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/progress/import' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            importProgress((body.progress || {}) as Record<string, number | { position?: number; duration?: number; updatedAt?: number }>);
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('import progress API error:', error);
-            writeJson(res, 500, { error: 'Failed to import progress' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/playback-track-preferences' && req.method === 'GET') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname === '/api/v2/playback-track-preferences' && req.method === 'GET') {
         const scope = reqUrl.searchParams.get('scope') || '';
         writeJson(res, 200, getPlaybackTrackPreferences(scope));
         return;
       }
 
-      if (reqUrl.pathname === '/api/playback-track-preferences' && req.method === 'POST') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname === '/api/v2/playback-track-preferences' && req.method === 'POST') {
         readJsonBody(req)
           .then((body) => {
             const scope = String(body.scope || '').trim();
@@ -578,8 +516,7 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/playback/segments' && req.method === 'GET') {
-        if (!requireLocalOrLanAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname === '/api/v2/playback/segments' && req.method === 'GET') {
         const mediaId = reqUrl.searchParams.get('mediaId') || '';
         if (!mediaId) {
           writeJson(res, 400, { error: 'mediaId is required' });
@@ -598,98 +535,24 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/artwork' && req.method === 'GET') {
-        writeJson(res, 200, customArtworkForRenderer(reqUrl.searchParams.get('mediaId') || ''));
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/artwork' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            saveCustomArtwork(String(body.mediaId || ''), String(body.target || ''), String(body.dataUrl || ''));
-            writeJson(res, 200, customArtworkForRenderer(String(body.mediaId || '')));
-          })
-          .catch((error) => {
-            console.error('save artwork API error:', error);
-            writeJson(res, 500, { error: 'Failed to save artwork' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/artwork/refresh-official' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => refreshOfficialArtwork(String(body.mediaId || '')))
-          .then((artwork) => writeJson(res, 200, artwork))
-          .catch((error) => {
-            console.error('refresh official artwork API error:', error);
-            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to refresh official artwork' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/artwork/official-candidates' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => getOfficialMetadataCandidates(String(body.mediaId || '')))
-          .then((candidates) => writeJson(res, 200, candidates))
-          .catch((error) => {
-            console.error('official metadata candidates API error:', error);
-            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to fetch official metadata candidates' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/artwork/apply-official' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => applyOfficialMetadataCandidate(String(body.mediaId || ''), body.candidate as OfficialMetadataCandidate))
-          .then((artwork) => writeJson(res, 200, artwork))
-          .catch((error) => {
-            console.error('apply official metadata API error:', error);
-            writeJson(res, 500, { error: error instanceof Error ? error.message : 'Failed to apply official metadata' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/artwork/import' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            importCustomArtwork((body.entries || {}) as Record<string, Record<string, string>>);
-            writeJson(res, 200, { ok: true });
-          })
-          .catch((error) => {
-            console.error('import artwork API error:', error);
-            writeJson(res, 500, { error: 'Failed to import artwork' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/database/backup' && req.method === 'POST') {
-        backupDatabase()
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('database backup API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to back up database' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/database/clear' && req.method === 'POST') {
-        try {
-          writeJson(res, 200, libraryForRenderer(clearAppData()));
-        } catch (error) {
-          console.error('database clear API error:', error);
-          writeJson(res, 500, { error: 'Failed to clear app data' });
-        }
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/ffmpeg') {
-        const ffmpegPath = findFFmpeg();
-        writeJson(res, 200, { available: ffmpegPath !== null, path: ffmpegPath });
-        return;
-      }
 
       if (reqUrl.pathname === '/api/cached-artwork') {
-        const sourceUrl = reqUrl.searchParams.get('source') || '';
+        let sourceUrl = reqUrl.searchParams.get('source') || '';
+        if (!isLoopbackRequest(req)) {
+          try {
+            sourceUrl = resolveExternalArtworkResource(resourceId);
+          } catch {
+            sourceUrl = '';
+          }
+        }
         if (!sourceUrl || !isExternalArtworkUrl(sourceUrl)) {
           res.writeHead(400);
           res.end('Invalid artwork source');
@@ -844,72 +707,11 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         return;
       }
 
-      if (reqUrl.pathname === '/api/ffprobe') {
-        const ffprobePath = findFFprobe();
-        writeJson(res, 200, { available: ffprobePath !== null, path: ffprobePath });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/media-server-port') {
-        writeJson(res, 200, { port: mediaServerPort });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/media/probe' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => safeResult(() => probeMedia(String(body.filePath || ''))))
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('probe media API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to probe media' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/media/start-transcode' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => safeResult(() => startTranscode(
-            String(body.filePath || ''),
-            (body.options || {}) as TranscodeOptions,
-            `http://127.0.0.1:${mediaServerPort}`,
-          )))
-          .then((result) => result.ok && result.data
-            ? { ...result, data: { ...result.data, playlistUrl: appendLocalAccessTokenToUrl(result.data.playlistUrl) } }
-            : result)
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('start transcode API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to start transcoding' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/media/stop-transcode' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => safeResult(() => stopTranscode(String(body.sessionId || ''))))
-          .then((result) => writeJson(res, result.ok ? 200 : 400, result))
-          .catch((error) => {
-            console.error('stop transcode API error:', error);
-            writeJson(res, 500, { ok: false, error: 'Failed to stop transcoding' });
-          });
-        return;
-      }
 
-      if (reqUrl.pathname === '/api/play-media' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => {
-            assertLocalMediaPath(String(body.filePath || ''));
-            writeJson(res, 200, {
-              ok: false,
-              error: 'Direct external playback is disabled. Use the in-app player.',
-            });
-          })
-          .catch((error) => {
-            console.error('play media API error:', error);
-            writeJson(res, 400, { ok: false, error: 'Invalid media path.' });
-          });
-        return;
-      }
 
       if (reqUrl.pathname === '/subtitle') {
         if (!requireStreamAccess(reqUrl, req, res)) return;
@@ -1036,8 +838,6 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
         // Copy browser-safe streams first; encode only the streams that need it.
         const videoCodec = playbackPlan.videoCodec;
         const audioCodec = playbackPlan.audioCodec;
-        const hasSubtitle = hasSubtitleSelection(streamOptions);
-        const bitmapSubtitle = hasBitmapSubtitleSelection(streamOptions);
         const copyVideo = playbackPlan.copyVideo;
         const copyAudio = playbackPlan.copyAudio;
         const hardwareEncoder = copyVideo ? null : preferredH264HardwareEncoder(ffmpegPath);
@@ -1052,61 +852,13 @@ export function startMediaServer(deps: MediaServerDeps): Promise<number> {
           'X-Audio-Codec': audioCodec,
         });
 
-        const args: string[] = ['-nostdin'];
-        if (typeof streamOptions.startSeconds === 'number' && streamOptions.startSeconds > 0) {
-          args.push('-ss', String(Math.floor(streamOptions.startSeconds)));
-        }
-        args.push('-i', filePath);
-
-        if (hasSubtitle && bitmapSubtitle) {
-          const subtitleFilter = subtitleFilterComplex(filePath, streamOptions);
-          args.push('-filter_complex', subtitleFilter.filter, '-map', `[${subtitleFilter.output}]`);
-        } else {
-          args.push('-map', streamMap('v', streamOptions.videoTrackIndex));
-        }
-
-        if (streamOptions.audioTrackIndex !== -1) {
-          args.push('-map', streamMap('a', streamOptions.audioTrackIndex, true));
-        }
-
-        args.push('-sn', '-dn', '-map_chapters', '-1', '-map_metadata', '-1');
-
-        if (hasSubtitle && !bitmapSubtitle) {
-          const textSelections = subtitleSelections(streamOptions);
-          const primarySubtitle = textSelections.find((selection) => selection.placement === 'primary') || textSelections[0];
-          const secondarySubtitle = textSelections.find((selection) => selection !== primarySubtitle);
-          args.push('-vf', textSubtitleFilter(
-            filePath,
-            primarySubtitle.streamOrdinal,
-            streamOptions.subtitleStyle,
-            streamOptions.startSeconds,
-            secondarySubtitle?.streamOrdinal,
-            primarySubtitle?.filePath,
-            secondarySubtitle?.filePath,
-          ));
-        } else if (!copyVideo && !bitmapSubtitle) {
-          args.push('-vf', 'format=yuv420p');
-        }
-
-        args.push('-c:v', copyVideo ? 'copy' : hardwareEncoder || 'libx264');
-        if (hardwareEncoder) {
-          appendH264EncoderOptions(args, hardwareEncoder);
-        } else if (!copyVideo) {
-          args.push('-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main');
-        }
-
-        if (streamOptions.audioTrackIndex === -1) {
-          args.push('-an');
-        } else {
-          args.push('-c:a', copyAudio ? 'copy' : 'aac');
-          if (!copyAudio) args.push('-b:a', '192k', '-ac', '2');
-        }
-
-        args.push(
-          '-f', 'mp4',
-          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-          'pipe:1',
-        );
+        const args = buildBrowserStreamArgs({
+          filePath,
+          options: streamOptions,
+          copyVideo,
+          copyAudio,
+          hardwareEncoder,
+        });
 
         try {
           const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
