@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { desktopApi, type LibraryPayload, type ManagedMediaSegment, type MediaSegmentType, type SkipAnalysisSettings } from '@/lib/desktopApi';
 
 const TYPES = ['intro', 'recap', 'credits', 'preview'] as const;
@@ -104,9 +103,7 @@ export default function SkipTimestampManager({
     onRun({ mediaId: selectedMediaId, season: selectedSeason });
   };
 
-  return <Card className="settings-panel">
-    <CardHeader><CardTitle className="text-white">Intro/outro timestamp manager</CardTitle><CardDescription className="text-[var(--loom-muted)]">Navigate the full library, including shows and seasons that do not have markers yet.</CardDescription></CardHeader>
-    <CardContent className="space-y-5">
+  return <div className="space-y-5">
       <div className="grid gap-3 rounded-lg border border-[var(--loom-border)] bg-black/15 p-4 md:grid-cols-3">
         <label className="text-xs text-[var(--loom-muted)]">Library title<select aria-label="Library title" value={selectedMediaId} onChange={(event) => setSelectedMediaId(event.target.value)} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{items.map((item) => <option key={item.id} value={item.id}>{item.type === 'movie' ? 'Movie' : item.type === 'anime' ? 'Anime' : 'TV'} · {item.title}</option>)}</select></label>
         <label className="text-xs text-[var(--loom-muted)]">Season<select aria-label="Season" value={selectedSeason} onChange={(event) => setSelectedSeason(Number(event.target.value))} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{seasons.map((season) => <option key={season} value={season}>{selectedItem?.type === 'movie' ? 'Movie' : `Season ${season}`}</option>)}</select></label>
@@ -137,6 +134,5 @@ export default function SkipTimestampManager({
         <span className={segment.status === 'active' ? 'text-emerald-300' : segment.status === 'review' ? 'text-amber-300' : 'text-red-300'}>{segment.status}</span>
         <div className="flex gap-1">{segment.source !== 'manual' && <><Button type="button" variant="outline" onClick={() => void updateCandidate(segment.id, { status: 'active' })}>{segment.status === 'rejected' ? 'Restore' : 'Approve'}</Button><Button type="button" variant="outline" onClick={() => void updateCandidate(segment.id, { status: 'rejected' })}>Reject</Button></>}{segment.source === 'manual' && <Button type="button" variant="outline" onClick={async () => { await desktopApi.deleteManualMediaSegment({ candidateId: segment.id, mediaId: segment.mediaId, season: segment.season, episode: segment.episode, type: segment.type }); await refresh(); }}>Delete</Button>}</div>
       </div>)}{!visible.length && <p className="py-8 text-center text-sm text-[var(--loom-muted)]">No markers for this title, season, and episode yet. You can manually scan the season or add one above.</p>}</div>
-    </CardContent>
-  </Card>;
+  </div>;
 }
