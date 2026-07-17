@@ -20,12 +20,28 @@ function fail(message) {
 
 function resourcesDir(packageDir) {
   if (platform === 'darwin') {
-    const appBundle = ['LoomTV.app', 'Loom Media Server.app']
-      .map((name) => path.join(packageDir, name))
-      .find(exists) || path.join(packageDir, 'LoomTV.app');
-    return path.join(appBundle, 'Contents', 'Resources');
+    return path.join(appBundlePath(packageDir), 'Contents', 'Resources');
   }
   return path.join(packageDir, 'resources');
+}
+
+function appBundlePath(packageDir) {
+  return ['LoomTV.app', 'Loom Media Server.app']
+    .map((name) => path.join(packageDir, name))
+    .find(exists) || path.join(packageDir, 'LoomTV.app');
+}
+
+function codeSigningDetails(target) {
+  const result = spawnSync('/usr/bin/codesign', ['-dvvv', target], { encoding: 'utf8' });
+  return `${result.stdout || ''}\n${result.stderr || ''}`;
+}
+
+function signingTeam(details) {
+  return details.match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim() || '';
+}
+
+function hasHardenedRuntime(details) {
+  return /^CodeDirectory .*flags=.*\bruntime\b/m.test(details);
 }
 
 function packageDirCandidates() {
@@ -70,6 +86,40 @@ const unpacked = path.join(resources, 'app.asar.unpacked');
 
 if (!exists(resources)) fail(`Missing resources directory: ${resources}`);
 if (!exists(appAsar)) fail(`Missing app.asar: ${appAsar}`);
+
+if (platform === 'darwin') {
+  const appBundle = appBundlePath(packageDir);
+  const mainExecutable = path.join(appBundle, 'Contents', 'MacOS', 'Loom Media Server');
+  const electronFramework = path.join(
+    appBundle,
+    'Contents',
+    'Frameworks',
+    'Electron Framework.framework',
+    'Versions',
+    'A',
+    'Electron Framework',
+  );
+  const signatureCheck = spawnSync('/usr/bin/codesign', [
+    '--verify', '--deep', '--strict', '--verbose=2', appBundle,
+  ], { encoding: 'utf8' });
+  if (signatureCheck.status !== 0) {
+    fail(`Invalid macOS app signature.\n${signatureCheck.stderr || signatureCheck.stdout}`);
+  }
+
+  const mainDetails = codeSigningDetails(mainExecutable);
+  const frameworkDetails = codeSigningDetails(electronFramework);
+  const mainTeam = signingTeam(mainDetails);
+  const frameworkTeam = signingTeam(frameworkDetails);
+  const bothAdHoc = mainTeam === 'not set' && frameworkTeam === 'not set';
+  const matchingDeveloperId = Boolean(mainTeam && mainTeam === frameworkTeam && mainTeam !== 'not set');
+
+  if (!matchingDeveloperId && !bothAdHoc) {
+    fail(`macOS signing Team ID mismatch: app=${mainTeam || 'missing'}, framework=${frameworkTeam || 'missing'}.`);
+  }
+  if (bothAdHoc && (hasHardenedRuntime(mainDetails) || hasHardenedRuntime(frameworkDetails))) {
+    fail('Ad-hoc macOS bundles must not enable hardened runtime; dyld will reject the Electron Framework Team ID.');
+  }
+}
 
 const appFiles = exists(appAsar)
   ? new Set(asar.listPackage(appAsar).map((entry) => entry.replace(/\\/g, '/')))
