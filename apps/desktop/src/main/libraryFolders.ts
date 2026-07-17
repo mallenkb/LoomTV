@@ -1,17 +1,13 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import type { LibraryData, LibraryFolderGroups } from '../main';
+import type {
+  LibraryData,
+  LibraryFolderGroups,
+  LibraryFolderKind,
+  LibraryFolderStatus,
+} from './appContracts.ts';
 
-export type LibraryFolderStatusKind = 'movies' | 'tvShows' | 'anime' | 'others';
-
-export interface LibraryFolderStatus {
-  path: string;
-  kind: LibraryFolderStatusKind;
-  state: 'available' | 'unavailable';
-  isNetworkLike: boolean;
-  checkedAt: number;
-  message: string;
-}
+export type { LibraryFolderStatus } from './appContracts.ts';
 
 export function defaultLibraryFolderGroups(): LibraryFolderGroups {
   return { movies: [], tvShows: [], anime: [], others: [] };
@@ -21,7 +17,7 @@ export function flattenLibraryFolders(groups: LibraryFolderGroups): string[] {
   return Array.from(new Set([...groups.movies, ...groups.tvShows, ...groups.anime, ...groups.others]));
 }
 
-export function normalizeFolderKindName(folderPath: string): string {
+function normalizeFolderKindName(folderPath: string): string {
   return path.basename(folderPath).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
@@ -69,7 +65,7 @@ export function isNetworkLikePath(folderPath: string): boolean {
     || /^\/\/[^/]+\/[^/]+/.test(normalized);
 }
 
-export function getLibraryFolderStatus(folderPath: string, kind: LibraryFolderStatusKind): LibraryFolderStatus {
+export function getLibraryFolderStatus(folderPath: string, kind: LibraryFolderKind): LibraryFolderStatus {
   const checkedAt = Date.now();
   const isNetworkLike = isNetworkLikePath(folderPath);
   try {

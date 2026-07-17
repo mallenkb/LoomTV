@@ -1,4 +1,4 @@
-export type UpdateAdapterStatus =
+type UpdateAdapterStatus =
   | 'idle'
   | 'disabled'
   | 'checking'

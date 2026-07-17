@@ -13,6 +13,24 @@
     "vite.*.config.ts"
   ],
   "ignoreDependencies": [
-    "pnpm"
+    "pnpm",
+    "@eslint/js",
+    "eslint-import-resolver-typescript",
+    "eslint-plugin-import-x",
+    "eslint-plugin-react-hooks",
+    "globals",
+    "typescript-eslint"
+  ],
+  "ignoreBinaries": [
+    "file",
+    "which",
+    "networksetup",
+    "ipconfig",
+    "system_profiler",
+    "netsh",
+    "iwgetid",
+    "nmcli",
+    "iw",
+    "ps"
   ]
 }

@@ -5,11 +5,13 @@
  * one-time H.264/AAC transcode fallback when direct playback fails.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Hls, { ErrorTypes, Events, type ErrorData } from 'hls.js';
+import type Hls from 'hls.js';
+import type { ErrorData } from 'hls.js';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
 import {
   desktopApi,
+  type ManagedMediaSegment,
   type MediaSegment,
   type MediaSegmentType,
 } from '@/lib/desktopApi';
@@ -20,7 +22,6 @@ import {
   saveProgress as savePlaybackProgress,
 } from '@/lib/progress';
 import {
-  CONTROLS_HIDE_MS,
   DEFAULT_EPISODE_PANEL_WIDTH,
   DEFAULT_MEDIA_PANEL_WIDTH,
   DEFAULT_SKIP_BACK_SECONDS,
@@ -53,7 +54,6 @@ export type { VideoPlayerProps } from './VideoPlayer/types';
 import {
   cleanEpisodeTitle,
   clampSeconds,
-  clampSidePanelWidth,
   epCode,
   externalSubtitleOrdinal,
   firstSubtitleTrackIndex,
@@ -85,6 +85,7 @@ import PauseOverlay from './VideoPlayer/PauseOverlay';
 import NextEpisodePrompt from './VideoPlayer/NextEpisodePrompt';
 import PlayerControlBar from './VideoPlayer/PlayerControlBar';
 import PlayerEpisodePanel from './VideoPlayer/PlayerEpisodePanel';
+import PlayerMarkerEditor from './VideoPlayer/PlayerMarkerEditor';
 import PlayerSettingsPanel from './VideoPlayer/PlayerSettingsPanel';
 import SubtitleOverlay from './VideoPlayer/SubtitleOverlay';
 import TopPlayerControls from './VideoPlayer/TopPlayerControls';
@@ -107,6 +108,8 @@ import {
   subtitleTrackPlaybackAction,
   transcodeSeekRestartOptions,
 } from './VideoPlayer/playerControls';
+import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
+import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
@@ -139,7 +142,6 @@ export default function VideoPlayer({
   const progressThumbRef = useRef<HTMLDivElement>(null);
   const currentTimeTextRef = useRef<HTMLSpanElement>(null);
   const durationTimeTextRef = useRef<HTMLSpanElement>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const transcodeSessionIdRef = useRef<string | null>(null);
@@ -207,9 +209,6 @@ export default function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [showControls, setShowControls] = useState(true);
-  const [showTopControls, setShowTopControls] = useState(true);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
   const [episodePanelWidth, setEpisodePanelWidth] = useState(DEFAULT_EPISODE_PANEL_WIDTH);
@@ -231,6 +230,7 @@ export default function VideoPlayer({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
+  const [skipPromptTypes, setSkipPromptTypes] = useState<Record<MediaSegmentType, boolean>>({ intro: true, recap: true, credits: true, preview: false });
   const [dismissedNextPromptKey, setDismissedNextPromptKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // force episode list re-render
   const [playbackLogoCandidates, setPlaybackLogoCandidates] = useState<string[]>([]);
@@ -241,7 +241,16 @@ export default function VideoPlayer({
   const [markerEnd, setMarkerEnd] = useState('90');
   const [markerSaving, setMarkerSaving] = useState(false);
   const [markerError, setMarkerError] = useState<string | null>(null);
+  const [rejectedSegments, setRejectedSegments] = useState<ManagedMediaSegment[]>([]);
   const playerStateRef = useRef<PlayerState>(playerState);
+  const {
+    fullscreen,
+    handlePointerMove,
+    showControls,
+    showTopControls,
+    toggleFullscreen,
+  } = usePlayerChrome(paused, containerRef);
+  const startSidePanelResize = useSidePanelResize();
 
   useEffect(() => {
     playerStateRef.current = playerState;
@@ -388,6 +397,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     setDismissedNextPromptKey(null);
+    setRejectedSegments([]);
   }, [filePath]);
 
   useEffect(() => {
@@ -405,6 +415,7 @@ export default function VideoPlayer({
             ? Number(settings.playbackSkipForwardSeconds)
             : DEFAULT_SKIP_FORWARD_SECONDS,
         );
+        if (settings.skipAnalysis?.promptTypes) setSkipPromptTypes(settings.skipAnalysis.promptTypes);
       })
       .catch(() => {
         if (cancelled) return;
@@ -978,7 +989,6 @@ export default function VideoPlayer({
       transcodeStartSecondsRef.current = pendingSwap.transcodeStartSeconds;
     }
     const isHlsSource = /\.m3u8(\?|$)/i.test(streamUrl);
-    let isManagedHls = false;
     const resumeSeconds = pendingSwap?.position ?? initialResumePositionRef.current;
     // For a seekable VOD transcode, begin loading at the intended absolute
     // position (resume or the spot a track-change restart was issued from).
@@ -1049,7 +1059,21 @@ export default function VideoPlayer({
     };
 
     if (isHlsSource) {
-      if (Hls.isSupported()) {
+      void import('hls.js').then(({ default: Hls, ErrorTypes, Events }) => {
+        if (sourceToken !== sourceLoadTokenRef.current) return;
+
+        if (!Hls.isSupported()) {
+          if (video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL')) {
+            video.src = streamUrl;
+            video.load();
+            playIfAllowed();
+          } else {
+            setPlayerState('error');
+            setErrorMessage('HLS streams are not supported in this build.');
+          }
+          return;
+        }
+
         const hls = new Hls({
           autoStartLoad: false,
           startPosition: hlsStartPosition,
@@ -1061,7 +1085,6 @@ export default function VideoPlayer({
           fragLoadingMaxRetry: 20,
           fragLoadingRetryDelay: 500,
         });
-        isManagedHls = true;
         hlsRef.current = hls;
         const markHlsPlayable = () => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
@@ -1083,7 +1106,7 @@ export default function VideoPlayer({
         });
         hls.on(Events.FRAG_BUFFERED, markHlsPlayable);
         hls.attachMedia(video);
-        hls.on(Events.ERROR, (_event: Events.ERROR, data: ErrorData) => {
+        hls.on(Events.ERROR, (_event, data: ErrorData) => {
           if (sourceToken !== sourceLoadTokenRef.current) return;
           console.warn(`[player] HLS error ${hlsErrorSummary(data)}`);
           const restartLocalHls = () => {
@@ -1134,13 +1157,12 @@ export default function VideoPlayer({
             setErrorMessage(data.details ? `HLS playback error: ${data.details}` : 'Unable to play HLS stream.');
           }
         });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL')) {
-        video.src = streamUrl;
-      } else {
+      }).catch((error: unknown) => {
+        if (sourceToken !== sourceLoadTokenRef.current) return;
+        console.error('[player] Failed to load HLS runtime', error);
         setPlayerState('error');
-        setErrorMessage('HLS streams are not supported in this build.');
-        return;
-      }
+        setErrorMessage('Unable to load HLS playback support.');
+      });
     } else {
       video.src = streamUrl;
     }
@@ -1321,7 +1343,7 @@ export default function VideoPlayer({
     video.addEventListener('error', onError);
     video.preload = 'auto';
     video.autoplay = !(pendingSwap?.wasPaused ?? userPausedRef.current);
-    if (!isManagedHls) {
+    if (!isHlsSource) {
       video.load();
       playIfAllowed();
     }
@@ -1358,47 +1380,6 @@ export default function VideoPlayer({
     startTranscodedFallback,
     updatePlaybackSnapshot,
   ]);
-
-  // ─── Auto-hide controls ────────────────────────────────────────────────────
-
-  const resetHideTimer = useCallback(() => {
-    setShowControls(true);
-    setShowTopControls(true);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    hideTimerRef.current = setTimeout(() => {
-      if (!videoRef.current?.paused) {
-        setShowControls(false);
-        setShowTopControls(false);
-      }
-    }, CONTROLS_HIDE_MS);
-  }, []);
-
-  const handlePointerMove = useCallback(() => {
-    resetHideTimer();
-  }, [resetHideTimer]);
-
-  useEffect(() => {
-    if (paused) {
-      setShowControls(true);
-      setShowTopControls(true);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      return;
-    }
-    resetHideTimer();
-  }, [paused, resetHideTimer]);
-
-  useEffect(() => () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }, []);
-
-  useEffect(() => {
-    const doc = document as Document & { webkitFullscreenElement?: Element | null };
-    const onFullscreenChange = () => setFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-    };
-  }, []);
 
   useEffect(() => () => {
     if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
@@ -1500,25 +1481,6 @@ export default function VideoPlayer({
     onClose();
   }, [onClose, shutdownPlayback]);
 
-  const toggleFullscreen = useCallback(() => {
-    const el = containerRef.current as
-      | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void })
-      | null;
-    if (!el) return;
-    const doc = document as Document & {
-      webkitFullscreenElement?: Element | null;
-      webkitExitFullscreen?: () => Promise<void> | void;
-    };
-    const fullscreenElement = doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
-    if (!fullscreenElement) {
-      const requestFullscreen = el.requestFullscreen?.bind(el) ?? el.webkitRequestFullscreen?.bind(el);
-      if (requestFullscreen) void requestFullscreen();
-    } else {
-      const exitFullscreen = doc.exitFullscreen?.bind(doc) ?? doc.webkitExitFullscreen?.bind(doc);
-      if (exitFullscreen) void exitFullscreen();
-    }
-  }, []);
-
   const openMediaPanel = useCallback(() => {
     if (showMediaPanel && mediaPanelTab === 'video') {
       setShowMediaPanel(false);
@@ -1550,36 +1512,6 @@ export default function VideoPlayer({
     setMediaPanelTab('subtitles');
     setShowMediaPanel(true);
   }, [showMediaPanel, mediaPanelTab]);
-
-  const startSidePanelResize = useCallback((
-    event: React.MouseEvent<HTMLDivElement>,
-    currentWidth: number,
-    setWidth: React.Dispatch<React.SetStateAction<number>>,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startX = event.clientX;
-    const startWidth = currentWidth;
-    const previousCursor = document.body.style.cursor;
-    const previousSelect = document.body.style.userSelect;
-
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      setWidth(clampSidePanelWidth(startWidth + startX - moveEvent.clientX));
-    };
-
-    const onMouseUp = () => {
-      document.body.style.cursor = previousCursor;
-      document.body.style.userSelect = previousSelect;
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -2185,8 +2117,8 @@ export default function VideoPlayer({
     && !isScrubbingRef.current,
   );
   const activeMediaSegment = useMemo(
-    () => activeSkipSegmentAt(mediaSegments, position),
-    [mediaSegments, position],
+    () => activeSkipSegmentAt(mediaSegments.filter((segment) => skipPromptTypes[segment.type] !== false), position),
+    [mediaSegments, position, skipPromptTypes],
   );
   const selectMarkerType = (type: MediaSegmentType) => {
     setMarkerType(type);
@@ -2198,6 +2130,10 @@ export default function VideoPlayer({
   const openMarkerEditor = () => {
     selectMarkerType(activeMediaSegment?.type || 'intro');
     setShowMarkerEditor(true);
+    if (mediaId) {
+      void desktopApi.getManagedMediaSegments({ mediaId, season: currentSeason, episode: currentEpisode })
+        .then((candidates) => setRejectedSegments(candidates.filter((candidate) => candidate.status === 'rejected')));
+    }
   };
   const saveMarker = async () => {
     if (!mediaId) return;
@@ -2269,6 +2205,35 @@ export default function VideoPlayer({
     }
   };
   const editorSegment = mediaSegments.find((segment) => segment.type === markerType);
+  const rejectMarker = async () => {
+    if (!mediaId || !editorSegment || editorSegment.source === 'manual') return;
+    setMarkerSaving(true);
+    setMarkerError(null);
+    try {
+      await desktopApi.updateManagedMediaSegment(editorSegment.id, { status: 'rejected' });
+      const candidates = await desktopApi.getManagedMediaSegments({ mediaId, season: currentSeason, episode: currentEpisode });
+      setRejectedSegments(candidates.filter((candidate) => candidate.status === 'rejected'));
+      const response = await desktopApi.getMediaSegments({ mediaId, season: currentSeason, episode: currentEpisode });
+      setMediaSegments(response.segments);
+    } catch (error) {
+      setMarkerError(error instanceof Error ? error.message : 'Could not reject that marker.');
+    } finally {
+      setMarkerSaving(false);
+    }
+  };
+  const restorableSegment = rejectedSegments.find((segment) => segment.type === markerType);
+  const restoreMarker = async () => {
+    if (!mediaId || !restorableSegment) return;
+    setMarkerSaving(true);
+    try {
+      await desktopApi.updateManagedMediaSegment(restorableSegment.id, { status: 'active' });
+      const response = await desktopApi.getMediaSegments({ mediaId, season: currentSeason, episode: currentEpisode });
+      setMediaSegments(response.segments);
+      setRejectedSegments((current) => current.filter((segment) => segment.id !== restorableSegment.id));
+    } finally {
+      setMarkerSaving(false);
+    }
+  };
   return (
     <div className="loom-player-root fixed inset-0 z-50 flex bg-black" ref={containerRef}>
       <style>
@@ -2402,59 +2367,27 @@ export default function VideoPlayer({
         )}
 
         {showMarkerEditor && (
-          <div
-            className="absolute inset-0 z-50 grid place-items-center bg-black/65 px-6 backdrop-blur-sm"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <section className="w-full max-w-md rounded-xl border border-white/15 bg-zinc-950 p-5 text-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Edit skip marker">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-semibold">Correct skip timing</h2>
-                  <p className="mt-1 text-xs text-white/55">Optional file-specific correction for automatic markers.</p>
-                </div>
-                <button type="button" onClick={() => setShowMarkerEditor(false)} className="rounded px-2 py-1 text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close marker editor">Close</button>
-              </div>
-              <label className="block text-xs font-medium uppercase tracking-wide text-white/60">
-                Segment
-                <select value={markerType} onChange={(event) => selectMarkerType(event.target.value as MediaSegmentType)} className="mt-2 w-full rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white">
-                  <option value="intro">Intro</option>
-                  <option value="recap">Recap</option>
-                  <option value="credits">Credits</option>
-                  <option value="preview">Preview</option>
-                </select>
-              </label>
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <label className="text-xs font-medium uppercase tracking-wide text-white/60">
-                  Start (seconds)
-                  <input value={markerStart} onChange={(event) => setMarkerStart(event.target.value)} inputMode="decimal" className="mt-2 w-full rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white" />
-                </label>
-                <label className="text-xs font-medium uppercase tracking-wide text-white/60">
-                  End (seconds)
-                  <input value={markerEnd} onChange={(event) => setMarkerEnd(event.target.value)} inputMode="decimal" placeholder="End of video" className="mt-2 w-full rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white" />
-                </label>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <button type="button" onClick={() => setMarkerStart(playbackPositionRef.current.toFixed(1))} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">Use current as start</button>
-                <button type="button" onClick={() => setMarkerEnd(playbackPositionRef.current.toFixed(1))} className="rounded-md border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10">Use current as end</button>
-              </div>
-              {editorSegment && (
-                <p className="mt-3 text-xs text-white/55">
-                  Current: {editorSegment.source} · {Math.round(editorSegment.confidence * 100)}% confidence · {new Date(editorSegment.updatedAt).toLocaleString()}
-                </p>
-              )}
-              {markerError && <p className="mt-3 text-sm text-red-300" role="alert">{markerError}</p>}
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <div className="flex gap-1">
-                  <button type="button" disabled={markerSaving} onClick={() => void resetMarker()} className="rounded-md px-2 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-50">Reset</button>
-                  <button type="button" disabled={markerSaving} onClick={() => void undoMarker()} className="rounded-md px-2 py-2 text-xs text-white/65 hover:bg-white/10 hover:text-white disabled:opacity-50">Undo</button>
-                </div>
-                <div className="flex gap-2">
-                  <button type="button" disabled={markerSaving || !markerEnd.trim()} onClick={() => seekTo(Number(markerEnd))} className="rounded-md border border-white/15 px-3 py-2 text-sm text-white/80 hover:bg-white/10 disabled:opacity-40">Preview</button>
-                  <button type="button" disabled={markerSaving} onClick={() => void saveMarker()} className="rounded-md bg-[var(--loom-accent)] px-4 py-2 text-sm font-semibold text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] disabled:opacity-50">{markerSaving ? 'Saving…' : 'Save marker'}</button>
-                </div>
-              </div>
-            </section>
-          </div>
+          <PlayerMarkerEditor
+            editorSegment={editorSegment}
+            error={markerError}
+            markerEnd={markerEnd}
+            markerStart={markerStart}
+            markerType={markerType}
+            saving={markerSaving}
+            onClose={() => setShowMarkerEditor(false)}
+            onMarkerEndChange={setMarkerEnd}
+            onMarkerStartChange={setMarkerStart}
+            onMarkerTypeChange={selectMarkerType}
+            onPreview={() => seekTo(Number(markerEnd))}
+            onReject={() => void rejectMarker()}
+            onRestore={() => void restoreMarker()}
+            canRestore={Boolean(restorableSegment)}
+            onReset={() => void resetMarker()}
+            onSave={() => void saveMarker()}
+            onUndo={() => void undoMarker()}
+            onUseCurrentAsEnd={() => setMarkerEnd(playbackPositionRef.current.toFixed(1))}
+            onUseCurrentAsStart={() => setMarkerStart(playbackPositionRef.current.toFixed(1))}
+          />
         )}
 
         {/* Controls overlay */}

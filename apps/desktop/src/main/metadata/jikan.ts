@@ -1,5 +1,6 @@
-import { remoteMatchesAnyLocalTitle, yearFromDateString } from './helpers';
-import type { EpisodeMeta, MediaItem } from './types';
+import { remoteMatchesAnyLocalTitle, yearFromDateString } from './helpers.ts';
+import type { EpisodeMeta, MediaItem } from './types.ts';
+import { safeFetch } from '../safeFetch.ts';
 
 export interface JikanAnimeResult extends Partial<MediaItem> {
   episodes?: EpisodeMeta[];
@@ -59,7 +60,7 @@ async function jikanDelay(): Promise<void> {
 
 async function jikanFetch<T>(path: string): Promise<T> {
   await jikanDelay();
-  const res = await fetch(`https://api.jikan.moe/v4${path}`);
+  const res = await safeFetch(`https://api.jikan.moe/v4${path}`, {}, { allowedHosts: ['api.jikan.moe'], retries: 2 });
   if (!res.ok) throw new Error(`Jikan ${path} → ${res.status}`);
   return (await res.json()) as T;
 }

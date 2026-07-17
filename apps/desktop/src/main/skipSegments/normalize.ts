@@ -30,7 +30,11 @@ export function normalizeSegment(
   const startMs = Math.round(Number(value.startMs));
   const rawEnd = value.endMs === null ? null : Math.round(Number(value.endMs));
   if (!duration || !Number.isFinite(startMs) || startMs < 0 || startMs >= duration) return null;
-  if (rawEnd !== null && (!Number.isFinite(rawEnd) || rawEnd <= startMs || rawEnd > duration + 1000)) return null;
+  // Provider timestamps are submitted against releases whose runtime can differ
+  // from the local file by a few seconds. An end that overshoots the local
+  // duration within the shared duration tolerance clamps to the file end;
+  // rejecting it drops valid credits markers on an episode-by-episode basis.
+  if (rawEnd !== null && (!Number.isFinite(rawEnd) || rawEnd <= startMs || rawEnd > duration + durationToleranceMs(duration))) return null;
   const endMs = rawEnd === null ? null : Math.min(duration, rawEnd);
   if (endMs !== null && endMs - startMs < 1000) return null;
   return {
@@ -41,10 +45,13 @@ export function normalizeSegment(
   };
 }
 
+export function durationToleranceMs(localDurationMs: number): number {
+  return Math.max(30_000, localDurationMs * 0.02);
+}
+
 export function durationIsCompatible(sourceDurationMs: number | undefined, localDurationMs: number): boolean {
   if (!sourceDurationMs || !localDurationMs) return true;
-  const tolerance = Math.max(30_000, localDurationMs * 0.02);
-  return Math.abs(sourceDurationMs - localDurationMs) <= tolerance;
+  return Math.abs(sourceDurationMs - localDurationMs) <= durationToleranceMs(localDurationMs);
 }
 
 export function resolveCandidates(candidates: MediaSegmentCandidate[]): MediaSegment[] {
@@ -76,7 +83,7 @@ export function resolveCandidates(candidates: MediaSegmentCandidate[]): MediaSeg
     })
     .filter(Boolean)
     .sort((a, b) => a.startMs - b.startMs || TYPE_ORDER[a.type] - TYPE_ORDER[b.type])
-    .map(({ id, type, startMs, endMs, confidence, source, mediaDurationMs, updatedAt }) => ({
+    .map(({ id, type, startMs, endMs, confidence, source, mediaDurationMs, updatedAt, analysisMetadata }) => ({
       id,
       type,
       startMs,
@@ -85,6 +92,7 @@ export function resolveCandidates(candidates: MediaSegmentCandidate[]): MediaSeg
       source,
       mediaDurationMs,
       updatedAt,
+      analysisMetadata,
     }));
 }
 
@@ -99,12 +107,18 @@ export function segmentRevision(segments: MediaSegment[]): string {
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex').slice(0, 16);
 }
 
+export const CHAPTER_LABELS: Record<MediaSegmentType, readonly string[]> = {
+  intro: ['intro', 'introduction', 'opening', 'op'],
+  recap: ['recap', 'previously', 'previously on', 'summary', 'last episode'],
+  credits: ['credits', 'end credits', 'ending', 'ed', 'outro'],
+  preview: ['preview', 'pv', 'sneak peek', 'coming up', 'next episode', 'next episode preview'],
+};
+
 export function chapterType(title: string): MediaSegmentType | null {
   const normalized = title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  if (['intro', 'introduction', 'opening', 'op'].includes(normalized)) return 'intro';
-  if (['recap', 'previously on'].includes(normalized)) return 'recap';
-  if (['credits', 'end credits', 'ending', 'ed'].includes(normalized)) return 'credits';
-  if (['preview', 'next episode', 'next episode preview'].includes(normalized)) return 'preview';
+  for (const type of ['intro', 'recap', 'credits', 'preview'] as const) {
+    if (CHAPTER_LABELS[type].includes(normalized)) return type;
+  }
   return null;
 }
 

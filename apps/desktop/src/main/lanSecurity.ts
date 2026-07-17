@@ -1,7 +1,6 @@
 import os from 'node:os';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { app } from 'electron';
 import { createLanShareCode } from './settings';
 import {
   hasValidLocalAccessToken,
@@ -13,12 +12,16 @@ import {
 import { getMediaServerPort } from './mediaServer';
 import { getPrimaryLocalNetworkAddress } from './networkInfo';
 import { checkPairRateLimit, recordPairFailure, recordPairSuccess } from './pairRateLimit';
-import { readJsonBody, writeJson } from './httpResponses';
+import { HttpBodyError, readJsonBody, writeJson } from './httpResponses';
 import { advertiseLanService, unadvertiseLanService } from './lanDiscovery';
-import type { AppSettings, LanPairedDevice } from '../main';
+import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 
-const CACHEABLE_SIGNED_LAN_URL_EXPIRY_SECONDS = 2_147_483_647;
+const MAX_SIGNED_LAN_URL_TTL_SECONDS = 15 * 60;
 const IMAGE_CACHE_BUST_QUERY_PARAM = 'loomtvImageBust';
+const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
+const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PAIRING_SESSION_TTL_MS = 5 * 60 * 1000;
+const DEVICE_SCOPES: LanPairedDevice['scopes'] = ['catalog:read', 'media:stream', 'playback:write'];
 
 type SignedLanUrlOptions = {
   stable?: boolean;
@@ -33,6 +36,7 @@ export interface LanSecurityDeps {
 
 export function createLanSecurity(deps: LanSecurityDeps) {
   const { loadSettings, saveSettings, localAccessToken, libraryForLocalNetwork } = deps;
+  let pairingSecretExpiresAt = 0;
 
   function getRequestRemoteAddress(req: IncomingMessage): string {
     return normalizeRemoteAddress(req.socket.remoteAddress);
@@ -53,13 +57,22 @@ export function createLanSecurity(deps: LanSecurityDeps) {
 
   function getLanShareToken(): string {
     const settings = loadSettings();
-    if (settings.localNetworkShareToken && /^\d{6}$/.test(settings.localNetworkShareToken)) {
+    if (
+      settings.localNetworkShareToken
+      && /^[A-Za-z0-9_-]{43}$/.test(settings.localNetworkShareToken)
+      && pairingSecretExpiresAt > Date.now()
+    ) {
       return settings.localNetworkShareToken;
     }
 
     const token = createLanShareCode();
+    pairingSecretExpiresAt = Date.now() + PAIRING_SESSION_TTL_MS;
     saveSettings({ ...settings, localNetworkShareToken: token });
     return token;
+  }
+
+  function tokenHash(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
   function getLanHmacSecret(): string {
@@ -75,7 +88,11 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const settings = loadSettings();
     const devices = settings.localNetworkPairedDevices || [];
     for (const device of devices) {
-      if (timingSafeStringEqual(device.token, token)) return device;
+      if (
+        device.securityEpoch === 2
+        && device.accessTokenExpiresAt > Date.now()
+        && timingSafeStringEqual(device.accessTokenHash, tokenHash(token))
+      ) return device;
     }
     return null;
   }
@@ -107,10 +124,11 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     ttlSeconds = 24 * 60 * 60,
     options: SignedLanUrlOptions = {},
   ): string {
-    const expires = options.stable
-      ? CACHEABLE_SIGNED_LAN_URL_EXPIRY_SECONDS
-      : Math.floor(Date.now() / 1000) + ttlSeconds;
-    const nonce = options.stable ? signedUrlStableNonce(pathname, params) : randomBytes(8).toString('hex');
+    const boundedTtl = Math.max(1, Math.min(ttlSeconds, MAX_SIGNED_LAN_URL_TTL_SECONDS));
+    const expires = Math.floor(Date.now() / 1000) + boundedTtl;
+    const nonce = options.stable
+      ? signedUrlStableNonce(pathname, new URLSearchParams(`${params.toString()}&exp=${expires}`))
+      : randomBytes(8).toString('hex');
     const signingInput = `${pathname}?${params.toString()}|exp=${expires}|nonce=${nonce}`;
     const sig = signLanPayload(signingInput);
     params.set('exp', String(expires));
@@ -141,10 +159,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     if (!isLanSharingEnabled()) return { ok: false };
     const token = requestToken(reqUrl, req);
     if (!token) return { ok: false };
-
-    if (timingSafeStringEqual(token, getLanShareToken())) {
-      return { ok: true };
-    }
 
     const device = findPairedDeviceByToken(token);
     if (device) {
@@ -206,8 +220,17 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       return;
     }
 
-    const body = await readJsonBody(req).catch(() => ({} as Record<string, unknown>));
-    const code = String(body.code || '').replace(/\D/g, '').slice(0, 6);
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonBody(req, { maxBytes: 16 * 1024, timeoutMs: 10_000 });
+    } catch (error) {
+      if (error instanceof HttpBodyError) {
+        writeJson(res, error.statusCode, { error: error.message });
+        return;
+      }
+      throw error;
+    }
+    const code = String(body.code || '').trim().slice(0, 128);
     const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
     const requestedDeviceId = String(body.deviceId || '').trim().slice(0, 64);
 
@@ -228,28 +251,99 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const existing = pairedDevices.find((device) => requestedDeviceId && device.id === requestedDeviceId)
       || pairedDevices.filter(isSameMobileClient).sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
     const deviceId = existing?.id || requestedDeviceId || randomUUID();
-    const deviceToken = randomBytes(32).toString('hex');
+    const accessToken = randomBytes(32).toString('base64url');
+    const refreshToken = randomBytes(32).toString('base64url');
     const now = Date.now();
     const updated: LanPairedDevice = {
       id: deviceId,
       name: deviceName,
-      token: deviceToken,
+      accessTokenHash: tokenHash(accessToken),
+      accessTokenExpiresAt: now + ACCESS_TOKEN_TTL_MS,
+      refreshTokenHash: tokenHash(refreshToken),
+      refreshTokenExpiresAt: now + REFRESH_TOKEN_TTL_MS,
+      scopes: DEVICE_SCOPES,
+      securityEpoch: 2,
       createdAt: existing?.createdAt || now,
       lastSeenAt: now,
       lastAddress: address,
     };
     const others = pairedDevices.filter((device) => device.id !== deviceId && !isSameMobileClient(device));
-    saveSettings({ ...settings, localNetworkPairedDevices: [...others, updated] });
+    saveSettings({
+      ...settings,
+      localNetworkShareToken: createLanShareCode(),
+      localNetworkPairedDevices: [...others, updated],
+      localNetworkSecurityEpoch: 2,
+    });
+    pairingSecretExpiresAt = 0;
 
     const payload = libraryForLocalNetwork();
     writeJson(res, 200, {
       ok: true,
       deviceId,
-      deviceToken,
+      accessToken,
+      accessTokenExpiresAt: updated.accessTokenExpiresAt,
+      refreshToken,
+      refreshTokenExpiresAt: updated.refreshTokenExpiresAt,
+      scopes: updated.scopes,
       hostDeviceId: settings.localNetworkDeviceId,
       hostDeviceName: settings.localNetworkDeviceName || os.hostname(),
       library: payload,
       libraryEtag: libraryEtagFor(payload),
+    });
+  }
+
+  async function handleLanRefreshRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isLanSharingEnabled()) {
+      writeJson(res, 403, { error: 'Local network sharing is disabled.' });
+      return;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonBody(req, { maxBytes: 16 * 1024, timeoutMs: 10_000 });
+    } catch (error) {
+      if (error instanceof HttpBodyError) {
+        writeJson(res, error.statusCode, { error: error.message });
+        return;
+      }
+      throw error;
+    }
+    const refreshToken = String(body.refreshToken || '').trim();
+    if (!refreshToken) {
+      writeJson(res, 400, { error: 'refreshToken is required.' });
+      return;
+    }
+    const settings = loadSettings();
+    const devices = settings.localNetworkPairedDevices || [];
+    const hash = tokenHash(refreshToken);
+    const device = devices.find((candidate) => candidate.securityEpoch === 2
+      && candidate.refreshTokenExpiresAt > Date.now()
+      && timingSafeStringEqual(candidate.refreshTokenHash, hash));
+    if (!device) {
+      writeJson(res, 401, { error: 'Refresh credential is invalid or expired.' });
+      return;
+    }
+    const now = Date.now();
+    const nextAccessToken = randomBytes(32).toString('base64url');
+    const nextRefreshToken = randomBytes(32).toString('base64url');
+    const updated: LanPairedDevice = {
+      ...device,
+      accessTokenHash: tokenHash(nextAccessToken),
+      accessTokenExpiresAt: now + ACCESS_TOKEN_TTL_MS,
+      refreshTokenHash: tokenHash(nextRefreshToken),
+      refreshTokenExpiresAt: now + REFRESH_TOKEN_TTL_MS,
+      lastSeenAt: now,
+      lastAddress: getRequestRemoteAddress(req),
+    };
+    saveSettings({
+      ...settings,
+      localNetworkPairedDevices: devices.map((candidate) => candidate.id === device.id ? updated : candidate),
+    });
+    writeJson(res, 200, {
+      accessToken: nextAccessToken,
+      accessTokenExpiresAt: updated.accessTokenExpiresAt,
+      refreshToken: nextRefreshToken,
+      refreshTokenExpiresAt: updated.refreshTokenExpiresAt,
+      scopes: updated.scopes,
     });
   }
 
@@ -265,11 +359,9 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     }
     advertiseLanService({
       port: getMediaServerPort(),
-      deviceId: settings.localNetworkDeviceId || randomUUID(),
+      instanceId: settings.localNetworkDeviceId || randomUUID(),
       deviceName: settings.localNetworkDeviceName || os.hostname(),
-      appVersion: app.getVersion(),
-      baseUrl: getLanServerBase() || undefined,
-      pairCode: getLanShareToken(),
+      protocolVersion: '2',
     });
   }
 
@@ -291,6 +383,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     requireLocalOrLanAccess,
     requireStreamAccess,
     handleLanPairRequest,
+    handleLanRefreshRequest,
     libraryEtagFor,
     syncLanAdvertisement,
   };

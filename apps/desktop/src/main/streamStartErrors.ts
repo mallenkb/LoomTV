@@ -1,4 +1,4 @@
-export type StreamStartFailureCode =
+type StreamStartFailureCode =
   | 'TRANSCODER_UNAVAILABLE'
   | 'TRANSCODE_TIMEOUT'
   | 'TRANSCODE_FAILED'

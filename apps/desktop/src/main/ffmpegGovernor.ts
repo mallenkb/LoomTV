@@ -44,6 +44,10 @@ function interruptAnalysis(): void {
   analysisProcesses.clear();
 }
 
+export function interruptAnalysisProcesses(): void {
+  interruptAnalysis();
+}
+
 function notePlaybackActivity(): void {
   lastPlaybackActivityAt = Date.now();
   interruptAnalysis();

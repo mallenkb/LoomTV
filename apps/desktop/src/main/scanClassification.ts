@@ -1,10 +1,10 @@
 import path from 'node:path';
-import { cleanMediaTitle } from './metadata/helpers';
-import { isConfidentAnimeSeasonMapping } from './animeSeasonMapping';
-import { fetchJikanMetadata } from './metadata/jikan';
-import type { JikanAnimeResult } from './metadata/jikan';
-import type { OMDbResponse } from './metadata/omdb';
-import type { EpisodeFile, EpisodeMeta, TVMetadata } from './metadata/types';
+import { cleanMediaTitle } from './metadata/helpers.ts';
+import { isConfidentAnimeSeasonMapping } from './animeSeasonMapping.ts';
+import { fetchJikanMetadata } from './metadata/jikan.ts';
+import type { JikanAnimeResult } from './metadata/jikan.ts';
+import type { OMDbResponse } from './metadata/omdb.ts';
+import type { EpisodeFile, EpisodeMeta, TVMetadata } from './metadata/types.ts';
 
 export function isTVPattern(folderName: string, files: string[]): boolean {
   const lower = folderName.toLowerCase();
@@ -26,11 +26,30 @@ export function createSubtitleRecords(basePath: string, subtitleFiles: string[])
   });
 }
 
-export function isLikelyTVFromFileName(name: string): boolean {
+function isLikelyTVFromFileName(name: string): boolean {
   return /[Ss]\d{1,2}[Ee]\d{1,3}/.test(name) || /(?:episode|ep|e)\s*\d{1,3}\b/i.test(name);
 }
 
-export function seriesTitleFromEpisodeFileName(fileName: string): string | null {
+export function parseEpisodeFileName(fileName: string, fallbackSeason: number): { season: number; episode: number } | null {
+  const withoutExt = fileName.replace(/\.[^.]+$/, '');
+  const seasonEpisode = withoutExt.match(/[Ss]\s*0*(\d{1,2})\s*[._ -]*[Ee]\s*0*(\d{1,3})/);
+  if (seasonEpisode) {
+    return { season: parseInt(seasonEpisode[1], 10), episode: parseInt(seasonEpisode[2], 10) };
+  }
+
+  const namedEpisode = withoutExt.match(/(?:episode|ep|e)\s*0*(\d{1,3})\b/i);
+  if (namedEpisode) return { season: fallbackSeason, episode: parseInt(namedEpisode[1], 10) };
+
+  const trailingNumber = withoutExt.match(/[-–_\s]+0*(\d{1,3})\s*$/);
+  if (trailingNumber) return { season: fallbackSeason, episode: parseInt(trailingNumber[1], 10) };
+
+  const leadingNumber = withoutExt.match(/^\s*0*(\d{1,3})(?:\D|$)/);
+  return leadingNumber
+    ? { season: fallbackSeason, episode: parseInt(leadingNumber[1], 10) }
+    : null;
+}
+
+function seriesTitleFromEpisodeFileName(fileName: string): string | null {
   const withoutExt = fileName.replace(/\.[^.]+$/, '');
   const match = withoutExt.match(/^(.+?)[._ -]+[Ss]\s*\d{1,2}\s*[._ -]*[Ee]\s*\d{1,3}\b/);
   if (!match) return null;
@@ -71,7 +90,7 @@ export function isLikelyAnimePath(filePath: string, title = ''): boolean {
     || /\b(horriblesubs|subsplease|erai-raws|judas|ember|commie|hakat[a]? ramen)\b/i.test(value);
 }
 
-export function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle: string): Map<number, string> {
+function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle: string): Map<number, string> {
   const titlesBySeason = new Map<number, Map<string, { title: string; count: number }>>();
 
   for (const file of episodeFiles) {
@@ -144,7 +163,7 @@ export function mergeLocalSeasonsWithMetadata(
   });
 }
 
-export function listFromApiValue(value?: string): string[] {
+function listFromApiValue(value?: string): string[] {
   return (value || '')
     .split(',')
     .map((item) => item.trim().toLowerCase())
