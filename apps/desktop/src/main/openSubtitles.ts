@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { isSubtitleFileName, isVideoFileName } from './fileClassification';
+import { isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
+import { safeFetch } from './safeFetch.ts';
 
 const API_ORIGIN = 'https://api.opensubtitles.com';
 const HASH_CHUNK_SIZE = 64 * 1024;
@@ -46,7 +47,7 @@ type OpenSubtitlesDownloadResponse = {
   file_name?: string;
 };
 
-export type OpenSubtitlesDownloadStatus = 'disabled' | 'skipped' | 'downloaded' | 'not-found' | 'error';
+type OpenSubtitlesDownloadStatus = 'disabled' | 'skipped' | 'downloaded' | 'not-found' | 'error';
 
 export type OpenSubtitlesDownloadResult = {
   status: OpenSubtitlesDownloadStatus;
@@ -58,7 +59,7 @@ export type OpenSubtitlesDownloadResult = {
 
 let sessionCache: { key: string; session: OpenSubtitlesSession } | null = null;
 
-export function normalizeOpenSubtitlesLanguages(value?: string): string[] {
+function normalizeOpenSubtitlesLanguages(value?: string): string[] {
   const source = value && value.trim() ? value : 'en';
   const aliases: Record<string, string> = {
     english: 'en',
@@ -128,11 +129,11 @@ async function login(options: OpenSubtitlesScanOptions): Promise<OpenSubtitlesSe
   const cacheKey = `${apiKey}:${username}:${password}`;
   if (sessionCache?.key === cacheKey) return sessionCache.session;
 
-  const response = await fetch(`${API_ORIGIN}/api/v1/login`, {
+  const response = await safeFetch(`${API_ORIGIN}/api/v1/login`, {
     method: 'POST',
     headers: openSubtitlesHeaders(options),
     body: JSON.stringify({ username, password }),
-  });
+  }, { allowedHosts: ['.opensubtitles.com'], maxBytes: 512 * 1024 });
   const json = await response.json().catch(() => ({})) as { token?: string; base_url?: string; message?: string };
   if (!response.ok || !json.token) {
     throw new Error(String(json.message || `OpenSubtitles login failed with ${response.status}.`));
@@ -154,7 +155,7 @@ function addHashChunk(hash: bigint, buffer: Buffer, bytesRead: number): bigint {
   return next;
 }
 
-export function computeOpenSubtitlesHash(filePath: string): { moviehash: string; moviebytesize: number } {
+function computeOpenSubtitlesHash(filePath: string): { moviehash: string; moviebytesize: number } {
   const stats = fs.statSync(filePath);
   const size = stats.size;
   const fd = fs.openSync(filePath, 'r');
@@ -226,9 +227,9 @@ async function searchSubtitle(
   url.searchParams.set('order_by', 'download_count');
   url.searchParams.set('order_direction', 'desc');
 
-  const response = await fetch(url.toString(), {
+  const response = await safeFetch(url, {
     headers: openSubtitlesHeaders(options, session.token),
-  });
+  }, { allowedHosts: ['.opensubtitles.com'], maxBytes: 2 * 1024 * 1024, retries: 2 });
   if (!response.ok) {
     throw new Error(`OpenSubtitles search failed with ${response.status}.`);
   }
@@ -247,7 +248,7 @@ async function requestDownloadLink(
   options: OpenSubtitlesScanOptions,
   session: OpenSubtitlesSession,
 ): Promise<string> {
-  const response = await fetch(new URL('/api/v1/download', session.baseUrl).toString(), {
+  const response = await safeFetch(new URL('/api/v1/download', session.baseUrl), {
     method: 'POST',
     headers: openSubtitlesHeaders(options, session.token),
     body: JSON.stringify({
@@ -257,7 +258,7 @@ async function requestDownloadLink(
       cleanup_links: true,
       remove_adds: true,
     }),
-  });
+  }, { allowedHosts: ['.opensubtitles.com'], maxBytes: 512 * 1024 });
   const json = await response.json().catch(() => ({})) as OpenSubtitlesDownloadResponse & { message?: string };
   if (!response.ok || !json.link) {
     throw new Error(String(json.message || `OpenSubtitles download failed with ${response.status}.`));
@@ -266,7 +267,12 @@ async function requestDownloadLink(
 }
 
 async function saveSubtitleFromLink(link: string, targetPath: string): Promise<void> {
-  const response = await fetch(link);
+  const response = await safeFetch(link, {}, {
+    allowedHosts: ['.opensubtitles.com'],
+    timeoutMs: 20_000,
+    maxBytes: 20 * 1024 * 1024,
+    retries: 2,
+  });
   if (!response.ok) throw new Error(`Subtitle file download failed with ${response.status}.`);
   const buffer = Buffer.from(await response.arrayBuffer());
   fs.writeFileSync(targetPath, buffer);

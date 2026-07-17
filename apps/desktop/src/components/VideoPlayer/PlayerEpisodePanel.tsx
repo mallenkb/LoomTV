@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Check, Play, Star, X } from 'lucide-react';
 import SafeArtwork from '../SafeArtwork';
 import { desktopApi } from '@/lib/desktopApi';
@@ -6,6 +6,7 @@ import { isWatched, progressFraction } from '@/lib/progress';
 import { ScrollArea } from '../ui/scroll-area';
 import { clampSidePanelWidth, epCode, isInProgress } from './helpers';
 import type { EpisodeFile, EpisodeMeta } from './types';
+import { episodeFileKey, indexEpisodeFiles } from './episodeIndex';
 
 interface PlayerEpisodePanelProps {
   episodePanelWidth: number;
@@ -101,6 +102,118 @@ function EpisodeThumbnail({
   );
 }
 
+interface PlayerEpisodeRowProps {
+  episode: EpisodeMeta;
+  file?: EpisodeFile;
+  isCurrent: boolean;
+  currentDuration?: number;
+  currentPosition?: number;
+  progressRevision: number;
+  displayEpisodeTitle: PlayerEpisodePanelProps['displayEpisodeTitle'];
+  goToEpisode: PlayerEpisodePanelProps['goToEpisode'];
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+}
+
+const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
+  episode,
+  file,
+  isCurrent,
+  currentDuration,
+  currentPosition,
+  progressRevision,
+  displayEpisodeTitle,
+  goToEpisode,
+  buttonRef,
+}: PlayerEpisodeRowProps) {
+  const epPath = file?.filePath;
+  const epDur = isCurrent ? currentDuration : file?.localMetadata?.durationSeconds;
+  const episodeTitle = displayEpisodeTitle(episode.season, episode.number, episode.title, epPath);
+  const watched = epPath ? isWatched(epPath, epDur) : false;
+  const inProgress = epPath ? isInProgress(epPath, epDur) : false;
+  const episodeRating = Number.isFinite(episode.rating) && episode.rating > 0 ? episode.rating : 0;
+  const code = epCode(episode.season, episode.number);
+  const runtime = runtimeLabel(epDur);
+  const progFrac = isCurrent && currentDuration && currentDuration > 0
+    ? (currentPosition || 0) / currentDuration
+    : epPath
+      ? progressFraction(epPath, epDur)
+      : 0;
+  void progressRevision;
+
+  return (
+    <button
+      ref={buttonRef}
+      disabled={!file}
+      onClick={() => file && goToEpisode(episode.season, episode.number)}
+      className={`group relative flex w-full items-start gap-3.5 px-5 py-3 text-left transition-colors
+        ${isCurrent ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}
+        ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
+    >
+      {isCurrent && (
+        <span className="pointer-events-none absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-[var(--loom-accent)]" />
+      )}
+
+      <span className="relative block w-32 shrink-0 overflow-hidden rounded-lg">
+        <EpisodeThumbnail
+          code={code}
+          episode={episode}
+          file={file}
+          title={episodeTitle}
+          isCurrent={isCurrent}
+        />
+        {file && !isCurrent && (
+          <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
+              <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" />
+            </span>
+          </span>
+        )}
+        {watched && !isCurrent && (
+          <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full border-2 border-[#101010] bg-emerald-500 shadow-[0_4px_14px_rgba(0,0,0,0.55)]">
+            <Check className="h-4 w-4 text-white" strokeWidth={3.2} />
+          </span>
+        )}
+        {runtime && (
+          <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1 py-0.5 text-[9px] font-medium leading-none text-white/90">
+            {runtime}
+          </span>
+        )}
+        {(inProgress || isCurrent) && progFrac > 0 && (
+          <span className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden rounded-b-lg bg-white/20">
+            <span
+              className="block h-full bg-[var(--loom-accent)]"
+              style={{ width: `${Math.min(100, progFrac * 100)}%` }}
+            />
+          </span>
+        )}
+      </span>
+
+      <span className="min-w-0 flex-1 pt-0.5">
+        <span className="flex items-center justify-between gap-2">
+          <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
+            {episode.number}. {episodeTitle}
+          </span>
+          {episodeRating > 0 && (
+            <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[#f5c451]">
+              <Star className="h-2.5 w-2.5 fill-current" />
+              {episodeRating.toFixed(1)}
+            </span>
+          )}
+        </span>
+        {episode.summary ? (
+          <span className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--loom-muted)]">
+            {episode.summary}
+          </span>
+        ) : (
+          <span className="mt-1 block font-mono text-[10px] text-[var(--loom-muted)]/70">
+            {code}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+});
+
 export default function PlayerEpisodePanel({
   episodePanelWidth,
   setEpisodePanelWidth,
@@ -132,6 +245,7 @@ export default function PlayerEpisodePanel({
     (count, season) => count + (groupedEpisodes[season] || []).length,
     0,
   );
+  const episodeFileByCode = useMemo(() => indexEpisodeFiles(episodeFiles), [episodeFiles]);
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
@@ -262,94 +376,21 @@ export default function PlayerEpisodePanel({
               </span>
             </div>
             {(groupedEpisodes[season] || []).map((ep) => {
-              const file = episodeFiles.find((item) => item.season === ep.season && item.episode === ep.number);
+              const file = episodeFileByCode.get(episodeFileKey(ep.season, ep.number));
               const isCurrent = ep.season === currentSeason && ep.number === currentEpisode;
-              const epPath = file?.filePath;
-              const epDur = isCurrent ? duration : file?.localMetadata?.durationSeconds;
-              const episodeTitle = displayEpisodeTitle(ep.season, ep.number, ep.title, epPath);
-              const watched = epPath ? isWatched(epPath, epDur) : false;
-              const inProgress = epPath ? isInProgress(epPath, epDur) : false;
-              const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
-              const code = epCode(ep.season, ep.number);
-              const runtime = runtimeLabel(epDur);
-              const progFrac = isCurrent && duration > 0
-                ? position / duration
-                : epPath
-                  ? progressFraction(epPath, epDur)
-                  : 0;
-
               return (
-                <button
+                <PlayerEpisodeRow
                   key={`${ep.season}-${ep.number}`}
-                  ref={isCurrent ? currentEpisodeRef : undefined}
-                  disabled={!file}
-                  onClick={() => file && goToEpisode(ep.season, ep.number)}
-                  className={`group relative flex w-full items-start gap-3.5 px-5 py-3 text-left transition-colors
-                    ${isCurrent ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}
-                    ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
-                >
-                  {isCurrent && (
-                    <span className="pointer-events-none absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-[var(--loom-accent)]" />
-                  )}
-
-                  <span className="relative block w-32 shrink-0 overflow-hidden rounded-lg">
-                    <EpisodeThumbnail
-                      code={code}
-                      episode={ep}
-                      file={file}
-                      title={episodeTitle}
-                      isCurrent={isCurrent}
-                    />
-                    {file && !isCurrent && (
-                      <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
-                        <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
-                          <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" />
-                        </span>
-                      </span>
-                    )}
-                    {watched && !isCurrent && (
-                      <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full border-2 border-[#101010] bg-emerald-500 shadow-[0_4px_14px_rgba(0,0,0,0.55)]">
-                        <Check className="h-4 w-4 text-white" strokeWidth={3.2} />
-                      </span>
-                    )}
-                    {runtime && (
-                      <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1 py-0.5 text-[9px] font-medium leading-none text-white/90">
-                        {runtime}
-                      </span>
-                    )}
-                    {(inProgress || isCurrent) && progFrac > 0 && (
-                      <span className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden rounded-b-lg bg-white/20">
-                        <span
-                          className="block h-full bg-[var(--loom-accent)]"
-                          style={{ width: `${Math.min(100, progFrac * 100)}%` }}
-                        />
-                      </span>
-                    )}
-                  </span>
-
-                  <span className="min-w-0 flex-1 pt-0.5">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className={`truncate text-[13px] font-medium ${isCurrent ? 'text-[var(--loom-accent)]' : 'text-white'}`}>
-                        {ep.number}. {episodeTitle}
-                      </span>
-                      {episodeRating > 0 && (
-                        <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[#f5c451]">
-                          <Star className="h-2.5 w-2.5 fill-current" />
-                          {episodeRating.toFixed(1)}
-                        </span>
-                      )}
-                    </span>
-                    {ep.summary ? (
-                      <span className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--loom-muted)]">
-                        {ep.summary}
-                      </span>
-                    ) : (
-                      <span className="mt-1 block font-mono text-[10px] text-[var(--loom-muted)]/70">
-                        {code}
-                      </span>
-                    )}
-                  </span>
-                </button>
+                  episode={ep}
+                  file={file}
+                  isCurrent={isCurrent}
+                  currentDuration={isCurrent ? duration : undefined}
+                  currentPosition={isCurrent ? position : undefined}
+                  progressRevision={tick}
+                  displayEpisodeTitle={displayEpisodeTitle}
+                  goToEpisode={goToEpisode}
+                  buttonRef={isCurrent ? currentEpisodeRef : undefined}
+                />
               );
             })}
           </div>

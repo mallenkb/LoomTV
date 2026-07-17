@@ -1,0 +1,132 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import BetterSqlite3 from 'better-sqlite3';
+import type { LibraryData } from '../src/main/appContracts.ts';
+import { loadLibrary, saveLibrary } from '../src/main/databaseLibraryRepository.ts';
+import { migrateDatabase } from '../src/main/databaseMigrations.ts';
+import {
+  getAllProgress,
+  getPlaybackTrackPreferences,
+  importProgress,
+  loadSettings,
+  savePlaybackTrackPreferences,
+  saveProgress,
+  saveSettings,
+} from '../src/main/databasePlaybackRepository.ts';
+
+function createDatabase(): BetterSqlite3.Database {
+  const database = new BetterSqlite3(':memory:');
+  database.pragma('foreign_keys = ON');
+  migrateDatabase(database);
+  return database;
+}
+
+function library(): LibraryData {
+  return {
+    movies: [],
+    animeShows: [],
+    tvShows: [{
+      id: 'show',
+      type: 'tv',
+      title: 'Show',
+      year: 2026,
+      poster: 'poster.jpg',
+      backdrop: 'data:image/png;base64,inline',
+      logo: 'logo.png',
+      posterCandidates: ['poster.jpg', 'poster.jpg'],
+      backdropCandidates: ['data:image/png;base64,inline'],
+      logoCandidates: ['logo.png'],
+      summary: 'Summary',
+      rating: 8,
+      genres: ['Drama'],
+      cast: [{ name: 'Actor', character: 'Lead', image: '' }],
+      filePath: '/library/show',
+      seasons: [
+        { number: 2, title: 'Season 2', episodeCount: 1 },
+        { number: 1, title: 'Season 1', episodeCount: 2 },
+      ],
+      episodes: [
+        { season: 2, number: 1, title: 'Later', summary: '', still: '', rating: 0, airDate: '' },
+        { season: 1, number: 2, title: 'Second', summary: '', still: '', rating: 0, airDate: '' },
+        { season: 1, number: 1, title: 'Pilot', summary: '', still: '', rating: 0, airDate: '' },
+      ],
+      episodeFiles: [
+        { season: 2, episode: 1, filePath: '/library/show.s02e01.mkv' },
+        { season: 1, episode: 2, filePath: '/library/show.s01e02.mkv' },
+        { season: 1, episode: 1, filePath: '/library/show.s01e01.mkv' },
+      ],
+    }],
+    libraryFolders: ['/library'],
+    libraryFolderGroups: { movies: [], tvShows: ['/library'], anime: [], others: [] },
+    scanCache: {
+      '/library': {
+        version: 9,
+        folderKind: 'tv',
+        signature: 'signature',
+        subtitleProfile: 'en',
+        fileCount: 3,
+        itemCount: 1,
+        scannedAt: 42,
+      },
+    },
+  };
+}
+
+test('library repository round-trips the existing schema, ordering, and durable overlays', () => {
+  const database = createDatabase();
+  try {
+    saveLibrary(database, library());
+    const result = loadLibrary(
+      database,
+      new Map([
+        ['/library/show.s01e01.mkv', { position: 10, duration: 100, updatedAt: 100, watched: false }],
+        ['/library/show.s02e01.mkv', { position: 20, duration: 100, updatedAt: 200, watched: false }],
+      ]),
+      new Map([['show', new Map([['poster', 'data:image/png;base64,custom']])]]),
+    );
+
+    assert.ok(result);
+    assert.deepEqual(result.libraryFolderGroups, { movies: [], tvShows: ['/library'], anime: [], others: [] });
+    assert.deepEqual(result.tvShows[0].seasons?.map((season) => season.number), [1, 2]);
+    assert.deepEqual(result.tvShows[0].episodes?.map((episode) => `${episode.season}-${episode.number}`), ['1-1', '1-2', '2-1']);
+    assert.deepEqual(result.tvShows[0].episodeFiles?.map((episode) => `${episode.season}-${episode.episode}`), ['1-1', '1-2', '2-1']);
+    assert.equal(result.tvShows[0].backdrop, '');
+    assert.deepEqual(result.tvShows[0].posterCandidates, ['loomtv-custom-artwork://artwork/show/poster', 'poster.jpg']);
+    assert.equal(result.tvShows[0].lastPlayed, 200);
+    assert.equal(result.scanCache?.['/library'].subtitleProfile, 'en');
+  } finally {
+    database.close();
+  }
+});
+
+test('settings, progress, and track preference repositories retain normalization and conflict behavior', () => {
+  const database = createDatabase();
+  try {
+    saveSettings(database, { appThemeMode: 'dark', localNetworkSharingEnabled: true });
+    assert.deepEqual(loadSettings(database), { appThemeMode: 'dark', localNetworkSharingEnabled: true });
+
+    const watched = saveProgress(database, '/library/movie.mkv', 95, 100);
+    assert.equal(watched.position, 100);
+    assert.equal(watched.watched, true);
+    importProgress(database, {
+      '/library/movie.mkv': { position: 10, duration: 100, updatedAt: watched.updatedAt - 1 },
+      '/library/new.mkv': { position: 20, duration: 100, updatedAt: watched.updatedAt + 1 },
+    });
+    assert.equal(getAllProgress(database)['/library/movie.mkv'].position, 100);
+    assert.equal(getAllProgress(database)['/library/new.mkv'].position, 20);
+
+    assert.deepEqual(savePlaybackTrackPreferences(database, 'show', {
+      audio: { enabled: true, language: ' EN ', codec: ' AAC ' },
+      subtitle: { enabled: false, forced: true },
+    }), {
+      audio: { enabled: true, language: 'en', codec: 'aac' },
+      subtitle: { enabled: false, forced: true },
+    });
+    assert.deepEqual(getPlaybackTrackPreferences(database, 'show'), {
+      audio: { enabled: true, language: 'en', codec: 'aac' },
+      subtitle: { enabled: false, forced: true },
+    });
+  } finally {
+    database.close();
+  }
+});

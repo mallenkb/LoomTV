@@ -24,7 +24,7 @@ async function fetchFanartJson(path: string, apiKey?: string): Promise<FanartRes
   const url = new URL(`${FANART_BASE}/${path}`);
   url.searchParams.set('api_key', key);
 
-  const response = await fetch(url.toString());
+  const response = await safeFetch(url, {}, { allowedHosts: ['webservice.fanart.tv'], retries: 2 });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Fanart.tv request failed with ${response.status}`);
   return (await response.json()) as FanartResponse;
@@ -70,3 +70,4 @@ export async function fetchFanartTVLogos(
     return [];
   }
 }
+import { safeFetch } from '../safeFetch';

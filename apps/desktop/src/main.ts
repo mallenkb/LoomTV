@@ -2,6 +2,7 @@ import {
   app,
   dialog,
   nativeImage,
+  powerMonitor,
   protocol,
   net,
   session,
@@ -9,7 +10,6 @@ import {
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
 import {
   LOCAL_ACCESS_HEADER,
@@ -36,37 +36,24 @@ import {
   stopTranscode,
 } from './main/transcodeManager';
 import { probeMediaFile } from './main/mediaProbeFile';
-import { decodeDataUrl, readJsonBody, redirectToArtworkSource, safeEndResponse, writeJson } from './main/httpResponses';
+import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/httpResponses';
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
 import { createLanSecurity } from './main/lanSecurity';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { createArtworkUrls } from './main/artworkUrls';
-import {
-  isImageFileName,
-  isMacSidecarFile,
-  isSubtitleFileName,
-  isVideoFileName,
-} from './main/fileClassification';
+import { registerResource } from './main/resourceRegistry';
+import { isImageFileName, isMacSidecarFile, isVideoFileName } from './main/fileClassification';
 import { createArtworkFinders } from './main/artworkFinders';
 import {
   defaultLibraryFolderGroups,
-  detectLibraryFolderKind,
   flattenLibraryFolders,
   getLibraryFolderStatus,
   libraryFolderStatusesFor,
   normalizeLibraryFolderGroups,
-  type LibraryFolderStatus,
 } from './main/libraryFolders';
 import {
-  createSubtitleRecords,
   fetchJikanEpisodesForLocalAnimeSeasons,
-  inferSeriesTitleFromEpisodeFiles,
-  isAnimeMetadata,
   isLikelyAnimePath,
-  isSeriesMetadata,
-  isTVPattern,
-  mergeLocalSeasonsWithMetadata,
-  shouldTreatAsTV,
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createWindow, getMainWindow, getWindowIconPath } from './main/windowManager';
@@ -77,6 +64,7 @@ import {
   getMediaServerSockets,
   setMediaServer,
   startMediaServer,
+  type MediaServerDependencies,
 } from './main/mediaServer';
 import {
   buildUpdateMenu,
@@ -89,31 +77,23 @@ import {
   startUpdateAdapter,
   stopUpdateCheckTimer,
 } from './main/autoUpdater';
-import type { UpdateState } from './main/autoUpdater';
 import { testMetadataKeys } from './main/metadataKeys';
 import {
   downloadMissingOpenSubtitlesForFolder,
-  downloadMissingOpenSubtitlesForVideo,
   openSubtitlesCacheKey,
   openSubtitlesIsConfigured,
-  type OpenSubtitlesScanOptions,
 } from './main/openSubtitles';
 import {
-  durableArtworkSource,
-  durableArtworkSources,
-} from './main/artworkSources';
+  createLibraryDeliveryProjections,
+  stripInlineArtworkFromLibrary,
+} from './main/libraryProjections';
 import {
   cachedItemsAreComplete,
   createMediaItemId,
-  isTrustedLocalTagTitle,
-  looksLikeLocalEpisodeFileTitle,
-  mostCommonUsefulTitle,
 } from './main/libraryItemHelpers';
 import {
   mergeProviderIds,
-  parseMetadataProviderIds,
 } from './main/mediaTags';
-import type { MetadataProviderIds } from './main/mediaTags';
 import {
   getLocalNetworkAddresses,
   getLocalNetworkNameFast,
@@ -123,30 +103,37 @@ import {
   backupDatabase,
   cacheLibraryArtwork,
   clearDatabase,
+  cancelSegmentAnalysisJobs,
   cleanupOrphanedAutomaticSegments,
+  cleanupOrphanedAnalysisData,
+  enqueueSegmentAnalysisJob,
+  fingerprintCacheBytes,
+  fingerprintCount,
+  getSegmentAnalysisInventory,
+  getSegmentAnalysisJobCounts,
+  getSegmentAnalysisJobs,
   getAllProgress,
+  getManagedSegmentCandidates,
   getPlaybackTrackPreferences,
   getProgress,
   importCustomArtwork,
   importProgress,
+  eraseAutomaticSegmentCandidates,
   loadLibraryFromDatabase,
   saveCustomArtwork,
   saveLibraryToDatabase,
   savePlaybackTrackPreferences,
   saveProgress,
+  saveSegmentAnalysisInventory,
+  updateSegmentAnalysisJob,
+  updateSegmentCandidate,
+  recoverRunningSegmentAnalysisJobs,
+  requeueWaitingSegmentAnalysisJobs,
+  resetAutomaticAnalysisData,
 } from './main/database';
 import {
   cleanMediaTitle,
-  bestSeriesTitleFromEpisodeFiles,
-  chooseMetadataSearchTitle,
   isGenericGroupingFolderTitle,
-  mergeEpisodeMetadataSources,
-  normalizeTitleForMatch,
-  numericRating,
-  parseYearFromText,
-  remoteMatchesAnyLocalTitle,
-  uniqueLocalTitles,
-  usefulLocalTitle,
 } from './main/metadata/helpers';
 import type {
   EpisodeFile as MetadataEpisodeFile,
@@ -154,7 +141,6 @@ import type {
   MediaItem as MetadataMediaItem,
 } from './main/metadata/types';
 import { fetchOMDbMetadata, fetchOMDbMetadataById } from './main/metadata/omdb';
-import type { OMDbResponse } from './main/metadata/omdb';
 import { fetchTVMetadata, fetchTVMetadataCandidates } from './main/metadata/tvmaze';
 import {
   fetchTMDBMovieMetadata,
@@ -171,11 +157,44 @@ import {
 import { fetchFanartMovieLogos, fetchFanartTVLogos } from './main/metadata/fanart';
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
+import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinator';
 import { setPlaybackActivityLease } from './main/ffmpegGovernor';
+import {
+  createLibraryScanFiles,
+  getLibraryFolderSignature,
+} from './main/libraryScanFiles';
+import {
+  createLibraryScanner,
+  type ScanContext,
+} from './main/libraryScanner';
+import { createMetadataItemBuilders } from './main/metadataItemBuilders.ts';
+import {
+  createOfficialMetadataService,
+} from './main/officialMetadataService.ts';
+import type {
+  AppSettings,
+  LibraryData,
+  LibraryFolderKind,
+  LibraryFolderStatus,
+  LibraryScanCache,
+  LibraryScanMode,
+  LibraryScanProgress,
+  ScanCacheFolderKind,
+} from './main/appContracts.ts';
+export type {
+  AppSettings,
+  LanPairedDevice,
+  LibraryData,
+  LibraryFolderGroups,
+  LibraryFolderKind,
+} from './main/appContracts.ts';
+export type { OfficialMetadataCandidate } from './main/officialMetadataService.ts';
 
 type EpisodeMeta = MetadataEpisodeMeta;
 type EpisodeFile = MetadataEpisodeFile;
 type MediaItem = MetadataMediaItem;
+
+const { extractSeasons, scanEpisodeFiles } = createLibraryScanFiles(probeMediaFile);
 
 function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -244,6 +263,7 @@ const {
   requireStreamAccess,
   requestToken,
   handleLanPairRequest,
+  handleLanRefreshRequest,
   libraryEtagFor,
   syncLanAdvertisement,
 } = createLanSecurity({
@@ -269,94 +289,34 @@ const {
 } = createArtworkUrls({
   localAccessToken: LOCAL_ACCESS_TOKEN,
   buildSignedLanUrl,
+  registerRemoteResource: (kind, value) => registerResource(loadSettings().localNetworkHmacSecret || '', kind, value),
 });
 
 const {
   getLocalFolderArtworkUrl,
   getLocalMovieArtworkUrl,
   getEmbeddedArtworkUrl,
-  hasPlayableVideoTrack,
 } = createArtworkFinders({
   getLocalImageUrl,
   getEmbeddedThumbnailUrl,
 });
 
-// ─── Interfaces ─────────────────────────────────────────────────────────────
-
-export interface LibraryData {
-  movies: MediaItem[];
-  tvShows: MediaItem[];
-  animeShows: MediaItem[];
-  libraryFolders: string[];
-  libraryFolderGroups?: LibraryFolderGroups;
-  libraryFolderStatuses?: LibraryFolderStatus[];
-  scanCache?: LibraryScanCache;
-}
-
-type LibraryScanProgress = LibraryData & {
-  isComplete: boolean;
-  scannedFolders: number;
-  totalFolders: number;
-};
-
-export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
-type ScanFolderKind = 'movies' | 'tv' | 'anime';
-type ScanCacheFolderKind = ScanFolderKind | 'auto';
-type LibraryScanMode = 'quick' | 'metadata' | 'full';
-
-export interface LibraryFolderGroups {
-  movies: string[];
-  tvShows: string[];
-  anime: string[];
-  others: string[];
-}
-
-interface ScanCacheEntry {
-  version?: number;
-  folderKind: ScanCacheFolderKind;
-  signature: string;
-  subtitleProfile?: string;
-  fileCount: number;
-  itemCount: number;
-  scannedAt: number;
-}
-
-type LibraryScanCache = Record<string, ScanCacheEntry>;
-
-export interface AppSettings {
-  omdbApiKey?: string;
-  tmdbApiKey?: string;
-  metadataApiKeys?: Record<string, string>;
-  openSubtitlesUsername?: string;
-  openSubtitlesPassword?: string;
-  openSubtitlesLanguages?: string;
-  openSubtitlesAutoDownload?: boolean;
-  autoSyncIntervalHours?: number;
-  playbackSkipBackSeconds?: number;
-  playbackSkipForwardSeconds?: number;
-  localSkipAnalysisEnabled?: boolean;
-  sidebarNavOrder?: string[];
-  customFolderNames?: Record<string, string>;
-  appThemeMode?: 'dark' | 'light';
-  appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
-  appDarkTheme?: 'default' | 'justwatch' | 'black';
-  appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
-  localNetworkSharingEnabled?: boolean;
-  localNetworkShareToken?: string;
-  localNetworkDeviceId?: string;
-  localNetworkDeviceName?: string;
-  localNetworkHmacSecret?: string;
-  localNetworkPairedDevices?: LanPairedDevice[];
-}
-
-export type LanPairedDevice = {
-  id: string;
-  name: string;
-  token: string;
-  createdAt: number;
-  lastSeenAt: number;
-  lastAddress?: string;
-};
+const {
+  libraryForLocalNetwork: projectLibraryForLocalNetwork,
+  libraryForRenderer: projectLibraryForRenderer,
+} = createLibraryDeliveryProjections({
+  artworkDeliveryUrl,
+  artworkDeliveryUrls,
+  flattenLibraryFolders,
+  getRemoteThumbnailUrl,
+  libraryFolderStatusesFor,
+  localMetadataWithTracks,
+  normalizeLibraryFolderGroups,
+  remoteArtworkDeliveryUrl,
+  signedStreamUrlForRemote,
+  subtitleRecordsForLocalNetwork,
+  subtitleRecordsForRenderer,
+});
 
 async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
   try {
@@ -395,39 +355,6 @@ function shouldSplitContainerFolder(folderPath: string, folderName: string, subD
   return showLikeDirs.length > 0 || (episodeBearingDirs.length > 1 && isGenericGroupingFolderTitle(folderName));
 }
 
-function matchingSubtitleFilesForVideo(dir: string, videoFileName: string): string[] {
-  const baseName = path.basename(videoFileName, path.extname(videoFileName)).toLowerCase();
-  try {
-    return fs.readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => !entry.isDirectory() && isSubtitleFileName(entry.name))
-      .map((entry) => entry.name)
-      .filter((fileName) => path.basename(fileName, path.extname(fileName)).toLowerCase().startsWith(baseName));
-  } catch {
-    return [];
-  }
-}
-
-function makeLocalEpisodeMeta(files: EpisodeFile[], seriesTitle?: string): EpisodeMeta[] {
-  return files.map((file) => {
-    const fallback = path.basename(file.filePath, path.extname(file.filePath))
-      .replace(/[._-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim() || `Episode ${file.episode}`;
-    const resolvedTitle = !looksLikeLocalEpisodeFileTitle(file.title, seriesTitle) && file.title
-      ? file.title
-      : fallback;
-    return {
-      season: file.season,
-      number: file.episode,
-      title: resolvedTitle,
-      summary: '',
-      still: '',
-      rating: 0,
-      airDate: '',
-      localMetadata: file.localMetadata,
-    };
-  });
-}
 
 function libraryFolderKindForScanKind(folderKind: ScanCacheFolderKind): LibraryFolderKind {
   if (folderKind === 'tv') return 'tvShows';
@@ -441,866 +368,37 @@ function libraryFolderKindForScanKind(folderKind: ScanCacheFolderKind): LibraryF
 
 // ─── Library scanning ─────────────────────────────────────────────────────────
 
-function getLibraryFolderSignature(folderPath: string): { signature: string; fileCount: number } | null {
-  if (!fs.existsSync(folderPath)) return null;
 
-  const hash = createHash('sha256');
-  const stack = [folderPath];
-  let fileCount = 0;
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (current === undefined) break;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true })
-        .sort((a, b) => a.name.localeCompare(b.name));
-    } catch {
-      continue;
-    }
-
-    for (const entry of entries) {
-      if (isMacSidecarFile(entry.name)) continue;
-      const fullPath = path.join(current, entry.name);
-
-      if (entry.isDirectory()) {
-        stack.push(fullPath);
-        continue;
-      }
-
-      if (!isVideoFileName(entry.name) && !isSubtitleFileName(entry.name) && !isImageFileName(entry.name)) continue;
-
-      try {
-        const stats = fs.statSync(fullPath);
-        hash.update(path.relative(folderPath, fullPath));
-        hash.update('\0');
-        hash.update(String(stats.size));
-        hash.update('\0');
-        hash.update(String(Math.round(stats.mtimeMs)));
-        hash.update('\0');
-        fileCount++;
-      } catch {
-        // File disappeared while scanning; the next sync will pick it up cleanly.
-      }
-    }
-  }
-
-  return { signature: `${fileCount}:${hash.digest('hex')}`, fileCount };
-}
-
-function scanEpisodeFiles(folderPath: string): EpisodeFile[] {
-  const files: EpisodeFile[] = [];
-
-  function seasonFromPath(dir: string): number | null {
-    const relativeParts = path.relative(folderPath, dir).split(path.sep).filter(Boolean).reverse();
-    for (const part of relativeParts) {
-      const match = part.match(/(?:season|series|s)\s*0*(\d{1,2})/i);
-      if (match) return parseInt(match[1], 10);
-    }
-    return null;
-  }
-
-  function episodeFromName(fileName: string, fallbackSeason: number): { season: number; episode: number } | null {
-    const withoutExt = fileName.replace(/\.[^.]+$/, '');
-
-    // SxxExx / SxxExx – standard TV naming
-    const seMatch = withoutExt.match(/[Ss]\s*0*(\d{1,2})\s*[._ -]*[Ee]\s*0*(\d{1,3})/);
-    if (seMatch) {
-      return { season: parseInt(seMatch[1], 10), episode: parseInt(seMatch[2], 10) };
-    }
-
-    // "Episode N" / "Ep N" / " - E N" prefix keyword
-    const episodeMatch = withoutExt.match(/(?:episode|ep|e)\s*0*(\d{1,3})\b/i);
-    if (episodeMatch) {
-      return { season: fallbackSeason, episode: parseInt(episodeMatch[1], 10) };
-    }
-
-    // Trailing number — catches anime naming like "[Group] Show Name - 01"
-    // Must be the last numeric token (after a separator) to avoid false-positives on years
-    const trailingMatch = withoutExt.match(/[-–_\s]+0*(\d{1,3})\s*$/);
-    if (trailingMatch) {
-      const n = parseInt(trailingMatch[1], 10);
-      // Ignore bare 4-digit years (1900–2099)
-      if (n < 1900 || n > 2099) {
-        return { season: fallbackSeason, episode: n };
-      }
-    }
-
-    // Leading number (e.g. "01 - Title.mkv")
-    const leadingNumber = withoutExt.match(/^\s*0*(\d{1,3})(?:\D|$)/);
-    if (leadingNumber) {
-      return { season: fallbackSeason, episode: parseInt(leadingNumber[1], 10) };
-    }
-
-    return null;
-  }
-
-  // Subfolders that are extras / bonus content, not real episodes
-  const SKIP_DIRS = new Set([
-    'nc', 'nced', 'ncop', 'bonus', 'extras', 'extra', 'special', 'specials',
-    'behind the scenes', 'featurettes', 'interviews', 'scenes', 'shorts',
-    'trailers', 'featurette', 'sample', 'samples', 'subs', 'subtitles',
-  ]);
-
-  function scanDir(dir: string) {
-    try {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (SKIP_DIRS.has(entry.name.toLowerCase())) continue;
-          scanDir(fullPath);
-        } else if (isVideoFileName(entry.name)) {
-          const probe = probeMediaFile(fullPath);
-          if (!hasPlayableVideoTrack(probe)) continue;
-          const parsed = episodeFromName(entry.name, probe.season || seasonFromPath(dir) || 1);
-          if (parsed) {
-            files.push({
-              season: probe.season || parsed.season,
-              episode: probe.episode || parsed.episode,
-              filePath: fullPath,
-              title: probe.embeddedTitle,
-              subtitles: createSubtitleRecords(dir, matchingSubtitleFilesForVideo(dir, entry.name)),
-              localMetadata: probe.localMetadata,
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.error('scanDir error:', e);
-    }
-  }
-
-  scanDir(folderPath);
-  return files.sort((a, b) => a.season !== b.season ? a.season - b.season : a.episode - b.episode);
-}
-
-function extractSeasons(folderPath: string, folderName: string): { number: number; title: string; episodeCount: number }[] {
-  const seasons: { number: number; title: string; episodeCount: number }[] = [];
-  try {
-    const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-    const dirs = entries.filter((e) => e.isDirectory());
-    const videoFiles = entries.filter((e) => !e.isDirectory() && isVideoFileName(e.name));
-
-    if (dirs.some((d) => /season/i.test(d.name))) {
-      for (const dir of dirs) {
-        const m = dir.name.match(/season\s*(\d+)/i);
-        const num = m ? parseInt(m[1]) : 1;
-        const dirPath = path.join(folderPath, dir.name);
-        const count = scanEpisodeFiles(dirPath).length || fs.readdirSync(dirPath).filter(isVideoFileName).length;
-        seasons.push({ number: num, title: dir.name, episodeCount: count });
-      }
-    } else {
-      const m = folderName.match(/[Ss](\d{1,2})/);
-      const num = m ? parseInt(m[1]) : 1;
-      const episodeFiles = scanEpisodeFiles(folderPath);
-      const grouped = new Map<number, number>();
-      episodeFiles.forEach((file) => grouped.set(file.season, (grouped.get(file.season) || 0) + 1));
-      if (grouped.size > 0) {
-        grouped.forEach((count, season) => {
-          seasons.push({ number: season, title: `Season ${String(season).padStart(2, '0')}`, episodeCount: count });
-        });
-      } else {
-        seasons.push({ number: num, title: `Season ${num}`, episodeCount: videoFiles.length });
-      }
-    }
-  } catch (e) {
-    console.error('extractSeasons error:', e);
-  }
-  return seasons.sort((a, b) => a.number - b.number);
-}
-
-async function buildTVItemFromFolder(
-  fullPath: string,
-  entryName: string,
-  id: string,
-  subtitles: { lang: string; label: string; url: string }[],
-  year: number,
-  cleanTitle: string,
-  omdbApiKey?: string,
-  itemType: 'tv' | 'anime' = 'tv',
-  tmdbApiKey?: string,
-  fanartApiKey?: string,
-  openSubtitles?: OpenSubtitlesScanOptions,
-): Promise<MediaItem | null> {
-  if (openSubtitlesIsConfigured(openSubtitles)) {
-    const results = await downloadMissingOpenSubtitlesForFolder(fullPath, openSubtitles);
-    const failures = results.filter((result) => result.status === 'error');
-    failures.forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
-  }
-
-  const localSeasons = extractSeasons(fullPath, entryName);
-  const episodeFiles = scanEpisodeFiles(fullPath);
-  const episodeProbes = episodeFiles.map((file) => probeMediaFile(file.filePath));
-  const representativeProbe = episodeProbes.find((probe) => probe.localMetadata) || episodeProbes[0] || {};
-  const providerIds = mergeProviderIds(
-    ...episodeProbes.map((probe) => probe.providerIds || {}),
-    parseMetadataProviderIds([
-      fullPath,
-      ...episodeFiles.map((file) => path.basename(file.filePath)),
-    ].join(' ')),
-  );
-  const inferredSeriesTitle = inferSeriesTitleFromEpisodeFiles(episodeFiles, cleanTitle);
-
-  const rawFolderTitle = cleanTitle || entryName;
-  const folderTitle = usefulLocalTitle(rawFolderTitle);
-  const parentTitle = usefulLocalTitle(path.basename(path.dirname(fullPath)));
-  const inferredTitle = usefulLocalTitle(inferredSeriesTitle);
-  const embeddedShowTitle = mostCommonUsefulTitle(episodeProbes.map((probe) => probe.embeddedShowTitle));
-  const structureTitle = folderTitle || parentTitle || inferredTitle || embeddedShowTitle || rawFolderTitle;
-  const trustedEmbeddedShowTitle = isTrustedLocalTagTitle(structureTitle, embeddedShowTitle, rawFolderTitle)
-    ? embeddedShowTitle
-    : null;
-  const searchTitle = trustedEmbeddedShowTitle || structureTitle;
-  const localTitleCandidates = uniqueLocalTitles([
-    searchTitle,
-    structureTitle,
-    trustedEmbeddedShowTitle,
-    folderTitle,
-    parentTitle,
-    inferredTitle,
-  ]);
-  const searchYear = year || episodeProbes.find((probe) => probe.year)?.year;
-  const likelyAnime = itemType === 'anime' || isLikelyAnimePath(fullPath, searchTitle);
-  const localEpisodes = makeLocalEpisodeMeta(episodeFiles, searchTitle);
-
-  // ── Fetch metadata sources ─────────────────────────────────────────────────
-  // Anime   → Jikan (MAL) primary, TVmaze + TMDB + OMDb as fallbacks
-  // TV show → TMDB primary, TVmaze as free fallback, OMDb for extra fields
-  const [omdbById, omdbBySearch, jikanMeta, tmdbTVById, tmdbTVBySearch, tvMeta] = await Promise.all([
-    providerIds.imdbId
-      ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey)
-      : Promise.resolve(null),
-    fetchOMDbMetadata(searchTitle, searchYear, omdbApiKey),
-    likelyAnime ? fetchJikanMetadata(searchTitle) : Promise.resolve(null),
-    providerIds.tmdbId
-      ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey)
-      : Promise.resolve(null),
-    fetchTMDBTVMetadata(searchTitle, searchYear, tmdbApiKey),
-    // TVmaze often has cleaner named episode lists, including anime seasons.
-    fetchTVMetadata(searchTitle, searchYear),
-  ]);
-  const matchedOmdbData = [omdbById, omdbBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localTitleCandidates, data?.Title)) || null;
-  const matchedJikanMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, jikanMeta?.title) ? jikanMeta : null;
-  const localAndAnimeAliasTitles = uniqueLocalTitles([
-    ...localTitleCandidates,
-    ...(matchedJikanMeta?.aliases || []),
-    matchedJikanMeta?.title,
-  ]);
-  const matchedTmdbTVMeta = [tmdbTVById, tmdbTVBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, data?.title)) || null;
-  const matchedTVMeta = remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, tvMeta?.title) ? tvMeta : null;
-
-  // ── Resolve type ───────────────────────────────────────────────────────────
-  const finalType: 'tv' | 'anime' =
-    likelyAnime || isAnimeMetadata(fullPath, searchTitle, matchedOmdbData, matchedTVMeta)
-      ? 'anime'
-      : 'tv';
-
-  // ── Poster / backdrop ──────────────────────────────────────────────────────
-  // Posters can fall through to embedded/generated thumbnails. Backdrops stay
-  // limited to true local/API cover art; the renderer falls back to poster art.
-  const localPoster = getLocalFolderArtworkUrl(fullPath, 'poster');
-  const embeddedPoster = episodeFiles[0] ? getEmbeddedArtworkUrl(episodeFiles[0].filePath, representativeProbe) : '';
-  const localBackdrop = getLocalFolderArtworkUrl(fullPath, 'backdrop');
-  const generatedThumbnail = episodeFiles[0] ? getLocalThumbnailUrl(episodeFiles[0].filePath) : '';
-  const omdbPoster = matchedOmdbData?.Poster && matchedOmdbData.Poster !== 'N/A' ? matchedOmdbData.Poster : '';
-  const officialPoster =
-    (finalType === 'anime' ? (matchedJikanMeta?.poster || '') : '')
-    || matchedTmdbTVMeta?.poster
-    || matchedTVMeta?.poster
-    || omdbPoster;
-  const poster =
-    localPoster
-    || officialPoster
-    || embeddedPoster
-    || generatedThumbnail;
-  const posterCandidates = orderedArtworkCandidates(
-    localPoster,
-    officialPoster,
-    embeddedPoster,
-    generatedThumbnail,
-  );
-
-  const officialBackdrop =
-    matchedTmdbTVMeta?.backdrop
-    || (finalType === 'anime' ? (matchedJikanMeta?.backdrop || '') : '')
-    || matchedTVMeta?.backdrop
-    || '';
-  const backdrop =
-    localBackdrop
-    || officialBackdrop;
-  const backdropCandidates = orderedArtworkCandidates(
-    localBackdrop,
-    officialBackdrop,
-  );
-  const fanartLogoCandidates = await fetchFanartTVLogos(
-    matchedTmdbTVMeta?.providerIds?.tvdbId || matchedTVMeta?.providerIds?.tvdbId || providerIds.tvdbId,
-    fanartApiKey,
-  );
-  const logoCandidates = orderedArtworkCandidates(
-    matchedTmdbTVMeta?.logo,
-    ...officialArtworkOnly(matchedTmdbTVMeta?.logoCandidates || []),
-    ...fanartLogoCandidates,
-  );
-  const logo = logoCandidates[0] || '';
-
-  // ── Summary / rating / genres / cast ──────────────────────────────────────
-  const summary =
-    episodeProbes.find((probe) => probe.summary)?.summary
-    || (finalType === 'anime' ? (matchedJikanMeta?.summary || '') : '')
-    || matchedTmdbTVMeta?.summary
-    || matchedTVMeta?.summary
-    || matchedOmdbData?.Plot
-    || '';
-
-  const rating = showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
-
-  const genres: string[] =
-    (finalType === 'anime' ? matchedJikanMeta?.genres : null)
-    ?? matchedTmdbTVMeta?.genres
-    ?? matchedTVMeta?.genres
-    ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : []);
-
-  const cast =
-    (finalType === 'anime' ? matchedJikanMeta?.cast : null)
-    ?? matchedTmdbTVMeta?.cast
-    ?? matchedTVMeta?.cast
-    ?? [];
-
-  const resolvedTitle =
-    searchTitle
-    || cleanTitle;
-
-  const resolvedYear =
-    searchYear
-    || (matchedOmdbData?.Year ? parseInt(matchedOmdbData.Year, 10) : 0)
-    || (finalType === 'anime' ? (matchedJikanMeta?.year ?? 0) : 0)
-    || (matchedTmdbTVMeta?.year ?? 0)
-    || (matchedTVMeta?.year ?? 0)
-    || year;
-  const jikanEpisodesForLocalSeasons = finalType === 'anime'
-    ? await fetchJikanEpisodesForLocalAnimeSeasons(episodeFiles, searchTitle, matchedJikanMeta)
-    : { episodes: [], malIdBySeason: {} };
-
-  // ── Merge episode metadata onto local files ────────────────────────────────
-  // Keep provider priority per field so anime can use TVmaze titles while Jikan
-  // fills episode scores that TVmaze often leaves empty.
-  const mergedEpisodes = mergeEpisodeMetadataSources(localEpisodes, [
-    matchedTVMeta?.episodes,
-    finalType === 'anime' && jikanEpisodesForLocalSeasons.episodes.length > 0 ? jikanEpisodesForLocalSeasons.episodes : null,
-    matchedTmdbTVMeta?.episodes,
-  ]);
-  const mergedEpisodeTitleByKey = new Map(
-    mergedEpisodes.map((episode) => [`${episode.season}-${episode.number}`, episode.title]),
-  );
-  const mergedEpisodeFiles = episodeFiles.map((file) => ({
-    ...file,
-    title: mergedEpisodeTitleByKey.get(`${file.season}-${file.episode}`) || file.title,
-  }));
-
-  const remoteSeasons = matchedTmdbTVMeta?.tmdbSeasons ?? matchedTVMeta?.seasons;
-  const mergedSeasons = mergeLocalSeasonsWithMetadata(localSeasons, remoteSeasons);
-
-  return {
-    id,
-    type: finalType,
-    title: resolvedTitle,
-    year: resolvedYear,
-    poster,
-    backdrop,
-    logo,
-    posterCandidates,
-    backdropCandidates,
-    logoCandidates,
-    summary,
-    rating,
-    genres,
-    cast,
-    filePath: fullPath,
-    seasons: mergedSeasons,
-    episodes: mergedEpisodes,
-    episodeFiles: mergedEpisodeFiles,
-    subtitles,
-    localMetadata: representativeProbe.localMetadata,
-    providerIds: mergeProviderIds(
-      providerIds,
-      matchedTmdbTVMeta?.providerIds || {},
-      matchedTVMeta?.providerIds || {},
-      finalType === 'anime' ? {
-        malId: matchedJikanMeta?.malId ? String(matchedJikanMeta.malId) : undefined,
-        malIdBySeason: jikanEpisodesForLocalSeasons.malIdBySeason,
-      } : {},
-    ),
-  };
-}
-
-async function buildMovieItemFromFile(
-  fullPath: string,
-  fileName: string,
-  titleFallback: string,
-  subtitles: { lang: string; label: string; url: string }[],
-  year: number,
-  omdbApiKey?: string,
-  tmdbApiKey?: string,
-  fanartApiKey?: string,
-  forcedType?: 'movie' | 'tv' | 'anime',
-): Promise<MediaItem> {
-  const parsedFile = cleanMediaTitle(fileName);
-  const stats = fs.statSync(fullPath);
-  const probe = probeMediaFile(fullPath);
-  const providerIds = mergeProviderIds(probe.providerIds || {}, parseMetadataProviderIds(`${fullPath} ${fileName}`));
-
-  const rawFileTitle = titleFallback || parsedFile.title;
-  const fileTitle = usefulLocalTitle(titleFallback) || usefulLocalTitle(parsedFile.title);
-  const embeddedMovieTitle = usefulLocalTitle(probe.embeddedTitle);
-  const trustedEmbeddedTitle = isTrustedLocalTagTitle(fileTitle, embeddedMovieTitle, rawFileTitle)
-    ? embeddedMovieTitle
-    : null;
-  const searchTitle = trustedEmbeddedTitle || fileTitle || rawFileTitle;
-  const localTitleCandidates = uniqueLocalTitles([
-    searchTitle,
-    trustedEmbeddedTitle,
-    fileTitle,
-    parsedFile.title,
-  ]);
-  const searchYear = year || parsedFile.year || probe.year;
-
-  const shouldUseShowProviders = forcedType === 'tv' || forcedType === 'anime';
-  const likelyAnime = forcedType === 'anime' || isLikelyAnimePath(fullPath, searchTitle);
-
-  // Fetch provider metadata in parallel. Single files forced into TV/anime
-  // library buckets must use show providers, not movie metadata, for artwork.
-  const [tmdbById, tmdbBySearch, omdbById, omdbBySearch, jikanMeta, tmdbTVById, tmdbTVBySearch, tvMeta] = await Promise.all([
-    !shouldUseShowProviders && providerIds.tmdbId
-      ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey)
-      : Promise.resolve(null),
-    !shouldUseShowProviders
-      ? fetchTMDBMovieMetadata(searchTitle, searchYear, tmdbApiKey)
-      : Promise.resolve(null),
-    providerIds.imdbId
-      ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey)
-      : Promise.resolve(null),
-    fetchOMDbMetadata(searchTitle, searchYear, omdbApiKey),
-    shouldUseShowProviders && likelyAnime ? fetchJikanMetadata(searchTitle) : Promise.resolve(null),
-    shouldUseShowProviders && providerIds.tmdbId
-      ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey)
-      : Promise.resolve(null),
-    shouldUseShowProviders
-      ? fetchTMDBTVMetadata(searchTitle, searchYear, tmdbApiKey)
-      : Promise.resolve(null),
-    shouldUseShowProviders ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
-  ]);
-  const matchedTmdbData = tmdbById || tmdbBySearch || null;
-  const matchedOmdbData = omdbById || omdbBySearch || null;
-  const matchedJikanMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, jikanMeta?.title) ? jikanMeta : null;
-  const localAndAnimeAliasTitles = uniqueLocalTitles([
-    ...localTitleCandidates,
-    ...(matchedJikanMeta?.aliases || []),
-    matchedJikanMeta?.title,
-  ]);
-  const matchedTmdbTVMeta = [tmdbTVById, tmdbTVBySearch]
-    .find((data) => remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, data?.title)) || null;
-  const matchedTVMeta = remoteMatchesAnyLocalTitle(localAndAnimeAliasTitles, tvMeta?.title) ? tvMeta : null;
-
-  // Resolve the canonical title (prefer API-confirmed names)
-  const resolvedTitle = searchTitle || parsedFile.title;
-
-  const finalType: 'movie' | 'tv' | 'anime' = forcedType
-    ?? (isAnimeMetadata(fullPath, resolvedTitle, matchedOmdbData, null)
-      ? 'anime'
-      : isSeriesMetadata(matchedOmdbData, null)
-        ? 'tv'
-        : 'movie');
-
-  // Posters can fall through to embedded/generated thumbnails. Backdrops stay
-  // limited to true local/API cover art; the renderer falls back to poster art.
-  const localThumbnail = getLocalThumbnailUrl(fullPath);
-  const localPoster = getLocalMovieArtworkUrl(fullPath, 'poster');
-  const embeddedPoster = getEmbeddedArtworkUrl(fullPath, probe);
-  const localBackdrop = getLocalMovieArtworkUrl(fullPath, 'backdrop');
-  const omdbPoster = matchedOmdbData?.Poster && matchedOmdbData.Poster !== 'N/A' ? matchedOmdbData.Poster : '';
-  const officialMoviePoster = matchedTmdbData?.poster || omdbPoster;
-  const officialShowPoster =
-    (finalType === 'anime' ? (matchedJikanMeta?.poster || '') : '')
-    || matchedTmdbTVMeta?.poster
-    || matchedTVMeta?.poster
-    || omdbPoster;
-  const officialPoster = shouldUseShowProviders ? officialShowPoster : officialMoviePoster;
-  const officialMovieBackdrop = matchedTmdbData?.backdrop || '';
-  const officialShowBackdrop =
-    matchedTmdbTVMeta?.backdrop
-    || (finalType === 'anime' ? (matchedJikanMeta?.backdrop || '') : '')
-    || matchedTVMeta?.backdrop
-    || '';
-  const officialBackdrop = shouldUseShowProviders ? officialShowBackdrop : officialMovieBackdrop;
-  const poster =
-    localPoster
-    || officialPoster
-    || embeddedPoster
-    || localThumbnail;
-  const posterCandidates = orderedArtworkCandidates(
-    localPoster,
-    officialPoster,
-    embeddedPoster,
-    localThumbnail,
-  );
-  const backdrop =
-    localBackdrop
-    || officialBackdrop;
-  const backdropCandidates = orderedArtworkCandidates(
-    localBackdrop,
-    officialBackdrop,
-  );
-  const fanartLogoCandidates = shouldUseShowProviders
-    ? await fetchFanartTVLogos(matchedTmdbTVMeta?.providerIds?.tvdbId || matchedTVMeta?.providerIds?.tvdbId || providerIds.tvdbId, fanartApiKey)
-    : await fetchFanartMovieLogos(matchedTmdbData?.providerIds?.tmdbId || providerIds.tmdbId, fanartApiKey);
-  const logoCandidates = orderedArtworkCandidates(
-    shouldUseShowProviders ? matchedTmdbTVMeta?.logo : matchedTmdbData?.logo,
-    ...officialArtworkOnly((shouldUseShowProviders ? matchedTmdbTVMeta?.logoCandidates : matchedTmdbData?.logoCandidates) || []),
-    ...fanartLogoCandidates,
-  );
-  const logo = logoCandidates[0] || '';
-
-  const summary =
-    probe.summary
-    || (finalType === 'anime' ? (matchedJikanMeta?.summary || '') : '')
-    || matchedTmdbTVMeta?.summary
-    || matchedTVMeta?.summary
-    || matchedTmdbData?.summary
-    || matchedOmdbData?.Plot
-    || '';
-  const rating = finalType === 'movie'
-    ? movieMetadataRating(matchedTmdbData, matchedOmdbData, matchedTVMeta)
-    : showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
-  const genres: string[] =
-    (finalType === 'anime' ? matchedJikanMeta?.genres : null)
-    ?? matchedTmdbTVMeta?.genres
-    ?? matchedTVMeta?.genres
-    ?? matchedTmdbData?.genres
-    ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : []);
-  const cast =
-    (finalType === 'anime' ? matchedJikanMeta?.cast : null)
-    ?? matchedTmdbTVMeta?.cast
-    ?? matchedTVMeta?.cast
-    ?? matchedTmdbData?.cast
-    ?? [];
-  const resolvedYear =
-    searchYear
-    || (finalType === 'anime' ? (matchedJikanMeta?.year ?? 0) : 0)
-    || (matchedTmdbTVMeta?.year ?? 0)
-    || (matchedTVMeta?.year ?? 0)
-    || matchedTmdbData?.year
-    || (matchedOmdbData?.Year ? parseInt(matchedOmdbData.Year, 10) : 0)
-    || parsedFile.year;
-
-  const baseItem: MediaItem = {
-    id: createMediaItemId(fullPath),
-    type: finalType,
-    title: resolvedTitle,
-    year: resolvedYear,
-    poster,
-    backdrop,
-    logo,
-    posterCandidates,
-    backdropCandidates,
-    logoCandidates,
-    summary,
-    rating,
-    genres,
-    cast,
-    filePath: fullPath,
-    fileSize: stats.size,
-    subtitles,
-    localMetadata: probe.localMetadata,
-    providerIds: mergeProviderIds(
-      providerIds,
-      matchedTmdbData?.providerIds || {},
-      matchedTmdbTVMeta?.providerIds || {},
-      matchedTVMeta?.providerIds || {},
-      finalType === 'anime' && matchedJikanMeta?.malId ? {
-        malId: String(matchedJikanMeta.malId),
-        malIdBySeason: { '1': String(matchedJikanMeta.malId) },
-      } : {},
-    ),
-  };
-
-  if (finalType === 'anime' || finalType === 'tv') {
-    const remoteEpisodes: EpisodeMeta[] =
-      matchedTVMeta?.episodes
-      ?? (finalType === 'anime' ? matchedJikanMeta?.episodes : null)
-      ?? matchedTmdbTVMeta?.episodes
-      ?? [];
-    const remoteSeasons =
-      matchedTmdbTVMeta?.tmdbSeasons
-      ?? matchedTVMeta?.seasons
-      ?? [{ number: 1, title: finalType === 'anime' ? 'Season 1' : 'Season 1', episodeCount: 1 }];
-    const episodeStill = remoteEpisodes.find((episode) => Boolean(episode.still))?.still || officialBackdrop || embeddedPoster || localThumbnail;
-    const firstRemoteEpisode = remoteEpisodes.find((episode) => episode.season === 1 && episode.number === 1) || remoteEpisodes[0];
-
-    return {
-      ...baseItem,
-      seasons: remoteSeasons.length > 0 ? remoteSeasons : [{ number: 1, title: 'Season 1', episodeCount: 1 }],
-      episodes: [{
-        season: 1, number: 1,
-        title: firstRemoteEpisode?.title || resolvedTitle,
-        summary: firstRemoteEpisode?.summary || summary,
-        still: episodeStill,
-        rating: firstRemoteEpisode?.rating || rating,
-        airDate: firstRemoteEpisode?.airDate || '',
-        localMetadata: probe.localMetadata,
-      }],
-      episodeFiles: [{
-        season: 1,
-        episode: 1,
-        filePath: fullPath,
-        title: firstRemoteEpisode?.title || resolvedTitle,
-        localMetadata: probe.localMetadata,
-      }],
-    };
-  }
-
-  return baseItem;
-}
-
-interface ScanContext {
-  omdbApiKey?: string;
-  tmdbApiKey?: string;
-  fanartApiKey?: string;
-  openSubtitles?: OpenSubtitlesScanOptions;
-  folderKind?: ScanFolderKind;
-}
-
-function subtitleFilesInDirectory(folderPath: string): string[] {
-  try {
-    return fs.readdirSync(folderPath, { withFileTypes: true })
-      .filter((entry) => !entry.isDirectory())
-      .map((entry) => entry.name)
-      .filter(isSubtitleFileName);
-  } catch {
-    return [];
-  }
-}
-
-async function downloadOpenSubtitlesForVideos(folderPath: string, videoFiles: string[], ctx: ScanContext): Promise<void> {
-  if (!openSubtitlesIsConfigured(ctx.openSubtitles) || videoFiles.length === 0) return;
-
-  for (const videoFile of videoFiles) {
-    const videoPath = path.join(folderPath, videoFile);
-    const results = await downloadMissingOpenSubtitlesForVideo(videoPath, ctx.openSubtitles);
-    results
-      .filter((result) => result.status === 'error')
-      .forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
-  }
-}
-
-async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promise<MediaItem | null> {
-  let dirEntries: fs.Dirent[];
-  try {
-    dirEntries = fs.readdirSync(folderPath, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-
-  const folderName = path.basename(folderPath);
-  const videoFiles = dirEntries
-    .filter((entry) => !entry.isDirectory())
-    .map((entry) => entry.name)
-    .filter(isVideoFileName);
-  await downloadOpenSubtitlesForVideos(folderPath, videoFiles, ctx);
-  const subtitleFiles = subtitleFilesInDirectory(folderPath);
-  const subDirs = dirEntries.filter((entry) => entry.isDirectory());
-  const hasSeasonDirs = subDirs.some((entry) => /season|series/i.test(entry.name));
-  const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? scanEpisodeFiles(folderPath) : [];
-  const detectedFolderKind = detectLibraryFolderKind(folderPath);
-
-  if (ctx.folderKind && detectedFolderKind) return null;
-  if (ctx.folderKind === 'movies' && videoFiles.length > 1) return null;
-
-  if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length === 0) return null;
-
-  const parsedFolder = cleanMediaTitle(folderName);
-  const subtitles = createSubtitleRecords(folderPath, subtitleFiles);
-  const id = createMediaItemId(folderPath);
-  const representativeProbe = videoFiles[0] ? probeMediaFile(path.join(folderPath, videoFiles[0])) : undefined;
-  const isTV = nestedEpisodeFiles.length > 0
-    || shouldTreatAsTV(folderName, videoFiles, hasSeasonDirs, representativeProbe);
-
-  if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length > 0 && shouldSplitContainerFolder(folderPath, folderName, subDirs)) {
-    return null;
-  }
-
-  if (ctx.folderKind === 'movies') {
-    if (videoFiles.length === 0) return null;
-    return buildMovieItemFromFile(
-      path.join(folderPath, videoFiles[0]),
-      videoFiles[0], parsedFolder.title,
-      subtitles, parsedFolder.year,
-      ctx.omdbApiKey, ctx.tmdbApiKey,
-      'movie',
-    );
-  }
-
-  if ((ctx.folderKind === 'tv' || ctx.folderKind === 'anime') && !isTV && videoFiles.length > 0) {
-    return buildMovieItemFromFile(
-      path.join(folderPath, videoFiles[0]),
-      videoFiles[0], parsedFolder.title,
-      subtitles, parsedFolder.year,
-      ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
-      ctx.folderKind === 'anime' ? 'anime' : 'tv',
-    );
-  }
-
-  if (isTV || ctx.folderKind === 'tv' || ctx.folderKind === 'anime') {
-    return buildTVItemFromFolder(
-      folderPath, folderName, id, subtitles,
-      parsedFolder.year, parsedFolder.title,
-      ctx.omdbApiKey,
-      ctx.folderKind === 'anime' || isLikelyAnimePath(folderPath, parsedFolder.title) ? 'anime' : 'tv',
-      ctx.tmdbApiKey,
-      ctx.fanartApiKey,
-      ctx.openSubtitles,
-    );
-  }
-
-  return buildMovieItemFromFile(
-    path.join(folderPath, videoFiles[0]),
-    videoFiles[0], parsedFolder.title,
-    subtitles, parsedFolder.year,
-    ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
-    ctx.folderKind === 'anime' ? 'anime' : undefined,
-  );
-}
-
-async function scanFolder(
-  folderPath: string,
-  ctx: ScanContext,
-  onItems?: (items: MediaItem[]) => void | Promise<void>,
-): Promise<MediaItem[]> {
-  const items: MediaItem[] = [];
-  if (!fs.existsSync(folderPath)) return items;
-
-  const addItems = async (nextItems: MediaItem[]) => {
-    items.push(...nextItems);
-    if (nextItems.length > 0) await onItems?.(nextItems);
-  };
-
-  try {
-    const rootEntries = fs.readdirSync(folderPath, { withFileTypes: true });
-
-    const rootVideoFiles = rootEntries
-      .filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name))
-      .map((entry) => entry.name);
-    await downloadOpenSubtitlesForVideos(folderPath, rootVideoFiles, ctx);
-    const rootSubtitleFiles = subtitleFilesInDirectory(folderPath);
-
-    for (const videoFile of rootVideoFiles) {
-      const fullVideoPath = path.join(folderPath, videoFile);
-      const probe = probeMediaFile(fullVideoPath);
-      const isTVFile = shouldTreatAsTV(videoFile, [videoFile], false, probe);
-      if (ctx.folderKind !== 'movies' && isTVFile) continue; // belongs to a show folder, not a standalone movie
-
-      const baseName = path.basename(videoFile, path.extname(videoFile));
-      const matchingSubtitles = rootSubtitleFiles.filter((subtitle) =>
-        path.basename(subtitle, path.extname(subtitle)).startsWith(baseName),
-      );
-      const forcedMovieType = ctx.folderKind === 'movies'
-        ? 'movie'
-        : ctx.folderKind === 'anime'
-          ? 'anime'
-          : ctx.folderKind === 'tv'
-            ? 'tv'
-            : undefined;
-      await addItems([await buildMovieItemFromFile(
-        fullVideoPath, videoFile,
-        cleanMediaTitle(videoFile).title,
-        createSubtitleRecords(folderPath, matchingSubtitles),
-        cleanMediaTitle(videoFile).year,
-        ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
-        forcedMovieType,
-      )]);
-    }
-
-    for (const entry of rootEntries) {
-      if (!entry.isDirectory()) continue;
-
-      const fullPath = path.join(folderPath, entry.name);
-
-      let dirEntries: fs.Dirent[];
-      try { dirEntries = fs.readdirSync(fullPath, { withFileTypes: true }); }
-      catch { continue; }
-
-      const videoFiles = dirEntries
-        .filter((d) => !d.isDirectory())
-        .map((d) => d.name)
-        .filter(isVideoFileName);
-
-      await downloadOpenSubtitlesForVideos(fullPath, videoFiles, ctx);
-      const subtitleFiles = subtitleFilesInDirectory(fullPath);
-
-      const subDirs = dirEntries.filter((d) => d.isDirectory());
-      const hasSeasonDirs = subDirs.some((d) => /season|series/i.test(d.name));
-
-      // Container folder (e.g. "TV Shows/", "Anime/") — recurse
-      if (videoFiles.length === 0 && subDirs.length > 0 && !hasSeasonDirs) {
-        const nestedEpisodeFiles = scanEpisodeFiles(fullPath);
-        if (ctx.folderKind !== 'movies' && nestedEpisodeFiles.length > 0) {
-          const parsedFolder = cleanMediaTitle(entry.name);
-          const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
-          if (!shouldSplitContainerFolder(fullPath, entry.name, subDirs)) {
-            const id = createMediaItemId(fullPath);
-            const tvItem = await buildTVItemFromFolder(
-              fullPath, entry.name, id, subtitles,
-              parsedFolder.year, parsedFolder.title,
-              ctx.omdbApiKey,
-              ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
-              ctx.tmdbApiKey,
-              ctx.fanartApiKey,
-              ctx.openSubtitles,
-            );
-            if (tvItem) await addItems([tvItem]);
-            continue;
-          }
-        }
-
-        items.push(...await scanFolder(fullPath, ctx, onItems));
-        continue;
-      }
-
-      const isTV = ctx.folderKind === 'tv'
-        || ctx.folderKind === 'anime'
-        || (ctx.folderKind !== 'movies' && (hasSeasonDirs || isTVPattern(entry.name, videoFiles)));
-      const parsedFolder = cleanMediaTitle(entry.name);
-      const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
-      const id = createMediaItemId(fullPath);
-
-      if (isTV) {
-        const tvItem = await buildTVItemFromFolder(
-          fullPath, entry.name, id, subtitles,
-          parsedFolder.year, parsedFolder.title,
-          ctx.omdbApiKey,
-          ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
-          ctx.tmdbApiKey,
-          ctx.fanartApiKey,
-          ctx.openSubtitles,
-        );
-        if (tvItem) await addItems([tvItem]);
-      } else if (videoFiles.length > 0) {
-        await addItems([await buildMovieItemFromFile(
-          path.join(fullPath, videoFiles[0]),
-          videoFiles[0], parsedFolder.title,
-          subtitles, parsedFolder.year,
-          ctx.omdbApiKey, ctx.tmdbApiKey, ctx.fanartApiKey,
-          ctx.folderKind === 'movies' ? 'movie' : undefined,
-        )]);
-      }
-    }
-  } catch (error) {
-    console.error('scanFolder error:', error);
-  }
-
-  return items;
-}
+const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuilders({
+  downloadMissingOpenSubtitlesForFolder,
+  extractSeasons,
+  fetchFanartMovieLogos,
+  fetchFanartTVLogos,
+  fetchJikanEpisodesForLocalAnimeSeasons,
+  fetchJikanMetadata,
+  fetchOMDbMetadata,
+  fetchOMDbMetadataById,
+  fetchTMDBMovieMetadata,
+  fetchTMDBMovieMetadataById,
+  fetchTMDBTVMetadata,
+  fetchTMDBTVMetadataById,
+  fetchTVMetadata,
+  getEmbeddedArtworkUrl,
+  getLocalFolderArtworkUrl,
+  getLocalMovieArtworkUrl,
+  getLocalThumbnailUrl,
+  openSubtitlesIsConfigured,
+  orderedArtworkCandidates,
+  probeMediaFile,
+  scanEpisodeFiles,
+});
+const { scanDirectoryAsItem, scanFolder } = createLibraryScanner({
+  buildMovieItemFromFile,
+  buildTVItemFromFolder,
+  probeMediaFile,
+  scanEpisodeFiles,
+  shouldSplitContainerFolder,
+});
 
 function episodeKey(episode: Pick<EpisodeMeta, 'season' | 'number'>): string {
   return `${episode.season}-${episode.number}`;
@@ -1749,70 +847,8 @@ function loadLibrary(): LibraryData {
   return { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups, libraryFolderStatuses: [], scanCache: {} };
 }
 
-function stripInlineArtworkFromItem(item: MediaItem): MediaItem {
-  return {
-    ...item,
-    poster: durableArtworkSource(item.poster),
-    backdrop: durableArtworkSource(item.backdrop),
-    logo: durableArtworkSource(item.logo),
-    posterCandidates: durableArtworkSources(item.posterCandidates),
-    backdropCandidates: durableArtworkSources(item.backdropCandidates),
-    logoCandidates: durableArtworkSources(item.logoCandidates),
-    episodes: item.episodes?.map((episode) => ({
-      ...episode,
-      still: durableArtworkSource(episode.still),
-    })),
-  };
-}
-
-function stripInlineArtworkFromLibrary(data: LibraryData): LibraryData {
-  return {
-    ...data,
-    movies: (data.movies || []).map(stripInlineArtworkFromItem),
-    tvShows: (data.tvShows || []).map(stripInlineArtworkFromItem),
-    animeShows: (data.animeShows || []).map(stripInlineArtworkFromItem),
-  };
-}
-
-function itemWithArtworkDeliveryUrls(item: MediaItem): MediaItem {
-  const poster = artworkDeliveryUrl(item.poster);
-  const backdrop = artworkDeliveryUrl(item.backdrop);
-  const logo = artworkDeliveryUrl(item.logo);
-  const posterCandidates = artworkDeliveryUrls(item.posterCandidates);
-  const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates);
-  const logoCandidates = artworkDeliveryUrls(item.logoCandidates);
-
-  return {
-    ...item,
-    poster,
-    backdrop,
-    logo,
-    posterCandidates,
-    backdropCandidates,
-    logoCandidates,
-    subtitles: subtitleRecordsForRenderer(item.subtitles),
-    episodes: item.episodes?.map((episode) => ({
-      ...episode,
-      still: artworkDeliveryUrl(episode.still),
-    })),
-    episodeFiles: item.episodeFiles?.map((episodeFile) => ({
-      ...episodeFile,
-      subtitles: subtitleRecordsForRenderer(episodeFile.subtitles),
-    })),
-  };
-}
-
 function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
-  const libraryFolderGroups = normalizeLibraryFolderGroups(data);
-  return {
-    ...data,
-    libraryFolders: flattenLibraryFolders(libraryFolderGroups),
-    libraryFolderGroups,
-    libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
-    movies: (data.movies || []).map(itemWithArtworkDeliveryUrls),
-    tvShows: (data.tvShows || []).map(itemWithArtworkDeliveryUrls),
-    animeShows: (data.animeShows || []).map(itemWithArtworkDeliveryUrls),
-  };
+  return projectLibraryForRenderer(data);
 }
 
 function appendLocalAccessTokenToUrl(url: string): string {
@@ -1822,7 +858,8 @@ function appendLocalAccessTokenToUrl(url: string): string {
 }
 
 function signedStreamUrlForRemote(base: string, filePath: string): string {
-  return buildSignedLanUrl(base, '/stream', new URLSearchParams({ path: filePath }));
+  const resourceId = registerResource(loadSettings().localNetworkHmacSecret || '', 'media', filePath);
+  return buildSignedLanUrl(base, '/stream', new URLSearchParams({ resourceId }));
 }
 
 function localMetadataWithTracks(filePath: string, metadata: MediaItem['localMetadata']): MediaItem['localMetadata'] {
@@ -1837,65 +874,10 @@ function localMetadataWithTracks(filePath: string, metadata: MediaItem['localMet
   }
 }
 
-function itemForLocalNetwork(item: MediaItem, base: string, token: string): MediaItem {
-  const episodeThumbnailFallback = item.episodeFiles?.[0] ? getRemoteThumbnailUrl(item.episodeFiles[0].filePath, base) : '';
-  const posterCandidates = artworkDeliveryUrls(item.posterCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
-  const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
-  const logoCandidates = artworkDeliveryUrls(item.logoCandidates).map((url) => remoteArtworkDeliveryUrl(url, base, token));
-  const poster = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.poster), base, token)
-    || posterCandidates[0]
-    || episodeThumbnailFallback;
-  const backdrop = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.backdrop), base, token)
-    || backdropCandidates[0]
-    || poster;
-  const logo = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.logo), base, token);
-
-  const stillByEpisode = new Map(
-    (item.episodes || []).map((episode) => [
-      `${episode.season}-${episode.number}`,
-      remoteArtworkDeliveryUrl(artworkDeliveryUrl(episode.still), base, token),
-    ]),
-  );
-
-  return {
-    ...item,
-    filePath: signedStreamUrlForRemote(base, item.filePath),
-    poster,
-    backdrop,
-    logo,
-    posterCandidates,
-    backdropCandidates,
-    logoCandidates,
-    localMetadata: localMetadataWithTracks(item.filePath, item.localMetadata),
-    subtitles: subtitleRecordsForLocalNetwork(item.subtitles, base),
-    episodes: item.episodes?.map((episode) => ({
-      ...episode,
-      still: remoteArtworkDeliveryUrl(artworkDeliveryUrl(episode.still), base, token),
-    })),
-    episodeFiles: item.episodeFiles?.map((episodeFile) => ({
-      ...episodeFile,
-      filePath: signedStreamUrlForRemote(base, episodeFile.filePath),
-      still: stillByEpisode.get(`${episodeFile.season}-${episodeFile.episode}`) || '',
-      thumbnail: getRemoteThumbnailUrl(episodeFile.filePath, base),
-      localMetadata: localMetadataWithTracks(episodeFile.filePath, episodeFile.localMetadata),
-      subtitles: subtitleRecordsForLocalNetwork(episodeFile.subtitles, base),
-    })),
-  };
-}
-
 function libraryForLocalNetwork(): LibraryData {
   const base = getLanServerBase() || `http://127.0.0.1:${getMediaServerPort()}`;
-  const token = getLanShareToken();
   const data = loadLibrary();
-  return {
-    ...data,
-    libraryFolders: [],
-    libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] },
-    libraryFolderStatuses: [],
-    movies: (data.movies || []).map((item) => itemForLocalNetwork(item, base, token)),
-    tvShows: (data.tvShows || []).map((item) => itemForLocalNetwork(item, base, token)),
-    animeShows: (data.animeShows || []).map((item) => itemForLocalNetwork(item, base, token)),
-  };
+  return projectLibraryForLocalNetwork(data, base);
 }
 
 let artworkCacheQueue: Promise<void> = Promise.resolve();
@@ -1908,7 +890,7 @@ async function cacheArtworkNow(data: LibraryData): Promise<void> {
   await artworkCacheQueue;
 }
 
-function saveLibrary(data: LibraryData): void {
+function saveLibrary(data: LibraryData): boolean {
   try {
     const durableData = stripInlineArtworkFromLibrary(data);
     const libraryFolderGroups = normalizeLibraryFolderGroups(data);
@@ -1922,608 +904,63 @@ function saveLibrary(data: LibraryData): void {
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       scanCache,
     });
+    return true;
   } catch (e) {
     console.error('saveLibrary error:', e);
+    return false;
   }
 }
 
 function saveLibraryMutation(data: LibraryData): void {
+  const previous = loadLibrary();
   libraryMutationVersion++;
-  saveLibrary(data);
+  if (saveLibrary(data)) reconcileSkipAnalysisAfterScan(previous, data);
 }
 
 let warmSkipSegmentsAfterScan: (data: LibraryData) => void = () => undefined;
+let reconcileSkipAnalysisAfterScan: (previous: LibraryData, next: LibraryData) => void = () => undefined;
 
 function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
-  saveLibrary(data);
+  const previous = loadLibrary();
+  if (!saveLibrary(data)) return false;
   cleanupOrphanedAutomaticSegments();
   warmSkipSegmentsAfterScan(data);
+  reconcileSkipAnalysisAfterScan(previous, data);
   return true;
 }
 
-type OfficialArtworkRefreshResult = {
-  thumbnail?: string;
-  cover?: string;
-  summary?: string;
-  rating?: number;
-  episodes?: EpisodeMeta[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
-  posterCandidates: string[];
-  backdropCandidates: string[];
-  logo?: string;
-  logoCandidates: string[];
-};
-
-export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
-  id: string;
-  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
-  title: string;
-  year?: number;
-  genres?: string[];
-  episodeCount?: number;
-  episodePreview?: string[];
-};
-
-function movieMetadataRating(
-  tmdbMeta?: Partial<MediaItem> | null,
-  omdbMeta?: OMDbResponse | null,
-  tvMeta?: { rating?: number } | null,
-): number {
-  return numericRating(tmdbMeta?.rating)
-    || numericRating(omdbMeta?.imdbRating)
-    || numericRating(tvMeta?.rating);
-}
-
-function showMetadataRating(
-  type: 'tv' | 'anime',
-  jikanMeta?: { rating?: number } | null,
-  tmdbMeta?: Partial<MediaItem> | null,
-  tvMeta?: { rating?: number } | null,
-  omdbMeta?: OMDbResponse | null,
-): number {
-  return (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
-    || numericRating(tmdbMeta?.rating)
-    || numericRating(tvMeta?.rating)
-    || numericRating(omdbMeta?.imdbRating);
-}
-
-function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
-  return orderedArtworkCandidates(...urls).filter((url) => {
-    try {
-      const parsed = new URL(url);
-      const host = parsed.hostname.toLowerCase();
-      return host.includes('image.tmdb.org')
-        || host.includes('assets.fanart.tv')
-        || host.includes('fanart.tv')
-        || host.includes('media-amazon.com')
-        || host.includes('m.media-amazon.com')
-        || host.includes('cdn.myanimelist.net')
-        || host.includes('myanimelist.net')
-        || host.includes('static.tvmaze.com');
-    } catch {
-      return false;
-    }
-  });
-}
-
-function metadataCandidateId(candidate: Omit<OfficialMetadataCandidate, 'id'>): string {
-  return createHash('sha1')
-    .update(JSON.stringify({
-      source: candidate.source,
-      title: candidate.title,
-      year: candidate.year || 0,
-      thumbnail: candidate.thumbnail || '',
-      cover: candidate.cover || '',
-    }))
-    .digest('hex')
-    .slice(0, 12);
-}
-
-function metadataCandidate(
-  source: OfficialMetadataCandidate['source'],
-  metadata: Partial<MediaItem> | null | undefined,
-  fallbackTitle: string,
-): OfficialMetadataCandidate | null {
-  if (!metadata) return null;
-  const posterCandidates = officialArtworkOnly([metadata.poster, ...(metadata.posterCandidates || [])]);
-  const backdropCandidates = officialArtworkOnly([metadata.backdrop, ...(metadata.backdropCandidates || [])]);
-  const logoCandidates = officialArtworkOnly([metadata.logo, ...(metadata.logoCandidates || [])]);
-  const title = String(metadata.title || fallbackTitle || '').trim();
-  const episodes = (metadata.episodes || []).filter((episode) => episode.title);
-  const candidateWithoutId: Omit<OfficialMetadataCandidate, 'id'> = {
-    source,
-    title,
-    year: metadata.year || undefined,
-    thumbnail: posterCandidates[0] || '',
-    cover: backdropCandidates[0] || posterCandidates[0] || '',
-    summary: metadata.summary || '',
-    rating: numericRating(metadata.rating),
-    genres: Array.isArray(metadata.genres) ? metadata.genres.filter(Boolean) : [],
-    episodes,
-    episodeCount: episodes.length || undefined,
-    episodePreview: episodes.slice(0, 4).map((episode) => {
-      const code = `S${String(episode.season || 1).padStart(2, '0')}E${String(episode.number).padStart(2, '0')}`;
-      return `${code} ${episode.title}`;
-    }),
-    posterCandidates,
-    backdropCandidates,
-    logo: logoCandidates[0] || '',
-    logoCandidates,
-  };
-  if (!candidateWithoutId.title && !candidateWithoutId.thumbnail && !candidateWithoutId.cover) return null;
-  return { ...candidateWithoutId, id: metadataCandidateId(candidateWithoutId) };
-}
-
-function omdbMetadataCandidate(metadata: OMDbResponse | null | undefined, fallbackTitle: string): OfficialMetadataCandidate | null {
-  if (!metadata) return null;
-  const poster = metadata.Poster && metadata.Poster !== 'N/A' ? metadata.Poster : '';
-  return metadataCandidate('OMDb', {
-    title: metadata.Title || fallbackTitle,
-    year: metadata.Year ? parseInt(String(metadata.Year), 10) : 0,
-    poster,
-    backdrop: poster,
-    summary: metadata.Plot && metadata.Plot !== 'N/A' ? metadata.Plot : '',
-    rating: numericRating(metadata.imdbRating),
-    genres: metadata.Genre && metadata.Genre !== 'N/A' ? String(metadata.Genre).split(',').map((genre) => genre.trim()) : [],
-  }, fallbackTitle);
-}
-
-function uniqueMetadataCandidates(candidates: Array<OfficialMetadataCandidate | null>): OfficialMetadataCandidate[] {
-  const seen = new Set<string>();
-  return candidates.filter((candidate): candidate is OfficialMetadataCandidate => {
-    if (!candidate) return false;
-    const key = `${candidate.source}:${candidate.title.toLowerCase()}:${candidate.year || ''}:${candidate.thumbnail || ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function metadataResultMatchesLocalTitle(
-  metadata: (Partial<MediaItem> & { aliases?: string[] }) | null | undefined,
-  localTitles: string[],
-): boolean {
-  if (!metadata) return false;
-  const remoteTitles = [
-    metadata.title,
-    ...(Array.isArray(metadata.aliases) ? metadata.aliases : []),
-  ].filter((title): title is string => typeof title === 'string' && title.trim().length > 0);
-  return remoteTitles.some((remoteTitle) => remoteMatchesAnyLocalTitle(localTitles, remoteTitle));
-}
-
-function matchingMetadataResults<T extends Partial<MediaItem> & { aliases?: string[] }>(
-  candidates: T[],
-  localTitles: string[],
-): T[] {
-  return candidates.filter((candidate) => metadataResultMatchesLocalTitle(candidate, localTitles));
-}
-
-function metadataCandidateScore(candidate: OfficialMetadataCandidate, preferredTitle: string, localTitles: string[]): number {
-  const normalizedCandidate = normalizeTitleForMatch(candidate.title);
-  const normalizedPreferred = normalizeTitleForMatch(preferredTitle);
-  const normalizedLocals = localTitles.map(normalizeTitleForMatch).filter(Boolean);
-  let score = 0;
-
-  if (normalizedCandidate === normalizedPreferred) score += 100;
-  if (normalizedLocals.some((title) => normalizedCandidate === title)) score += 80;
-  if (normalizedPreferred && normalizedCandidate.includes(normalizedPreferred)) score += 45;
-  if (normalizedPreferred && normalizedPreferred.includes(normalizedCandidate)) score += 35;
-
-  const preferredTokens = new Set(normalizedPreferred.split(' ').filter((token) => token.length > 2));
-  const candidateTokens = new Set(normalizedCandidate.split(' ').filter((token) => token.length > 2));
-  let sharedTokens = 0;
-  preferredTokens.forEach((token) => {
-    if (candidateTokens.has(token)) sharedTokens++;
-  });
-  if (preferredTokens.size > 0) score += (sharedTokens / preferredTokens.size) * 30;
-
-  if (candidate.thumbnail) score += 8;
-  if (candidate.cover && candidate.cover !== candidate.thumbnail) score += 6;
-  if (candidate.summary) score += 4;
-  if (candidate.rating) score += 2;
-
-  const sequelArcWords = /\b(mugen|entertainment|district|swordsmith|hashira|training|infinity|castle|arc)\b/i;
-  if (sequelArcWords.test(candidate.title)) {
-    score -= 140;
-  } else {
-    score += 60;
-  }
-  return score;
-}
-
-function sortMetadataCandidates(
-  candidates: OfficialMetadataCandidate[],
-  preferredTitle: string,
-  localTitles: string[],
-): OfficialMetadataCandidate[] {
-  const sequelArcWords = /\b(mugen|entertainment|district|swordsmith|hashira|training|infinity|castle|arc)\b/i;
-  return [...candidates].sort((a, b) => {
-    const aIsArc = sequelArcWords.test(a.title);
-    const bIsArc = sequelArcWords.test(b.title);
-    if (aIsArc !== bIsArc) return aIsArc ? 1 : -1;
-    return metadataCandidateScore(b, preferredTitle, localTitles) - metadataCandidateScore(a, preferredTitle, localTitles);
-  });
-}
-
-function mergeEpisodeMetadataForTarget(
-  target: MediaItem,
-  remoteEpisodes: EpisodeMeta[] | undefined,
-  source: OfficialMetadataCandidate['source'] | 'refresh',
-): void {
-  if (target.type === 'movie' || !remoteEpisodes?.length) return;
-
-  const useEpKeyOnly = source === 'Jikan';
-  const remoteByKey = new Map<string, EpisodeMeta>(
-    remoteEpisodes.map((episode) => [
-      useEpKeyOnly ? String(episode.number) : `${episode.season}-${episode.number}`,
-      episode,
-    ]),
-  );
-  const existingByKey = new Map<string, EpisodeMeta>(
-    (target.episodes || []).map((episode) => [`${episode.season}-${episode.number}`, episode]),
-  );
-
-  if (!target.episodeFiles?.length) {
-    target.episodes = remoteEpisodes;
-    return;
-  }
-
-  target.episodes = target.episodeFiles.map((file) => {
-    const key = `${file.season}-${file.episode}`;
-    const remote = remoteByKey.get(useEpKeyOnly ? String(file.episode) : key);
-    const existing = existingByKey.get(key);
-    return {
-      season: file.season,
-      number: file.episode,
-      title: remote?.title || existing?.title || file.title || '',
-      summary: remote?.summary || existing?.summary || '',
-      still: remote?.still || existing?.still || '',
-      rating: remote?.rating || existing?.rating || 0,
-      airDate: remote?.airDate || existing?.airDate || '',
-      localMetadata: file.localMetadata || existing?.localMetadata,
-    };
-  });
-}
-
-function itemArtworkLookupData(item: MediaItem): {
-  title: string;
-  year?: number;
-  localTitles: string[];
-  providerIds: MetadataProviderIds;
-} {
-  const representativePath = item.episodeFiles?.[0]?.filePath || item.filePath;
-  const probe = representativePath && fs.existsSync(representativePath) ? probeMediaFile(representativePath) : {};
-  const parsedPathTitle = representativePath ? cleanMediaTitle(path.basename(representativePath)).title : '';
-  const folderTitle = item.filePath ? cleanMediaTitle(path.basename(item.filePath)).title : '';
-  const embeddedTitle = item.type === 'movie' ? probe.embeddedTitle : probe.embeddedShowTitle;
-  const episodeSeriesTitle = item.type === 'movie' ? null : bestSeriesTitleFromEpisodeFiles(item.episodeFiles || []);
-  const pathTitle = localTitleFromPath(representativePath || item.filePath) || '';
-  const searchTitle = chooseMetadataSearchTitle({
-    itemTitle: item.title,
-    embeddedTitle,
-    folderTitle,
-    parsedPathTitle: pathTitle || parsedPathTitle,
-    episodeSeriesTitle,
-    fallbackTitle: item.title,
-  });
-  const localTitles = uniqueLocalTitles([
-    searchTitle,
-    item.title,
-    folderTitle,
-    parsedPathTitle,
-    pathTitle,
-    episodeSeriesTitle,
-    embeddedTitle,
-  ]);
-  const providerIds = mergeProviderIds(
-    probe.providerIds || {},
-    parseMetadataProviderIds(`${item.filePath || ''} ${representativePath || ''} ${item.title || ''}`),
-  );
-
-  return {
-    title: searchTitle,
-    year: item.year || probe.year || parseYearFromText(representativePath || item.filePath),
-    localTitles,
-    providerIds,
-  };
-}
-
-function findLibraryMediaItem(library: LibraryData, mediaId: string): MediaItem | null {
-  return [...library.movies, ...library.tvShows, ...library.animeShows].find((item) => item.id === mediaId) || null;
-}
-
-async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<OfficialMetadataCandidate[]> {
-  const settings = loadSettings();
-  const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
-  const omdbApiKey = getMetadataApiKey(settings, 'omdb');
-  const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
-
-  if (item.type === 'movie') {
-    const [tmdbById, tmdbBySearch, tmdbCandidates, omdbById, omdbBySearch, tvMeta, tvCandidates] = await Promise.all([
-      providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-      fetchTMDBMovieMetadata(title, year, tmdbApiKey),
-      fetchTMDBMovieMetadataCandidates(title, year, tmdbApiKey),
-      providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-      fetchOMDbMetadata(title, year, omdbApiKey),
-      fetchTVMetadata(title, year),
-      fetchTVMetadataCandidates(title, year),
-    ]);
-    return sortMetadataCandidates(uniqueMetadataCandidates([
-      metadataCandidate('TMDB', tmdbById, title),
-      metadataCandidate('TMDB', tmdbBySearch, title),
-      ...matchingMetadataResults(tmdbCandidates, localTitles).map((candidate) => metadataCandidate('TMDB', candidate, title)),
-      omdbMetadataCandidate(omdbById, title),
-      omdbMetadataCandidate(omdbBySearch, title),
-      metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
-      ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
-    ]), title, localTitles);
-  }
-
-  const likelyAnime = item.type === 'anime';
-  const [omdbById, omdbBySearch, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvMeta, tvCandidates] = await Promise.all([
-    providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-    fetchOMDbMetadata(title, year, omdbApiKey),
-    likelyAnime ? fetchJikanMetadataCandidates(title, localTitles) : Promise.resolve([]),
-    providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-    fetchTMDBTVMetadata(title, year, tmdbApiKey),
-    fetchTMDBTVMetadataCandidates(title, year, tmdbApiKey),
-    fetchTVMetadata(title, year),
-    fetchTVMetadataCandidates(title, year),
-  ]);
-  return sortMetadataCandidates(uniqueMetadataCandidates([
-    ...matchingMetadataResults(jikanCandidates, localTitles).map((candidate) => metadataCandidate('Jikan', candidate, title)),
-    metadataCandidate('TMDB', tmdbById, title),
-    metadataCandidate('TMDB', remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null, title),
-    ...matchingMetadataResults(tmdbCandidates, localTitles).map((candidate) => metadataCandidate('TMDB', candidate, title)),
-    omdbMetadataCandidate(omdbById, title),
-    omdbMetadataCandidate(remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null, title),
-    metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
-    ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
-  ]), title, localTitles);
-}
-
-async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
-  const settings = loadSettings();
-  const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
-  const omdbApiKey = getMetadataApiKey(settings, 'omdb');
-  const fanartApiKey = getMetadataApiKey(settings, 'fanart');
-  const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
-
-  if (item.type === 'movie') {
-    const [tmdbById, tmdbBySearch, omdbById, omdbBySearch, tvMeta] = await Promise.all([
-      providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-      fetchTMDBMovieMetadata(title, year, tmdbApiKey),
-      providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-      fetchOMDbMetadata(title, year, omdbApiKey),
-      fetchTVMetadata(title, year),
-    ]);
-    const tmdbMeta = tmdbById || tmdbBySearch || null;
-    const omdbMeta = omdbById || omdbBySearch || null;
-    const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
-    const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
-    const posterCandidates = officialArtworkOnly([tmdbMeta?.poster, omdbPoster]);
-    const backdropCandidates = officialArtworkOnly([tmdbMeta?.backdrop]);
-    const fanartLogoCandidates = await fetchFanartMovieLogos(
-      tmdbMeta?.providerIds?.tmdbId || providerIds.tmdbId,
-      fanartApiKey,
-    );
-    const logoCandidates = orderedArtworkCandidates(
-      ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
-      ...fanartLogoCandidates,
-    );
-    return {
-      thumbnail: posterCandidates[0] || '',
-      cover: backdropCandidates[0] || posterCandidates[0] || '',
-      summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
-      rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
-      posterCandidates,
-      backdropCandidates,
-      logo: logoCandidates[0] || '',
-      logoCandidates,
-    };
-  }
-
-  const likelyAnime = item.type === 'anime';
-  const [omdbById, omdbBySearch, jikanMeta, tmdbById, tmdbBySearch, tvMeta] = await Promise.all([
-    providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-    fetchOMDbMetadata(title, year, omdbApiKey),
-    likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null),
-    providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-    fetchTMDBTVMetadata(title, year, tmdbApiKey),
-    fetchTVMetadata(title, year),
-  ]);
-  const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
-  const matchedJikan = metadataResultMatchesLocalTitle(jikanMeta, localTitles) ? jikanMeta : null;
-  const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
-  const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
-  const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
-  const posterCandidates = officialArtworkOnly([
-    tmdbMeta?.poster,
-    omdbPoster,
-    matchedTV?.poster,
-    likelyAnime ? matchedJikan?.poster : '',
-  ]);
-  const backdropCandidates = officialArtworkOnly([
-    tmdbMeta?.backdrop,
-    likelyAnime ? matchedJikan?.backdrop : '',
-    matchedTV?.backdrop,
-  ]);
-  const fanartLogoCandidates = await fetchFanartTVLogos(
-    tmdbMeta?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
-    fanartApiKey,
-  );
-  const logoCandidates = orderedArtworkCandidates(
-    ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
-    ...fanartLogoCandidates,
-  );
-  const episodes = matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes;
-  const episodeSource = matchedTV?.episodes?.length
-    ? 'TVmaze'
-    : likelyAnime && matchedJikan?.episodes?.length
-      ? 'Jikan'
-      : tmdbMeta?.episodes?.length
-        ? 'TMDB'
-        : undefined;
-
-  return {
-    thumbnail: posterCandidates[0] || '',
-    cover: backdropCandidates[0] || posterCandidates[0] || '',
-    summary: tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
-    rating: showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
-    episodes,
-    episodeSource,
-    posterCandidates,
-    backdropCandidates,
-    logo: logoCandidates[0] || '',
-    logoCandidates,
-  };
-}
-
-async function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMetadataCandidate): Promise<OfficialArtworkRefreshResult> {
-  const library = loadLibrary();
-  const target = findLibraryMediaItem(library, mediaId);
-
-  if (!target) {
-    throw new Error('Media item was not found in the library.');
-  }
-
-  if (candidate.title) target.title = candidate.title;
-  if (candidate.year) target.year = candidate.year;
-  if (candidate.thumbnail) target.poster = candidate.thumbnail;
-  if (candidate.cover) target.backdrop = candidate.cover;
-  if (candidate.logo) target.logo = candidate.logo;
-  if (candidate.summary) target.summary = candidate.summary;
-  if (candidate.rating) target.rating = candidate.rating;
-  if (candidate.genres?.length) target.genres = candidate.genres;
-  mergeEpisodeMetadataForTarget(target, candidate.episodes, candidate.source);
-  target.posterCandidates = orderedArtworkCandidates(
-    ...(candidate.posterCandidates || []),
-    candidate.thumbnail,
-    ...officialArtworkOnly(target.posterCandidates || []),
-    target.poster,
-  );
-  target.backdropCandidates = orderedArtworkCandidates(
-    ...(candidate.backdropCandidates || []),
-    candidate.cover,
-    ...officialArtworkOnly(target.backdropCandidates || []),
-    target.backdrop,
-  );
-  target.logoCandidates = orderedArtworkCandidates(
-    ...(candidate.logoCandidates || []),
-    candidate.logo,
-    ...officialArtworkOnly(target.logoCandidates || []),
-    target.logo,
-  );
-  saveLibrary(library);
-  await cacheArtworkNow(library);
-
-  return {
-    thumbnail: candidate.thumbnail || target.poster || '',
-    cover: candidate.cover || target.backdrop || candidate.thumbnail || target.poster || '',
-    summary: candidate.summary || target.summary || '',
-    rating: candidate.rating || target.rating || 0,
-    episodes: target.type === 'movie' ? undefined : target.episodes,
-    episodeSource: candidate.source,
-    posterCandidates: target.posterCandidates || [],
-    backdropCandidates: target.backdropCandidates || [],
-    logo: candidate.logo || target.logo || '',
-    logoCandidates: target.logoCandidates || [],
-  };
-}
-
-async function getOfficialMetadataCandidates(mediaId: string): Promise<OfficialMetadataCandidate[]> {
-  const library = loadLibrary();
-  const target = findLibraryMediaItem(library, mediaId);
-  if (!target) {
-    throw new Error('Media item was not found in the library.');
-  }
-  return fetchOfficialMetadataCandidatesForItem(target);
-}
-
-async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkRefreshResult> {
-  const library = loadLibrary();
-  const target = findLibraryMediaItem(library, mediaId);
-
-  if (!target) {
-    throw new Error('Media item was not found in the library.');
-  }
-
-  const refreshed = await fetchOfficialArtworkForItem(target);
-  if (refreshed.thumbnail || refreshed.cover || refreshed.logo || refreshed.summary || refreshed.rating || refreshed.episodes?.length) {
-    if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
-    if (refreshed.cover) target.backdrop = refreshed.cover;
-    if (refreshed.logo) target.logo = refreshed.logo;
-    if (refreshed.summary) target.summary = refreshed.summary;
-    if (refreshed.rating) target.rating = refreshed.rating;
-    mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
-    target.posterCandidates = orderedArtworkCandidates(
-      ...refreshed.posterCandidates,
-      ...officialArtworkOnly(target.posterCandidates || []),
-      target.poster,
-    );
-    target.backdropCandidates = orderedArtworkCandidates(
-      ...refreshed.backdropCandidates,
-      ...officialArtworkOnly(target.backdropCandidates || []),
-      target.backdrop,
-    );
-    target.logoCandidates = orderedArtworkCandidates(
-      ...refreshed.logoCandidates,
-      ...officialArtworkOnly(target.logoCandidates || []),
-      target.logo,
-    );
-    saveLibrary(library);
-    await cacheArtworkNow(library);
-  }
-
-  return {
-    ...refreshed,
-    episodes: target.type === 'movie' ? undefined : target.episodes,
-    episodeSource: refreshed.episodeSource,
-    posterCandidates: target.posterCandidates || refreshed.posterCandidates,
-    backdropCandidates: target.backdropCandidates || refreshed.backdropCandidates,
-    logo: target.logo || refreshed.logo || '',
-    logoCandidates: target.logoCandidates || refreshed.logoCandidates,
-  };
-}
-
-async function getPlaybackLogo(mediaId: string): Promise<{ logo?: string; logoCandidates: string[] }> {
-  const library = loadLibrary();
-  const target = findLibraryMediaItem(library, mediaId);
-  if (!target) {
-    throw new Error('Media item was not found in the library.');
-  }
-
-  const existing = orderedArtworkCandidates(
-    target.logo,
-    ...officialArtworkOnly(target.logoCandidates || []),
-  );
-  if (existing.length > 0) {
-    const delivered = artworkDeliveryUrls(existing);
-    return { logo: delivered[0] || artworkDeliveryUrl(existing[0]), logoCandidates: delivered };
-  }
-
-  const refreshed = await fetchOfficialArtworkForItem(target);
-  const logoCandidates = orderedArtworkCandidates(
-    refreshed.logo,
-    ...officialArtworkOnly(refreshed.logoCandidates || []),
-  );
-  if (logoCandidates.length > 0) {
-    target.logo = logoCandidates[0];
-    target.logoCandidates = orderedArtworkCandidates(
-      ...logoCandidates,
-      ...officialArtworkOnly(target.logoCandidates || []),
-    );
-    saveLibrary(library);
-    void cacheArtworkNow(library).catch((error) => {
-      console.error('playback logo artwork cache error:', error);
-    });
-  }
-
-  const delivered = artworkDeliveryUrls(logoCandidates);
-  return { logo: delivered[0] || artworkDeliveryUrl(logoCandidates[0]), logoCandidates: delivered };
-}
-
+const {
+  applyOfficialMetadataCandidate,
+  getOfficialMetadataCandidates,
+  getPlaybackLogo,
+  refreshOfficialArtwork,
+} = createOfficialMetadataService({
+  artworkDeliveryUrl,
+  artworkDeliveryUrls,
+  cacheArtworkNow,
+  fetchFanartMovieLogos,
+  fetchFanartTVLogos,
+  fetchJikanMetadata,
+  fetchJikanMetadataCandidates,
+  fetchOMDbMetadata,
+  fetchOMDbMetadataById,
+  fetchTMDBMovieMetadata,
+  fetchTMDBMovieMetadataById,
+  fetchTMDBMovieMetadataCandidates,
+  fetchTMDBTVMetadata,
+  fetchTMDBTVMetadataById,
+  fetchTMDBTVMetadataCandidates,
+  fetchTVMetadata,
+  fetchTVMetadataCandidates,
+  getMetadataApiKey,
+  loadLibrary,
+  loadSettings,
+  localTitleFromPath,
+  orderedArtworkCandidates,
+  probeMediaFile,
+  saveLibrary,
+});
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
   if (!candidatePath) return false;
   const relative = path.relative(path.resolve(folderPath), path.resolve(candidatePath));
@@ -2629,11 +1066,39 @@ function configureRendererSecurityPolicy(): void {
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
-const skipSegmentService = createSkipSegmentService({ loadLibrary, probeMediaFile });
+const skipSegmentService = createSkipSegmentService({ loadLibrary, loadSettings, probeMediaFile });
 const localSegmentAnalysis = createLocalSegmentAnalysis({ loadLibrary, loadSettings, probeMediaFile });
+const analysisCoordinator = createAnalysisCoordinator({
+  loadLibrary,
+  loadSettings,
+  detector: localSegmentAnalysis,
+  repository: {
+    cancelSegmentAnalysisJobs,
+    cleanupOrphanedAnalysisData,
+    enqueueSegmentAnalysisJob,
+    fingerprintCacheBytes,
+    fingerprintCount,
+    getSegmentAnalysisInventory,
+    getSegmentAnalysisJobCounts,
+    getSegmentAnalysisJobs,
+    recoverRunningSegmentAnalysisJobs,
+    requeueWaitingSegmentAnalysisJobs,
+    resetAutomaticAnalysisData,
+    saveSegmentAnalysisInventory,
+    updateSegmentAnalysisJob,
+  },
+  runtime: {
+    isReady: () => app.isReady(),
+    isOnBatteryPower: () => powerMonitor.isOnBatteryPower(),
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    onAc: (listener) => { powerMonitor.on('on-ac', listener); },
+    onBattery: (listener) => { powerMonitor.on('on-battery', listener); },
+  },
+});
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
+reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
 
-registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateState>({
+registerIpcHandlers<LibraryData, AppSettings>({
   getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
   showOpenFolderDialog,
@@ -2651,6 +1116,7 @@ registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateS
   browserPlaybackPlan,
   loadSettings,
   saveSettings,
+  onSettingsSaved: analysisCoordinator.settingsChanged,
   syncLanAdvertisement,
   testMetadataKeys,
   getLanShareToken,
@@ -2669,9 +1135,42 @@ registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateS
   saveManualMediaSegment: skipSegmentService.saveManualSegment,
   deleteManualMediaSegment: skipSegmentService.deleteManualSegment,
   undoManualMediaSegment: skipSegmentService.undoManualSegment,
-  setPlaybackActivityLease,
-  getLocalSegmentAnalysisStatus: localSegmentAnalysis.status,
-  analyzeLocalSegmentSeason: localSegmentAnalysis.analyze,
+  getManagedMediaSegments: (request) => getManagedSegmentCandidates(request?.mediaId, request?.season, request?.episode).map((candidate) => ({
+    id: candidate.id,
+    mediaId: candidate.mediaId,
+    season: candidate.season,
+    episode: candidate.episode,
+    type: candidate.type,
+    startMs: candidate.startMs,
+    endMs: candidate.endMs,
+    confidence: candidate.confidence,
+    source: candidate.source,
+    status: candidate.status,
+    mediaDurationMs: candidate.mediaDurationMs,
+    updatedAt: candidate.updatedAt,
+    analysisMetadata: candidate.analysisMetadata,
+  })),
+  updateManagedMediaSegment: updateSegmentCandidate,
+  eraseManagedMediaSegments: (request) => ({ removed: eraseAutomaticSegmentCandidates(request.mediaId, request.season, request.episode) }),
+  setPlaybackActivityLease: (key, active, label) => {
+    setPlaybackActivityLease(key, active, label);
+    if (!active) void analysisCoordinator.tick();
+  },
+  getLocalSegmentAnalysisStatus: analysisCoordinator.status,
+  analyzeLocalSegmentSeason: async (mediaId, season) => {
+    analysisCoordinator.enqueueScope({ mediaId, season });
+    return skipSegmentService.getSegments({ mediaId, season });
+  },
+  runLocalSegmentAnalysis: (scope) => ({ queued: analysisCoordinator.enqueueScope(scope) }),
+  cancelLocalSegmentAnalysis: (request) => ({
+    cancelled: request?.kind === 'manual'
+      ? analysisCoordinator.cancelManual()
+      : analysisCoordinator.cancel(request?.jobKey),
+  }),
+  pauseLocalSegmentAnalysis: () => { analysisCoordinator.pause(); return true; },
+  resumeLocalSegmentAnalysis: () => { analysisCoordinator.resume(); return true; },
+  cleanupLocalSegmentAnalysis: () => ({ queued: analysisCoordinator.cleanup() }),
+  rebuildLocalSegmentAnalysis: analysisCoordinator.rebuild,
   customArtworkForRenderer,
   saveCustomArtwork,
   getOfficialMetadataCandidates,
@@ -2691,6 +1190,22 @@ registerIpcHandlers<LibraryData, AppSettings, OfficialMetadataCandidate, UpdateS
   startTranscode,
   appendLocalAccessTokenToUrl,
   stopTranscode,
+  isTrustedSender: (event) => {
+    const window = getMainWindow();
+    if (!window || window.isDestroyed() || event.sender.id !== window.webContents.id) return false;
+    try {
+      const senderFrame = event.senderFrame;
+      if (!senderFrame) return false;
+      const senderUrl = new URL(senderFrame.url);
+      const applicationUrl = new URL(window.webContents.getURL());
+      if (applicationUrl.protocol === 'file:') {
+        return senderUrl.protocol === 'file:' && senderUrl.pathname === applicationUrl.pathname;
+      }
+      return senderUrl.origin === applicationUrl.origin;
+    } catch {
+      return false;
+    }
+  },
 });
 
 // ── VideoPlayer uses HTML5 <video> + the HTTP media server directly.
@@ -2702,24 +1217,14 @@ export const mediaServerDeps = {
   ALLOWED_CORS_ORIGINS,
   LOCAL_ACCESS_HEADER,
   LOCAL_ACCESS_TOKEN,
-  addFolderToLibrary,
   allowedCorsOrigin,
-  appendLocalAccessTokenToUrl,
-  applyOfficialMetadataCandidate,
   authorizeLanRequest,
   authorizeLocalRequest,
-  cacheArtworkNow,
-  clearAppData,
-  customArtworkForRenderer,
   decodeDataUrl,
   getLanServerBase,
-  getLanShareToken,
-  getLibraryMutationVersion: () => libraryMutationVersion,
-  getOfficialMetadataCandidates,
-  getPlaybackTrackPreferences,
   getMediaSegments: skipSegmentService.getSegments,
-  getPlaybackLogo,
   handleLanPairRequest,
+  handleLanRefreshRequest,
   isExternalArtworkUrl,
   isImageFileName,
   isLanSharingEnabled,
@@ -2727,35 +1232,23 @@ export const mediaServerDeps = {
   isSignedLanRequestValid,
   libraryEtagFor,
   libraryForLocalNetwork,
-  libraryForRenderer,
   loadLibrary,
   loadSettings,
   localAccessQuery,
-  needsBrowserTranscoding,
-  browserPlaybackPlan,
   readJsonBody,
-  redirectToArtworkSource,
-  refreshOfficialArtwork,
-  removeFolderFromLibrary,
   requireLocalOrLanAccess,
   requireStreamAccess,
   requestToken,
   safeEndResponse,
-  safeResult,
-  saveLibraryFromScan,
-  saveLibraryMutation,
-  savePlaybackTrackPreferences,
   saveSettings,
-  scanLibrary,
-  showOpenFolderDialog,
   writeJson,
-};
+} satisfies MediaServerDependencies;
 
 app.whenReady().then(async () => {
   applyAppIcon();
   cleanupOldTranscodes();
   await startMediaServer(mediaServerDeps);
-  localSegmentAnalysis.startScheduler();
+  analysisCoordinator.start();
   skipSegmentService.warmLibrary(loadLibrary());
   syncLanAdvertisement();
   const trayIconPath = getWindowIconPath();

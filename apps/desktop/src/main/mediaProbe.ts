@@ -1,11 +1,13 @@
 import fs from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { findFFprobe } from './mediaBinaries';
 import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
 
 const PROBE_CACHE_LIMIT = 1000;
 const probeCache = new Map<string, ProbeResult>();
+const execFileAsync = promisify(execFile);
 
 function streamType(value?: string): MediaTrack['type'] {
   if (value === 'video' || value === 'audio' || value === 'subtitle' || value === 'data') return value;
@@ -34,7 +36,7 @@ function cacheProbeResult(cacheKey: string, result: ProbeResult): ProbeResult {
   return result;
 }
 
-export function probeMedia(filePath: string): ProbeResult {
+export async function probeMedia(filePath: string): Promise<ProbeResult> {
   assertLocalMediaPath(filePath);
   const cacheKey = probeCacheKey(filePath);
   const cached = probeCache.get(cacheKey);
@@ -43,10 +45,10 @@ export function probeMedia(filePath: string): ProbeResult {
   const ffprobe = findFFprobe();
   if (!ffprobe) throw new Error('ffprobe is not available.');
 
-  const raw = execFileSync(
+  const { stdout: raw } = await execFileAsync(
     ffprobe,
     ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
   );
   const parsed = JSON.parse(raw) as {
     format?: { duration?: string; bit_rate?: string; format_name?: string };

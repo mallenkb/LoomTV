@@ -52,8 +52,23 @@ export default defineConfig({
   base: './',
   plugins: [rendererCspPlugin(), react()],
   build: {
+    // hls.js is lazy-loaded as a self-contained playback runtime (~510 kB
+    // minified); keep the budget tight enough to catch growth elsewhere.
+    chunkSizeWarningLimit: 525,
     emptyOutDir: false,
     outDir: '.vite/renderer/main_window',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('/hls.js/')) return 'media-runtime';
+          if (id.includes('/motion/')) return 'motion';
+          if (id.includes('/lucide-react/')) return 'icons';
+          if (/\/react(?:-dom|-router|-router-dom)?\//.test(id)) return 'react-runtime';
+          return 'vendor';
+        },
+      },
+    },
   },
   optimizeDeps: {
     entries: ['index.html'],

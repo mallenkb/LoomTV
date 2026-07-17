@@ -68,7 +68,7 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
         '-show_chapters',
         filePath,
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
     );
 
     const parsed = JSON.parse(raw) as {

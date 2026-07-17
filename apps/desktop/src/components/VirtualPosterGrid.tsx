@@ -52,16 +52,25 @@ export default function VirtualPosterGrid<T extends { id: string }>({
     if (!root) return undefined;
     const parent = scrollParentFor(root);
 
-    const update = () => {
+    let animationFrame: number | null = null;
+    const measure = () => {
+      animationFrame = null;
       const metrics = scrollMetrics(parent, root);
-      setViewport({
-        width: root.clientWidth,
-        scrollTop: metrics.scrollTop,
-        height: metrics.viewportHeight,
-      });
+      const width = root.clientWidth;
+      setViewport((current) => (
+        current.width === width
+        && current.scrollTop === metrics.scrollTop
+        && current.height === metrics.viewportHeight
+          ? current
+          : { width, scrollTop: metrics.scrollTop, height: metrics.viewportHeight }
+      ));
+    };
+    const update = () => {
+      if (animationFrame !== null) return;
+      animationFrame = requestAnimationFrame(measure);
     };
 
-    update();
+    measure();
     const resizeObserver = new ResizeObserver(update);
     resizeObserver.observe(root);
     const scrollTarget = parent instanceof Window ? window : parent;
@@ -69,6 +78,7 @@ export default function VirtualPosterGrid<T extends { id: string }>({
     window.addEventListener('resize', update);
 
     return () => {
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
       scrollTarget.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
@@ -78,7 +88,9 @@ export default function VirtualPosterGrid<T extends { id: string }>({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    setViewport((current) => ({ ...current, width: root.clientWidth }));
+    setViewport((current) => current.width === root.clientWidth
+      ? current
+      : { ...current, width: root.clientWidth });
   }, [items.length]);
 
   const range = virtualGridRange({

@@ -18,8 +18,8 @@ export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey
     const attempts = year ? [year, undefined] : [undefined];
     for (const attemptYear of attempts) {
       const yearParam = attemptYear ? `&y=${attemptYear}` : '';
-      const url = `http://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}`;
-      const res = await fetch(url);
+      const url = `https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${encodeURIComponent(omdbApiKey)}${yearParam}`;
+      const res = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'], retries: 2 });
       const data = (await res.json()) as OMDbResponse;
       if (data.Response !== 'False') return data;
     }
@@ -32,11 +32,12 @@ export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey
 export async function fetchOMDbMetadataById(imdbId: string | undefined, omdbApiKey?: string): Promise<OMDbResponse | null> {
   if (!imdbId || !omdbApiKey) return null;
   try {
-    const url = `http://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(omdbApiKey)}`;
-    const res = await fetch(url);
+    const url = `https://www.omdbapi.com/?i=${encodeURIComponent(imdbId)}&apikey=${encodeURIComponent(omdbApiKey)}`;
+    const res = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'], retries: 2 });
     const data = (await res.json()) as OMDbResponse;
     return data.Response !== 'False' ? data : null;
   } catch {
     return null;
   }
 }
+import { safeFetch } from '../safeFetch';
