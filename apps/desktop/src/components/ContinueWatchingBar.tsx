@@ -3,7 +3,7 @@ import { Play, X } from 'lucide-react';
 import { useLibrary, EpisodeFile, EpisodeMeta, MediaItem, TVShow } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
 import type { StoredProgress } from '@/lib/desktopApi';
-import { hydrateProgressFromDatabase, loadProgress } from '@/lib/progress';
+import { useProgressSnapshot } from '@/lib/progress';
 import {
   cleanEpisodeTitleForDisplay,
   episodeCode as formatEpisodeCode,
@@ -283,7 +283,7 @@ function findLatestCandidate(
 
 export default function ContinueWatchingBar({ isHidden = false, onPlay }: ContinueWatchingBarProps) {
   const { state } = useLibrary();
-  const [progress, setProgress] = useState<Record<string, StoredProgress>>(() => loadProgress());
+  const progress = useProgressSnapshot();
   const [dismissedCandidate, setDismissedCandidate] = useState<{
     key: string;
     position: number;
@@ -292,21 +292,6 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [thumbnailFallbackUrl, setThumbnailFallbackUrl] = useState('');
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
-
-  useEffect(() => {
-    const refresh = () => setProgress(loadProgress());
-    void hydrateProgressFromDatabase().then(refresh);
-    const interval = window.setInterval(refresh, 2000);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('storage', refresh);
-    window.addEventListener('loomtv-progress', refresh);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', refresh);
-      window.removeEventListener('storage', refresh);
-      window.removeEventListener('loomtv-progress', refresh);
-    };
-  }, []);
 
   const candidate = useMemo(
     () => findLatestCandidate(

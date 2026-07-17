@@ -78,6 +78,14 @@ body {
   scrollbar-width: none;
 }
 
+/* Keep typography consistent across every desktop surface, including utility
+   classes that may otherwise add condensed, expanded, or negative tracking. */
+*,
+*::before,
+*::after {
+  letter-spacing: normal !important;
+}
+
 *::-webkit-scrollbar {
   display: none;
 }
@@ -324,7 +332,6 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .loom-section-title {
-  letter-spacing: 0;
   text-transform: none;
 }
 
@@ -370,22 +377,26 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .settings-panel {
-  border: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--loom-text) 9%, transparent) !important;
   background: var(--loom-surface-2);
 }
 
 .settings-panel-soft {
-  border: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--loom-text) 7%, transparent) !important;
   background: var(--loom-surface-2);
 }
 
 .settings-folder-row {
-  border: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--loom-text) 12%, transparent);
   background: var(--loom-surface-3);
 }
 
+.settings-network-card {
+  border: 1px solid color-mix(in srgb, var(--loom-text) 12%, transparent);
+}
+
 .settings-action-tile {
-  border: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--loom-text) 7%, transparent) !important;
   background: var(--loom-surface-2);
 }
 

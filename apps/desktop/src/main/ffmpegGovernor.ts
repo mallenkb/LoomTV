@@ -30,6 +30,7 @@ const playbackProcesses = new Map<ChildProcess, PlaybackMeta>();
 const playbackActivityLeases = new Map<string, { label: string; touchedAt: number }>();
 const analysisProcesses = new Set<ChildProcess>();
 let lastPlaybackActivityAt = 0;
+let analysisInterruptionEpoch = 0;
 
 function killProcess(proc: ChildProcess): void {
   try {
@@ -40,8 +41,17 @@ function killProcess(proc: ChildProcess): void {
 }
 
 function interruptAnalysis(): void {
+  analysisInterruptionEpoch += 1;
   for (const proc of [...analysisProcesses]) killProcess(proc);
   analysisProcesses.clear();
+}
+
+export function interruptAnalysisProcesses(): void {
+  interruptAnalysis();
+}
+
+export function currentAnalysisInterruptionEpoch(): number {
+  return analysisInterruptionEpoch;
 }
 
 function notePlaybackActivity(): void {

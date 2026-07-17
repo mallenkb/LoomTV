@@ -18,7 +18,7 @@ function popcount32(value: number): number {
   return (((next + (next >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
 }
 
-export function fingerprintFrameSimilarity(left: number, right: number): number {
+function fingerprintFrameSimilarity(left: number, right: number): number {
   return 1 - popcount32((left ^ right) >>> 0) / 32;
 }
 
@@ -47,7 +47,12 @@ function candidateOffsets(left: number[], right: number[]): number[] {
 export function bestFingerprintMatch(
   left: FingerprintWindow,
   right: FingerprintWindow,
-  limits: { minDurationMs: number; maxDurationMs: number; minSimilarity: number },
+  limits: {
+    minDurationMs: number;
+    maxDurationMs: number;
+    minSimilarity: number;
+    excludeLeft?: Array<{ startMs: number; endMs: number }>;
+  },
 ): FingerprintMatch | null {
   if (!left.frames.length || !right.frames.length || !left.durationMs || !right.durationMs) return null;
   const frameMs = left.durationMs / left.frames.length;
@@ -76,6 +81,15 @@ export function bestFingerprintMatch(
     };
 
     for (let index = start; index < stop; index += 1) {
+      const timeMs = index * frameMs;
+      const excluded = limits.excludeLeft?.some((range) => timeMs >= range.startMs && timeMs < range.endMs);
+      if (excluded) {
+        consider();
+        runStart = index + 1;
+        runScore = 0;
+        runLength = 0;
+        continue;
+      }
       const similarity = fingerprintFrameSimilarity(left.frames[index], right.frames[index + offset]);
       if (similarity >= 0.70) {
         runScore += similarity;

@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { randomBytes, randomInt, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { app } from 'electron';
 import { loadSettingsFromDatabase, saveSettingsToDatabase } from './database';
 import { normalizeProviderId } from './metadataKeys';
-import type { AppSettings, LanPairedDevice } from '../main';
+import type { AppSettings, LanPairedDevice } from './appContracts.ts';
+import type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
@@ -15,7 +16,7 @@ const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' 
 };
 
 export function createLanShareCode(): string {
-  return String(randomInt(0, 1_000_000)).padStart(6, '0');
+  return randomBytes(32).toString('base64url');
 }
 
 function pairedDeviceFingerprint(device: Pick<LanPairedDevice, 'name' | 'lastAddress'>): string {
@@ -30,11 +31,24 @@ function normalizePairedDevices(value: unknown): LanPairedDevice[] {
   const unique = new Map<string, LanPairedDevice>();
 
   for (const entry of value) {
-    if (!entry || typeof entry.id !== 'string' || typeof entry.token !== 'string' || !/^[0-9a-f]{32,}$/i.test(entry.token)) continue;
+    if (
+      !entry
+      || entry.securityEpoch !== 2
+      || typeof entry.id !== 'string'
+      || typeof entry.accessTokenHash !== 'string'
+      || !/^[0-9a-f]{64}$/i.test(entry.accessTokenHash)
+      || typeof entry.refreshTokenHash !== 'string'
+      || !/^[0-9a-f]{64}$/i.test(entry.refreshTokenHash)
+    ) continue;
     const device: LanPairedDevice = {
       id: entry.id,
       name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 80) : 'Unnamed device',
-      token: entry.token,
+      accessTokenHash: entry.accessTokenHash,
+      accessTokenExpiresAt: Number(entry.accessTokenExpiresAt) || 0,
+      refreshTokenHash: entry.refreshTokenHash,
+      refreshTokenExpiresAt: Number(entry.refreshTokenExpiresAt) || 0,
+      scopes: ['catalog:read', 'media:stream', 'playback:write'],
+      securityEpoch: 2,
       createdAt: Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : Date.now(),
       lastSeenAt: Number.isFinite(entry.lastSeenAt) ? Number(entry.lastSeenAt) : Date.now(),
       lastAddress: typeof entry.lastAddress === 'string' ? entry.lastAddress : undefined,
@@ -47,7 +61,73 @@ function normalizePairedDevices(value: unknown): LanPairedDevice[] {
   return [...unique.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
 }
 
-export function normalizeSettings(raw: AppSettings): AppSettings {
+function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(min, Math.min(max, numeric)) : fallback;
+}
+
+function stringList(value: unknown, max = 500): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.flatMap((entry) => typeof entry === 'string' && entry.trim() ? [entry.trim().slice(0, 1024)] : []))].slice(0, max);
+}
+
+function normalizeSkipAnalysis(raw: AppSettings): SkipAnalysisSettings {
+  const value = raw.skipAnalysis && typeof raw.skipAnalysis === 'object' ? raw.skipAnalysis : undefined;
+  const bool = (entry: unknown, fallback: boolean) => typeof entry === 'boolean' ? entry : fallback;
+  const limit = (entry: unknown, fallbackMin: number, fallbackMax: number) => {
+    const record = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    const minSeconds = boundedNumber(record.minSeconds, fallbackMin, 1, 900);
+    const maxSeconds = Math.max(minSeconds, boundedNumber(record.maxSeconds, fallbackMax, minSeconds, 1800));
+    return { minSeconds, maxSeconds };
+  };
+  const enabledTypes = value?.enabledTypes;
+  const promptTypes = value?.promptTypes;
+  const durationLimits = value?.durationLimits;
+  const exclusions = value?.exclusions;
+  const rawOverrides = value?.seasonOverrides && typeof value.seasonOverrides === 'object'
+    ? value.seasonOverrides as Record<string, unknown>
+    : {};
+  const seasonOverrides: Record<string, SkipAnalysisSettings['seasonOverrides'][string]> = {};
+  for (const [key, mode] of Object.entries(rawOverrides)) {
+    if ((mode === 'full' || mode === 'chapter-only' || mode === 'providers-only') && key.length <= 240) {
+      seasonOverrides[key] = mode;
+    }
+  }
+  return {
+    enabled: bool(value?.enabled, raw.localSkipAnalysisEnabled !== false),
+    analyzeNewMedia: bool(value?.analyzeNewMedia, true),
+    enabledTypes: {
+      intro: bool(enabledTypes?.intro, true),
+      recap: bool(enabledTypes?.recap, true),
+      credits: bool(enabledTypes?.credits, true),
+      preview: bool(enabledTypes?.preview, true),
+    },
+    promptTypes: {
+      intro: bool(promptTypes?.intro, true),
+      recap: bool(promptTypes?.recap, true),
+      credits: bool(promptTypes?.credits, true),
+      preview: bool(promptTypes?.preview, false),
+    },
+    durationLimits: {
+      intro: limit(durationLimits?.intro, 15, 180),
+      recap: limit(durationLimits?.recap, 15, 120),
+      credits: limit(durationLimits?.credits, 15, 300),
+      preview: limit(durationLimits?.preview, 15, 120),
+      movieCredits: limit(durationLimits?.movieCredits, 15, 900),
+    },
+    suppressFirstEpisodeIntro: bool(value?.suppressFirstEpisodeIntro, false),
+    analyzeSpecials: bool(value?.analyzeSpecials, false),
+    exclusions: {
+      seriesIds: stringList(exclusions?.seriesIds),
+      movieIds: stringList(exclusions?.movieIds),
+      seasons: stringList(exclusions?.seasons),
+      paths: stringList(exclusions?.paths),
+    },
+    seasonOverrides,
+  };
+}
+
+function normalizeSettings(raw: AppSettings): AppSettings {
   const metadataApiKeys: Record<string, string> = {};
   const rawKeys = raw.metadataApiKeys || {};
   const autoSyncIntervalHours = Number(raw.autoSyncIntervalHours);
@@ -67,6 +147,7 @@ export function normalizeSettings(raw: AppSettings): AppSettings {
   if (raw.omdbApiKey?.trim()) metadataApiKeys.omdb = raw.omdbApiKey.trim();
   if (raw.tmdbApiKey?.trim()) metadataApiKeys.tmdb = raw.tmdbApiKey.trim();
 
+  const skipAnalysis = normalizeSkipAnalysis(raw);
   return {
     ...raw,
     omdbApiKey: metadataApiKeys.omdb || '',
@@ -91,7 +172,8 @@ export function normalizeSettings(raw: AppSettings): AppSettings {
     playbackSkipForwardSeconds: Number.isFinite(Number(raw.playbackSkipForwardSeconds)) && Number(raw.playbackSkipForwardSeconds) > 0
       ? Number(raw.playbackSkipForwardSeconds)
       : 15,
-    localSkipAnalysisEnabled: raw.localSkipAnalysisEnabled !== false,
+    localSkipAnalysisEnabled: skipAnalysis.enabled,
+    skipAnalysis,
     sidebarNavOrder,
     appThemeMode: raw.appThemeMode === 'light' ? 'light' : 'dark',
     appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
@@ -104,7 +186,7 @@ export function normalizeSettings(raw: AppSettings): AppSettings {
       ? raw.appLoaderStyle
       : 'play-mark',
     localNetworkSharingEnabled: Boolean(raw.localNetworkSharingEnabled),
-    localNetworkShareToken: raw.localNetworkShareToken && /^\d{6}$/.test(raw.localNetworkShareToken)
+    localNetworkShareToken: raw.localNetworkShareToken && /^[A-Za-z0-9_-]{43}$/.test(raw.localNetworkShareToken)
       ? raw.localNetworkShareToken
       : createLanShareCode(),
     localNetworkDeviceId: typeof raw.localNetworkDeviceId === 'string' && raw.localNetworkDeviceId.length >= 8
@@ -117,6 +199,7 @@ export function normalizeSettings(raw: AppSettings): AppSettings {
       ? raw.localNetworkHmacSecret
       : randomBytes(32).toString('hex'),
     localNetworkPairedDevices: normalizePairedDevices(raw.localNetworkPairedDevices),
+    localNetworkSecurityEpoch: 2,
   };
 }
 
@@ -132,20 +215,31 @@ export function getMetadataApiKey(settings: AppSettings, providerId: string): st
 
 export function loadSettings(): AppSettings {
   const databaseSettings = loadSettingsFromDatabase();
-  if (databaseSettings) return normalizeSettings(databaseSettings as AppSettings);
+  if (databaseSettings) {
+    const normalized = normalizeSettings(databaseSettings as AppSettings);
+    if (Number((databaseSettings as AppSettings).localNetworkSecurityEpoch) !== 2) {
+      saveSettingsToDatabase(normalized as unknown as Record<string, unknown>);
+    }
+    return normalized;
+  }
 
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
       const settings = normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')) as AppSettings);
       saveSettingsToDatabase(settings as unknown as Record<string, unknown>);
+      try {
+        fs.rmSync(SETTINGS_FILE);
+      } catch (error) {
+        console.warn('[settings] Legacy settings were migrated but could not be removed:', error);
+      }
       return settings;
     }
-  } catch {}
+  } catch (error) {
+    console.error('[settings] Failed to migrate legacy settings:', error);
+  }
   return normalizeSettings({});
 }
 
 export function saveSettings(settings: AppSettings): void {
-  try {
-    saveSettingsToDatabase(normalizeSettings(settings) as unknown as Record<string, unknown>);
-  } catch {}
+  saveSettingsToDatabase(normalizeSettings(settings) as unknown as Record<string, unknown>);
 }

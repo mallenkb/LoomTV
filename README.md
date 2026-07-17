@@ -44,6 +44,10 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.50](docs/releases/v1.0.50.md): fixes desktop release CI by aligning the GitHub Actions pnpm version with the workspace toolchain.
+- [Loom Media Server 1.0.49](docs/releases/v1.0.49.md): republishes the current desktop build with fresh installers and updater metadata.
+- [Loom Media Server 1.0.48](docs/releases/v1.0.48.md): improves skip-analysis scheduling, manual scan responsiveness, playback protection, and library coverage reporting.
+- [Loom Media Server 1.0.47](docs/releases/v1.0.47.md): makes intro/outro skipping easier to discover while keeping advanced analysis and manual timestamp controls available on demand.
 - [Loom Media Server 1.0.46](docs/releases/v1.0.46.md): hardens desktop library scans against duplicate items, stale metadata, and overlapping scan runs.
 - [Loom Media Server 1.0.45](docs/releases/v1.0.45.md): makes skip-marker lookups durable and retries empty or partial provider results during playback.
 - [Loom Media Server 1.0.44](docs/releases/v1.0.44.md): fixes skip-marker provider timeouts so desktop CI and playback recovery complete reliably.
@@ -216,7 +220,6 @@ Loom Media Server can enrich local files with artwork and metadata. Open Setting
 
 - `corepack pnpm desktop:start`: start the Electron Forge desktop app.
 - `corepack pnpm mobile:start`: start the Expo mobile app.
-- `corepack pnpm convex:dev`: configure and run the Convex backend.
 - `corepack pnpm --filter loom-media-server-desktop package`: create an unpacked local desktop build.
 - `corepack pnpm --filter loom-media-server-desktop make`: create Electron Forge desktop distributables.
 - `corepack pnpm --filter loom-media-server-desktop dist`: create Electron Builder release artifacts without publishing.
@@ -232,7 +235,6 @@ apps/
     resources/   Bundled FFmpeg and FFprobe resources and notices.
     tests/       Desktop unit tests.
   mobile/        Expo React Native MVP client for pairing with a desktop host and testing playback.
-convex/          Convex schema and functions for host registry, pairing, media sync, and playback state.
 ```
 
 ## Building and Packaging

@@ -38,13 +38,13 @@ test('LAN token remains separate from the local access token query parameter', (
   assert.equal(requestLanToken(new URL('http://192.168.1.5:3847/api/lan/library'), { authorization: 'Bearer device-token' }), 'device-token');
 });
 
-test('CORS is restricted to renderer and loopback web origins', () => {
+test('CORS is restricted to the exact configured renderer origin', () => {
   const allowed = new Set(['http://localhost:5173']);
 
   assert.equal(allowedCorsOrigin('http://localhost:5173', allowed), 'http://localhost:5173');
-  assert.equal(allowedCorsOrigin('http://127.0.0.1:5173', allowed), 'http://127.0.0.1:5173');
-  assert.equal(allowedCorsOrigin('http://[::1]:5173', allowed), 'http://[::1]:5173');
-  assert.equal(allowedCorsOrigin('null', allowed), 'null');
+  assert.equal(allowedCorsOrigin('http://127.0.0.1:5173', allowed), null);
+  assert.equal(allowedCorsOrigin('http://[::1]:5173', allowed), null);
+  assert.equal(allowedCorsOrigin('null', allowed), null);
   assert.equal(allowedCorsOrigin('https://example.com', allowed), null);
 });
 

@@ -1,242 +1,78 @@
 import packageJson from '../../package.json';
-import type { MediaItem, TVShow } from '@/contexts/LibraryContext';
-
-type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
-type LibraryFolderGroups = { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
-type LibraryFolderStatus = {
-  path: string;
-  kind: LibraryFolderKind;
-  state: 'available' | 'unavailable';
-  isNetworkLike: boolean;
-  checkedAt: number;
-  message: string;
-};
-type LibraryPayload = {
-  movies: MediaItem[];
-  tvShows: TVShow[];
-  animeShows?: TVShow[];
-  libraryFolders: string[];
-  libraryFolderGroups?: LibraryFolderGroups;
-  libraryFolderStatuses?: LibraryFolderStatus[];
-};
-type LibraryScanProgress = {
-  isComplete: boolean;
-  scannedFolders: number;
-  totalFolders: number;
-};
-export type LibraryScanMode = 'quick' | 'metadata' | 'full';
-type MetadataApiKeys = Record<string, string>;
-type SettingsPayload = {
-  omdbApiKey?: string;
-  tmdbApiKey?: string;
-  metadataApiKeys?: MetadataApiKeys;
-  openSubtitlesUsername?: string;
-  openSubtitlesPassword?: string;
-  openSubtitlesLanguages?: string;
-  openSubtitlesAutoDownload?: boolean;
-  autoSyncIntervalHours?: number;
-  playbackSkipBackSeconds?: number;
-  playbackSkipForwardSeconds?: number;
-  localSkipAnalysisEnabled?: boolean;
-  sidebarNavOrder?: string[];
-  customFolderNames?: Record<string, string>;
-  appThemeMode?: 'dark' | 'light';
-  appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
-  appDarkTheme?: 'default' | 'justwatch' | 'black';
-  appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
-  localNetworkSharingEnabled?: boolean;
-  localNetworkShareToken?: string;
-};
-export type MetadataKeyTestResult = {
-  provider: string;
-  ok: boolean;
-  message: string;
-};
-export type PlaybackLogoResult = {
-  logo?: string;
-  logoCandidates?: string[];
-};
-export type UpdateState = {
-  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error';
-  currentVersion: string;
-  platform: NodeJS.Platform;
-  arch: string;
-  supported: boolean;
-  downloadPercent?: number;
-  latestVersion?: string;
-  releaseUrl?: string;
-  message?: string;
-  checkedAt?: string;
-};
-type FFmpegStatus = { available: boolean; path: string | null };
-type ApiResult<T> = { ok: boolean; data?: T; error?: string };
-type SubtitleStyleOptions = {
-  delaySeconds?: number;
-  position?: number;
-  scale?: number;
-  fontSize?: number;
-  fontColor?: string;
-  borderColor?: string;
-  borderWidth?: number;
-  borderEnabled?: boolean;
-  backgroundColor?: string;
-  backgroundEnabled?: boolean;
-};
-type TranscodeOptions = {
-  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
-  startSeconds?: number;
-  videoTrackIndex?: number;
-  audioTrackIndex?: number;
-  subtitleTrackIndex?: number;
-  subtitleStreamOrdinal?: number;
-  subtitleCodec?: string;
-  subtitleFilePath?: string;
-  secondarySubtitleTrackIndex?: number;
-  secondarySubtitleStreamOrdinal?: number;
-  secondarySubtitleCodec?: string;
-  secondarySubtitleFilePath?: string;
-  subtitleStyle?: SubtitleStyleOptions;
-  forceTranscode?: boolean;
-};
-type TranscodeSession = {
-  sessionId: string;
-  filePath: string;
-  playlistUrl: string;
-  outputDir: string;
-  seekable: boolean;
-  startSeconds: number;
-};
-type StreamUrlOptions = Pick<TranscodeOptions,
-  | 'startSeconds'
-  | 'videoTrackIndex'
-  | 'audioTrackIndex'
-  | 'subtitleTrackIndex'
-  | 'subtitleStreamOrdinal'
-  | 'subtitleCodec'
-  | 'subtitleFilePath'
-  | 'secondarySubtitleTrackIndex'
-  | 'secondarySubtitleStreamOrdinal'
-  | 'secondarySubtitleCodec'
-  | 'secondarySubtitleFilePath'
-  | 'forceTranscode'
-> & { subtitleStyle?: SubtitleStyleOptions };
-type PlaybackMode = 'direct' | 'remux' | 'direct-stream' | 'transcode';
-type StreamUrlResult = {
-  url: string;
-  contentType: string;
-  fileName: string;
-  isTranscoded?: boolean;
-  isRemuxed?: boolean;
-  playbackMode?: PlaybackMode;
-  decisionReason?: string;
-};
+import type {
+  ApiResult,
+  FFmpegStatus,
+  LibraryFolderKind,
+  LibraryPayload,
+  LibraryScanMode,
+  LibraryScanProgress,
+  LocalNetworkPairedDevice,
+  LocalNetworkPeer,
+  LocalNetworkStatus,
+  LocalSegmentAnalysisStatus,
+  ManualMediaSegmentInput,
+  ManagedMediaSegment,
+  MediaSegmentRequest,
+  MediaSegmentResponse,
+  MediaSegmentType,
+  MetadataApiKeys,
+  MetadataKeyTestResult,
+  OfficialArtworkResult,
+  OfficialMetadataCandidate,
+  PlaybackLogoResult,
+  PlaybackMode,
+  PlaybackTrackPreferences,
+  RemoteLibraryConnection,
+  SettingsPayload,
+  SkipAnalysisRunScope,
+  StoredProgress,
+  StreamUrlOptions,
+  StreamUrlResult,
+  TranscodeOptions,
+  TranscodeSession,
+  UpdateState,
+} from '../shared/desktopProtocol.ts';
+export type {
+  ApiResult,
+  LibraryFolderKind,
+  LibraryPayload,
+  LibraryScanMode,
+  LibraryScanProgress,
+  LocalNetworkPairedDevice,
+  LocalNetworkPeer,
+  LocalNetworkStatus,
+  LocalSegmentAnalysisStatus,
+  ManualMediaSegmentInput,
+  ManagedMediaSegment,
+  MediaSegment,
+  MediaSegmentRequest,
+  MediaSegmentResponse,
+  MediaSegmentType,
+  MetadataApiKeys,
+  MetadataKeyTestResult,
+  OfficialArtworkResult,
+  OfficialMetadataCandidate,
+  PlaybackLogoResult,
+  PlaybackTrackPreferences,
+  RemoteLibraryConnection,
+  SettingsPayload,
+  SkipAnalysisRunScope,
+  StoredProgress,
+  StreamUrlOptions,
+  StreamUrlResult,
+  SubtitleStyleOptions,
+  TranscodeOptions,
+  TranscodeSession,
+  UpdateState,
+} from '../shared/desktopProtocol.ts';
+export type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 declare const __APP_VERSION__: string | undefined;
 
 export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION__
   ? __APP_VERSION__
   : packageJson.version || 'dev';
 
-export type LocalNetworkPairedDevice = {
-  id: string;
-  name: string;
-  createdAt: number;
-  lastSeenAt: number;
-  lastAddress?: string;
-};
-export type LocalNetworkStatus = {
-  sharingEnabled: boolean;
-  token: string;
-  deviceId?: string;
-  deviceName?: string;
-  networkName: string;
-  port: number;
-  addresses: string[];
-  baseUrl: string | null;
-  libraryUrl: string | null;
-  pairedDevices?: LocalNetworkPairedDevice[];
-};
-export type LocalNetworkPeer = {
-  deviceId: string;
-  deviceName: string;
-  host: string;
-  port: number;
-  addresses: string[];
-  appVersion: string;
-};
-export type RemoteLibraryConnection = {
-  baseUrl: string;
-  deviceId: string;
-  deviceToken: string;
-  hostDeviceId?: string;
-  hostDeviceName?: string;
-  library: LibraryPayload;
-  libraryEtag: string;
-};
-export type StoredProgress = { position: number; duration: number; updatedAt: number; watched: boolean };
-export type TrackPreference = {
-  enabled: boolean;
-  index?: number;
-  language?: string;
-  title?: string;
-  codec?: string;
-  forced?: boolean;
-};
-export type PlaybackTrackPreferences = {
-  audio?: TrackPreference;
-  subtitle?: TrackPreference;
-};
-export type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
-export type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'chromaprint';
-export type MediaSegment = {
-  id: string;
-  type: MediaSegmentType;
-  startMs: number;
-  endMs: number | null;
-  confidence: number;
-  source: MediaSegmentSource;
-  mediaDurationMs: number;
-  updatedAt: string;
-};
-export type MediaSegmentRequest = { mediaId: string; season?: number; episode?: number };
-export type MediaSegmentResponse = { segments: MediaSegment[]; revision: string };
-export type ManualMediaSegmentInput = MediaSegmentRequest & {
-  type: MediaSegmentType;
-  startMs: number;
-  endMs: number | null;
-};
-export type LocalSegmentAnalysisStatus = {
-  enabled: boolean;
-  available: boolean;
-  helperPath: string | null;
-  state: 'disabled' | 'idle' | 'queued' | 'running' | 'paused' | 'unavailable' | 'error';
-  message?: string;
-  jobs?: Array<{ jobKey: string; mediaId: string; season: number; state: string; detail: string; updatedAt: number }>;
-};
-export type OfficialArtworkResult = {
-  thumbnail?: string;
-  cover?: string;
-  summary?: string;
-  rating?: number;
-  episodes?: unknown[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
-  posterCandidates?: string[];
-  backdropCandidates?: string[];
-  logoCandidates?: string[];
-  logo?: string;
-};
-export type OfficialMetadataCandidate = OfficialArtworkResult & {
-  id: string;
-  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
-  title: string;
-  year?: number;
-  genres?: string[];
-  episodeCount?: number;
-  episodePreview?: string[];
-};
-
-declare global {
-  interface Window {
-    desktopApi?: {
+export type DesktopBridgeApi = {
       getLibrary: () => Promise<LibraryPayload>;
       scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryPayload>;
       onLibraryScanProgress?: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => () => void;
@@ -263,11 +99,20 @@ declare global {
       savePlaybackTrackPreferences?: (scope: string, preferences: PlaybackTrackPreferences) => Promise<PlaybackTrackPreferences>;
       getMediaSegments?: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
       saveManualMediaSegment?: (input: ManualMediaSegmentInput) => Promise<MediaSegmentResponse>;
-      deleteManualMediaSegment?: (input: MediaSegmentRequest & { type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
-      undoManualMediaSegment?: (input: MediaSegmentRequest & { type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
+      deleteManualMediaSegment?: (input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
+      undoManualMediaSegment?: (input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
+      getManagedMediaSegments?: (request?: Partial<MediaSegmentRequest>) => Promise<ManagedMediaSegment[]>;
+      updateManagedMediaSegment?: (candidateId: string, patch: { status?: ManagedMediaSegment['status']; type?: MediaSegmentType }) => Promise<boolean>;
+      eraseManagedMediaSegments?: (request: MediaSegmentRequest) => Promise<{ removed: number }>;
       setPlaybackActivity?: (key: string, active: boolean, label?: string) => Promise<boolean>;
       getLocalSegmentAnalysisStatus?: () => Promise<LocalSegmentAnalysisStatus>;
       analyzeLocalSegmentSeason?: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
+      runLocalSegmentAnalysis?: (scope?: SkipAnalysisRunScope) => Promise<{ queued: number }>;
+      cancelLocalSegmentAnalysis?: (request?: { jobKey?: string; kind?: 'manual' }) => Promise<{ cancelled: number }>;
+      pauseLocalSegmentAnalysis?: () => Promise<boolean>;
+      resumeLocalSegmentAnalysis?: () => Promise<boolean>;
+      cleanupLocalSegmentAnalysis?: () => Promise<{ queued: number }>;
+      rebuildLocalSegmentAnalysis?: () => Promise<{ removed: number; queued: number }>;
       getCustomArtwork?: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
       getOfficialMetadataCandidates?: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
@@ -285,11 +130,15 @@ declare global {
       onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
       media?: {
         probe: (filePath: string) => Promise<ApiResult<unknown>>;
-        canDirectPlay: (filePath: string, backend?: string) => Promise<ApiResult<boolean>>;
+        canDirectPlay: (filePath: string, backend?: 'html5' | 'hls') => Promise<ApiResult<boolean>>;
         startTranscode: (filePath: string, options?: TranscodeOptions) => Promise<ApiResult<TranscodeSession>>;
         stopTranscode: (sessionId: string) => Promise<ApiResult<boolean>>;
       };
-    };
+};
+
+declare global {
+  interface Window {
+    desktopApi?: DesktopBridgeApi;
   }
 }
 
@@ -358,6 +207,7 @@ function normalizeLocalNetworkBaseUrl(value: string): string {
   if (!trimmed) throw new Error('Enter the other device address.');
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   const parsed = new URL(withProtocol);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Enter a valid HTTP or HTTPS address.');
   return parsed.origin;
 }
 
@@ -517,9 +367,9 @@ export const desktopApi = {
   },
 
   async connectToLocalNetworkLibrary(baseUrl: string, code: string): Promise<RemoteLibraryConnection> {
-    const normalizedCode = code.replace(/\D/g, '').slice(0, 6);
-    if (!/^\d{6}$/.test(normalizedCode)) {
-      throw new Error('Enter a 6-digit sharing code.');
+    const normalizedCode = code.trim();
+    if (!/^[A-Za-z0-9_-]{43}$/.test(normalizedCode)) {
+      throw new Error('Enter the one-time pairing secret.');
     }
 
     const normalizedBaseUrl = baseUrl.trim()
@@ -530,7 +380,7 @@ export const desktopApi = {
     const deviceId = status?.deviceId || '';
     const deviceName = status?.deviceName || 'Loom Media Server device';
 
-    const response = await fetch(`${normalizedBaseUrl}/api/lan/pair`, {
+    const response = await fetch(`${normalizedBaseUrl}/api/v2/pair`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: normalizedCode, deviceId, deviceName }),
@@ -544,7 +394,10 @@ export const desktopApi = {
 
     const payload = await response.json() as {
       deviceId: string;
-      deviceToken: string;
+      accessToken: string;
+      accessTokenExpiresAt: number;
+      refreshToken: string;
+      refreshTokenExpiresAt: number;
       hostDeviceId?: string;
       hostDeviceName?: string;
       library: LibraryPayload;
@@ -554,7 +407,10 @@ export const desktopApi = {
     return {
       baseUrl: normalizedBaseUrl,
       deviceId: payload.deviceId,
-      deviceToken: payload.deviceToken,
+      deviceToken: payload.accessToken,
+      accessTokenExpiresAt: payload.accessTokenExpiresAt,
+      refreshToken: payload.refreshToken,
+      refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
       hostDeviceId: payload.hostDeviceId,
       hostDeviceName: payload.hostDeviceName,
       library: payload.library,
@@ -562,8 +418,44 @@ export const desktopApi = {
     };
   },
 
-  async refreshRemoteLibrary(baseUrl: string, deviceToken: string, etag?: string): Promise<{ library: LibraryPayload; etag: string } | null> {
-    const response = await fetch(`${baseUrl}/api/lan/library`, bearerHeaders(deviceToken, {
+  async refreshRemoteLibrary(
+    baseUrl: string,
+    deviceToken: string,
+    etag?: string,
+    refreshToken?: string,
+    accessTokenExpiresAt?: number,
+    refreshTokenExpiresAt?: number,
+  ): Promise<{
+    library: LibraryPayload;
+    etag: string;
+    deviceToken: string;
+    accessTokenExpiresAt: number;
+    refreshToken: string;
+    refreshTokenExpiresAt: number;
+  } | null> {
+    let activeToken = deviceToken;
+    let activeRefreshToken = refreshToken || '';
+    let activeAccessExpiresAt = Number(accessTokenExpiresAt) || 0;
+    let refreshExpiresAt = Number(refreshTokenExpiresAt) || 0;
+    if (activeRefreshToken && activeAccessExpiresAt <= Date.now() + 60_000) {
+      const refreshResponse = await fetch(`${baseUrl}/api/v2/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: activeRefreshToken }),
+      });
+      if (!refreshResponse.ok) throw new Error('The secure pairing session expired. Pair again.');
+      const credentials = await refreshResponse.json() as {
+        accessToken: string;
+        accessTokenExpiresAt: number;
+        refreshToken: string;
+        refreshTokenExpiresAt: number;
+      };
+      activeToken = credentials.accessToken;
+      activeAccessExpiresAt = credentials.accessTokenExpiresAt;
+      activeRefreshToken = credentials.refreshToken;
+      refreshExpiresAt = credentials.refreshTokenExpiresAt;
+    }
+    const response = await fetch(`${baseUrl}/api/v2/library`, bearerHeaders(activeToken, {
       headers: etag ? { 'If-None-Match': etag } : undefined,
     }));
     if (response.status === 304) return null;
@@ -572,11 +464,18 @@ export const desktopApi = {
       throw new Error('Could not refresh the shared library.');
     }
     const library = await response.json() as LibraryPayload;
-    return { library, etag: response.headers.get('ETag') || '' };
+    return {
+      library,
+      etag: response.headers.get('ETag') || '',
+      deviceToken: activeToken,
+      accessTokenExpiresAt: activeAccessExpiresAt,
+      refreshToken: activeRefreshToken,
+      refreshTokenExpiresAt: refreshExpiresAt,
+    };
   },
 
   async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string, deviceId: string): Promise<void> {
-    await fetch(`${baseUrl}/api/lan/unpair`, bearerHeaders(deviceToken, {
+    await fetch(`${baseUrl}/api/v2/unpair`, bearerHeaders(deviceToken, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId }),
@@ -705,14 +604,29 @@ export const desktopApi = {
     return window.desktopApi.saveManualMediaSegment(input);
   },
 
-  async deleteManualMediaSegment(input: MediaSegmentRequest & { type: MediaSegmentType }): Promise<MediaSegmentResponse> {
+  async deleteManualMediaSegment(input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }): Promise<MediaSegmentResponse> {
     if (!window.desktopApi?.deleteManualMediaSegment) throw new Error('Manual markers are available in the desktop app.');
     return window.desktopApi.deleteManualMediaSegment(input);
   },
 
-  async undoManualMediaSegment(input: MediaSegmentRequest & { type: MediaSegmentType }): Promise<MediaSegmentResponse> {
+  async undoManualMediaSegment(input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }): Promise<MediaSegmentResponse> {
     if (!window.desktopApi?.undoManualMediaSegment) throw new Error('Manual markers are available in the desktop app.');
     return window.desktopApi.undoManualMediaSegment(input);
+  },
+
+  async getManagedMediaSegments(request?: Partial<MediaSegmentRequest>): Promise<ManagedMediaSegment[]> {
+    if (!window.desktopApi?.getManagedMediaSegments) return [];
+    return window.desktopApi.getManagedMediaSegments(request);
+  },
+
+  async updateManagedMediaSegment(candidateId: string, patch: { status?: ManagedMediaSegment['status']; type?: MediaSegmentType }): Promise<boolean> {
+    if (!window.desktopApi?.updateManagedMediaSegment) return false;
+    return window.desktopApi.updateManagedMediaSegment(candidateId, patch);
+  },
+
+  async eraseManagedMediaSegments(request: MediaSegmentRequest): Promise<{ removed: number }> {
+    if (!window.desktopApi?.eraseManagedMediaSegments) return { removed: 0 };
+    return window.desktopApi.eraseManagedMediaSegments(request);
   },
 
   async setPlaybackActivity(key: string, active: boolean, label?: string): Promise<boolean> {
@@ -728,6 +642,34 @@ export const desktopApi = {
   async analyzeLocalSegmentSeason(mediaId: string, season: number): Promise<MediaSegmentResponse> {
     if (!window.desktopApi?.analyzeLocalSegmentSeason) throw new Error('Local analysis is available in the desktop app.');
     return window.desktopApi.analyzeLocalSegmentSeason(mediaId, season);
+  },
+
+  async runLocalSegmentAnalysis(scope?: SkipAnalysisRunScope): Promise<{ queued: number }> {
+    if (!window.desktopApi?.runLocalSegmentAnalysis) throw new Error('Local analysis is available in the desktop app.');
+    return window.desktopApi.runLocalSegmentAnalysis(scope);
+  },
+
+  async cancelLocalSegmentAnalysis(request?: { jobKey?: string; kind?: 'manual' }): Promise<{ cancelled: number }> {
+    if (!window.desktopApi?.cancelLocalSegmentAnalysis) return { cancelled: 0 };
+    return window.desktopApi.cancelLocalSegmentAnalysis(request);
+  },
+
+  async pauseLocalSegmentAnalysis(): Promise<boolean> {
+    return window.desktopApi?.pauseLocalSegmentAnalysis?.() ?? false;
+  },
+
+  async resumeLocalSegmentAnalysis(): Promise<boolean> {
+    return window.desktopApi?.resumeLocalSegmentAnalysis?.() ?? false;
+  },
+
+  async cleanupLocalSegmentAnalysis(): Promise<{ queued: number }> {
+    if (!window.desktopApi?.cleanupLocalSegmentAnalysis) return { queued: 0 };
+    return window.desktopApi.cleanupLocalSegmentAnalysis();
+  },
+
+  async rebuildLocalSegmentAnalysis(): Promise<{ removed: number; queued: number }> {
+    if (!window.desktopApi?.rebuildLocalSegmentAnalysis) return { removed: 0, queued: 0 };
+    return window.desktopApi.rebuildLocalSegmentAnalysis();
   },
 
   async getCustomArtwork(mediaId: string): Promise<Record<string, string>> {
@@ -883,7 +825,7 @@ export const desktopApi = {
       });
     },
 
-    async canDirectPlay(filePath: string, backend = 'html5'): Promise<ApiResult<boolean>> {
+    async canDirectPlay(filePath: string, backend: 'html5' | 'hls' = 'html5'): Promise<ApiResult<boolean>> {
       if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
       const probeResult = await this.probe(filePath);
       return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };
