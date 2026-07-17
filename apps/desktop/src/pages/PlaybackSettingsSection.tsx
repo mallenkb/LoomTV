@@ -19,6 +19,16 @@ type PlaybackSettingsSectionProps = {
 const INTRO_TYPES = ['intro', 'recap'] as const;
 const OUTRO_TYPES = ['credits', 'preview'] as const;
 
+const STATE_LABELS: Record<string, string> = {
+  idle: 'Idle — markers up to date',
+  queued: 'Queued',
+  running: 'Analyzing…',
+  paused: 'Paused',
+  disabled: 'Off',
+  unavailable: 'Unavailable',
+  error: 'Needs attention',
+};
+
 export default function PlaybackSettingsSection({
   skipBackSeconds,
   skipForwardSeconds,
@@ -30,6 +40,8 @@ export default function PlaybackSettingsSection({
   onAnalysisAction,
   onSave,
 }: PlaybackSettingsSectionProps) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [scopeMediaId, setScopeMediaId] = useState('');
   const [scopeSeason, setScopeSeason] = useState('');
   const update = (patch: Partial<SkipAnalysisSettings>) => onSkipAnalysisChange({ ...skipAnalysis, ...patch });
@@ -39,7 +51,7 @@ export default function PlaybackSettingsSection({
   };
   const statusText = !analysisStatus
     ? 'Checking local analysis helpers…'
-    : `${analysisStatus.state}${analysisStatus.pendingCount ? ` · ${analysisStatus.pendingCount} pending` : ''}`;
+    : `${STATE_LABELS[analysisStatus.state] || analysisStatus.state}${analysisStatus.pendingCount ? ` · ${analysisStatus.pendingCount} pending` : ''}`;
 
   return (
     <div className="space-y-6">
@@ -66,71 +78,116 @@ export default function PlaybackSettingsSection({
 
       <Card className="settings-panel">
         <CardHeader>
-          <CardTitle className="text-white">Intro &amp; Outro Skip Controls</CardTitle>
+          <CardTitle className="text-white">Intro &amp; Outro Skipping</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Detect intros, recaps, credits, and previews automatically or start a manual library/season scan. Media files are never modified.
+            LoomTV finds intros and outros automatically — from online databases, embedded chapters, and local audio analysis — and shows a skip button during playback. Media files are never modified.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Toggle label="Enable intro/outro analysis" checked={skipAnalysis.enabled} onChange={(enabled) => update({ enabled })} />
-            <Toggle label="Auto-scan new or changed media" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => update({ analyzeNewMedia })} />
-            <Toggle label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => update({ analyzeSpecials })} />
-            <Toggle label="Suppress first-episode intros" checked={skipAnalysis.suppressFirstEpisodeIntro} onChange={(suppressFirstEpisodeIntro) => update({ suppressFirstEpisodeIntro })} />
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[var(--loom-border)] bg-black/15 p-4">
+            <label className="flex items-center gap-3 text-sm font-medium text-white">
+              <input
+                type="checkbox"
+                checked={skipAnalysis.enabled}
+                onChange={(event) => update(event.target.checked
+                  ? { enabled: true, analyzeNewMedia: true }
+                  : { enabled: false })}
+                className="h-5 w-5 accent-[var(--loom-accent)]"
+              />
+              Automatically detect and mark intros &amp; outros
+            </label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" onClick={() => void manuallyScan()}>Scan library now</Button>
+              <Button type="button" variant="outline" onClick={onSave}>Save</Button>
+            </div>
+          </div>
+
+          <div className="text-xs text-[var(--loom-muted)]">
+            <p>{statusText}</p>
+            {analysisStatus?.currentJob && <p className="mt-1">{analysisStatus.currentJob.detail}</p>}
+            {analysisStatus?.lastError && <p role="alert" className="mt-1 text-red-300">{analysisStatus.lastError}</p>}
           </div>
 
           <div>
-            <h3 className="text-sm font-medium text-white">Skip sections</h3>
-            <div className="mt-3 grid gap-4 lg:grid-cols-2">
-              <SegmentGroup title="Intro & recap" description="Opening sequences and previous-episode summaries." types={INTRO_TYPES} settings={skipAnalysis} update={update} />
-              <SegmentGroup title="Outro & next preview" description="End credits and upcoming-episode previews." types={OUTRO_TYPES} settings={skipAnalysis} update={update} />
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((value) => !value)}
+              className="text-xs font-medium text-[var(--loom-muted)] underline-offset-2 hover:text-white hover:underline"
+            >
+              {showAdvanced ? 'Hide advanced options' : 'Show advanced options'}
+            </button>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            <ListField label="Excluded series IDs" value={skipAnalysis.exclusions.seriesIds} onChange={(seriesIds) => update({ exclusions: { ...skipAnalysis.exclusions, seriesIds } })} />
-            <ListField label="Excluded movie IDs" value={skipAnalysis.exclusions.movieIds} onChange={(movieIds) => update({ exclusions: { ...skipAnalysis.exclusions, movieIds } })} />
-            <ListField label="Excluded seasons (mediaId:season)" value={skipAnalysis.exclusions.seasons} onChange={(seasons) => update({ exclusions: { ...skipAnalysis.exclusions, seasons } })} />
-            <div className="lg:col-span-2"><ListField label="Excluded local paths" value={skipAnalysis.exclusions.paths} onChange={(paths) => update({ exclusions: { ...skipAnalysis.exclusions, paths } })} /></div>
-          </div>
+          {showAdvanced && (
+            <div className="space-y-5 rounded-lg border border-[var(--loom-border)] bg-black/10 p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Toggle label="Auto-scan new or changed media" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => update({ analyzeNewMedia })} />
+                <Toggle label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => update({ analyzeSpecials })} />
+                <Toggle label="Suppress first-episode intros" checked={skipAnalysis.suppressFirstEpisodeIntro} onChange={(suppressFirstEpisodeIntro) => update({ suppressFirstEpisodeIntro })} />
+              </div>
 
-          <div className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-white">Manual scan &amp; auto-scan status</p>
-                <p className="mt-1 text-xs text-[var(--loom-muted)]">{statusText}</p>
-                <p className="mt-1 text-xs text-[var(--loom-muted)]">Auto-scan: {skipAnalysis.analyzeNewMedia ? 'On — new and changed media will queue automatically' : 'Off — scans run only when you start them'}</p>
-                {analysisStatus?.currentJob && <p className="mt-1 text-xs text-[var(--loom-muted)]">{analysisStatus.currentJob.detail} · {analysisStatus.currentJob.mediaId} S{analysisStatus.currentJob.season}E{analysisStatus.currentJob.episode}</p>}
-                {analysisStatus?.lastError && <p role="alert" className="mt-1 text-xs text-red-300">{analysisStatus.lastError}</p>}
+                <h3 className="text-sm font-medium text-white">Skip sections</h3>
+                <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                  <SegmentGroup title="Intro & recap" description="Opening sequences and previous-episode summaries." types={INTRO_TYPES} settings={skipAnalysis} update={update} />
+                  <SegmentGroup title="Outro & next preview" description="End credits and upcoming-episode previews." types={OUTRO_TYPES} settings={skipAnalysis} update={update} />
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-2">
+                <ListField label="Excluded series IDs" value={skipAnalysis.exclusions.seriesIds} onChange={(seriesIds) => update({ exclusions: { ...skipAnalysis.exclusions, seriesIds } })} />
+                <ListField label="Excluded movie IDs" value={skipAnalysis.exclusions.movieIds} onChange={(movieIds) => update({ exclusions: { ...skipAnalysis.exclusions, movieIds } })} />
+                <ListField label="Excluded seasons (mediaId:season)" value={skipAnalysis.exclusions.seasons} onChange={(seasons) => update({ exclusions: { ...skipAnalysis.exclusions, seasons } })} />
+                <ListField label="Excluded local paths" value={skipAnalysis.exclusions.paths} onChange={(paths) => update({ exclusions: { ...skipAnalysis.exclusions, paths } })} />
+              </div>
+
+              <div className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4">
+                <p className="text-sm font-medium text-white">Maintenance</p>
                 <p className="mt-1 text-xs text-[var(--loom-muted)]">{analysisStatus?.fingerprintCount || 0} cached fingerprints · {formatBytes(analysisStatus?.fingerprintCacheBytes || 0)}{analysisStatus?.helperPath ? ` · ${analysisStatus.helperPath}` : ''}</p>
                 {analysisStatus?.progress && <p className="mt-1 text-xs text-[var(--loom-muted)]">Job history: {analysisStatus.progress.complete}/{analysisStatus.progress.total} complete</p>}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => void manuallyScan()}>Save &amp; manually scan library</Button>
-                <Button type="button" variant="outline" onClick={() => onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
-                <Button type="button" variant="outline" onClick={() => onAnalysisAction('cancel')}>Cancel queued</Button>
-                <Button type="button" variant="outline" onClick={() => onAnalysisAction('cleanup')}>Clear stale cache</Button>
-                <Button type="button" variant="outline" onClick={() => onAnalysisAction('rebuild')}>Rebuild all automatic markers</Button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => onAnalysisAction(analysisStatus?.paused ? 'resume' : 'pause')}>{analysisStatus?.paused ? 'Resume' : 'Pause'}</Button>
+                  <Button type="button" variant="outline" onClick={() => onAnalysisAction('cancel')}>Cancel queued</Button>
+                  <Button type="button" variant="outline" onClick={() => onAnalysisAction('cleanup')}>Clear stale cache</Button>
+                  <Button type="button" variant="outline" onClick={() => onAnalysisAction('rebuild')}>Rebuild all automatic markers</Button>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_110px_auto]">
+                  <input value={scopeMediaId} onChange={(event) => setScopeMediaId(event.target.value)} placeholder="Media ID for season scan" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
+                  <input value={scopeSeason} onChange={(event) => setScopeSeason(event.target.value)} type="number" min={0} placeholder="Season" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
+                  <Button type="button" variant="outline" disabled={!scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Save &amp; scan season</Button>
+                </div>
+                {!!analysisStatus?.recentJobs?.length && <div className="mt-4 max-h-36 overflow-y-auto rounded-md border border-white/10"><table className="w-full text-left text-xs text-[var(--loom-muted)]"><thead><tr><th className="px-2 py-1">State</th><th className="px-2 py-1">Media</th><th className="px-2 py-1">Detail</th></tr></thead><tbody>{analysisStatus.recentJobs.map((job) => <tr key={job.jobKey} className="border-t border-white/10"><td className="px-2 py-1">{job.state}</td><td className="px-2 py-1">{job.mediaId} S{job.season}E{job.episode}</td><td className="px-2 py-1">{job.detail}</td></tr>)}</tbody></table></div>}
               </div>
             </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_110px_auto]">
-              <input value={scopeMediaId} onChange={(event) => setScopeMediaId(event.target.value)} placeholder="Media ID for season scan" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
-              <input value={scopeSeason} onChange={(event) => setScopeSeason(event.target.value)} type="number" min={0} placeholder="Season" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
-              <Button type="button" variant="outline" disabled={!scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Save &amp; scan season</Button>
-            </div>
-            {!!analysisStatus?.recentJobs?.length && <div className="mt-4 max-h-36 overflow-y-auto rounded-md border border-white/10"><table className="w-full text-left text-xs text-[var(--loom-muted)]"><thead><tr><th className="px-2 py-1">State</th><th className="px-2 py-1">Media</th><th className="px-2 py-1">Detail</th></tr></thead><tbody>{analysisStatus.recentJobs.map((job) => <tr key={job.jobKey} className="border-t border-white/10"><td className="px-2 py-1">{job.state}</td><td className="px-2 py-1">{job.mediaId} S{job.season}E{job.episode}</td><td className="px-2 py-1">{job.detail}</td></tr>)}</tbody></table></div>}
-          </div>
-
-          <div className="flex justify-end"><Button onClick={onSave}>Save playback settings</Button></div>
+          )}
         </CardContent>
       </Card>
 
-      <SkipTimestampManager
-        settings={skipAnalysis}
-        onSettingsChange={onSkipAnalysisChange}
-        onRun={(scope) => onAnalysisAction('run', scope)}
-        onSaveSettings={onSave}
-      />
+      <Card className="settings-panel">
+        <CardHeader>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-white">Manual markers</CardTitle>
+              <CardDescription className="text-[var(--loom-muted)]">
+                Review, correct, or add intro and outro timestamps by hand. Manual markers always override automatic detection.
+              </CardDescription>
+            </div>
+            <Button type="button" variant="outline" onClick={() => setShowManual((value) => !value)}>
+              {showManual ? 'Hide timestamp manager' : 'Open timestamp manager'}
+            </Button>
+          </div>
+        </CardHeader>
+        {showManual && (
+          <CardContent>
+            <SkipTimestampManager
+              settings={skipAnalysis}
+              onSettingsChange={onSkipAnalysisChange}
+              onRun={(scope) => onAnalysisAction('run', scope)}
+              onSaveSettings={onSave}
+            />
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 }
