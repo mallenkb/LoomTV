@@ -42,6 +42,23 @@ test('normalization rejects invalid intervals and incompatible durations', () =>
   assert.equal(durationIsCompatible(1_300_000, 1_420_000), false);
 });
 
+test('credits ending slightly past the local duration clamp to the file end', () => {
+  // AniSkip ED intervals are submitted against releases whose runtime differs
+  // from the local file by a few seconds (live example: ed end 1,421,210 ms
+  // vs a 1,420,100 ms local file). The marker must clamp, not vanish.
+  const clamped = normalizeSegment(
+    { type: 'credits', startMs: 1_330_583, endMs: 1_421_210, confidence: 0.92, source: 'aniskip' },
+    1_420_100,
+  );
+  assert.equal(clamped?.endMs, 1_420_100);
+  assert.equal(clamped?.startMs, 1_330_583);
+  // Beyond the shared duration tolerance the interval is still rejected.
+  assert.equal(normalizeSegment(
+    { type: 'credits', startMs: 1_330_583, endMs: 1_460_000, confidence: 0.92, source: 'aniskip' },
+    1_420_100,
+  ), null);
+});
+
 test('chapter labels are anchored and generic names are ignored', () => {
   assert.equal(chapterType(' Opening '), 'intro');
   assert.equal(chapterType('Previously On'), 'recap');
@@ -171,6 +188,19 @@ test('bounded fingerprint alignment detects repeated windows and scores support'
   if (!match) throw new Error('Expected a fingerprint match.');
   assert.ok(match.similarity >= 0.99);
   assert.ok(scoreFingerprintMatches([match, match, match, match]) >= 0.90);
+});
+
+test('recap and preview matching can exclude an already-classified intro or credits interval', () => {
+  const repeated = Array.from({ length: 300 }, (_, index) => (index * 2654435761) >>> 0);
+  const target = { frames: repeated, durationMs: 30_000, windowStartMs: 0 };
+  const other = { frames: repeated, durationMs: 30_000, windowStartMs: 0 };
+  const excluded = bestFingerprintMatch(target, other, {
+    minDurationMs: 15_000,
+    maxDurationMs: 120_000,
+    minSimilarity: 0.85,
+    excludeLeft: [{ startMs: 0, endMs: 30_000 }],
+  });
+  assert.equal(excluded, null);
 });
 
 function movieFrame(kind: 'credits' | 'scene', variation = 0): Uint8Array {

@@ -114,7 +114,7 @@ function commandIncludesPath(command: string, targetPath: string): boolean {
   return command.includes(targetPath) || normalizedCommand.includes(normalizedPath);
 }
 
-export function cleanupStaleTranscodeProcesses(): void {
+function cleanupStaleTranscodeProcesses(): void {
   const root = transcodeRoot();
   let killed = 0;
   for (const row of listProcessRows()) {
@@ -193,9 +193,9 @@ function selectedTrack(tracks: MediaTrack[], type: MediaTrack['type'], selectedI
   return tracks.find((track) => track.type === type);
 }
 
-function hlsMediaInfo(filePath: string, options: TranscodeOptions): HlsMediaInfo | undefined {
+async function hlsMediaInfo(filePath: string, options: TranscodeOptions): Promise<HlsMediaInfo | undefined> {
   try {
-    const probe = probeMedia(filePath);
+    const probe = await probeMedia(filePath);
     const video = selectedTrack(probe.tracks, 'video', options.videoTrackIndex);
     const audio = options.audioTrackIndex === -1
       ? undefined
@@ -420,7 +420,7 @@ async function startInitialWindow(ffmpeg: string, session: ActiveSession, startI
       );
       session.preset = attempt.preset;
       session.options = { ...attempt.options };
-      session.mediaInfo = hlsMediaInfo(session.filePath, attempt.options);
+      session.mediaInfo = await hlsMediaInfo(session.filePath, attempt.options);
       session.lastRequestedIndex = startIndex;
       return;
     } catch (error) {
@@ -547,9 +547,9 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
 
   let durationSeconds = 0;
   try {
-    durationSeconds = probeMedia(filePath).durationSeconds || 0;
+    durationSeconds = (await probeMedia(filePath)).durationSeconds || 0;
   } catch {
-    durationSeconds = 0;
+    // Treat an unprobeable duration as a non-seekable stream.
   }
 
   const segmentSeconds = SEGMENT_SECONDS;
@@ -572,7 +572,7 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
     playlistUrl: playlistUrlFor(serverBase, sessionId),
     options,
     preset: selectedPreset(ffmpeg, options),
-    mediaInfo: hlsMediaInfo(filePath, options),
+    mediaInfo: await hlsMediaInfo(filePath, options),
     durationSeconds,
     segmentSeconds,
     segmentCount,

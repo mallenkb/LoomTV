@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
-import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState } from '@/lib/desktopApi';
+import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useTheme } from '@/components/ThemeProvider';
 import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
 import {
@@ -29,6 +29,24 @@ import type {
   MetadataProvider,
   SharedLibrarySnapshot,
 } from './Settings.types';
+
+const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
+  enabled: true,
+  analyzeNewMedia: true,
+  enabledTypes: { intro: true, recap: true, credits: true, preview: true },
+  promptTypes: { intro: true, recap: true, credits: true, preview: false },
+  durationLimits: {
+    intro: { minSeconds: 15, maxSeconds: 180 },
+    recap: { minSeconds: 15, maxSeconds: 120 },
+    credits: { minSeconds: 15, maxSeconds: 300 },
+    preview: { minSeconds: 15, maxSeconds: 120 },
+    movieCredits: { minSeconds: 15, maxSeconds: 900 },
+  },
+  suppressFirstEpisodeIntro: false,
+  analyzeSpecials: false,
+  exclusions: { seriesIds: [], movieIds: [], seasons: [], paths: [] },
+  seasonOverrides: {},
+};
 
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
   return [
@@ -139,8 +157,8 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
-  const [localSkipAnalysisEnabled, setLocalSkipAnalysisEnabled] = useState(true);
-  const [localAnalysisStatus, setLocalAnalysisStatus] = useState('Checking fpcalc…');
+  const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
+  const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
@@ -158,6 +176,7 @@ export default function Settings() {
   const [isScanningPeers, setIsScanningPeers] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
+  const [settingsPersistenceError, setSettingsPersistenceError] = useState('');
   const peerScanInFlightRef = useRef(false);
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
   const { theme, setTheme } = useTheme();
@@ -169,6 +188,17 @@ export default function Settings() {
     () => remoteLibraryRefreshIdentity(sharedLibrarySnapshot),
     [sharedLibrarySnapshot],
   );
+
+  const persistSettings = useCallback(async (settings: Parameters<typeof desktopApi.saveSettings>[0]): Promise<boolean> => {
+    try {
+      await desktopApi.saveSettings(settings);
+      setSettingsPersistenceError('');
+      return true;
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Settings could not be saved.');
+      return false;
+    }
+  }, []);
 
   const refreshLocalNetworkStatus = useCallback(async () => {
     try {
@@ -202,13 +232,9 @@ export default function Settings() {
       setCustomFolderNames(s.customFolderNames || {});
       setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
       setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
-      setLocalSkipAnalysisEnabled(s.localSkipAnalysisEnabled !== false);
+      setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
-    void desktopApi.getLocalSegmentAnalysisStatus().then((status) => {
-      setLocalAnalysisStatus(status.available
-        ? `Ready${status.helperPath ? ` · ${status.helperPath}` : ''}`
-        : status.message || 'fpcalc is not available.');
-    });
+    void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
@@ -219,14 +245,25 @@ export default function Settings() {
     }
   }, []);
 
+  useEffect(() => {
+    if (activeSection !== 'playback') return undefined;
+    let cancelled = false;
+    const refresh = () => void desktopApi.getLocalSegmentAnalysisStatus().then((status) => {
+      if (!cancelled) setLocalAnalysisStatus(status);
+    });
+    refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [activeSection]);
+
   const renameFolder = useCallback((folder: string, name: string) => {
     const trimmed = name.trim();
     const next = { ...customFolderNames };
     if (trimmed && trimmed !== folder) next[folder] = trimmed;
     else delete next[folder];
     setCustomFolderNames(next);
-    void desktopApi.saveSettings({ customFolderNames: next });
-  }, [customFolderNames]);
+    void persistSettings({ customFolderNames: next });
+  }, [customFolderNames, persistSettings]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
@@ -284,7 +321,7 @@ export default function Settings() {
         .filter(([provider, value]) => provider && value),
     ) as Record<string, string>;
 
-    await desktopApi.saveSettings({
+    if (!await persistSettings({
       metadataApiKeys: cleanedKeys,
       omdbApiKey: cleanedKeys.omdb || '',
       tmdbApiKey: cleanedKeys.tmdb || '',
@@ -292,7 +329,7 @@ export default function Settings() {
       openSubtitlesPassword: openSubtitlesPassword.trim(),
       openSubtitlesLanguages: openSubtitlesLanguages.trim() || 'en',
       openSubtitlesAutoDownload,
-    });
+    })) return;
     setMetadataKeys(cleanedKeys);
     setEditingKeys(
       Object.fromEntries(Object.keys(cleanedKeys).map((provider) => [provider, false])),
@@ -329,18 +366,31 @@ export default function Settings() {
     const normalizedForward = Math.max(1, Math.round(Number(playbackSkipForwardSeconds) || 0));
     setPlaybackSkipBackSeconds(normalizedBack);
     setPlaybackSkipForwardSeconds(normalizedForward);
-    await desktopApi.saveSettings({
+    if (!await persistSettings({
       playbackSkipBackSeconds: normalizedBack,
       playbackSkipForwardSeconds: normalizedForward,
-      localSkipAnalysisEnabled,
-    });
-    const status = await desktopApi.getLocalSegmentAnalysisStatus();
-    setLocalAnalysisStatus(status.available ? `Ready${status.helperPath ? ` · ${status.helperPath}` : ''}` : status.message || 'fpcalc is not available.');
+      localSkipAnalysisEnabled: skipAnalysis.enabled,
+      skipAnalysis,
+    })) return;
+    setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+  };
+
+  const handleAnalysisAction = async (
+    action: 'run' | 'pause' | 'resume' | 'cancel' | 'cleanup' | 'rebuild',
+    scope?: { mediaId?: string; season?: number },
+  ) => {
+    if (action === 'run') await desktopApi.runLocalSegmentAnalysis(scope);
+    else if (action === 'pause') await desktopApi.pauseLocalSegmentAnalysis();
+    else if (action === 'resume') await desktopApi.resumeLocalSegmentAnalysis();
+    else if (action === 'cancel') await desktopApi.cancelLocalSegmentAnalysis();
+    else if (action === 'cleanup') await desktopApi.cleanupLocalSegmentAnalysis();
+    else await desktopApi.rebuildLocalSegmentAnalysis();
+    setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
   };
 
   const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
     setSidebarNavOrder(nextOrder);
-    await desktopApi.saveSettings({ sidebarNavOrder: nextOrder });
+    if (!await persistSettings({ sidebarNavOrder: nextOrder })) return;
     window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: nextOrder }));
   };
 
@@ -438,6 +488,9 @@ export default function Settings() {
         baseUrl: connection.baseUrl,
         deviceId: connection.deviceId,
         deviceToken: connection.deviceToken,
+        accessTokenExpiresAt: connection.accessTokenExpiresAt,
+        refreshToken: connection.refreshToken,
+        refreshTokenExpiresAt: connection.refreshTokenExpiresAt,
         hostDeviceId: connection.hostDeviceId,
         hostDeviceName: connection.hostDeviceName,
         connectedAt: Date.now(),
@@ -465,12 +518,19 @@ export default function Settings() {
         snapshot.baseUrl,
         snapshot.deviceToken,
         snapshot.libraryEtag,
+        snapshot.refreshToken,
+        snapshot.accessTokenExpiresAt,
+        snapshot.refreshTokenExpiresAt,
       );
       if (!refreshed) return; // 304 — no change.
       const next: SharedLibrarySnapshot = {
         ...snapshot,
         library: refreshed.library,
         libraryEtag: refreshed.etag,
+        deviceToken: refreshed.deviceToken,
+        accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
+        refreshToken: refreshed.refreshToken,
+        refreshTokenExpiresAt: refreshed.refreshTokenExpiresAt,
       };
       localStorage.setItem('loomtv:shared-library', JSON.stringify(next));
       sharedLibrarySnapshotRef.current = next;
@@ -694,15 +754,21 @@ export default function Settings() {
           </div>
 
           <div className="loom-settings-sections space-y-6">
+              {settingsPersistenceError && (
+                <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  {settingsPersistenceError}
+                </div>
+              )}
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
                   skipBackSeconds={playbackSkipBackSeconds}
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   onSkipBackChange={setPlaybackSkipBackSeconds}
                   onSkipForwardChange={setPlaybackSkipForwardSeconds}
-                  localSkipAnalysisEnabled={localSkipAnalysisEnabled}
-                  onLocalSkipAnalysisChange={setLocalSkipAnalysisEnabled}
-                  localAnalysisStatus={localAnalysisStatus}
+                  skipAnalysis={skipAnalysis}
+                  onSkipAnalysisChange={setSkipAnalysis}
+                  analysisStatus={localAnalysisStatus}
+                  onAnalysisAction={(action, scope) => void handleAnalysisAction(action, scope)}
                   onSave={() => void handleSavePlaybackSettings()}
                 />
               )}

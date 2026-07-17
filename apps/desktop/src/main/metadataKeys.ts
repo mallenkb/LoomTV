@@ -22,7 +22,7 @@ async function testTMDBKey(value: string): Promise<MetadataKeyTestResult> {
   } else {
     url.searchParams.set('api_key', credential);
   }
-  const response = await fetch(url.toString(), requestInit);
+  const response = await safeFetch(url, requestInit, { allowedHosts: ['api.themoviedb.org'] });
   return {
     provider: 'tmdb',
     ok: response.ok,
@@ -36,7 +36,7 @@ async function testOMDbKey(value: string): Promise<MetadataKeyTestResult> {
   const url = new URL('https://www.omdbapi.com/');
   url.searchParams.set('apikey', key);
   url.searchParams.set('i', 'tt0133093');
-  const response = await fetch(url.toString());
+  const response = await safeFetch(url, {}, { allowedHosts: ['www.omdbapi.com'] });
   const json = await response.json().catch(() => ({}));
   const ok = response.ok && json?.Response !== 'False';
   return {
@@ -51,7 +51,7 @@ async function testFanartKey(value: string): Promise<MetadataKeyTestResult> {
   if (!key) return { provider: 'fanart', ok: false, message: 'Missing key.' };
   const url = new URL('https://webservice.fanart.tv/v3/movies/120');
   url.searchParams.set('api_key', key);
-  const response = await fetch(url.toString());
+  const response = await safeFetch(url, {}, { allowedHosts: ['webservice.fanart.tv'] });
   return {
     provider: 'fanart',
     ok: response.ok,
@@ -62,12 +62,12 @@ async function testFanartKey(value: string): Promise<MetadataKeyTestResult> {
 async function testOpenSubtitlesKey(value: string): Promise<MetadataKeyTestResult> {
   const key = value.trim();
   if (!key) return { provider: 'opensubtitles', ok: false, message: 'Missing key.' };
-  const response = await fetch('https://api.opensubtitles.com/api/v1/infos/languages', {
+  const response = await safeFetch('https://api.opensubtitles.com/api/v1/infos/languages', {
     headers: {
       'Api-Key': key,
       'User-Agent': 'Loom Media Server v1',
     },
-  });
+  }, { allowedHosts: ['.opensubtitles.com'] });
   return {
     provider: 'opensubtitles',
     ok: response.ok,
@@ -100,3 +100,4 @@ export async function testMetadataKeys(keys: Record<string, string>): Promise<Me
 
   return Promise.all(tests);
 }
+import { safeFetch } from './safeFetch';

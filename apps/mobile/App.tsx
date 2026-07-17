@@ -77,11 +77,64 @@ import {
   type PlaybackFailure,
 } from './playbackRecovery';
 import { mobileAbsoluteMediaSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
+import {
+  createStyles,
+  settingsContentMaxWidth,
+  type MobileThemeColors,
+} from './mobileStyles';
+import { createMobileLanClient } from './mobileLanClient';
+import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
+import {
+  DEFAULT_MOBILE_THEME,
+  mobileThemeFromSettings,
+  type MobileThemeMode,
+  type ResolvedMobileThemeMode,
+} from './mobileTheme';
+import {
+  allItems,
+  collections,
+  episodeCode,
+  episodePlayTarget,
+  filePathFromUrl,
+  libraryWithPlayedItem,
+  matchesMobileLibraryFilter,
+  matchesMobileSearchScope,
+  matchesQuery,
+  playTargetForItem,
+  progressStateFor,
+  shouldTranscode,
+  sortedEpisodes,
+  streamPathFor,
+} from './mobileLibrary';
+import type {
+  ApiResult,
+  Connection,
+  DiscoveredHost,
+  EpisodeFile,
+  HlsSession,
+  LibraryKind,
+  LibraryPayload,
+  LocalMediaTrack,
+  MediaItem,
+  MediaSegment,
+  MobileLibraryFilter,
+  MobileSearchScope,
+  MobileThemeSettings,
+  OfficialArtworkResponse,
+  OfficialMetadataCandidate,
+  PairResponse,
+  PlaybackTrackPreferences,
+  PlayTarget,
+  PosterCandidateSheetState,
+  SavedConnection,
+  SettingsSection,
+  StoredProgress,
+  StreamOptions,
+  SubtitleRecord,
+  TrackPreference,
+} from './mobileDomain';
+import { activeKnownMediaSegmentAt, mobileMediaSegmentLabel } from './mobileDomain';
 
-type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
-type SettingsSection = 'library' | 'network' | 'appearance';
-type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched';
-type MobileSearchScope = 'all' | 'genre:drama' | 'genre:animation' | 'genre:action-adventure' | 'genre:comedy';
 type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
@@ -113,213 +166,10 @@ const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
   { value: 270, label: '270°' },
 ];
 
-type LocalMediaTrack = {
-  index: number;
-  type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
-  codec?: string;
-  language?: string;
-  title?: string;
-  channels?: number;
-  width?: number;
-  height?: number;
-  profile?: string;
-  pixelFormat?: string;
-  default?: boolean;
-  forced?: boolean;
-};
-
-type LocalMediaDetails = {
-  durationSeconds?: number;
-  videoCodec?: string;
-  audioCodec?: string;
-  audioTracks?: number;
-  subtitleTracks?: number;
-  tracks?: LocalMediaTrack[];
-  container?: string;
-  width?: number;
-  height?: number;
-};
-
-type SubtitleRecord = {
-  lang: string;
-  label: string;
-  url: string;
-};
-
-type EpisodeMeta = {
-  season: number;
-  number: number;
-  title?: string;
-  summary?: string;
-  rating?: number;
-};
-
-type EpisodeFile = {
-  season: number;
-  episode: number;
-  filePath: string;
-  title?: string;
-  thumbnail?: string;
-  still?: string;
-  subtitles?: SubtitleRecord[];
-  localMetadata?: LocalMediaDetails;
-};
-
-type CastMember = {
-  name: string;
-  character?: string;
-  image?: string;
-};
-
-type MediaItem = {
-  id: string;
-  type: 'movie' | 'tv' | 'anime';
-  title: string;
-  year?: number;
-  poster?: string;
-  backdrop?: string;
-  posterCandidates?: string[];
-  backdropCandidates?: string[];
-  summary?: string;
-  rating?: number;
-  genres?: string[];
-  cast?: CastMember[];
-  episodes?: EpisodeMeta[];
-  filePath: string;
-  lastPlayed?: number;
-  subtitles?: SubtitleRecord[];
-  localMetadata?: LocalMediaDetails;
-  episodeFiles?: EpisodeFile[];
-};
-
-type LibraryPayload = {
-  movies?: MediaItem[];
-  tvShows?: MediaItem[];
-  animeShows?: MediaItem[];
-};
-
-type PairResponse = {
-  deviceId: string;
-  deviceToken: string;
-  hostDeviceId?: string;
-  hostDeviceName?: string;
-  library: LibraryPayload;
-  libraryEtag: string;
-};
-
-type Connection = {
-  baseUrl: string;
-  deviceId: string;
-  deviceToken: string;
-  hostDeviceId: string;
-  hostDeviceName: string;
-  library: LibraryPayload;
-  libraryEtag: string;
-};
-
-type SavedConnection = Pick<Connection, 'baseUrl' | 'deviceId' | 'deviceToken' | 'hostDeviceId' | 'hostDeviceName'>;
-
-type DiscoveredHost = {
-  deviceId: string;
-  deviceName: string;
-  /** mDNS instance name — differs from deviceName, which comes from TXT. */
-  serviceName: string;
-  baseUrl: string;
-  pairCode: string;
-};
-
-const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v1';
+const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v2';
 const MOBILE_DEVICE_ID_KEY = 'loomtv.mobile-device-id.v1';
 const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
-
-type MobileThemeSettings = {
-  appThemeMode?: string;
-  appThemeColor?: string;
-  appDarkTheme?: string;
-};
-
-type MobileThemeMode = 'auto' | 'dark' | 'light';
-type ResolvedMobileThemeMode = Exclude<MobileThemeMode, 'auto'>;
-
-type MobileThemeColors = {
-  accent: string;
-  accentSoft: string;
-  accentBorder: string;
-  accentForeground: string;
-  bg: string;
-  panel: string;
-  panel2: string;
-  border: string;
-  text: string;
-  muted: string;
-  faint: string;
-  themeLabel: string;
-};
-
-type ApiResult<T> = {
-  ok: boolean;
-  data?: T;
-  code?: string;
-  error?: string;
-  retryable?: boolean;
-};
-
-type HlsSession = {
-  playlistUrl: string;
-};
-
-type OfficialArtworkResponse = {
-  thumbnail?: string;
-  cover?: string;
-  summary?: string;
-  rating?: number;
-  genres?: string[];
-  episodes?: unknown[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
-  posterCandidates?: string[];
-  backdropCandidates?: string[];
-  logo?: string;
-  logoCandidates?: string[];
-  error?: string;
-};
-
-type OfficialMetadataCandidate = OfficialArtworkResponse & {
-  id?: string;
-  source?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
-  title?: string;
-  year?: number;
-  episodeCount?: number;
-  episodePreview?: string[];
-};
-
-type PosterCandidateSheetState = {
-  item: MediaItem;
-  candidates: OfficialMetadataCandidate[];
-};
-
-type StreamOptions = {
-  forceTranscode?: boolean;
-  startSeconds?: number;
-  audioTrackIndex?: number;
-  subtitleTrackIndex?: number;
-  subtitleStreamOrdinal?: number;
-  subtitleCodec?: string;
-  subtitleFilePath?: string;
-};
-
-type TrackPreference = {
-  enabled: boolean;
-  index?: number;
-  language?: string;
-  title?: string;
-  codec?: string;
-  forced?: boolean;
-};
-
-type PlaybackTrackPreferences = {
-  audio?: TrackPreference;
-  subtitle?: TrackPreference;
-};
+const mobileLanClient = createMobileLanClient();
 
 type LibraryMetric = {
   key: string;
@@ -328,33 +178,6 @@ type LibraryMetric = {
   Icon: (props: IconProps) => ReactElement;
 };
 
-type PlayTarget = {
-  title: string;
-  subtitle?: string;
-  streamPath: string;
-  transcode: boolean;
-  localMetadata?: LocalMediaDetails;
-  subtitles?: SubtitleRecord[];
-  startPosition?: number;
-  mediaId?: string;
-  mediaType?: MediaItem['type'];
-  season?: number;
-  episode?: number;
-  thumbnail?: string;
-  thumbnailCandidates?: string[];
-};
-
-type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
-type MediaSegment = {
-  id: string;
-  type: MediaSegmentType;
-  startMs: number;
-  endMs: number | null;
-  confidence: number;
-  source: 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'chromaprint';
-  mediaDurationMs: number;
-  updatedAt: string;
-};
 
 type PlayerAudioOption = {
   key: string;
@@ -372,102 +195,16 @@ type PlayerSubtitleOption = {
   streamOrdinal?: number;
 };
 
-type StoredProgress = {
-  position: number;
-  duration: number;
-  updatedAt: number;
-  watched: boolean;
-};
-
-const MOBILE_ACCENTS: Record<string, Pick<MobileThemeColors, 'accent' | 'accentSoft' | 'accentBorder' | 'accentForeground'>> = {
-  yellow: { accent: '#fbc500', accentSoft: 'rgba(251,197,0,0.16)', accentBorder: 'rgba(251,197,0,0.45)', accentForeground: '#08101a' },
-  red: { accent: '#931116', accentSoft: 'rgba(147,17,22,0.18)', accentBorder: 'rgba(147,17,22,0.48)', accentForeground: '#ffffff' },
-  blue: { accent: '#8FB8FF', accentSoft: 'rgba(143,184,255,0.18)', accentBorder: 'rgba(143,184,255,0.48)', accentForeground: '#071322' },
-  orange: { accent: '#FF9900', accentSoft: 'rgba(255,153,0,0.18)', accentBorder: 'rgba(255,153,0,0.48)', accentForeground: '#000000' },
-};
-
-const MOBILE_DARK_THEMES: Record<string, Pick<MobileThemeColors, 'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'>> = {
-  black: {
-    bg: '#15151b',
-    panel: '#202127',
-    panel2: '#1a1b21',
-    border: '#34363f',
-    muted: '#b8b8c0',
-    faint: '#7e808b',
-    themeLabel: 'Cinematic',
-  },
-  default: {
-    bg: '#1a1a1a',
-    panel: '#232323',
-    panel2: '#1d1d1d',
-    border: '#2d2d2d',
-    muted: '#a8a8a8',
-    faint: '#777777',
-    themeLabel: 'Default',
-  },
-  justwatch: {
-    bg: '#060d17',
-    panel: '#101a28',
-    panel2: '#0b1420',
-    border: '#243348',
-    muted: '#9aa7b8',
-    faint: '#647287',
-    themeLabel: 'Navy Black',
-  },
-};
-
-const MOBILE_LIGHT_THEME: Pick<MobileThemeColors, 'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'> = {
-  bg: '#f4f6f8',
-  panel: '#ffffff',
-  panel2: '#eef2f5',
-  border: '#dce3e9',
-  muted: '#525252',
-  faint: '#737373',
-  themeLabel: 'Light',
-};
-
-const DEFAULT_MOBILE_THEME: MobileThemeColors = {
-  ...MOBILE_ACCENTS.yellow,
-  ...MOBILE_DARK_THEMES.black,
-  text: '#ffffff',
-};
-
-let accent = DEFAULT_MOBILE_THEME.accent;
-let accentForeground = DEFAULT_MOBILE_THEME.accentForeground;
-let bg = DEFAULT_MOBILE_THEME.bg;
-let panel = DEFAULT_MOBILE_THEME.panel;
-let panel2 = DEFAULT_MOBILE_THEME.panel2;
-let border = DEFAULT_MOBILE_THEME.border;
-let text = DEFAULT_MOBILE_THEME.text;
-let muted = DEFAULT_MOBILE_THEME.muted;
-let faint = DEFAULT_MOBILE_THEME.faint;
-const settingsContentMaxWidth = 640;
 const settingsPageHorizontalPadding = 32;
 const settingsCardHorizontalPadding = 32;
-const settingsMetricGap = 8;
 const imageLoadTimeoutMs = 8000;
 const imageRetryDelayMs = 12000;
 const imageCacheBustQueryParam = 'loomtvImageBust';
 const serverOfflineHint = 'The desktop app or Local Network Sharing may be off. LoomTV will reconnect automatically when it becomes available.';
 
-const navItems: { id: LibraryKind; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement }[] = [
-  { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive },
-  { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive },
-  { id: 'tv', label: 'TV Shows', Icon: navIcons.tv, ActiveIcon: navIcons.tvActive },
-  { id: 'movies', label: 'Movies', Icon: navIcons.movies, ActiveIcon: navIcons.moviesActive },
-  { id: 'settings', label: 'Settings', Icon: navIcons.settings, ActiveIcon: navIcons.settingsActive },
-];
-
 // Coupang Play-style top category tabs shown under the logo on library pages.
 // The bottom nav shrinks to Home / Search / Settings; these tabs carry the
 // library kinds instead.
-const homeTabs: { id: LibraryKind; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement }[] = [
-  { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive },
-  { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive },
-  { id: 'tv', label: 'TV Shows', Icon: navIcons.tv, ActiveIcon: navIcons.tvActive },
-  { id: 'movies', label: 'Movies', Icon: navIcons.movies, ActiveIcon: navIcons.moviesActive },
-];
-
 const settingsSections: { id: SettingsSection; label: string; description: string }[] = [
   { id: 'library', label: 'Library', description: 'Refresh and review the paired desktop library.' },
   { id: 'network', label: 'Network', description: 'Pairing status and desktop connection details.' },
@@ -477,29 +214,22 @@ const settingsSections: { id: SettingsSection; label: string; description: strin
 function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
   if (!trimmed) throw new Error('Enter the desktop app address.');
-  return /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const parsed = new URL(normalized);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Enter a valid HTTP or HTTPS desktop address.');
+  return parsed.origin;
 }
 
 function discoveredHostFromService(service: ZeroconfService): DiscoveredHost | null {
   const txt = service.txt || {};
-  const deviceId = String(txt.deviceId || '').trim();
-  const deviceName = String(txt.deviceName || service.name || '').trim();
-  const pairCode = String(txt.pairCode || '').replace(/\D/g, '').slice(0, 6);
+  if (String(txt.protocolVersion || '') !== '2') return null;
+  const deviceId = String(txt.instanceId || '').trim();
+  const deviceName = String(service.name || '').trim();
+  const certFingerprint = String(txt.certFingerprint || '').trim();
   const port = Number(service.port || 0);
   if (!deviceId || !Number.isInteger(port) || port <= 0) return null;
 
   const serviceName = String(service.name || '').trim();
-  const advertisedBaseUrl = String(txt.baseUrl || '').trim().replace(/\/$/, '');
-  if (/^https?:\/\/[^/]+(?::\d+)?$/i.test(advertisedBaseUrl)) {
-    return {
-      deviceId,
-      deviceName: deviceName || advertisedBaseUrl,
-      serviceName,
-      baseUrl: advertisedBaseUrl,
-      pairCode,
-    };
-  }
-
   const addresses = service.addresses || [];
   const ipv4Address = addresses.find((candidate) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(candidate));
   const ipv6Address = addresses.find((candidate) => candidate.includes(':'))?.split('%')[0];
@@ -513,7 +243,7 @@ function discoveredHostFromService(service: ZeroconfService): DiscoveredHost | n
     deviceName: deviceName || resolvedHost,
     serviceName,
     baseUrl: `http://${resolvedHost}:${port}`,
-    pairCode,
+    certFingerprint,
   };
 }
 
@@ -561,138 +291,15 @@ function formatDuration(seconds?: number): string {
   return hours > 0 ? `${hours}h ${remainder}m` : `${minutes}m`;
 }
 
-function streamPathFor(item: MediaItem): string {
-  return item.type === 'movie'
-    ? item.filePath
-    : item.episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath || item.filePath;
-}
-
-function filePathFromUrl(value: string): string {
-  try {
-    const parsed = new URL(value);
-    return parsed.searchParams.get('path') || value;
-  } catch {
-    return value;
-  }
-}
-
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
 }
 
-function mobileThemeFromSettings(settings?: MobileThemeSettings, mode: ResolvedMobileThemeMode = 'dark'): MobileThemeColors {
-  const accentTheme = MOBILE_ACCENTS[settings?.appThemeColor || ''] || MOBILE_ACCENTS.yellow;
-  const light = mode === 'light';
-  return {
-    ...accentTheme,
-    ...(light ? MOBILE_LIGHT_THEME : MOBILE_DARK_THEMES[settings?.appDarkTheme || ''] || MOBILE_DARK_THEMES.black),
-    accentForeground: light && settings?.appThemeColor === 'yellow' ? '#000000' : accentTheme.accentForeground,
-    text: light ? '#000000' : '#ffffff',
-  };
-}
-
-function applyMobileThemeGlobals(theme: MobileThemeColors, nextStyles: ReturnType<typeof createStyles>) {
-  accent = theme.accent;
-  accentForeground = theme.accentForeground;
-  bg = theme.bg;
-  panel = theme.panel;
-  panel2 = theme.panel2;
-  border = theme.border;
-  text = theme.text;
-  muted = theme.muted;
-  faint = theme.faint;
-  styles = nextStyles;
-}
-
 // Stable empty list so the library feed keeps the same `data` reference in rails
 // mode (rails render in the header; the grid data is intentionally empty).
 const EMPTY_ITEMS: MediaItem[] = [];
-const TRANSCODE_EXTENSIONS = ['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts'];
-// Audio codecs the native mobile players decode reliably; anything else
-// (ac3/eac3/dts/truehd) plays video with no sound unless the host transcodes.
-const DIRECT_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm'];
 const LIBRARY_SECTION_APPLY_DELAY_MS = 45;
-
-function needsTranscode(streamPath: string, meta?: LocalMediaDetails): boolean {
-  const filePath = filePathFromUrl(streamPath);
-  const extension = filePath.split('.').pop()?.toLowerCase() || '';
-  if ((meta?.container || '').toLowerCase().includes('matroska') || TRANSCODE_EXTENSIONS.includes(extension)) return true;
-  const audioCodec = (meta?.audioCodec || '').toLowerCase();
-  if (audioCodec && !DIRECT_AUDIO_CODECS.some((codec) => audioCodec.includes(codec))) return true;
-  return false;
-}
-
-function shouldTranscode(item: MediaItem): boolean {
-  return needsTranscode(streamPathFor(item), item.localMetadata);
-}
-
-function episodeCode(season: number, episode: number): string {
-  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-}
-
-function sortedEpisodes(item: MediaItem): EpisodeFile[] {
-  return (item.episodeFiles || []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode);
-}
-
-function episodePlayTarget(item: MediaItem, ep: EpisodeFile, progress?: Record<string, StoredProgress>): PlayTarget {
-  const name = ep.title || `Episode ${ep.episode}`;
-  const state = progress ? progressStateFor(progress, ep.filePath, ep.localMetadata?.durationSeconds) : null;
-  return {
-    title: name,
-    subtitle: `${episodeCode(ep.season, ep.episode)} · ${item.title}`,
-    streamPath: ep.filePath,
-    transcode: needsTranscode(ep.filePath, ep.localMetadata),
-    localMetadata: ep.localMetadata,
-    subtitles: ep.subtitles || item.subtitles,
-    startPosition: state?.inProgress ? state.position : 0,
-    mediaId: item.id,
-    mediaType: item.type,
-    season: ep.season,
-    episode: ep.episode,
-    thumbnail: ep.still || ep.thumbnail || item.backdrop || item.poster,
-    thumbnailCandidates: [
-      ep.still,
-      ep.thumbnail,
-      item.backdrop,
-      ...(item.backdropCandidates || []),
-      item.poster,
-      ...(item.posterCandidates || []),
-    ].filter(Boolean) as string[],
-  };
-}
-
-function playTargetForItem(item: MediaItem, progress: Record<string, StoredProgress>): PlayTarget {
-  const episodes = sortedEpisodes(item);
-  if (item.type !== 'movie' && episodes.length > 0) {
-    const nextUp = episodes.find((episode) => {
-      const state = progressStateFor(progress, episode.filePath, episode.localMetadata?.durationSeconds);
-      return !state.watched;
-    }) || episodes[0];
-    return episodePlayTarget(item, nextUp, progress);
-  }
-
-  const streamPath = streamPathFor(item);
-  const state = progressStateFor(progress, streamPath, item.localMetadata?.durationSeconds);
-  return {
-    title: item.title,
-    subtitle: item.year ? String(item.year) : undefined,
-    streamPath,
-    transcode: shouldTranscode(item),
-    localMetadata: item.localMetadata,
-    subtitles: item.subtitles,
-    startPosition: state.inProgress ? state.position : 0,
-    mediaId: item.id,
-    mediaType: item.type,
-    thumbnail: item.poster || item.backdrop,
-    thumbnailCandidates: [
-      item.poster,
-      ...(item.posterCandidates || []),
-      item.backdrop,
-      ...(item.backdropCandidates || []),
-    ].filter(Boolean) as string[],
-  };
-}
 
 function isHlsPlaybackUrl(playbackUrl: string): boolean {
   return playbackUrl.includes('.m3u8') || playbackUrl.includes('/hls/');
@@ -753,11 +360,6 @@ function normalizeTrackField(value?: string): string {
 
 function playbackPreferenceScope(target: Pick<PlayTarget, 'mediaId' | 'streamPath'>): string {
   return target.mediaId ? `media:${target.mediaId}` : `file:${filePathFromUrl(target.streamPath)}`;
-}
-
-function trackLanguageLabel(language?: string): string {
-  const normalized = language?.trim();
-  return normalized ? normalized.toUpperCase() : '';
 }
 
 function trackLanguageName(language?: string): string {
@@ -900,50 +502,6 @@ function seasonCountLabel(item: MediaItem): string {
   return item.type === 'anime' ? 'Anime' : 'Series';
 }
 
-function libraryWithPlayedItem(library: LibraryPayload, streamPath: string, playedAt: number): LibraryPayload {
-  const filePath = filePathFromUrl(streamPath);
-  const markItems = (items?: MediaItem[]) => items?.map((item) => {
-    const itemPath = filePathFromUrl(item.filePath);
-    const episodeMatch = item.episodeFiles?.some((episode) => filePathFromUrl(episode.filePath) === filePath);
-    return itemPath === filePath || episodeMatch ? { ...item, lastPlayed: playedAt } : item;
-  });
-
-  return {
-    ...library,
-    movies: markItems(library.movies),
-    tvShows: markItems(library.tvShows),
-    animeShows: markItems(library.animeShows),
-  };
-}
-
-function progressStateFor(progress: Record<string, StoredProgress>, streamPath: string, durationHint = 0) {
-  const stored = progress[filePathFromUrl(streamPath)] || progress[streamPath];
-  const duration = stored?.duration || durationHint || 0;
-  const position = Math.min(stored?.position || 0, duration || stored?.position || 0);
-  const fraction = duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0;
-  const watched = Boolean(stored?.watched) || fraction >= 0.9;
-  return {
-    position,
-    duration,
-    fraction: watched ? 1 : fraction,
-    watched,
-    inProgress: position > 10 && !watched,
-  };
-}
-
-function collections(library: LibraryPayload) {
-  return {
-    anime: library.animeShows || [],
-    tv: library.tvShows || [],
-    movies: library.movies || [],
-    others: [] as MediaItem[],
-  };
-}
-
-function allItems(library: LibraryPayload): MediaItem[] {
-  const grouped = collections(library);
-  return [...grouped.anime, ...grouped.tv, ...grouped.movies, ...grouped.others];
-}
 
 function appendImageCacheBust(url: string, cacheBust?: string): string {
   if (!cacheBust || !/^https?:/i.test(url)) return url;
@@ -1071,6 +629,7 @@ function FallbackImage({
 }
 
 const ShimmerOverlay = memo(function ShimmerOverlay() {
+  const { styles } = useMobileTheme();
   const progress = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
 
@@ -1124,49 +683,6 @@ const ShimmerOverlay = memo(function ShimmerOverlay() {
     </View>
   );
 });
-
-function matchesQuery(item: MediaItem, query: string): boolean {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return true;
-  return [
-    item.title,
-    item.year ? String(item.year) : '',
-    ...(item.genres || []),
-    item.summary || '',
-  ].some((value) => value.toLowerCase().includes(needle));
-}
-
-function matchesMobileSearchScope(item: MediaItem, scope: MobileSearchScope): boolean {
-  if (scope === 'all') return true;
-  const genre = scope.replace('genre:', '').replace('-', ' ');
-  return (item.genres || []).some((itemGenre) => itemGenre.toLowerCase().includes(genre));
-}
-
-function matchesMobileLibraryFilter(
-  item: MediaItem,
-  filter: MobileLibraryFilter,
-  progress: Record<string, StoredProgress>,
-): boolean {
-  if (filter === 'all') return true;
-
-  if (item.type === 'movie') {
-    const state = progressStateFor(progress, item.filePath, item.localMetadata?.durationSeconds);
-    if (filter === 'in-progress') return state.inProgress;
-    if (filter === 'watched') return state.watched;
-    return !state.inProgress && !state.watched;
-  }
-
-  const episodeStates = (item.episodeFiles || []).map((episode) => (
-    progressStateFor(progress, episode.filePath, episode.localMetadata?.durationSeconds)
-  ));
-  const watchedCount = episodeStates.filter((state) => state.watched).length;
-  const inProgress = episodeStates.some((state) => state.inProgress);
-  const watched = episodeStates.length > 0 && watchedCount === episodeStates.length;
-  const partiallyWatched = watchedCount > 0;
-  if (filter === 'in-progress') return inProgress;
-  if (filter === 'watched') return watched;
-  return !inProgress && !partiallyWatched;
-}
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -1238,6 +754,7 @@ function FadeInImage({
   style: StyleProp<ImageStyle>;
   uri: string;
 }) {
+  const { styles } = useMobileTheme();
   const [loaded, setLoaded] = useState(false);
   const settledRef = useRef(false);
   const onErrorRef = useRef(onError);
@@ -1412,12 +929,13 @@ function AppRoot() {
     settings: 0,
   });
   const themeSyncStartedRef = useRef(false);
-  const prePairThemeBaseRef = useRef('');
   const reconnectingSavedConnectionRef = useRef(false);
   const connectionHealthCheckRef = useRef(false);
   const mobileDeviceIdRef = useRef('');
   const themedStyles = useMemo(() => createStyles(mobileTheme), [mobileTheme]);
-  applyMobileThemeGlobals(mobileTheme, themedStyles);
+  const themeContextValue = useMemo(() => ({ colors: mobileTheme, styles: themedStyles }), [mobileTheme, themedStyles]);
+  const styles = themedStyles;
+  const { accent, panel, text, muted } = mobileTheme;
 
   const navigateToKind = useCallback((kind: LibraryKind) => {
     if (kind === activeKind) {
@@ -1528,7 +1046,14 @@ function AppRoot() {
       .then((stored) => {
         if (cancelled || !stored) return;
         const saved = JSON.parse(stored) as SavedConnection;
-        if (!saved.baseUrl || !saved.deviceId || !saved.deviceToken) return;
+        if (
+          !saved.baseUrl
+          || !saved.deviceId
+          || !saved.deviceToken
+          || !saved.refreshToken
+          || !Number.isFinite(saved.accessTokenExpiresAt)
+          || !Number.isFinite(saved.refreshTokenExpiresAt)
+        ) return;
         saved.hostDeviceId ||= '';
         setSavedConnection(saved);
         setBaseUrl(saved.baseUrl);
@@ -1577,7 +1102,7 @@ function AppRoot() {
     const scanWindow = setTimeout(() => setIsDiscoveringHosts(false), 5000);
     return () => {
       clearTimeout(scanWindow);
-      try { zeroconf.stop(); } catch {}
+      try { zeroconf.stop(); } catch { /* Zeroconf may already be stopped. */ }
       zeroconf.removeAllListeners();
       zeroconf.removeDeviceListeners();
     };
@@ -1612,6 +1137,20 @@ function AppRoot() {
     return () => clearInterval(healthCheck);
   }, [connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag]);
 
+  useEffect(() => {
+    if (!savedConnection || !connection) return undefined;
+    const delay = Math.max(0, connection.accessTokenExpiresAt - Date.now() - 60_000);
+    const timer = setTimeout(() => {
+      void refreshSavedCredentials(savedConnection).catch(async () => {
+        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        setSavedConnection(null);
+        setConnection(null);
+        setError('Your secure session expired. Pair with the desktop again.');
+      });
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [connection, savedConnection]);
+
   // Browsing is portrait; video playback is locked to either landscape direction.
   // Serialize and deduplicate native lock requests: overlapping lockAsync calls can
   // deadlock Expo's iOS orientation registry while it dispatches an orientation event.
@@ -1634,39 +1173,13 @@ function AppRoot() {
     if (!connection || themeSyncStartedRef.current) return;
     themeSyncStartedRef.current = true;
 
-    fetch(`${connection.baseUrl}/api/settings`, {
-      headers: { Authorization: `Bearer ${connection.deviceToken}` },
-    })
+    mobileLanClient.getClientConfig(connection.baseUrl, connection.deviceToken)
       .then((response) => (response.ok ? response.json() as Promise<MobileThemeSettings> : undefined))
       .then((settings) => {
         if (settings) setRemoteThemeSettings(settings);
       })
       .catch(() => {});
   }, [connection]);
-
-  useEffect(() => {
-    if (connection) return;
-    let nextBaseUrl = '';
-    try {
-      nextBaseUrl = normalizeBaseUrl(baseUrl);
-    } catch {
-      return;
-    }
-    if (prePairThemeBaseRef.current === nextBaseUrl) return;
-    prePairThemeBaseRef.current = nextBaseUrl;
-
-    let cancelled = false;
-    fetch(`${nextBaseUrl}/api/settings`)
-      .then((response) => (response.ok ? response.json() as Promise<MobileThemeSettings> : undefined))
-      .then((settings) => {
-        if (!cancelled && settings) setRemoteThemeSettings(settings);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [baseUrl, connection]);
 
   useEffect(() => {
     setMobileTheme(mobileThemeFromSettings(remoteThemeSettings, resolvedMobileThemeMode));
@@ -1752,7 +1265,7 @@ function AppRoot() {
         }
 
         await player.replaceAsync(videoSourceFor(playbackUrl, playTarget, connection?.deviceToken));
-      } catch (nextError) {
+      } catch {
         if (!cancelled) {
           setPlaybackFailure(playbackLoadFailure());
         }
@@ -1887,17 +1400,12 @@ function AppRoot() {
           forceTranscode: true,
           ...(startSeconds > 2 ? { startSeconds } : {}),
         };
-        const response = await fetch(`${connection.baseUrl}/api/lan/start-hls`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${connection.deviceToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            filePath: filePathFromUrl(playTarget.streamPath),
-            options,
-          }),
-        });
+        const response = await mobileLanClient.startHls(
+          connection.baseUrl,
+          connection.deviceToken,
+          filePathFromUrl(playTarget.streamPath),
+          options,
+        );
         const result = (await response.json()) as ApiResult<HlsSession>;
         if (!response.ok || !result.ok || !result.data?.playlistUrl) {
           if (!cancelled) {
@@ -1931,8 +1439,8 @@ function AppRoot() {
 
   async function syncPlaybackProgress(target = playTarget) {
     if (!connection || !target) return;
-    let position = 0;
-    let duration = 0;
+    let position: number;
+    let duration: number;
     try {
       position = Number(player.currentTime || 0);
       duration = Number(player.duration || 0);
@@ -1942,17 +1450,10 @@ function AppRoot() {
     if (!Number.isFinite(position) || position <= 0) return;
 
     try {
-      const response = await fetch(`${connection.baseUrl}/api/progress`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${connection.deviceToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          filePath: filePathFromUrl(target.streamPath),
+      const response = await mobileLanClient.saveProgress(connection.baseUrl, connection.deviceToken, {
+          mediaId: filePathFromUrl(target.streamPath),
           position,
           duration: Number.isFinite(duration) ? duration : 0,
-        }),
       });
       if (response.ok) {
         const stored = (await response.json()) as StoredProgress;
@@ -2072,9 +1573,7 @@ function AppRoot() {
   async function hydrateProgress(nextConnection = connection) {
     if (!nextConnection) return;
     try {
-      const response = await fetch(`${nextConnection.baseUrl}/api/progress`, {
-        headers: { Authorization: `Bearer ${nextConnection.deviceToken}` },
-      });
+      const response = await mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken);
       if (!response.ok) return;
       setProgress((await response.json()) as Record<string, StoredProgress>);
     } catch {
@@ -2082,23 +1581,44 @@ function AppRoot() {
     }
   }
 
+  async function refreshSavedCredentials(saved: SavedConnection): Promise<SavedConnection> {
+    const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken);
+    if (!response.ok) throw new Error(`Credential refresh failed (${response.status}).`);
+    const payload = (await response.json()) as Pick<PairResponse,
+      'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>;
+    const updated: SavedConnection = {
+      ...saved,
+      deviceToken: payload.accessToken,
+      accessTokenExpiresAt: payload.accessTokenExpiresAt,
+      refreshToken: payload.refreshToken,
+      refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
+    };
+    await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+    setSavedConnection(updated);
+    setConnection((current) => current && current.deviceId === updated.deviceId
+      ? { ...current, ...updated }
+      : current);
+    return updated;
+  }
+
   async function reconnectSavedConnection(saved: SavedConnection) {
     if (reconnectingSavedConnectionRef.current) return;
     reconnectingSavedConnectionRef.current = true;
     setIsServerOffline(false);
     try {
-      const response = await fetch(`${saved.baseUrl}/api/lan/library`, {
-        headers: { Authorization: `Bearer ${saved.deviceToken}` },
-      });
+      const activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
+        ? await refreshSavedCredentials(saved)
+        : saved;
+      const response = await mobileLanClient.getLibrary(activeSaved.baseUrl, activeSaved.deviceToken);
       if (response.status === 401) {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
-        setError('This device is no longer authorized. Select the desktop and enter its 6-digit code to pair again.');
+        setError('This device is no longer authorized. Select the desktop and enter its current pairing secret.');
         return;
       }
       if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
       const nextConnection: Connection = {
-        ...saved,
+        ...activeSaved,
         library: (await response.json()) as LibraryPayload,
         libraryEtag: response.headers.get('ETag') || '',
       };
@@ -2123,17 +1643,13 @@ function AppRoot() {
     try {
       const host = discoveredHost && typeof discoveredHost.baseUrl === 'string' ? discoveredHost : undefined;
       const nextBaseUrl = normalizeBaseUrl(host?.baseUrl || baseUrl);
-      const code = (host?.pairCode || shareCode).replace(/\D/g, '').slice(0, 6);
-      if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit sharing code from the desktop app.');
+      const code = shareCode.trim();
+      if (!/^[A-Za-z0-9_-]{43}$/.test(code)) throw new Error('Enter the one-time pairing secret from the desktop app.');
 
-      const response = await fetch(`${nextBaseUrl}/api/lan/pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const response = await mobileLanClient.pair(nextBaseUrl, {
           code,
           deviceId: mobileDeviceIdRef.current || undefined,
           deviceName: Platform.OS === 'android' ? 'LoomTV Android' : 'LoomTV iOS',
-        }),
       });
       if (!response.ok) {
         if (response.status === 401) throw new Error('The sharing code was not accepted.');
@@ -2145,7 +1661,10 @@ function AppRoot() {
       const nextConnection = {
         baseUrl: nextBaseUrl,
         deviceId: payload.deviceId,
-        deviceToken: payload.deviceToken,
+        deviceToken: payload.accessToken,
+        accessTokenExpiresAt: payload.accessTokenExpiresAt,
+        refreshToken: payload.refreshToken,
+        refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
         hostDeviceId: payload.hostDeviceId || discoveredHosts.find((host) => host.baseUrl === nextBaseUrl)?.deviceId || '',
         hostDeviceName: payload.hostDeviceName || 'Loom Media Player Desktop',
         library: payload.library || {},
@@ -2155,6 +1674,9 @@ function AppRoot() {
         baseUrl: nextConnection.baseUrl,
         deviceId: nextConnection.deviceId,
         deviceToken: nextConnection.deviceToken,
+        accessTokenExpiresAt: nextConnection.accessTokenExpiresAt,
+        refreshToken: nextConnection.refreshToken,
+        refreshTokenExpiresAt: nextConnection.refreshTokenExpiresAt,
         hostDeviceId: nextConnection.hostDeviceId,
         hostDeviceName: nextConnection.hostDeviceName,
       };
@@ -2215,12 +1737,11 @@ function AppRoot() {
     setIsServerOffline(false);
     setIsRefreshing(true);
     try {
-      const response = await fetch(`${connection.baseUrl}/api/lan/library`, {
-        headers: {
-          Authorization: `Bearer ${connection.deviceToken}`,
-          ...(connection.libraryEtag ? { 'If-None-Match': connection.libraryEtag } : {}),
-        },
-      });
+      const response = await mobileLanClient.getLibrary(
+        connection.baseUrl,
+        connection.deviceToken,
+        connection.libraryEtag,
+      );
       if (response.status === 304) return;
       if (!response.ok) throw new Error(`Could not refresh the library (${response.status}).`);
       const nextLibrary = (await response.json()) as LibraryPayload;
@@ -2246,17 +1767,16 @@ function AppRoot() {
     if (!connection || connectionHealthCheckRef.current || isRefreshing) return;
     connectionHealthCheckRef.current = true;
     try {
-      const response = await fetch(`${connection.baseUrl}/api/lan/library`, {
-        headers: {
-          Authorization: `Bearer ${connection.deviceToken}`,
-          ...(connection.libraryEtag ? { 'If-None-Match': connection.libraryEtag } : {}),
-        },
-      });
+      const response = await mobileLanClient.getLibrary(
+        connection.baseUrl,
+        connection.deviceToken,
+        connection.libraryEtag,
+      );
       if (response.status === 401) {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
         setConnection(null);
-        setError('This device is no longer authorized. Enter the current 6-digit code to pair again.');
+        setError('This device is no longer authorized. Enter the current pairing secret to pair again.');
         return;
       }
       if (response.status === 304) {
@@ -2279,9 +1799,7 @@ function AppRoot() {
 
   async function syncLibraryAfterArtworkChange(itemId: string, appliedCandidate?: OfficialMetadataCandidate): Promise<void> {
     if (!connection) return;
-    const libraryResponse = await fetch(`${connection.baseUrl}/api/lan/library`, {
-      headers: { Authorization: `Bearer ${connection.deviceToken}` },
-    });
+    const libraryResponse = await mobileLanClient.getLibrary(connection.baseUrl, connection.deviceToken);
     if (!libraryResponse.ok) {
       throw new Error(`Poster updated, but mobile sync failed (${libraryResponse.status}).`);
     }
@@ -2305,14 +1823,11 @@ function AppRoot() {
     setArtworkRefreshError('');
     setRefreshingArtworkId(item.id);
     try {
-      const response = await fetch(`${connection.baseUrl}/api/artwork/official-candidates`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${connection.deviceToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ mediaId: item.id }),
-      });
+      const response = await mobileLanClient.getOfficialArtworkCandidates(
+        connection.baseUrl,
+        connection.deviceToken,
+        item.id,
+      );
       const result = await readJsonResponse<OfficialMetadataCandidate[] | { error?: string }>(
         response,
         `Could not load poster choices (${response.status}).`,
@@ -2335,14 +1850,12 @@ function AppRoot() {
     setArtworkRefreshError('');
     setApplyingPosterCandidateId(candidateKey);
     try {
-      const response = await fetch(`${connection.baseUrl}/api/artwork/apply-official`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${connection.deviceToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ mediaId: itemId, candidate }),
-      });
+      const response = await mobileLanClient.applyOfficialArtwork(
+        connection.baseUrl,
+        connection.deviceToken,
+        itemId,
+        candidate,
+      );
       const result = await readJsonResponse<OfficialArtworkResponse>(
         response,
         `Could not apply poster (${response.status}).`,
@@ -2363,7 +1876,7 @@ function AppRoot() {
     styles.scrollContent,
     { paddingBottom: 96 + insets.bottom, paddingTop: insets.top + 12 },
   ];
-  const canRetryPairing = isServerOffline && Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode);
+  const canRetryPairing = isServerOffline && Boolean(baseUrl.trim()) && /^[A-Za-z0-9_-]{43}$/.test(shareCode.trim());
   const libraryRefreshControl = (
     <RefreshControl
       colors={[accent]}
@@ -2379,6 +1892,7 @@ function AppRoot() {
   const showSearchEmpty = Boolean(query.trim());
 
   return (
+    <MobileThemeProvider value={themeContextValue}>
     <View style={styles.app}>
       <StatusBar style={text === '#ffffff' ? 'light' : 'dark'} />
       {!connection ? (
@@ -2469,7 +1983,6 @@ function AppRoot() {
                       activeKind={activeKind}
                       filterOpen={filterOpen}
                       hasActiveFilters={hasActiveFilters}
-                      onSelectKind={navigateToKind}
                       searchScope={searchScope}
                       searchOpen={searchOpen}
                       setFilterOpen={setFilterOpen}
@@ -2603,14 +2116,6 @@ function AppRoot() {
         isRefreshingArtwork={Boolean(detailItem && refreshingArtworkId === detailItem.id)}
         onClose={closeDetail}
         onOpenKind={navigateToKind}
-        onOpenSearch={() => {
-          closeDetail();
-          setFilterOpen(false);
-          setLibraryFilter('all');
-          setSearchScope('all');
-          setQuery('');
-          setSearchOpen(true);
-        }}
         onPlay={(target) => {
           playerReturnItemRef.current = detailItem;
           setMiniPlayerTarget(null);
@@ -2654,12 +2159,12 @@ function AppRoot() {
         failure={playbackFailure}
         playbackUrl={playbackUrl}
         player={player}
-        streamOptions={streamOptions}
         onClose={() => { void closePlayer(); }}
         onRetry={retryPlayback}
         onStreamOptionsChange={setStreamOptions}
       />
     </View>
+    </MobileThemeProvider>
   );
 }
 
@@ -2694,7 +2199,8 @@ function PairingScreen({
   shareCode: string;
   onPair: (host?: DiscoveredHost) => void;
 }) {
-  const canPair = Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode);
+  const { colors: { accent, accentForeground, faint, text }, styles } = useMobileTheme();
+  const canPair = Boolean(baseUrl.trim()) && /^[A-Za-z0-9_-]{43}$/.test(shareCode.trim());
   const [showManual, setShowManual] = useState(false);
   // Without a saved desktop, manual entry is the always-visible fallback under
   // the device list; with one, it stays behind a single link.
@@ -2765,7 +2271,7 @@ function PairingScreen({
                     disabled={isPairing}
                     onPress={() => {
                       setBaseUrl(host.baseUrl);
-                      void onPair(host);
+                      setShowManual(true);
                     }}
                     style={({ pressed }) => [styles.hostCard, pressed && styles.pressed]}
                     accessibilityRole="button"
@@ -2819,11 +2325,12 @@ function PairingScreen({
                 value={baseUrl}
               />
               <TextInput
-                accessibilityLabel="6-digit sharing code"
-                keyboardType="number-pad"
-                maxLength={6}
-                onChangeText={(value) => setShareCode(value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="6-digit code"
+                accessibilityLabel="One-time pairing secret"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={43}
+                onChangeText={(value) => setShareCode(value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 43))}
+                placeholder="One-time pairing secret"
                 placeholderTextColor={faint}
                 style={[styles.input, styles.codeInput]}
                 value={shareCode}
@@ -2873,7 +2380,6 @@ function Header({
   activeKind,
   filterOpen,
   hasActiveFilters,
-  onSelectKind,
   query,
   searchScope,
   searchOpen,
@@ -2885,7 +2391,6 @@ function Header({
   activeKind: LibraryKind;
   filterOpen: boolean;
   hasActiveFilters: boolean;
-  onSelectKind: (kind: LibraryKind) => void;
   query: string;
   searchScope: MobileSearchScope;
   searchOpen: boolean;
@@ -2894,6 +2399,7 @@ function Header({
   setSearchScope: (value: MobileSearchScope) => void;
   setSearchOpen: (value: boolean) => void;
 }) {
+  const { colors: { accent, faint, muted, text }, styles } = useMobileTheme();
   const canFilter = activeKind !== 'settings';
   if (searchOpen) {
     return (
@@ -2980,6 +2486,7 @@ function SearchScopeFilters({
   activeScope: MobileSearchScope;
   onChange: (value: MobileSearchScope) => void;
 }) {
+  const { styles } = useMobileTheme();
   const options: { id: MobileSearchScope; label: string }[] = [
     { id: 'all', label: 'All' },
     { id: 'genre:drama', label: 'Drama' },
@@ -3019,6 +2526,7 @@ function LibraryFilters({
   activeFilter: MobileLibraryFilter;
   onChange: (value: MobileLibraryFilter) => void;
 }) {
+  const { styles } = useMobileTheme();
   const options: { id: MobileLibraryFilter; label: string }[] = [
     { id: 'all', label: 'All' },
     { id: 'in-progress', label: 'In Progress' },
@@ -3050,56 +2558,6 @@ function LibraryFilters({
   );
 }
 
-function SideNav({
-  activeKind,
-  counts,
-  hostName,
-  isRefreshing,
-  onRefresh,
-  setActiveKind,
-}: {
-  activeKind: LibraryKind;
-  counts: Record<'anime' | 'tv' | 'movies' | 'others', number>;
-  hostName: string;
-  isRefreshing: boolean;
-  onRefresh: () => void;
-  setActiveKind: (kind: LibraryKind) => void;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <View style={[styles.sideNav, { paddingTop: insets.top + 18 }]}>
-      <View style={styles.brandRow}>
-        <LoomLogo width={86} height={24} accent={accent} wordColor={text} />
-      </View>
-      <Text selectable style={styles.sideHost}>{hostName}</Text>
-      <View style={styles.sideNavItems}>
-        {navItems.map((item) => {
-          const isActive = activeKind === item.id;
-          const Icon = isActive ? (item.ActiveIcon || item.Icon) : item.Icon;
-          return (
-            <Pressable
-              key={item.id}
-              style={({ pressed }) => [styles.sideNavButton, isActive && styles.sideNavButtonActive, pressed && styles.pressed]}
-              onPress={() => setActiveKind(item.id)}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: isActive }}
-            >
-              <View style={styles.navGlyph}>
-                <Icon size={20} color={isActive ? accent : muted} />
-              </View>
-              <Text style={[styles.sideNavLabel, isActive && styles.sideNavLabelActive]}>{item.label}</Text>
-              {item.id !== 'home' && item.id !== 'settings' ? <Text style={styles.sideNavCount}>{counts[item.id]}</Text> : null}
-            </Pressable>
-          );
-        })}
-      </View>
-      <Pressable style={styles.refreshButton} onPress={onRefresh} disabled={isRefreshing}>
-        <Text style={styles.refreshButtonText}>{isRefreshing ? 'Refreshing...' : 'Refresh library'}</Text>
-      </Pressable>
-    </View>
-  );
-}
-
 function BottomNavItem({
   item,
   isActive,
@@ -3109,6 +2567,7 @@ function BottomNavItem({
   isActive: boolean;
   onPress: () => void;
 }) {
+  const { colors: { accent, faint }, styles } = useMobileTheme();
   const active = useRef(new Animated.Value(isActive ? 1 : 0)).current;
   useEffect(() => {
     Animated.spring(active, {
@@ -3144,6 +2603,7 @@ function BottomNav({
   activeKind: LibraryKind;
   setActiveKind: (kind: LibraryKind) => void;
 }) {
+  const { colors: { text }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const bottomItems: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement; isActive: boolean; onPress: () => void }[] = [
     { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive, isActive: activeKind === 'home', onPress: () => setActiveKind('home') },
@@ -3201,6 +2661,7 @@ function MiniPlayerStrip({
   onOpen: () => void;
   target: PlayTarget | null;
 }) {
+  const { colors: { accentForeground }, styles } = useMobileTheme();
   if (!target) return null;
   const thumbnailSources = imageUrlsFor(baseUrl, [
     target.thumbnail,
@@ -3276,7 +2737,6 @@ function DetailModal({
   progress,
   onClose,
   onOpenKind,
-  onOpenSearch,
   onPlay,
   onRefreshArtwork,
 }: {
@@ -3291,7 +2751,6 @@ function DetailModal({
   progress: Record<string, StoredProgress>;
   onClose: () => void;
   onOpenKind: (kind: LibraryKind) => void;
-  onOpenSearch: () => void;
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
@@ -3311,7 +2770,6 @@ function DetailModal({
       progress={progress}
       onClose={onClose}
       onOpenKind={onOpenKind}
-      onOpenSearch={onOpenSearch}
       onPlay={onPlay}
       onRefreshArtwork={onRefreshArtwork}
     />
@@ -3319,6 +2777,7 @@ function DetailModal({
 }
 
 const HeroGradient = memo(function HeroGradient() {
+  const { colors: { bg } } = useMobileTheme();
   return (
     <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
       <Defs>
@@ -3345,7 +2804,6 @@ function DetailContent({
   progress,
   onClose,
   onOpenKind,
-  onOpenSearch,
   onPlay,
   onRefreshArtwork,
 }: {
@@ -3360,10 +2818,10 @@ function DetailContent({
   progress: Record<string, StoredProgress>;
   onClose: () => void;
   onOpenKind: (kind: LibraryKind) => void;
-  onOpenSearch: () => void;
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
+  const { colors: { accent, accentForeground, text }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const isLightTheme = text !== '#ffffff';
   const entrance = useEntrance(16);
@@ -3676,6 +3134,7 @@ function DetailInfo({
   cacheBust?: string;
   item: MediaItem;
 }) {
+  const { styles } = useMobileTheme();
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const cast = (item.cast || []).filter((actor) => actor.name.trim()).slice(0, 8);
 
@@ -3757,6 +3216,7 @@ function PosterCandidateSheet({
   onApply: (candidate: OfficialMetadataCandidate, candidateKey: string) => void;
   onClose: () => void;
 }) {
+  const { colors: { accent, accentForeground, text }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const entrance = useEntrance(22);
   if (!item) return null;
@@ -3881,6 +3341,7 @@ function EpisodeRow({
   summary?: string;
   onPress: () => void;
 }) {
+  const { styles } = useMobileTheme();
   const thumbnailSources = useMemo(
     () => imageUrlsFor(baseUrl, [
       episode.thumbnail,
@@ -3949,7 +3410,6 @@ function PlayerModal({
   onStreamOptionsChange,
   playbackUrl,
   player,
-  streamOptions,
 }: {
   baseUrl: string;
   deviceToken: string;
@@ -3961,7 +3421,6 @@ function PlayerModal({
   onStreamOptionsChange: (options: StreamOptions) => void;
   playbackUrl: string | null;
   player: ReturnType<typeof useVideoPlayer>;
-  streamOptions: StreamOptions;
 }) {
   if (!target) return null;
   // Keyed so playback position/controls state resets per title.
@@ -3978,7 +3437,6 @@ function PlayerModal({
       onStreamOptionsChange={onStreamOptionsChange}
       playbackUrl={playbackUrl}
       player={player}
-      streamOptions={streamOptions}
     />
   );
 }
@@ -3996,6 +3454,7 @@ function PlayerSkipButton({
   onPress: () => void;
   style?: StyleProp<ViewStyle>;
 }) {
+  const { styles } = useMobileTheme();
   const Icon = direction === 'back' ? SkipBackIcon : SkipForwardIcon;
   return (
     <Pressable
@@ -4011,6 +3470,7 @@ function PlayerSkipButton({
 }
 
 function PlayerMenuRow({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const { colors: { accent }, styles } = useMobileTheme();
   return (
     <Pressable
       onPress={onPress}
@@ -4033,6 +3493,7 @@ function PlayerSegmentedControl<T extends string | number>({
   value: T;
   onChange: (value: T) => void;
 }) {
+  const { styles } = useMobileTheme();
   return (
     <ScrollView
       horizontal
@@ -4075,7 +3536,6 @@ function PlayerContent({
   onStreamOptionsChange,
   playbackUrl,
   player,
-  streamOptions,
 }: {
   baseUrl: string;
   deviceToken: string;
@@ -4087,8 +3547,8 @@ function PlayerContent({
   onStreamOptionsChange: (options: StreamOptions) => void;
   playbackUrl: string | null;
   player: ReturnType<typeof useVideoPlayer>;
-  streamOptions: StreamOptions;
 }) {
+  const { colors: { accent }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const { width: playerWidth } = useWindowDimensions();
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -4203,9 +3663,7 @@ function PlayerContent({
     setTrackPreferences({});
     if (!baseUrl || !deviceToken || !preferenceScope) return () => { cancelled = true; };
 
-    fetch(`${baseUrl}/api/playback-track-preferences?scope=${encodeURIComponent(preferenceScope)}`, {
-      headers: { Authorization: `Bearer ${deviceToken}` },
-    })
+    mobileLanClient.getTrackPreferences(baseUrl, deviceToken, preferenceScope)
       .then((response) => (response.ok ? response.json() as Promise<PlaybackTrackPreferences> : {}))
       .then((preferences) => {
         if (!cancelled) setTrackPreferences(preferences || {});
@@ -4233,10 +3691,12 @@ function PlayerContent({
     }
     const load = async (attempt = 0) => {
       try {
-        const response = await fetch(`${baseUrl}/api/playback/segments?${params.toString()}`, {
-          headers: { Authorization: `Bearer ${deviceToken}` },
-          signal: controller.signal,
-        });
+        const response = await mobileLanClient.getPlaybackSegments(
+          baseUrl,
+          deviceToken,
+          params,
+          controller.signal,
+        );
         if (!response.ok) throw new Error(`Skip marker lookup failed (${response.status}).`);
         const payload = await response.json() as { segments?: MediaSegment[] };
         if (cancelled) return;
@@ -4558,14 +4018,7 @@ function PlayerContent({
     const nextPreferences = { ...trackPreferences, ...nextPreference };
     setTrackPreferences(nextPreferences);
     if (!baseUrl || !deviceToken || !preferenceScope) return;
-    fetch(`${baseUrl}/api/playback-track-preferences`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${deviceToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ scope: preferenceScope, preferences: nextPreferences }),
-    }).catch(() => {});
+    mobileLanClient.saveTrackPreferences(baseUrl, deviceToken, preferenceScope, nextPreferences).catch(() => {});
   };
 
   const selectAudioOption = (option: PlayerAudioOption) => {
@@ -4611,17 +4064,8 @@ function PlayerContent({
   };
 
   const progressFractionValue = duration > 0 ? Math.min(1, position / duration) : 0;
-  const activeMediaSegment = useMemo(() => mediaSegments.find((segment) => {
-    if (segment.type === 'preview') return false;
-    const endSeconds = (segment.endMs ?? segment.mediaDurationMs) / 1000;
-    return position >= segment.startMs / 1000 && position < endSeconds - 0.25;
-  }) || null, [mediaSegments, position]);
-  const activeSegmentLabel = activeMediaSegment ? ({
-    intro: 'Intro',
-    recap: 'Recap',
-    credits: target.mediaType === 'movie' ? 'Credits' : 'Outro',
-    preview: 'Preview',
-  } as const)[activeMediaSegment.type] : '';
+  const activeMediaSegment = useMemo(() => activeKnownMediaSegmentAt(mediaSegments, position), [mediaSegments, position]);
+  const activeSegmentLabel = activeMediaSegment ? mobileMediaSegmentLabel(activeMediaSegment.type, target.mediaType === 'movie') : '';
   const displayLabels = playerDisplayLabels(target);
   const controlVerticalPadding = Math.max(insets.top, insets.bottom, 16);
   const aspectRatioValue = aspectRatio === 'default' ? undefined : aspectRatio;
@@ -4971,6 +4415,7 @@ function SettingsScreen({
   onSelectTheme: (mode: MobileThemeMode) => void;
   setActiveSection: (section: SettingsSection | null) => void;
 }) {
+  const { colors: { accent, muted }, styles } = useMobileTheme();
   const active = settingsSections.find((section) => section.id === activeSection);
 
   if (active) {
@@ -5042,6 +4487,7 @@ function SettingsScreen({
 }
 
 function MobileThemePicker({ mode, onSelectTheme }: { mode: MobileThemeMode; onSelectTheme: (mode: MobileThemeMode) => void }) {
+  const { colors: { accent, muted }, styles } = useMobileTheme();
   const options: { value: MobileThemeMode; label: string; Icon: (props: IconProps) => ReactElement }[] = [
     { value: 'auto', label: 'Auto', Icon: AutoThemeIcon },
     { value: 'light', label: 'Light mode', Icon: SunIcon },
@@ -5096,6 +4542,7 @@ function SettingsDetail({
   onDisconnect: () => void;
   onRefresh: () => void;
 }) {
+  const { styles } = useMobileTheme();
   const { width, fontScale } = useWindowDimensions();
   const availableSettingsWidth = Math.min(
     settingsContentMaxWidth,
@@ -5158,6 +4605,7 @@ function SettingsDetail({
 }
 
 function SettingsMetric({ metric }: { metric: LibraryMetric }) {
+  const { colors: { accent }, styles } = useMobileTheme();
   const Icon = metric.Icon;
   return (
     <View style={styles.settingsMetric}>
@@ -5191,6 +4639,7 @@ function HomeSections({
   onResume: (item: MediaItem) => void;
   onSelect: (item: MediaItem) => void;
 }) {
+  const { styles } = useMobileTheme();
   const hasItems = grouped.anime.length > 0 || grouped.tv.length > 0 || grouped.movies.length > 0 || grouped.others.length > 0;
 
   // Keep one featured title fixed while Home remains mounted. Playback progress
@@ -5254,6 +4703,7 @@ function HomeHero({
   onPlay: (item: MediaItem) => void;
   onSelect: (item: MediaItem) => void;
 }) {
+  const { styles } = useMobileTheme();
   const { width } = useWindowDimensions();
   const contentWidth = isTablet ? width - 220 : width;
   const cardWidth = isTablet ? Math.min(contentWidth - 56, 460) : contentWidth - 32;
@@ -5291,6 +4741,7 @@ function HeroCard({
   onSelect: () => void;
   width: number;
 }) {
+  const { colors: { accent, accentForeground }, styles } = useMobileTheme();
   const canonicalPoster = item.poster || item.posterCandidates?.[0];
   const sources = useMemo(
     () => imageUrlsFor(baseUrl, [canonicalPoster], cacheBust),
@@ -5364,6 +4815,7 @@ function Rail({
   onSelect: (item: MediaItem) => void;
   title: string;
 }) {
+  const { colors: { text }, styles } = useMobileTheme();
   if (items.length === 0) return null;
   return (
     <View style={styles.rail}>
@@ -5429,6 +4881,7 @@ function LibraryList({
   refreshControl?: ReactElement<RefreshControlProps>;
   showEmpty?: boolean;
 }) {
+  const { styles } = useMobileTheme();
   const { width } = useWindowDimensions();
   const gap = 14;
   // Side nav (tablet) is 220px wide; account for the 16px content padding on each side.
@@ -5493,6 +4946,7 @@ const PosterCard = memo(function PosterCard({
   onSelect: (item: MediaItem) => void;
   width: number;
 }) {
+  const { colors: { accent }, styles } = useMobileTheme();
   const posterCandidates = useMemo(
     () => [
       item.poster,
@@ -5556,6 +5010,7 @@ const PosterCard = memo(function PosterCard({
 });
 
 function EmptyLibrary({ isTablet }: { isTablet: boolean }) {
+  const { styles } = useMobileTheme();
   return (
     <View style={[styles.emptyLibrary, isTablet && styles.emptyLibraryTablet]}>
       <View style={styles.emptyIcon}>
@@ -5568,2258 +5023,3 @@ function EmptyLibrary({ isTablet }: { isTablet: boolean }) {
     </View>
   );
 }
-
-function createStyles(theme: MobileThemeColors) {
-  const { accent, accentSoft, accentBorder, accentForeground, bg, panel, panel2, border, text, muted, faint } = theme;
-  const surface = panel2;
-  const dangerText = text === '#ffffff' ? '#ff9a8f' : '#b42318';
-  const errorTextColor = text === '#ffffff' ? '#ff8c78' : '#b42318';
-  const ratingSurface = text === '#ffffff' ? 'rgba(245,196,81,0.15)' : '#fff1bf';
-  const posterRatingSurface = text === '#ffffff' ? 'rgba(0,0,0,0.78)' : '#fff1bf';
-  const ratingBorder = text === '#ffffff' ? 'rgba(245,196,81,0.42)' : '#f5c451';
-  const ratingText = text === '#ffffff' ? '#f5c451' : '#000000';
-  return StyleSheet.create({
-  app: {
-    backgroundColor: bg,
-    flex: 1,
-  },
-  imageLoadFrame: {
-    backgroundColor: panel2,
-    overflow: 'hidden',
-  },
-  shimmerBase: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: panel2,
-    overflow: 'hidden',
-  },
-  shimmerBand: {
-    // The width and gradient sheen are applied at runtime; the vertical overflow
-    // keeps the skewed edges clipped off-frame.
-    bottom: -40,
-    position: 'absolute',
-    top: -40,
-  },
-  pairingAvoider: {
-    flex: 1,
-  },
-  pairingContent: {
-    flexGrow: 1,
-    gap: 28,
-    justifyContent: 'center',
-    paddingBottom: 64,
-    paddingHorizontal: 24,
-    paddingTop: 48,
-  },
-  pairingContentKeyboard: {
-    justifyContent: 'flex-start',
-    paddingBottom: 32,
-    paddingTop: 24,
-  },
-  pairingHero: {
-    alignItems: 'center',
-    gap: 14,
-  },
-  pairingSubtitle: {
-    color: muted,
-    fontSize: 15,
-    lineHeight: 22,
-    maxWidth: 320,
-    textAlign: 'center',
-  },
-  helpToggle: {
-    alignItems: 'center',
-    minHeight: 40,
-    justifyContent: 'center',
-  },
-  helpToggleText: {
-    color: accent,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  brandRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  formBlock: {
-    gap: 11,
-    paddingTop: 8,
-  },
-  discoveryBlock: {
-    gap: 10,
-  },
-  discoveryHeading: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 28,
-  },
-  discoveryTitle: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  refreshDiscoveryButton: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 44,
-    paddingHorizontal: 4,
-  },
-  hostCard: {
-    alignItems: 'center',
-    backgroundColor: surface,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 72,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-  },
-  hostCardSelected: {
-    backgroundColor: accentSoft,
-    borderColor: accent,
-  },
-  hostCardCopy: {
-    flex: 1,
-    gap: 3,
-    minWidth: 0,
-  },
-  hostName: {
-    color: text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  hostAddress: {
-    color: faint,
-    fontSize: 12,
-  },
-  hostConnectLabel: {
-    color: accent,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  emptyDiscoveryCard: {
-    alignItems: 'center',
-    backgroundColor: surface,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 5,
-    padding: 20,
-  },
-  emptyDiscoveryTitle: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  emptyDiscoveryCopy: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-  },
-  codePrompt: {
-    gap: 9,
-    paddingTop: 4,
-  },
-  codePromptTitle: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  manualForm: {
-    gap: 11,
-  },
-  manualDivider: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    marginVertical: 4,
-  },
-  manualDividerLine: {
-    backgroundColor: border,
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-  },
-  manualDividerText: {
-    color: faint,
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  manualHint: {
-    color: faint,
-    fontSize: 12,
-    lineHeight: 17,
-    textAlign: 'center',
-  },
-  savedHostCard: {
-    backgroundColor: surface,
-    borderColor: border,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 5,
-    padding: 18,
-  },
-  hostStatusRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 7,
-  },
-  hostStatusDot: {
-    backgroundColor: '#ef6a5b',
-    borderRadius: 999,
-    height: 8,
-    width: 8,
-  },
-  hostStatusDotSearching: {
-    backgroundColor: accent,
-  },
-  savedHostStatus: {
-    color: muted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  input: {
-    backgroundColor: surface,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    color: text,
-    fontSize: 16,
-    minHeight: 50,
-    paddingHorizontal: 14,
-  },
-  codeInput: {
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 4,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    borderRadius: 10,
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  disabledButton: {
-    opacity: 0.7,
-  },
-  primaryButtonText: {
-    color: accentForeground,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  reconnectButton: {
-    backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 8,
-    minHeight: 42,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    alignSelf: 'flex-start',
-  },
-  reconnectButtonText: {
-    color: text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  errorText: {
-    color: errorTextColor,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  errorCard: {
-    backgroundColor: 'rgba(255, 120, 92, 0.10)',
-    borderColor: 'rgba(255, 140, 120, 0.25)',
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 4,
-    padding: 12,
-  },
-  shell: {
-    flex: 1,
-  },
-  shellTablet: {
-    flexDirection: 'row',
-  },
-  sideNav: {
-    backgroundColor: surface,
-    borderRightColor: border,
-    borderRightWidth: 1,
-    gap: 18,
-    padding: 18,
-    width: 220,
-  },
-  sideHost: {
-    color: faint,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  sideNavItems: {
-    gap: 6,
-  },
-  sideNavButton: {
-    alignItems: 'center',
-    borderRadius: 10,
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 44,
-    paddingHorizontal: 12,
-  },
-  sideNavButtonActive: {
-    backgroundColor: panel2,
-  },
-  navGlyph: {
-    alignItems: 'center',
-    width: 24,
-  },
-  sideNavLabel: {
-    color: muted,
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sideNavLabelActive: {
-    color: accent,
-  },
-  sideNavCount: {
-    color: faint,
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-  },
-  refreshButton: {
-    alignItems: 'center',
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 'auto',
-    minHeight: 42,
-    justifyContent: 'center',
-  },
-  refreshButtonText: {
-    color: text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  main: {
-    flex: 1,
-  },
-  swipeContainer: {
-    flex: 1,
-  },
-  scrollContent: {
-    gap: 18,
-    padding: 16,
-    paddingBottom: 108,
-    paddingTop: 20,
-  },
-  header: {
-    gap: 14,
-  },
-  topBarRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginHorizontal: -4,
-    justifyContent: 'space-between',
-    minHeight: 44,
-  },
-  headerActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 2,
-  },
-  homeStickyHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    left: 0,
-    paddingBottom: 4,
-    paddingHorizontal: 12,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    zIndex: 10,
-  },
-  homeStickyBackground: {
-    backgroundColor: text === '#ffffff' ? 'rgba(21,21,27,0.97)' : 'rgba(255,255,255,0.97)',
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  topBarIconButton: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  filterButtonActive: {
-    backgroundColor: panel2,
-    borderRadius: 14,
-  },
-  filterChipRow: {
-    gap: 8,
-    paddingRight: 16,
-  },
-  filterChip: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderRadius: 999,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-  },
-  filterChipSelected: {
-    backgroundColor: text === '#ffffff' ? '#ffffff' : '#000000',
-  },
-  filterChipText: {
-    color: muted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  filterChipTextSelected: {
-    color: text === '#ffffff' ? '#000000' : '#ffffff',
-  },
-  railTitleRow: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    gap: 4,
-    minHeight: 32,
-  },
-  headerTop: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  screenTitle: {
-    color: text,
-    fontSize: 32,
-    fontWeight: '700',
-    lineHeight: 36,
-  },
-  headerMeta: {
-    color: faint,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  iconButton: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  searchHeader: {
-    gap: 12,
-  },
-  searchHeaderRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    width: '100%',
-  },
-  searchBox: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    gap: 9,
-    minWidth: 0,
-    minHeight: 44,
-    paddingHorizontal: 12,
-  },
-  searchClearButton: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderRadius: 999,
-    height: 24,
-    justifyContent: 'center',
-    width: 24,
-  },
-  searchCancelButton: {
-    alignItems: 'center',
-    flexShrink: 0,
-    minHeight: 44,
-    justifyContent: 'center',
-    width: 56,
-  },
-  searchCancelText: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  searchInput: {
-    color: text,
-    flex: 1,
-    minWidth: 0,
-    fontSize: 16,
-    fontWeight: '400',
-    letterSpacing: 0,
-  },
-  metaText: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 4,
-  },
-  sections: {
-    gap: 20,
-  },
-  homeTabStrip: {
-    marginHorizontal: -16,
-  },
-  homeTabRow: {
-    gap: 8,
-    paddingHorizontal: 16,
-  },
-  homeTab: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 7,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-  },
-  homeTabActive: {
-    backgroundColor: text === '#ffffff' ? '#ffffff' : '#171717',
-  },
-  homeTabText: {
-    color: muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  homeTabTextActive: {
-    color: text === '#ffffff' ? '#171717' : '#ffffff',
-  },
-  heroCarousel: {
-    alignItems: 'center',
-    marginHorizontal: -16,
-  },
-  heroCard: {
-    backgroundColor: panel2,
-    borderRadius: 14,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  heroCardImage: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  heroCardShade: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-  },
-  heroCardFooter: {
-    bottom: 0,
-    gap: 8,
-    left: 0,
-    padding: 16,
-    position: 'absolute',
-    right: 0,
-    zIndex: 2,
-  },
-  heroCardTitle: {
-    color: '#ffffff',
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: -0.4,
-    lineHeight: 30,
-  },
-  heroCardMeta: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  heroPlayButton: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 10,
-    height: 52,
-    justifyContent: 'center',
-    marginTop: 6,
-    width: '100%',
-  },
-  heroPlayButtonPressed: {
-    opacity: 0.82,
-  },
-  heroPlayButtonText: {
-    color: accentForeground,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  posterBadge: {
-    alignItems: 'center',
-    backgroundColor: '#e5232e',
-    borderRadius: 4,
-    flexDirection: 'row',
-    gap: 4,
-    left: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    position: 'absolute',
-    top: 6,
-  },
-  posterBadgeDot: {
-    backgroundColor: '#ffd28a',
-    borderRadius: 999,
-    height: 4,
-    width: 4,
-  },
-  posterBadgeText: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.1,
-  },
-  rail: {
-    gap: 10,
-  },
-  sectionTitle: {
-    color: text,
-    fontSize: 20,
-    fontWeight: '800',
-    letterSpacing: -0.3,
-  },
-  railContent: {
-    gap: 14,
-    paddingRight: 20,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  posterCard: {
-  },
-  posterFrame: {
-    aspectRatio: 2 / 3,
-    backgroundColor: panel2,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  posterImage: {
-    height: '100%',
-    width: '100%',
-  },
-  posterFallback: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-    padding: 10,
-  },
-  posterTitle: {
-    color: text,
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 18,
-    marginTop: 8,
-  },
-  posterRatingBadge: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: posterRatingSurface,
-    borderColor: ratingBorder,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 3,
-    position: 'absolute',
-    right: 8,
-    top: 8,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  posterRatingText: {
-    color: ratingText,
-    fontSize: 11,
-    fontWeight: '800',
-    lineHeight: 13,
-  },
-  emptyLibrary: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 12,
-    padding: 24,
-  },
-  emptyLibraryTablet: {
-    maxWidth: 520,
-  },
-  emptyIcon: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 24,
-    borderWidth: 1,
-    height: 72,
-    justifyContent: 'center',
-    width: 72,
-  },
-  emptyIconText: {
-    color: accent,
-    fontSize: 30,
-    fontWeight: '600',
-  },
-  emptyInline: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 8,
-    padding: 24,
-  },
-  emptyTitle: {
-    color: text,
-    fontSize: 20,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  emptyCopy: {
-    color: muted,
-    fontSize: 14,
-    lineHeight: 21,
-    maxWidth: 420,
-    textAlign: 'center',
-  },
-  settingsPage: {
-    alignSelf: 'center',
-    gap: 16,
-    maxWidth: settingsContentMaxWidth,
-    width: '100%',
-  },
-  settingsProfile: {
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 22,
-  },
-  settingsAvatar: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    borderColor: accentBorder,
-    borderRadius: 36,
-    borderWidth: 1,
-    height: 72,
-    justifyContent: 'center',
-    shadowColor: accent,
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    width: 72,
-  },
-  settingsAvatarText: {
-    color: accentForeground,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  settingsProfileTitle: {
-    color: text,
-    fontSize: 25,
-    fontWeight: '700',
-    lineHeight: 31,
-    marginTop: 12,
-  },
-  settingsProfileCopy: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 6,
-    maxWidth: 300,
-    textAlign: 'center',
-  },
-  settingsList: {
-    paddingTop: 2,
-  },
-  settingsListItem: {
-    alignItems: 'center',
-    borderBottomColor: 'rgba(148,163,184,0.18)',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    gap: 16,
-    minHeight: 56,
-  },
-  settingsAppearanceRow: {
-    borderBottomWidth: 0,
-  },
-  settingsListValue: {
-    color: muted,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  settingsListText: {
-    color: text,
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  settingsThemePicker: {
-    gap: 10,
-    paddingBottom: 16,
-    paddingHorizontal: 0,
-    paddingTop: 2,
-  },
-  settingsThemeOptions: {
-    flexDirection: 'row',
-    gap: 10,
-    width: '100%',
-  },
-  settingsThemeOption: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderRadius: 12,
-    flex: 1,
-    gap: 7,
-    justifyContent: 'center',
-    minHeight: 86,
-    paddingHorizontal: 12,
-  },
-  settingsThemeOptionActive: {
-    backgroundColor: accentSoft,
-  },
-  settingsThemeOptionText: {
-    color: muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  settingsThemeOptionTextActive: {
-    color: accent,
-  },
-  settingsDetailHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    paddingBottom: 4,
-  },
-  settingsBackButton: {
-    alignItems: 'center',
-    height: 32,
-    justifyContent: 'center',
-    marginLeft: -7,
-    width: 32,
-  },
-  settingsDetailTitle: {
-    color: text,
-    flex: 1,
-    fontSize: 25,
-    fontWeight: '700',
-    lineHeight: 31,
-  },
-  settingsCards: {
-    gap: 12,
-    width: '100%',
-  },
-  settingsCard: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 10,
-    padding: 16,
-  },
-  settingsCardTitle: {
-    color: text,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  settingsCardCopy: {
-    color: muted,
-    flexShrink: 1,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  settingsValue: {
-    backgroundColor: surface,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    color: text,
-    fontSize: 13,
-    lineHeight: 18,
-    padding: 12,
-  },
-  settingsMetricRows: {
-    gap: settingsMetricGap,
-  },
-  settingsMetricRow: {
-    flexDirection: 'row',
-    gap: settingsMetricGap,
-  },
-  settingsMetric: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    gap: 11,
-    minHeight: 70,
-    minWidth: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-  },
-  settingsMetricIcon: {
-    alignItems: 'center',
-    backgroundColor: accentSoft,
-    borderColor: accentBorder,
-    borderRadius: 11,
-    borderWidth: 1,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-  settingsMetricCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  settingsMetricValue: {
-    color: accent,
-    fontSize: 21,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '800',
-    lineHeight: 25,
-  },
-  settingsMetricLabel: {
-    color: muted,
-    flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-  },
-  settingsPrimaryButton: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    borderRadius: 10,
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: 16,
-  },
-  settingsPrimaryButtonText: {
-    color: accentForeground,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  settingsDangerButton: {
-    alignItems: 'center',
-    borderColor: 'rgba(239,68,68,0.45)',
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  settingsDangerButtonText: {
-    color: dangerText,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  bottomNav: {
-    backgroundColor: text === '#ffffff' ? 'rgba(21,21,27,0.96)' : 'rgba(255,255,255,0.94)',
-    borderColor: border,
-    borderTopWidth: 1,
-    bottom: 0,
-    left: 0,
-    paddingHorizontal: 6,
-    paddingTop: 8,
-    position: 'absolute',
-    right: 0,
-    zIndex: 24,
-  },
-  bottomNavBlur: {
-    backgroundColor: 'transparent',
-    overflow: 'hidden',
-  },
-  bottomNavLight: {
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderColor: border,
-  },
-  bottomNavRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-  },
-  bottomNavButton: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 4,
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  bottomNavIconWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 26,
-    minWidth: 32,
-  },
-  bottomNavLabel: {
-    color: faint,
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  bottomNavLabelActive: {
-    color: accent,
-  },
-  miniPlayerWrap: {
-    left: 12,
-    position: 'absolute',
-    right: 12,
-    zIndex: 26,
-  },
-  miniPlayerStrip: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    borderColor: 'rgba(255,255,255,0.13)',
-    borderRadius: 14,
-    borderWidth: 1,
-    elevation: 8,
-    flexDirection: 'row',
-    minHeight: 62,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.34,
-    shadowRadius: 18,
-  },
-  miniPlayerBlur: {
-    backgroundColor: 'rgba(0,0,0,0.84)',
-  },
-  miniPlayerMain: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 62,
-    minWidth: 0,
-    paddingLeft: 10,
-    paddingVertical: 8,
-  },
-  miniPlayerThumb: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderRadius: 9,
-    height: 42,
-    justifyContent: 'center',
-    overflow: 'hidden',
-    width: 56,
-  },
-  miniPlayerThumbImage: {
-    height: '100%',
-    width: '100%',
-  },
-  miniPlayerThumbFallback: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    height: '100%',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  miniPlayerThumbBadge: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    borderRadius: 999,
-    bottom: 4,
-    height: 18,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 4,
-    width: 18,
-  },
-  miniPlayerText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  miniPlayerTitle: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 19,
-  },
-  miniPlayerMeta: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 17,
-    marginTop: 1,
-  },
-  miniPlayerDismiss: {
-    alignItems: 'center',
-    height: 54,
-    justifyContent: 'center',
-    width: 48,
-  },
-  pressed: {
-    opacity: 0.6,
-  },
-  playerControlPressed: {
-    transform: [{ scale: 0.96 }],
-  },
-  overlay: {
-    backgroundColor: bg,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    zIndex: 20,
-  },
-  detailScroll: {
-    paddingBottom: 48,
-  },
-  detailHero: {
-    aspectRatio: 4 / 3,
-    position: 'relative',
-    width: '100%',
-  },
-  detailBackdrop: {
-    height: '100%',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    width: '100%',
-  },
-  detailTopBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    left: 0,
-    paddingBottom: 8,
-    paddingHorizontal: 12,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    zIndex: 6,
-  },
-  detailTopBarBackground: {
-    backgroundColor: 'rgba(21,21,27,0.97)',
-    borderBottomColor: border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  detailTopAction: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 22,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  detailStickyTitle: {
-    color: '#ffffff',
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  detailBack: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.9)',
-    borderRadius: 22,
-    height: 44,
-    justifyContent: 'center',
-    left: 16,
-    position: 'absolute',
-    width: 44,
-    zIndex: 5,
-  },
-  detailRefreshPosterButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(16,16,16,0.9)',
-    borderColor: border,
-    borderRadius: 22,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 16,
-    width: 44,
-    zIndex: 5,
-  },
-  posterSheetOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-    zIndex: 35,
-  },
-  posterSheet: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    borderWidth: 1,
-    maxHeight: '86%',
-    paddingHorizontal: 18,
-    paddingTop: 10,
-  },
-  posterSheetHandle: {
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.28)',
-    borderRadius: 999,
-    height: 4,
-    marginBottom: 14,
-    width: 42,
-  },
-  posterSheetHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  posterSheetTitleBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-  posterSheetEyebrow: {
-    color: accent,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  posterSheetTitle: {
-    color: text,
-    fontSize: 20,
-    fontWeight: '800',
-    lineHeight: 25,
-    marginTop: 2,
-  },
-  posterSheetClose: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 20,
-    borderWidth: 1,
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
-  posterSheetError: {
-    color: errorTextColor,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 10,
-  },
-  posterCandidateList: {
-    gap: 12,
-    paddingBottom: 10,
-  },
-  posterCandidateCard: {
-    backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 12,
-    padding: 10,
-  },
-  posterCandidateTop: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 12,
-  },
-  posterCandidateImage: {
-    backgroundColor: surface,
-    borderRadius: 10,
-    height: 112,
-    overflow: 'hidden',
-    width: 76,
-  },
-  posterCandidateInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  posterCandidateTitle: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '800',
-    lineHeight: 20,
-  },
-  posterCandidateDetails: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 6,
-  },
-  posterCandidateYear: {
-    color: muted,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  posterCandidateSource: {
-    borderColor: border,
-    borderRadius: 999,
-    borderWidth: 1,
-    color: muted,
-    fontSize: 11,
-    fontWeight: '800',
-    lineHeight: 16,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  posterCandidateRating: {
-    alignItems: 'center',
-    backgroundColor: ratingSurface,
-    borderColor: ratingBorder,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  posterCandidateRatingText: {
-    color: ratingText,
-    fontSize: 11,
-    fontWeight: '900',
-    lineHeight: 14,
-  },
-  posterCandidateSummary: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 7,
-  },
-  posterCandidateCover: {
-    backgroundColor: surface,
-    borderRadius: 9,
-    height: 52,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  posterCandidateCoverFallback: {
-    alignItems: 'center',
-    backgroundColor: surface,
-    borderRadius: 9,
-    height: 52,
-    justifyContent: 'center',
-    width: '100%',
-  },
-  posterCandidateCoverFallbackText: {
-    color: faint,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  posterCandidateEpisodes: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  posterCandidateEpisodesLabel: {
-    color: faint,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    lineHeight: 14,
-    textTransform: 'uppercase',
-  },
-  posterCandidateEpisodeName: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  posterCandidateGenres: {
-    flex: 1,
-    color: muted,
-    fontSize: 11,
-    lineHeight: 16,
-  },
-  posterCandidateFooter: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between',
-  },
-  posterCandidateFooterSpacer: {
-    flex: 1,
-  },
-  posterCandidateApply: {
-    alignItems: 'center',
-    backgroundColor: accent,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 6,
-    justifyContent: 'center',
-    minHeight: 40,
-    minWidth: 84,
-    paddingHorizontal: 12,
-  },
-  posterCandidateApplyText: {
-    color: accentForeground,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  posterCandidateEmpty: {
-    alignItems: 'center',
-    borderColor: border,
-    borderRadius: 16,
-    borderWidth: 1,
-    gap: 6,
-    padding: 22,
-  },
-  posterCandidateEmptyTitle: {
-    color: text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  posterCandidateEmptyCopy: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-  },
-  detailTitle: {
-    color: text,
-    fontSize: 30,
-    fontWeight: '700',
-    lineHeight: 35,
-    textAlign: 'center',
-  },
-  detailMeta: {
-    color: muted,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  detailRatingRow: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: ratingSurface,
-    borderColor: ratingBorder,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  detailRatingText: {
-    color: ratingText,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  detailBody: {
-    gap: 16,
-    marginTop: -32,
-    paddingHorizontal: 12,
-  },
-  playButton: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'center',
-    marginTop: 6,
-    minHeight: 52,
-  },
-  playButtonLight: {
-    backgroundColor: '#000000',
-  },
-  playButtonText: {
-    color: '#0b0b0b',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  playButtonTextLight: {
-    color: '#ffffff',
-  },
-  detailErrorText: {
-    color: errorTextColor,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  detailSummary: {
-    color: muted,
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  detailSummaryBlock: {
-    gap: 8,
-  },
-  detailSummaryToggle: {
-    alignSelf: 'flex-start',
-    minHeight: 32,
-    justifyContent: 'center',
-  },
-  detailSummaryToggleText: {
-    color: accent,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  detailTabs: {
-    borderBottomColor: border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 28,
-    marginTop: 2,
-  },
-  detailTabButton: {
-    justifyContent: 'center',
-    minHeight: 48,
-    paddingHorizontal: 2,
-    position: 'relative',
-  },
-  detailTabLabel: {
-    color: muted,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  detailTabLabelActive: {
-    color: text,
-  },
-  detailTabIndicator: {
-    backgroundColor: text,
-    bottom: -1,
-    height: 3,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-  },
-  detailsPanel: {
-    gap: 22,
-    paddingTop: 4,
-  },
-  detailsSectionHeading: {
-    color: text,
-    fontSize: 21,
-    fontWeight: '700',
-  },
-  castSection: {
-    gap: 12,
-  },
-  castRailContent: {
-    gap: 14,
-    paddingRight: 20,
-  },
-  castCard: {
-    alignItems: 'center',
-    gap: 4,
-    width: 82,
-  },
-  castAvatar: {
-    backgroundColor: panel2,
-    borderRadius: 34,
-    height: 68,
-    overflow: 'hidden',
-    width: 68,
-  },
-  castAvatarImage: {
-    height: '100%',
-    width: '100%',
-  },
-  castAvatarFallback: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    flex: 1,
-    justifyContent: 'center',
-  },
-  castAvatarFallbackText: {
-    color: accent,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  castName: {
-    color: text,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  castCharacter: {
-    color: muted,
-    fontSize: 11,
-    textAlign: 'center',
-  },
-  detailsEmpty: {
-    color: muted,
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  episodesSection: {
-    gap: 12,
-    paddingTop: 4,
-    position: 'relative',
-  },
-  episodesHeading: {
-    color: text,
-    fontSize: 21,
-    fontWeight: '700',
-  },
-  episodesSubheading: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  seasonPicker: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 48,
-    paddingHorizontal: 18,
-  },
-  seasonPickerContainer: {
-    position: 'relative',
-    zIndex: 20,
-  },
-  seasonPickerText: {
-    color: text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  seasonPickerChevron: {
-    transform: [{ rotate: '90deg' }],
-  },
-  seasonPickerChevronOpen: {
-    transform: [{ rotate: '-90deg' }],
-  },
-  seasonPickerMenu: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    elevation: 12,
-    gap: 2,
-    left: 0,
-    marginTop: 4,
-    padding: 6,
-    position: 'absolute',
-    right: 0,
-    shadowColor: '#000000',
-    shadowOffset: { height: 8, width: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    top: '100%',
-  },
-  seasonPickerOption: {
-    alignItems: 'center',
-    borderRadius: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 46,
-    paddingHorizontal: 12,
-  },
-  seasonPickerOptionActive: {
-    backgroundColor: panel2,
-  },
-  seasonPickerOptionText: {
-    color: muted,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  seasonPickerOptionTextActive: {
-    color: text,
-  },
-  seasonPickerOptionMeta: {
-    color: faint,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  seasonRailContent: {
-    gap: 12,
-    paddingRight: 20,
-  },
-  seasonCard: {
-    gap: 6,
-    width: 148,
-  },
-  seasonCardFrame: {
-    aspectRatio: 16 / 9,
-    backgroundColor: panel2,
-    borderColor: 'transparent',
-    borderRadius: 10,
-    borderWidth: 2,
-    overflow: 'hidden',
-  },
-  seasonCardFrameActive: {
-    borderColor: accent,
-  },
-  seasonCardImage: {
-    height: '100%',
-    width: '100%',
-  },
-  seasonCardFallback: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
-  seasonCardFallbackText: {
-    color: accent,
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  seasonCardTitle: {
-    color: muted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  seasonCardTitleActive: {
-    color: text,
-  },
-  seasonCardMeta: {
-    color: faint,
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  episodeList: {
-    gap: 14,
-  },
-  episodeRow: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 14,
-    paddingVertical: 4,
-  },
-  episodeRowWatched: {
-    opacity: 0.62,
-  },
-  episodeThumb: {
-    backgroundColor: panel2,
-    borderRadius: 8,
-    aspectRatio: 16 / 9,
-    overflow: 'hidden',
-    position: 'relative',
-    width: '38%',
-  },
-  episodeThumbImage: {
-    height: '100%',
-    width: '100%',
-  },
-  episodeThumbFallback: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
-  episodePlayBadge: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 18,
-    height: 36,
-    justifyContent: 'center',
-    left: '50%',
-    marginLeft: -18,
-    marginTop: -18,
-    position: 'absolute',
-    top: '50%',
-    width: 36,
-  },
-  episodeIndex: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderRadius: 8,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-  episodeIndexText: {
-    color: accent,
-    fontSize: 15,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '900',
-  },
-  episodeInfo: {
-    flex: 1,
-    gap: 3,
-    minWidth: 0,
-  },
-  episodeMetaRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  episodeTitle: {
-    color: text,
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '800',
-    lineHeight: 21,
-  },
-  episodeTitleWatched: {
-    color: muted,
-  },
-  episodeMeta: {
-    color: faint,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  episodeSummary: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  resumePill: {
-    color: accent,
-    fontSize: 10,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  watchedBadge: {
-    alignItems: 'center',
-    backgroundColor: '#20c55d',
-    borderRadius: 999,
-    height: 20,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 5,
-    top: 5,
-    width: 20,
-  },
-  episodeProgressTrack: {
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    bottom: 0,
-    height: 3,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-  },
-  episodeProgressFill: {
-    backgroundColor: accent,
-    height: '100%',
-  },
-  emptyEpisodesCard: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 4,
-    padding: 14,
-  },
-  emptyEpisodesTitle: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  emptyEpisodesCopy: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  playerRoot: {
-    alignItems: 'center',
-    backgroundColor: '#000000',
-    justifyContent: 'center',
-    zIndex: 30,
-  },
-  playerVideo: {
-    flex: 1,
-    width: '100%',
-  },
-  playerVideoFrame: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  playerVideoFrameFill: {
-    flex: 1,
-    width: '100%',
-  },
-  playerStatus: {
-    alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 32,
-  },
-  playerStatusText: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  playerStatusTitle: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  playerRecoveryText: {
-    color: 'rgba(255,255,255,0.64)',
-    fontSize: 13,
-    lineHeight: 19,
-    maxWidth: 420,
-    textAlign: 'center',
-  },
-  playerRecoveryActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    justifyContent: 'center',
-  },
-  playerStatusButton: {
-    alignItems: 'center',
-    borderColor: 'rgba(255,255,255,0.28)',
-    borderRadius: 11,
-    borderWidth: 1,
-    minHeight: 46,
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  playerStatusButtonPrimary: {
-    backgroundColor: accent,
-    borderColor: accent,
-  },
-  playerStatusButtonPrimaryText: {
-    color: '#000000',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  playerStatusButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  playerClose: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 22,
-    height: 44,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 16,
-    width: 44,
-  },
-  playerControls: {
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  playerTopRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 4,
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  playerTopTitle: {
-    color: 'rgba(255,255,255,0.82)',
-    flex: 1,
-    fontSize: 14,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '800',
-  },
-  playerTitle: {
-    color: '#ffffff',
-    fontSize: 21,
-    fontWeight: '800',
-  },
-  playerIconButton: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  playerCloseControl: {
-    backgroundColor: 'rgba(18,18,18,0.78)',
-    borderRadius: 22,
-  },
-  playerOptionsPill: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(18,18,18,0.72)',
-    borderRadius: 999,
-    flexDirection: 'row',
-    paddingHorizontal: 6,
-  },
-  playerFitButton: {
-    alignItems: 'center',
-    height: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  playerFitLabel: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  playerFitLabelActive: {
-    color: accent,
-  },
-  playerVideoSettings: {
-    paddingHorizontal: 6,
-    paddingBottom: 8,
-  },
-  playerSettingBlock: {
-    marginBottom: 16,
-  },
-  playerSettingLabel: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  playerSegmentScroll: {
-    flexGrow: 0,
-  },
-  playerSegmented: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  playerSegment: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: 14,
-  },
-  playerSegmentActive: {
-    backgroundColor: accent,
-    borderRadius: 12,
-  },
-  playerSegmentText: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  playerSegmentTextActive: {
-    color: '#ffffff',
-  },
-  playerSegmentDivider: {
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    height: 24,
-    width: 1,
-  },
-  playerCenterOverlay: {
-    alignItems: 'center',
-    bottom: 0,
-    justifyContent: 'center',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  playerCenterRow: {
-    alignItems: 'center',
-    height: 104,
-    justifyContent: 'center',
-    position: 'relative',
-    width: 392,
-  },
-  playerSkipButton: {
-    alignItems: 'center',
-    height: 64,
-    justifyContent: 'center',
-    width: 64,
-  },
-  playerSkipBackControl: {
-    left: '50%',
-    marginLeft: -176,
-    marginTop: -32,
-    position: 'absolute',
-    top: '50%',
-  },
-  playerSkipForwardControl: {
-    left: '50%',
-    marginLeft: 112,
-    marginTop: -32,
-    position: 'absolute',
-    top: '50%',
-  },
-  playerSkipLabel: {
-    color: '#ffffff',
-    fontSize: 9,
-    fontWeight: '800',
-    marginTop: 1,
-    position: 'absolute',
-  },
-  playerPlayButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderRadius: 999,
-    height: 76,
-    justifyContent: 'center',
-    width: 76,
-  },
-  playerPlayCenterControl: {
-    left: '50%',
-    marginLeft: -38,
-    marginTop: -38,
-    position: 'absolute',
-    top: '50%',
-  },
-  playerBottomBlock: {
-    bottom: 28,
-    gap: 6,
-    left: 28,
-    position: 'absolute',
-    right: 28,
-  },
-  playerTimesRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  playerTime: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
-  },
-  playerSeekTrackHit: {
-    justifyContent: 'center',
-    minHeight: 32,
-  },
-  playerMenuPanel: {
-    backgroundColor: 'rgba(14,14,14,0.96)',
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 16,
-    borderWidth: 1,
-    maxHeight: 260,
-    minWidth: 250,
-    paddingBottom: 6,
-    position: 'absolute',
-  },
-  playerMenuScroll: {
-    paddingHorizontal: 6,
-  },
-  playerMenuTitle: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    textTransform: 'uppercase',
-  },
-  playerMenuRow: {
-    alignItems: 'center',
-    borderRadius: 10,
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
-    minHeight: 44,
-    paddingHorizontal: 12,
-  },
-  playerMenuRowText: {
-    color: '#ffffff',
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 19,
-  },
-  playerMenuRowTextActive: {
-    color: accent,
-  },
-  playerMenuEmpty: {
-    color: 'rgba(255,255,255,0.64)',
-    fontSize: 13,
-    lineHeight: 19,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  playerSeekTrack: {
-    backgroundColor: 'rgba(255,255,255,0.28)',
-    borderRadius: 2,
-    height: 4,
-  },
-  playerSeekFill: {
-    backgroundColor: accent,
-    borderRadius: 2,
-    height: '100%',
-  },
-  playerSeekThumb: {
-    backgroundColor: accent,
-    borderRadius: 7,
-    height: 14,
-    marginLeft: -7,
-    position: 'absolute',
-    top: -5,
-    width: 14,
-  },
-  playerGestureHint: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(12,12,12,0.82)',
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 16,
-    borderWidth: 1,
-    left: '50%',
-    marginLeft: -82,
-    marginTop: -43,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    position: 'absolute',
-    top: '50%',
-    width: 164,
-  },
-  playerSegmentSkip: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(12,12,12,0.86)',
-    borderColor: 'rgba(255,255,255,0.28)',
-    borderRadius: 10,
-    borderWidth: 1,
-    bottom: 94,
-    minHeight: 44,
-    paddingHorizontal: 20,
-    position: 'absolute',
-    right: 28,
-    justifyContent: 'center',
-    zIndex: 40,
-  },
-  playerSegmentSkipText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  playerGestureTitle: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  playerGestureTrack: {
-    backgroundColor: 'rgba(255,255,255,0.24)',
-    borderRadius: 99,
-    height: 5,
-    marginTop: 10,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  playerGestureFill: {
-    backgroundColor: accent,
-    borderRadius: 99,
-    height: '100%',
-  },
-  playerGestureValue: {
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 6,
-  },
-});
-}
-
-let styles = createStyles(DEFAULT_MOBILE_THEME);

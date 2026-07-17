@@ -1,6 +1,10 @@
-import { desktopApi, StoredProgress } from '@/lib/desktopApi';
+import { useEffect, useSyncExternalStore } from 'react';
+import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
+import { createProgressRefreshSubscription } from '@/lib/progressSubscription';
 
 const PROGRESS_KEY = 'videoProgress';
+const PROGRESS_MIGRATION_KEY = 'loomtvProgressMigrationVersion';
+const PROGRESS_MIGRATION_VERSION = '1';
 const WATCHED_THRESHOLD = 0.9;
 const REPLAY_FROM_START_REMAINING_SECONDS = 8;
 
@@ -8,6 +12,9 @@ type LegacyProgress = number | { position?: number; duration?: number; updatedAt
 
 let progressCache: Record<string, StoredProgress> = readLocalProgress();
 let hydrated = false;
+let progressRefreshRevision = 0;
+let dispatchingInternalProgressEvent = false;
+let progressRefreshSubscription: ReturnType<typeof createProgressRefreshSubscription> | null = null;
 
 function normalizeProgress(value: LegacyProgress | StoredProgress | null | undefined): StoredProgress | null {
   if (value == null) return null;
@@ -35,19 +42,51 @@ function readLocalProgress(): Record<string, StoredProgress> {
 }
 
 function writeLocalProgress(): void {
+  const subscription = getProgressRefreshSubscription();
+  if (subscription) subscription.publish();
+  else progressRefreshRevision += 1;
+
+  dispatchingInternalProgressEvent = true;
   try {
-    localStorage.setItem(PROGRESS_KEY, JSON.stringify(progressCache));
     window.dispatchEvent(new Event('loomtv-progress'));
-  } catch {
-    // Progress still works for this session.
+  } finally {
+    dispatchingInternalProgressEvent = false;
   }
+}
+
+function getProgressRefreshSubscription() {
+  if (typeof window === 'undefined') return null;
+  if (!progressRefreshSubscription) {
+    progressRefreshSubscription = createProgressRefreshSubscription({
+      eventTarget: window,
+      onRefresh: () => {
+        progressRefreshRevision += 1;
+      },
+      setInterval: (callback, delayMs) => window.setInterval(callback, delayMs),
+      clearInterval: (timerId) => window.clearInterval(timerId),
+      shouldRefreshEvent: () => !dispatchingInternalProgressEvent,
+    });
+  }
+  return progressRefreshSubscription;
+}
+
+function subscribeToProgress(listener: () => void): () => void {
+  return getProgressRefreshSubscription()?.subscribe(listener) || (() => undefined);
+}
+
+function progressDataSnapshot(): Record<string, StoredProgress> {
+  return progressCache;
+}
+
+function progressRevisionSnapshot(): number {
+  return progressRefreshRevision;
 }
 
 function mergeProgress(...sources: Array<Record<string, StoredProgress>>): Record<string, StoredProgress> {
   const merged: Record<string, StoredProgress> = {};
   for (const source of sources) {
     for (const [filePath, progress] of Object.entries(source)) {
-      if (!merged[filePath] || (progress.updatedAt || 0) >= (merged[filePath].updatedAt || 0)) {
+      if (!merged[filePath] || (progress.updatedAt || 0) > (merged[filePath].updatedAt || 0)) {
         merged[filePath] = progress;
       }
     }
@@ -60,22 +99,42 @@ export async function hydrateProgressFromDatabase(): Promise<void> {
   hydrated = true;
   try {
     const localProgress = readLocalProgress();
-    if (Object.keys(localProgress).length > 0) {
-      await desktopApi.importProgress(localProgress);
-    }
     const remote = await desktopApi.getProgress();
     const databaseProgress = remote && !('position' in remote)
       ? remote as Record<string, StoredProgress>
       : {};
-    progressCache = mergeProgress(localProgress, databaseProgress);
+    // Database is merged first and therefore wins equal timestamps.
+    progressCache = mergeProgress(databaseProgress, localProgress);
+    if (Object.keys(progressCache).length > 0) {
+      await desktopApi.importProgress(progressCache);
+    }
+    localStorage.setItem(PROGRESS_MIGRATION_KEY, PROGRESS_MIGRATION_VERSION);
+    localStorage.removeItem(PROGRESS_KEY);
     writeLocalProgress();
   } catch {
     progressCache = readLocalProgress();
+    writeLocalProgress();
   }
 }
 
 export function loadProgress(): Record<string, StoredProgress> {
   return progressCache;
+}
+
+export function useProgressSnapshot(): Record<string, StoredProgress> {
+  const progress = useSyncExternalStore(subscribeToProgress, progressDataSnapshot, progressDataSnapshot);
+  useEffect(() => {
+    void hydrateProgressFromDatabase();
+  }, []);
+  return progress;
+}
+
+export function useProgressRefreshRevision(): number {
+  const revision = useSyncExternalStore(subscribeToProgress, progressRevisionSnapshot, progressRevisionSnapshot);
+  useEffect(() => {
+    void hydrateProgressFromDatabase();
+  }, []);
+  return revision;
 }
 
 export function getProgressState(filePath: string | null, durationHint = 0) {

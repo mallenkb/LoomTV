@@ -73,11 +73,11 @@ export default function NetworkSettingsSection({
             Local Network Sharing
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Watch this library on LoomTV mobile over your home network. Private by default — only devices paired with your code can connect.
+            Watch this library on LoomTV mobile over your home network. Private by default — only explicitly paired devices can connect.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4">
+          <div className="settings-network-card flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4">
             <div>
               <p className="text-sm font-semibold text-white">
                 {isTogglingNetworkSharing ? 'Updating sharing...' : isNetworkSharingOn ? 'Sharing is on' : 'Sharing is off'}
@@ -115,13 +115,13 @@ export default function NetworkSettingsSection({
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               >
-                <div className="rounded-xl bg-[var(--loom-accent)]/10 p-4">
+                <div className="settings-network-card rounded-xl bg-[var(--loom-accent)]/10 p-4">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
                     <CheckCircle2 className="h-4 w-4 text-[var(--loom-accent)]" />
                     Pair a phone or tablet
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1.3fr_.7fr]">
-                    <div className="rounded-lg bg-[var(--loom-bg)] p-3">
+                    <div className="settings-network-card rounded-lg bg-[var(--loom-bg)] p-3">
                       <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Desktop address</p>
                       <div className="flex items-center gap-2">
                         <code className="min-w-0 flex-1 truncate text-base font-semibold text-white">
@@ -138,11 +138,11 @@ export default function NetworkSettingsSection({
                         </button>
                       </div>
                     </div>
-                    <div className="rounded-lg bg-[var(--loom-bg)] p-3">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">6-digit code</p>
+                    <div className="settings-network-card rounded-lg bg-[var(--loom-bg)] p-3">
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">One-time pairing secret</p>
                       <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 text-2xl font-black tracking-[0.22em] text-white">
-                          {localNetworkStatus?.token || '------'}
+                        <code className="min-w-0 flex-1 truncate text-sm font-bold text-white">
+                          {localNetworkStatus?.token || 'Waiting for pairing secret'}
                         </code>
                         <button
                           type="button"
@@ -157,7 +157,7 @@ export default function NetworkSettingsSection({
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-[var(--loom-muted)]">
-                    In LoomTV mobile, choose Pair device, then enter this desktop address and code.
+                    This secret expires after five minutes and rotates immediately after a successful pairing.
                   </p>
                 </div>
 
@@ -178,7 +178,7 @@ export default function NetworkSettingsSection({
                       {localNetworkStatus?.pairedDevices?.map((device) => {
                         const lastSeenLabel = new Date(device.lastSeenAt).toLocaleString();
                         return (
-                          <li key={device.id} className="flex items-center justify-between rounded-md bg-[var(--loom-surface-2)] px-2 py-1.5">
+                          <li key={device.id} className="settings-network-card flex items-center justify-between rounded-md bg-[var(--loom-surface-2)] px-2 py-1.5">
                             <div className="min-w-0">
                               <p className="truncate text-xs font-semibold text-white">{device.name}</p>
                               <p className="truncate text-[10px] text-[var(--loom-faint)]">
@@ -247,11 +247,11 @@ export default function NetworkSettingsSection({
             Connect to Shared Library
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Find another Loom host on this network, enter its 6-digit code, and browse without copying files.
+            Find another Loom host on this network, enter its one-time pairing secret, and browse without copying files.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
+          <div className="settings-network-card flex items-center gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
             <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-400">
               <Wifi className="h-4 w-4" />
             </span>
@@ -261,7 +261,7 @@ export default function NetworkSettingsSection({
             </div>
           </div>
 
-          <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
+          <div className="settings-network-card rounded-lg bg-[var(--loom-surface-2)] p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">Devices on this network</p>
               <button
@@ -304,19 +304,17 @@ export default function NetworkSettingsSection({
           <div className="flex flex-wrap items-center gap-3">
             <input
               type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
+              maxLength={43}
               value={remoteShareCode}
-              onChange={(event) => setRemoteShareCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="000000"
-              aria-label="Share code"
+              onChange={(event) => setRemoteShareCode(event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 43))}
+              placeholder="One-time pairing secret"
+              aria-label="One-time pairing secret"
               className="h-10 w-44 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-sm font-semibold tracking-[0.28em] text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
             />
             <Button
               type="button"
               onClick={connectRemoteLibrary}
-              disabled={isConnectingRemoteLibrary || !/^\d{6}$/.test(remoteShareCode)}
+              disabled={isConnectingRemoteLibrary || !/^[A-Za-z0-9_-]{43}$/.test(remoteShareCode)}
               className="ml-auto gap-2 px-5"
             >
               <Wifi className="h-4 w-4" />

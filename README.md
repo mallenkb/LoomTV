@@ -216,7 +216,6 @@ Loom Media Server can enrich local files with artwork and metadata. Open Setting
 
 - `corepack pnpm desktop:start`: start the Electron Forge desktop app.
 - `corepack pnpm mobile:start`: start the Expo mobile app.
-- `corepack pnpm convex:dev`: configure and run the Convex backend.
 - `corepack pnpm --filter loom-media-server-desktop package`: create an unpacked local desktop build.
 - `corepack pnpm --filter loom-media-server-desktop make`: create Electron Forge desktop distributables.
 - `corepack pnpm --filter loom-media-server-desktop dist`: create Electron Builder release artifacts without publishing.
@@ -232,7 +231,6 @@ apps/
     resources/   Bundled FFmpeg and FFprobe resources and notices.
     tests/       Desktop unit tests.
   mobile/        Expo React Native MVP client for pairing with a desktop host and testing playback.
-convex/          Convex schema and functions for host registry, pairing, media sync, and playback state.
 ```
 
 ## Building and Packaging

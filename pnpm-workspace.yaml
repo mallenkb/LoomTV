@@ -38,6 +38,13 @@ catalog:
   vite-plus: latest
 overrides:
   vite: 'catalog:'
+  '@expo/cli>tar': 7.5.16
+  '@expo/cli>undici': 6.27.0
+  '@expo/cli>ws': 8.21.0
+  '@expo/metro-config>postcss': 8.5.14
+  '@expo/xcpretty>js-yaml': 4.3.0
+  'electron-updater>js-yaml': 4.3.0
+  'xcode>uuid': 11.1.1
 peerDependencyRules:
   allowAny:
     - vite

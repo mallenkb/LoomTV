@@ -60,18 +60,7 @@ export function allowedCorsOrigin(
   allowedOrigins: ReadonlySet<string>,
 ): string | null {
   if (!origin) return null;
-  if (origin === 'null' || origin === 'file://') return origin;
-
-  try {
-    const parsed = new URL(origin);
-    const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
-    const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    return allowedOrigins.has(parsed.origin) || (isHttp && isLoopbackAddress(hostname))
-      ? parsed.origin
-      : null;
-  } catch {
-    return null;
-  }
+  return allowedOrigins.has(origin) ? origin : null;
 }
 
 export function localAccessQuery(token: string): string {

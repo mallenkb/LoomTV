@@ -1,43 +1,44 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer as electronIpcRenderer } from 'electron';
+import type {
+  DesktopBridgeApi,
+} from './lib/desktopApi';
+import type {
+  LibraryPayload,
+  LibraryScanMode,
+  LibraryScanProgress,
+  ManualMediaSegmentInput,
+  MediaSegmentRequest,
+  MediaSegmentType,
+  OfficialMetadataCandidate,
+  PlaybackTrackPreferences,
+  SubtitleStyleOptions,
+  TranscodeOptions,
+  UpdateState,
+} from './shared/desktopProtocol.ts';
+import type { IpcEventChannel, IpcInvokeChannel } from './shared/ipcChannels';
+import type { IpcContract, IpcEventContract } from './shared/ipcContract';
 
-type SubtitleStyleOptions = {
-  delaySeconds?: number;
-  position?: number;
-  scale?: number;
-  fontSize?: number;
-  fontColor?: string;
-  borderColor?: string;
-  borderWidth?: number;
-  borderEnabled?: boolean;
-  backgroundColor?: string;
-  backgroundEnabled?: boolean;
-};
-
-type LibraryPayload = {
-  movies: unknown[];
-  tvShows: unknown[];
-  animeShows?: unknown[];
-  libraryFolders: string[];
-  libraryFolderGroups?: { movies: string[]; tvShows: string[]; anime: string[]; others: string[] };
-};
-type LibraryScanMode = 'quick' | 'metadata' | 'full';
-type LibraryScanProgress = { isComplete: boolean; scannedFolders: number; totalFolders: number };
-type UpdateState = {
-  status: 'idle' | 'disabled' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'not-available' | 'error';
-  currentVersion: string;
-  platform: NodeJS.Platform;
-  arch: string;
-  supported: boolean;
-  downloadPercent?: number;
-  latestVersion?: string;
-  releaseUrl?: string;
-  message?: string;
-  checkedAt?: string;
+const ipcRenderer = {
+  invoke<C extends IpcInvokeChannel>(channel: C, ...args: IpcContract[C]['args']): Promise<IpcContract[C]['result']> {
+    return electronIpcRenderer.invoke(channel, ...args) as Promise<IpcContract[C]['result']>;
+  },
+  on<C extends IpcEventChannel>(
+    channel: C,
+    listener: (event: Electron.IpcRendererEvent, ...args: IpcEventContract[C]['args']) => void,
+  ): void {
+    electronIpcRenderer.on(channel, listener as Parameters<typeof electronIpcRenderer.on>[1]);
+  },
+  removeListener<C extends IpcEventChannel>(
+    channel: C,
+    listener: (event: Electron.IpcRendererEvent, ...args: IpcEventContract[C]['args']) => void,
+  ): void {
+    electronIpcRenderer.removeListener(channel, listener as Parameters<typeof electronIpcRenderer.removeListener>[1]);
+  },
 };
 
 // ─── desktopApi — existing library/media/settings surface ────────────────────
 
-contextBridge.exposeInMainWorld('desktopApi', {
+const desktopApi = {
   getLibrary: () => ipcRenderer.invoke('library:get'),
   scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
   onLibraryScanProgress: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => {
@@ -70,7 +71,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   getSubtitleUrl: (filePath: string, streamOrdinal?: number) => ipcRenderer.invoke('media:get-subtitle-url', filePath, streamOrdinal),
   getThumbnail: (filePath: string, time?: string) => ipcRenderer.invoke('media:get-thumbnail', filePath, time),
   getFileInfo: (filePath: string) => ipcRenderer.invoke('media:get-file-info', filePath),
-  getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port: number) => `http://127.0.0.1:${port}`),
+  getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port) => `http://127.0.0.1:${port}`),
   checkFFmpeg: () => ipcRenderer.invoke('media:ffmpeg-available'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings: {
@@ -103,20 +104,29 @@ contextBridge.exposeInMainWorld('desktopApi', {
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) =>
     ipcRenderer.invoke('progress:import', progress),
   getPlaybackTrackPreferences: (scope?: string) => ipcRenderer.invoke('playback-track-preferences:get', scope),
-  savePlaybackTrackPreferences: (scope: string, preferences: unknown) =>
+  savePlaybackTrackPreferences: (scope: string, preferences: PlaybackTrackPreferences) =>
     ipcRenderer.invoke('playback-track-preferences:save', scope, preferences),
   getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) =>
     ipcRenderer.invoke('playback:segments:get', request),
-  saveManualMediaSegment: (input: unknown) => ipcRenderer.invoke('playback:segments:save-manual', input),
-  deleteManualMediaSegment: (input: unknown) => ipcRenderer.invoke('playback:segments:delete-manual', input),
-  undoManualMediaSegment: (input: unknown) => ipcRenderer.invoke('playback:segments:undo-manual', input),
+  saveManualMediaSegment: (input: ManualMediaSegmentInput) => ipcRenderer.invoke('playback:segments:save-manual', input),
+  deleteManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }) => ipcRenderer.invoke('playback:segments:delete-manual', input),
+  undoManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }) => ipcRenderer.invoke('playback:segments:undo-manual', input),
+  getManagedMediaSegments: (request) => ipcRenderer.invoke('playback:segments:manage-list', request),
+  updateManagedMediaSegment: (candidateId, patch) => ipcRenderer.invoke('playback:segments:manage-update', candidateId, patch),
+  eraseManagedMediaSegments: (request) => ipcRenderer.invoke('playback:segments:manage-erase', request),
   setPlaybackActivity: (key: string, active: boolean, label?: string) => ipcRenderer.invoke('playback:activity', key, active, label),
   getLocalSegmentAnalysisStatus: () => ipcRenderer.invoke('playback:analysis:status'),
   analyzeLocalSegmentSeason: (mediaId: string, season: number) => ipcRenderer.invoke('playback:analysis:season', mediaId, season),
+  runLocalSegmentAnalysis: (scope) => ipcRenderer.invoke('playback:analysis:run', scope),
+  cancelLocalSegmentAnalysis: (jobKey?: string) => ipcRenderer.invoke('playback:analysis:cancel', jobKey),
+  pauseLocalSegmentAnalysis: () => ipcRenderer.invoke('playback:analysis:pause'),
+  resumeLocalSegmentAnalysis: () => ipcRenderer.invoke('playback:analysis:resume'),
+  cleanupLocalSegmentAnalysis: () => ipcRenderer.invoke('playback:analysis:cleanup'),
+  rebuildLocalSegmentAnalysis: () => ipcRenderer.invoke('playback:analysis:rebuild'),
   getCustomArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:get', mediaId),
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => ipcRenderer.invoke('artwork:save', mediaId, target, dataUrl),
   getOfficialMetadataCandidates: (mediaId: string) => ipcRenderer.invoke('artwork:official-candidates', mediaId),
-  applyOfficialMetadata: (mediaId: string, candidate: unknown) => ipcRenderer.invoke('artwork:apply-official', mediaId, candidate),
+  applyOfficialMetadata: (mediaId: string, candidate: OfficialMetadataCandidate) => ipcRenderer.invoke('artwork:apply-official', mediaId, candidate),
   refreshOfficialArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:refresh-official', mediaId),
   getPlaybackLogo: (mediaId: string) => ipcRenderer.invoke('artwork:playback-logo', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
@@ -144,29 +154,15 @@ contextBridge.exposeInMainWorld('desktopApi', {
 
   media: {
     probe: (filePath: string) => ipcRenderer.invoke('media:probe', filePath),
-    canDirectPlay: (filePath: string, backend = 'html5') => ipcRenderer.invoke('media:can-direct-play', filePath, backend),
-    startTranscode: (filePath: string, options?: {
-      preset?: string;
-      startSeconds?: number;
-      videoTrackIndex?: number;
-      audioTrackIndex?: number;
-      subtitleTrackIndex?: number;
-      subtitleStreamOrdinal?: number;
-      subtitleCodec?: string;
-      subtitleFilePath?: string;
-      secondarySubtitleTrackIndex?: number;
-      secondarySubtitleStreamOrdinal?: number;
-      secondarySubtitleCodec?: string;
-      secondarySubtitleFilePath?: string;
-      subtitleStyle?: SubtitleStyleOptions;
-    }) =>
+    canDirectPlay: (filePath: string, backend: 'html5' | 'hls' = 'html5') => ipcRenderer.invoke('media:can-direct-play', filePath, backend),
+    startTranscode: (filePath: string, options?: TranscodeOptions) =>
       ipcRenderer.invoke('media:start-transcode', filePath, options || {}),
     stopTranscode: (sessionId: string) => ipcRenderer.invoke('media:stop-transcode', sessionId),
   },
-});
+} satisfies DesktopBridgeApi;
+
+contextBridge.exposeInMainWorld('desktopApi', desktopApi);
 
 // ─── playerApi — kept for any future use; VideoPlayer now uses HTML5 <video> ──
 
-// The Window.desktopApi type lives in src/lib/desktopApi.ts as the single
-// source of truth for renderer consumers. Preload only writes that surface
-// via contextBridge.exposeInMainWorld above.
+// The bridge implementation is compile-time checked against DesktopBridgeApi.

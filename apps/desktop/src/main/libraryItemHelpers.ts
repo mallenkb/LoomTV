@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { isGenericGroupingFolderTitle, normalizeTitleForMatch, titleMatchesLocal, usefulLocalTitle } from './metadata/helpers';
-import type { MediaItem } from './metadata/types';
-import { durableArtworkSource } from './artworkSources';
+import { isGenericGroupingFolderTitle, normalizeTitleForMatch, titleMatchesLocal, usefulLocalTitle } from './metadata/helpers.ts';
+import type { MediaItem } from './metadata/types.ts';
+import { durableArtworkSource } from './artworkSources.ts';
 
 const VTT_BOM_PREFIX = new RegExp(`^\\u{FEFF}?WEBVTT\\s*\\n+`, 'iu');
 

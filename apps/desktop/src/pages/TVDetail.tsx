@@ -9,7 +9,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
-import { getProgressState, hydrateProgressFromDatabase } from '@/lib/progress';
+import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
@@ -60,7 +60,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const { state, refreshLibrary } = useLibrary();
   const [show, setShow] = useState<TVShow | null>(null);
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
-  const [progressTick, setProgressTick] = useState(0);
+  const progressTick = useProgressRefreshRevision();
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [detailsReady, setDetailsReady] = useState(false);
@@ -83,21 +83,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const frame = window.requestAnimationFrame(() => setDetailsReady(true));
     return () => window.cancelAnimationFrame(frame);
   }, [show?.id]);
-
-  useEffect(() => {
-    const bump = () => setProgressTick((value) => value + 1);
-    void hydrateProgressFromDatabase().then(bump);
-    const interval = window.setInterval(bump, 2000);
-    window.addEventListener('focus', bump);
-    window.addEventListener('storage', bump);
-    window.addEventListener('loomtv-progress', bump);
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener('focus', bump);
-      window.removeEventListener('storage', bump);
-      window.removeEventListener('loomtv-progress', bump);
-    };
-  }, []);
 
   useEffect(() => {
     setFallbackThumbnails([]);
@@ -699,11 +684,6 @@ function EpisodeRow({
     };
   }, [filePath]);
 
-  const handlePlay = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onPlay();
-  };
-
   const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
   const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
   const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
@@ -711,7 +691,12 @@ function EpisodeRow({
   void progressTick;
 
   return (
-    <div className="relative flex cursor-pointer items-center gap-4 p-4 transition-colors group hover:bg-white/5" onClick={onPlay}>
+    <button
+      type="button"
+      className="group relative flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+      onClick={onPlay}
+      aria-label={`Play ${epLabel}: ${displayTitle}`}
+    >
       {(progress.inProgress || progress.watched) && progress.fraction > 0 && (
         <span
           className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${progress.watched ? 'bg-green-500' : 'bg-[var(--loom-accent)]'}`}
@@ -734,9 +719,9 @@ function EpisodeRow({
           </div>
         )}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100">
-          <button onClick={handlePlay} className="w-8 h-8 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
+          <span aria-hidden="true" className="w-8 h-8 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
             <Play className="w-4 h-4 text-[var(--loom-accent-foreground)]" />
-          </button>
+          </span>
         </div>
       </div>
 
@@ -757,6 +742,6 @@ function EpisodeRow({
         {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--loom-accent)]">resume</span>}
         {progress.watched && <CheckCircle className="h-4 w-4 text-green-500" />}
       </div>
-    </div>
+    </button>
   );
 }
