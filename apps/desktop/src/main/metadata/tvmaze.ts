@@ -1,5 +1,6 @@
 import { yearFromDateString } from './helpers';
 import type { EpisodeMeta, TVMetadata } from './types';
+import { safeFetch } from '../safeFetch';
 
 interface TVMazeImage {
   medium?: string;
@@ -60,7 +61,10 @@ function tvmazeEpisodeToMeta(episode: TVMazeEpisode): EpisodeMeta {
 }
 
 async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
-  const episodesRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
+  const episodesRes = await safeFetch(`https://api.tvmaze.com/shows/${showId}/episodes`, {}, {
+    allowedHosts: ['api.tvmaze.com'],
+    retries: 2,
+  });
   if (!episodesRes.ok) return [];
   const episodes = (await episodesRes.json()) as TVMazeEpisode[];
   if (!Array.isArray(episodes)) return [];
@@ -68,8 +72,10 @@ async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
 }
 
 async function fetchTVMetadataById(showId: number, fallbackTitle: string, localYear?: number): Promise<TVMetadata | null> {
-  const detailRes = await fetch(
+  const detailRes = await safeFetch(
     `https://api.tvmaze.com/shows/${showId}?embed[]=seasons&embed[]=cast`,
+    {},
+    { allowedHosts: ['api.tvmaze.com'], retries: 2 },
   );
   if (!detailRes.ok) return null;
   const [details, episodes] = await Promise.all([
@@ -116,8 +122,10 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
 
 export async function fetchTVMetadata(title: string, localYear?: number): Promise<TVMetadata | null> {
   try {
-    const searchRes = await fetch(
+    const searchRes = await safeFetch(
       `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`,
+      {},
+      { allowedHosts: ['api.tvmaze.com'], retries: 2 },
     );
     const searchData = (await searchRes.json()) as TVMazeSearchEntry[];
     if (!searchData || searchData.length === 0) return null;
@@ -141,7 +149,10 @@ export async function fetchTVMetadata(title: string, localYear?: number): Promis
 
 export async function fetchTVMetadataCandidates(title: string, localYear?: number): Promise<TVMetadata[]> {
   try {
-    const searchRes = await fetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`);
+    const searchRes = await safeFetch(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(title)}`, {}, {
+      allowedHosts: ['api.tvmaze.com'],
+      retries: 2,
+    });
     const searchData = (await searchRes.json()) as TVMazeSearchEntry[];
     if (!Array.isArray(searchData) || searchData.length === 0) return [];
 

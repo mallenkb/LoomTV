@@ -52,7 +52,6 @@ corepack pnpm --filter loom-media-server-desktop dist
 apps/
   desktop/   Electron main process, renderer UI, local database, playback, probing, and packaging.
   mobile/    Expo mobile client for pairing and playback experiments.
-convex/      Backend functions for host registry, pairing, media sync, and playback state.
 docs/        Screenshots, release notes, future work, and implementation notes.
 ```
 

@@ -52,6 +52,7 @@ export function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
+      sandbox: true,
     },
   };
   const iconPath = getWindowIconPath();
@@ -60,6 +61,13 @@ export function createWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    const expectedUrl = MAIN_WINDOW_DEV_SERVER_URL
+      || new URL(`file://${path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`)}`).toString();
+    if (targetUrl !== expectedUrl) event.preventDefault();
+  });
 
   mainWindow.on('ready-to-show', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;

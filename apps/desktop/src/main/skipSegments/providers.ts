@@ -1,6 +1,7 @@
 import type { MetadataProviderIds } from '../mediaTags';
 import { deduplicateProviderSegments, durationIsCompatible, normalizeSegment } from './normalize.ts';
 import type { NormalizedSegmentInput } from './types';
+import { safeFetch } from '../safeFetch.ts';
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 3000;
@@ -32,9 +33,13 @@ async function providerFetch(url: URL): Promise<{ response: Response; payload?: 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       headers: { Accept: 'application/json', 'User-Agent': 'LoomTV/skip-markers' },
       signal: controller.signal,
+    }, {
+      allowedHosts: ['api.theintrodb.org', 'api.aniskip.com'],
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      maxBytes: MAX_RESPONSE_BYTES,
     });
     if (!response.ok) return { response };
     return { response, payload: await responseJson(response) };

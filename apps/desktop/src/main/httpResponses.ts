@@ -15,7 +15,7 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
-export function isClosedResponseError(error: unknown): boolean {
+function isClosedResponseError(error: unknown): boolean {
   const code = errorCode(error);
   return Boolean(code && CLOSED_RESPONSE_ERROR_CODES.has(code));
 }
@@ -33,24 +33,82 @@ export function handleResponseErrors(res: ServerResponse): void {
   });
 }
 
-export async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+export class HttpBodyError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = 'HttpBodyError';
+    this.statusCode = statusCode;
+  }
+}
+
+type ReadJsonBodyOptions = {
+  maxBytes?: number;
+  timeoutMs?: number;
+};
+
+export async function readJsonBody(
+  req: IncomingMessage,
+  options: ReadJsonBodyOptions = {},
+): Promise<Record<string, unknown>> {
+  const maxBytes = options.maxBytes ?? 64 * 1024;
+  const timeoutMs = options.timeoutMs ?? 10_000;
   return new Promise((resolve, reject) => {
-    let body = '';
+    const declaredLength = Number(req.headers['content-length'] || 0);
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      reject(new HttpBodyError(`Request body exceeds ${maxBytes} bytes.`, 413));
+      req.resume();
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let byteLength = 0;
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
+    const timer = setTimeout(() => {
+      finish(() => reject(new HttpBodyError('Request body timed out.', 408)));
+      req.destroy();
+    }, timeoutMs);
+
     req.on('data', (chunk) => {
-      body += chunk.toString();
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteLength += buffer.byteLength;
+      if (byteLength > maxBytes) {
+        finish(() => reject(new HttpBodyError(`Request body exceeds ${maxBytes} bytes.`, 413)));
+        chunks.length = 0;
+        req.removeAllListeners('data');
+        req.resume();
+        return;
+      }
+      chunks.push(buffer);
     });
     req.on('end', () => {
+      if (settled) return;
+      const body = Buffer.concat(chunks, byteLength).toString('utf8');
       if (!body) {
-        resolve({});
+        finish(() => resolve({}));
         return;
       }
       try {
-        resolve(JSON.parse(body));
+        const parsed = JSON.parse(body) as unknown;
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+          throw new HttpBodyError('JSON body must be an object.', 400);
+        }
+        finish(() => resolve(parsed as Record<string, unknown>));
       } catch (error) {
-        reject(error);
+        finish(() => reject(error instanceof HttpBodyError
+          ? error
+          : new HttpBodyError('Request body is not valid JSON.', 400)));
       }
     });
-    req.on('error', reject);
+    req.on('error', (error) => finish(() => reject(error)));
   });
 }
 

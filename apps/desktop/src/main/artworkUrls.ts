@@ -7,6 +7,7 @@ import { customArtworkReference, parseCustomArtworkReference } from './artworkCa
 import { getCustomArtwork } from './database';
 import { isImageFileName } from './fileClassification';
 import type { MediaItem } from './metadata/types';
+import type { LocalResourceKind } from './resourceRegistry';
 
 const LAN_IMAGE_CACHE_QUERY_PARAM = 'loomtvImageCache';
 
@@ -19,10 +20,11 @@ export interface ArtworkUrlsDeps {
     ttlSeconds?: number,
     options?: { stable?: boolean },
   ) => string;
+  registerRemoteResource: (kind: LocalResourceKind, value: string) => string;
 }
 
 export function createArtworkUrls(deps: ArtworkUrlsDeps) {
-  const { localAccessToken, buildSignedLanUrl } = deps;
+  const { localAccessToken, buildSignedLanUrl, registerRemoteResource } = deps;
 
   function getLocalImageUrl(filePath: string): string {
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), localAccessToken);
@@ -35,7 +37,8 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
   }
 
   function getRemoteThumbnailUrl(filePath: string, base: string, time = '00:03:00'): string {
-    return signedArtworkUrlForRemote(base, '/api/thumbnail', new URLSearchParams({ path: filePath, t: time }));
+    const resourceId = registerRemoteResource('media', filePath);
+    return signedArtworkUrlForRemote(base, '/api/thumbnail', new URLSearchParams({ resourceId, t: time }));
   }
 
   function getEmbeddedThumbnailUrl(filePath: string, streamIndex?: number): string {
@@ -129,14 +132,16 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     }
   }
 
-  function remoteArtworkDeliveryUrl(source: string, base: string, _token: string): string {
+  function remoteArtworkDeliveryUrl(source: string, base: string): string {
     if (!source) return '';
     if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrlSigned(source, base);
     if (isExternalArtworkUrl(source)) {
-      return signedArtworkUrlForRemote(base, '/api/cached-artwork', new URLSearchParams({ source }));
+      const resourceId = registerRemoteResource('external-artwork', source);
+      return signedArtworkUrlForRemote(base, '/api/cached-artwork', new URLSearchParams({ resourceId }));
     }
     if (isLocalImageFilePath(source)) {
-      return signedArtworkUrlForRemote(base, '/api/local-image', new URLSearchParams({ path: source }));
+      const resourceId = registerRemoteResource('image', source);
+      return signedArtworkUrlForRemote(base, '/api/local-image', new URLSearchParams({ resourceId }));
     }
     return source;
   }
@@ -179,6 +184,11 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       params.delete('sig');
       params.delete('exp');
       params.delete('nonce');
+      const filePath = params.get('path');
+      if (filePath) {
+        params.delete('path');
+        params.set('resourceId', registerRemoteResource('subtitle', filePath));
+      }
       return buildSignedLanUrl(base, parsed.pathname, params);
     } catch {
       return source;

@@ -10,7 +10,7 @@
     "ios": {
       "requireFullScreen": true,
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.loomtvmobile",
+      "bundleIdentifier": "app.loomtv.mobile",
       "infoPlist": {
         "NSBonjourServices": [
           "_loomtv._tcp"
@@ -33,7 +33,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.loomtvmobile"
+      "package": "app.loomtv.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -48,6 +48,9 @@
       [
         "expo-build-properties",
         {
+          "android": {
+            "usesCleartextTraffic": true
+          },
           "ios": {
             "deploymentTarget": "15.1"
           }

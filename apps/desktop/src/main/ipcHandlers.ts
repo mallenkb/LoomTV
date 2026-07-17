@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain, shell } from 'electron';
-import type { OpenDialogOptions, OpenDialogReturnValue } from 'electron';
+import type { IpcMainInvokeEvent, OpenDialogOptions, OpenDialogReturnValue } from 'electron';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,9 +10,13 @@ import type { ApiResult, ProbeResult, TranscodeOptions, TranscodeSession } from 
 import type { MetadataKeyTestResult } from './metadataKeys';
 import type { BrowserPlaybackPlan } from './transcodeDecision';
 import type { ManualMediaSegmentInput, MediaSegmentRequest, MediaSegmentResponse } from './skipSegments/types';
+import type { IpcInvokeChannel } from '../shared/ipcChannels';
+import type { IpcContract } from '../shared/ipcContract';
+import type { StoredProgress } from '../shared/desktopProtocol.ts';
+import { buildNetworkStatus, ffmpegAvailability } from './ipcHandlerPolicy.ts';
 
-export type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
-export type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
+type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
+type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
 
 type LibraryScanProgress<TLibraryData> = TLibraryData & {
   isComplete: boolean;
@@ -23,7 +27,6 @@ type LibraryScanProgress<TLibraryData> = TLibraryData & {
 type LanPairedDevice = {
   id: string;
   name: string;
-  token: string;
   createdAt: number;
   lastSeenAt: number;
   lastAddress?: string;
@@ -35,22 +38,18 @@ type NetworkSettings = {
   localNetworkPairedDevices?: LanPairedDevice[];
 };
 
-type UpdateStateLike = {
-  status: string;
-};
-
 type OpenExternalResult = ReturnType<typeof shell.openExternal>;
+type IpcResult<C extends IpcInvokeChannel> = IpcContract[C]['result'];
+type OfficialMetadataCandidate = IpcContract['artwork:apply-official']['args'][1];
 export interface IpcHandlerDependencies<
   TLibraryData,
-  TSettings extends NetworkSettings,
-  TOfficialMetadataCandidate,
-  TUpdateState extends UpdateStateLike,
+  TSettings extends NetworkSettings & IpcResult<'settings:get'>,
 > {
   getMediaServerPort: () => number;
   localAccessToken: string;
   showOpenFolderDialog: (options: OpenDialogOptions) => Promise<OpenDialogReturnValue>;
   loadLibrary: () => TLibraryData;
-  libraryForRenderer: (library?: TLibraryData) => unknown;
+  libraryForRenderer: (library?: TLibraryData) => IpcResult<'library:get'>;
   scanLibrary: (
     library: TLibraryData,
     options: {
@@ -69,6 +68,7 @@ export interface IpcHandlerDependencies<
   browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
   loadSettings: () => TSettings;
   saveSettings: (settings: TSettings) => void;
+  onSettingsSaved?: () => void;
   syncLanAdvertisement: () => void;
   testMetadataKeys: (keys: Record<string, string>) => Promise<MetadataKeyTestResult[]>;
   getLanShareToken: () => string;
@@ -76,39 +76,52 @@ export interface IpcHandlerDependencies<
   isLanSharingEnabled: () => boolean;
   getLocalNetworkNameFast: () => string;
   getLocalNetworkAddresses: () => string[];
-  discoverLanPeers: (timeoutMs: number, ownDeviceId?: string) => Promise<unknown[]>;
-  getProgress: (filePath: string) => unknown;
-  getAllProgress: () => unknown;
-  saveProgress: (filePath: string, position: number, duration: number) => void;
+  discoverLanPeers: (timeoutMs: number, ownDeviceId?: string) => Promise<IpcResult<'network:discover-peers'>>;
+  getProgress: (filePath: string) => StoredProgress | null;
+  getAllProgress: () => Record<string, StoredProgress>;
+  saveProgress: (filePath: string, position: number, duration: number) => IpcResult<'progress:save'>;
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => void;
-  getPlaybackTrackPreferences: (scope?: string) => unknown;
-  savePlaybackTrackPreferences: (scope: string, preferences: unknown) => unknown;
+  getPlaybackTrackPreferences: (scope?: string) => IpcResult<'playback-track-preferences:get'>;
+  savePlaybackTrackPreferences: (
+    scope: string,
+    preferences: IpcContract['playback-track-preferences:save']['args'][1],
+  ) => IpcResult<'playback-track-preferences:save'>;
   getMediaSegments: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
   saveManualMediaSegment: (input: ManualMediaSegmentInput) => MediaSegmentResponse;
-  deleteManualMediaSegment: (input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
-  undoManualMediaSegment: (input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
+  deleteManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
+  undoManualMediaSegment: (input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => MediaSegmentResponse;
+  getManagedMediaSegments: (request?: Partial<MediaSegmentRequest>) => IpcResult<'playback:segments:manage-list'>;
+  updateManagedMediaSegment: (candidateId: string, patch: IpcContract['playback:segments:manage-update']['args'][1]) => boolean;
+  eraseManagedMediaSegments: (request: MediaSegmentRequest) => IpcResult<'playback:segments:manage-erase'>;
   setPlaybackActivityLease: (key: string, active: boolean, label?: string) => void;
-  getLocalSegmentAnalysisStatus: () => unknown;
+  getLocalSegmentAnalysisStatus: () => IpcResult<'playback:analysis:status'>;
   analyzeLocalSegmentSeason: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
-  customArtworkForRenderer: (mediaId: string) => unknown;
+  runLocalSegmentAnalysis: (scope?: IpcContract['playback:analysis:run']['args'][0]) => IpcResult<'playback:analysis:run'>;
+  cancelLocalSegmentAnalysis: (jobKey?: string) => IpcResult<'playback:analysis:cancel'>;
+  pauseLocalSegmentAnalysis: () => boolean;
+  resumeLocalSegmentAnalysis: () => boolean;
+  cleanupLocalSegmentAnalysis: () => IpcResult<'playback:analysis:cleanup'>;
+  rebuildLocalSegmentAnalysis: () => IpcResult<'playback:analysis:rebuild'>;
+  customArtworkForRenderer: (mediaId: string) => IpcResult<'artwork:get'>;
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => void;
-  getOfficialMetadataCandidates: (mediaId: string) => unknown;
-  applyOfficialMetadataCandidate: (mediaId: string, candidate: TOfficialMetadataCandidate) => unknown;
-  refreshOfficialArtwork: (mediaId: string) => unknown;
-  getPlaybackLogo: (mediaId: string) => unknown;
+  getOfficialMetadataCandidates: (mediaId: string) => IpcResult<'artwork:official-candidates'> | Promise<IpcResult<'artwork:official-candidates'>>;
+  applyOfficialMetadataCandidate: (mediaId: string, candidate: OfficialMetadataCandidate) => IpcResult<'artwork:apply-official'> | Promise<IpcResult<'artwork:apply-official'>>;
+  refreshOfficialArtwork: (mediaId: string) => IpcResult<'artwork:refresh-official'> | Promise<IpcResult<'artwork:refresh-official'>>;
+  getPlaybackLogo: (mediaId: string) => IpcResult<'artwork:playback-logo'> | Promise<IpcResult<'artwork:playback-logo'>>;
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => void;
-  backupDatabase: () => unknown;
+  backupDatabase: () => IpcResult<'database:backup'> | Promise<IpcResult<'database:backup'>>;
   clearAppData: () => TLibraryData;
-  getUpdateState: () => TUpdateState;
-  checkForUpdates: () => TUpdateState | Promise<TUpdateState>;
-  installDownloadedUpdate: () => unknown;
+  getUpdateState: () => IpcResult<'updates:get-state'>;
+  checkForUpdates: () => IpcResult<'updates:check'> | Promise<IpcResult<'updates:check'>>;
+  installDownloadedUpdate: () => IpcResult<'updates:install'> | Promise<IpcResult<'updates:install'>>;
   findFFmpeg: () => string | null;
   safeResult: <T>(fn: () => T | Promise<T>) => Promise<ApiResult<T>>;
-  probeMedia: (filePath: string) => ProbeResult;
-  canDirectPlay: (filePath: string, probe: ProbeResult, backend: 'html5' | 'hls') => unknown;
+  probeMedia: (filePath: string) => Promise<ProbeResult>;
+  canDirectPlay: (filePath: string, probe: ProbeResult, backend: 'html5' | 'hls') => boolean;
   startTranscode: (filePath: string, options: TranscodeOptions, serverBase: string) => Promise<TranscodeSession>;
   appendLocalAccessTokenToUrl: (url: string) => string;
-  stopTranscode: (sessionId: string) => unknown;
+  stopTranscode: (sessionId: string) => boolean;
+  isTrustedSender: (event: IpcMainInvokeEvent) => boolean;
 }
 
 function safeLibraryFolderKind(kind: string | undefined): IpcLibraryFolderKind {
@@ -125,13 +138,24 @@ function scanProgressPayload<TLibraryData>(snapshot: LibraryScanProgress<TLibrar
 
 export function registerIpcHandlers<
   TLibraryData,
-  TSettings extends NetworkSettings,
-  TOfficialMetadataCandidate,
-  TUpdateState extends UpdateStateLike,
->(deps: IpcHandlerDependencies<TLibraryData, TSettings, TOfficialMetadataCandidate, TUpdateState>): void {
-  ipcMain.handle('library:get', () => deps.libraryForRenderer());
+  TSettings extends NetworkSettings & IpcResult<'settings:get'>,
+>(deps: IpcHandlerDependencies<TLibraryData, TSettings>): void {
+  const handle = <C extends IpcInvokeChannel>(
+    channel: C,
+    listener: (
+      event: IpcMainInvokeEvent,
+      ...args: IpcContract[C]['args']
+    ) => IpcContract[C]['result'] | Promise<IpcContract[C]['result']>,
+  ) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
+      return listener(event, ...(args as IpcContract[C]['args']));
+    });
+  };
 
-  ipcMain.handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {
+  handle('library:get', () => deps.libraryForRenderer());
+
+  handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {
     const data = deps.loadLibrary();
     const scanVersion = deps.getLibraryMutationVersion();
     const mode: IpcLibraryScanMode = options?.force
@@ -151,7 +175,7 @@ export function registerIpcHandlers<
     return deps.libraryForRenderer();
   });
 
-  ipcMain.handle('library:add-folder', async (_event, kind: string = 'movies') => {
+  handle('library:add-folder', async (_event, kind: string = 'movies') => {
     const result = await deps.showOpenFolderDialog({
       properties: ['openDirectory'],
       buttonLabel: 'Add Folder',
@@ -179,14 +203,14 @@ export function registerIpcHandlers<
     return null;
   });
 
-  ipcMain.handle('library:remove-folder', (_event, folderPath: string) => {
+  handle('library:remove-folder', (_event, folderPath: string) => {
     const data = deps.loadLibrary();
     const updated = deps.removeFolderFromLibrary(data, folderPath);
     deps.saveLibraryMutation(updated);
     return deps.libraryForRenderer();
   });
 
-  ipcMain.handle('media:play', async (_event, filePath: string) => {
+  handle('media:play', async (_event, filePath: string) => {
     try {
       deps.assertLocalMediaPath(filePath);
       return false;
@@ -195,9 +219,9 @@ export function registerIpcHandlers<
     }
   });
 
-  ipcMain.handle('media:get-server-port', () => deps.getMediaServerPort());
+  handle('media:get-server-port', () => deps.getMediaServerPort());
 
-  ipcMain.handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
+  handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     appendStreamOptionParams(params, options);
@@ -214,20 +238,20 @@ export function registerIpcHandlers<
     };
   });
 
-  ipcMain.handle('media:get-subtitle-url', (_event, filePath: string, streamOrdinal?: number) => {
+  handle('media:get-subtitle-url', (_event, filePath: string, streamOrdinal?: number) => {
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) params.set('streamOrdinal', String(Math.floor(streamOrdinal)));
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/subtitle?${params.toString()}` };
   });
 
-  ipcMain.handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
+  handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (time) params.set('t', time);
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/api/thumbnail?${params.toString()}` };
   });
 
-  ipcMain.handle('media:get-file-info', (_event, filePath: string) => {
+  handle('media:get-file-info', (_event, filePath: string) => {
     try {
       deps.assertLocalMediaPath(filePath);
       const exists = fs.existsSync(filePath);
@@ -238,35 +262,23 @@ export function registerIpcHandlers<
     }
   });
 
-  ipcMain.handle('settings:get', () => deps.loadSettings());
+  handle('settings:get', () => deps.loadSettings());
 
-  ipcMain.handle('settings:save', (_event, settings: TSettings) => {
+  handle('settings:save', (_event, settings) => {
     deps.saveSettings({ ...deps.loadSettings(), ...settings });
+    deps.onSettingsSaved?.();
     deps.syncLanAdvertisement();
     return true;
   });
 
-  ipcMain.handle('metadata:test-keys', (_event, keys: Record<string, string>) => deps.testMetadataKeys(keys || {}));
+  handle('metadata:test-keys', (_event, keys: Record<string, string>) => deps.testMetadataKeys(keys || {}));
 
-  ipcMain.handle('network:status', () => {
-    const settings = deps.loadSettings();
-    const token = deps.getLanShareToken();
-    const base = deps.getLanServerBase();
-    return {
-      sharingEnabled: deps.isLanSharingEnabled(),
-      token,
-      deviceId: settings.localNetworkDeviceId,
-      deviceName: settings.localNetworkDeviceName || os.hostname(),
-      networkName: deps.getLocalNetworkNameFast(),
-      port: deps.getMediaServerPort(),
-      addresses: deps.getLocalNetworkAddresses(),
-      baseUrl: base,
-      libraryUrl: base ? `${base}/api/lan/library` : null,
-      pairedDevices: settings.localNetworkPairedDevices || [],
-    };
+  handle('network:status', () => {
+    const status = buildNetworkStatus(deps);
+    return { ...status, deviceName: status.deviceName || os.hostname() };
   });
 
-  ipcMain.handle('network:discover-peers', async (_event, timeoutMs?: number) => {
+  handle('network:discover-peers', async (_event, timeoutMs?: number) => {
     const settings = deps.loadSettings();
     try {
       return await deps.discoverLanPeers(Number(timeoutMs) || 2500, settings.localNetworkDeviceId);
@@ -276,14 +288,14 @@ export function registerIpcHandlers<
     }
   });
 
-  ipcMain.handle('network:revoke-paired-device', (_event, deviceId: string) => {
+  handle('network:revoke-paired-device', (_event, deviceId: string) => {
     const settings = deps.loadSettings();
     const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
     deps.saveSettings({ ...settings, localNetworkPairedDevices: remaining });
     return remaining;
   });
 
-  ipcMain.handle('network:set-device-name', (_event, name: string) => {
+  handle('network:set-device-name', (_event, name: string) => {
     const settings = deps.loadSettings();
     const nextName = String(name || '').trim().slice(0, 80) || os.hostname();
     deps.saveSettings({ ...settings, localNetworkDeviceName: nextName });
@@ -291,48 +303,77 @@ export function registerIpcHandlers<
     return nextName;
   });
 
-  ipcMain.handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress());
-  ipcMain.handle('progress:save', (_event, filePath: string, position: number, duration: number) =>
+  handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress());
+  handle('progress:save', (_event, filePath: string, position: number, duration: number) =>
     deps.saveProgress(filePath, Number(position) || 0, Number(duration) || 0));
-  ipcMain.handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => {
+  handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => {
     deps.importProgress(progress || {});
     return true;
   });
-  ipcMain.handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope));
-  ipcMain.handle('playback-track-preferences:save', (_event, scope: string, preferences: unknown) =>
+  handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope));
+  handle('playback-track-preferences:save', (_event, scope: string, preferences) =>
     deps.savePlaybackTrackPreferences(scope, preferences || {}));
-  ipcMain.handle('playback:segments:get', (_event, request: MediaSegmentRequest) =>
+  handle('playback:segments:get', (_event, request: MediaSegmentRequest) =>
     deps.getMediaSegments(request || { mediaId: '' }));
-  ipcMain.handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) =>
+  handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) =>
     deps.saveManualMediaSegment(input));
-  ipcMain.handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) =>
+  handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) =>
     deps.deleteManualMediaSegment(input));
-  ipcMain.handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { type: ManualMediaSegmentInput['type'] }) =>
+  handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) =>
     deps.undoManualMediaSegment(input));
-  ipcMain.handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
+  handle('playback:segments:manage-list', (_event, request) => deps.getManagedMediaSegments(request ? {
+    mediaId: request.mediaId ? String(request.mediaId).slice(0, 240) : undefined,
+    season: request.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
+    episode: request.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
+  } : undefined));
+  handle('playback:segments:manage-update', (_event, candidateId, patch) => {
+    const status = patch?.status === 'active' || patch?.status === 'review' || patch?.status === 'rejected' ? patch.status : undefined;
+    const type = patch?.type === 'intro' || patch?.type === 'recap' || patch?.type === 'credits' || patch?.type === 'preview' ? patch.type : undefined;
+    return deps.updateManagedMediaSegment(String(candidateId || '').slice(0, 240), { status, type });
+  });
+  handle('playback:segments:manage-erase', (_event, request) => deps.eraseManagedMediaSegments({
+    mediaId: String(request?.mediaId || '').slice(0, 240),
+    season: request?.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
+    episode: request?.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
+  }));
+  handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
     deps.setPlaybackActivityLease(key, Boolean(active), label);
     return true;
   });
-  ipcMain.handle('playback:analysis:status', () => deps.getLocalSegmentAnalysisStatus());
-  ipcMain.handle('playback:analysis:season', (_event, mediaId: string, season: number) =>
-    deps.analyzeLocalSegmentSeason(String(mediaId || ''), Number(season) || 1));
-  ipcMain.handle('artwork:get', (_event, mediaId: string) => deps.customArtworkForRenderer(mediaId));
-  ipcMain.handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
+  handle('playback:analysis:status', () => deps.getLocalSegmentAnalysisStatus());
+  handle('playback:analysis:season', (_event, mediaId: string, season: number) =>
+    deps.analyzeLocalSegmentSeason(
+      String(mediaId || '').slice(0, 240),
+      Number.isFinite(Number(season)) ? Math.max(0, Math.floor(Number(season))) : 1,
+    ));
+  handle('playback:analysis:run', (_event, scope) => deps.runLocalSegmentAnalysis(scope ? {
+    mediaId: scope.mediaId ? String(scope.mediaId).slice(0, 240) : undefined,
+    season: scope.season === undefined || !Number.isFinite(Number(scope.season)) ? undefined : Math.max(0, Math.floor(Number(scope.season))),
+    episode: scope.episode === undefined || !Number.isFinite(Number(scope.episode)) ? undefined : Math.max(0, Math.floor(Number(scope.episode))),
+  } : undefined));
+  handle('playback:analysis:cancel', (_event, jobKey?: string) =>
+    deps.cancelLocalSegmentAnalysis(jobKey ? String(jobKey).slice(0, 128) : undefined));
+  handle('playback:analysis:pause', () => deps.pauseLocalSegmentAnalysis());
+  handle('playback:analysis:resume', () => deps.resumeLocalSegmentAnalysis());
+  handle('playback:analysis:cleanup', () => deps.cleanupLocalSegmentAnalysis());
+  handle('playback:analysis:rebuild', () => deps.rebuildLocalSegmentAnalysis());
+  handle('artwork:get', (_event, mediaId: string) => deps.customArtworkForRenderer(mediaId));
+  handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
     deps.saveCustomArtwork(mediaId, target, dataUrl);
     return deps.customArtworkForRenderer(mediaId);
   });
-  ipcMain.handle('artwork:official-candidates', (_event, mediaId: string) => deps.getOfficialMetadataCandidates(mediaId));
-  ipcMain.handle('artwork:apply-official', (_event, mediaId: string, candidate: TOfficialMetadataCandidate) =>
+  handle('artwork:official-candidates', (_event, mediaId: string) => deps.getOfficialMetadataCandidates(mediaId));
+  handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) =>
     deps.applyOfficialMetadataCandidate(mediaId, candidate));
-  ipcMain.handle('artwork:refresh-official', (_event, mediaId: string) => deps.refreshOfficialArtwork(mediaId));
-  ipcMain.handle('artwork:playback-logo', (_event, mediaId: string) => deps.getPlaybackLogo(mediaId));
-  ipcMain.handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
+  handle('artwork:refresh-official', (_event, mediaId: string) => deps.refreshOfficialArtwork(mediaId));
+  handle('artwork:playback-logo', (_event, mediaId: string) => deps.getPlaybackLogo(mediaId));
+  handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
     deps.importCustomArtwork(entries || {});
     return true;
   });
-  ipcMain.handle('database:backup', () => deps.backupDatabase());
-  ipcMain.handle('database:clear', () => deps.libraryForRenderer(deps.clearAppData()));
-  ipcMain.handle('shell:open-external', (_event, url: string): OpenExternalResult => {
+  handle('database:backup', () => deps.backupDatabase());
+  handle('database:clear', () => deps.libraryForRenderer(deps.clearAppData()));
+  handle('shell:open-external', (_event, url: string): OpenExternalResult => {
     const parsed = new URL(String(url || ''));
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       throw new Error('Only http and https links can be opened externally.');
@@ -347,36 +388,33 @@ export function registerIpcHandlers<
     shell.showItemInFolder(path.resolve(target));
     return true;
   };
-  ipcMain.handle('shell:open-folder-path', (_event, filePath: string) => openFolderPath(filePath));
-  ipcMain.handle('shell:show-item', (_event, filePath: string) => openFolderPath(filePath));
-  ipcMain.handle('updates:get-state', () => deps.getUpdateState());
-  ipcMain.handle('updates:check', () => deps.checkForUpdates());
-  ipcMain.handle('updates:install', () => {
+  handle('shell:open-folder-path', (_event, filePath: string) => openFolderPath(filePath));
+  handle('shell:show-item', (_event, filePath: string) => openFolderPath(filePath));
+  handle('updates:get-state', () => deps.getUpdateState());
+  handle('updates:check', () => deps.checkForUpdates());
+  handle('updates:install', () => {
     const updateState = deps.getUpdateState();
     if (updateState.status !== 'downloaded') return updateState;
     return deps.installDownloadedUpdate();
   });
 
-  ipcMain.handle('media:ffmpeg-available', () => {
-    const ffmpegPath = deps.findFFmpeg();
-    return { available: ffmpegPath !== null, path: ffmpegPath };
-  });
+  handle('media:ffmpeg-available', () => ffmpegAvailability(deps.findFFmpeg));
 
-  ipcMain.handle('media:probe', (_event, filePath: string) => deps.safeResult(() => deps.probeMedia(filePath)));
+  handle('media:probe', (_event, filePath: string) => deps.safeResult(() => deps.probeMedia(filePath)));
 
-  ipcMain.handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
-    deps.safeResult(() => {
+  handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
+    deps.safeResult(async () => {
       if (backend === 'html5') return deps.browserPlaybackPlan(filePath).mode === 'direct';
-      const result = deps.probeMedia(filePath);
+      const result = await deps.probeMedia(filePath);
       return deps.canDirectPlay(filePath, result, backend);
     }),
   );
 
-  ipcMain.handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
+  handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
     deps.safeResult(async () => {
       const session = await deps.startTranscode(filePath, options || {}, `http://127.0.0.1:${deps.getMediaServerPort()}`);
       return { ...session, playlistUrl: deps.appendLocalAccessTokenToUrl(session.playlistUrl) };
     }),
   );
-  ipcMain.handle('media:stop-transcode', (_event, sessionId: string) => deps.safeResult(() => deps.stopTranscode(sessionId)));
+  handle('media:stop-transcode', (_event, sessionId: string) => deps.safeResult(() => deps.stopTranscode(sessionId)));
 }

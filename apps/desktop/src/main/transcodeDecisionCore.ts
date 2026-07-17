@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { TranscodeOptions } from './mediaTypes.ts';
 import type { LocalMediaDetails } from './metadata/types.ts';
 
-export type BrowserPlaybackMode = 'direct' | 'remux' | 'direct-stream' | 'transcode';
+type BrowserPlaybackMode = 'direct' | 'remux' | 'direct-stream' | 'transcode';
 
 export interface BrowserPlaybackPlan {
   mode: BrowserPlaybackMode;
@@ -16,8 +16,6 @@ export interface BrowserPlaybackPlan {
   requiresFfmpeg: boolean;
   requiresSeekRestart: boolean;
 }
-
-export const transcodeFirstExtensions = new Set(['.mkv', '.avi', '.wmv', '.flv', '.mpg', '.mpeg', '.m2ts', '.3gp', '.ts']);
 
 const mp4Extensions = new Set(['.mp4', '.m4v', '.mov']);
 const webmExtensions = new Set(['.webm']);
