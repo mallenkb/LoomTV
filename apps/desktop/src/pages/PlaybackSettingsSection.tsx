@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { LocalSegmentAnalysisStatus, SkipAnalysisSettings } from '@/lib/desktopApi';
@@ -12,8 +12,11 @@ type PlaybackSettingsSectionProps = {
   skipAnalysis: SkipAnalysisSettings;
   onSkipAnalysisChange: (value: SkipAnalysisSettings) => void;
   analysisStatus: LocalSegmentAnalysisStatus | null;
-  onAnalysisAction: (action: 'run' | 'pause' | 'resume' | 'cancel' | 'cleanup' | 'rebuild', scope?: { mediaId?: string; season?: number }) => void;
-  onSave: () => void | Promise<void>;
+  onAnalysisAction: (
+    action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
+    scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
+  ) => Promise<{ queued: number } | undefined> | void;
+  onSave: () => void | boolean | Promise<void | boolean>;
 };
 
 const INTRO_TYPES = ['intro', 'recap'] as const;
@@ -42,16 +45,65 @@ export default function PlaybackSettingsSection({
 }: PlaybackSettingsSectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [showProgress, setShowProgress] = useState(false);
   const [scopeMediaId, setScopeMediaId] = useState('');
   const [scopeSeason, setScopeSeason] = useState('');
+  // The status poll reports how many jobs remain, not how many a scan started
+  // with. Remember the largest remaining count seen during the active run so
+  // the bar can show honest progress through that batch.
+  const [batchSize, setBatchSize] = useState(0);
+  const manualRemaining = (analysisStatus?.manualPendingCount || 0) + (analysisStatus?.manualRunningCount || 0);
+  // The checkbox is an unsaved draft. Only persisted coordinator status may
+  // hide an active run; otherwise unchecking before Save would hide Stop.
+  const coordinatorDisabled = analysisStatus?.state === 'disabled';
+  const manualScanActive = !coordinatorDisabled && manualRemaining > 0;
+  const running = analysisStatus?.runningCount || 0;
+  const remaining = manualScanActive ? manualRemaining : running;
+  const waiting = analysisStatus?.waitingCount || 0;
+  const scanActive = remaining > 0;
+  useEffect(() => {
+    if (!scanActive) {
+      setBatchSize(0);
+      return;
+    }
+    setBatchSize((size) => Math.max(size, remaining));
+  }, [remaining, scanActive]);
+  const percent = scanActive && batchSize > 0
+    ? Math.min(99, Math.round(((batchSize - remaining) / batchSize) * 100))
+    : 0;
+  const [scanNotice, setScanNotice] = useState<string | null>(null);
   const update = (patch: Partial<SkipAnalysisSettings>) => onSkipAnalysisChange({ ...skipAnalysis, ...patch });
-  const manuallyScan = async (scope?: { mediaId?: string; season?: number }) => {
-    await onSave();
-    onAnalysisAction('run', scope);
+  const manuallyScan = async (scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' }) => {
+    setScanNotice(null);
+    if (!skipAnalysis.enabled) {
+      setScanNotice('Enable automatic intro and outro detection before starting a scan.');
+      return;
+    }
+    // Scans always persist the current settings first; a failed save must not
+    // start a run against the stale configuration.
+    const saved = await onSave();
+    if (saved === false) return;
+    const result = await onAnalysisAction('run', scope);
+    if (result && result.queued > 0) setBatchSize(result.queued);
+    if (result && result.queued === 0) {
+      setScanNotice(scope?.mode === 'quick'
+        ? waiting > 0
+          ? `No new items to analyze. ${waiting} item${waiting === 1 ? ' is' : 's are'} waiting for more episodes.`
+          : 'Everything is already analyzed and up to date — nothing new to scan.'
+        : 'No analyzable content found in that scope.');
+    }
+  };
+  const stopScan = () => {
+    setScanNotice('Scan stopped. Already-marked content keeps its markers.');
+    void onAnalysisAction('cancel-manual');
   };
   const statusText = !analysisStatus
     ? 'Checking local analysis helpers…'
-    : `${STATE_LABELS[analysisStatus.state] || analysisStatus.state}${analysisStatus.pendingCount ? ` · ${analysisStatus.pendingCount} pending` : ''}`;
+    : `${STATE_LABELS[analysisStatus.state] || analysisStatus.state}${analysisStatus.pendingCount ? ` · ${analysisStatus.pendingCount} pending` : ''}${waiting ? ` · ${waiting} waiting for more episodes` : ''}`;
+  const coverage = analysisStatus?.library;
+  const coverageWaiting = coverage?.waiting || 0;
+  const coverageRemaining = coverage ? Math.max(0, coverage.total - coverage.analyzed - coverageWaiting) : 0;
+  const phase = analysisStatus?.phaseProgress;
 
   return (
     <div className="space-y-6">
@@ -97,16 +149,93 @@ export default function PlaybackSettingsSection({
               Automatically detect and mark intros &amp; outros
             </label>
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" onClick={() => void manuallyScan()}>Scan library now</Button>
+              {manualScanActive ? (
+                <Button type="button" onClick={stopScan}>Stop scan</Button>
+              ) : (
+                <Button type="button" disabled={!skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'quick' })}>Quick scan</Button>
+              )}
+              <Button type="button" variant="outline" disabled={manualScanActive || !skipAnalysis.enabled} onClick={() => void manuallyScan({ mode: 'full' })}>Full scan</Button>
               <Button type="button" variant="outline" onClick={onSave}>Save</Button>
             </div>
           </div>
 
-          <div className="text-xs text-[var(--loom-muted)]">
-            <p>{statusText}</p>
-            {analysisStatus?.currentJob && <p className="mt-1">{analysisStatus.currentJob.detail}</p>}
-            {analysisStatus?.lastError && <p role="alert" className="mt-1 text-red-300">{analysisStatus.lastError}</p>}
-          </div>
+          <p className="text-xs text-[var(--loom-muted)]">
+            Quick scan only analyzes items that aren&apos;t up to date yet. Full scan re-analyzes the entire library.
+            Scans save your settings automatically, and stopping keeps everything already completed — only the rest stays remaining.
+          </p>
+          {scanNotice && !scanActive && <p className="text-xs text-emerald-300">{scanNotice}</p>}
+
+          {scanActive ? (
+            <div className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4" aria-live="polite">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-white">
+                  {analysisStatus?.paused ? 'Paused' : manualScanActive ? 'Analyzing library…' : 'Automatic analysis running…'}
+                </span>
+                <span className="text-[var(--loom-muted)]">
+                  {percent}% · {remaining} item{remaining === 1 ? '' : 's'} left
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-valuenow={percent}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Skip analysis progress"
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"
+              >
+                <div
+                  className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-700 ease-out"
+                  style={{ width: `${Math.max(percent, 2)}%` }}
+                />
+              </div>
+              {analysisStatus?.currentJob && (
+                <p className="mt-2 text-xs text-[var(--loom-muted)]">{analysisStatus.currentJob.detail}</p>
+              )}
+              {phase && (
+                <p className="mt-1 text-xs text-[var(--loom-muted)]">
+                  Current phase: {phase.completed} of {phase.total} {phase.phase === 'fingerprinting' ? 'fingerprinted' : 'matched'}
+                </p>
+              )}
+              {coverage && (
+                <p className="mt-1 text-xs text-[var(--loom-muted)]">
+                  {coverage.analyzed} of {coverage.total} library items analyzed
+                  {coverageWaiting > 0 ? ` · ${coverageWaiting} waiting for more episodes` : ''}
+                  {coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : ''}
+                </p>
+              )}
+              {analysisStatus?.lastError && <p role="alert" className="mt-1 text-xs text-red-300">{analysisStatus.lastError}</p>}
+              {!!analysisStatus?.recentJobs?.length && (
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-expanded={showProgress}
+                    aria-controls="skip-analysis-progress-list"
+                    onClick={() => setShowProgress((value) => !value)}
+                  >
+                    {showProgress ? 'Hide progress' : 'Show progress'}
+                  </Button>
+                  {showProgress && <AnalysisProgressList jobs={analysisStatus.recentJobs} />}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs text-[var(--loom-muted)]">
+              <p>{statusText}</p>
+              {coverage && (
+                <p className="mt-1">
+                  {coverage.analyzed} of {coverage.total} library items analyzed
+                  {coverageWaiting > 0 ? ` · ${coverageWaiting} waiting for more episodes` : ''}
+                  {coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : coverageWaiting === 0 ? ' — all caught up' : ''}
+                </p>
+              )}
+              {analysisStatus?.lastError && <p role="alert" className="mt-1 text-red-300">{analysisStatus.lastError}</p>}
+              {waiting > 0 && <p className="mt-1">{waiting} item{waiting === 1 ? '' : 's'} waiting for enough peer episodes; this does not keep the scanner active.</p>}
+              {coordinatorDisabled && manualRemaining > 0 && (
+                <p className="mt-1">{manualRemaining} unfinished manual item{manualRemaining === 1 ? '' : 's'} retained and ready to resume when analysis is enabled.</p>
+              )}
+            </div>
+          )}
 
           <div>
             <button
@@ -154,9 +283,8 @@ export default function PlaybackSettingsSection({
                 <div className="mt-4 grid gap-2 sm:grid-cols-[1fr_110px_auto]">
                   <input value={scopeMediaId} onChange={(event) => setScopeMediaId(event.target.value)} placeholder="Media ID for season scan" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
                   <input value={scopeSeason} onChange={(event) => setScopeSeason(event.target.value)} type="number" min={0} placeholder="Season" className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
-                  <Button type="button" variant="outline" disabled={!scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Save &amp; scan season</Button>
+                  <Button type="button" variant="outline" disabled={!skipAnalysis.enabled || !scopeMediaId.trim()} onClick={() => void manuallyScan({ mediaId: scopeMediaId.trim(), season: Math.max(0, Number(scopeSeason) || 0) })}>Save &amp; scan season</Button>
                 </div>
-                {!!analysisStatus?.recentJobs?.length && <div className="mt-4 max-h-36 overflow-y-auto rounded-md border border-white/10"><table className="w-full text-left text-xs text-[var(--loom-muted)]"><thead><tr><th className="px-2 py-1">State</th><th className="px-2 py-1">Media</th><th className="px-2 py-1">Detail</th></tr></thead><tbody>{analysisStatus.recentJobs.map((job) => <tr key={job.jobKey} className="border-t border-white/10"><td className="px-2 py-1">{job.state}</td><td className="px-2 py-1">{job.mediaId} S{job.season}E{job.episode}</td><td className="px-2 py-1">{job.detail}</td></tr>)}</tbody></table></div>}
               </div>
             </div>
           )}
@@ -188,6 +316,45 @@ export default function PlaybackSettingsSection({
           </CardContent>
         )}
       </Card>
+    </div>
+  );
+}
+
+type ProgressJob = NonNullable<LocalSegmentAnalysisStatus['recentJobs']>[number];
+
+function AnalysisProgressList({ jobs }: { jobs: ProgressJob[] }) {
+  return (
+    <div id="skip-analysis-progress-list" className="mt-3 max-h-52 overflow-y-auto rounded-md border border-white/10">
+      <table className="w-full text-left text-xs text-[var(--loom-muted)]">
+        <caption className="sr-only">Completed, remaining, and failed skip-analysis items</caption>
+        <thead className="sticky top-0 bg-[var(--loom-bg)]">
+          <tr><th className="px-2 py-1">State</th><th className="px-2 py-1">Media</th><th className="px-2 py-1">Detail</th></tr>
+        </thead>
+        <tbody>
+          {jobs.map((job) => {
+            const stateLabel = job.state === 'complete'
+              ? 'completed'
+              : job.state === 'error'
+                ? 'failed'
+                : job.state === 'pending'
+                  ? 'remaining'
+                  : job.state;
+            return (
+              <tr key={job.jobKey} className="border-t border-white/10">
+                <td className={`px-2 py-1 font-semibold ${
+                  job.state === 'complete'
+                    ? 'text-emerald-300'
+                    : job.state === 'error'
+                      ? 'text-red-300'
+                      : ''
+                }`}>{stateLabel}</td>
+                <td className="px-2 py-1">{job.mediaId} S{job.season}E{job.episode}</td>
+                <td className="px-2 py-1">{job.detail}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

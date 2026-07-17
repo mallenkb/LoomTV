@@ -491,8 +491,8 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     if (job.kind === 'manual') {
       getDb().prepare(`UPDATE segment_analysis_jobs
         SET state = 'cancelled', detail = 'Superseded by manual scan', updated_at = ?
-        WHERE file_revision = ? AND kind != 'manual' AND state IN ('pending', 'waiting_for_peers')`)
-        .run(job.updatedAt, job.fileRevision);
+        WHERE file_revision = ? AND job_key != ? AND state IN ('pending', 'waiting_for_peers')`)
+        .run(job.updatedAt, job.fileRevision, job.jobKey);
     }
     getDb().prepare(`
       INSERT INTO segment_analysis_jobs (
@@ -528,8 +528,10 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     return (rows as Parameters<typeof analysisJobFromRow>[0][]).map(analysisJobFromRow);
   }
 
-  function getSegmentAnalysisJobCounts(): Partial<Record<SegmentAnalysisJobState, number>> {
-    const rows = getDb().prepare('SELECT state, COUNT(*) AS count FROM segment_analysis_jobs GROUP BY state').all() as Array<{ state: SegmentAnalysisJobState; count: number }>;
+  function getSegmentAnalysisJobCounts(kind?: SegmentAnalysisJob['kind']): Partial<Record<SegmentAnalysisJobState, number>> {
+    const rows = (kind
+      ? getDb().prepare('SELECT state, COUNT(*) AS count FROM segment_analysis_jobs WHERE kind = ? GROUP BY state').all(kind)
+      : getDb().prepare('SELECT state, COUNT(*) AS count FROM segment_analysis_jobs GROUP BY state').all()) as Array<{ state: SegmentAnalysisJobState; count: number }>;
     return Object.fromEntries(rows.map((row) => [row.state, row.count]));
   }
 
@@ -616,14 +618,23 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     return primary.bytes + auxiliary.bytes;
   }
 
-  function cancelSegmentAnalysisJobs(jobKey?: string): number {
+  function cancelSegmentAnalysisJobs(
+    jobKey?: string,
+    kind?: SegmentAnalysisJob['kind'],
+    preserveWaiting = false,
+  ): number {
     const database = getDb();
     const now = Date.now();
-    const result = jobKey
-      ? database.prepare(`UPDATE segment_analysis_jobs SET state = 'cancelled', detail = 'Cancelled by user', updated_at = ?
-          WHERE job_key = ? AND state IN ('pending', 'running', 'waiting_for_peers')`).run(now, jobKey)
-      : database.prepare(`UPDATE segment_analysis_jobs SET state = 'cancelled', detail = 'Cancelled by user', updated_at = ?
-          WHERE state IN ('pending', 'running', 'waiting_for_peers')`).run(now);
+    const states: SegmentAnalysisJobState[] = preserveWaiting
+      ? ['pending', 'running']
+      : ['pending', 'running', 'waiting_for_peers'];
+    const clauses = [`state IN (${states.map(() => '?').join(',')})`];
+    const parameters: Array<string | number> = [now, ...states];
+    if (jobKey) { clauses.push('job_key = ?'); parameters.push(jobKey); }
+    if (kind) { clauses.push('kind = ?'); parameters.push(kind); }
+    const result = database.prepare(`UPDATE segment_analysis_jobs
+      SET state = 'cancelled', detail = 'Cancelled by user', updated_at = ?
+      WHERE ${clauses.join(' AND ')}`).run(...parameters);
     return result.changes;
   }
 

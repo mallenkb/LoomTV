@@ -2,6 +2,7 @@ import {
   app,
   dialog,
   nativeImage,
+  powerMonitor,
   protocol,
   net,
   session,
@@ -911,8 +912,9 @@ function saveLibrary(data: LibraryData): boolean {
 }
 
 function saveLibraryMutation(data: LibraryData): void {
+  const previous = loadLibrary();
   libraryMutationVersion++;
-  saveLibrary(data);
+  if (saveLibrary(data)) reconcileSkipAnalysisAfterScan(previous, data);
 }
 
 let warmSkipSegmentsAfterScan: (data: LibraryData) => void = () => undefined;
@@ -1085,6 +1087,13 @@ const analysisCoordinator = createAnalysisCoordinator({
     saveSegmentAnalysisInventory,
     updateSegmentAnalysisJob,
   },
+  runtime: {
+    isReady: () => app.isReady(),
+    isOnBatteryPower: () => powerMonitor.isOnBatteryPower(),
+    idleSeconds: () => powerMonitor.getSystemIdleTime(),
+    onAc: (listener) => { powerMonitor.on('on-ac', listener); },
+    onBattery: (listener) => { powerMonitor.on('on-battery', listener); },
+  },
 });
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
@@ -1143,14 +1152,21 @@ registerIpcHandlers<LibraryData, AppSettings>({
   })),
   updateManagedMediaSegment: updateSegmentCandidate,
   eraseManagedMediaSegments: (request) => ({ removed: eraseAutomaticSegmentCandidates(request.mediaId, request.season, request.episode) }),
-  setPlaybackActivityLease,
+  setPlaybackActivityLease: (key, active, label) => {
+    setPlaybackActivityLease(key, active, label);
+    if (!active) void analysisCoordinator.tick();
+  },
   getLocalSegmentAnalysisStatus: analysisCoordinator.status,
   analyzeLocalSegmentSeason: async (mediaId, season) => {
     analysisCoordinator.enqueueScope({ mediaId, season });
     return skipSegmentService.getSegments({ mediaId, season });
   },
   runLocalSegmentAnalysis: (scope) => ({ queued: analysisCoordinator.enqueueScope(scope) }),
-  cancelLocalSegmentAnalysis: (jobKey) => ({ cancelled: analysisCoordinator.cancel(jobKey) }),
+  cancelLocalSegmentAnalysis: (request) => ({
+    cancelled: request?.kind === 'manual'
+      ? analysisCoordinator.cancelManual()
+      : analysisCoordinator.cancel(request?.jobKey),
+  }),
   pauseLocalSegmentAnalysis: () => { analysisCoordinator.pause(); return true; },
   resumeLocalSegmentAnalysis: () => { analysisCoordinator.resume(); return true; },
   cleanupLocalSegmentAnalysis: () => ({ queued: analysisCoordinator.cleanup() }),

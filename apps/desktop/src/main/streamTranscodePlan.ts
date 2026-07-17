@@ -1,13 +1,14 @@
-import { appendH264EncoderOptions, type H264HardwareEncoder } from './mediaBinaries';
 import type { TranscodeOptions } from './mediaTypes';
 import {
+  appendH264EncoderOptions,
   hasBitmapSubtitleSelection,
   hasSubtitleSelection,
   streamMap,
   subtitleFilterComplex,
   subtitleSelections,
   textSubtitleFilter,
-} from './transcodeFilters';
+  type H264HardwareEncoder,
+} from './transcodeFilters.ts';
 
 export interface BrowserStreamArgsRequest {
   filePath: string;

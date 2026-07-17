@@ -153,6 +153,9 @@ export type SkipAnalysisRunScope = {
   mediaId?: string;
   season?: number;
   episode?: number;
+  // 'quick' analyzes only content without up-to-date markers; 'full' (default)
+  // re-analyzes everything in scope.
+  mode?: 'quick' | 'full';
 };
 
 export interface MetadataKeyTestResult { provider: string; ok: boolean; message: string }
@@ -314,11 +317,22 @@ export interface LocalSegmentAnalysisStatus {
   message?: string;
   paused?: boolean;
   pendingCount?: number;
+  runningCount?: number;
+  waitingCount?: number;
+  manualPendingCount?: number;
+  manualRunningCount?: number;
   currentJob?: { jobKey: string; kind: string; mediaId: string; season: number; episode: number; detail: string };
+  phaseProgress?: {
+    phase: 'fingerprinting' | 'matching';
+    completed: number;
+    total: number;
+    detail: string;
+  };
   lastError?: string;
   fingerprintCount?: number;
   fingerprintCacheBytes?: number;
   progress?: { complete: number; total: number };
+  library?: { analyzed: number; waiting?: number; total: number };
   lastCompletedAt?: number;
   recentJobs?: Array<{
     jobKey: string;
