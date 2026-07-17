@@ -66,7 +66,7 @@ export interface IpcContract {
   'playback:analysis:season': { args: [mediaId: string, season: number]; result: MediaSegmentResponse };
   'playback:analysis:status': { args: []; result: LocalSegmentAnalysisStatus };
   'playback:analysis:run': { args: [scope?: SkipAnalysisRunScope]; result: { queued: number } };
-  'playback:analysis:cancel': { args: [jobKey?: string]; result: { cancelled: number } };
+  'playback:analysis:cancel': { args: [request?: { jobKey?: string; kind?: 'manual' }]; result: { cancelled: number } };
   'playback:analysis:pause': { args: []; result: boolean };
   'playback:analysis:resume': { args: []; result: boolean };
   'playback:analysis:cleanup': { args: []; result: { queued: number } };

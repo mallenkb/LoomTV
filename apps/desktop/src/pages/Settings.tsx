@@ -245,6 +245,7 @@ export default function Settings() {
     }
   }, []);
 
+  const analysisIsActive = localAnalysisStatus?.state === 'running' || localAnalysisStatus?.state === 'queued';
   useEffect(() => {
     if (activeSection !== 'playback') return undefined;
     let cancelled = false;
@@ -252,9 +253,10 @@ export default function Settings() {
       if (!cancelled) setLocalAnalysisStatus(status);
     });
     refresh();
-    const timer = window.setInterval(refresh, 5000);
+    // Poll faster while a scan is running so the progress bar tracks it.
+    const timer = window.setInterval(refresh, analysisIsActive ? 2000 : 5000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [activeSection]);
+  }, [activeSection, analysisIsActive]);
 
   const renameFolder = useCallback((folder: string, name: string) => {
     const trimmed = name.trim();
@@ -361,7 +363,7 @@ export default function Settings() {
     }
   };
 
-  const handleSavePlaybackSettings = async () => {
+  const handleSavePlaybackSettings = async (): Promise<boolean> => {
     const normalizedBack = Math.max(1, Math.round(Number(playbackSkipBackSeconds) || 0));
     const normalizedForward = Math.max(1, Math.round(Number(playbackSkipForwardSeconds) || 0));
     setPlaybackSkipBackSeconds(normalizedBack);
@@ -371,21 +373,25 @@ export default function Settings() {
       playbackSkipForwardSeconds: normalizedForward,
       localSkipAnalysisEnabled: skipAnalysis.enabled,
       skipAnalysis,
-    })) return;
+    })) return false;
     setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    return true;
   };
 
   const handleAnalysisAction = async (
-    action: 'run' | 'pause' | 'resume' | 'cancel' | 'cleanup' | 'rebuild',
-    scope?: { mediaId?: string; season?: number },
-  ) => {
-    if (action === 'run') await desktopApi.runLocalSegmentAnalysis(scope);
+    action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
+    scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
+  ): Promise<{ queued: number } | undefined> => {
+    let runResult: { queued: number } | undefined;
+    if (action === 'run') runResult = await desktopApi.runLocalSegmentAnalysis(scope);
     else if (action === 'pause') await desktopApi.pauseLocalSegmentAnalysis();
     else if (action === 'resume') await desktopApi.resumeLocalSegmentAnalysis();
     else if (action === 'cancel') await desktopApi.cancelLocalSegmentAnalysis();
+    else if (action === 'cancel-manual') await desktopApi.cancelLocalSegmentAnalysis({ kind: 'manual' });
     else if (action === 'cleanup') await desktopApi.cleanupLocalSegmentAnalysis();
     else await desktopApi.rebuildLocalSegmentAnalysis();
     setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    return runResult;
   };
 
   const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
@@ -768,8 +774,8 @@ export default function Settings() {
                   skipAnalysis={skipAnalysis}
                   onSkipAnalysisChange={setSkipAnalysis}
                   analysisStatus={localAnalysisStatus}
-                  onAnalysisAction={(action, scope) => void handleAnalysisAction(action, scope)}
-                  onSave={() => void handleSavePlaybackSettings()}
+                  onAnalysisAction={handleAnalysisAction}
+                  onSave={handleSavePlaybackSettings}
                 />
               )}
 

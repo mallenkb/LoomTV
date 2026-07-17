@@ -97,7 +97,7 @@ export interface IpcHandlerDependencies<
   getLocalSegmentAnalysisStatus: () => IpcResult<'playback:analysis:status'>;
   analyzeLocalSegmentSeason: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
   runLocalSegmentAnalysis: (scope?: IpcContract['playback:analysis:run']['args'][0]) => IpcResult<'playback:analysis:run'>;
-  cancelLocalSegmentAnalysis: (jobKey?: string) => IpcResult<'playback:analysis:cancel'>;
+  cancelLocalSegmentAnalysis: (request?: { jobKey?: string; kind?: 'manual' }) => IpcResult<'playback:analysis:cancel'>;
   pauseLocalSegmentAnalysis: () => boolean;
   resumeLocalSegmentAnalysis: () => boolean;
   cleanupLocalSegmentAnalysis: () => IpcResult<'playback:analysis:cleanup'>;
@@ -350,9 +350,12 @@ export function registerIpcHandlers<
     mediaId: scope.mediaId ? String(scope.mediaId).slice(0, 240) : undefined,
     season: scope.season === undefined || !Number.isFinite(Number(scope.season)) ? undefined : Math.max(0, Math.floor(Number(scope.season))),
     episode: scope.episode === undefined || !Number.isFinite(Number(scope.episode)) ? undefined : Math.max(0, Math.floor(Number(scope.episode))),
+    mode: scope.mode === 'quick' ? 'quick' : scope.mode === 'full' ? 'full' : undefined,
   } : undefined));
-  handle('playback:analysis:cancel', (_event, jobKey?: string) =>
-    deps.cancelLocalSegmentAnalysis(jobKey ? String(jobKey).slice(0, 128) : undefined));
+  handle('playback:analysis:cancel', (_event, request) => deps.cancelLocalSegmentAnalysis(request ? {
+    jobKey: request.jobKey ? String(request.jobKey).slice(0, 128) : undefined,
+    kind: request.kind === 'manual' ? 'manual' : undefined,
+  } : undefined));
   handle('playback:analysis:pause', () => deps.pauseLocalSegmentAnalysis());
   handle('playback:analysis:resume', () => deps.resumeLocalSegmentAnalysis());
   handle('playback:analysis:cleanup', () => deps.cleanupLocalSegmentAnalysis());

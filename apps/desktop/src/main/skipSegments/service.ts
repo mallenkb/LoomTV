@@ -10,18 +10,19 @@ import {
   saveManualSegmentCandidate,
   saveSegmentSourceCache,
   undoManualSegmentCandidate,
-} from '../database';
+} from '../database.ts';
 import type { MetadataProviderIds } from '../mediaTags';
 import type { EpisodeFile, MediaItem } from '../metadata/types';
 import type { ProbeMediaFileResult } from '../mediaProbeFile';
-import { chapterType, normalizeSegment, resolveCandidates, segmentRevision } from './normalize';
+import { chapterType, normalizeSegment, resolveCandidates, segmentRevision } from './normalize.ts';
+import { mediaFileRevision } from './fileIdentity.ts';
 import {
   aniSkipLookupKey,
   fetchAniSkipSegments,
   fetchTheIntroDbSegments,
   theIntroDbLookupKey,
   type ProviderLookupResult,
-} from './providers';
+} from './providers.ts';
 import type {
   ManualMediaSegmentInput,
   MediaSegment,
@@ -84,21 +85,7 @@ function defaultAudioLanguage(item: EpisodeFile): string {
   return audio?.language || 'und';
 }
 
-export function mediaFileRevision(
-  filePath: string,
-  durationMs: number,
-  audioTrack: number,
-  known?: { fileSize?: number; modifiedAtMs?: number },
-): string {
-  const stats = typeof known?.fileSize === 'number' && typeof known.modifiedAtMs === 'number' ? null : fs.statSync(filePath);
-  return hashId(
-    path.resolve(filePath),
-    known?.fileSize ?? stats?.size,
-    Math.round(known?.modifiedAtMs ?? stats?.mtimeMs ?? 0),
-    Math.round(durationMs),
-    audioTrack,
-  );
-}
+export { mediaFileRevision } from './fileIdentity.ts';
 
 function releaseKey(filePath: string, durationMs: number, audioTrack: number, audioLanguage: string): string {
   const stats = fs.statSync(filePath);

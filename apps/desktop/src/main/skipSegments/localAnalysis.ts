@@ -13,28 +13,48 @@ import {
   saveMediaFingerprint,
   saveAuxiliaryFingerprint,
   saveSegmentAnalysisState,
-} from '../database';
+} from '../database.ts';
 import type { SkipAnalysisSettings } from '../../shared/desktopProtocol.ts';
 import {
+  currentAnalysisInterruptionEpoch,
   isPlaybackActivityActive,
   registerAnalysisProcess,
-} from '../ffmpegGovernor';
-import { findFFmpeg, findFFprobe, findFpcalc } from '../mediaBinaries';
+} from '../ffmpegGovernor.ts';
+import { findFFmpeg, findFFprobe, findFpcalc } from '../mediaBinaries.ts';
 import type { EpisodeFile, MediaItem } from '../metadata/types';
 import type { ProbeMediaFileResult } from '../mediaProbeFile';
-import { bestFingerprintMatch, scoreFingerprintMatches, type FingerprintMatch, type FingerprintWindow } from './fingerprintMatcher';
+import { bestFingerprintMatch, scoreFingerprintMatches, type FingerprintMatch, type FingerprintWindow } from './fingerprintMatcher.ts';
 import {
   detectMovieCreditIntervals,
   MOVIE_CREDIT_FRAME_HEIGHT,
   MOVIE_CREDIT_FRAME_WIDTH,
-} from './movieCreditsDetector';
-import { chapterType, segmentRevision } from './normalize';
+} from './movieCreditsDetector.ts';
+import { chapterType, segmentRevision } from './normalize.ts';
 import { selectRefinedBoundary, type BoundaryPoint } from './boundaryRefinement.ts';
-import type { LocalAnalysisOutcome, MediaSegmentCandidate, MediaSegmentResponse, SegmentAnalysisStatus } from './types';
+import {
+  AnalysisInterruptedError,
+  batchedFingerprintIndices,
+  isAnalysisInterruptedError,
+  neighborIndices,
+  runIsolatedWorkerPool,
+  yieldToAnalysisEvents,
+} from './analysisBatch.ts';
+import type {
+  LocalAnalysisOutcome,
+  MediaSegmentCandidate,
+  MediaSegmentResponse,
+  SegmentAnalysisPhaseProgress,
+  SegmentAnalysisStatus,
+} from './types';
 
-export const FINGERPRINT_ALGORITHM_VERSION = 'loom-chromaprint-v1-11025-mono';
+export { FINGERPRINT_ALGORITHM_VERSION } from './fileIdentity.ts';
+import { FINGERPRINT_ALGORITHM_VERSION } from './fileIdentity.ts';
 const SAMPLE_RATE = 11025;
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+// Bounded fingerprint parallelism: episodes are independent, but FFmpeg decode
+// is itself multithreaded and media often lives on NAS/spinning disks, so keep
+// this small. Raise only with benchmarks (docs/skip-analysis-performance-plan.md).
+const FINGERPRINT_WORKERS = 2;
 
 type LibraryLike = { movies?: MediaItem[]; tvShows?: MediaItem[]; animeShows?: MediaItem[] };
 type AnalysisContext = {
@@ -373,11 +393,15 @@ export function createLocalSegmentAnalysis(deps: {
   async function analyzeSeason(
     mediaId: string,
     season: number,
-    targetRevision?: string,
+    targetRevisions?: string[],
     shouldContinue: () => boolean = () => !isPlaybackActivityActive(),
+    onProgress?: (progress: SegmentAnalysisPhaseProgress) => void,
+    onOutcome?: (fileRevision: string, outcome: LocalAnalysisOutcome) => void,
   ): Promise<MediaSegmentResponse> {
     if (!settings().enabled) throw new Error('Enable automatic local skip analysis in Playback settings first.');
     if (running) return running;
+    const interruptionEpoch = currentAnalysisInterruptionEpoch();
+    const canContinue = () => shouldContinue() && currentAnalysisInterruptionEpoch() === interruptionEpoch;
     const task = (async () => {
       const fpcalcPath = findFpcalc();
       const ffmpegPath = findFFmpeg();
@@ -392,28 +416,80 @@ export function createLocalSegmentAnalysis(deps: {
         const configured = settings();
         const fingerprintTypes = (['intro', 'recap', 'credits', 'preview'] as const)
           .filter((type) => configured.enabledTypes[type]);
-        const targetIndex = targetRevision ? episodes.findIndex((episode) => episode.fileRevision === targetRevision) : -1;
-        const fingerprintEpisodes = targetIndex >= 0
-          ? episodes.slice(Math.max(0, targetIndex - 4), Math.min(episodes.length, targetIndex + 5))
-          : episodes;
+        const targetSet = targetRevisions ? new Set(targetRevisions) : null;
+        const targetIndices = targetSet
+          ? episodes.flatMap((episode, index) => (targetSet.has(episode.fileRevision) ? [index] : []))
+          : null;
+        if (targetIndices && !targetIndices.length) throw new Error('That media revision is no longer available.');
+        // Matching only ever looks ±4 episodes around a target, so fingerprint
+        // exactly that union once and reuse it for every comparison.
+        const fingerprintIndices = targetIndices
+          ? batchedFingerprintIndices(targetIndices, episodes.length)
+          : episodes.map((_, index) => index);
+        const fingerprintEpisodes = fingerprintIndices.map((index) => episodes[index]);
+        const report = (progress: SegmentAnalysisPhaseProgress) => {
+          saveSegmentAnalysisState(jobKey, mediaId, season, 'running', progress.detail);
+          onProgress?.(progress);
+        };
         const fingerprints = new Map<string, Partial<Record<FingerprintType, FingerprintWindow>>>();
-        for (const episode of fingerprintEpisodes) {
-          if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
-          const values: Partial<Record<FingerprintType, FingerprintWindow>> = {};
-          for (const type of fingerprintTypes) {
-            if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
-            values[type] = await generateFingerprint(episode, type, ffmpegPath, fpcalcPath);
-          }
-          fingerprints.set(episode.fileRevision, values);
-        }
+        let fingerprinted = 0;
+        report({ phase: 'fingerprinting', completed: 0, total: fingerprintEpisodes.length, detail: `Fingerprinting 0 of ${fingerprintEpisodes.length} episodes` });
+        const fingerprintFailures = await runIsolatedWorkerPool(
+          fingerprintEpisodes,
+          FINGERPRINT_WORKERS,
+          async (episode) => {
+            const values: Partial<Record<FingerprintType, FingerprintWindow>> = {};
+            for (const type of fingerprintTypes) {
+              if (!canContinue()) throw new AnalysisInterruptedError();
+              values[type] = await generateFingerprint(episode, type, ffmpegPath, fpcalcPath);
+            }
+            fingerprints.set(episode.fileRevision, values);
+            fingerprinted += 1;
+            report({
+              phase: 'fingerprinting', completed: fingerprinted, total: fingerprintEpisodes.length,
+              detail: `Fingerprinting ${fingerprinted} of ${fingerprintEpisodes.length} episodes`,
+            });
+          },
+          canContinue,
+        );
 
+        let matched = 0;
+        const matchTotal = targetIndices ? targetIndices.length : episodes.length;
+        const outcomes = new Map<string, LocalAnalysisOutcome>();
         for (let index = 0; index < episodes.length; index += 1) {
           const episode = episodes[index];
-          if (targetRevision && episode.fileRevision !== targetRevision) continue;
-          if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+          if (targetSet && !targetSet.has(episode.fileRevision)) continue;
+          await yieldToAnalysisEvents(canContinue);
+          report({
+            phase: 'matching', completed: matched, total: matchTotal,
+            detail: `Matching episode ${matched + 1} of ${matchTotal}`,
+          });
+          const targetFailure = fingerprintFailures.get(episode);
+          const healthyPeerCount = neighborIndices(index, episodes.length)
+            .filter((dependencyIndex) => dependencyIndex !== index && !fingerprintFailures.has(episodes[dependencyIndex]))
+            .length;
+          const dependencyFailure = targetFailure
+            || (fingerprintFailures.size > 0 && healthyPeerCount < 2
+              ? new Error('Fewer than two healthy peer fingerprints remain in this episode window.')
+              : null);
+          if (dependencyFailure) {
+            const outcome: LocalAnalysisOutcome = {
+              kind: 'error',
+              detail: `Fingerprint dependency failed: ${dependencyFailure.message}`,
+            };
+            outcomes.set(episode.fileRevision, outcome);
+            onOutcome?.(episode.fileRevision, outcome);
+            matched += 1;
+            report({
+              phase: 'matching', completed: matched, total: matchTotal,
+              detail: `Matching episode ${matched} of ${matchTotal}`,
+            });
+            continue;
+          }
+          try {
           const candidates: MediaSegmentCandidate[] = [];
           for (const type of fingerprintTypes) {
-            if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+            if (!canContinue()) throw new AnalysisInterruptedError();
             const target = fingerprints.get(episode.fileRevision)?.[type];
             if (!target) continue;
             const frameMs = target.durationMs / target.frames.length;
@@ -497,7 +573,7 @@ export function createLocalSegmentAnalysis(deps: {
             });
           }
           if (configured.enabledTypes.credits && !candidates.some((candidate) => candidate.type === 'credits' && candidate.confidence >= 0.90)) {
-            if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+            if (!canContinue()) throw new AnalysisInterruptedError();
             const limits = configured.durationLimits.credits;
             const visualIntervals = await movieCreditIntervals(episode, ffmpegPath, 5 * 60_000);
             for (const interval of visualIntervals) {
@@ -528,17 +604,50 @@ export function createLocalSegmentAnalysis(deps: {
               && (other.confidence > candidate.confidence
                 || (other.confidence === candidate.confidence && localTypePriority[other.type] < localTypePriority[candidate.type]));
           }));
-          if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+          if (!canContinue()) throw new AnalysisInterruptedError();
           replaceSegmentCandidatesForSource(episode.fileRevision, 'chromaprint', localOnly);
+          const segments = getResolvedMediaSegments(episode.fileRevision);
+          const outcome: LocalAnalysisOutcome = {
+            kind: 'complete',
+            response: { segments, revision: segmentRevision(segments) },
+          };
+          outcomes.set(episode.fileRevision, outcome);
+          onOutcome?.(episode.fileRevision, outcome);
+          } catch (error) {
+            if (isAnalysisInterruptedError(error) || !canContinue()) throw new AnalysisInterruptedError();
+            const outcome: LocalAnalysisOutcome = {
+              kind: 'error',
+              detail: error instanceof Error ? error.message : 'Episode analysis failed.',
+            };
+            outcomes.set(episode.fileRevision, outcome);
+            onOutcome?.(episode.fileRevision, outcome);
+          }
+          matched += 1;
+          report({
+            phase: 'matching', completed: matched, total: matchTotal,
+            detail: `Matching episode ${matched} of ${matchTotal}`,
+          });
         }
-        saveSegmentAnalysisState(jobKey, mediaId, season, 'complete', `Analyzed ${episodes.length} episodes`);
-        const resultRevision = targetRevision || episodes[0].fileRevision;
+        const failed = [...outcomes.values()].filter((outcome) => outcome.kind === 'error').length;
+        saveSegmentAnalysisState(
+          jobKey,
+          mediaId,
+          season,
+          'complete',
+          `Analyzed ${outcomes.size - failed} episodes${failed ? `; ${failed} failed` : ''}`,
+        );
+        const resultRevision = targetRevisions?.[0] || episodes[0].fileRevision;
+        const result = outcomes.get(resultRevision);
+        if (result && result.kind !== 'error') return result.response;
         const segments = getResolvedMediaSegments(resultRevision);
         return { segments, revision: segmentRevision(segments) };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Local analysis failed.';
-        saveSegmentAnalysisState(jobKey, mediaId, season, message.includes('Playback became active') ? 'queued' : 'error', message);
-        throw error;
+        const interrupted = isAnalysisInterruptedError(error) || !canContinue();
+        const normalized = interrupted
+          ? new AnalysisInterruptedError()
+          : error instanceof Error ? error : new Error('Local analysis failed.');
+        saveSegmentAnalysisState(jobKey, mediaId, season, interrupted ? 'queued' : 'error', normalized.message);
+        throw normalized;
       }
     })();
     running = task;
@@ -555,66 +664,134 @@ export function createLocalSegmentAnalysis(deps: {
     fileRevision: string,
     shouldContinue: () => boolean = () => !isPlaybackActivityActive(),
   ): Promise<LocalAnalysisOutcome> {
+    const outcomes = await analyzeSeasonBatch(mediaId, season, [fileRevision], shouldContinue);
+    const outcome = outcomes.get(fileRevision);
+    if (!outcome) throw new Error('That media revision is no longer available.');
+    return outcome;
+  }
+
+  // One season pass for every requested episode: fingerprints the union of the
+  // targets ±4 neighbors once, then matches and publishes per target. Outcomes
+  // are emitted as each target finishes so interruption preserves completed work.
+  async function analyzeSeasonBatch(
+    mediaId: string,
+    season: number,
+    fileRevisions: string[],
+    shouldContinue: () => boolean = () => !isPlaybackActivityActive(),
+    onProgress?: (progress: SegmentAnalysisPhaseProgress) => void,
+    onOutcome?: (fileRevision: string, outcome: LocalAnalysisOutcome) => void,
+  ): Promise<Map<string, LocalAnalysisOutcome>> {
+    const outcomes = new Map<string, LocalAnalysisOutcome>();
+    const interruptionEpoch = currentAnalysisInterruptionEpoch();
+    const canContinue = () => shouldContinue() && currentAnalysisInterruptionEpoch() === interruptionEpoch;
+    const record = (revision: string, outcome: LocalAnalysisOutcome) => {
+      outcomes.set(revision, outcome);
+      onOutcome?.(revision, outcome);
+    };
+    const requested = [...new Set(fileRevisions)];
     const isMovie = (deps.loadLibrary().movies || []).some((item) => item.id === mediaId && item.type === 'movie');
-    if (isMovie) return { kind: 'complete', response: await analyzeMovie(mediaId, shouldContinue) };
+    if (isMovie) {
+      const response = await analyzeMovie(mediaId, canContinue);
+      for (const revision of requested) record(revision, { kind: 'complete', response });
+      return outcomes;
+    }
     const episodes = contexts(mediaId, season);
-    const target = episodes.find((episode) => episode.fileRevision === fileRevision);
-    if (!target) throw new Error('That media revision is no longer available.');
+    const known = new Set(episodes.map((episode) => episode.fileRevision));
+    const targets = requested.filter((revision) => known.has(revision));
+    for (const revision of requested) {
+      if (!known.has(revision)) record(revision, { kind: 'error', detail: 'That media revision is no longer available.' });
+    }
+    if (!targets.length) return outcomes;
     const mode = settings().seasonOverrides[`${mediaId}:${season}`] || 'full';
     if (mode !== 'full') {
-      if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
-      replaceSegmentCandidatesForSource(fileRevision, 'chromaprint', []);
-      if (mode === 'chapter-only') {
-        replaceSegmentCandidatesForSource(fileRevision, 'aniskip', []);
-        replaceSegmentCandidatesForSource(fileRevision, 'theintrodb', []);
-      } else {
-        replaceSegmentCandidatesForSource(fileRevision, 'chapter', []);
+      for (const revision of targets) {
+        await yieldToAnalysisEvents(canContinue);
+        replaceSegmentCandidatesForSource(revision, 'chromaprint', []);
+        if (mode === 'chapter-only') {
+          replaceSegmentCandidatesForSource(revision, 'aniskip', []);
+          replaceSegmentCandidatesForSource(revision, 'theintrodb', []);
+        } else {
+          replaceSegmentCandidatesForSource(revision, 'chapter', []);
+        }
+        const segments = getResolvedMediaSegments(revision);
+        record(revision, { kind: 'complete', response: { segments, revision: segmentRevision(segments) } });
       }
-      const segments = getResolvedMediaSegments(fileRevision);
-      return { kind: 'complete', response: { segments, revision: segmentRevision(segments) } };
+      return outcomes;
     }
     if (episodes.length < 3) {
-      if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
-      const chapterCandidates: MediaSegmentCandidate[] = (target.file.localMetadata?.chapters || []).flatMap((chapter) => {
-        const type = chapterType(chapter.title);
-        if (!type || !settings().enabledTypes[type] || chapter.endMs <= chapter.startMs) return [];
+      for (const revision of targets) {
+        const target = episodes.find((episode) => episode.fileRevision === revision);
+        if (!target) continue;
+        await yieldToAnalysisEvents(canContinue);
+        try {
+          record(revision, await analyzeUnderpopulatedEpisode(mediaId, season, target, canContinue));
+        } catch (error) {
+          if (isAnalysisInterruptedError(error) || !canContinue()) throw new AnalysisInterruptedError();
+          record(revision, {
+            kind: 'error',
+            detail: error instanceof Error ? error.message : 'Episode analysis failed.',
+          });
+        }
+      }
+      return outcomes;
+    }
+    await analyzeSeason(mediaId, season, targets, canContinue, onProgress, record);
+    for (const revision of targets) {
+      if (outcomes.has(revision)) continue;
+      const segments = getResolvedMediaSegments(revision);
+      record(revision, { kind: 'complete', response: { segments, revision: segmentRevision(segments) } });
+    }
+    return outcomes;
+  }
+
+  // Seasons with fewer than three usable episodes cannot use peer matching;
+  // fall back to chapter markers plus the visual credits detector.
+  async function analyzeUnderpopulatedEpisode(
+    mediaId: string,
+    season: number,
+    target: AnalysisContext,
+    shouldContinue: () => boolean,
+  ): Promise<LocalAnalysisOutcome> {
+    const fileRevision = target.fileRevision;
+    if (!shouldContinue()) throw new AnalysisInterruptedError();
+    const chapterCandidates: MediaSegmentCandidate[] = (target.file.localMetadata?.chapters || []).flatMap((chapter) => {
+      const type = chapterType(chapter.title);
+      if (!type || !settings().enabledTypes[type] || chapter.endMs <= chapter.startMs) return [];
+      return [{
+        id: hashId(target.fileRevision, 'chapter', type, chapter.startMs, chapter.endMs),
+        mediaId, season, episode: target.file.episode, filePath: target.file.filePath,
+        fileRevision: target.fileRevision, type, startMs: chapter.startMs, endMs: chapter.endMs,
+        confidence: 0.98, source: 'chapter' as const, status: 'active' as const,
+        mediaDurationMs: target.durationMs, updatedAt: new Date().toISOString(),
+        analysisMetadata: { detector: 'chapter' as const, startSnap: 'chapter' as const, endSnap: 'chapter' as const },
+      }];
+    });
+    if (!shouldContinue()) throw new AnalysisInterruptedError();
+    replaceSegmentCandidatesForSource(fileRevision, 'chapter', chapterCandidates);
+    const ffmpegPath = findFFmpeg();
+    if (ffmpegPath && settings().enabledTypes.credits && shouldContinue()) {
+      const limits = settings().durationLimits.credits;
+      const visualCandidates = (await movieCreditIntervals(target, ffmpegPath, 5 * 60_000)).flatMap((interval) => {
+        const endMs = interval.endMs ?? target.durationMs;
+        const durationMs = endMs - interval.startMs;
+        if (durationMs < limits.minSeconds * 1000 || durationMs > limits.maxSeconds * 1000) return [];
         return [{
-          id: hashId(target.fileRevision, 'chapter', type, chapter.startMs, chapter.endMs),
+          id: hashId(target.fileRevision, 'chromaprint', 'episode-visual-credits', interval.startMs, interval.endMs),
           mediaId, season, episode: target.file.episode, filePath: target.file.filePath,
-          fileRevision: target.fileRevision, type, startMs: chapter.startMs, endMs: chapter.endMs,
-          confidence: 0.98, source: 'chapter' as const, status: 'active' as const,
-          mediaDurationMs: target.durationMs, updatedAt: new Date().toISOString(),
-          analysisMetadata: { detector: 'chapter' as const, startSnap: 'chapter' as const, endSnap: 'chapter' as const },
+          fileRevision: target.fileRevision, type: 'credits' as const, startMs: interval.startMs,
+          endMs: interval.endMs, confidence: interval.confidence, source: 'chromaprint' as const,
+          status: 'active' as const, mediaDurationMs: target.durationMs, updatedAt: new Date().toISOString(),
+          analysisMetadata: { detector: 'blackframe' as const, originalStartMs: interval.startMs, originalEndMs: interval.endMs, startSnap: 'original' as const, endSnap: 'original' as const },
         }];
       });
-      if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
-      replaceSegmentCandidatesForSource(fileRevision, 'chapter', chapterCandidates);
-      const ffmpegPath = findFFmpeg();
-      if (ffmpegPath && settings().enabledTypes.credits && shouldContinue()) {
-        const limits = settings().durationLimits.credits;
-        const visualCandidates = (await movieCreditIntervals(target, ffmpegPath, 5 * 60_000)).flatMap((interval) => {
-          const endMs = interval.endMs ?? target.durationMs;
-          const durationMs = endMs - interval.startMs;
-          if (durationMs < limits.minSeconds * 1000 || durationMs > limits.maxSeconds * 1000) return [];
-          return [{
-            id: hashId(target.fileRevision, 'chromaprint', 'episode-visual-credits', interval.startMs, interval.endMs),
-            mediaId, season, episode: target.file.episode, filePath: target.file.filePath,
-            fileRevision: target.fileRevision, type: 'credits' as const, startMs: interval.startMs,
-            endMs: interval.endMs, confidence: interval.confidence, source: 'chromaprint' as const,
-            status: 'active' as const, mediaDurationMs: target.durationMs, updatedAt: new Date().toISOString(),
-            analysisMetadata: { detector: 'blackframe' as const, originalStartMs: interval.startMs, originalEndMs: interval.endMs, startSnap: 'original' as const, endSnap: 'original' as const },
-          }];
-        });
-        if (shouldContinue()) replaceSegmentCandidatesForSource(fileRevision, 'chromaprint', visualCandidates);
-      }
-      const segments = getResolvedMediaSegments(fileRevision);
-      return {
-        kind: 'waiting_for_peers',
-        response: { segments, revision: segmentRevision(segments) },
-        detail: 'Waiting for at least three usable episodes in this season.',
-      };
+      if (shouldContinue()) replaceSegmentCandidatesForSource(fileRevision, 'chromaprint', visualCandidates);
     }
-    return { kind: 'complete', response: await analyzeSeason(mediaId, season, fileRevision, shouldContinue) };
+    const segments = getResolvedMediaSegments(fileRevision);
+    return {
+      kind: 'waiting_for_peers',
+      response: { segments, revision: segmentRevision(segments) },
+      detail: 'Waiting for at least three usable episodes in this season.',
+    };
   }
 
   async function analyzeMovie(
@@ -629,7 +806,7 @@ export function createLocalSegmentAnalysis(deps: {
       const context = movieContext(mediaId);
       if (!context) throw new Error('That movie file is unavailable.');
       if (!settings().enabledTypes.credits) {
-        if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+        if (!shouldContinue()) throw new AnalysisInterruptedError();
         replaceSegmentCandidatesForSource(context.fileRevision, 'chromaprint', []);
         const segments = getResolvedMediaSegments(context.fileRevision);
         return { segments, revision: segmentRevision(segments) };
@@ -637,7 +814,7 @@ export function createLocalSegmentAnalysis(deps: {
       const jobKey = `movie:${mediaId}:${context.fileRevision}:credits-v1`;
       saveSegmentAnalysisState(jobKey, mediaId, 0, 'running', 'Inspecting the final 15 minutes for movie credits');
       try {
-        if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+        if (!shouldContinue()) throw new AnalysisInterruptedError();
         const limits = settings().durationLimits.movieCredits;
         const intervals = (await movieCreditIntervals(context, ffmpegPath)).filter((interval) => {
           const durationMs = (interval.endMs ?? context.durationMs) - interval.startMs;
@@ -645,7 +822,7 @@ export function createLocalSegmentAnalysis(deps: {
         });
         const candidates: MediaSegmentCandidate[] = [];
         for (const interval of intervals) {
-          if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+          if (!shouldContinue()) throw new AnalysisInterruptedError();
           const startMs = await refinedCreditsStart(context, interval.startMs, ffmpegPath);
           candidates.push({
             id: hashId(context.fileRevision, 'chromaprint', 'movie-credits', startMs, interval.endMs),
@@ -672,7 +849,7 @@ export function createLocalSegmentAnalysis(deps: {
             },
           });
         }
-        if (!shouldContinue()) throw new Error('Analysis was interrupted and queued again.');
+        if (!shouldContinue()) throw new AnalysisInterruptedError();
         replaceSegmentCandidatesForSource(context.fileRevision, 'chromaprint', candidates);
         saveSegmentAnalysisState(
           jobKey,
@@ -684,9 +861,12 @@ export function createLocalSegmentAnalysis(deps: {
         const segments = getResolvedMediaSegments(context.fileRevision);
         return { segments, revision: segmentRevision(segments) };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Movie credits analysis failed.';
-        saveSegmentAnalysisState(jobKey, mediaId, 0, message.includes('Playback became active') ? 'queued' : 'error', message);
-        throw error;
+        const interrupted = isAnalysisInterruptedError(error) || !shouldContinue();
+        const normalized = interrupted
+          ? new AnalysisInterruptedError()
+          : error instanceof Error ? error : new Error('Movie credits analysis failed.');
+        saveSegmentAnalysisState(jobKey, mediaId, 0, interrupted ? 'queued' : 'error', normalized.message);
+        throw normalized;
       }
     })();
     running = task;
@@ -710,5 +890,5 @@ export function createLocalSegmentAnalysis(deps: {
     };
   }
 
-  return { analyze, analyzeMovie, analyzeRevision, status };
+  return { analyze, analyzeMovie, analyzeRevision, analyzeSeasonBatch, status };
 }
