@@ -12,7 +12,7 @@
   },
   "scripts": {
     "preinstall": "node scripts/enforce-pnpm.cjs",
-    "prestart": "node scripts/enforce-pnpm.cjs && electron-builder install-app-deps",
+    "prestart": "node scripts/enforce-pnpm.cjs && electron-rebuild -f -w better-sqlite3",
     "prebuild": "node scripts/enforce-pnpm.cjs",
     "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
     "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",

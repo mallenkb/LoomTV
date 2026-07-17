@@ -108,7 +108,7 @@ export type DesktopBridgeApi = {
       getLocalSegmentAnalysisStatus?: () => Promise<LocalSegmentAnalysisStatus>;
       analyzeLocalSegmentSeason?: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
       runLocalSegmentAnalysis?: (scope?: SkipAnalysisRunScope) => Promise<{ queued: number }>;
-      cancelLocalSegmentAnalysis?: (jobKey?: string) => Promise<{ cancelled: number }>;
+      cancelLocalSegmentAnalysis?: (request?: { jobKey?: string; kind?: 'manual' }) => Promise<{ cancelled: number }>;
       pauseLocalSegmentAnalysis?: () => Promise<boolean>;
       resumeLocalSegmentAnalysis?: () => Promise<boolean>;
       cleanupLocalSegmentAnalysis?: () => Promise<{ queued: number }>;
@@ -649,9 +649,9 @@ export const desktopApi = {
     return window.desktopApi.runLocalSegmentAnalysis(scope);
   },
 
-  async cancelLocalSegmentAnalysis(jobKey?: string): Promise<{ cancelled: number }> {
+  async cancelLocalSegmentAnalysis(request?: { jobKey?: string; kind?: 'manual' }): Promise<{ cancelled: number }> {
     if (!window.desktopApi?.cancelLocalSegmentAnalysis) return { cancelled: 0 };
-    return window.desktopApi.cancelLocalSegmentAnalysis(jobKey);
+    return window.desktopApi.cancelLocalSegmentAnalysis(request);
   },
 
   async pauseLocalSegmentAnalysis(): Promise<boolean> {

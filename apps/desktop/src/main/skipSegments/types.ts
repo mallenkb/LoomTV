@@ -88,11 +88,18 @@ export interface SegmentAnalysisStatus {
   message?: string;
   paused?: boolean;
   pendingCount?: number;
+  runningCount?: number;
+  waitingCount?: number;
+  manualPendingCount?: number;
+  manualRunningCount?: number;
   currentJob?: { jobKey: string; kind: string; mediaId: string; season: number; episode: number; detail: string };
+  phaseProgress?: SegmentAnalysisPhaseProgress;
   lastError?: string;
   fingerprintCount?: number;
   fingerprintCacheBytes?: number;
   progress?: { complete: number; total: number };
+  // Library-wide coverage: how many analyzable items have up-to-date markers.
+  library?: { analyzed: number; waiting?: number; total: number };
   lastCompletedAt?: number;
   recentJobs?: Array<{
     jobKey: string;
@@ -106,6 +113,14 @@ export interface SegmentAnalysisStatus {
   }>;
 }
 
+export type SegmentAnalysisPhaseProgress = {
+  phase: 'fingerprinting' | 'matching';
+  completed: number;
+  total: number;
+  detail: string;
+};
+
 export type LocalAnalysisOutcome =
   | { kind: 'complete'; response: MediaSegmentResponse }
-  | { kind: 'waiting_for_peers'; response: MediaSegmentResponse; detail: string };
+  | { kind: 'waiting_for_peers'; response: MediaSegmentResponse; detail: string }
+  | { kind: 'error'; detail: string };

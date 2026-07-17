@@ -15,7 +15,7 @@ export default function SkipTimestampManager({
   settings: SkipAnalysisSettings;
   onSettingsChange: (settings: SkipAnalysisSettings) => void;
   onRun: (scope: { mediaId: string; season?: number }) => void;
-  onSaveSettings: () => void | Promise<void>;
+  onSaveSettings: () => void | boolean | Promise<void | boolean>;
 }) {
   const [segments, setSegments] = useState<ManagedMediaSegment[]>([]);
   const [library, setLibrary] = useState<LibraryPayload | null>(null);
@@ -99,7 +99,8 @@ export default function SkipTimestampManager({
     setPreview({ url: stream.url, start, end });
   };
   const rescanSeason = async () => {
-    await onSaveSettings();
+    const saved = await onSaveSettings();
+    if (saved === false) return;
     onRun({ mediaId: selectedMediaId, season: selectedSeason });
   };
 
@@ -110,7 +111,7 @@ export default function SkipTimestampManager({
         <label className="text-xs text-[var(--loom-muted)]">Episode<select aria-label="Episode" value={selectedEpisode} onChange={(event) => setSelectedEpisode(Number(event.target.value))} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{episodes.map((episode) => <option key={episode} value={episode}>{selectedItem?.type === 'movie' ? 'Feature' : `Episode ${episode}`}</option>)}</select></label>
         <div className="flex flex-wrap gap-2 md:col-span-3">
           <select aria-label="Season analysis mode" value={settings.seasonOverrides[excludedKey] || 'full'} onChange={(event) => onSettingsChange({ ...settings, seasonOverrides: { ...settings.seasonOverrides, [excludedKey]: event.target.value as 'full' | 'chapter-only' | 'providers-only' } })} className="rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-xs text-white"><option value="full">Full analysis</option><option value="chapter-only">Chapter only</option><option value="providers-only">Providers only</option></select>
-          <Button type="button" variant="outline" disabled={!selectedMediaId} onClick={() => void rescanSeason()}>Save &amp; manually scan season</Button>
+          <Button type="button" variant="outline" disabled={!settings.enabled || !selectedMediaId} onClick={() => void rescanSeason()}>Save &amp; manually scan season</Button>
           <Button type="button" variant="outline" disabled={!selectedMediaId} onClick={() => onSettingsChange({ ...settings, exclusions: { ...settings.exclusions, seasons: seasonExcluded ? settings.exclusions.seasons.filter((value) => value !== excludedKey) : [...settings.exclusions.seasons, excludedKey] } })}>{seasonExcluded ? 'Include season' : 'Exclude season'}</Button>
           <Button type="button" variant="outline" disabled={!selectedMediaId} onClick={async () => { await desktopApi.eraseManagedMediaSegments({ mediaId: selectedMediaId, season: selectedSeason }); await refresh(); }}>Erase season automatic markers</Button>
         </div>

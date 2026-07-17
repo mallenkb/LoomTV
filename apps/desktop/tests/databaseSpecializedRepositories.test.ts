@@ -9,6 +9,7 @@ import { createDatabaseArtworkRepository } from '../src/main/databaseArtworkRepo
 import { migrateDatabase } from '../src/main/databaseMigrations.ts';
 import { createDatabaseSegmentsRepository } from '../src/main/databaseSegmentsRepository.ts';
 import type { MediaSegmentCandidate, ProviderCacheEntry } from '../src/main/skipSegments/types.ts';
+import type { SegmentAnalysisJob } from '../src/main/skipSegments/analysisJobs.ts';
 
 function createDatabase(): BetterSqlite3.Database {
   const database = new BetterSqlite3(':memory:');
@@ -76,6 +77,26 @@ test('segment repository preserves provider cache, resolution, fingerprints, and
       state: state.state,
       detail: state.detail,
     })), [{ jobKey: 'show:1', state: 'complete', detail: 'matched' }]);
+  } finally {
+    database.close();
+  }
+});
+
+test('a manual analysis request supersedes every parked request for the same revision', () => {
+  const database = createDatabase();
+  const repository = createDatabaseSegmentsRepository(database);
+  const job = (jobKey: string, kind: SegmentAnalysisJob['kind'], state: SegmentAnalysisJob['state']): SegmentAnalysisJob => ({
+    jobKey, kind, state, mediaId: 'show', season: 1, episode: 1, fileRevision: 'revision',
+    configHash: 'config', detail: '', createdAt: 1, updatedAt: 1,
+  });
+  try {
+    repository.enqueueSegmentAnalysisJob(job('incremental', 'incremental', 'pending'));
+    repository.enqueueSegmentAnalysisJob(job('manual-old', 'manual', 'waiting_for_peers'));
+    repository.enqueueSegmentAnalysisJob(job('manual-new', 'manual', 'pending'));
+    const states = new Map(repository.getSegmentAnalysisJobs().map((entry) => [entry.jobKey, entry.state]));
+    assert.equal(states.get('incremental'), 'cancelled');
+    assert.equal(states.get('manual-old'), 'cancelled');
+    assert.equal(states.get('manual-new'), 'pending');
   } finally {
     database.close();
   }

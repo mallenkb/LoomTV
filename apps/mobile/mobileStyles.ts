@@ -198,7 +198,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
   },
   manualHint: {
     color: faint,
@@ -246,7 +245,6 @@ export function createStyles(theme: MobileThemeColors) {
   },
   codeInput: {
     fontVariant: ['tabular-nums'],
-    letterSpacing: 4,
   },
   primaryButton: {
     alignItems: 'center',
@@ -520,7 +518,6 @@ export function createStyles(theme: MobileThemeColors) {
     minWidth: 0,
     fontSize: 16,
     fontWeight: '400',
-    letterSpacing: 0,
   },
   metaText: {
     color: muted,
@@ -589,7 +586,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: '#ffffff',
     fontSize: 26,
     fontWeight: '800',
-    letterSpacing: -0.4,
     lineHeight: 30,
   },
   heroCardMeta: {
@@ -638,7 +634,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: '#ffffff',
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.1,
   },
   rail: {
     gap: 10,
@@ -647,7 +642,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: text,
     fontSize: 20,
     fontWeight: '800',
-    letterSpacing: -0.3,
   },
   railContent: {
     gap: 14,
@@ -1248,7 +1242,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: accent,
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   posterSheetTitle: {
@@ -1386,7 +1379,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: faint,
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 0.6,
     lineHeight: 14,
     textTransform: 'uppercase',
   },
@@ -2159,7 +2151,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: 'rgba(255,255,255,0.72)',
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.8,
     paddingHorizontal: 16,
     paddingVertical: 12,
     textTransform: 'uppercase',

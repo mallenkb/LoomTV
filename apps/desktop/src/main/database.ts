@@ -224,8 +224,8 @@ export function getSegmentAnalysisJobs(states?: SegmentAnalysisJobState[], limit
   return getSegmentRepository().getSegmentAnalysisJobs(states, limit);
 }
 
-export function getSegmentAnalysisJobCounts(): Partial<Record<SegmentAnalysisJobState, number>> {
-  return getSegmentRepository().getSegmentAnalysisJobCounts();
+export function getSegmentAnalysisJobCounts(kind?: SegmentAnalysisJob['kind']): Partial<Record<SegmentAnalysisJobState, number>> {
+  return getSegmentRepository().getSegmentAnalysisJobCounts(kind);
 }
 
 export function updateSegmentAnalysisJob(jobKey: string, state: SegmentAnalysisJobState, detail?: string): void {
@@ -256,8 +256,12 @@ export function fingerprintCacheBytes(): number {
   return getSegmentRepository().fingerprintCacheBytes();
 }
 
-export function cancelSegmentAnalysisJobs(jobKey?: string): number {
-  return getSegmentRepository().cancelSegmentAnalysisJobs(jobKey);
+export function cancelSegmentAnalysisJobs(
+  jobKey?: string,
+  kind?: SegmentAnalysisJob['kind'],
+  preserveWaiting?: boolean,
+): number {
+  return getSegmentRepository().cancelSegmentAnalysisJobs(jobKey, kind, preserveWaiting);
 }
 
 export function requeueWaitingSegmentAnalysisJobs(mediaId: string, season: number): number {
