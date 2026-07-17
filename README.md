@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [Loom Media Server 1.0.52](docs/releases/v1.0.52.md): fixes ad-hoc macOS release signing so Electron Framework loads correctly on launch.
 - [Loom Media Server 1.0.51](docs/releases/v1.0.51.md): rebuilds the desktop SQLite native module against Electron before packaging.
 - [Loom Media Server 1.0.50](docs/releases/v1.0.50.md): fixes desktop release CI by aligning the GitHub Actions pnpm version with the workspace toolchain.
 - [Loom Media Server 1.0.49](docs/releases/v1.0.49.md): republishes the current desktop build with fresh installers and updater metadata.
