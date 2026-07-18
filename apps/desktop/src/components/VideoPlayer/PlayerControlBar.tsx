@@ -26,6 +26,7 @@ interface PlayerControlBarProps {
   playbackPositionRef: React.RefObject<number>;
   duration: number;
   position: number;
+  showRemainingTime: boolean;
   progressPct: number;
   paused: boolean;
   muted: boolean;
@@ -40,6 +41,7 @@ interface PlayerControlBarProps {
   handleProgressPointerDown: React.PointerEventHandler<HTMLDivElement>;
   handleProgressKeyDown: React.KeyboardEventHandler<HTMLDivElement>;
   togglePlay: () => void;
+  toggleTimeDisplay: () => void;
   seekTo: (seconds: number) => void;
   toggleMute: () => void;
   handleVolume: React.ChangeEventHandler<HTMLInputElement>;
@@ -61,6 +63,7 @@ export default function PlayerControlBar({
   playbackPositionRef,
   duration,
   position,
+  showRemainingTime,
   progressPct,
   paused,
   muted,
@@ -75,6 +78,7 @@ export default function PlayerControlBar({
   handleProgressPointerDown,
   handleProgressKeyDown,
   togglePlay,
+  toggleTimeDisplay,
   seekTo,
   toggleMute,
   handleVolume,
@@ -92,14 +96,19 @@ export default function PlayerControlBar({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className="mb-3 flex items-center gap-3">
-        <div
-          className="min-w-[6.75rem] shrink-0 select-none text-left text-sm font-medium tabular-nums text-white/90 sm:text-base"
+        <button
+          type="button"
+          onClick={toggleTimeDisplay}
+          className="min-w-[6.75rem] shrink-0 select-none rounded px-1 text-left text-sm font-medium tabular-nums text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] sm:text-base"
+          title={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
+          aria-label={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
+          aria-pressed={showRemainingTime}
           aria-live="off"
         >
-          <span ref={currentTimeTextRef} className="text-white">{formatTime(position)}</span>
+          <span ref={currentTimeTextRef} className="text-white">{showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)}</span>
           <span className="mx-1.5 text-white/45">/</span>
           <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
-        </div>
+        </button>
 
         {/* Progress bar */}
         <div
