@@ -31,7 +31,7 @@ test('settings page defers Electron-only status probes until their tabs are acti
   const source = settingsPageSource();
   const settingsLoadIndex = source.indexOf('desktopApi.getSettings()');
   const mountEffectStart = source.lastIndexOf('useEffect', settingsLoadIndex);
-  const mountEffectEnd = source.indexOf('\n  }, []);', settingsLoadIndex);
+  const mountEffectEnd = source.indexOf('\n\n  const analysisIsActive', settingsLoadIndex);
   const mountEffect = mountEffectStart >= 0 && mountEffectEnd >= 0
     ? source.slice(mountEffectStart, mountEffectEnd)
     : '';
@@ -86,7 +86,7 @@ test('FFmpeg status IPC resolves the binary path once', () => {
 
 test('settings tab strip opts out of the macOS drag area', () => {
   const source = settingsTabsSource();
-  const tabStripStart = source.indexOf('{SETTINGS_SECTIONS.map');
+  const tabStripStart = source.indexOf('{sections.map');
   const tabStripOpening = source.lastIndexOf('className="', tabStripStart);
   const tabStripClass = tabStripOpening >= 0
     ? source.slice(tabStripOpening, source.indexOf('"', tabStripOpening + 'className="'.length + 1))
