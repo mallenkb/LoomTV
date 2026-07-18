@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.60](docs/releases/v1.0.60.md): republishes the complete desktop profile, Kids restrictions, personal lists, profile transfer, and LAN security release with current Settings source-verification tests.
 - [LoomTV 1.0.59](docs/releases/v1.0.59.md): completes desktop profiles with PIN workflows, Kids restrictions, per-profile lists and settings, profile transfer, LAN enforcement, metadata ratings, and detailed security and migration improvements.
 - [LoomTV 1.0.58](docs/releases/v1.0.58.md): aligns profile migration verification with the current schema ledger and republishes the corrected desktop profile release.
 - [LoomTV 1.0.57](docs/releases/v1.0.57.md): fixes profile-service type contracts so the new desktop profile release builds successfully on every supported platform.
