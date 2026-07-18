@@ -1,73 +1,167 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { desktopApi, type ProfileCreateInput, type ProfileSummary, type ProfileUpdateInput } from '@/lib/desktopApi';
-import { resetProgressForProfileSwitch } from '@/lib/progress';
+import {
+  desktopApi,
+  type ActiveProfileState,
+  type ProfileCreateInput,
+  type ProfileListEntry,
+  type ProfileListKind,
+  type ProfilePreferences,
+  type ProfileRestrictions,
+  type ProfileSummary,
+  type ProfileTransferResult,
+  type ProfileUpdateInput,
+} from '@/lib/desktopApi';
+import { hasActivePlayback, shutdownActivePlayback } from '@/lib/playbackLifecycle';
+import { flushProgressWrites, setProgressProfile } from '@/lib/progress';
 
 type ProfileContextValue = {
   profiles: ProfileSummary[];
   activeProfile: ProfileSummary | null;
+  activeState: ActiveProfileState;
+  preferences: ProfilePreferences;
+  lists: ProfileListEntry[];
   isLoading: boolean;
-  /** Whether the full-window Who's Watching gate is showing. */
   gateOpen: boolean;
-  /** Re-opens the gate, e.g. from the sidebar Switch Profile action. */
+  generation: number;
+  canManageProfiles: boolean;
   openGate: () => void;
-  selectProfile: (profileId: string) => Promise<void>;
-  createProfile: (input: ProfileCreateInput) => Promise<void>;
+  closeGate: () => void;
+  selectProfile: (profileId: string, pin?: string) => Promise<void>;
+  selectGuestProfile: () => Promise<void>;
+  lockProfile: () => Promise<void>;
+  createProfile: (input: ProfileCreateInput) => Promise<ProfileSummary>;
   updateProfile: (profileId: string, patch: ProfileUpdateInput) => Promise<void>;
   deleteProfile: (profileId: string) => Promise<void>;
+  reorderProfiles: (profileIds: string[]) => Promise<void>;
+  changeProfilePin: (profileId: string, pin: string | null) => Promise<void>;
+  resetOwnerProfile: (confirmation: string) => Promise<void>;
+  setAutomaticSignIn: (enabled: boolean) => Promise<void>;
+  savePreferences: (patch: ProfilePreferences) => Promise<void>;
+  getRestrictions: (profileId: string) => Promise<ProfileRestrictions>;
+  saveRestrictions: (profileId: string, input: Omit<ProfileRestrictions, 'revision'>) => Promise<ProfileRestrictions>;
+  setListEntry: (mediaId: string, kind: ProfileListKind, present: boolean) => Promise<void>;
+  exportProfile: (profileId: string) => Promise<ProfileTransferResult>;
+  importProfile: () => Promise<ProfileTransferResult>;
+};
+
+const EMPTY_ACTIVE_STATE: ActiveProfileState = {
+  profileId: null,
+  selectionRequired: true,
+  selectionRevision: 0,
+  automaticSignIn: false,
 };
 
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [activeState, setActiveState] = useState<ActiveProfileState>(EMPTY_ACTIVE_STATE);
+  const [preferences, setPreferences] = useState<ProfilePreferences>({});
+  const [lists, setLists] = useState<ProfileListEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  // Selecting is per app launch: with several profiles the picker is the front
-  // door every cold start, like Netflix, even when a last-used profile exists.
   const [selectedThisSession, setSelectedThisSession] = useState(false);
+  const [ownerSessionAuthorized, setOwnerSessionAuthorized] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const generationRef = useRef(0);
   const mountedRef = useRef(true);
+
+  const hydratePersonalState = useCallback(async (profileId: string | null) => {
+    const hydrationGeneration = ++generationRef.current;
+    setGeneration(hydrationGeneration);
+    await setProgressProfile(profileId);
+    if (hydrationGeneration !== generationRef.current) return;
+    if (!profileId) {
+      setPreferences({});
+      setLists([]);
+      return;
+    }
+    const [nextPreferences, nextLists] = await Promise.all([
+      desktopApi.getProfilePreferences(),
+      desktopApi.getProfileLists(),
+    ]);
+    if (!mountedRef.current || hydrationGeneration !== generationRef.current) return;
+    setPreferences(nextPreferences);
+    setLists(nextLists);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
     void (async () => {
       try {
-        const [nextProfiles, activeState] = await Promise.all([
+        const [nextProfiles, nextActiveState] = await Promise.all([
           desktopApi.listProfiles(),
           desktopApi.getActiveProfileState(),
         ]);
         if (!mountedRef.current) return;
         setProfiles(nextProfiles);
-        setActiveProfileId(activeState.profileId);
-        if (nextProfiles.length <= 1) setSelectedThisSession(true);
+        setActiveState(nextActiveState);
+        const active = nextProfiles.find((profile) => profile.id === nextActiveState.profileId);
+        const mayEnter = Boolean(active && nextActiveState.automaticSignIn);
+        setSelectedThisSession(mayEnter);
+        setOwnerSessionAuthorized(Boolean(mayEnter && active?.type === 'owner'));
+        if (mayEnter) await hydratePersonalState(nextActiveState.profileId);
       } finally {
         if (mountedRef.current) setIsLoading(false);
       }
     })();
-    const unsubscribe = desktopApi.onProfilesChanged((nextProfiles) => {
-      if (mountedRef.current) setProfiles(nextProfiles);
+
+    const unsubscribeProfiles = desktopApi.onProfilesChanged((event) => {
+      if (mountedRef.current) setProfiles(event.profiles);
+    });
+    const unsubscribeActive = desktopApi.onActiveProfileChanged((state) => {
+      if (mountedRef.current) setActiveState(state);
     });
     return () => {
       mountedRef.current = false;
-      unsubscribe();
+      unsubscribeProfiles();
+      unsubscribeActive();
     };
-  }, []);
+  }, [hydratePersonalState]);
 
-  const selectProfile = useCallback(async (profileId: string) => {
-    const isSwitch = activeProfileId !== null && activeProfileId !== profileId;
-    const selected = await desktopApi.selectProfile(profileId);
+  const prepareForSwitch = useCallback(async (profileId: string) => {
+    if (activeState.profileId === profileId) return;
+    if (hasActivePlayback()) {
+      const confirmed = window.confirm('Stop playback and switch profiles? Your current position will be saved.');
+      if (!confirmed) throw new Error('Profile switch cancelled.');
+      await shutdownActivePlayback();
+    }
+    await flushProgressWrites();
+  }, [activeState.profileId]);
+
+  const selectProfile = useCallback(async (profileId: string, pin?: string) => {
+    await prepareForSwitch(profileId);
+    const selected = await desktopApi.selectProfile(profileId, pin);
     if (!mountedRef.current) return;
-    setActiveProfileId(selected.id);
+    const state = await desktopApi.getActiveProfileState();
+    setActiveState(state);
     setSelectedThisSession(true);
-    if (isSwitch) await resetProgressForProfileSwitch();
-  }, [activeProfileId]);
+    setOwnerSessionAuthorized(selected.type === 'owner');
+    await hydratePersonalState(selected.id);
+  }, [hydratePersonalState, prepareForSwitch]);
+
+  const selectGuestProfile = useCallback(async () => {
+    await prepareForSwitch('__guest__');
+    const selected = await desktopApi.selectGuestProfile();
+    if (!mountedRef.current) return;
+    setProfiles((current) => [...current.filter((profile) => !profile.isGuest), selected]);
+    setActiveState(await desktopApi.getActiveProfileState());
+    setSelectedThisSession(true);
+    setOwnerSessionAuthorized(false);
+    await hydratePersonalState(selected.id);
+  }, [hydratePersonalState, prepareForSwitch]);
 
   const refreshProfiles = useCallback((nextProfiles: ProfileSummary[]) => {
     setProfiles(nextProfiles);
-    setActiveProfileId((current) => (current && nextProfiles.some((profile) => profile.id === current) ? current : null));
+    setActiveState((current) => current.profileId && nextProfiles.some((profile) => profile.id === current.profileId)
+      ? current
+      : EMPTY_ACTIVE_STATE);
   }, []);
 
   const createProfile = useCallback(async (input: ProfileCreateInput) => {
-    refreshProfiles(await desktopApi.createProfile(input));
+    const nextProfiles = await desktopApi.createProfile(input);
+    refreshProfiles(nextProfiles);
+    const created = nextProfiles.reduce((latest, profile) => profile.sortOrder > latest.sortOrder ? profile : latest);
+    return created;
   }, [refreshProfiles]);
 
   const updateProfile = useCallback(async (profileId: string, patch: ProfileUpdateInput) => {
@@ -78,28 +172,104 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     refreshProfiles(await desktopApi.deleteProfile(profileId));
   }, [refreshProfiles]);
 
-  const openGate = useCallback(() => {
-    setSelectedThisSession(false);
+  const reorder = useCallback(async (profileIds: string[]) => {
+    refreshProfiles(await desktopApi.reorderProfiles(profileIds));
+  }, [refreshProfiles]);
+
+  const changePin = useCallback(async (profileId: string, pin: string | null) => {
+    const updated = await desktopApi.changeProfilePin(profileId, pin);
+    setProfiles((current) => current.map((profile) => profile.id === updated.id ? updated : profile));
   }, []);
 
-  const activeProfile = useMemo(
-    () => profiles.find((profile) => profile.id === activeProfileId) || null,
-    [profiles, activeProfileId],
-  );
+  const resetOwner = useCallback(async (confirmation: string) => {
+    const owner = await desktopApi.resetOwnerProfile(confirmation);
+    setProfiles((current) => current.map((profile) => profile.type === 'owner' ? owner : profile));
+    setActiveState(await desktopApi.getActiveProfileState());
+    setSelectedThisSession(true);
+    setOwnerSessionAuthorized(true);
+    await hydratePersonalState(owner.id);
+  }, [hydratePersonalState]);
 
-  const gateOpen = !isLoading && profiles.length > 1 && (!selectedThisSession || !activeProfile);
+  const lock = useCallback(async () => {
+    await shutdownActivePlayback();
+    await flushProgressWrites();
+    const state = await desktopApi.lockProfile();
+    setActiveState(state);
+    setSelectedThisSession(false);
+    setOwnerSessionAuthorized(false);
+    await hydratePersonalState(null);
+  }, [hydratePersonalState]);
+
+  const setAutomaticSignIn = useCallback(async (enabled: boolean) => {
+    setActiveState(await desktopApi.setAutomaticProfileSignIn(enabled));
+  }, []);
+
+  const savePreferences = useCallback(async (patch: ProfilePreferences) => {
+    const expectedProfileId = activeState.profileId || undefined;
+    const writeGeneration = generationRef.current;
+    const saved = await desktopApi.saveProfilePreferences(patch, expectedProfileId);
+    if (writeGeneration === generationRef.current) setPreferences(saved);
+  }, [activeState.profileId]);
+
+  const setListEntry = useCallback(async (mediaId: string, kind: ProfileListKind, present: boolean) => {
+    const expectedProfileId = activeState.profileId || undefined;
+    const writeGeneration = generationRef.current;
+    const saved = await desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
+    if (writeGeneration === generationRef.current) setLists(saved);
+  }, [activeState.profileId]);
+
+  const exportProfile = useCallback((profileId: string) => desktopApi.exportProfile(profileId), []);
+  const importProfile = useCallback(async () => {
+    const result = await desktopApi.importProfile();
+    if (result.ok) refreshProfiles(await desktopApi.listProfiles());
+    return result;
+  }, [refreshProfiles]);
+
+  const openGate = useCallback(() => setSelectedThisSession(false), []);
+  const closeGate = useCallback(() => {
+    if (activeState.profileId) setSelectedThisSession(true);
+  }, [activeState.profileId]);
+  const activeProfile = useMemo(
+    () => profiles.find((profile) => profile.id === activeState.profileId) || null,
+    [profiles, activeState.profileId],
+  );
+  const gateOpen = !isLoading && (!selectedThisSession || !activeProfile);
+  const canManageProfiles = Boolean(ownerSessionAuthorized && activeProfile?.type === 'owner');
 
   const value = useMemo<ProfileContextValue>(() => ({
     profiles,
     activeProfile,
+    activeState,
+    preferences,
+    lists,
     isLoading,
     gateOpen,
+    generation,
+    canManageProfiles,
     openGate,
+    closeGate,
     selectProfile,
+    selectGuestProfile,
+    lockProfile: lock,
     createProfile,
     updateProfile,
     deleteProfile,
-  }), [profiles, activeProfile, isLoading, gateOpen, openGate, selectProfile, createProfile, updateProfile, deleteProfile]);
+    reorderProfiles: reorder,
+    changeProfilePin: changePin,
+    resetOwnerProfile: resetOwner,
+    setAutomaticSignIn,
+    savePreferences,
+    getRestrictions: desktopApi.getProfileRestrictions,
+    saveRestrictions: desktopApi.saveProfileRestrictions,
+    setListEntry,
+    exportProfile,
+    importProfile,
+  }), [
+    profiles, activeProfile, activeState, preferences, lists, isLoading, gateOpen, generation, canManageProfiles,
+    openGate, closeGate, selectProfile, selectGuestProfile, lock, createProfile, updateProfile,
+    deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry,
+    exportProfile, importProfile,
+  ]);
 
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
 }

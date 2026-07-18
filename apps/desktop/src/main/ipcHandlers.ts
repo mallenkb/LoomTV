@@ -64,9 +64,12 @@ export interface IpcHandlerDependencies<
   removeFolderFromLibrary: (library: TLibraryData, folderPath: string) => TLibraryData;
   saveLibraryMutation: (library: TLibraryData) => void;
   assertLocalMediaPath: (filePath: string) => void;
+  authorizeMediaPath: (filePath: string) => void;
   needsBrowserTranscoding: (filePath: string) => boolean;
   browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
   loadSettings: () => TSettings;
+  settingsForRenderer: () => TSettings;
+  authorizeSettingsWrite: () => void;
   saveSettings: (settings: TSettings) => void;
   onSettingsSaved?: () => void;
   syncLanAdvertisement: () => void;
@@ -80,12 +83,15 @@ export interface IpcHandlerDependencies<
   getProgress: (filePath: string) => StoredProgress | null;
   getAllProgress: () => Record<string, StoredProgress>;
   saveProgress: (filePath: string, position: number, duration: number, expectedProfileId?: string) => IpcResult<'progress:save'>;
-  importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => void;
+  importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string) => void;
   listProfiles: () => IpcResult<'profiles:list'>;
+  chooseProfileAvatar: () => Promise<IpcResult<'profiles:choose-avatar'>>;
   getActiveProfileState: () => IpcResult<'profiles:get-active'>;
   createProfile: (input: IpcContract['profiles:create']['args'][0]) => IpcResult<'profiles:create'>;
   updateProfile: (profileId: string, patch: IpcContract['profiles:update']['args'][1]) => IpcResult<'profiles:update'>;
   deleteProfile: (profileId: string) => IpcResult<'profiles:delete'>;
+  exportProfile: (profileId: string) => Promise<IpcResult<'profiles:export'>>;
+  importProfile: () => Promise<IpcResult<'profiles:import'>>;
   selectProfile: (profileId: string, pin?: string) => IpcResult<'profiles:select'> | Promise<IpcResult<'profiles:select'>>;
   selectGuestProfile: () => IpcResult<'profiles:select-guest'>;
   lockProfile: () => IpcResult<'profiles:lock'>;
@@ -94,15 +100,16 @@ export interface IpcHandlerDependencies<
   resetOwnerProfile: (confirmation: string) => IpcResult<'profiles:reset-owner'>;
   setAutomaticSignIn: (enabled: boolean) => IpcResult<'profiles:set-auto-sign-in'>;
   getProfilePreferences: () => IpcResult<'profile-preferences:get'>;
-  saveProfilePreferences: (patch: IpcContract['profile-preferences:save']['args'][0]) => IpcResult<'profile-preferences:save'>;
+  saveProfilePreferences: (patch: IpcContract['profile-preferences:save']['args'][0], expectedProfileId?: string) => IpcResult<'profile-preferences:save'>;
   getProfileRestrictions: (profileId: string) => IpcResult<'profile-restrictions:get'>;
   saveProfileRestrictions: (profileId: string, input: IpcContract['profile-restrictions:save']['args'][1]) => IpcResult<'profile-restrictions:save'>;
   getProfileLists: (kind?: IpcContract['profile-lists:get']['args'][0]) => IpcResult<'profile-lists:get'>;
-  setProfileListEntry: (mediaId: string, kind: IpcContract['profile-lists:set']['args'][1], present: boolean) => IpcResult<'profile-lists:set'>;
+  setProfileListEntry: (mediaId: string, kind: IpcContract['profile-lists:set']['args'][1], present: boolean, expectedProfileId?: string) => IpcResult<'profile-lists:set'>;
   getPlaybackTrackPreferences: (scope?: string) => IpcResult<'playback-track-preferences:get'>;
   savePlaybackTrackPreferences: (
     scope: string,
     preferences: IpcContract['playback-track-preferences:save']['args'][1],
+    expectedProfileId?: string,
   ) => IpcResult<'playback-track-preferences:save'>;
   getMediaSegments: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
   saveManualMediaSegment: (input: ManualMediaSegmentInput) => MediaSegmentResponse;
@@ -174,6 +181,7 @@ export function registerIpcHandlers<
   handle('library:get', () => deps.libraryForRenderer());
 
   handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {
+    deps.authorizeSettingsWrite();
     const data = deps.loadLibrary();
     const scanVersion = deps.getLibraryMutationVersion();
     const mode: IpcLibraryScanMode = options?.force
@@ -194,6 +202,7 @@ export function registerIpcHandlers<
   });
 
   handle('library:add-folder', async (_event, kind: string = 'movies') => {
+    deps.authorizeSettingsWrite();
     const result = await deps.showOpenFolderDialog({
       properties: ['openDirectory'],
       buttonLabel: 'Add Folder',
@@ -222,6 +231,7 @@ export function registerIpcHandlers<
   });
 
   handle('library:remove-folder', (_event, folderPath: string) => {
+    deps.authorizeSettingsWrite();
     const data = deps.loadLibrary();
     const updated = deps.removeFolderFromLibrary(data, folderPath);
     deps.saveLibraryMutation(updated);
@@ -230,6 +240,7 @@ export function registerIpcHandlers<
 
   handle('media:play', async (_event, filePath: string) => {
     try {
+      deps.authorizeMediaPath(filePath);
       deps.assertLocalMediaPath(filePath);
       return false;
     } catch {
@@ -240,6 +251,7 @@ export function registerIpcHandlers<
   handle('media:get-server-port', () => deps.getMediaServerPort());
 
   handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
+    deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     appendStreamOptionParams(params, options);
@@ -257,6 +269,7 @@ export function registerIpcHandlers<
   });
 
   handle('media:get-subtitle-url', (_event, filePath: string, streamOrdinal?: number) => {
+    deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) params.set('streamOrdinal', String(Math.floor(streamOrdinal)));
@@ -264,6 +277,7 @@ export function registerIpcHandlers<
   });
 
   handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
+    deps.authorizeMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (time) params.set('t', time);
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/api/thumbnail?${params.toString()}` };
@@ -271,6 +285,7 @@ export function registerIpcHandlers<
 
   handle('media:get-file-info', (_event, filePath: string) => {
     try {
+      deps.authorizeMediaPath(filePath);
       deps.assertLocalMediaPath(filePath);
       const exists = fs.existsSync(filePath);
       const size = exists ? fs.statSync(filePath).size : 0;
@@ -280,16 +295,20 @@ export function registerIpcHandlers<
     }
   });
 
-  handle('settings:get', () => deps.loadSettings());
+  handle('settings:get', () => deps.settingsForRenderer());
 
   handle('settings:save', (_event, settings) => {
+    deps.authorizeSettingsWrite();
     deps.saveSettings({ ...deps.loadSettings(), ...settings });
     deps.onSettingsSaved?.();
     deps.syncLanAdvertisement();
     return true;
   });
 
-  handle('metadata:test-keys', (_event, keys: Record<string, string>) => deps.testMetadataKeys(keys || {}));
+  handle('metadata:test-keys', (_event, keys: Record<string, string>) => {
+    deps.authorizeSettingsWrite();
+    return deps.testMetadataKeys(keys || {});
+  });
 
   handle('network:status', () => {
     const status = buildNetworkStatus(deps);
@@ -307,6 +326,7 @@ export function registerIpcHandlers<
   });
 
   handle('network:revoke-paired-device', (_event, deviceId: string) => {
+    deps.authorizeSettingsWrite();
     const settings = deps.loadSettings();
     const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
     deps.saveSettings({ ...settings, localNetworkPairedDevices: remaining });
@@ -314,6 +334,7 @@ export function registerIpcHandlers<
   });
 
   handle('network:set-device-name', (_event, name: string) => {
+    deps.authorizeSettingsWrite();
     const settings = deps.loadSettings();
     const nextName = String(name || '').trim().slice(0, 80) || os.hostname();
     deps.saveSettings({ ...settings, localNetworkDeviceName: nextName });
@@ -322,11 +343,14 @@ export function registerIpcHandlers<
   });
 
   handle('profiles:list', () => deps.listProfiles());
+  handle('profiles:choose-avatar', () => deps.chooseProfileAvatar());
   handle('profiles:get-active', () => deps.getActiveProfileState());
   handle('profiles:lock', () => deps.lockProfile());
   handle('profiles:create', (_event, input) => deps.createProfile(input || { name: '' }));
   handle('profiles:update', (_event, profileId: string, patch) => deps.updateProfile(String(profileId || ''), patch || {}));
   handle('profiles:delete', (_event, profileId: string) => deps.deleteProfile(String(profileId || '')));
+  handle('profiles:export', (_event, profileId: string) => deps.exportProfile(String(profileId || '')));
+  handle('profiles:import', () => deps.importProfile());
   handle('profiles:select', (_event, profileId: string, pin?: string) => deps.selectProfile(String(profileId || ''), pin));
   handle('profiles:select-guest', () => deps.selectGuestProfile());
   handle('profiles:reorder', (_event, profileIds) => deps.reorderProfiles(Array.isArray(profileIds) ? profileIds.map(String) : []));
@@ -334,84 +358,130 @@ export function registerIpcHandlers<
   handle('profiles:reset-owner', (_event, confirmation) => deps.resetOwnerProfile(String(confirmation || '')));
   handle('profiles:set-auto-sign-in', (_event, enabled) => deps.setAutomaticSignIn(Boolean(enabled)));
   handle('profile-preferences:get', () => deps.getProfilePreferences());
-  handle('profile-preferences:save', (_event, patch) => deps.saveProfilePreferences(patch || {}));
+  handle('profile-preferences:save', (_event, patch, expectedProfileId) => deps.saveProfilePreferences(patch || {}, expectedProfileId));
   handle('profile-restrictions:get', (_event, profileId) => deps.getProfileRestrictions(String(profileId || '')));
   handle('profile-restrictions:save', (_event, profileId, input) => deps.saveProfileRestrictions(String(profileId || ''), input));
   handle('profile-lists:get', (_event, kind) => deps.getProfileLists(kind));
-  handle('profile-lists:set', (_event, mediaId, kind, present) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present)));
+  handle('profile-lists:set', (_event, mediaId, kind, present, expectedProfileId) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present), expectedProfileId));
   handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress());
   handle('progress:save', (_event, filePath: string, position: number, duration: number, expectedProfileId?: string) =>
     deps.saveProgress(filePath, Number(position) || 0, Number(duration) || 0, expectedProfileId));
-  handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => {
-    deps.importProgress(progress || {});
+  handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string) => {
+    deps.importProgress(progress || {}, expectedProfileId);
     return true;
   });
   handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope));
-  handle('playback-track-preferences:save', (_event, scope: string, preferences) =>
-    deps.savePlaybackTrackPreferences(scope, preferences || {}));
+  handle('playback-track-preferences:save', (_event, scope: string, preferences, expectedProfileId) =>
+    deps.savePlaybackTrackPreferences(scope, preferences || {}, expectedProfileId));
   handle('playback:segments:get', (_event, request: MediaSegmentRequest) =>
     deps.getMediaSegments(request || { mediaId: '' }));
-  handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) =>
-    deps.saveManualMediaSegment(input));
-  handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) =>
-    deps.deleteManualMediaSegment(input));
-  handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) =>
-    deps.undoManualMediaSegment(input));
-  handle('playback:segments:manage-list', (_event, request) => deps.getManagedMediaSegments(request ? {
-    mediaId: request.mediaId ? String(request.mediaId).slice(0, 240) : undefined,
-    season: request.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
-    episode: request.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
-  } : undefined));
+  handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) => {
+    deps.authorizeSettingsWrite();
+    return deps.saveManualMediaSegment(input);
+  });
+  handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => {
+    deps.authorizeSettingsWrite();
+    return deps.deleteManualMediaSegment(input);
+  });
+  handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => {
+    deps.authorizeSettingsWrite();
+    return deps.undoManualMediaSegment(input);
+  });
+  handle('playback:segments:manage-list', (_event, request) => {
+    deps.authorizeSettingsWrite();
+    return deps.getManagedMediaSegments(request ? {
+      mediaId: request.mediaId ? String(request.mediaId).slice(0, 240) : undefined,
+      season: request.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
+      episode: request.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
+    } : undefined);
+  });
   handle('playback:segments:manage-update', (_event, candidateId, patch) => {
+    deps.authorizeSettingsWrite();
     const status = patch?.status === 'active' || patch?.status === 'review' || patch?.status === 'rejected' ? patch.status : undefined;
     const type = patch?.type === 'intro' || patch?.type === 'recap' || patch?.type === 'credits' || patch?.type === 'preview' ? patch.type : undefined;
     return deps.updateManagedMediaSegment(String(candidateId || '').slice(0, 240), { status, type });
   });
-  handle('playback:segments:manage-erase', (_event, request) => deps.eraseManagedMediaSegments({
-    mediaId: String(request?.mediaId || '').slice(0, 240),
-    season: request?.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
-    episode: request?.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
-  }));
+  handle('playback:segments:manage-erase', (_event, request) => {
+    deps.authorizeSettingsWrite();
+    return deps.eraseManagedMediaSegments({
+      mediaId: String(request?.mediaId || '').slice(0, 240),
+      season: request?.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
+      episode: request?.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
+    });
+  });
   handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
     deps.setPlaybackActivityLease(key, Boolean(active), label);
     return true;
   });
-  handle('playback:analysis:status', () => deps.getLocalSegmentAnalysisStatus());
-  handle('playback:analysis:season', (_event, mediaId: string, season: number) =>
-    deps.analyzeLocalSegmentSeason(
+  handle('playback:analysis:status', () => {
+    deps.authorizeSettingsWrite();
+    return deps.getLocalSegmentAnalysisStatus();
+  });
+  handle('playback:analysis:season', (_event, mediaId: string, season: number) => {
+    deps.authorizeSettingsWrite();
+    return deps.analyzeLocalSegmentSeason(
       String(mediaId || '').slice(0, 240),
       Number.isFinite(Number(season)) ? Math.max(0, Math.floor(Number(season))) : 1,
-    ));
-  handle('playback:analysis:run', (_event, scope) => deps.runLocalSegmentAnalysis(scope ? {
-    mediaId: scope.mediaId ? String(scope.mediaId).slice(0, 240) : undefined,
-    season: scope.season === undefined || !Number.isFinite(Number(scope.season)) ? undefined : Math.max(0, Math.floor(Number(scope.season))),
-    episode: scope.episode === undefined || !Number.isFinite(Number(scope.episode)) ? undefined : Math.max(0, Math.floor(Number(scope.episode))),
-    mode: scope.mode === 'quick' ? 'quick' : scope.mode === 'full' ? 'full' : undefined,
-  } : undefined));
-  handle('playback:analysis:cancel', (_event, request) => deps.cancelLocalSegmentAnalysis(request ? {
-    jobKey: request.jobKey ? String(request.jobKey).slice(0, 128) : undefined,
-    kind: request.kind === 'manual' ? 'manual' : undefined,
-  } : undefined));
-  handle('playback:analysis:pause', () => deps.pauseLocalSegmentAnalysis());
-  handle('playback:analysis:resume', () => deps.resumeLocalSegmentAnalysis());
-  handle('playback:analysis:cleanup', () => deps.cleanupLocalSegmentAnalysis());
-  handle('playback:analysis:rebuild', () => deps.rebuildLocalSegmentAnalysis());
+    );
+  });
+  handle('playback:analysis:run', (_event, scope) => {
+    deps.authorizeSettingsWrite();
+    return deps.runLocalSegmentAnalysis(scope ? {
+      mediaId: scope.mediaId ? String(scope.mediaId).slice(0, 240) : undefined,
+      season: scope.season === undefined || !Number.isFinite(Number(scope.season)) ? undefined : Math.max(0, Math.floor(Number(scope.season))),
+      episode: scope.episode === undefined || !Number.isFinite(Number(scope.episode)) ? undefined : Math.max(0, Math.floor(Number(scope.episode))),
+      mode: scope.mode === 'quick' ? 'quick' : scope.mode === 'full' ? 'full' : undefined,
+    } : undefined);
+  });
+  handle('playback:analysis:cancel', (_event, request) => {
+    deps.authorizeSettingsWrite();
+    return deps.cancelLocalSegmentAnalysis(request ? {
+      jobKey: request.jobKey ? String(request.jobKey).slice(0, 128) : undefined,
+      kind: request.kind === 'manual' ? 'manual' : undefined,
+    } : undefined);
+  });
+  handle('playback:analysis:pause', () => {
+    deps.authorizeSettingsWrite();
+    return deps.pauseLocalSegmentAnalysis();
+  });
+  handle('playback:analysis:resume', () => {
+    deps.authorizeSettingsWrite();
+    return deps.resumeLocalSegmentAnalysis();
+  });
+  handle('playback:analysis:cleanup', () => {
+    deps.authorizeSettingsWrite();
+    return deps.cleanupLocalSegmentAnalysis();
+  });
+  handle('playback:analysis:rebuild', () => {
+    deps.authorizeSettingsWrite();
+    return deps.rebuildLocalSegmentAnalysis();
+  });
   handle('artwork:get', (_event, mediaId: string) => deps.customArtworkForRenderer(mediaId));
   handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
+    deps.authorizeSettingsWrite();
     deps.saveCustomArtwork(mediaId, target, dataUrl);
     return deps.customArtworkForRenderer(mediaId);
   });
-  handle('artwork:official-candidates', (_event, mediaId: string) => deps.getOfficialMetadataCandidates(mediaId));
-  handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) =>
-    deps.applyOfficialMetadataCandidate(mediaId, candidate));
-  handle('artwork:refresh-official', (_event, mediaId: string) => deps.refreshOfficialArtwork(mediaId));
+  handle('artwork:official-candidates', (_event, mediaId: string) => {
+    deps.authorizeSettingsWrite();
+    return deps.getOfficialMetadataCandidates(mediaId);
+  });
+  handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) => {
+    deps.authorizeSettingsWrite();
+    return deps.applyOfficialMetadataCandidate(mediaId, candidate);
+  });
+  handle('artwork:refresh-official', (_event, mediaId: string) => {
+    deps.authorizeSettingsWrite();
+    return deps.refreshOfficialArtwork(mediaId);
+  });
   handle('artwork:playback-logo', (_event, mediaId: string) => deps.getPlaybackLogo(mediaId));
   handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
+    deps.authorizeSettingsWrite();
     deps.importCustomArtwork(entries || {});
     return true;
   });
-  handle('database:backup', () => deps.backupDatabase());
-  handle('database:clear', () => deps.libraryForRenderer(deps.clearAppData()));
+  handle('database:backup', () => { deps.authorizeSettingsWrite(); return deps.backupDatabase(); });
+  handle('database:clear', () => { deps.authorizeSettingsWrite(); return deps.libraryForRenderer(deps.clearAppData()); });
   handle('shell:open-external', (_event, url: string): OpenExternalResult => {
     const parsed = new URL(String(url || ''));
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
@@ -439,10 +509,14 @@ export function registerIpcHandlers<
 
   handle('media:ffmpeg-available', () => ffmpegAvailability(deps.findFFmpeg));
 
-  handle('media:probe', (_event, filePath: string) => deps.safeResult(() => deps.probeMedia(filePath)));
+  handle('media:probe', (_event, filePath: string) => deps.safeResult(() => {
+    deps.authorizeMediaPath(filePath);
+    return deps.probeMedia(filePath);
+  }));
 
   handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
     deps.safeResult(async () => {
+      deps.authorizeMediaPath(filePath);
       if (backend === 'html5') return deps.browserPlaybackPlan(filePath).mode === 'direct';
       const result = await deps.probeMedia(filePath);
       return deps.canDirectPlay(filePath, result, backend);
@@ -451,6 +525,7 @@ export function registerIpcHandlers<
 
   handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
     deps.safeResult(async () => {
+      deps.authorizeMediaPath(filePath);
       const session = await deps.startTranscode(filePath, options || {}, `http://127.0.0.1:${deps.getMediaServerPort()}`);
       return { ...session, playlistUrl: deps.appendLocalAccessTokenToUrl(session.playlistUrl) };
     }),

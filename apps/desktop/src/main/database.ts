@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch';
 import type { LibraryData } from './appContracts.ts';
+import type { ProfileExportV1 } from '../shared/desktopProtocol.ts';
 import {
   createDatabaseArtworkRepository,
   type CachedArtwork,
@@ -41,11 +42,13 @@ import type {
 import { migrateDatabase, profilesMigrationPending } from './databaseMigrations';
 import {
   clearDeviceProfileSelection as clearDeviceProfileSelectionRecord,
+  clearAllGuestProfiles as clearAllGuestProfilesRecord,
   createProfile as createProfileRecord,
   createGuestProfile as createGuestProfileRecord,
   deleteProfile as deleteProfileRecord,
   getDeviceProfileSelection as getDeviceProfileSelectionRecord,
   getDeviceProfileSelectionState as getDeviceProfileSelectionStateRecord,
+  getDeviceSelectionRevision as getDeviceSelectionRevisionRecord,
   getOwnerProfile as getOwnerProfileRecord,
   getProfile as getProfileRecord,
   getProfileLists as getProfileListsRecord,
@@ -226,6 +229,10 @@ export function getDeviceProfileSelectionState(deviceId: string): DeviceProfileS
   return getDeviceProfileSelectionStateRecord(getDb(), deviceId);
 }
 
+export function getDeviceSelectionRevision(deviceId: string): number {
+  return getDeviceSelectionRevisionRecord(getDb(), deviceId);
+}
+
 export function clearDeviceProfileSelection(deviceId: string): void {
   clearDeviceProfileSelectionRecord(getDb(), deviceId);
 }
@@ -236,6 +243,10 @@ export function setDeviceAutomaticSignIn(deviceId: string, enabled: boolean): De
 
 export function createGuestProfile(deviceId: string): ProfileRecord {
   return createGuestProfileRecord(getDb(), deviceId);
+}
+
+export function clearAllGuestProfiles(): void {
+  clearAllGuestProfilesRecord(getDb());
 }
 
 export function reorderProfiles(profileIds: readonly string[]): ProfileRecord[] {
@@ -280,6 +291,199 @@ export function profilePersonalDataCount(profileId: string): number {
 
 export function resetOwnerProfile(): ProfileRecord {
   return resetOwnerProfileRecord(getDb());
+}
+
+export type ProfileImportResult = {
+  profile: ProfileRecord;
+  importedProgress: number;
+  skippedProgress: number;
+  importedLists: number;
+  skippedLists: number;
+};
+
+const PROFILE_AVATAR_KEYS = new Set([
+  ...Array.from({ length: 12 }, (_, index) => `glyph-${String(index + 1).padStart(2, '0')}`),
+  ...Array.from({ length: 8 }, (_, index) => `weave-0${index + 1}`),
+]);
+const PROFILE_COLOR_KEYS = new Set(['ember', 'gold', 'crimson', 'ocean', 'violet', 'teal', 'rose', 'slate']);
+const PROFILE_TYPES = new Set(['owner', 'standard', 'kid']);
+const RATING_COUNTRIES = new Set(['US', 'GB', 'CA', 'AU']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validExportTimestamp(value: unknown): boolean {
+  return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= Date.now() + 86_400_000;
+}
+
+function validProfileAvatar(value: unknown): boolean {
+  const avatar = String(value ?? '');
+  return PROFILE_AVATAR_KEYS.has(avatar)
+    || (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(avatar) && avatar.length <= 512 * 1024);
+}
+
+function validateProfileImport(value: unknown): asserts value is ProfileExportV1 {
+  if (!isRecord(value) || value.format !== 'loomtv.profile.v1' || !validExportTimestamp(value.exportedAt)) {
+    throw new Error('This is not a supported LoomTV profile file.');
+  }
+  const profile = value.profile;
+  if (
+    !isRecord(profile)
+    || typeof profile.name !== 'string'
+    || !profile.name.trim()
+    || profile.name.trim().length > 30
+    || !validProfileAvatar(profile.avatarKey)
+    || !PROFILE_COLOR_KEYS.has(String(profile.colorKey))
+    || !PROFILE_TYPES.has(String(profile.type))
+  ) throw new Error('The profile metadata is invalid.');
+
+  if (!isRecord(value.progress) || !isRecord(value.trackPreferences) || !isRecord(value.preferences)) {
+    throw new Error('The profile data is malformed.');
+  }
+  const progressEntries = Object.entries(value.progress);
+  const trackEntries = Object.entries(value.trackPreferences);
+  const lists = value.lists;
+  if (!Array.isArray(lists) || progressEntries.length > 100_000 || trackEntries.length > 100_000 || lists.length > 100_000) {
+    throw new Error('The profile contains too many entries.');
+  }
+  for (const [filePath, progress] of progressEntries) {
+    if (
+      !filePath
+      || filePath.length > 4_096
+      || !isRecord(progress)
+      || !Number.isFinite(progress.position)
+      || Number(progress.position) < 0
+      || !Number.isFinite(progress.duration)
+      || Number(progress.duration) < 0
+      || !validExportTimestamp(progress.updatedAt)
+      || typeof progress.watched !== 'boolean'
+    ) throw new Error('The profile progress data is invalid.');
+  }
+  for (const [scope, preferences] of trackEntries) {
+    if (!scope || scope.length > 500 || !isRecord(preferences)) throw new Error('The track preferences are invalid.');
+  }
+
+  const preferences = value.preferences;
+  const allowedPreferenceValues: Array<[string, ReadonlySet<string>]> = [
+    ['appThemeMode', new Set(['dark', 'light'])],
+    ['appThemeColor', new Set(['orange', 'yellow', 'red', 'blue', 'twitch'])],
+    ['appDarkTheme', new Set(['black'])],
+    ['appLoaderStyle', new Set(['play-mark', 'logo-mark', 'horizontal-logo'])],
+  ];
+  for (const [key, allowed] of allowedPreferenceValues) {
+    if (preferences[key] !== undefined && !allowed.has(String(preferences[key]))) throw new Error('The profile preferences are invalid.');
+  }
+  for (const key of ['playbackSkipBackSeconds', 'playbackSkipForwardSeconds']) {
+    if (preferences[key] !== undefined && (!Number.isFinite(preferences[key]) || Number(preferences[key]) < 1 || Number(preferences[key]) > 120)) {
+      throw new Error('The profile preferences are invalid.');
+    }
+  }
+  if (preferences.sidebarNavOrder !== undefined && (
+    !Array.isArray(preferences.sidebarNavOrder)
+    || preferences.sidebarNavOrder.length > 32
+    || preferences.sidebarNavOrder.some((entry) => typeof entry !== 'string')
+  )) throw new Error('The profile navigation order is invalid.');
+  if (preferences.autoplayNextEnabled !== undefined && typeof preferences.autoplayNextEnabled !== 'boolean') {
+    throw new Error('The profile preferences are invalid.');
+  }
+
+  const restrictions = value.restrictions;
+  if (
+    !isRecord(restrictions)
+    || !RATING_COUNTRIES.has(String(restrictions.country))
+    || (restrictions.maximumAge !== null && (!Number.isInteger(restrictions.maximumAge) || Number(restrictions.maximumAge) < 0 || Number(restrictions.maximumAge) > 18))
+    || typeof restrictions.allowUnrated !== 'boolean'
+    || !Array.isArray(restrictions.allowedFolders)
+    || restrictions.allowedFolders.length > 1_000
+    || restrictions.allowedFolders.some((folder) => typeof folder !== 'string' || folder.length > 4_096)
+  ) throw new Error('The profile restrictions are invalid.');
+
+  for (const entry of lists) {
+    if (
+      !isRecord(entry)
+      || typeof entry.mediaId !== 'string'
+      || !entry.mediaId
+      || entry.mediaId.length > 240
+      || (entry.kind !== 'watchlist' && entry.kind !== 'favorite')
+      || !validExportTimestamp(entry.createdAt)
+    ) throw new Error('The profile lists are invalid.');
+  }
+}
+
+export function exportProfileData(profileId: string): ProfileExportV1 {
+  const profile = getProfile(profileId);
+  if (!profile || profile.isGuest) throw new Error('That profile cannot be exported.');
+  return {
+    format: 'loomtv.profile.v1',
+    exportedAt: Date.now(),
+    profile: {
+      name: profile.name,
+      avatarKey: profile.avatarKey,
+      colorKey: profile.colorKey,
+      type: profile.type,
+    },
+    progress: getAllProgress(profileId),
+    trackPreferences: getPlaybackTrackPreferences(profileId) as Record<string, PlaybackTrackPreferences>,
+    preferences: getProfilePreferences(profileId),
+    restrictions: getProfileRestrictions(profileId),
+    lists: getProfileLists(profileId),
+  };
+}
+
+export function importProfileData(bundle: ProfileExportV1): ProfileImportResult {
+  validateProfileImport(bundle);
+  const progressEntries = Object.entries(bundle.progress || {});
+  const trackEntries = Object.entries(bundle.trackPreferences || {});
+  const listEntries = Array.isArray(bundle.lists) ? bundle.lists : [];
+
+  const database = getDb();
+  return database.transaction(() => {
+    const type = bundle.profile.type === 'kid' ? 'kid' : 'standard';
+    const profile = createProfileRecord(database, {
+      name: bundle.profile.name.slice(0, 40),
+      avatarKey: bundle.profile.avatarKey,
+      colorKey: bundle.profile.colorKey,
+      type,
+    });
+    const validPaths = new Set((database.prepare(`
+      SELECT file_path FROM media_items WHERE file_path <> ''
+      UNION SELECT file_path FROM episode_files WHERE file_path <> ''
+    `).all() as Array<{ file_path: string }>).map((row) => row.file_path));
+    const validMediaIds = new Set((database.prepare('SELECT id FROM media_items').all() as Array<{ id: string }>).map((row) => row.id));
+    let importedProgress = 0;
+    let skippedProgress = 0;
+    let importedLists = 0;
+    let skippedLists = 0;
+
+    for (const [filePath, progress] of progressEntries) {
+      if (!validPaths.has(filePath)) {
+        skippedProgress++;
+        continue;
+      }
+      saveProgressRecord(database, profile.id, filePath, Number(progress.position) || 0, Number(progress.duration) || 0);
+      importedProgress++;
+    }
+    for (const [scope, preferences] of trackEntries) {
+      if (scope.length <= 500) savePlaybackTrackPreferencesRecord(database, profile.id, scope, preferences);
+    }
+    saveProfilePreferencesRecord(database, profile.id, bundle.preferences || {});
+    saveProfileRestrictionsRecord(database, profile.id, {
+      country: bundle.restrictions?.country || 'US',
+      maximumAge: type === 'kid' ? bundle.restrictions?.maximumAge ?? 13 : bundle.restrictions?.maximumAge ?? null,
+      allowUnrated: Boolean(bundle.restrictions?.allowUnrated),
+      allowedFolders: Array.isArray(bundle.restrictions?.allowedFolders) ? bundle.restrictions.allowedFolders : [],
+    });
+    for (const entry of listEntries) {
+      if (!validMediaIds.has(entry.mediaId) || (entry.kind !== 'watchlist' && entry.kind !== 'favorite')) {
+        skippedLists++;
+        continue;
+      }
+      setProfileListEntryRecord(database, profile.id, entry.mediaId, entry.kind, true);
+      importedLists++;
+    }
+    return { profile, importedProgress, skippedProgress, importedLists, skippedLists };
+  })();
 }
 export function getSegmentSourceCache(
   provider: ProviderCacheEntry['provider'],
@@ -542,7 +746,7 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
   return { ok: true, path: result.filePath };
 }
 
-export function clearDatabase(): void {
+export function clearDatabase(): ProfileRecord {
   const database = getDb();
   database.transaction(() => database.exec(`
     DELETE FROM segment_manual_history;
@@ -563,6 +767,7 @@ export function clearDatabase(): void {
     DELETE FROM profile_restrictions;
     DELETE FROM profile_preferences;
     DELETE FROM device_profile_selections;
+    DELETE FROM device_profile_selection_revisions;
     DELETE FROM profiles;
     DELETE FROM episode_files;
     DELETE FROM episodes;
@@ -573,10 +778,14 @@ export function clearDatabase(): void {
     DELETE FROM app_settings;
   `))();
   const now = Date.now();
+  const ownerId = randomUUID();
   database.prepare(`
     INSERT INTO profiles (id, name, avatar_key, color_key, profile_type, created_at, updated_at, sort_order)
-    VALUES (?, 'Owner', 'weave-01', 'ember', 'owner', ?, ?, 0)
-  `).run(randomUUID(), now, now);
+    VALUES (?, 'Owner', 'glyph-01', 'ember', 'owner', ?, ?, 0)
+  `).run(ownerId, now, now);
   database.pragma('wal_checkpoint(TRUNCATE)');
   database.exec('VACUUM;');
+  const owner = getProfile(ownerId);
+  if (!owner) throw new Error('The clean Owner profile could not be created.');
+  return owner;
 }

@@ -1,10 +1,11 @@
 import type { AppLoaderStyle } from '@/lib/theme';
 import type { UpdateState } from '@/lib/desktopApi';
 
-export type SettingsSection = 'library' | 'playback' | 'network' | 'metadata' | 'theme' | 'about';
+export type SettingsSection = 'profiles' | 'library' | 'playback' | 'network' | 'metadata' | 'theme' | 'about';
 export type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: 'profiles', label: 'Profiles' },
   { id: 'library', label: 'Library' },
   { id: 'playback', label: 'Playback' },
   { id: 'network', label: 'Network' },
@@ -37,6 +38,7 @@ export const APP_LICENSE = {
 };
 
 export const THIRD_PARTY_DEPENDENCIES = [
+  { name: 'DiceBear Glyphs', owner: 'Matt Houser / DiceBear', license: 'CC BY 4.0', url: 'https://www.dicebear.com/styles/glyphs/' },
   { name: 'Electron', owner: 'Electron Community', license: 'MIT', url: 'https://www.electronjs.org/' },
   { name: 'Electron Forge', owner: 'Electron Forge contributors', license: 'MIT', url: 'https://www.electronforge.io/' },
   { name: 'React', owner: 'Meta Platforms, Inc. and affiliates', license: 'MIT', url: 'https://react.dev/' },
@@ -71,7 +73,8 @@ export function normalizeProviderId(value: string): string {
 }
 
 export function isSettingsSection(value: string | null): value is SettingsSection {
-  return value === 'library'
+  return value === 'profiles'
+    || value === 'library'
     || value === 'playback'
     || value === 'network'
     || value === 'metadata'

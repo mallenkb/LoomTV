@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Play, Star, Clock, ArrowLeft } from 'lucide-react';
+import { Bookmark, Heart, Play, Star, Clock, ArrowLeft } from 'lucide-react';
 import { useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
+import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -92,6 +93,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary } = useLibrary();
+  const { canManageProfiles, lists, setListEntry } = useProfiles();
   const [movie, setMovie] = useState<MediaItem | null>(null);
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const progressTick = useProgressRefreshRevision();
@@ -165,6 +167,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   }
 
   const localSpecs = formatLocalSpecs(movie.localMetadata);
+  const inWatchlist = lists.some((entry) => entry.mediaId === movie.id && entry.kind === 'watchlist');
+  const isFavorite = lists.some((entry) => entry.mediaId === movie.id && entry.kind === 'favorite');
   const sourceArtwork = (location.state as { artwork?: RouteArtworkState } | null)?.artwork;
   const { heroArtwork, posterArtwork, heroKey, posterKey } = resolveMovieArtwork(
     customArtwork,
@@ -216,7 +220,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           />
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
-        <ArtworkEditorControls
+        {canManageProfiles && <ArtworkEditorControls
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
@@ -227,7 +231,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           onFetchOfficialArtwork={() => desktopApi.refreshOfficialArtwork(movie.id)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(movie.id)}
           onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(movie.id, candidate)}
-        />
+        />}
         <button
           type="button"
           onClick={handleBack}
@@ -305,6 +309,14 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </span>
             </span>
           </Button>
+          <div className="flex shrink-0 gap-2">
+            <button type="button" aria-pressed={isFavorite} onClick={() => void setListEntry(movie.id, 'favorite', !isFavorite)} className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15" title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}>
+              <Heart className={`h-5 w-5 ${isFavorite ? 'fill-current' : ''}`} />
+            </button>
+            <button type="button" aria-pressed={inWatchlist} onClick={() => void setListEntry(movie.id, 'watchlist', !inWatchlist)} className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15" title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}>
+              <Bookmark className={`h-5 w-5 ${inWatchlist ? 'fill-current' : ''}`} />
+            </button>
+          </div>
           </div>
         </div>
       </div>

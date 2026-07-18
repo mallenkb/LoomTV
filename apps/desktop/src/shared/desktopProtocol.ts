@@ -292,6 +292,11 @@ export type ProfileRestrictions = LanProfileRestrictions;
 export type ProfileListKind = LanProfileListKind;
 export type ProfileListEntry = LanProfileListEntry;
 
+export interface ProfilesChangedEvent {
+  profiles: ProfileSummary[];
+  selectionRevision: number;
+}
+
 export interface ProfileCreateInput {
   name: string;
   avatarKey?: string;
@@ -310,6 +315,17 @@ export interface ProfileExportV1 {
   preferences: ProfilePreferences;
   restrictions: ProfileRestrictions;
   lists: ProfileListEntry[];
+}
+
+export interface ProfileTransferResult {
+  ok: boolean;
+  path?: string;
+  profile?: ProfileSummary;
+  importedProgress?: number;
+  skippedProgress?: number;
+  importedLists?: number;
+  skippedLists?: number;
+  error?: string;
 }
 
 export type StoredProgress = LanStoredProgress;

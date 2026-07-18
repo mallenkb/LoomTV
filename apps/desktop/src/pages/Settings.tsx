@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
+import { useProfiles } from '@/contexts/ProfileContext';
 import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useTheme } from '@/components/ThemeProvider';
 import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
@@ -21,6 +22,7 @@ import LibrarySettingsSection from './LibrarySettingsSection';
 import MetadataSettingsSection from './MetadataSettingsSection';
 import NetworkSettingsSection from './NetworkSettingsSection';
 import PlaybackSettingsSection from './PlaybackSettingsSection';
+import ProfilesSettingsSection from './ProfilesSettingsSection';
 import SettingsTabs from './SettingsTabs';
 import ThemeSettingsSection from './ThemeSettingsSection';
 import type {
@@ -133,6 +135,7 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
 
 export default function Settings() {
   const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, refreshLibrary, clearAppData, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
+  const { activeProfile } = useProfiles();
   const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
@@ -177,6 +180,12 @@ export default function Settings() {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
   const [settingsPersistenceError, setSettingsPersistenceError] = useState('');
+  const visibleSettingsSections = useMemo(
+    () => activeProfile?.type === 'owner'
+      ? SETTINGS_SECTIONS
+      : SETTINGS_SECTIONS.filter((section) => section.id === 'profiles' || section.id === 'playback' || section.id === 'theme' || section.id === 'about'),
+    [activeProfile?.type],
+  );
   const peerScanInFlightRef = useRef(false);
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
   const { theme, setTheme } = useTheme();
@@ -210,7 +219,7 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    desktopApi.getSettings().then((s) => {
+    Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()]).then(([s, profilePreferences]) => {
       const loadedKeys = {
         ...(s.metadataApiKeys || {}),
         tmdb: s.metadataApiKeys?.tmdb || s.tmdbApiKey || '',
@@ -228,13 +237,15 @@ export default function Settings() {
           Object.entries(loadedKeys).map(([provider, value]) => [provider, !value]),
         ),
       );
-      setSidebarNavOrder(normalizeSidebarNavOrder(s.sidebarNavOrder));
+      setSidebarNavOrder(normalizeSidebarNavOrder(profilePreferences.sidebarNavOrder ?? s.sidebarNavOrder));
       setCustomFolderNames(s.customFolderNames || {});
-      setPlaybackSkipBackSeconds(Number.isFinite(s.playbackSkipBackSeconds) && (s.playbackSkipBackSeconds || 0) > 0 ? (s.playbackSkipBackSeconds || 10) : 10);
-      setPlaybackSkipForwardSeconds(Number.isFinite(s.playbackSkipForwardSeconds) && (s.playbackSkipForwardSeconds || 0) > 0 ? (s.playbackSkipForwardSeconds || 15) : 15);
+      const skipBack = profilePreferences.playbackSkipBackSeconds ?? s.playbackSkipBackSeconds;
+      const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
+      setPlaybackSkipBackSeconds(Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10);
+      setPlaybackSkipForwardSeconds(Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15);
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
-    void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
+    if (activeProfile?.type === 'owner') void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
@@ -243,7 +254,7 @@ export default function Settings() {
     } catch {
       // Ignore invalid saved pairing data.
     }
-  }, []);
+  }, [activeProfile?.id, activeProfile?.type]);
 
   const analysisIsActive = localAnalysisStatus?.state === 'running' || localAnalysisStatus?.state === 'queued';
   useEffect(() => {
@@ -368,13 +379,19 @@ export default function Settings() {
     const normalizedForward = Math.max(1, Math.round(Number(playbackSkipForwardSeconds) || 0));
     setPlaybackSkipBackSeconds(normalizedBack);
     setPlaybackSkipForwardSeconds(normalizedForward);
-    if (!await persistSettings({
-      playbackSkipBackSeconds: normalizedBack,
-      playbackSkipForwardSeconds: normalizedForward,
-      localSkipAnalysisEnabled: skipAnalysis.enabled,
-      skipAnalysis,
-    })) return false;
-    setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    try {
+      await desktopApi.saveProfilePreferences({
+        playbackSkipBackSeconds: normalizedBack,
+        playbackSkipForwardSeconds: normalizedForward,
+      }, activeProfile?.id);
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save profile playback settings.');
+      return false;
+    }
+    if (activeProfile?.type === 'owner') {
+      if (!await persistSettings({ localSkipAnalysisEnabled: skipAnalysis.enabled, skipAnalysis })) return false;
+      setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
+    }
     return true;
   };
 
@@ -396,7 +413,12 @@ export default function Settings() {
 
   const saveSidebarNavOrder = async (nextOrder: SidebarNavItemId[]) => {
     setSidebarNavOrder(nextOrder);
-    if (!await persistSettings({ sidebarNavOrder: nextOrder })) return;
+    try {
+      await desktopApi.saveProfilePreferences({ sidebarNavOrder: nextOrder }, activeProfile?.id);
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save profile navigation settings.');
+      return;
+    }
     window.dispatchEvent(new CustomEvent('loomtv:sidebar-order-changed', { detail: nextOrder }));
   };
 
@@ -732,13 +754,17 @@ export default function Settings() {
     setIsMobileSettingsMenuOpen(false);
   }, []);
 
-  const activeSectionLabel = SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.label || 'Settings';
+  useEffect(() => {
+    if (!visibleSettingsSections.some((section) => section.id === activeSection)) setActiveSection('profiles');
+  }, [activeSection, visibleSettingsSections]);
+
+  const activeSectionLabel = visibleSettingsSections.find((section) => section.id === activeSection)?.label || 'Settings';
 
   return (
     <div className={`loom-page loom-settings-page h-full overflow-y-auto ${isMobileSettingsMenuOpen ? 'loom-settings-menu-open' : 'loom-settings-detail-open'}`}>
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
         <div className="loom-settings-content mx-auto max-w-5xl pt-16">
-          <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} />
+          <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} sections={visibleSettingsSections} />
 
           <div className="loom-settings-mobile-menu">
             <div className="loom-settings-mobile-profile">
@@ -747,7 +773,7 @@ export default function Settings() {
               <p>Manage your library, playback, network, metadata, theme, and app details.</p>
             </div>
             <div className="loom-settings-mobile-list">
-              {SETTINGS_SECTIONS.map((section) => (
+              {visibleSettingsSections.map((section) => (
                 <button key={section.id} type="button" onClick={() => handleSectionSelect(section.id)}>
                   <span>{section.label}</span>
                   <ChevronRight className="h-5 w-5" />
@@ -769,8 +795,10 @@ export default function Settings() {
                   {settingsPersistenceError}
                 </div>
               )}
+              {activeSection === 'profiles' && <ProfilesSettingsSection />}
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
+                  showServerControls={activeProfile?.type === 'owner'}
                   skipBackSeconds={playbackSkipBackSeconds}
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   onSkipBackChange={setPlaybackSkipBackSeconds}

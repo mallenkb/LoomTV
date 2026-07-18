@@ -53,6 +53,12 @@ export interface EpisodeFile {
   localMetadata?: LocalMediaDetails;
 }
 
+export interface ContentRating {
+  code: string;
+  minimumAge: number;
+  source: string;
+}
+
 export interface MediaItem {
   id: string;
   type: 'movie' | 'tv' | 'anime';
@@ -66,6 +72,7 @@ export interface MediaItem {
   logoCandidates?: string[];
   summary: string;
   rating: number;
+  contentRatings?: Record<string, ContentRating>;
   genres: string[];
   cast: { name: string; character: string; image: string }[];
   filePath: string;

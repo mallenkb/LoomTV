@@ -9,19 +9,32 @@ import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { useProgressSnapshot } from '@/lib/progress';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
+import { useProfiles } from '@/contexts/ProfileContext';
 
 export default function Home() {
   const { state, addLibraryFolder } = useLibrary();
+  const { lists } = useProfiles();
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const continueWatchingRailRef = useRef<HTMLDivElement>(null);
+  const watchlistRailRef = useRef<HTMLDivElement>(null);
+  const favoritesRailRef = useRef<HTMLDivElement>(null);
   const animeRailRef = useRef<HTMLDivElement>(null);
   const tvRailRef = useRef<HTMLDivElement>(null);
   const moviesRailRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
+  const profileListItems = useMemo(() => {
+    const byId = new Map([...movies, ...tvShows, ...animeShows].map((item) => [item.id, item]));
+    const resolve = (kind: 'watchlist' | 'favorite') => lists
+      .filter((entry) => entry.kind === kind)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((entry) => byId.get(entry.mediaId))
+      .filter((item): item is MediaItem => Boolean(item));
+    return { watchlist: resolve('watchlist'), favorites: resolve('favorite') };
+  }, [animeShows, lists, movies, tvShows]);
 
   // Recency comes from the active profile's progress, never from the shared
   // catalog, so one profile's viewing cannot reorder Home for another.
@@ -69,6 +82,13 @@ export default function Home() {
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
         {!normalizedQuery && !isLoading && !hasLibraryItems && (
           <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
+        )}
+
+        {!normalizedQuery && profileListItems.watchlist.length > 0 && (
+          <ProfileListRail title="Watchlist" items={profileListItems.watchlist} railRef={watchlistRailRef} from={currentRoute} onScroll={scrollRail} />
+        )}
+        {!normalizedQuery && profileListItems.favorites.length > 0 && (
+          <ProfileListRail title="Favorites" items={profileListItems.favorites} railRef={favoritesRailRef} from={currentRoute} onScroll={scrollRail} />
         )}
 
         {!normalizedQuery && continueWatching.length > 0 && (
@@ -136,6 +156,33 @@ export default function Home() {
         )}
       </div>
     </div>
+  );
+}
+
+function ProfileListRail({
+  title,
+  items,
+  railRef,
+  from,
+  onScroll,
+}: {
+  title: string;
+  items: MediaItem[];
+  railRef: RefObject<HTMLDivElement | null>;
+  from: string;
+  onScroll: (railRef: RefObject<HTMLDivElement | null>, direction: -1 | 1) => void;
+}) {
+  return (
+    <section className="mb-8">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="loom-section-title text-2xl font-bold text-white">{title}</h3>
+        <div className="flex items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" onClick={() => onScroll(railRef, -1)} aria-label={`Scroll ${title} left`} className={RAIL_ARROW_CLASS}><ChevronLeft className="h-5 w-5" /></Button>
+          <Button type="button" variant="ghost" size="icon" onClick={() => onScroll(railRef, 1)} aria-label={`Scroll ${title} right`} className={RAIL_ARROW_CLASS}><ChevronRight className="h-5 w-5" /></Button>
+        </div>
+      </div>
+      <MediaRail items={items.slice(0, 20)} isLoading={false} from={from} scrollRef={railRef} />
+    </section>
   );
 }
 

@@ -15,7 +15,8 @@ import {
   usefulLocalTitle,
 } from './metadata/helpers.ts';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
-import type { OMDbResponse } from './metadata/omdb.ts';
+import { omdbContentRatings, type OMDbResponse } from './metadata/omdb.ts';
+import { mergeContentRatings } from './metadata/contentRatings.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import {
   inferSeriesTitleFromEpisodeFiles,
@@ -334,6 +335,11 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
+      contentRatings: mergeContentRatings(
+        finalType === 'anime' ? matchedJikanMeta?.contentRatings : undefined,
+        matchedTmdbTVMeta?.contentRatings,
+        omdbContentRatings(matchedOmdbData),
+      ),
       genres,
       cast,
       filePath: fullPath,
@@ -526,6 +532,12 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
+      contentRatings: mergeContentRatings(
+        matchedTmdbData?.contentRatings,
+        matchedTmdbTVMeta?.contentRatings,
+        finalType === 'anime' ? matchedJikanMeta?.contentRatings : undefined,
+        omdbContentRatings(matchedOmdbData),
+      ),
       genres,
       cast,
       filePath: fullPath,

@@ -10,6 +10,7 @@ import type { MediaItem } from './metadata/types';
 import type { LocalResourceKind } from './resourceRegistry';
 
 const LAN_IMAGE_CACHE_QUERY_PARAM = 'loomtvImageCache';
+type RemoteProfileIdentity = { deviceId: string; profileId: string; selectionRevision: number };
 
 export interface ArtworkUrlsDeps {
   localAccessToken: string;
@@ -25,6 +26,14 @@ export interface ArtworkUrlsDeps {
 
 export function createArtworkUrls(deps: ArtworkUrlsDeps) {
   const { localAccessToken, buildSignedLanUrl, registerRemoteResource } = deps;
+  const bindProfile = (params: URLSearchParams, identity?: RemoteProfileIdentity): URLSearchParams => {
+    if (identity) {
+      params.set('deviceId', identity.deviceId);
+      params.set('profileId', identity.profileId);
+      params.set('selectionRevision', String(identity.selectionRevision));
+    }
+    return params;
+  };
 
   function getLocalImageUrl(filePath: string): string {
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), localAccessToken);
@@ -36,9 +45,9 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     return `http://127.0.0.1:${getMediaServerPort()}/api/thumbnail?${params.toString()}`;
   }
 
-  function getRemoteThumbnailUrl(filePath: string, base: string, time = '00:03:00'): string {
+  function getRemoteThumbnailUrl(filePath: string, base: string, time = '00:03:00', identity?: RemoteProfileIdentity): string {
     const resourceId = registerRemoteResource('media', filePath);
-    return signedArtworkUrlForRemote(base, '/api/thumbnail', new URLSearchParams({ resourceId, t: time }));
+    return signedArtworkUrlForRemote(base, '/api/thumbnail', bindProfile(new URLSearchParams({ resourceId, t: time }), identity));
   }
 
   function getEmbeddedThumbnailUrl(filePath: string, streamIndex?: number): string {
@@ -114,7 +123,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     return buildSignedLanUrl(base, pathname, params, undefined, { stable: true });
   }
 
-  function rewriteLocalServerUrlSigned(source: string, base: string): string {
+  function rewriteLocalServerUrlSigned(source: string, base: string, identity?: RemoteProfileIdentity): string {
     try {
       const parsed = new URL(source);
       const params = new URLSearchParams(parsed.search);
@@ -150,22 +159,22 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
           params.set('resourceId', registerRemoteResource('media', mediaPath));
         }
       }
-      return signedArtworkUrlForRemote(base, parsed.pathname, params);
+      return signedArtworkUrlForRemote(base, parsed.pathname, bindProfile(params, identity));
     } catch {
       return source;
     }
   }
 
-  function remoteArtworkDeliveryUrl(source: string, base: string): string {
+  function remoteArtworkDeliveryUrl(source: string, base: string, identity?: RemoteProfileIdentity): string {
     if (!source) return '';
-    if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrlSigned(source, base);
+    if (isLocalMediaServerArtworkUrl(source)) return rewriteLocalServerUrlSigned(source, base, identity);
     if (isExternalArtworkUrl(source)) {
       const resourceId = registerRemoteResource('external-artwork', source);
-      return signedArtworkUrlForRemote(base, '/api/cached-artwork', new URLSearchParams({ resourceId }));
+      return signedArtworkUrlForRemote(base, '/api/cached-artwork', bindProfile(new URLSearchParams({ resourceId }), identity));
     }
     if (isLocalImageFilePath(source)) {
       const resourceId = registerRemoteResource('image', source);
-      return signedArtworkUrlForRemote(base, '/api/local-image', new URLSearchParams({ resourceId }));
+      return signedArtworkUrlForRemote(base, '/api/local-image', bindProfile(new URLSearchParams({ resourceId }), identity));
     }
     return source;
   }
@@ -196,7 +205,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     }
   }
 
-  function signedSubtitleUrlForRemote(base: string, source: string): string {
+  function signedSubtitleUrlForRemote(base: string, source: string, identity?: RemoteProfileIdentity): string {
     const trimmed = source.trim();
     if (!trimmed) return trimmed;
 
@@ -213,7 +222,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
         params.delete('path');
         params.set('resourceId', registerRemoteResource('subtitle', filePath));
       }
-      return buildSignedLanUrl(base, parsed.pathname, params);
+      return buildSignedLanUrl(base, parsed.pathname, bindProfile(params, identity));
     } catch {
       return source;
     }
@@ -226,10 +235,10 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     }));
   }
 
-  function subtitleRecordsForLocalNetwork(subtitles: MediaItem['subtitles'] | undefined, base: string): MediaItem['subtitles'] {
+  function subtitleRecordsForLocalNetwork(subtitles: MediaItem['subtitles'] | undefined, base: string, identity?: RemoteProfileIdentity): MediaItem['subtitles'] {
     return subtitles?.map((subtitle) => ({
       ...subtitle,
-      url: signedSubtitleUrlForRemote(base, subtitle.url),
+      url: signedSubtitleUrlForRemote(base, subtitle.url, identity),
     }));
   }
 

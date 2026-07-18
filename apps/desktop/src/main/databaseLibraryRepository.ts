@@ -27,6 +27,7 @@ type MediaItemRow = {
   poster_candidates_json: string | null;
   backdrop_candidates_json: string | null;
   logo_candidates_json: string | null;
+  content_ratings_json: string | null;
 };
 
 type SeasonRow = { media_id: string; number: number; title: string; episode_count: number };
@@ -108,8 +109,6 @@ function applyDurableState(
 ): MediaItem {
   const next = { ...item };
   const itemCustom = custom.get(item.id);
-  const itemProgress = progress.get(item.filePath);
-  let lastPlayed = itemProgress?.updatedAt || item.lastPlayed || 0;
 
   next.poster = durableArtworkSource(next.poster);
   next.backdrop = durableArtworkSource(next.backdrop);
@@ -122,15 +121,7 @@ function applyDurableState(
     still: durableArtworkSource(episode.still),
   }));
 
-  if (Array.isArray(next.episodeFiles)) {
-    for (const episodeFile of next.episodeFiles) {
-      const episodeProgress = progress.get(episodeFile.filePath);
-      if (episodeProgress?.updatedAt && episodeProgress.updatedAt > lastPlayed) {
-        lastPlayed = episodeProgress.updatedAt;
-      }
-    }
-  }
-  if (lastPlayed) next.lastPlayed = lastPlayed;
+  delete next.lastPlayed;
 
   if (itemCustom) {
     const cover = itemCustom.get('cover');
@@ -246,11 +237,11 @@ export function loadLibrary(
       logoCandidates: jsonParse(row.logo_candidates_json, []),
       summary: row.summary,
       rating: row.rating,
+      contentRatings: jsonParse(row.content_ratings_json, {}),
       genres: jsonParse(row.genres_json, []),
       cast: jsonParse(row.cast_json, []),
       filePath: row.file_path,
       fileSize: row.file_size || undefined,
-      lastPlayed: row.last_played || undefined,
       subtitles: jsonParse(row.subtitles_json, []),
       localMetadata: jsonParse(row.local_metadata_json, undefined),
       providerIds: jsonParse(row.provider_ids_json, undefined),
@@ -282,8 +273,8 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
         id, type, title, year, poster, backdrop, logo, summary, rating, file_path, file_size, last_played,
-        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
     const insertEpisode = database.prepare(`
@@ -308,7 +299,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         item.rating || 0,
         item.filePath || '',
         item.fileSize || null,
-        item.lastPlayed || null,
+        null,
         jsonString(item.genres || []),
         jsonString(item.cast || []),
         jsonString(item.subtitles || []),
@@ -317,6 +308,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         jsonString(durableArtworkSources(item.posterCandidates || [])),
         jsonString(durableArtworkSources(item.backdropCandidates || [])),
         jsonString(durableArtworkSources(item.logoCandidates || [])),
+        jsonString(item.contentRatings || {}),
         now,
       );
 

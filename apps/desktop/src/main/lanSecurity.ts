@@ -31,7 +31,7 @@ export interface LanSecurityDeps {
   loadSettings: () => AppSettings;
   saveSettings: (settings: AppSettings) => void;
   localAccessToken: string;
-  libraryForLocalNetwork: () => unknown;
+  libraryForLocalNetwork: (profileId?: string, deviceId?: string) => unknown;
 }
 
 export function createLanSecurity(deps: LanSecurityDeps) {
@@ -280,7 +280,10 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     });
     pairingSecretExpiresAt = 0;
 
-    const payload = libraryForLocalNetwork();
+    const supportsProfiles = req.headers['x-loom-profile-api-version'] === '1';
+    const payload = supportsProfiles
+      ? { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] } }
+      : libraryForLocalNetwork(undefined, deviceId);
     writeJson(res, 200, {
       ok: true,
       deviceId,

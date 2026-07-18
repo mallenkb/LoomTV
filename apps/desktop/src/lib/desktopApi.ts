@@ -7,7 +7,9 @@ import type {
   ProfileListKind,
   ProfilePreferences,
   ProfileRestrictions,
+  ProfilesChangedEvent,
   ProfileSummary,
+  ProfileTransferResult,
   ProfileUpdateInput,
   FFmpegStatus,
   LibraryFolderKind,
@@ -69,6 +71,7 @@ export type {
   ProfilePreferences,
   ProfileRestrictions,
   ProfileSummary,
+  ProfileTransferResult,
   ProfileType,
   ProfileUpdateInput,
   RemoteLibraryConnection,
@@ -110,10 +113,13 @@ export type DesktopBridgeApi = {
       revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
       setLocalNetworkDeviceName?: (name: string) => Promise<string>;
       listProfiles?: () => Promise<ProfileSummary[]>;
+      chooseProfileAvatar?: () => Promise<string | null>;
       getActiveProfileState?: () => Promise<ActiveProfileState>;
       createProfile?: (input: ProfileCreateInput) => Promise<ProfileSummary[]>;
       updateProfile?: (profileId: string, patch: ProfileUpdateInput) => Promise<ProfileSummary[]>;
       deleteProfile?: (profileId: string) => Promise<ProfileSummary[]>;
+      exportProfile?: (profileId: string) => Promise<ProfileTransferResult>;
+      importProfile?: () => Promise<ProfileTransferResult>;
       selectProfile?: (profileId: string, pin?: string) => Promise<ProfileSummary>;
       selectGuestProfile?: () => Promise<ProfileSummary>;
       lockProfile?: () => Promise<ActiveProfileState>;
@@ -122,18 +128,18 @@ export type DesktopBridgeApi = {
       resetOwnerProfile?: (confirmation: string) => Promise<ProfileSummary>;
       setAutomaticProfileSignIn?: (enabled: boolean) => Promise<ActiveProfileState>;
       getProfilePreferences?: () => Promise<ProfilePreferences>;
-      saveProfilePreferences?: (patch: ProfilePreferences) => Promise<ProfilePreferences>;
+      saveProfilePreferences?: (patch: ProfilePreferences, expectedProfileId?: string) => Promise<ProfilePreferences>;
       getProfileRestrictions?: (profileId: string) => Promise<ProfileRestrictions>;
       saveProfileRestrictions?: (profileId: string, restrictions: Omit<ProfileRestrictions, 'revision'>) => Promise<ProfileRestrictions>;
       getProfileLists?: (kind?: ProfileListKind) => Promise<ProfileListEntry[]>;
-      setProfileListEntry?: (mediaId: string, kind: ProfileListKind, present: boolean) => Promise<ProfileListEntry[]>;
-      onProfilesChanged?: (callback: (profiles: ProfileSummary[]) => void) => () => void;
+      setProfileListEntry?: (mediaId: string, kind: ProfileListKind, present: boolean, expectedProfileId?: string) => Promise<ProfileListEntry[]>;
+      onProfilesChanged?: (callback: (event: ProfilesChangedEvent) => void) => () => void;
       onActiveProfileChanged?: (callback: (state: ActiveProfileState) => void) => () => void;
       getProgress?: (filePath?: string) => Promise<Record<string, StoredProgress> | StoredProgress | null>;
       saveProgress?: (filePath: string, position: number, duration: number, expectedProfileId?: string) => Promise<StoredProgress>;
-      importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
+      importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string) => Promise<boolean>;
       getPlaybackTrackPreferences?: (scope?: string) => Promise<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>;
-      savePlaybackTrackPreferences?: (scope: string, preferences: PlaybackTrackPreferences) => Promise<PlaybackTrackPreferences>;
+      savePlaybackTrackPreferences?: (scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string) => Promise<PlaybackTrackPreferences>;
       getMediaSegments?: (request: MediaSegmentRequest) => Promise<MediaSegmentResponse>;
       saveManualMediaSegment?: (input: ManualMediaSegmentInput) => Promise<MediaSegmentResponse>;
       deleteManualMediaSegment?: (input: MediaSegmentRequest & { candidateId?: string; type: MediaSegmentType }) => Promise<MediaSegmentResponse>;
@@ -610,6 +616,11 @@ export const desktopApi = {
     return [];
   },
 
+  async chooseProfileAvatar(): Promise<string | null> {
+    if (window.desktopApi?.chooseProfileAvatar) return window.desktopApi.chooseProfileAvatar();
+    throw new Error('Profile images can only be selected from the LoomTV desktop app.');
+  },
+
   async getActiveProfileState(): Promise<ActiveProfileState> {
     if (window.desktopApi?.getActiveProfileState) return window.desktopApi.getActiveProfileState();
     return { profileId: null, selectionRequired: false, selectionRevision: 0, automaticSignIn: false };
@@ -628,6 +639,12 @@ export const desktopApi = {
   async deleteProfile(profileId: string): Promise<ProfileSummary[]> {
     if (window.desktopApi?.deleteProfile) return window.desktopApi.deleteProfile(profileId);
     throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+  },
+  async exportProfile(profileId: string): Promise<ProfileTransferResult> {
+    return window.desktopApi?.exportProfile?.(profileId) || { ok: false, error: 'Profile export is unavailable.' };
+  },
+  async importProfile(): Promise<ProfileTransferResult> {
+    return window.desktopApi?.importProfile?.() || { ok: false, error: 'Profile import is unavailable.' };
   },
 
   async selectProfile(profileId: string, pin?: string): Promise<ProfileSummary> {
@@ -669,8 +686,8 @@ export const desktopApi = {
     return window.desktopApi?.getProfilePreferences?.() || {};
   },
 
-  async saveProfilePreferences(patch: ProfilePreferences): Promise<ProfilePreferences> {
-    if (window.desktopApi?.saveProfilePreferences) return window.desktopApi.saveProfilePreferences(patch);
+  async saveProfilePreferences(patch: ProfilePreferences, expectedProfileId?: string): Promise<ProfilePreferences> {
+    if (window.desktopApi?.saveProfilePreferences) return window.desktopApi.saveProfilePreferences(patch, expectedProfileId);
     return patch;
   },
 
@@ -688,12 +705,12 @@ export const desktopApi = {
     return window.desktopApi?.getProfileLists?.(kind) || [];
   },
 
-  async setProfileListEntry(mediaId: string, kind: ProfileListKind, present: boolean): Promise<ProfileListEntry[]> {
-    if (window.desktopApi?.setProfileListEntry) return window.desktopApi.setProfileListEntry(mediaId, kind, present);
+  async setProfileListEntry(mediaId: string, kind: ProfileListKind, present: boolean, expectedProfileId?: string): Promise<ProfileListEntry[]> {
+    if (window.desktopApi?.setProfileListEntry) return window.desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
     return [];
   },
 
-  onProfilesChanged(callback: (profiles: ProfileSummary[]) => void): () => void {
+  onProfilesChanged(callback: (event: ProfilesChangedEvent) => void): () => void {
     return window.desktopApi?.onProfilesChanged?.(callback) || (() => undefined);
   },
 
@@ -715,8 +732,8 @@ export const desktopApi = {
     });
   },
 
-  async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>): Promise<boolean> {
-    if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress);
+  async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string): Promise<boolean> {
+    if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress, expectedProfileId);
     const response = await fetchJson<{ ok: boolean }>('/api/progress/import', {
       method: 'POST',
       body: JSON.stringify({ progress }),
@@ -730,8 +747,8 @@ export const desktopApi = {
     return fetchJson<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>(`/api/playback-track-preferences${query}`);
   },
 
-  async savePlaybackTrackPreferences(scope: string, preferences: PlaybackTrackPreferences): Promise<PlaybackTrackPreferences> {
-    if (window.desktopApi?.savePlaybackTrackPreferences) return window.desktopApi.savePlaybackTrackPreferences(scope, preferences);
+  async savePlaybackTrackPreferences(scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string): Promise<PlaybackTrackPreferences> {
+    if (window.desktopApi?.savePlaybackTrackPreferences) return window.desktopApi.savePlaybackTrackPreferences(scope, preferences, expectedProfileId);
     return fetchJson<PlaybackTrackPreferences>('/api/playback-track-preferences', {
       method: 'POST',
       body: JSON.stringify({ scope, preferences }),

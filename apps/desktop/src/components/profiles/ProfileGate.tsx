@@ -1,68 +1,140 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
-import LoomLogo from '@/components/LoomLogo';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, Check, ImagePlus, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useProfiles } from '@/contexts/ProfileContext';
-import type { ProfileSummary } from '@/lib/desktopApi';
+import { desktopApi, type ProfileSummary } from '@/lib/desktopApi';
 import ProfileAvatar, { PROFILE_AVATAR_KEYS, PROFILE_COLOR_KEYS, PROFILE_COLOR_PRESETS } from './ProfileAvatar';
+import PinDigitInput from './PinDigitInput';
 
 type GateMode = 'select' | 'edit';
 type EditorTarget = ProfileSummary | 'new';
 
 /**
  * Full-window profile gate: the Who's Watching picker, its in-place Edit
- * profiles mode, and the focused profile detail editor. Rendered instead of
- * the app shell, never over it.
+ * profiles mode, and the focused profile detail editor. It is the startup
+ * surface and becomes an overlay when opened from an active profile.
  */
 export default function ProfileGate() {
-  const { profiles, selectProfile } = useProfiles();
+  const { activeProfile, canManageProfiles, closeGate, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
+  const [pinTarget, setPinTarget] = useState<ProfileSummary | null>(null);
+  const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const focusRestoreId = useRef<string | null>(null);
+  const canManage = canManageProfiles;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      if (editorTarget) setEditorTarget(null);
-      else if (mode === 'edit') setMode('select');
+      if (event.key === 'Escape') {
+        if (pinTarget) setPinTarget(null);
+        else if (editorTarget) setEditorTarget(null);
+        else if (mode === 'edit') setMode('select');
+        else if (activeProfile) closeGate();
+        return;
+      }
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLSelectElement) return;
+      const controls = [...document.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+        .filter((button) => button.offsetParent !== null);
+      if (controls.length === 0) return;
+      const current = activeElement instanceof HTMLButtonElement ? activeElement : controls[0];
+      const origin = current.getBoundingClientRect();
+      const originX = origin.left + origin.width / 2;
+      const originY = origin.top + origin.height / 2;
+      const candidates = controls.filter((button) => {
+        if (button === current) return false;
+        const rect = button.getBoundingClientRect();
+        const dx = rect.left + rect.width / 2 - originX;
+        const dy = rect.top + rect.height / 2 - originY;
+        return event.key === 'ArrowLeft' ? dx < -4
+          : event.key === 'ArrowRight' ? dx > 4
+            : event.key === 'ArrowUp' ? dy < -4
+              : dy > 4;
+      });
+      const next = candidates.sort((a, b) => {
+        const score = (button: HTMLButtonElement) => {
+          const rect = button.getBoundingClientRect();
+          const dx = Math.abs(rect.left + rect.width / 2 - originX);
+          const dy = Math.abs(rect.top + rect.height / 2 - originY);
+          return event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? dx + dy * 2 : dy + dx * 2;
+        };
+        return score(a) - score(b);
+      })[0];
+      if (next) {
+        event.preventDefault();
+        next.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editorTarget, mode]);
+  }, [activeProfile, closeGate, editorTarget, mode, pinTarget]);
 
   const handleSelect = useCallback(async (profile: ProfileSummary) => {
+    focusRestoreId.current = profile.id;
     setBusyProfileId(profile.id);
     try {
+      if (profile.hasPin) {
+        setPinTarget(profile);
+        return;
+      }
       await selectProfile(profile.id);
     } finally {
       setBusyProfileId(null);
     }
   }, [selectProfile]);
 
+  useEffect(() => {
+    if (editorTarget || pinTarget || !focusRestoreId.current) return;
+    const profileId = focusRestoreId.current;
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-profile-id="${CSS.escape(profileId)}"]`)?.focus());
+  }, [editorTarget, pinTarget]);
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
-      <header className="flex items-center justify-between p-6">
-        <LoomLogo className="h-8 w-auto" />
-        {!editorTarget && (mode === 'select' ? (
+      <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
+        {mode === 'select' && activeProfile && !editorTarget && !pinTarget ? (
           <button
             type="button"
-            onClick={() => setMode('edit')}
-            className="rounded-lg border border-[var(--loom-surface-3)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
+            onClick={closeGate}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-surface-3)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
           >
-            Edit Profiles
+            <ArrowLeft className="h-4 w-4" />
+            Back
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setMode('select')}
-            className="rounded-lg bg-[var(--loom-accent)] px-5 py-2 text-sm font-bold uppercase tracking-wide text-[var(--loom-accent-foreground)] transition-opacity hover:opacity-90"
-          >
-            Done
-          </button>
-        ))}
+        ) : <span />}
+        {!editorTarget && !pinTarget && (
+          <div className="flex items-center gap-3">
+            {mode === 'select' && canManage && (
+              <button
+                type="button"
+                onClick={() => setMode('edit')}
+                className="rounded-lg border border-[var(--loom-surface-3)] px-5 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
+              >
+                Edit Profiles
+              </button>
+            )}
+            {mode === 'edit' && (
+              <button type="button" onClick={() => setMode('select')} className="rounded-lg bg-[var(--loom-accent)] px-5 py-2 text-sm font-bold uppercase tracking-wide text-[var(--loom-accent-foreground)] hover:opacity-90">
+                Done
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
-      {editorTarget ? (
+      {pinTarget ? (
+        <ProfilePinPad
+          profile={pinTarget}
+          onBack={() => setPinTarget(null)}
+          onSubmit={async (pin) => {
+            await selectProfile(pinTarget.id, pin);
+            setPinTarget(null);
+          }}
+          onResetOwner={pinTarget.type === 'owner' ? resetOwnerProfile : undefined}
+        />
+      ) : editorTarget ? (
         <ProfileDetailEditor
           target={editorTarget}
           onClose={() => setEditorTarget(null)}
@@ -77,20 +149,53 @@ export default function ProfileGate() {
           )}
           {mode === 'select' && <div className="mb-8" />}
           <div className="flex max-w-[900px] flex-wrap items-start justify-center gap-[clamp(16px,3vw,44px)]">
-            {profiles.map((profile) => (
+            {profiles.filter((profile) => !profile.isGuest).map((profile, index, permanentProfiles) => (
               <ProfileCard
                 key={profile.id}
                 profile={profile}
+                active={profile.id === activeProfile?.id}
                 editMode={mode === 'edit'}
                 busy={busyProfileId === profile.id}
                 onClick={() => {
+                  focusRestoreId.current = profile.id;
                   if (mode === 'edit') setEditorTarget(profile);
                   else void handleSelect(profile);
                 }}
+                move={mode === 'edit' && canManage ? {
+                  canMoveBack: index > 0,
+                  canMoveForward: index < permanentProfiles.length - 1,
+                  onMoveBack: () => void reorderProfiles([
+                    ...permanentProfiles.slice(0, index - 1).map((item) => item.id),
+                    profile.id,
+                    permanentProfiles[index - 1].id,
+                    ...permanentProfiles.slice(index + 1).map((item) => item.id),
+                  ]),
+                  onMoveForward: () => void reorderProfiles([
+                    ...permanentProfiles.slice(0, index).map((item) => item.id),
+                    permanentProfiles[index + 1].id,
+                    profile.id,
+                    ...permanentProfiles.slice(index + 2).map((item) => item.id),
+                  ]),
+                } : undefined}
               />
             ))}
-            <AddProfileCard onClick={() => setEditorTarget('new')} />
+            {mode === 'select' && canManage && <AddProfileCard onClick={() => setEditorTarget('new')} />}
+            {mode === 'edit' && canManage && <AddProfileCard onClick={() => setEditorTarget('new')} />}
           </div>
+          {mode === 'edit' && canManage && (
+            <button
+              type="button"
+              onClick={() => void importProfile().then((result) => setTransferMessage(
+                result.ok
+                  ? `Imported ${result.profile?.name || 'profile'} · ${result.importedProgress || 0} progress entries · ${result.importedLists || 0} list entries`
+                  : result.error || null,
+              ))}
+              className="mt-8 rounded-lg border border-[var(--loom-surface-3)] px-5 py-2.5 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
+            >
+              Import Profile
+            </button>
+          )}
+          {transferMessage && <p className="mt-3 text-center text-xs text-[var(--loom-muted)]">{transferMessage}</p>}
         </main>
       )}
     </div>
@@ -99,47 +204,169 @@ export default function ProfileGate() {
 
 function ProfileCard({
   profile,
+  active,
   editMode,
   busy,
   onClick,
+  move,
 }: {
   profile: ProfileSummary;
+  active: boolean;
   editMode: boolean;
   busy: boolean;
   onClick: () => void;
+  move?: {
+    canMoveBack: boolean;
+    canMoveForward: boolean;
+    onMoveBack: () => void;
+    onMoveForward: () => void;
+  };
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className="group flex w-[clamp(112px,12vw,200px)] flex-col items-center gap-3 rounded-xl p-2 outline-none disabled:opacity-60"
-    >
-      <span
-        className={cn(
-          'relative block aspect-square w-[clamp(88px,10vw,176px)] rounded-full transition-transform duration-150',
-          'ring-0 ring-[var(--loom-accent)] group-hover:scale-105 group-hover:ring-4 group-focus-visible:scale-105 group-focus-visible:ring-4',
-        )}
+    <div className="flex w-[clamp(112px,12vw,200px)] flex-col items-center">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        aria-current={active ? 'true' : undefined}
+        data-profile-id={profile.id}
+        className="group flex w-full flex-col items-center gap-3 rounded-xl p-2 outline-none disabled:opacity-60"
       >
-        <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} className="rounded-full" />
-        {editMode && (
-          <span className="absolute bottom-0 right-0 grid h-[clamp(30px,2.8vw,42px)] w-[clamp(30px,2.8vw,42px)] place-items-center rounded-full bg-[var(--loom-text)] text-[var(--loom-bg)] shadow-lg">
-            <Pencil className="h-[45%] w-[45%]" />
-          </span>
-        )}
-      </span>
-      <span className="flex max-w-full flex-col items-center gap-1">
-        <span className="max-w-full truncate text-base font-medium text-[var(--loom-muted)] transition-colors group-hover:text-[var(--loom-text)] group-focus-visible:text-[var(--loom-text)]">
-          {profile.name}
+        <span
+          className={cn(
+            'relative block aspect-square w-[clamp(88px,10vw,176px)] rounded-full border-4 transition-transform duration-150',
+            active ? 'border-[var(--loom-accent)] shadow-[0_0_0_2px_color-mix(in_srgb,var(--loom-accent)_35%,transparent)]' : 'border-transparent',
+            'group-hover:scale-105 group-hover:border-[var(--loom-accent)] group-focus-visible:scale-105 group-focus-visible:border-[var(--loom-accent)]',
+          )}
+        >
+          <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} className="rounded-full" />
+          {editMode && (
+            <span className="absolute bottom-0 right-0 grid h-[clamp(30px,2.8vw,42px)] w-[clamp(30px,2.8vw,42px)] place-items-center rounded-full bg-[var(--loom-text)] text-[var(--loom-bg)] shadow-lg">
+              <Pencil className="h-[45%] w-[45%]" />
+            </span>
+          )}
         </span>
-        {profile.type === 'kid' && (
-          <span className="rounded bg-[var(--loom-surface-3)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--loom-muted)]">
-            Kids
+        <span className="flex max-w-full flex-col items-center gap-1">
+          <span className="max-w-full truncate text-base font-medium text-[var(--loom-muted)] transition-colors group-hover:text-[var(--loom-text)] group-focus-visible:text-[var(--loom-text)]">
+            {profile.name}
           </span>
-        )}
-        {profile.hasPin && <Lock className="h-3.5 w-3.5 text-[var(--loom-muted)]" aria-label="PIN protected" />}
-      </span>
-    </button>
+          <span className="flex min-h-5 flex-wrap items-center justify-center gap-1">
+            {active && (
+              <span className="rounded-full bg-[var(--loom-accent)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--loom-accent-foreground)]">
+                Active
+              </span>
+            )}
+            {profile.type === 'kid' && (
+              <span className="rounded-full bg-[var(--loom-surface-3)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--loom-muted)]">
+                Kids
+              </span>
+            )}
+            {profile.hasPin && <Lock className="h-3.5 w-3.5 text-[var(--loom-muted)]" aria-label="PIN protected" />}
+          </span>
+        </span>
+      </button>
+      {move && (
+        <div className="mt-1 flex gap-1">
+          <button type="button" aria-label={`Move ${profile.name} left`} disabled={!move.canMoveBack} onClick={move.onMoveBack} className="rounded-full p-1 text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:opacity-25">
+            <ArrowLeft className="h-3.5 w-3.5" />
+          </button>
+          <button type="button" aria-label={`Move ${profile.name} right`} disabled={!move.canMoveForward} onClick={move.onMoveForward} className="rounded-full p-1 text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:opacity-25">
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfilePinPad({
+  profile,
+  onBack,
+  onSubmit,
+  onResetOwner,
+}: {
+  profile: ProfileSummary;
+  onBack: () => void;
+  onSubmit: (pin: string) => Promise<void>;
+  onResetOwner?: (confirmation: string) => Promise<void>;
+}) {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetConfirmation, setResetConfirmation] = useState('');
+
+  const submit = useCallback(async (value: string) => {
+    if (value.length !== 4 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onSubmit(value);
+    } catch {
+      setPin('');
+      setError('That PIN could not be accepted.');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, onSubmit]);
+
+  const append = useCallback((digit: string) => {
+    const next = `${pin}${digit}`.slice(0, 4);
+    setPin(next);
+    if (next.length === 4) void submit(next);
+  }, [pin, submit]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (busy || event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+      if (/^\d$/.test(event.key)) {
+        event.preventDefault();
+        append(event.key);
+      } else if (event.key === 'Backspace') {
+        event.preventDefault();
+        setPin((value) => value.slice(0, -1));
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [append, busy]);
+
+  return (
+    <main className="flex flex-1 flex-col items-center justify-center px-8 pb-[8vh]">
+      <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} className="mb-5 h-28 w-28 rounded-full" />
+      <h1 className="text-3xl font-bold">Enter PIN</h1>
+      <p className="mt-2 text-sm text-[var(--loom-muted)]">Unlock {profile.name}</p>
+      <div className="my-6 flex gap-3" aria-label={`${pin.length} of 4 digits entered`}>
+        {[0, 1, 2, 3].map((index) => (
+          <span key={index} className={`h-3 w-3 rounded-full ${index < pin.length ? 'bg-[var(--loom-text)]' : 'bg-[var(--loom-surface-3)]'}`} />
+        ))}
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        {'123456789'.split('').map((digit) => (
+          <button key={digit} type="button" onClick={() => append(digit)} disabled={busy} className="h-14 w-14 rounded-full bg-[var(--loom-surface-2)] text-xl font-semibold hover:bg-[var(--loom-surface-3)] focus-visible:ring-4 focus-visible:ring-[var(--loom-accent)]">
+            {digit}
+          </button>
+        ))}
+        <button type="button" onClick={onBack} className="h-14 w-14 rounded-full text-xs text-[var(--loom-muted)]">Back</button>
+        <button type="button" onClick={() => append('0')} disabled={busy} className="h-14 w-14 rounded-full bg-[var(--loom-surface-2)] text-xl font-semibold hover:bg-[var(--loom-surface-3)] focus-visible:ring-4 focus-visible:ring-[var(--loom-accent)]">0</button>
+        <button type="button" onClick={() => setPin((value) => value.slice(0, -1))} className="h-14 w-14 rounded-full text-xs text-[var(--loom-muted)]">Delete</button>
+      </div>
+      {error && <p className="mt-5 text-sm text-red-400">{error}</p>}
+      {onResetOwner && (
+        <div className="mt-6 flex max-w-sm flex-col items-center gap-2 text-center">
+          <button type="button" onClick={() => setShowReset((value) => !value)} className="text-xs text-[var(--loom-muted)] hover:text-[var(--loom-text)]">Forgot Owner PIN?</button>
+          {showReset && (
+            <>
+              <p className="text-xs text-[var(--loom-muted)]">This deletes the Owner’s viewing history and personal settings. Shared media and other profiles remain.</p>
+              <input value={resetConfirmation} onChange={(event) => setResetConfirmation(event.target.value)} placeholder="Type RESET" className="w-full rounded-lg border border-red-900 bg-[var(--loom-surface-2)] px-3 py-2 text-sm" />
+              <button type="button" disabled={resetConfirmation !== 'RESET'} onClick={() => void onResetOwner(resetConfirmation)} className="rounded-lg bg-red-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">Reset Owner profile</button>
+            </>
+          )}
+        </div>
+      )}
+    </main>
   );
 }
 
@@ -161,24 +388,76 @@ function AddProfileCard({ onClick }: { onClick: () => void }) {
 }
 
 function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClose: () => void }) {
-  const { createProfile, updateProfile, deleteProfile } = useProfiles();
+  const {
+    activeProfile,
+    activeState,
+    changeProfilePin,
+    createProfile,
+    deleteProfile,
+    exportProfile,
+    getRestrictions,
+    resetOwnerProfile,
+    saveRestrictions,
+    setAutomaticSignIn,
+    updateProfile,
+  } = useProfiles();
   const isNew = target === 'new';
   const existing = isNew ? null : target;
   const [name, setName] = useState(existing?.name || '');
   const [avatarKey, setAvatarKey] = useState(existing?.avatarKey || PROFILE_AVATAR_KEYS[0]);
   const [colorKey, setColorKey] = useState(existing?.colorKey || PROFILE_COLOR_KEYS[0]);
   const [isKid, setIsKid] = useState(existing?.type === 'kid');
+  const [pin, setPin] = useState('');
+  const [removePin, setRemovePin] = useState(false);
+  const [country, setCountry] = useState<'US' | 'GB' | 'CA' | 'AU'>('US');
+  const [maximumAge, setMaximumAge] = useState<number | null>(existing?.type === 'kid' ? 13 : null);
+  const [allowUnrated, setAllowUnrated] = useState(false);
+  const [allowedFolders, setAllowedFolders] = useState<string[]>([]);
+  const [folderOptions, setFolderOptions] = useState<string[]>([]);
+  const [ownerResetConfirmation, setOwnerResetConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const isOwner = existing?.type === 'owner';
+
+  const chooseCustomAvatar = async () => {
+    if (avatarBusy) return;
+    setAvatarBusy(true);
+    setError(null);
+    try {
+      const selected = await desktopApi.chooseProfileAvatar();
+      if (selected) setAvatarKey(selected);
+    } catch (avatarError) {
+      setError(avatarError instanceof Error ? avatarError.message : 'The profile image could not be selected.');
+    } finally {
+      setAvatarBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void desktopApi.getLibrary().then((library) => setFolderOptions(library.libraryFolders || []));
+    if (!existing) return;
+    void getRestrictions(existing.id).then((restrictions) => {
+      setCountry(restrictions.country);
+      setMaximumAge(restrictions.maximumAge);
+      setAllowUnrated(restrictions.allowUnrated);
+      setAllowedFolders(restrictions.allowedFolders);
+    });
+  }, [existing, getRestrictions]);
 
   const handleSave = async () => {
     setBusy(true);
     setError(null);
+    let createdProfileId: string | null = null;
     try {
+      if (isKid && maximumAge === null) throw new Error('Choose a maximum age for this Kids profile.');
+      if (pin && !/^\d{4}$/.test(pin)) throw new Error('A profile PIN must contain exactly four digits.');
+      let savedProfile = existing;
       if (isNew) {
-        await createProfile({ name, avatarKey, colorKey, type: isKid ? 'kid' : 'standard' });
+        savedProfile = await createProfile({ name, avatarKey, colorKey, type: isKid ? 'kid' : 'standard' });
+        createdProfileId = savedProfile.id;
       } else if (existing) {
         await updateProfile(existing.id, {
           name,
@@ -187,8 +466,17 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
           ...(isOwner ? {} : { type: isKid ? 'kid' as const : 'standard' as const }),
         });
       }
+      if (savedProfile && isKid) {
+        await saveRestrictions(savedProfile.id, { country, maximumAge, allowUnrated, allowedFolders });
+      }
+      if (savedProfile && (pin || removePin)) {
+        await changeProfilePin(savedProfile.id, removePin ? null : pin);
+      }
       onClose();
     } catch (saveError) {
+      if (createdProfileId) {
+        try { await deleteProfile(createdProfileId); } catch { /* Preserve the original save error. */ }
+      }
       setError(saveError instanceof Error ? saveError.message : 'The profile could not be saved.');
     } finally {
       setBusy(false);
@@ -246,6 +534,19 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => void chooseCustomAvatar()}
+              disabled={avatarBusy}
+              aria-pressed={avatarKey.startsWith('data:image/')}
+              className={cn(
+                'mt-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5 text-sm text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)] disabled:opacity-50',
+                avatarKey.startsWith('data:image/') && 'border-[var(--loom-accent)] text-[var(--loom-text)]',
+              )}
+            >
+              <ImagePlus className="h-4 w-4" />
+              {avatarBusy ? 'Opening…' : avatarKey.startsWith('data:image/') ? 'Change uploaded image' : 'Upload your own image'}
+            </button>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -262,7 +563,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                     'grid h-8 w-8 place-items-center rounded-full transition-transform hover:scale-110',
                     colorKey === key && 'ring-2 ring-[var(--loom-text)] ring-offset-2 ring-offset-[var(--loom-bg)]',
                   )}
-                  style={{ background: `linear-gradient(135deg, ${PROFILE_COLOR_PRESETS[key][0]}, ${PROFILE_COLOR_PRESETS[key][1]})` }}
+                  style={{ backgroundColor: PROFILE_COLOR_PRESETS[key] }}
                 >
                   {colorKey === key && <Check className="h-4 w-4 text-white" />}
                 </button>
@@ -274,9 +575,86 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
             <label className="flex items-center justify-between rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5">
               <span className="flex flex-col">
                 <span className="text-sm font-medium">Kids profile</span>
-                <span className="text-xs text-[var(--loom-muted)]">Content restrictions arrive in a later update.</span>
+                <span className="text-xs text-[var(--loom-muted)]">Only content within the selected maturity level is available.</span>
               </span>
               <input type="checkbox" checked={isKid} onChange={(event) => setIsKid(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />
+            </label>
+          )}
+
+          {isKid && (
+            <div className="grid grid-cols-2 gap-3 rounded-lg border border-[var(--loom-surface-3)] p-3">
+              <label className="flex flex-col gap-1 text-xs text-[var(--loom-muted)]">
+                Rating country
+                <select value={country} onChange={(event) => setCountry(event.target.value as typeof country)} className="rounded-md bg-[var(--loom-surface-2)] p-2 text-sm text-[var(--loom-text)]">
+                  <option value="US">United States</option>
+                  <option value="GB">United Kingdom</option>
+                  <option value="CA">Canada</option>
+                  <option value="AU">Australia</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-[var(--loom-muted)]">
+                Maximum age
+                <select value={maximumAge ?? ''} onChange={(event) => setMaximumAge(event.target.value ? Number(event.target.value) : null)} className="rounded-md bg-[var(--loom-surface-2)] p-2 text-sm text-[var(--loom-text)]">
+                  <option value="" disabled>Choose</option>
+                  {[0, 7, 8, 12, 13, 14, 15, 16, 17, 18].map((age) => <option key={age} value={age}>{age === 0 ? 'All ages' : `${age} and under`}</option>)}
+                </select>
+              </label>
+              <label className="col-span-2 flex items-center justify-between text-sm">
+                Allow unrated content
+                <input type="checkbox" checked={allowUnrated} onChange={(event) => setAllowUnrated(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />
+              </label>
+              {folderOptions.length > 0 && (
+                <div className="col-span-2 border-t border-[var(--loom-surface-3)] pt-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Library access</p>
+                  <label className="mb-2 flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={allowedFolders.length === 0} onChange={() => setAllowedFolders([])} className="accent-[var(--loom-accent)]" />
+                    All library folders
+                  </label>
+                  <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
+                    {folderOptions.map((folder) => {
+                      const checked = allowedFolders.length === 0 || allowedFolders.includes(folder);
+                      return (
+                        <label key={folder} className="flex items-center gap-2 text-xs text-[var(--loom-muted)]">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setAllowedFolders((current) => {
+                              const explicit = current.length === 0 ? [...folderOptions] : current;
+                              return checked ? explicit.filter((item) => item !== folder) : [...explicit, folder];
+                            })}
+                            className="accent-[var(--loom-accent)]"
+                          />
+                          <span className="truncate" title={folder}>{folder}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">{existing?.hasPin ? 'Change PIN' : 'Profile PIN'}</span>
+            <PinDigitInput
+              value={pin}
+              onChange={(value) => { setPin(value); setRemovePin(false); }}
+              label={existing?.hasPin ? 'Change four-digit profile PIN' : 'Optional four-digit profile PIN'}
+            />
+            <span className="text-xs text-[var(--loom-muted)]">
+              {existing?.hasPin ? 'Leave all four boxes empty to keep the current PIN.' : 'Optional'}
+            </span>
+            {existing?.hasPin && (
+              <button type="button" onClick={() => { setRemovePin(true); setPin(''); }} className="self-start text-xs text-[var(--loom-muted)] hover:text-red-400">
+                {removePin ? 'PIN will be removed when saved' : 'Remove PIN'}
+              </button>
+            )}
+          </div>
+
+          {existing && existing.id === activeProfile?.id && !existing.hasPin && !existing.isGuest && (
+            <label className="flex items-center justify-between rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5">
+              <span className="text-sm">Automatically sign in on this device</span>
+              <input type="checkbox" checked={activeState.automaticSignIn} onChange={(event) => void setAutomaticSignIn(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />
             </label>
           )}
 
@@ -286,7 +664,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={busy || !name.trim()}
+              disabled={busy || !name.trim() || Boolean(pin && pin.length !== 4) || (isKid && maximumAge === null)}
               className="rounded-lg bg-[var(--loom-accent)] px-6 py-2.5 text-sm font-bold uppercase tracking-wide text-[var(--loom-accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               Save
@@ -300,6 +678,20 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
               Cancel
             </button>
           </div>
+
+          {existing && !existing.isGuest && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void exportProfile(existing.id).then((result) => setTransferMessage(
+                result.ok ? `Exported to ${result.path || 'the selected file'}` : result.error || null,
+              ))}
+              className="self-start text-xs font-medium text-[var(--loom-muted)] hover:text-[var(--loom-text)]"
+            >
+              Export Profile
+            </button>
+          )}
+          {transferMessage && <p className="text-xs text-[var(--loom-muted)]">{transferMessage}</p>}
 
           {existing && !isOwner && (
             <div className="mt-4 border-t border-[var(--loom-surface-3)] pt-4">
@@ -335,6 +727,14 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                   <Trash2 className="h-4 w-4" /> Delete profile
                 </button>
               )}
+            </div>
+          )}
+
+          {isOwner && existing && existing.hasPin && (
+            <div className="mt-4 border-t border-[var(--loom-surface-3)] pt-4">
+              <p className="mb-2 text-xs text-[var(--loom-muted)]">Forgotten PIN recovery deletes only the Owner’s personal data. Your library, server settings, paired devices, and other profiles remain.</p>
+              <input value={ownerResetConfirmation} onChange={(event) => setOwnerResetConfirmation(event.target.value)} placeholder="Type RESET" className="mb-2 w-full rounded-lg border border-red-900 bg-[var(--loom-surface-2)] px-3 py-2 text-sm" />
+              <button type="button" disabled={ownerResetConfirmation !== 'RESET' || busy} onClick={() => void resetOwnerProfile(ownerResetConfirmation).then(onClose)} className="rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Reset Owner profile</button>
             </div>
           )}
         </div>

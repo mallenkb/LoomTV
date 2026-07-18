@@ -12,8 +12,9 @@ import {
   remoteMatchesAnyLocalTitle,
   uniqueLocalTitles,
 } from './metadata/helpers.ts';
-import type { EpisodeMeta, MediaItem } from './metadata/types.ts';
-import type { OMDbResponse } from './metadata/omdb.ts';
+import type { ContentRating, EpisodeMeta, MediaItem } from './metadata/types.ts';
+import { omdbContentRatings, type OMDbResponse } from './metadata/omdb.ts';
+import { mergeContentRatings } from './metadata/contentRatings.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import type { MetadataProviderIds } from './mediaTags.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
@@ -29,6 +30,7 @@ export type OfficialArtworkRefreshResult = {
   backdropCandidates?: string[];
   logo?: string;
   logoCandidates?: string[];
+  contentRatings?: Record<string, ContentRating>;
 };
 
 export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
@@ -181,6 +183,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       backdropCandidates,
       logo: logoCandidates[0] || '',
       logoCandidates,
+      contentRatings: metadata.contentRatings,
     };
     if (!candidateWithoutId.title && !candidateWithoutId.thumbnail && !candidateWithoutId.cover) return null;
     return { ...candidateWithoutId, id: metadataCandidateId(candidateWithoutId) };
@@ -196,6 +199,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       backdrop: poster,
       summary: metadata.Plot && metadata.Plot !== 'N/A' ? metadata.Plot : '',
       rating: numericRating(metadata.imdbRating),
+      contentRatings: omdbContentRatings(metadata),
       genres: metadata.Genre && metadata.Genre !== 'N/A' ? String(metadata.Genre).split(',').map((genre) => genre.trim()) : [],
     }, fallbackTitle);
   }
@@ -448,6 +452,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         cover: backdropCandidates[0] || posterCandidates[0] || '',
         summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
+        contentRatings: mergeContentRatings(tmdbMeta?.contentRatings, omdbContentRatings(omdbMeta)),
         posterCandidates,
         backdropCandidates,
         logo: logoCandidates[0] || '',
@@ -502,6 +507,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       cover: backdropCandidates[0] || posterCandidates[0] || '',
       summary: tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
       rating: showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
+      contentRatings: mergeContentRatings(
+        tmdbMeta?.contentRatings,
+        likelyAnime ? matchedJikan?.contentRatings : undefined,
+        omdbContentRatings(omdbMeta),
+      ),
       episodes,
       episodeSource,
       posterCandidates,
@@ -527,6 +537,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (candidate.summary) target.summary = candidate.summary;
     if (candidate.rating) target.rating = candidate.rating;
     if (candidate.genres?.length) target.genres = candidate.genres;
+    if (candidate.contentRatings) target.contentRatings = candidate.contentRatings;
     mergeEpisodeMetadataForTarget(target, candidate.episodes, candidate.source);
     target.posterCandidates = orderedArtworkCandidates(
       ...(candidate.posterCandidates || []),
@@ -554,6 +565,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       cover: candidate.cover || target.backdrop || candidate.thumbnail || target.poster || '',
       summary: candidate.summary || target.summary || '',
       rating: candidate.rating || target.rating || 0,
+      contentRatings: candidate.contentRatings || target.contentRatings,
       episodes: target.type === 'movie' ? undefined : target.episodes,
       episodeSource: candidate.source,
       posterCandidates: target.posterCandidates || [],
@@ -581,12 +593,13 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
 
     const refreshed = await fetchOfficialArtworkForItem(target);
-    if (refreshed.thumbnail || refreshed.cover || refreshed.logo || refreshed.summary || refreshed.rating || refreshed.episodes?.length) {
+    if (refreshed.thumbnail || refreshed.cover || refreshed.logo || refreshed.summary || refreshed.rating || refreshed.contentRatings || refreshed.episodes?.length) {
       if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
       if (refreshed.cover) target.backdrop = refreshed.cover;
       if (refreshed.logo) target.logo = refreshed.logo;
       if (refreshed.summary) target.summary = refreshed.summary;
       if (refreshed.rating) target.rating = refreshed.rating;
+      if (refreshed.contentRatings) target.contentRatings = refreshed.contentRatings;
       mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
       target.posterCandidates = orderedArtworkCandidates(
         ...(refreshed.posterCandidates || []),
