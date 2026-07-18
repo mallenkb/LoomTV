@@ -173,7 +173,7 @@ test('the profiles migration backfills legacy viewer state onto the Owner exactl
     assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n, 2);
 
     const ledger = database.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
-    assert.deepEqual(ledger.map((row) => row.version), [0, 1]);
+    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2]);
   } finally {
     database.close();
   }
