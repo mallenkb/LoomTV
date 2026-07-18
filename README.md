@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.54](docs/releases/v1.0.54.md): aligns desktop theme verification with the neutral light and dark palettes used by the app.
 - [LoomTV 1.0.53](docs/releases/v1.0.53.md): refreshes the desktop identity and interface, hardens local renderer access, and improves LAN pairing, updates, subtitles, and playback controls.
 - [Loom Media Server 1.0.52](docs/releases/v1.0.52.md): fixes ad-hoc macOS release signing so Electron Framework loads correctly on launch.
 - [Loom Media Server 1.0.51](docs/releases/v1.0.51.md): rebuilds the desktop SQLite native module against Electron before packaging.

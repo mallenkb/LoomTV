@@ -17,7 +17,7 @@ export function filePathFromUrl(value: string): string {
     const parsed = new URL(value);
     return parsed.searchParams.get('resourceId') || '';
   } catch {
-    return /^[A-Za-z0-9_-]{43}$/.test(value) ? value : '';
+    return /^\d{6}$/.test(value) ? value : '';
   }
 }
 
