@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import * as Brightness from 'expo-brightness';
+import * as Device from 'expo-device';
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
 import {
   ActivityIndicator,
@@ -85,8 +86,9 @@ import {
 import { createMobileLanClient } from './mobileLanClient';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
 import {
-  DEFAULT_MOBILE_THEME,
+  MOBILE_THEME_COLOR_OPTIONS,
   mobileThemeFromSettings,
+  type MobileThemeColor,
   type MobileThemeMode,
   type ResolvedMobileThemeMode,
 } from './mobileTheme';
@@ -119,7 +121,6 @@ import type {
   MediaSegment,
   MobileLibraryFilter,
   MobileSearchScope,
-  MobileThemeSettings,
   OfficialArtworkResponse,
   OfficialMetadataCandidate,
   PairResponse,
@@ -169,7 +170,23 @@ const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
 const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v2';
 const MOBILE_DEVICE_ID_KEY = 'loomtv.mobile-device-id.v1';
 const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
+const MOBILE_THEME_COLOR_KEY = 'loomtv.mobile-theme-color.v1';
+const MOBILE_SUBTITLE_FONT_SIZE_KEY = 'loomtv.mobile-subtitle-font-size.v1';
+const DEFAULT_MOBILE_SUBTITLE_FONT_SIZE = 64;
+const MOBILE_SUBTITLE_SIZE_OPTIONS = [
+  { value: 32, label: '100%' },
+  { value: 48, label: '150%' },
+  { value: 64, label: '200%' },
+  { value: 80, label: '250%' },
+  { value: 96, label: '300%' },
+];
 const mobileLanClient = createMobileLanClient();
+
+function mobileDeviceName(): string {
+  return Device.deviceName?.trim()
+    || Device.modelName?.trim()
+    || (Platform.OS === 'android' ? 'LoomTV Android' : 'LoomTV iOS');
+}
 
 type LibraryMetric = {
   key: string;
@@ -289,6 +306,11 @@ function formatDuration(seconds?: number): string {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return hours > 0 ? `${hours}h ${remainder}m` : `${minutes}m`;
+}
+
+function formatShortMinutes(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
+  return `${Math.max(1, Math.round(seconds / 60))}m`;
 }
 
 function clamp01(value: number): number {
@@ -629,7 +651,7 @@ function FallbackImage({
 }
 
 const ShimmerOverlay = memo(function ShimmerOverlay() {
-  const { styles } = useMobileTheme();
+  const { colors: { themeLabel }, styles } = useMobileTheme();
   const progress = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
 
@@ -911,13 +933,16 @@ function AppRoot() {
     outputRange: [0.985, 1],
     extrapolate: 'clamp',
   });
-  const [mobileTheme, setMobileTheme] = useState<MobileThemeColors>(DEFAULT_MOBILE_THEME);
+  const initialResolvedThemeMode: ResolvedMobileThemeMode = 'dark';
+  const [mobileTheme, setMobileTheme] = useState<MobileThemeColors>(() => (
+    mobileThemeFromSettings(undefined, initialResolvedThemeMode)
+  ));
   const [mobileThemeMode, setMobileThemeMode] = useState<MobileThemeMode>('dark');
+  const [mobileThemeColor, setMobileThemeColor] = useState<MobileThemeColor>('yellow');
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
   const resolvedMobileThemeMode: ResolvedMobileThemeMode = mobileThemeMode === 'auto'
     ? (systemColorScheme === 'light' ? 'light' : 'dark')
     : mobileThemeMode;
-  const [remoteThemeSettings, setRemoteThemeSettings] = useState<MobileThemeSettings>();
   const libraryListRef = useRef<FlatList<MediaItem> | null>(null);
   const settingsScrollRef = useRef<ScrollView | null>(null);
   const scrollOffsetsRef = useRef<Record<LibraryKind, number>>({
@@ -928,7 +953,6 @@ function AppRoot() {
     others: 0,
     settings: 0,
   });
-  const themeSyncStartedRef = useRef(false);
   const reconnectingSavedConnectionRef = useRef(false);
   const connectionHealthCheckRef = useRef(false);
   const mobileDeviceIdRef = useRef('');
@@ -970,6 +994,11 @@ function AppRoot() {
   const selectMobileTheme = useCallback((next: MobileThemeMode) => {
     setMobileThemeMode(next);
     void SecureStore.setItemAsync(MOBILE_THEME_MODE_KEY, next).catch(() => {});
+  }, []);
+
+  const selectMobileThemeColor = useCallback((next: MobileThemeColor) => {
+    setMobileThemeColor(next);
+    void SecureStore.setItemAsync(MOBILE_THEME_COLOR_KEY, next).catch(() => {});
   }, []);
 
   const rememberMainScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -1040,6 +1069,13 @@ function AppRoot() {
     void SecureStore.getItemAsync(MOBILE_THEME_MODE_KEY)
       .then((mode) => {
         if (!cancelled && (mode === 'auto' || mode === 'light' || mode === 'dark')) setMobileThemeMode(mode);
+      })
+      .catch(() => {});
+    void SecureStore.getItemAsync(MOBILE_THEME_COLOR_KEY)
+      .then((color) => {
+        if (!cancelled && MOBILE_THEME_COLOR_OPTIONS.some((option) => option.value === color)) {
+          setMobileThemeColor(color as MobileThemeColor);
+        }
       })
       .catch(() => {});
     void SecureStore.getItemAsync(SAVED_CONNECTION_KEY)
@@ -1170,20 +1206,8 @@ function AppRoot() {
   }, [playTarget]);
 
   useEffect(() => {
-    if (!connection || themeSyncStartedRef.current) return;
-    themeSyncStartedRef.current = true;
-
-    mobileLanClient.getClientConfig(connection.baseUrl, connection.deviceToken)
-      .then((response) => (response.ok ? response.json() as Promise<MobileThemeSettings> : undefined))
-      .then((settings) => {
-        if (settings) setRemoteThemeSettings(settings);
-      })
-      .catch(() => {});
-  }, [connection]);
-
-  useEffect(() => {
-    setMobileTheme(mobileThemeFromSettings(remoteThemeSettings, resolvedMobileThemeMode));
-  }, [remoteThemeSettings, resolvedMobileThemeMode]);
+    setMobileTheme(mobileThemeFromSettings({ appThemeColor: mobileThemeColor }, resolvedMobileThemeMode));
+  }, [mobileThemeColor, resolvedMobileThemeMode]);
 
   const library = connection?.library || {};
   const grouped = useMemo(() => collections(library), [library]);
@@ -1582,7 +1606,8 @@ function AppRoot() {
   }
 
   async function refreshSavedCredentials(saved: SavedConnection): Promise<SavedConnection> {
-    const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken);
+    const currentDeviceName = mobileDeviceName();
+    const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken, currentDeviceName);
     if (!response.ok) throw new Error(`Credential refresh failed (${response.status}).`);
     const payload = (await response.json()) as Pick<PairResponse,
       'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>;
@@ -1592,6 +1617,7 @@ function AppRoot() {
       accessTokenExpiresAt: payload.accessTokenExpiresAt,
       refreshToken: payload.refreshToken,
       refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
+      clientDeviceName: currentDeviceName,
     };
     await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
     setSavedConnection(updated);
@@ -1607,13 +1633,14 @@ function AppRoot() {
     setIsServerOffline(false);
     try {
       const activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
+        || saved.clientDeviceName !== mobileDeviceName()
         ? await refreshSavedCredentials(saved)
         : saved;
       const response = await mobileLanClient.getLibrary(activeSaved.baseUrl, activeSaved.deviceToken);
       if (response.status === 401) {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
-        setError('This device is no longer authorized. Select the desktop and enter its current pairing secret.');
+        setError('This device is no longer authorized. Select the desktop and enter its current 6-digit pairing PIN.');
         return;
       }
       if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
@@ -1644,16 +1671,20 @@ function AppRoot() {
       const host = discoveredHost && typeof discoveredHost.baseUrl === 'string' ? discoveredHost : undefined;
       const nextBaseUrl = normalizeBaseUrl(host?.baseUrl || baseUrl);
       const code = shareCode.trim();
-      if (!/^[A-Za-z0-9_-]{43}$/.test(code)) throw new Error('Enter the one-time pairing secret from the desktop app.');
+      if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit pairing PIN from the desktop app.');
 
       const response = await mobileLanClient.pair(nextBaseUrl, {
           code,
           deviceId: mobileDeviceIdRef.current || undefined,
-          deviceName: Platform.OS === 'android' ? 'LoomTV Android' : 'LoomTV iOS',
+          deviceName: mobileDeviceName(),
       });
       if (!response.ok) {
         if (response.status === 401) throw new Error('The sharing code was not accepted.');
-        if (response.status === 429) throw new Error('Too many failed attempts. Try again later.');
+        if (response.status === 429) {
+          const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') || '', 10);
+          const waitMinutes = Number.isFinite(retryAfterSeconds) ? Math.max(1, Math.ceil(retryAfterSeconds / 60)) : 5;
+          throw new Error(`Too many failed attempts. Wait ${waitMinutes} minutes, then use the current PIN from desktop Settings.`);
+        }
         throw new Error(`Could not pair with the desktop app (${response.status}).`);
       }
 
@@ -1667,6 +1698,7 @@ function AppRoot() {
         refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
         hostDeviceId: payload.hostDeviceId || discoveredHosts.find((host) => host.baseUrl === nextBaseUrl)?.deviceId || '',
         hostDeviceName: payload.hostDeviceName || 'Loom Media Player Desktop',
+        clientDeviceName: mobileDeviceName(),
         library: payload.library || {},
         libraryEtag: payload.libraryEtag,
       };
@@ -1679,6 +1711,7 @@ function AppRoot() {
         refreshTokenExpiresAt: nextConnection.refreshTokenExpiresAt,
         hostDeviceId: nextConnection.hostDeviceId,
         hostDeviceName: nextConnection.hostDeviceName,
+        clientDeviceName: nextConnection.clientDeviceName,
       };
       mobileDeviceIdRef.current = nextConnection.deviceId;
       await SecureStore.setItemAsync(MOBILE_DEVICE_ID_KEY, nextConnection.deviceId);
@@ -1776,7 +1809,7 @@ function AppRoot() {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
         setConnection(null);
-        setError('This device is no longer authorized. Enter the current pairing secret to pair again.');
+        setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
       if (response.status === 304) {
@@ -1876,7 +1909,7 @@ function AppRoot() {
     styles.scrollContent,
     { paddingBottom: 96 + insets.bottom, paddingTop: insets.top + 12 },
   ];
-  const canRetryPairing = isServerOffline && Boolean(baseUrl.trim()) && /^[A-Za-z0-9_-]{43}$/.test(shareCode.trim());
+  const canRetryPairing = isServerOffline && Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode.trim());
   const libraryRefreshControl = (
     <RefreshControl
       colors={[accent]}
@@ -1894,7 +1927,7 @@ function AppRoot() {
   return (
     <MobileThemeProvider value={themeContextValue}>
     <View style={styles.app}>
-      <StatusBar style={text === '#ffffff' ? 'light' : 'dark'} />
+      <StatusBar style={text !== '#000000' ? 'light' : 'dark'} />
       {!connection ? (
         <PairingScreen
           baseUrl={baseUrl}
@@ -1938,6 +1971,7 @@ function AppRoot() {
                   }}
                   isTablet={isTablet}
                   isRefreshing={isRefreshing}
+                  mobileThemeColor={mobileThemeColor}
                   mobileThemeMode={mobileThemeMode}
                   onDisconnect={() => {
                     void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
@@ -1962,6 +1996,7 @@ function AppRoot() {
                   }}
                   onRefresh={refreshLibrary}
                   onSelectTheme={selectMobileTheme}
+                  onSelectThemeColor={selectMobileThemeColor}
                   setActiveSection={setSettingsSection}
                 />
               </ScrollView>
@@ -2051,9 +2086,6 @@ function AppRoot() {
                   style={[
                     styles.homeStickyBackground,
                     {
-                      backgroundColor: resolvedMobileThemeMode === 'light'
-                        ? 'rgba(255,255,255,0.9)'
-                        : 'rgba(21,21,27,0.9)',
                       borderBottomWidth: 0,
                     },
                   ]}
@@ -2136,21 +2168,23 @@ function AppRoot() {
           setPosterCandidateSheet(null);
         }}
       />
-      <MiniPlayerStrip
-        baseUrl={connection?.baseUrl || ''}
-        cacheBust={miniPlayerTarget?.mediaId ? artworkCacheBusters[miniPlayerTarget.mediaId] : undefined}
-        target={miniPlayerTarget}
-        bottomOffset={isTablet || searchOpen ? Math.max(insets.bottom, 12) : Math.max(insets.bottom, 10) + 70}
-        onDismiss={() => setMiniPlayerTarget(null)}
-        onOpen={() => {
-          if (!miniPlayerTarget) return;
-          playerReturnItemRef.current = detailItem;
-          setStreamOptions({});
-          setPlayTarget(miniPlayerTarget);
-          setMiniPlayerTarget(null);
-          setDetailItem(null);
-        }}
-      />
+      {activeKind !== 'settings' ? (
+        <MiniPlayerStrip
+          baseUrl={connection?.baseUrl || ''}
+          cacheBust={miniPlayerTarget?.mediaId ? artworkCacheBusters[miniPlayerTarget.mediaId] : undefined}
+          target={miniPlayerTarget}
+          bottomOffset={isTablet || searchOpen ? Math.max(insets.bottom, 12) : Math.max(insets.bottom, 10) + 70}
+          onDismiss={() => setMiniPlayerTarget(null)}
+          onOpen={() => {
+            if (!miniPlayerTarget) return;
+            playerReturnItemRef.current = detailItem;
+            setStreamOptions({});
+            setPlayTarget(miniPlayerTarget);
+            setMiniPlayerTarget(null);
+            setDetailItem(null);
+          }}
+        />
+      ) : null}
       <PlayerModal
         baseUrl={connection?.baseUrl || ''}
         deviceToken={connection?.deviceToken || ''}
@@ -2200,7 +2234,7 @@ function PairingScreen({
   onPair: (host?: DiscoveredHost) => void;
 }) {
   const { colors: { accent, accentForeground, faint, text }, styles } = useMobileTheme();
-  const canPair = Boolean(baseUrl.trim()) && /^[A-Za-z0-9_-]{43}$/.test(shareCode.trim());
+  const canPair = Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode.trim());
   const [showManual, setShowManual] = useState(false);
   // Without a saved desktop, manual entry is the always-visible fallback under
   // the device list; with one, it stays behind a single link.
@@ -2325,12 +2359,14 @@ function PairingScreen({
                 value={baseUrl}
               />
               <TextInput
-                accessibilityLabel="One-time pairing secret"
+                accessibilityLabel="One-time pairing PIN"
                 autoCapitalize="none"
                 autoCorrect={false}
-                maxLength={43}
-                onChangeText={(value) => setShareCode(value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 43))}
-                placeholder="One-time pairing secret"
+                inputMode="numeric"
+                keyboardType="number-pad"
+                maxLength={6}
+                onChangeText={(value) => setShareCode(value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="6-digit pairing PIN"
                 placeholderTextColor={faint}
                 style={[styles.input, styles.codeInput]}
                 value={shareCode}
@@ -2603,8 +2639,12 @@ function BottomNav({
   activeKind: LibraryKind;
   setActiveKind: (kind: LibraryKind) => void;
 }) {
-  const { colors: { text }, styles } = useMobileTheme();
+  const { colors: { themeLabel }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
+  const isAndroid = Platform.OS === 'android';
+  const androidGlassBackground = themeLabel === 'Light'
+    ? 'rgba(255,255,255,0.42)'
+    : 'rgba(10,10,10,0.88)';
   const bottomItems: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement; isActive: boolean; onPress: () => void }[] = [
     { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive, isActive: activeKind === 'home', onPress: () => setActiveKind('home') },
     { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive, isActive: activeKind === 'anime', onPress: () => setActiveKind('anime') },
@@ -2625,24 +2665,20 @@ function BottomNav({
     </View>
   );
 
-  // iOS gets the translucent "glass" tab bar; Android stays opaque above the
-  // system navigation area.
-  if (Platform.OS === 'ios') {
-    return (
-      <BlurView
-        intensity={70}
-        tint={text === '#ffffff' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight'}
-        style={[styles.bottomNav, styles.bottomNavBlur, text !== '#ffffff' && styles.bottomNavLight, { paddingBottom: Math.max(insets.bottom, 10) }]}
-      >
-        {items}
-      </BlurView>
-    );
-  }
-
   return (
-    <View style={[styles.bottomNav, text !== '#ffffff' && styles.bottomNavLight, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+    <BlurView
+      intensity={isAndroid ? 54 : 36}
+      tint={themeLabel === 'Light' ? 'light' : 'dark'}
+      blurReductionFactor={isAndroid ? 1.5 : 4}
+      experimentalBlurMethod={isAndroid ? 'dimezisBlurView' : 'none'}
+      style={[
+        styles.bottomNav,
+        isAndroid && { backgroundColor: androidGlassBackground },
+        { paddingBottom: Math.max(insets.bottom, 10) },
+      ]}
+    >
       {items}
-    </View>
+    </BlurView>
   );
 }
 
@@ -2672,6 +2708,24 @@ function MiniPlayerStrip({
     : 'Paused';
   const content = (
     <>
+      <View pointerEvents="none" style={styles.miniPlayerArtworkBackdrop}>
+        <FallbackImage
+          sources={thumbnailSources}
+          style={styles.miniPlayerArtworkBackdropImage}
+          resizeMode="cover"
+          altFallback={<View style={styles.miniPlayerArtworkBackdropFallback} />}
+        />
+      </View>
+      <Svg pointerEvents="none" style={styles.miniPlayerArtworkScrim} width="100%" height="100%">
+        <Defs>
+          <SvgLinearGradient id="miniPlayerScrim" x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor="#171717" stopOpacity="0.98" />
+            <Stop offset="0.58" stopColor="#171717" stopOpacity="0.88" />
+            <Stop offset="1" stopColor="#171717" stopOpacity="0.64" />
+          </SvgLinearGradient>
+        </Defs>
+        <SvgRect width="100%" height="100%" fill="url(#miniPlayerScrim)" />
+      </Svg>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Resume ${target.title}`}
@@ -2690,7 +2744,7 @@ function MiniPlayerStrip({
             )}
           />
           <View style={styles.miniPlayerThumbBadge}>
-            <PlayIcon size={10} color={accentForeground} />
+            <PlayIcon size={13} color={accentForeground} />
           </View>
         </View>
         <View style={styles.miniPlayerText}>
@@ -2707,20 +2761,21 @@ function MiniPlayerStrip({
         onPress={onDismiss}
         style={({ pressed }) => [styles.miniPlayerDismiss, pressed && styles.pressed]}
       >
-        <CloseIcon size={18} color="#ffffff" />
+        <CloseIcon size={20} color="#ffffff" />
       </Pressable>
     </>
   );
 
   return (
     <View style={[styles.miniPlayerWrap, { bottom: bottomOffset }]}>
-      {Platform.OS === 'ios' ? (
-        <BlurView intensity={46} tint="systemChromeMaterialDark" style={[styles.miniPlayerStrip, styles.miniPlayerBlur]}>
-          {content}
-        </BlurView>
-      ) : (
-        <View style={styles.miniPlayerStrip}>{content}</View>
-      )}
+      <BlurView
+        experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
+        intensity={46}
+        tint="dark"
+        style={[styles.miniPlayerStrip, styles.miniPlayerBlur]}
+      >
+        {content}
+      </BlurView>
     </View>
   );
 }
@@ -2823,7 +2878,7 @@ function DetailContent({
 }) {
   const { colors: { accent, accentForeground, text }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
-  const isLightTheme = text !== '#ffffff';
+  const isLightTheme = text === '#000000';
   const entrance = useEntrance(16);
   const detailScrollY = useRef(new Animated.Value(0)).current;
   const stickyHeaderOpacity = detailScrollY.interpolate({
@@ -2868,17 +2923,22 @@ function DetailContent({
   const nextUp = useMemo(() => {
     for (const ep of episodes) {
       const state = progressStateFor(progress, ep.filePath, ep.localMetadata?.durationSeconds);
-      if (!state.watched) return { ep, inProgress: state.inProgress };
+      if (!state.watched) return { ep, state };
     }
-    return episodes.length > 0 ? { ep: episodes[0], inProgress: false } : null;
+    return episodes.length > 0
+      ? { ep: episodes[0], state: progressStateFor(progress, episodes[0].filePath, episodes[0].localMetadata?.durationSeconds) }
+      : null;
   }, [episodes, progress]);
   const movieState = progressStateFor(progress, streamPathFor(item), item.localMetadata?.durationSeconds);
 
-  const watchLabel = isSeries && nextUp
-    ? `${nextUp.inProgress ? 'Resume' : 'Watch'} ${episodeCode(nextUp.ep.season, nextUp.ep.episode)}`
-    : movieState.inProgress
-      ? 'Resume'
-      : 'Watch Now';
+  const watchProgress = isSeries && nextUp ? nextUp.state : movieState;
+  const watchPrimaryLabel = watchProgress.inProgress ? 'Resume' : isSeries ? 'Watch' : 'Watch Now';
+  const watchEpisodeLabel = isSeries && nextUp ? episodeCode(nextUp.ep.season, nextUp.ep.episode) : '';
+  const watchProgressCopy = watchProgress.inProgress && watchProgress.duration > 0
+    ? `${formatShortMinutes(watchProgress.position)} of ${formatShortMinutes(watchProgress.duration)}`
+    : '';
+  const watchMetaLabel = [watchEpisodeLabel, watchProgressCopy].filter(Boolean).join(' · ');
+  const watchProgressWidth = `${Math.round(watchProgress.fraction * 100)}%` as `${number}%`;
   const onPressPlay = () => {
     if (isSeries && nextUp) {
       onPlay(episodePlayTarget(item, nextUp.ep, progress));
@@ -2921,7 +2981,7 @@ function DetailContent({
       }}
       style={[styles.overlay, entrance]}
     >
-      <StatusBar style={text === '#ffffff' ? 'light' : 'dark'} />
+      <StatusBar style={text !== '#000000' ? 'light' : 'dark'} />
       <Animated.ScrollView
         contentContainerStyle={[styles.detailScroll, { paddingBottom: detailBottomPadding }]}
         onScroll={Animated.event(
@@ -2957,13 +3017,21 @@ function DetailContent({
 
           <PressableScale
             scaleTo={0.97}
-            style={[styles.playButton, text !== '#ffffff' && styles.playButtonLight]}
+            style={styles.playButton}
             onPress={onPressPlay}
             accessibilityRole="button"
-            accessibilityLabel={`${watchLabel} ${item.title}`}
+            accessibilityLabel={`${watchPrimaryLabel}${watchMetaLabel ? ` ${watchMetaLabel}` : ''} ${item.title}`}
           >
-              <PlayIcon size={22} color={text !== '#ffffff' ? '#ffffff' : accentForeground} />
-            <Text style={[styles.playButtonText, text !== '#ffffff' && styles.playButtonTextLight]}>{watchLabel}</Text>
+            {watchProgress.fraction > 0 ? (
+              <View pointerEvents="none" style={[styles.playButtonProgress, { width: watchProgressWidth }]} />
+            ) : null}
+            <View style={styles.playButtonContent}>
+              <PlayIcon size={22} color={accentForeground} />
+              <View style={styles.playButtonCopy}>
+                <Text style={styles.playButtonText}>{watchPrimaryLabel}</Text>
+                {watchMetaLabel ? <Text style={styles.playButtonMeta}>{watchMetaLabel}</Text> : null}
+              </View>
+            </View>
           </PressableScale>
           {artworkRefreshError ? <Text selectable style={styles.detailErrorText}>{artworkRefreshError}</Text> : null}
 
@@ -3568,6 +3636,7 @@ function PlayerContent({
   const [nativeSubtitleTracks, setNativeSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [activeAudioKey, setActiveAudioKey] = useState('');
   const [activeSubtitleKey, setActiveSubtitleKey] = useState('off');
+  const [subtitleFontSize, setSubtitleFontSize] = useState(DEFAULT_MOBILE_SUBTITLE_FONT_SIZE);
   const [mediaSegments, setMediaSegments] = useState<MediaSegment[]>([]);
   const recoveryAction = failure ? recoveryActionFor(failure) : null;
   const [trackPreferences, setTrackPreferences] = useState<PlaybackTrackPreferences>({});
@@ -3583,6 +3652,20 @@ function PlayerContent({
   const volumeRef = useRef(1);
   const restoreBrightnessRef = useRef<number | null>(null);
   const gestureHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void SecureStore.getItemAsync(MOBILE_SUBTITLE_FONT_SIZE_KEY).then((storedValue) => {
+      if (cancelled) return;
+      const parsedValue = Number(storedValue);
+      if (MOBILE_SUBTITLE_SIZE_OPTIONS.some((option) => option.value === parsedValue)) {
+        setSubtitleFontSize(parsedValue);
+      }
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -3920,8 +4003,10 @@ function PlayerContent({
       options.subtitleTrackIndex = subtitleOption.localTrack.index;
       options.subtitleStreamOrdinal = subtitleOption.streamOrdinal || 0;
       options.subtitleCodec = subtitleOption.localTrack.codec;
+      options.subtitleStyle = { fontSize: subtitleFontSize };
     } else if (subtitleOption?.sidecar) {
       options.subtitleFilePath = filePathFromUrl(subtitleOption.sidecar.url);
+      options.subtitleStyle = { fontSize: subtitleFontSize };
     }
 
     const needsServerVariant = target.transcode
@@ -3940,6 +4025,23 @@ function PlayerContent({
   const requestSelectionStream = (audioKey: string, subtitleKey: string) => {
     const startSeconds = Number(player.currentTime || position || 0);
     onStreamOptionsChange(streamOptionsForSelection(audioKey, subtitleKey, startSeconds) || {});
+  };
+
+  const selectSubtitleFontSize = (fontSize: number) => {
+    bumpControls();
+    setSubtitleFontSize(fontSize);
+    void SecureStore.setItemAsync(MOBILE_SUBTITLE_FONT_SIZE_KEY, String(fontSize)).catch(() => {});
+
+    const subtitleOption = subtitleOptions.find((option) => option.key === activeSubtitleKey);
+    if (!subtitleOption?.localTrack && !subtitleOption?.sidecar) return;
+    const startSeconds = Number(player.currentTime || position || 0);
+    const nextOptions = streamOptionsForSelection(
+      activeAudioKey || audioOptions[0]?.key || '',
+      activeSubtitleKey,
+      startSeconds,
+    );
+    if (nextOptions?.subtitleStyle) nextOptions.subtitleStyle.fontSize = fontSize;
+    onStreamOptionsChange(nextOptions || {});
   };
 
   const applyNativeTrackSelection = (audioKey: string, subtitleKey: string) => {
@@ -3984,6 +4086,7 @@ function PlayerContent({
       scope: preferenceScope,
       audio: nextAudioKey,
       subtitle: nextSubtitleKey,
+      subtitleFontSize,
       preference: trackPreferences,
       audioOptions: audioOptions.map((option) => option.key),
       subtitleOptions: subtitleOptions.map((option) => option.key),
@@ -4010,6 +4113,7 @@ function PlayerContent({
     preferenceScope,
     streamOptionsForSelection,
     subtitleOptions,
+    subtitleFontSize,
     target.subtitles?.length,
     trackPreferences,
   ]);
@@ -4318,6 +4422,14 @@ function PlayerContent({
                       )
                     ) : (
                       <>
+                        <View style={styles.playerSettingBlock}>
+                          <Text style={styles.playerSettingLabel}>Subtitle size:</Text>
+                          <PlayerSegmentedControl
+                            options={MOBILE_SUBTITLE_SIZE_OPTIONS}
+                            value={subtitleFontSize}
+                            onChange={selectSubtitleFontSize}
+                          />
+                        </View>
                         <PlayerMenuRow
                           label="Off"
                           selected={activeSubtitleKey === 'off'}
@@ -4398,10 +4510,12 @@ function SettingsScreen({
   counts,
   isTablet,
   isRefreshing,
+  mobileThemeColor,
   mobileThemeMode,
   onDisconnect,
   onRefresh,
   onSelectTheme,
+  onSelectThemeColor,
   setActiveSection,
 }: {
   activeSection: SettingsSection | null;
@@ -4409,10 +4523,12 @@ function SettingsScreen({
   counts: Record<'anime' | 'tv' | 'movies' | 'others', number>;
   isTablet: boolean;
   isRefreshing: boolean;
+  mobileThemeColor: MobileThemeColor;
   mobileThemeMode: MobileThemeMode;
   onDisconnect: () => void;
   onRefresh: () => void;
   onSelectTheme: (mode: MobileThemeMode) => void;
+  onSelectThemeColor: (color: MobileThemeColor) => void;
   setActiveSection: (section: SettingsSection | null) => void;
 }) {
   const { colors: { accent, muted }, styles } = useMobileTheme();
@@ -4438,7 +4554,6 @@ function SettingsScreen({
           counts={counts}
           isTablet={isTablet}
           isRefreshing={isRefreshing}
-          onDisconnect={onDisconnect}
           onRefresh={onRefresh}
         />
       </View>
@@ -4477,16 +4592,39 @@ function SettingsScreen({
               </Pressable>
             )}
             {section.id === 'appearance' ? (
-              <MobileThemePicker mode={mobileThemeMode} onSelectTheme={onSelectTheme} />
+              <MobileThemePicker
+                color={mobileThemeColor}
+                mode={mobileThemeMode}
+                onSelectColor={onSelectThemeColor}
+                onSelectTheme={onSelectTheme}
+              />
             ) : null}
           </Fragment>
         ))}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Disconnect device"
+          style={({ pressed }) => [styles.settingsDangerButton, styles.settingsDisconnectButton, pressed && styles.pressed]}
+          onPress={onDisconnect}
+        >
+          <Text style={styles.settingsDangerButtonText}>Disconnect device</Text>
+        </Pressable>
       </View>
     </View>
   );
 }
 
-function MobileThemePicker({ mode, onSelectTheme }: { mode: MobileThemeMode; onSelectTheme: (mode: MobileThemeMode) => void }) {
+function MobileThemePicker({
+  color,
+  mode,
+  onSelectColor,
+  onSelectTheme,
+}: {
+  color: MobileThemeColor;
+  mode: MobileThemeMode;
+  onSelectColor: (color: MobileThemeColor) => void;
+  onSelectTheme: (mode: MobileThemeMode) => void;
+}) {
   const { colors: { accent, muted }, styles } = useMobileTheme();
   const options: { value: MobileThemeMode; label: string; Icon: (props: IconProps) => ReactElement }[] = [
     { value: 'auto', label: 'Auto', Icon: AutoThemeIcon },
@@ -4521,6 +4659,30 @@ function MobileThemePicker({ mode, onSelectTheme }: { mode: MobileThemeMode; onS
           );
         })}
       </View>
+      <View style={styles.settingsThemeDivider} />
+      <Text selectable style={styles.settingsThemeColorTitle}>Theme</Text>
+      <View style={styles.settingsThemeColorOptions}>
+        {MOBILE_THEME_COLOR_OPTIONS.map((option) => {
+          const selected = color === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="radio"
+              accessibilityLabel={`${option.label} theme color`}
+              accessibilityState={{ selected }}
+              onPress={() => onSelectColor(option.value)}
+              style={({ pressed }) => [
+                styles.settingsThemeColorOption,
+                selected && styles.settingsThemeColorOptionActive,
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={[styles.settingsThemeColorSwatch, { backgroundColor: option.color }]} />
+              <Text selectable style={styles.settingsThemeColorLabel}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -4531,7 +4693,6 @@ function SettingsDetail({
   counts,
   isTablet,
   isRefreshing,
-  onDisconnect,
   onRefresh,
 }: {
   section: { id: SettingsSection; label: string; description: string };
@@ -4539,7 +4700,6 @@ function SettingsDetail({
   counts: Record<'anime' | 'tv' | 'movies' | 'others', number>;
   isTablet: boolean;
   isRefreshing: boolean;
-  onDisconnect: () => void;
   onRefresh: () => void;
 }) {
   const { styles } = useMobileTheme();
@@ -4594,9 +4754,6 @@ function SettingsDetail({
           <Text selectable style={styles.settingsCardCopy}>{connection.hostDeviceName}</Text>
           <Text selectable style={styles.settingsValue}>{connection.baseUrl}</Text>
         </View>
-        <Pressable style={styles.settingsDangerButton} onPress={onDisconnect}>
-          <Text style={styles.settingsDangerButtonText}>Disconnect device</Text>
-        </Pressable>
       </View>
     );
   }

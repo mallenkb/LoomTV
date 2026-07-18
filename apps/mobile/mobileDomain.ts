@@ -86,13 +86,14 @@ export type Connection = {
   refreshTokenExpiresAt: number;
   hostDeviceId: string;
   hostDeviceName: string;
+  clientDeviceName: string;
   library: LibraryPayload;
   libraryEtag: string;
 };
 
 export type SavedConnection = Pick<Connection,
   'baseUrl' | 'deviceId' | 'deviceToken' | 'accessTokenExpiresAt' | 'refreshToken' |
-  'refreshTokenExpiresAt' | 'hostDeviceId' | 'hostDeviceName'>;
+  'refreshTokenExpiresAt' | 'hostDeviceId' | 'hostDeviceName' | 'clientDeviceName'>;
 
 export type DiscoveredHost = {
   deviceId: string;

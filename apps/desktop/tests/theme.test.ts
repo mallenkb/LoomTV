@@ -49,18 +49,18 @@ test('light mode updates LoomTV and component primitive tokens together', () => 
 
     assert.equal(dataset.theme, 'light');
     assert.equal(properties.get('color-scheme'), 'light');
-    assert.equal(properties.get('--loom-bg'), '#f4f6f8');
-    assert.equal(properties.get('--loom-sidebar'), '#f4f6f8');
+    assert.equal(properties.get('--loom-bg'), '#f5f5f5');
+    assert.equal(properties.get('--loom-sidebar'), '#f5f5f5');
     assert.equal(properties.get('--loom-surface'), '#ffffff');
-    assert.equal(properties.get('--loom-text'), '#17212b');
+    assert.equal(properties.get('--loom-text'), '#171717');
     assert.equal(properties.get('--loom-active-bg'), '#e7e5e4');
     assert.equal(properties.get('--loom-active-bg-strong'), '#d6d3d1');
     assert.equal(properties.get('--loom-active-text'), '#1c1917');
     assert.equal(properties.get('--loom-active-muted'), '#57534e');
     assert.equal(properties.get('--loom-active-border'), '#d6d3d1');
     assert.equal(properties.get('--loom-focus-ring'), '#a8a29e');
-    assert.equal(properties.get('--color-background'), '#f4f6f8');
-    assert.equal(properties.get('--color-card-foreground'), '#17212b');
+    assert.equal(properties.get('--color-background'), '#f5f5f5');
+    assert.equal(properties.get('--color-card-foreground'), '#171717');
   });
 });
 
@@ -74,6 +74,6 @@ test('switching back to dark restores the selected dark palette', () => {
     assert.equal(properties.get('color-scheme'), 'dark');
     assert.equal(properties.get('--loom-bg'), DARK_THEMES.black.bg);
     assert.equal(properties.get('--loom-sidebar'), DARK_THEMES.black.bg);
-    assert.equal(properties.get('--loom-text'), '#ffffff');
+    assert.equal(properties.get('--loom-text'), '#fafafa');
   });
 });

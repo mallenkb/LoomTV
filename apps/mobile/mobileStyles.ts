@@ -1,5 +1,12 @@
 import { StyleSheet } from 'react-native';
 
+function colorWithOpacity(color: string, opacity: number): string {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!match) return color;
+  const [, red, green, blue] = match;
+  return `rgba(${Number.parseInt(red, 16)},${Number.parseInt(green, 16)},${Number.parseInt(blue, 16)},${opacity})`;
+}
+
 export type MobileThemeColors = {
   accent: string;
   accentSoft: string;
@@ -19,13 +26,16 @@ export const settingsContentMaxWidth = 640;
 export const settingsMetricGap = 8;
 export function createStyles(theme: MobileThemeColors) {
   const { accent, accentSoft, accentBorder, accentForeground, bg, panel, panel2, border, text, muted, faint } = theme;
+  const isDarkTheme = text !== '#000000';
   const surface = panel2;
-  const dangerText = text === '#ffffff' ? '#ff9a8f' : '#b42318';
-  const errorTextColor = text === '#ffffff' ? '#ff8c78' : '#b42318';
-  const ratingSurface = text === '#ffffff' ? 'rgba(245,196,81,0.15)' : '#fff1bf';
-  const posterRatingSurface = text === '#ffffff' ? 'rgba(0,0,0,0.78)' : '#fff1bf';
-  const ratingBorder = text === '#ffffff' ? 'rgba(245,196,81,0.42)' : '#f5c451';
-  const ratingText = text === '#ffffff' ? '#f5c451' : '#000000';
+  const dangerText = isDarkTheme ? '#ff9a8f' : '#b42318';
+  const errorTextColor = isDarkTheme ? '#ff8c78' : '#b42318';
+  const ratingSurface = isDarkTheme ? 'rgba(245,196,81,0.15)' : '#fff1bf';
+  const posterRatingSurface = 'rgba(0,0,0,0.78)';
+  const posterRatingBorder = 'rgba(245,196,81,0.42)';
+  const posterRatingTextColor = '#f5c451';
+  const ratingBorder = isDarkTheme ? 'rgba(245,196,81,0.42)' : '#f5c451';
+  const ratingText = isDarkTheme ? '#f5c451' : '#000000';
   return StyleSheet.create({
   app: {
     backgroundColor: bg,
@@ -396,7 +406,7 @@ export function createStyles(theme: MobileThemeColors) {
     zIndex: 10,
   },
   homeStickyBackground: {
-    backgroundColor: text === '#ffffff' ? 'rgba(21,21,27,0.97)' : 'rgba(255,255,255,0.97)',
+    backgroundColor: bg,
     bottom: 0,
     left: 0,
     position: 'absolute',
@@ -426,7 +436,7 @@ export function createStyles(theme: MobileThemeColors) {
     paddingHorizontal: 14,
   },
   filterChipSelected: {
-    backgroundColor: text === '#ffffff' ? '#ffffff' : '#000000',
+    backgroundColor: isDarkTheme ? '#ffffff' : '#000000',
   },
   filterChipText: {
     color: muted,
@@ -434,7 +444,7 @@ export function createStyles(theme: MobileThemeColors) {
     fontWeight: '600',
   },
   filterChipTextSelected: {
-    color: text === '#ffffff' ? '#000000' : '#ffffff',
+    color: isDarkTheme ? '#000000' : '#ffffff',
   },
   railTitleRow: {
     alignItems: 'center',
@@ -546,7 +556,7 @@ export function createStyles(theme: MobileThemeColors) {
     paddingHorizontal: 14,
   },
   homeTabActive: {
-    backgroundColor: text === '#ffffff' ? '#ffffff' : '#171717',
+    backgroundColor: isDarkTheme ? '#ffffff' : '#171717',
   },
   homeTabText: {
     color: muted,
@@ -554,7 +564,7 @@ export function createStyles(theme: MobileThemeColors) {
     fontWeight: '700',
   },
   homeTabTextActive: {
-    color: text === '#ffffff' ? '#171717' : '#ffffff',
+    color: isDarkTheme ? '#171717' : '#ffffff',
   },
   heroCarousel: {
     alignItems: 'center',
@@ -596,7 +606,7 @@ export function createStyles(theme: MobileThemeColors) {
   heroPlayButton: {
     alignItems: 'center',
     backgroundColor: accent,
-    borderRadius: 999,
+    borderRadius: 12,
     flexDirection: 'row',
     gap: 10,
     height: 52,
@@ -610,7 +620,7 @@ export function createStyles(theme: MobileThemeColors) {
   heroPlayButtonText: {
     color: accentForeground,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '500',
   },
   posterBadge: {
     alignItems: 'center',
@@ -680,7 +690,7 @@ export function createStyles(theme: MobileThemeColors) {
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: posterRatingSurface,
-    borderColor: ratingBorder,
+    borderColor: posterRatingBorder,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: 'row',
@@ -692,7 +702,7 @@ export function createStyles(theme: MobileThemeColors) {
     paddingVertical: 3,
   },
   posterRatingText: {
-    color: ratingText,
+    color: posterRatingTextColor,
     fontSize: 11,
     fontWeight: '800',
     lineHeight: 13,
@@ -848,6 +858,46 @@ export function createStyles(theme: MobileThemeColors) {
   settingsThemeOptionTextActive: {
     color: accent,
   },
+  settingsThemeDivider: {
+    backgroundColor: 'rgba(148,163,184,0.18)',
+    height: StyleSheet.hairlineWidth,
+    width: '100%',
+  },
+  settingsThemeColorTitle: {
+    color: text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  settingsThemeColorOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  settingsThemeColorOption: {
+    alignItems: 'center',
+    backgroundColor: panel2,
+    borderColor: border,
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 11,
+  },
+  settingsThemeColorOptionActive: {
+    backgroundColor: accentSoft,
+    borderColor: accentBorder,
+  },
+  settingsThemeColorSwatch: {
+    borderRadius: 7,
+    height: 22,
+    width: 22,
+  },
+  settingsThemeColorLabel: {
+    color: text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   settingsDetailHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -978,10 +1028,11 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 14,
     fontWeight: '700',
   },
+  settingsDisconnectButton: {
+    marginTop: 12,
+  },
   bottomNav: {
-    backgroundColor: text === '#ffffff' ? 'rgba(21,21,27,0.96)' : 'rgba(255,255,255,0.94)',
-    borderColor: border,
-    borderTopWidth: 1,
+    backgroundColor: colorWithOpacity(panel, 0.88),
     bottom: 0,
     left: 0,
     paddingHorizontal: 6,
@@ -989,14 +1040,6 @@ export function createStyles(theme: MobileThemeColors) {
     position: 'absolute',
     right: 0,
     zIndex: 24,
-  },
-  bottomNavBlur: {
-    backgroundColor: 'transparent',
-    overflow: 'hidden',
-  },
-  bottomNavLight: {
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderColor: border,
   },
   bottomNavRow: {
     alignItems: 'center',
@@ -1032,13 +1075,13 @@ export function createStyles(theme: MobileThemeColors) {
   },
   miniPlayerStrip: {
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    borderColor: 'rgba(255,255,255,0.13)',
+    backgroundColor: 'rgba(23,23,23,0.92)',
+    borderColor: 'rgba(255,255,255,0.10)',
     borderRadius: 14,
     borderWidth: 1,
     elevation: 8,
     flexDirection: 'row',
-    minHeight: 62,
+    minHeight: 68,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -1046,26 +1089,39 @@ export function createStyles(theme: MobileThemeColors) {
     shadowRadius: 18,
   },
   miniPlayerBlur: {
-    backgroundColor: 'rgba(0,0,0,0.84)',
+    backgroundColor: 'rgba(23,23,23,0.88)',
+  },
+  miniPlayerArtworkBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.22,
+  },
+  miniPlayerArtworkBackdropImage: {
+    height: '100%',
+    transform: [{ scale: 1.06 }],
+    width: '100%',
+  },
+  miniPlayerArtworkBackdropFallback: {
+    backgroundColor: '#171717',
+    flex: 1,
+  },
+  miniPlayerArtworkScrim: {
+    ...StyleSheet.absoluteFillObject,
   },
   miniPlayerMain: {
     alignItems: 'center',
     flex: 1,
     flexDirection: 'row',
     gap: 12,
-    minHeight: 62,
+    minHeight: 68,
     minWidth: 0,
-    paddingLeft: 10,
-    paddingVertical: 8,
   },
   miniPlayerThumb: {
     alignItems: 'center',
     backgroundColor: panel2,
-    borderRadius: 9,
-    height: 42,
+    height: 68,
     justifyContent: 'center',
     overflow: 'hidden',
-    width: 56,
+    width: 91,
   },
   miniPlayerThumbImage: {
     height: '100%',
@@ -1082,12 +1138,13 @@ export function createStyles(theme: MobileThemeColors) {
     alignItems: 'center',
     backgroundColor: accent,
     borderRadius: 999,
-    bottom: 4,
-    height: 18,
+    height: 24,
     justifyContent: 'center',
+    left: '50%',
     position: 'absolute',
-    right: 4,
-    width: 18,
+    top: '50%',
+    transform: [{ translateX: -12 }, { translateY: -12 }],
+    width: 24,
   },
   miniPlayerText: {
     flex: 1,
@@ -1156,7 +1213,7 @@ export function createStyles(theme: MobileThemeColors) {
     zIndex: 6,
   },
   detailTopBarBackground: {
-    backgroundColor: 'rgba(21,21,27,0.97)',
+    backgroundColor: colorWithOpacity(bg, 0.97),
     borderBottomColor: border,
     borderBottomWidth: StyleSheet.hairlineWidth,
     bottom: 0,
@@ -1474,24 +1531,43 @@ export function createStyles(theme: MobileThemeColors) {
   },
   playButton: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 10,
+    backgroundColor: accent,
+    borderRadius: 12,
     justifyContent: 'center',
     marginTop: 6,
     minHeight: 52,
+    overflow: 'hidden',
+    position: 'relative',
   },
-  playButtonLight: {
-    backgroundColor: '#000000',
+  playButtonProgress: {
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    top: 0,
+  },
+  playButtonContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  playButtonCopy: {
+    alignItems: 'flex-start',
   },
   playButtonText: {
-    color: '#0b0b0b',
-    fontSize: 18,
-    fontWeight: '700',
+    color: accentForeground,
+    fontSize: 17,
+    fontWeight: '500',
+    lineHeight: 20,
   },
-  playButtonTextLight: {
-    color: '#ffffff',
+  playButtonMeta: {
+    color: accentForeground,
+    fontSize: 11,
+    fontWeight: '500',
+    lineHeight: 14,
+    opacity: 0.72,
   },
   detailErrorText: {
     color: errorTextColor,

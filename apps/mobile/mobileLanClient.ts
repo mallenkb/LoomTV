@@ -28,11 +28,11 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch) {
         body: JSON.stringify(body),
       });
     },
-    refreshCredentials(baseUrl: string, refreshToken: string) {
+    refreshCredentials(baseUrl: string, refreshToken: string, deviceName?: string) {
       return fetchImpl(`${baseUrl}/api/v2/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({ refreshToken, deviceName }),
       });
     },
     getLibrary(baseUrl: string, token: string, etag?: string) {
