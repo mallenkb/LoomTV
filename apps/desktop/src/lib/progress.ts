@@ -13,6 +13,9 @@ type LegacyProgress = number | { position?: number; duration?: number; updatedAt
 let progressCache: Record<string, StoredProgress> = readLocalProgress();
 let hydrated = false;
 let progressRefreshRevision = 0;
+let activeProfileId: string | null = null;
+let profileGeneration = 0;
+const pendingWrites = new Set<Promise<void>>();
 let dispatchingInternalProgressEvent = false;
 let progressRefreshSubscription: ReturnType<typeof createProgressRefreshSubscription> | null = null;
 
@@ -97,16 +100,24 @@ function mergeProgress(...sources: Array<Record<string, StoredProgress>>): Recor
 export async function hydrateProgressFromDatabase(): Promise<void> {
   if (hydrated) return;
   hydrated = true;
+  const generation = profileGeneration;
   try {
-    const localProgress = readLocalProgress();
+    const localProgress = localStorage.getItem(PROGRESS_MIGRATION_KEY) === PROGRESS_MIGRATION_VERSION
+      ? {}
+      : readLocalProgress();
     const remote = await desktopApi.getProgress();
+    if (generation !== profileGeneration) return;
     const databaseProgress = remote && !('position' in remote)
       ? remote as Record<string, StoredProgress>
       : {};
     // Database is merged first and therefore wins equal timestamps.
     progressCache = mergeProgress(databaseProgress, localProgress);
-    if (Object.keys(progressCache).length > 0) {
+    // Only legacy localStorage progress is imported; re-importing the
+    // database's own rows would be wasted writes, and after a profile switch
+    // it must never happen at all.
+    if (Object.keys(localProgress).length > 0) {
       await desktopApi.importProgress(progressCache);
+      if (generation !== profileGeneration) return;
     }
     localStorage.setItem(PROGRESS_MIGRATION_KEY, PROGRESS_MIGRATION_VERSION);
     localStorage.removeItem(PROGRESS_KEY);
@@ -117,8 +128,29 @@ export async function hydrateProgressFromDatabase(): Promise<void> {
   }
 }
 
-export function loadProgress(): Record<string, StoredProgress> {
-  return progressCache;
+/**
+ * Discards the in-memory viewer state and rehydrates for the newly selected
+ * profile. Progress subscribers re-render with the new profile's history.
+ */
+export async function resetProgressForProfileSwitch(): Promise<void> {
+  progressCache = {};
+  hydrated = false;
+  writeLocalProgress();
+  await hydrateProgressFromDatabase();
+}
+
+export async function setProgressProfile(profileId: string | null): Promise<void> {
+  if (activeProfileId === profileId && hydrated) return;
+  activeProfileId = profileId;
+  profileGeneration += 1;
+  progressCache = {};
+  hydrated = false;
+  writeLocalProgress();
+  if (profileId) await hydrateProgressFromDatabase();
+}
+
+export async function flushProgressWrites(): Promise<void> {
+  await Promise.allSettled([...pendingWrites]);
 }
 
 export function useProgressSnapshot(): Record<string, StoredProgress> {
@@ -172,11 +204,17 @@ export async function saveProgress(filePath: string, position: number, duration:
   if (!local || local.position <= 10 || local.duration <= 0) return;
   progressCache = { ...progressCache, [filePath]: local };
   writeLocalProgress();
-  try {
-    const stored = await desktopApi.saveProgress(filePath, local.position, local.duration);
-    progressCache = { ...progressCache, [filePath]: stored };
-    writeLocalProgress();
-  } catch {
-    // The local mirror is enough until the main process is reachable again.
-  }
+  const generation = profileGeneration;
+  const profileId = activeProfileId ?? undefined;
+  const write = desktopApi.saveProgress(filePath, local.position, local.duration, profileId)
+    .then((stored) => {
+      if (generation !== profileGeneration || profileId !== activeProfileId) return;
+      progressCache = { ...progressCache, [filePath]: stored };
+      writeLocalProgress();
+    })
+    .catch(() => {
+      // The local mirror is enough until the main process is reachable again.
+    });
+  pendingWrites.add(write);
+  await write.finally(() => pendingWrites.delete(write));
 }

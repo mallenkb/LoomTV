@@ -13,6 +13,13 @@ import {
   saveProgress,
   saveSettings,
 } from '../src/main/databasePlaybackRepository.ts';
+import {
+  createProfile,
+  deleteProfile,
+  getDeviceProfileSelection,
+  getOwnerProfile,
+  selectDeviceProfile,
+} from '../src/main/databaseProfilesRepository.ts';
 
 function createDatabase(): BetterSqlite3.Database {
   const database = new BetterSqlite3(':memory:');
@@ -105,27 +112,59 @@ test('settings, progress, and track preference repositories retain normalization
     saveSettings(database, { appThemeMode: 'dark', localNetworkSharingEnabled: true });
     assert.deepEqual(loadSettings(database), { appThemeMode: 'dark', localNetworkSharingEnabled: true });
 
-    const watched = saveProgress(database, '/library/movie.mkv', 95, 100);
+    const owner = getOwnerProfile(database);
+    assert.ok(owner, 'migration creates an Owner profile');
+    const ownerId = owner.id;
+
+    const watched = saveProgress(database, ownerId, '/library/movie.mkv', 95, 100);
     assert.equal(watched.position, 100);
     assert.equal(watched.watched, true);
-    importProgress(database, {
+    importProgress(database, ownerId, {
       '/library/movie.mkv': { position: 10, duration: 100, updatedAt: watched.updatedAt - 1 },
       '/library/new.mkv': { position: 20, duration: 100, updatedAt: watched.updatedAt + 1 },
     });
-    assert.equal(getAllProgress(database)['/library/movie.mkv'].position, 100);
-    assert.equal(getAllProgress(database)['/library/new.mkv'].position, 20);
+    assert.equal(getAllProgress(database, ownerId)['/library/movie.mkv'].position, 100);
+    assert.equal(getAllProgress(database, ownerId)['/library/new.mkv'].position, 20);
 
-    assert.deepEqual(savePlaybackTrackPreferences(database, 'show', {
+    assert.deepEqual(savePlaybackTrackPreferences(database, ownerId, 'show', {
       audio: { enabled: true, language: ' EN ', codec: ' AAC ' },
       subtitle: { enabled: false, forced: true },
     }), {
       audio: { enabled: true, language: 'en', codec: 'aac' },
       subtitle: { enabled: false, forced: true },
     });
-    assert.deepEqual(getPlaybackTrackPreferences(database, 'show'), {
+    assert.deepEqual(getPlaybackTrackPreferences(database, ownerId, 'show'), {
       audio: { enabled: true, language: 'en', codec: 'aac' },
       subtitle: { enabled: false, forced: true },
     });
+  } finally {
+    database.close();
+  }
+});
+
+test('profiles keep viewer state isolated and cascade on delete', () => {
+  const database = createDatabase();
+  try {
+    const owner = getOwnerProfile(database);
+    assert.ok(owner);
+    const second = createProfile(database, { name: 'Amara', type: 'standard' });
+
+    saveProgress(database, owner.id, '/library/movie.mkv', 30, 100);
+    saveProgress(database, second.id, '/library/movie.mkv', 80, 100);
+    assert.equal(getAllProgress(database, owner.id)['/library/movie.mkv'].position, 30);
+    assert.equal(getAllProgress(database, second.id)['/library/movie.mkv'].position, 80);
+
+    savePlaybackTrackPreferences(database, owner.id, 'show', { audio: { enabled: true, language: 'en' } });
+    assert.deepEqual(getPlaybackTrackPreferences(database, second.id, 'show'), {});
+
+    selectDeviceProfile(database, 'tablet-1', second.id);
+    assert.equal(getDeviceProfileSelection(database, 'tablet-1'), second.id);
+
+    assert.throws(() => deleteProfile(database, owner.id), /Owner profile cannot be deleted/);
+    deleteProfile(database, second.id);
+    assert.deepEqual(getAllProgress(database, second.id), {});
+    assert.equal(getDeviceProfileSelection(database, 'tablet-1'), null);
+    assert.equal(getAllProgress(database, owner.id)['/library/movie.mkv'].position, 30);
   } finally {
     database.close();
   }

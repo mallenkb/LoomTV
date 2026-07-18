@@ -122,3 +122,59 @@ test('database migrations upgrade legacy columns and preserve segment rows', () 
     database.close();
   }
 });
+
+test('the profiles migration backfills legacy viewer state onto the Owner exactly once', () => {
+  const database = new BetterSqlite3(':memory:');
+  database.pragma('foreign_keys = ON');
+  try {
+    database.exec(`
+      CREATE TABLE playback_progress (
+        file_path TEXT PRIMARY KEY,
+        position REAL NOT NULL DEFAULT 0,
+        duration REAL NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        watched INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT INTO playback_progress VALUES ('/library/a.mkv', 10, 100, 1000, 0);
+      INSERT INTO playback_progress VALUES ('/library/b.mkv', 95, 100, 2000, 1);
+
+      CREATE TABLE playback_track_preferences (
+        scope TEXT PRIMARY KEY,
+        preferences_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO playback_track_preferences VALUES ('show', '{"audio":{"enabled":true}}', 1000);
+    `);
+
+    migrateDatabase(database);
+
+    const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string };
+    assert.ok(owner?.id, 'an Owner profile exists after migration');
+
+    const progressRows = database.prepare('SELECT * FROM playback_progress ORDER BY file_path').all() as Array<{ profile_id: string; file_path: string; position: number }>;
+    assert.equal(progressRows.length, 2);
+    assert.ok(progressRows.every((row) => row.profile_id === owner.id));
+    assert.equal(progressRows[0].position, 10);
+
+    const preferenceRows = database.prepare('SELECT * FROM playback_track_preferences').all() as Array<{ profile_id: string; scope: string }>;
+    assert.deepEqual(preferenceRows.map((row) => [row.profile_id, row.scope]), [[owner.id, 'show']]);
+
+    // The migration boot keeps the legacy tables; the next boot drops them.
+    const tablesAfterFirstBoot = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name));
+    assert.equal(tablesAfterFirstBoot.has('playback_progress_legacy'), true);
+    migrateDatabase(database);
+    const tablesAfterSecondBoot = new Set((database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name));
+    assert.equal(tablesAfterSecondBoot.has('playback_progress_legacy'), false);
+    assert.equal(tablesAfterSecondBoot.has('playback_track_preferences_legacy'), false);
+
+    // Re-running never duplicates the Owner or replays the backfill.
+    const owners = database.prepare("SELECT COUNT(*) AS n FROM profiles WHERE profile_type = 'owner'").get() as { n: number };
+    assert.equal(owners.n, 1);
+    assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n, 2);
+
+    const ledger = database.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
+    assert.deepEqual(ledger.map((row) => row.version), [0, 1]);
+  } finally {
+    database.close();
+  }
+});

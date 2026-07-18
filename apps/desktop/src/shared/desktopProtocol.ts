@@ -1,5 +1,13 @@
 import type {
+  LanActiveProfile,
+  LanContentRating,
   LanLibraryPayload,
+  LanProfileListEntry,
+  LanProfileListKind,
+  LanProfilePreferences,
+  LanProfileRestrictions,
+  LanProfileSummary,
+  LanProfileType,
   LanStoredProgress,
   LanStreamOptions,
 } from '../../../../packages/lan-protocol/src/index.ts';
@@ -42,6 +50,7 @@ export interface WireEpisodeMeta {
   summary: string;
   still: string;
   rating: number;
+  contentRatings?: Record<string, LanContentRating>;
   airDate: string;
   localMetadata?: WireLocalMediaDetails;
 }
@@ -273,6 +282,34 @@ export interface RemoteLibraryConnection {
   hostDeviceName?: string;
   library: LibraryPayload;
   libraryEtag: string;
+}
+
+export type ProfileType = LanProfileType;
+export type ProfileSummary = LanProfileSummary;
+export type ActiveProfileState = LanActiveProfile;
+export type ProfilePreferences = LanProfilePreferences;
+export type ProfileRestrictions = LanProfileRestrictions;
+export type ProfileListKind = LanProfileListKind;
+export type ProfileListEntry = LanProfileListEntry;
+
+export interface ProfileCreateInput {
+  name: string;
+  avatarKey?: string;
+  colorKey?: string;
+  type?: 'standard' | 'kid';
+}
+
+export type ProfileUpdateInput = Partial<ProfileCreateInput>;
+
+export interface ProfileExportV1 {
+  format: 'loomtv.profile.v1';
+  exportedAt: number;
+  profile: Pick<ProfileSummary, 'name' | 'avatarKey' | 'colorKey' | 'type'>;
+  progress: Record<string, StoredProgress>;
+  trackPreferences: Record<string, PlaybackTrackPreferences>;
+  preferences: ProfilePreferences;
+  restrictions: ProfileRestrictions;
+  lists: ProfileListEntry[];
 }
 
 export type StoredProgress = LanStoredProgress;

@@ -16,8 +16,16 @@ import type {
   MetadataKeyTestResult,
   OfficialArtworkResult,
   OfficialMetadataCandidate,
+  ActiveProfileState,
   PlaybackLogoResult,
   PlaybackTrackPreferences,
+  ProfileListEntry,
+  ProfileListKind,
+  ProfilePreferences,
+  ProfileRestrictions,
+  ProfileCreateInput,
+  ProfileSummary,
+  ProfileUpdateInput,
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
@@ -78,9 +86,27 @@ export interface IpcContract {
   'playback:segments:manage-list': { args: [request?: Partial<MediaSegmentRequest>]; result: ManagedMediaSegment[] };
   'playback:segments:manage-update': { args: [candidateId: string, patch: { status?: 'active' | 'review' | 'rejected'; type?: MediaSegmentType }]; result: boolean };
   'playback:segments:manage-erase': { args: [request: MediaSegmentRequest]; result: { removed: number } };
+  'profiles:create': { args: [input: ProfileCreateInput]; result: ProfileSummary[] };
+  'profiles:delete': { args: [profileId: string]; result: ProfileSummary[] };
+  'profiles:get-active': { args: []; result: ActiveProfileState };
+  'profiles:lock': { args: []; result: ActiveProfileState };
+  'profiles:list': { args: []; result: ProfileSummary[] };
+  'profiles:pin': { args: [profileId: string, pin: string | null]; result: ProfileSummary };
+  'profiles:reorder': { args: [profileIds: string[]]; result: ProfileSummary[] };
+  'profiles:reset-owner': { args: [confirmation: string]; result: ProfileSummary };
+  'profiles:select': { args: [profileId: string, pin?: string]; result: ProfileSummary };
+  'profiles:select-guest': { args: []; result: ProfileSummary };
+  'profiles:set-auto-sign-in': { args: [enabled: boolean]; result: ActiveProfileState };
+  'profiles:update': { args: [profileId: string, patch: ProfileUpdateInput]; result: ProfileSummary[] };
+  'profile-preferences:get': { args: []; result: ProfilePreferences };
+  'profile-preferences:save': { args: [patch: ProfilePreferences]; result: ProfilePreferences };
+  'profile-restrictions:get': { args: [profileId: string]; result: ProfileRestrictions };
+  'profile-restrictions:save': { args: [profileId: string, restrictions: Omit<ProfileRestrictions, 'revision'>]; result: ProfileRestrictions };
+  'profile-lists:get': { args: [kind?: ProfileListKind]; result: ProfileListEntry[] };
+  'profile-lists:set': { args: [mediaId: string, kind: ProfileListKind, present: boolean]; result: ProfileListEntry[] };
   'progress:get': { args: [filePath?: string]; result: Record<string, StoredProgress> | StoredProgress | null };
   'progress:import': { args: [progress: ImportedProgress]; result: boolean };
-  'progress:save': { args: [filePath: string, position: number, duration: number]; result: StoredProgress };
+  'progress:save': { args: [filePath: string, position: number, duration: number, expectedProfileId?: string]; result: StoredProgress };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };
@@ -95,6 +121,8 @@ export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
   'library:scan-progress': { args: [library: LibraryPayload, progress: import('./desktopProtocol.ts').LibraryScanProgress] };
+  'profile:active-changed': { args: [state: ActiveProfileState] };
+  'profiles:changed': { args: [profiles: ProfileSummary[]] };
   'updates:state': { args: [state: UpdateState] };
 }
 

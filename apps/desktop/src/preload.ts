@@ -11,6 +11,12 @@ import type {
   MediaSegmentType,
   OfficialMetadataCandidate,
   PlaybackTrackPreferences,
+  ProfileListKind,
+  ProfilePreferences,
+  ProfileRestrictions,
+  ProfileCreateInput,
+  ProfileSummary,
+  ProfileUpdateInput,
   SubtitleStyleOptions,
   TranscodeOptions,
   UpdateState,
@@ -99,8 +105,39 @@ const desktopApi = {
   discoverLocalNetworkPeers: (timeoutMs?: number) => ipcRenderer.invoke('network:discover-peers', timeoutMs),
   revokePairedDevice: (deviceId: string) => ipcRenderer.invoke('network:revoke-paired-device', deviceId),
   setLocalNetworkDeviceName: (name: string) => ipcRenderer.invoke('network:set-device-name', name),
+  listProfiles: () => ipcRenderer.invoke('profiles:list'),
+  getActiveProfileState: () => ipcRenderer.invoke('profiles:get-active'),
+  createProfile: (input: ProfileCreateInput) => ipcRenderer.invoke('profiles:create', input),
+  updateProfile: (profileId: string, patch: ProfileUpdateInput) => ipcRenderer.invoke('profiles:update', profileId, patch),
+  deleteProfile: (profileId: string) => ipcRenderer.invoke('profiles:delete', profileId),
+  selectProfile: (profileId: string, pin?: string) => ipcRenderer.invoke('profiles:select', profileId, pin),
+  selectGuestProfile: () => ipcRenderer.invoke('profiles:select-guest'),
+  lockProfile: () => ipcRenderer.invoke('profiles:lock'),
+  reorderProfiles: (profileIds: string[]) => ipcRenderer.invoke('profiles:reorder', profileIds),
+  changeProfilePin: (profileId: string, pin: string | null) => ipcRenderer.invoke('profiles:pin', profileId, pin),
+  resetOwnerProfile: (confirmation: string) => ipcRenderer.invoke('profiles:reset-owner', confirmation),
+  setAutomaticProfileSignIn: (enabled: boolean) => ipcRenderer.invoke('profiles:set-auto-sign-in', enabled),
+  getProfilePreferences: () => ipcRenderer.invoke('profile-preferences:get'),
+  saveProfilePreferences: (patch: ProfilePreferences) => ipcRenderer.invoke('profile-preferences:save', patch),
+  getProfileRestrictions: (profileId: string) => ipcRenderer.invoke('profile-restrictions:get', profileId),
+  saveProfileRestrictions: (profileId: string, restrictions: Omit<ProfileRestrictions, 'revision'>) =>
+    ipcRenderer.invoke('profile-restrictions:save', profileId, restrictions),
+  getProfileLists: (kind?: ProfileListKind) => ipcRenderer.invoke('profile-lists:get', kind),
+  setProfileListEntry: (mediaId: string, kind: ProfileListKind, present: boolean) =>
+    ipcRenderer.invoke('profile-lists:set', mediaId, kind, present),
+  onProfilesChanged: (callback: (profiles: ProfileSummary[]) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, profiles: ProfileSummary[]) => callback(profiles);
+    ipcRenderer.on('profiles:changed', handler);
+    return () => ipcRenderer.removeListener('profiles:changed', handler);
+  },
+  onActiveProfileChanged: (callback) => {
+    const handler = (_: Electron.IpcRendererEvent, state: import('./shared/desktopProtocol.ts').ActiveProfileState) => callback(state);
+    ipcRenderer.on('profile:active-changed', handler);
+    return () => ipcRenderer.removeListener('profile:active-changed', handler);
+  },
   getProgress: (filePath?: string) => ipcRenderer.invoke('progress:get', filePath),
-  saveProgress: (filePath: string, position: number, duration: number) => ipcRenderer.invoke('progress:save', filePath, position, duration),
+  saveProgress: (filePath: string, position: number, duration: number, expectedProfileId?: string) =>
+    ipcRenderer.invoke('progress:save', filePath, position, duration, expectedProfileId),
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) =>
     ipcRenderer.invoke('progress:import', progress),
   getPlaybackTrackPreferences: (scope?: string) => ipcRenderer.invoke('playback-track-preferences:get', scope),
@@ -162,7 +199,3 @@ const desktopApi = {
 } satisfies DesktopBridgeApi;
 
 contextBridge.exposeInMainWorld('desktopApi', desktopApi);
-
-// ─── playerApi — kept for any future use; VideoPlayer now uses HTML5 <video> ──
-
-// The bridge implementation is compile-time checked against DesktopBridgeApi.
