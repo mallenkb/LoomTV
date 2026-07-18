@@ -1,8 +1,8 @@
 # FFmpeg Notices
 
-Loom Media Server bundles FFmpeg command line tools so users do not need to install FFmpeg separately.
+LoomTV bundles FFmpeg command line tools so users do not need to install FFmpeg separately.
 
-FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project. Loom Media Server is not affiliated with the FFmpeg project.
+FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project. LoomTV is not affiliated with the FFmpeg project.
 
 ## macOS bundle
 
@@ -34,11 +34,10 @@ FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project. Loom
 
 The bundled FFmpeg builds include GPL components, so the bundled FFmpeg tools are distributed under the GNU General Public License version 3 or later, as applicable to those builds and their included libraries.
 
-Loom Media Server invokes FFmpeg as separate command line executables. The FFmpeg binaries remain third-party software owned by their respective copyright holders.
+LoomTV invokes FFmpeg as separate command line executables. The FFmpeg binaries remain third-party software owned by their respective copyright holders.
 
 For FFmpeg source code, documentation, and legal details, see:
 
 - https://ffmpeg.org/
 - https://ffmpeg.org/legal.html
 - https://git.ffmpeg.org/ffmpeg.git
-

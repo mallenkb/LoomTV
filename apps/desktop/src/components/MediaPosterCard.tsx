@@ -58,13 +58,6 @@ const PLAY_OVERLAY_CLASS: Record<MediaPosterCardVariant, string> = {
   others: 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100',
 };
 
-const PLAY_ICON_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'w-6 h-6 text-[var(--loom-accent-foreground)] ml-1',
-  movies: 'w-6 h-6 text-[var(--loom-accent-foreground)] ml-1',
-  tv: 'w-6 h-6 text-[var(--loom-accent-foreground)] ml-1',
-  others: 'ml-1 h-6 w-6 text-[var(--loom-accent-foreground)]',
-};
-
 export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
   const baseImageSources = useMemo(() => posterSources(item), [item]);
@@ -142,13 +135,11 @@ const MediaPosterCard = memo(function MediaPosterCard({
         <RatingBadge rating={item.rating} />
         <div className={BACKDROP_CLASS[variant]} />
         <div className={PLAY_OVERLAY_CLASS[variant]}>
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_6px_rgba(251,197,0,0.14)]">
-            <Play className={PLAY_ICON_CLASS[variant]} />
-          </div>
+          <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
         </div>
       </div>
       <div className="mt-2">
-        <h4 className="truncate text-sm font-semibold text-white">{item.title}</h4>
+        <h4 className="truncate text-sm font-semibold text-[var(--loom-text)]">{item.title}</h4>
         {metaLine && <p className="text-xs text-[var(--loom-muted)]">{metaLine}</p>}
       </div>
     </Link>

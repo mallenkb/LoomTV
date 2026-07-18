@@ -179,7 +179,7 @@ export function registerIpcHandlers<
     const result = await deps.showOpenFolderDialog({
       properties: ['openDirectory'],
       buttonLabel: 'Add Folder',
-      message: 'Select a folder to add to your Loom Media Server library.',
+      message: 'Select a folder to add to your LoomTV library.',
     });
     if (!result.canceled && result.filePaths.length > 0) {
       const data = deps.loadLibrary();

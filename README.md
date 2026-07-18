@@ -1,26 +1,26 @@
-# Loom Media Server
+# LoomTV
 
-Loom Media Server is a desktop media library app for browsing and playing a local collection of movies, TV shows, and anime. It is built with Electron Forge, Vite, React, TypeScript, Tailwind CSS, and a local SQLite-backed library.
+LoomTV is a desktop media library app for browsing and playing a local collection of movies, TV shows, and anime. It is built with Electron Forge, Vite, React, TypeScript, Tailwind CSS, and a local SQLite-backed library.
 
-This project is for organizing and playing media files that you own, have created, or are otherwise authorized to use. Loom Media Server does not provide movies, TV shows, anime, streaming subscriptions, or copyrighted media.
+This project is for organizing and playing media files that you own, have created, or are otherwise authorized to use. LoomTV does not provide movies, TV shows, anime, streaming subscriptions, or copyrighted media.
 
-![Loom Media Server empty library home screen](docs/screenshots/loomtv-home-empty-library.png)
+![LoomTV empty library home screen](docs/screenshots/loomtv-home-empty-library.png)
 
 ## Screenshots
 
 ### Empty Library
 
-![Loom Media Server empty library setup screen](docs/screenshots/loomtv-home-empty-library.png)
+![LoomTV empty library setup screen](docs/screenshots/loomtv-home-empty-library.png)
 
 ### Settings
 
-![Loom Media Server library folder settings](docs/screenshots/loomtv-settings-library.png)
+![LoomTV library folder settings](docs/screenshots/loomtv-settings-library.png)
 
-![Loom Media Server local network sharing settings](docs/screenshots/loomtv-settings-network.png)
+![LoomTV local network sharing settings](docs/screenshots/loomtv-settings-network.png)
 
-![Loom Media Server theme customization settings](docs/screenshots/loomtv-settings-theme.png)
+![LoomTV theme customization settings](docs/screenshots/loomtv-settings-theme.png)
 
-![Loom Media Server about and update settings](docs/screenshots/loomtv-settings-about.png)
+![LoomTV about and update settings](docs/screenshots/loomtv-settings-about.png)
 
 ## Features
 
@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.53](docs/releases/v1.0.53.md): refreshes the desktop identity and interface, hardens local renderer access, and improves LAN pairing, updates, subtitles, and playback controls.
 - [Loom Media Server 1.0.52](docs/releases/v1.0.52.md): fixes ad-hoc macOS release signing so Electron Framework loads correctly on launch.
 - [Loom Media Server 1.0.51](docs/releases/v1.0.51.md): rebuilds the desktop SQLite native module against Electron before packaging.
 - [Loom Media Server 1.0.50](docs/releases/v1.0.50.md): fixes desktop release CI by aligning the GitHub Actions pnpm version with the workspace toolchain.

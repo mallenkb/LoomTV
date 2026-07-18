@@ -6,6 +6,7 @@ import {
   protocol,
   net,
   session,
+  shell,
 } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
@@ -56,7 +57,7 @@ import {
   isLikelyAnimePath,
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
-import { createWindow, getMainWindow, getWindowIconPath } from './main/windowManager';
+import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import {
   getMediaServer,
@@ -220,7 +221,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'plexserver', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } },
 ]);
 
-app.setName('Loom Media Server');
+app.setName('LoomTV');
 const USER_DATA_DIR = path.join(app.getPath('appData'), 'LoomTV');
 app.setPath('userData', USER_DATA_DIR);
 
@@ -500,7 +501,7 @@ async function scanLibrary(
       password: settings.openSubtitlesPassword,
       languages: settings.openSubtitlesLanguages,
       autoDownload: settings.openSubtitlesAutoDownload,
-      userAgent: `Loom Media Server v${app.getVersion() || 'dev'}`,
+      userAgent: `LoomTV v${app.getVersion() || 'dev'}`,
     },
   };
   const subtitleProfile = openSubtitlesCacheKey(ctx.openSubtitles);
@@ -1009,7 +1010,7 @@ function applyAppIcon() {
   const iconPath = getWindowIconPath();
   if (!iconPath) return;
 
-  app.setName('Loom Media Server');
+  app.setName('LoomTV');
 
   if (process.platform === 'darwin' && app.dock) {
     const icon = nativeImage.createFromPath(iconPath);
@@ -1232,6 +1233,7 @@ export const mediaServerDeps = {
   isSignedLanRequestValid,
   libraryEtagFor,
   libraryForLocalNetwork,
+  libraryForRenderer,
   loadLibrary,
   loadSettings,
   localAccessQuery,
@@ -1251,13 +1253,16 @@ app.whenReady().then(async () => {
   analysisCoordinator.start();
   skipSegmentService.warmLibrary(loadLibrary());
   syncLanAdvertisement();
-  const trayIconPath = getWindowIconPath();
+  const trayIconPath = getTrayIconPath() || getWindowIconPath();
   if (trayIconPath) {
     createServerTray({
       iconPath: trayIconPath,
       onOpen: () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
         createWindow();
+      },
+      onOpenWeb: () => {
+        void shell.openExternal(MAIN_WINDOW_DEV_SERVER_URL || 'http://localhost:5174');
       },
       onQuit: () => app.quit(),
       port: getMediaServerPort(),
@@ -1300,7 +1305,7 @@ app.whenReady().then(async () => {
   createWindow();
   startUpdateAdapter();
 }).catch((error) => {
-  console.error('Failed to start Loom Media Server:', error);
+  console.error('Failed to start LoomTV:', error);
   app.quit();
 });
 

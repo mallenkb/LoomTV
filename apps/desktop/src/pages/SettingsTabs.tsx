@@ -21,14 +21,14 @@ export default function SettingsTabs({ activeSection, onSelect }: SettingsTabsPr
             aria-pressed={isActive}
             className={`relative h-9 rounded-[8px] px-4 text-sm font-medium transition-colors ${
               isActive
-                ? 'text-[var(--loom-accent-foreground)]'
+                ? 'text-[var(--loom-active-text)]'
                 : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
             }`}
             style={{ borderRadius: 8 }}
           >
             {isActive && (
               <span
-                className="absolute inset-0 rounded-[8px] bg-[var(--loom-accent)]"
+                className="absolute inset-0 rounded-[8px] bg-[var(--loom-active-bg)]"
                 style={{ borderRadius: 8 }}
               />
             )}

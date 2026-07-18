@@ -117,7 +117,7 @@ function openSubtitlesHeaders(options: OpenSubtitlesScanOptions, token?: string)
   return {
     'Api-Key': options.apiKey?.trim() || '',
     'Content-Type': 'application/json',
-    'User-Agent': options.userAgent || 'Loom Media Server v1',
+    'User-Agent': options.userAgent || 'LoomTV v1',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }

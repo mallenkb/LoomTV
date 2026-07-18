@@ -425,7 +425,7 @@ export default function ArtworkEditorControls({
           title="Fix metadata match"
           onClick={openMetadataCandidates}
           disabled={isFetchingArtwork}
-          className={`${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md transition-all duration-200 hover:border-[var(--loom-accent)]/45 hover:bg-[var(--loom-panel)] hover:text-[var(--loom-accent)] disabled:cursor-wait disabled:opacity-70`}
+          className={`${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70`}
         >
           {isFetchingArtwork ? (
             <Loader2 className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4 animate-spin text-[var(--loom-accent)]`} />
@@ -443,7 +443,7 @@ export default function ArtworkEditorControls({
             aria-haspopup="menu"
             aria-expanded={artworkMenuOpen}
             onClick={() => setArtworkMenuOpen((open) => !open)}
-            className="h-10 w-10 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:bg-[var(--loom-panel)] hover:text-[var(--loom-accent)]"
+            className="h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
           >
             {isFetchingArtwork ? (
               <Loader2 className="h-5 w-5 animate-spin text-[var(--loom-accent)]" />
@@ -454,7 +454,7 @@ export default function ArtworkEditorControls({
           {artworkMenuOpen && (
             <div
               role="menu"
-              className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] py-1 shadow-2xl backdrop-blur-md"
+              className="absolute right-0 top-full mt-2 w-60 overflow-hidden rounded-lg bg-[var(--loom-panel)] py-1 shadow-2xl backdrop-blur-md"
             >
               <button
                 type="button"
@@ -464,7 +464,7 @@ export default function ArtworkEditorControls({
                   void refreshOfficialMetadata();
                 }}
                 disabled={!onFetchOfficialArtwork || isFetchingArtwork}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
                 <RefreshCw className="h-4 w-4" />
                 Refresh metadata
@@ -474,7 +474,7 @@ export default function ArtworkEditorControls({
                   type="button"
                   role="menuitem"
                   onClick={openFolderPath}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
                 >
                   <FolderOpen className="h-4 w-4" />
                   Open folder
@@ -484,7 +484,7 @@ export default function ArtworkEditorControls({
                 type="button"
                 role="menuitem"
                 onClick={() => openArtworkPicker('thumbnail')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
                 <Image className="h-4 w-4" />
                 {ARTWORK_TARGETS.thumbnail.menuLabel}
@@ -493,7 +493,7 @@ export default function ArtworkEditorControls({
                 type="button"
                 role="menuitem"
                 onClick={() => openArtworkPicker('cover')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-white transition-colors hover:bg-white/10 hover:text-[var(--loom-accent)]"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
                 <Image className="h-4 w-4" />
                 {ARTWORK_TARGETS.cover.menuLabel}
@@ -561,8 +561,8 @@ export default function ArtworkEditorControls({
                   <span className="min-w-0 truncate">{artworkPreview.name}</span>
                   <span>{artworkPreview.width} x {artworkPreview.height}</span>
                 </div>
-                <div className="grid gap-4 rounded-lg bg-white/[0.06] p-4">
-                  <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-white/65">
+                <div className="grid gap-4 rounded-lg bg-[var(--loom-surface-3)] p-4">
+                  <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">
                     Zoom
                     <input
                       type="range"
@@ -575,7 +575,7 @@ export default function ArtworkEditorControls({
                     />
                   </label>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-white/65">
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">
                       Horizontal
                       <input
                         type="range"
@@ -587,7 +587,7 @@ export default function ArtworkEditorControls({
                         className="w-full accent-[var(--loom-accent)]"
                       />
                     </label>
-                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-white/65">
+                    <label className="grid gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">
                       Vertical
                       <input
                         type="range"
@@ -605,7 +605,7 @@ export default function ArtworkEditorControls({
                       type="button"
                       variant="ghost"
                       onClick={() => updateArtworkPreview({ zoom: 1, offsetX: 0, offsetY: 0 })}
-                      className="h-8 px-3 text-xs text-white/70 hover:bg-white/10 hover:text-white"
+                      className="h-8 px-3 text-xs text-[var(--loom-muted)] hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
                     >
                       Reset Crop
                     </Button>
@@ -614,7 +614,7 @@ export default function ArtworkEditorControls({
               </>
             )}
             {artworkSaveError && (
-              <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              <p className="loom-status-error rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm">
                 {artworkSaveError}
               </p>
             )}
@@ -624,7 +624,7 @@ export default function ArtworkEditorControls({
                 variant="outline"
                 onClick={closeArtworkPreview}
                 disabled={isSavingArtwork}
-                className="border-white/15 bg-transparent text-white hover:bg-white/10"
+                className="border-[var(--loom-border)] bg-transparent text-[var(--loom-text)] hover:bg-[var(--loom-surface-3)]"
               >
                 Cancel
               </Button>
@@ -665,10 +665,10 @@ export default function ArtworkEditorControls({
           </DialogHeader>
           <div className="space-y-4 p-5">
             <p className="text-sm text-[var(--loom-muted)]">
-              Select the result you want to apply. Loom Media Server will update the poster, cover, summary, rating, genres, and episode names from that source.
+              Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, genres, and episode names from that source.
             </p>
             {metadataCandidates.length === 0 ? (
-              <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
+              <div className="rounded-lg bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
                 No matching metadata was found from the connected metadata APIs.
               </div>
             ) : (
@@ -680,7 +680,7 @@ export default function ArtworkEditorControls({
                   return (
                     <div
                       key={candidate.id}
-                      className="grid gap-3 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-3"
+                      className="grid gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3"
                     >
                       <div className="grid min-w-0 grid-cols-[58px_1fr] gap-3">
                         <div className="h-[86px] w-[58px] overflow-hidden rounded-md bg-[var(--loom-surface)]">
@@ -695,7 +695,7 @@ export default function ArtworkEditorControls({
                         <div className="min-w-0 space-y-2">
                           <div className="flex min-w-0 items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <h3 className="truncate text-sm font-semibold text-white">{candidate.title}</h3>
+                              <h3 className="truncate text-sm font-semibold text-[var(--loom-text)]">{candidate.title}</h3>
                               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                                 {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
                                 <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
@@ -721,7 +721,7 @@ export default function ArtworkEditorControls({
                             )}
                           </div>
                           {candidate.episodePreview?.length ? (
-                            <div className="rounded-md border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] px-2.5 py-2">
+                            <div className="rounded-md bg-[var(--loom-surface)] px-2.5 py-2">
                               <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--loom-faint)]">
                                 {candidate.episodeCount || candidate.episodePreview.length} episodes
                               </p>
@@ -753,7 +753,7 @@ export default function ArtworkEditorControls({
               </div>
             )}
             {metadataError && (
-              <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              <p className="loom-status-error rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm">
                 {metadataError}
               </p>
             )}

@@ -18,9 +18,9 @@ export const SETTINGS_SECTION_STORAGE_KEY = 'loomtv:settings-active-section';
 export const DEFAULT_SIDEBAR_NAV_ORDER: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 
 export const LOADER_OPTIONS: { id: AppLoaderStyle; label: string; description: string }[] = [
-  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the Loom Media Server logo.' },
+  { id: 'play-mark', label: 'Play Mark', description: 'The clean white play icon from the LoomTV logo.' },
   { id: 'logo-mark', label: 'Logo Only', description: 'Compact logo-only loader for tighter surfaces.' },
-  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full Loom Media Server wordmark animation for branded screens.' },
+  { id: 'horizontal-logo', label: 'Horizontal Logo', description: 'Full LoomTV wordmark animation for branded screens.' },
 ];
 
 export const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
@@ -31,7 +31,7 @@ export const SIDEBAR_NAV_LABELS: Record<SidebarNavItemId, string> = {
 };
 
 export const APP_LICENSE = {
-  name: 'Loom Media Server',
+  name: 'LoomTV',
   license: 'MIT',
   copyright: 'Copyright (c) 2026 malllenkb',
 };

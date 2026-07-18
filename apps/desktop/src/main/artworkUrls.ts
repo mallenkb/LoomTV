@@ -126,6 +126,30 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       // signed URL leaks it to paired devices and changes every artwork URL
       // across restarts, invalidating their long-lived image caches.
       params.delete(LOCAL_ACCESS_QUERY_PARAM);
+
+      // Renderer artwork URLs contain the underlying source/path because they
+      // are only reachable over loopback. LAN artwork handlers intentionally
+      // reject those raw values and resolve opaque resource IDs instead, so
+      // translate them before signing the URL for a paired device.
+      if (parsed.pathname === '/api/cached-artwork') {
+        const externalSource = params.get('source') || '';
+        if (externalSource) {
+          params.delete('source');
+          params.set('resourceId', registerRemoteResource('external-artwork', externalSource));
+        }
+      } else if (parsed.pathname === '/api/local-image') {
+        const imagePath = params.get('path') || '';
+        if (imagePath) {
+          params.delete('path');
+          params.set('resourceId', registerRemoteResource('image', imagePath));
+        }
+      } else if (parsed.pathname === '/api/thumbnail') {
+        const mediaPath = params.get('path') || '';
+        if (mediaPath) {
+          params.delete('path');
+          params.set('resourceId', registerRemoteResource('media', mediaPath));
+        }
+      }
       return signedArtworkUrlForRemote(base, parsed.pathname, params);
     } catch {
       return source;

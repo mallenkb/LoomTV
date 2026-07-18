@@ -19,7 +19,7 @@ function TopPlayerControls({ visible, label, onBack, onClose }: TopPlayerControl
           onBack();
         }}
         onDoubleClick={(event) => event.stopPropagation()}
-        className={`loom-no-drag loom-player-top-control absolute left-6 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${visibilityClass}`}
+        className={`loom-no-drag loom-player-top-control absolute left-6 z-40 flex h-10 items-center gap-2 rounded-lg border border-white/20 bg-black/55 px-3 text-sm text-white shadow-lg backdrop-blur-md transition-[opacity,background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white ${visibilityClass}`}
         aria-label="Back"
       >
         <ChevronLeft className="w-4 h-4" />
@@ -36,7 +36,7 @@ function TopPlayerControls({ visible, label, onBack, onClose }: TopPlayerControl
           onClose();
         }}
         onDoubleClick={(event) => event.stopPropagation()}
-        className={`loom-no-drag loom-player-top-control absolute right-6 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-opacity duration-200 hover:bg-white/10 hover:text-[var(--loom-accent)] ${visibilityClass}`}
+        className={`loom-no-drag loom-player-top-control absolute right-6 z-40 grid h-10 w-10 place-items-center rounded-lg border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md transition-[opacity,background-color,color,border-color] duration-200 hover:bg-white/10 hover:text-white ${visibilityClass}`}
         title="Close player"
         aria-label="Close player"
       >
