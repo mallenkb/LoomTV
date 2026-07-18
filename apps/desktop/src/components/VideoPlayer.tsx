@@ -199,10 +199,10 @@ export default function VideoPlayer({
   // Set before handing control to the next episode so queued events from the
   // outgoing media element cannot restart that same episode during teardown.
   const pendingEpisodeTransitionRef = useRef<string | null>(null);
-  // An open-ended credits/outro marker means "finish this episode". Keep that
+  // An open-ended credits marker means "finish this episode". Keep that
   // intent across the final seek so an ended event advances instead of being
   // treated as an interrupted transcode that should restart this file.
-  const pendingOutroCompletionRef = useRef(false);
+  const pendingCreditsCompletionRef = useRef(false);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
@@ -238,7 +238,7 @@ export default function VideoPlayer({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
-  const [skipPromptTypes, setSkipPromptTypes] = useState<Record<MediaSegmentType, boolean>>({ intro: true, recap: true, credits: true, preview: false });
+  const [skipPromptTypes, setSkipPromptTypes] = useState<Record<MediaSegmentType, boolean>>({ intro: true, recap: true, outro: true, credits: true, preview: true });
   const [dismissedNextPromptKey, setDismissedNextPromptKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // force episode list re-render
   const [playbackLogoCandidates, setPlaybackLogoCandidates] = useState<string[]>([]);
@@ -417,7 +417,7 @@ export default function VideoPlayer({
     setDismissedNextPromptKey(null);
     setRejectedSegments([]);
     pendingEpisodeTransitionRef.current = null;
-    pendingOutroCompletionRef.current = false;
+    pendingCreditsCompletionRef.current = false;
   }, [filePath]);
 
   useEffect(() => {
@@ -1328,8 +1328,8 @@ export default function VideoPlayer({
       // The old source can still deliver an `ended` event after the parent has
       // requested another episode. Never let that stale event restart playback.
       if (sourceToken !== sourceLoadTokenRef.current || pendingEpisodeTransitionRef.current) return;
-      const outroCompletionRequested = pendingOutroCompletionRef.current;
-      pendingOutroCompletionRef.current = false;
+      const creditsCompletionRequested = pendingCreditsCompletionRef.current;
+      pendingCreditsCompletionRef.current = false;
       const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
       const totalDuration = probedDurationRef.current || (Number.isFinite(video.duration) ? video.duration : 0);
       const eventPosition = clampSeconds(absoluteMediaSeconds(currentTime, {
@@ -1344,10 +1344,10 @@ export default function VideoPlayer({
         Math.max(eventPosition, playbackPositionRef.current),
         totalDuration || undefined,
       );
-      if (outroCompletionRequested) {
+      if (creditsCompletionRequested) {
         latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
         setPaused(true);
-        // Pressing Skip Outro is an explicit request to finish this episode,
+        // Pressing Skip Credits is an explicit request to finish this episode,
         // so advance even when the optional end-of-episode autoplay toggle is
         // disabled. Normal, unprompted endings still respect that toggle.
         if (latestEpisodePlaybackRef.current.nextEpisodeFile) {
@@ -2422,7 +2422,7 @@ export default function VideoPlayer({
                 ? Math.max(activeMediaSegment.startMs / 1000, activeMediaSegment.mediaDurationMs / 1000 - END_COMPLETION_TOLERANCE_SECONDS)
                 : activeMediaSegment.endMs / 1000;
               if (activeMediaSegment.endMs === null) {
-                pendingOutroCompletionRef.current = true;
+                pendingCreditsCompletionRef.current = activeMediaSegment.type === 'credits';
               }
               seekTo(targetSeconds);
             }}

@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.62](docs/releases/v1.0.62.md): adds desktop host-or-remote onboarding, paired remote-library playback, and distinct Outro, Credits, and Preview skip markers.
 - [LoomTV 1.0.61](docs/releases/v1.0.61.md): publishes the complete desktop profile release with cross-platform Settings verification normalized for Windows line endings.
 - [LoomTV 1.0.60](docs/releases/v1.0.60.md): republishes the complete desktop profile, Kids restrictions, personal lists, profile transfer, and LAN security release with current Settings source-verification tests.
 - [LoomTV 1.0.59](docs/releases/v1.0.59.md): completes desktop profiles with PIN workflows, Kids restrictions, per-profile lists and settings, profile transfer, LAN enforcement, metadata ratings, and detailed security and migration improvements.

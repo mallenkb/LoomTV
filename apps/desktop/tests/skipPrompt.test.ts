@@ -9,7 +9,16 @@ test('unknown client segment types are ignored and labels have a safe fallback',
 });
 
 test('known contextual labels remain stable', () => {
-  assert.equal(skipPromptLabel('credits', true), 'Outro');
+  assert.equal(skipPromptLabel('outro', true), 'Outro');
   assert.equal(skipPromptLabel('credits', false), 'Credits');
   assert.equal(skipPromptLabel('preview', true), 'Preview');
+});
+
+test('an overlapping ending takes prompt precedence over a broader credits range', () => {
+  const credits = { type: 'credits' as const, startMs: 1_425_000, endMs: 1_560_000, mediaDurationMs: 1_560_000 };
+  const outro = { type: 'outro' as const, startMs: 1_430_000, endMs: 1_500_000, mediaDurationMs: 1_560_000 };
+  const preview = { type: 'preview' as const, startMs: 1_520_000, endMs: 1_550_000, mediaDurationMs: 1_560_000 };
+  assert.equal(activeSkipSegmentAt([credits, outro, preview], 1_450)?.type, 'outro');
+  assert.equal(activeSkipSegmentAt([credits, outro, preview], 1_510)?.type, 'credits');
+  assert.equal(activeSkipSegmentAt([credits, outro, preview], 1_530)?.type, 'preview');
 });

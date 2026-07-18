@@ -99,18 +99,21 @@ function normalizeSkipAnalysis(raw: AppSettings): SkipAnalysisSettings {
     enabledTypes: {
       intro: bool(enabledTypes?.intro, true),
       recap: bool(enabledTypes?.recap, true),
+      outro: bool(enabledTypes?.outro, true),
       credits: bool(enabledTypes?.credits, true),
       preview: bool(enabledTypes?.preview, true),
     },
     promptTypes: {
       intro: bool(promptTypes?.intro, true),
       recap: bool(promptTypes?.recap, true),
+      outro: bool(promptTypes?.outro, true),
       credits: bool(promptTypes?.credits, true),
-      preview: bool(promptTypes?.preview, false),
+      preview: bool(promptTypes?.preview, true),
     },
     durationLimits: {
       intro: limit(durationLimits?.intro, 15, 180),
       recap: limit(durationLimits?.recap, 15, 120),
+      outro: limit(durationLimits?.outro, 15, 300),
       credits: limit(durationLimits?.credits, 15, 300),
       preview: limit(durationLimits?.preview, 15, 120),
       movieCredits: limit(durationLimits?.movieCredits, 15, 900),

@@ -9,6 +9,7 @@ export const PROFILE_SELECTION_LEDGER_MIGRATION_VERSION = 3;
 export const PROFILE_GUEST_TYPE_MIGRATION_VERSION = 4;
 export const PROFILE_GLYPH_AVATAR_MIGRATION_VERSION = 5;
 export const PROFILE_AUTOMATIC_SIGN_IN_MIGRATION_VERSION = 6;
+export const OUTRO_SEGMENT_MIGRATION_VERSION = 7;
 
 function ensureColumn(database: BetterSqlite3.Database, tableName: string, columnName: string, definition: string): void {
   const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
@@ -140,7 +141,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       file_path TEXT NOT NULL,
       file_revision TEXT NOT NULL,
       release_key TEXT,
-      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'credits', 'preview')),
+      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
       start_ms INTEGER NOT NULL,
       end_ms INTEGER,
       confidence REAL NOT NULL,
@@ -160,7 +161,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
 
     CREATE TABLE IF NOT EXISTS media_segments (
       file_revision TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'credits', 'preview')),
+      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
       id TEXT NOT NULL,
       start_ms INTEGER NOT NULL,
       end_ms INTEGER,
@@ -272,6 +273,103 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateProfileGuestType(database);
   migrateProfileGlyphAvatars(database);
   migrateProfileAutomaticSignIn(database);
+  migrateOutroSegments(database);
+}
+
+function migrateOutroSegments(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(OUTRO_SEGMENT_MIGRATION_VERSION)) return;
+  const candidatesSql = (database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_segment_candidates'").get() as { sql?: string } | undefined)?.sql || '';
+  const segmentsSql = (database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'media_segments'").get() as { sql?: string } | undefined)?.sql || '';
+  database.transaction(() => {
+    if (!candidatesSql.includes("'outro'")) {
+      database.exec(`
+        ALTER TABLE media_segment_candidates RENAME TO media_segment_candidates_pre_outro;
+        CREATE TABLE media_segment_candidates (
+          id TEXT PRIMARY KEY,
+          media_id TEXT NOT NULL,
+          season INTEGER NOT NULL,
+          episode INTEGER NOT NULL,
+          file_path TEXT NOT NULL,
+          file_revision TEXT NOT NULL,
+          release_key TEXT,
+          type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
+          start_ms INTEGER NOT NULL,
+          end_ms INTEGER,
+          confidence REAL NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('manual', 'chapter', 'theintrodb', 'aniskip', 'chromaprint')),
+          status TEXT NOT NULL CHECK (status IN ('active', 'review', 'rejected')),
+          media_duration_ms INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          analysis_metadata_json TEXT
+        );
+        INSERT INTO media_segment_candidates (
+          id, media_id, season, episode, file_path, file_revision, release_key,
+          type, start_ms, end_ms, confidence, source, status, media_duration_ms,
+          updated_at, expires_at, analysis_metadata_json
+        )
+        SELECT
+          id, media_id, season, episode, file_path, file_revision, release_key,
+          CASE WHEN source = 'aniskip' AND type = 'credits' THEN 'outro' ELSE type END,
+          start_ms, end_ms, confidence, source, status, media_duration_ms,
+          updated_at, expires_at, analysis_metadata_json
+        FROM media_segment_candidates_pre_outro;
+        DROP TABLE media_segment_candidates_pre_outro;
+        CREATE INDEX idx_media_segment_candidates_revision ON media_segment_candidates(file_revision, type, source);
+        CREATE INDEX idx_media_segment_candidates_episode ON media_segment_candidates(media_id, season, episode, source);
+        CREATE INDEX idx_media_segment_candidates_release ON media_segment_candidates(release_key, source);
+      `);
+    }
+    if (!segmentsSql.includes("'outro'")) {
+      database.exec(`
+        ALTER TABLE media_segments RENAME TO media_segments_pre_outro;
+        CREATE TABLE media_segments (
+          file_revision TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
+          id TEXT NOT NULL,
+          start_ms INTEGER NOT NULL,
+          end_ms INTEGER,
+          confidence REAL NOT NULL,
+          source TEXT NOT NULL,
+          media_duration_ms INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (file_revision, id)
+        );
+        INSERT INTO media_segments (
+          file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
+        )
+        SELECT
+          file_revision,
+          CASE WHEN source = 'aniskip' AND type = 'credits' THEN 'outro' ELSE type END,
+          id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
+        FROM media_segments_pre_outro;
+        DROP TABLE media_segments_pre_outro;
+      `);
+    }
+    // Cached AniSkip payloads were normalized with the legacy ED -> credits
+    // mapping. Force a fresh lookup using the new semantic model.
+    database.prepare("DELETE FROM segment_source_cache WHERE provider = 'aniskip'").run();
+    const settingsRow = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
+    if (settingsRow) {
+      try {
+        const settings = JSON.parse(settingsRow.data_json) as Record<string, unknown>;
+        const skipAnalysis = settings.skipAnalysis && typeof settings.skipAnalysis === 'object'
+          ? settings.skipAnalysis as Record<string, unknown>
+          : {};
+        const promptTypes = skipAnalysis.promptTypes && typeof skipAnalysis.promptTypes === 'object'
+          ? skipAnalysis.promptTypes as Record<string, unknown>
+          : {};
+        settings.skipAnalysis = { ...skipAnalysis, promptTypes: { ...promptTypes, preview: true } };
+        database.prepare('UPDATE app_settings SET data_json = ?, updated_at = ? WHERE id = 1')
+          .run(JSON.stringify(settings), Date.now());
+      } catch {
+        // Leave malformed settings untouched; the regular settings loader will
+        // recover them without blocking the marker schema migration.
+      }
+    }
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(OUTRO_SEGMENT_MIGRATION_VERSION, Date.now());
+  })();
 }
 
 function migrateProfileAutomaticSignIn(database: BetterSqlite3.Database): void {
@@ -609,7 +707,7 @@ function migrateMediaSegmentsPrimaryKey(database: BetterSqlite3.Database): void 
 
     CREATE TABLE media_segments (
       file_revision TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'credits', 'preview')),
+      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
       id TEXT NOT NULL,
       start_ms INTEGER NOT NULL,
       end_ms INTEGER,

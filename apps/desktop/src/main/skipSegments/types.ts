@@ -1,4 +1,4 @@
-export type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
+export type MediaSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
 
 export type MediaSegmentSource =
   | 'manual'
