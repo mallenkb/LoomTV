@@ -142,6 +142,7 @@ export default function VideoPlayer({
   const progressThumbRef = useRef<HTMLDivElement>(null);
   const currentTimeTextRef = useRef<HTMLSpanElement>(null);
   const durationTimeTextRef = useRef<HTMLSpanElement>(null);
+  const showRemainingTimeRef = useRef(false);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const transcodeSessionIdRef = useRef<string | null>(null);
@@ -207,6 +208,7 @@ export default function VideoPlayer({
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [showRemainingTime, setShowRemainingTime] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -277,7 +279,10 @@ export default function VideoPlayer({
       progressThumbRef.current.style.left = `${progressPercent}%`;
     }
     if (currentTimeTextRef.current) {
-      currentTimeTextRef.current.textContent = formatTime(safePosition);
+      const displayTime = showRemainingTimeRef.current
+        ? `-${formatTime(Math.max(0, safeDuration - safePosition))}`
+        : formatTime(safePosition);
+      currentTimeTextRef.current.textContent = displayTime;
     }
     if (durationTimeTextRef.current) {
       durationTimeTextRef.current.textContent = formatTime(safeDuration);
@@ -288,6 +293,13 @@ export default function VideoPlayer({
       seekSliderRef.current.setAttribute('aria-valuetext', `${formatTime(safePosition)} of ${formatTime(safeDuration)}`);
     }
   }, []);
+
+  const toggleTimeDisplay = useCallback(() => {
+    const nextShowRemainingTime = !showRemainingTimeRef.current;
+    showRemainingTimeRef.current = nextShowRemainingTime;
+    setShowRemainingTime(nextShowRemainingTime);
+    syncPlaybackUi(playbackPositionRef.current, playbackDurationRef.current);
+  }, [syncPlaybackUi]);
 
   const updatePlaybackSnapshot = useCallback((
     nextPosition: number,
@@ -2401,6 +2413,7 @@ export default function VideoPlayer({
           playbackPositionRef={playbackPositionRef}
           duration={duration}
           position={position}
+          showRemainingTime={showRemainingTime}
           progressPct={progressPct}
           paused={paused}
           muted={muted}
@@ -2415,6 +2428,7 @@ export default function VideoPlayer({
           handleProgressPointerDown={handleProgressPointerDown}
           handleProgressKeyDown={handleProgressKeyDown}
           togglePlay={togglePlay}
+          toggleTimeDisplay={toggleTimeDisplay}
           seekTo={seekTo}
           toggleMute={toggleMute}
           handleVolume={handleVolume}
