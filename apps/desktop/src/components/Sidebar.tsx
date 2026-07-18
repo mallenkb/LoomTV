@@ -131,8 +131,8 @@ function SettingsNavSolidExactIcon({ className }: { className?: string }) {
 }
 
 function SidebarProfileSwitcher() {
-  const { activeProfile, profiles, openGate } = useProfiles();
-  if (!activeProfile || profiles.length <= 1) return null;
+  const { activeProfile, openGate } = useProfiles();
+  if (!activeProfile) return null;
   return (
     <button
       type="button"
@@ -150,6 +150,7 @@ function SidebarProfileSwitcher() {
 
 export default function Sidebar() {
   const location = useLocation();
+  const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
   const isSettingsActive = location.pathname === '/settings';
@@ -160,9 +161,9 @@ export default function Sidebar() {
   useEffect(() => {
     let mounted = true;
 
-    desktopApi.getSettings().then((settings) => {
+    Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()]).then(([settings, preferences]) => {
       if (mounted) {
-        setNavOrder(normalizeSidebarNavOrder(settings.sidebarNavOrder));
+        setNavOrder(normalizeSidebarNavOrder(preferences.sidebarNavOrder ?? settings.sidebarNavOrder));
       }
     });
 
@@ -177,7 +178,7 @@ export default function Sidebar() {
       mounted = false;
       window.removeEventListener('loomtv:sidebar-order-changed', handleSidebarOrderChanged);
     };
-  }, []);
+  }, [activeProfile?.id]);
 
   const navItems = useMemo(
     () => [

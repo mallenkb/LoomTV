@@ -15,10 +15,19 @@ import {
 } from '../src/main/databasePlaybackRepository.ts';
 import {
   createProfile,
+  createGuestProfile,
   deleteProfile,
+  getDeviceSelectionRevision,
   getDeviceProfileSelection,
+  getProfileLists,
+  getProfilePreferences,
+  getProfileRestrictions,
   getOwnerProfile,
+  resetOwnerProfile,
+  saveProfilePreferences,
+  saveProfileRestrictions,
   selectDeviceProfile,
+  setProfileListEntry,
 } from '../src/main/databaseProfilesRepository.ts';
 
 function createDatabase(): BetterSqlite3.Database {
@@ -99,7 +108,7 @@ test('library repository round-trips the existing schema, ordering, and durable 
     assert.deepEqual(result.tvShows[0].episodeFiles?.map((episode) => `${episode.season}-${episode.episode}`), ['1-1', '1-2', '2-1']);
     assert.equal(result.tvShows[0].backdrop, '');
     assert.deepEqual(result.tvShows[0].posterCandidates, ['loomtv-custom-artwork://artwork/show/poster', 'poster.jpg']);
-    assert.equal(result.tvShows[0].lastPlayed, 200);
+    assert.equal(result.tvShows[0].lastPlayed, undefined);
     assert.equal(result.scanCache?.['/library'].subtitleProfile, 'en');
   } finally {
     database.close();
@@ -159,12 +168,51 @@ test('profiles keep viewer state isolated and cascade on delete', () => {
 
     selectDeviceProfile(database, 'tablet-1', second.id);
     assert.equal(getDeviceProfileSelection(database, 'tablet-1'), second.id);
+    const revisionBeforeDelete = getDeviceSelectionRevision(database, 'tablet-1');
 
     assert.throws(() => deleteProfile(database, owner.id), /Owner profile cannot be deleted/);
     deleteProfile(database, second.id);
     assert.deepEqual(getAllProgress(database, second.id), {});
     assert.equal(getDeviceProfileSelection(database, 'tablet-1'), null);
+    assert.equal(getDeviceSelectionRevision(database, 'tablet-1'), revisionBeforeDelete + 1);
     assert.equal(getAllProgress(database, owner.id)['/library/movie.mkv'].position, 30);
+  } finally {
+    database.close();
+  }
+});
+
+test('profile preferences, restrictions, lists, Guest state, and Owner reset remain isolated', () => {
+  const database = createDatabase();
+  try {
+    database.prepare("INSERT INTO library_folders (path, kind, added_at) VALUES ('/library', 'movies', 1)").run();
+    const owner = getOwnerProfile(database);
+    assert.ok(owner);
+    const child = createProfile(database, { name: 'Child', type: 'kid' });
+
+    saveProfilePreferences(database, child.id, { appThemeMode: 'light', playbackSkipForwardSeconds: 20 });
+    saveProfileRestrictions(database, child.id, {
+      country: 'US',
+      maximumAge: 13,
+      allowUnrated: false,
+      allowedFolders: ['/library'],
+    });
+    setProfileListEntry(database, child.id, 'movie', 'favorite', true);
+    assert.deepEqual(getProfilePreferences(database, owner.id), {});
+    assert.equal(getProfilePreferences(database, child.id).playbackSkipForwardSeconds, 20);
+    assert.deepEqual(getProfileRestrictions(database, child.id).allowedFolders, ['/library']);
+    assert.equal(getProfileLists(database, child.id)[0].mediaId, 'movie');
+
+    const guest = createGuestProfile(database, 'tablet-guest');
+    assert.equal(guest.isGuest, true);
+    assert.equal(getDeviceProfileSelection(database, 'tablet-guest'), guest.id);
+
+    saveProgress(database, owner.id, '/library/owner.mkv', 10, 100);
+    selectDeviceProfile(database, 'desktop-primary', owner.id);
+    const replacement = resetOwnerProfile(database);
+    assert.notEqual(replacement.id, owner.id);
+    assert.equal(getAllProgress(database, owner.id)['/library/owner.mkv'], undefined);
+    assert.equal(getDeviceProfileSelection(database, 'desktop-primary'), null);
+    assert.equal(getOwnerProfile(database)?.id, replacement.id);
   } finally {
     database.close();
   }

@@ -40,17 +40,15 @@ interface NowPlaying {
 
 export default function App() {
   return (
-    <LibraryProvider>
+    <ProfileProvider>
       <ThemeProvider>
         <ToastProvider>
-          <ProfileProvider>
-            <HashRouter>
-              <ProfileGateOrShell />
-            </HashRouter>
-          </ProfileProvider>
+          <HashRouter>
+            <ProfileGateOrShell />
+          </HashRouter>
         </ToastProvider>
       </ThemeProvider>
-    </LibraryProvider>
+    </ProfileProvider>
   );
 }
 
@@ -60,10 +58,17 @@ export default function App() {
  * has been chosen for this session.
  */
 function ProfileGateOrShell() {
-  const { gateOpen, isLoading } = useProfiles();
+  const { activeProfile, gateOpen, generation, isLoading } = useProfiles();
   if (isLoading) return <div className="h-screen bg-[var(--loom-bg)]" />;
-  if (gateOpen) return <ProfileGate />;
-  return <AppShell />;
+  if (!activeProfile) return <ProfileGate />;
+  return (
+    <>
+      <LibraryProvider key={generation}>
+        <AppShell />
+      </LibraryProvider>
+      {gateOpen && <ProfileGate />}
+    </>
+  );
 }
 
 function AppShell() {

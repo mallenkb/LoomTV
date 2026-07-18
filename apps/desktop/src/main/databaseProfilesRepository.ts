@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type BetterSqlite3 from 'better-sqlite3';
 import type {
   LanProfileListEntry,
@@ -43,7 +44,7 @@ type ProfileRow = {
   name: string;
   avatar_key: string;
   color_key: string;
-  profile_type: Exclude<ProfileType, 'guest'>;
+  profile_type: ProfileType;
   pin_hash: string | null;
   pin_salt: string | null;
   created_at: number;
@@ -60,7 +61,7 @@ export type DeviceProfileSelection = {
   selectionRevision: number;
 };
 
-export const DEFAULT_AVATAR_KEY = 'weave-01';
+export const DEFAULT_AVATAR_KEY = 'glyph-01';
 export const DEFAULT_COLOR_KEY = 'ember';
 
 const MAX_PROFILES = 10;
@@ -102,6 +103,12 @@ function safeKey(value: unknown, fallback: string): string {
   return /^[a-z0-9-]+$/.test(key) ? key : fallback;
 }
 
+function safeAvatarKey(value: unknown, fallback: string): string {
+  const key = String(value ?? '').trim();
+  if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(key) && key.length <= 512 * 1024) return key;
+  return safeKey(key, fallback);
+}
+
 export function listProfiles(database: BetterSqlite3.Database, guestDeviceId?: string): ProfileRecord[] {
   const rows = guestDeviceId
     ? database.prepare('SELECT * FROM profiles WHERE is_guest = 0 OR guest_device_id = ? ORDER BY sort_order, created_at').all(guestDeviceId) as ProfileRow[]
@@ -133,7 +140,7 @@ export function createProfile(database: BetterSqlite3.Database, input: ProfileCr
   `).run(
     id,
     name,
-    safeKey(input.avatarKey, DEFAULT_AVATAR_KEY),
+    safeAvatarKey(input.avatarKey, DEFAULT_AVATAR_KEY),
     safeKey(input.colorKey, DEFAULT_COLOR_KEY),
     input.type === 'kid' ? 'kid' : 'standard',
     now,
@@ -161,7 +168,7 @@ export function updateProfile(database: BetterSqlite3.Database, profileId: strin
     WHERE id = ?
   `).run(
     name,
-    patch.avatarKey === undefined ? existing.avatarKey : safeKey(patch.avatarKey, existing.avatarKey),
+    patch.avatarKey === undefined ? existing.avatarKey : safeAvatarKey(patch.avatarKey, existing.avatarKey),
     patch.colorKey === undefined ? existing.colorKey : safeKey(patch.colorKey, existing.colorKey),
     nextType,
     Date.now(),
@@ -178,13 +185,27 @@ export function deleteProfile(database: BetterSqlite3.Database, profileId: strin
   if (existing.type === 'owner') throw new Error('The Owner profile cannot be deleted.');
   const count = (database.prepare('SELECT COUNT(*) AS n FROM profiles WHERE is_guest = 0').get() as { n: number }).n;
   if (count <= 1) throw new Error('The last remaining profile cannot be deleted.');
-  // playback_progress, playback_track_preferences, and device_profile_selections
-  // rows cascade via their profile_id foreign keys.
-  database.prepare('DELETE FROM profiles WHERE id = ?').run(profileId);
+  const affectedDevices = database.prepare('SELECT device_id FROM device_profile_selections WHERE profile_id = ?')
+    .all(profileId) as Array<{ device_id: string }>;
+  database.transaction(() => {
+    const advanceRevision = database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision) VALUES (?, 1)
+      ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
+    `);
+    affectedDevices.forEach(({ device_id }) => advanceRevision.run(device_id));
+    // All personal records and device selections cascade from the profile.
+    database.prepare('DELETE FROM profiles WHERE id = ?').run(profileId);
+  })();
 }
 
 export function getDeviceProfileSelection(database: BetterSqlite3.Database, deviceId: string): string | null {
   return getDeviceProfileSelectionState(database, deviceId)?.profileId ?? null;
+}
+
+export function getDeviceSelectionRevision(database: BetterSqlite3.Database, deviceId: string): number {
+  const row = database.prepare('SELECT revision FROM device_profile_selection_revisions WHERE device_id = ?')
+    .get(deviceId) as { revision: number } | undefined;
+  return row?.revision ?? 0;
 }
 
 export function getDeviceProfileSelectionState(database: BetterSqlite3.Database, deviceId: string): DeviceProfileSelection | null {
@@ -204,15 +225,26 @@ export function selectDeviceProfile(database: BetterSqlite3.Database, deviceId: 
   if (!profile) throw new Error('That profile no longer exists.');
   const now = Date.now();
   const safeDeviceId = String(deviceId).slice(0, 128);
-  database.prepare(`
-    INSERT INTO device_profile_selections (device_id, profile_id, selected_at, automatic_sign_in, selection_revision)
-    VALUES (?, ?, ?, 0, 1)
-    ON CONFLICT(device_id) DO UPDATE SET
-      profile_id = excluded.profile_id,
-      selected_at = excluded.selected_at,
-      automatic_sign_in = CASE WHEN device_profile_selections.profile_id = excluded.profile_id THEN device_profile_selections.automatic_sign_in ELSE 0 END,
-      selection_revision = device_profile_selections.selection_revision + 1
-  `).run(safeDeviceId, profileId, now);
+  const defaultAutomaticSignIn = profile.hasPin || profile.isGuest ? 0 : 1;
+  database.transaction(() => {
+    const row = database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision) VALUES (?, 1)
+      ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
+      RETURNING revision
+    `).get(safeDeviceId) as { revision: number };
+    database.prepare(`
+      INSERT INTO device_profile_selections (device_id, profile_id, selected_at, automatic_sign_in, selection_revision)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(device_id) DO UPDATE SET
+        profile_id = excluded.profile_id,
+        selected_at = excluded.selected_at,
+        automatic_sign_in = CASE
+          WHEN device_profile_selections.profile_id = excluded.profile_id THEN device_profile_selections.automatic_sign_in
+          ELSE excluded.automatic_sign_in
+        END,
+        selection_revision = excluded.selection_revision
+    `).run(safeDeviceId, profileId, now, defaultAutomaticSignIn, row.revision);
+  })();
   database.prepare('UPDATE profiles SET last_used_at = ? WHERE id = ?').run(now, profileId);
   return profile;
 }
@@ -228,7 +260,7 @@ export function createGuestProfile(database: BetterSqlite3.Database, deviceId: s
       INSERT INTO profiles (
         id, name, avatar_key, color_key, profile_type, created_at, updated_at,
         sort_order, is_guest, guest_device_id
-      ) VALUES (?, 'Guest', 'weave-08', 'slate', 'standard', ?, ?, 9999, 1, ?)
+      ) VALUES (?, 'Guest', 'glyph-12', 'slate', 'guest', ?, ?, 9999, 1, ?)
     `).run(id, now, now, safeDeviceId);
     selectDeviceProfile(database, safeDeviceId, id);
     return getProfile(database, id);
@@ -238,11 +270,19 @@ export function createGuestProfile(database: BetterSqlite3.Database, deviceId: s
   return profile;
 }
 
+export function clearAllGuestProfiles(database: BetterSqlite3.Database): void {
+  database.prepare('DELETE FROM profiles WHERE is_guest = 1').run();
+}
+
 export function clearDeviceProfileSelection(database: BetterSqlite3.Database, deviceId: string): void {
   const selection = getDeviceProfileSelectionState(database, deviceId);
   if (selection) {
     const profile = getProfile(database, selection.profileId);
     database.prepare('DELETE FROM device_profile_selections WHERE device_id = ?').run(deviceId);
+    database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision) VALUES (?, 1)
+      ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
+    `).run(deviceId);
     if (profile?.isGuest) database.prepare('DELETE FROM profiles WHERE id = ?').run(profile.id);
   }
 }
@@ -377,10 +417,23 @@ export function saveProfileRestrictions(
 ): ProfileRestrictions {
   const profile = getProfile(database, profileId);
   if (!profile) throw new Error('That profile no longer exists.');
-  const country = RESTRICTION_COUNTRIES.has(input.country) ? input.country : 'US';
-  const maximumAge = input.maximumAge === null ? null : Math.min(18, Math.max(0, Math.round(Number(input.maximumAge))));
+  if (!RESTRICTION_COUNTRIES.has(input.country)) throw new Error('Choose a supported ratings country.');
+  const country = input.country;
+  const requestedMaximumAge = input.maximumAge === null ? null : Number(input.maximumAge);
+  if (requestedMaximumAge !== null && !Number.isFinite(requestedMaximumAge)) {
+    throw new Error('Choose a valid maximum age.');
+  }
+  const maximumAge = requestedMaximumAge === null
+    ? null
+    : Math.min(18, Math.max(0, Math.round(requestedMaximumAge)));
   if (profile.type === 'kid' && maximumAge === null) throw new Error('Choose a maximum age for a Kids profile.');
-  const folders = [...new Set(input.allowedFolders.map(String).map((folder) => folder.trim()).filter(Boolean))];
+  const availableFolders = new Map((database.prepare('SELECT path FROM library_folders').all() as Array<{ path: string }>).map(({ path: folder }) => [path.resolve(folder), folder]));
+  const requestedFolders = [...new Set(input.allowedFolders.map(String).map((folder) => folder.trim()).filter(Boolean))];
+  const folders = requestedFolders.map((folder) => {
+    const storedFolder = availableFolders.get(path.resolve(folder));
+    if (!storedFolder) throw new Error('Folder access must use a current library root.');
+    return storedFolder;
+  });
   const now = Date.now();
   database.transaction(() => {
     database.prepare(`
@@ -447,24 +500,24 @@ export function profilePersonalDataCount(database: BetterSqlite3.Database, profi
 export function resetOwnerProfile(database: BetterSqlite3.Database): ProfileRecord {
   const owner = getOwnerProfile(database);
   if (!owner) throw new Error('The Owner profile could not be found.');
+  const affectedDevices = database.prepare('SELECT device_id FROM device_profile_selections WHERE profile_id = ?')
+    .all(owner.id) as Array<{ device_id: string }>;
+  const ownerId = randomUUID();
+  const now = Date.now();
   database.transaction(() => {
-    for (const table of [
-      'playback_progress',
-      'playback_track_preferences',
-      'profile_preferences',
-      'profile_restrictions',
-      'profile_library_access',
-      'profile_media_lists',
-    ]) database.prepare(`DELETE FROM ${table} WHERE profile_id = ?`).run(owner.id);
+    const advanceRevision = database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision) VALUES (?, 1)
+      ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
+    `);
+    affectedDevices.forEach(({ device_id }) => advanceRevision.run(device_id));
+    database.prepare('DELETE FROM profiles WHERE id = ?').run(owner.id);
     database.prepare(`
-      UPDATE profiles SET
-        name = 'Owner', avatar_key = ?, color_key = ?, pin_hash = NULL,
-        pin_salt = NULL, updated_at = ?, last_used_at = NULL, sort_order = 0
-      WHERE id = ?
-    `).run(DEFAULT_AVATAR_KEY, DEFAULT_COLOR_KEY, Date.now(), owner.id);
-    database.prepare('UPDATE device_profile_selections SET automatic_sign_in = 0 WHERE profile_id = ?').run(owner.id);
+      INSERT INTO profiles (
+        id, name, avatar_key, color_key, profile_type, created_at, updated_at, sort_order
+      ) VALUES (?, 'Owner', ?, ?, 'owner', ?, ?, 0)
+    `).run(ownerId, DEFAULT_AVATAR_KEY, DEFAULT_COLOR_KEY, now, now);
   })();
-  const reset = getOwnerProfile(database);
+  const reset = getProfile(database, ownerId);
   if (!reset) throw new Error('The Owner profile could not be reset.');
   return reset;
 }

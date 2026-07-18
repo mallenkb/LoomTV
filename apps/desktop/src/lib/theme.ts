@@ -19,11 +19,11 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
 };
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
-  yellow: { label: 'Sunflare', hex: '#FC9C03', hover: '#FCB303', foreground: '#0a0a0a', foregroundMuted: '#404040' },
-  red: { label: 'Emberline', hex: '#E20C17', hover: '#F31520', foreground: '#ffffff', foregroundMuted: '#ffffff' },
-  blue: { label: 'Deepwave', hex: '#0367FC', hover: '#1D78FC', foreground: '#ffffff', foregroundMuted: '#ffffff' },
-  orange: { label: 'Aqualume', hex: '#05D3EB', hover: '#27E0F5', foreground: '#001719', foregroundMuted: '#123C40' },
-  twitch: { label: 'Nightbloom', hex: '#9449FC', hover: '#AC73FC', foreground: '#ffffff', foregroundMuted: '#ffffff' },
+  yellow: { label: 'Orange', hex: '#FC9C03', hover: '#FCB303', foreground: '#0a0a0a', foregroundMuted: '#404040' },
+  red: { label: 'Netflix', hex: '#E20C17', hover: '#F31520', foreground: '#ffffff', foregroundMuted: '#ffffff' },
+  blue: { label: 'Paramount', hex: '#0367FC', hover: '#1D78FC', foreground: '#ffffff', foregroundMuted: '#ffffff' },
+  orange: { label: 'Disney', hex: '#05D3EB', hover: '#27E0F5', foreground: '#001719', foregroundMuted: '#123C40' },
+  twitch: { label: 'Twitch', hex: '#9449FC', hover: '#AC73FC', foreground: '#ffffff', foregroundMuted: '#ffffff' },
 };
 
 export const DARK_THEMES: Record<AppDarkTheme, {

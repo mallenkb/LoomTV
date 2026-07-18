@@ -46,6 +46,7 @@ import type {
   EpisodeFile,
   EpisodeMeta,
   MediaTrack,
+  PlaybackTrackPreferences,
   PlayerState,
   RotationMode,
   SubtitleStyleSettings,
@@ -63,16 +64,13 @@ import {
   getStoredDuration,
   hlsErrorSummary,
   isBitmapSubtitleCodec,
-  loadAutoplayNextEpisode,
   loadSharedTrackPreferences,
   loadSubtitlesDefaultEnabled,
-  loadTrackPreferences,
   mediaErrorMessage,
   parseVttCues,
   preferredTrackIndex,
   probeDurationSeconds,
   probeTracks,
-  saveAutoplayNextEpisode,
   saveSubtitlesDefaultEnabled,
   saveTrackPreference,
   selectedEmbeddedSubtitle,
@@ -230,7 +228,7 @@ export default function VideoPlayer({
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
-  const [autoplayNextEnabled, setAutoplayNextEnabled] = useState(loadAutoplayNextEpisode);
+  const autoplayNextEnabled = true;
   const [nextCountdown, setNextCountdown] = useState<number | null>(null);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
@@ -329,10 +327,10 @@ export default function VideoPlayer({
   }, [syncPlaybackUi]);
 
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
-  const [sharedTrackPreferences, setSharedTrackPreferences] = useState(() => loadTrackPreferences(trackPreferenceScopeKey));
+  const [sharedTrackPreferences, setSharedTrackPreferences] = useState<PlaybackTrackPreferences>({});
   useEffect(() => {
     let cancelled = false;
-    setSharedTrackPreferences(loadTrackPreferences(trackPreferenceScopeKey));
+    setSharedTrackPreferences({});
     void loadSharedTrackPreferences(trackPreferenceScopeKey).then((preferences) => {
       if (!cancelled) setSharedTrackPreferences(preferences);
     });
@@ -424,17 +422,17 @@ export default function VideoPlayer({
 
   useEffect(() => {
     let cancelled = false;
-    void desktopApi.getSettings()
-      .then((settings) => {
+    void Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()])
+      .then(([settings, preferences]) => {
         if (cancelled) return;
         setSkipBackSeconds(
-          Number.isFinite(settings.playbackSkipBackSeconds) && (settings.playbackSkipBackSeconds || 0) > 0
-            ? Number(settings.playbackSkipBackSeconds)
+          Number.isFinite(preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds)
+            ? Number(preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds)
             : DEFAULT_SKIP_BACK_SECONDS,
         );
         setSkipForwardSeconds(
-          Number.isFinite(settings.playbackSkipForwardSeconds) && (settings.playbackSkipForwardSeconds || 0) > 0
-            ? Number(settings.playbackSkipForwardSeconds)
+          Number.isFinite(preferences.playbackSkipForwardSeconds ?? settings.playbackSkipForwardSeconds)
+            ? Number(preferences.playbackSkipForwardSeconds ?? settings.playbackSkipForwardSeconds)
             : DEFAULT_SKIP_FORWARD_SECONDS,
         );
         if (settings.skipAnalysis?.promptTypes) setSkipPromptTypes(settings.skipAnalysis.promptTypes);
@@ -1882,15 +1880,6 @@ export default function VideoPlayer({
     }));
   }, [setLiveSubtitleStyle]);
 
-  const toggleAutoplayNext = useCallback(() => {
-    setAutoplayNextEnabled((current) => {
-      const next = !current;
-      saveAutoplayNextEpisode(next);
-      if (!next) clearNextEpisodeCountdown();
-      return next;
-    });
-  }, [clearNextEpisodeCountdown]);
-
   const selectVideoTrack = useCallback((trackIndex: number) => {
     if (selectedVideoTrackIndexRef.current === trackIndex) return;
     selectedVideoTrackIndexRef.current = trackIndex;
@@ -2514,9 +2503,6 @@ export default function VideoPlayer({
           onClose={() => setShowMediaPanel(false)}
           mediaPanelTab={mediaPanelTab}
           setMediaPanelTab={setMediaPanelTab}
-          hasEpisodes={hasEpisodes}
-          autoplayNextEnabled={autoplayNextEnabled}
-          toggleAutoplayNext={toggleAutoplayNext}
           videoTracks={videoTracks}
           selectedVideoTrackIndex={selectedVideoTrackIndex}
           selectVideoTrack={selectVideoTrack}

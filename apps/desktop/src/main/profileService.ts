@@ -3,6 +3,7 @@ import {
   clearDeviceProfileSelection,
   createGuestProfile,
   getDeviceProfileSelectionState,
+  getDeviceSelectionRevision,
   getOwnerProfile,
   getProfile,
   getProfilePinCredentials,
@@ -133,12 +134,12 @@ export function getActiveProfileState(deviceId: string): ActiveProfileState {
     };
   }
 
-  const profiles = listProfiles();
-  if (profiles.length === 1 && !profiles[0].hasPin) {
-    selectDeviceProfile(deviceId, profiles[0].id);
-    return getActiveProfileState(deviceId);
-  }
-  return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
+  return {
+    profileId: null,
+    selectionRequired: true,
+    selectionRevision: getDeviceSelectionRevision(deviceId),
+    automaticSignIn: false,
+  };
 }
 
 export function getDesktopActiveProfileId(): string | null {
@@ -147,6 +148,13 @@ export function getDesktopActiveProfileId(): string | null {
 
 export function getDesktopActiveProfileState(): ActiveProfileState {
   return getActiveProfileState(DESKTOP_DEVICE_ID);
+}
+
+export function prepareDesktopProfileStartup(): void {
+  const selection = getDeviceProfileSelectionState(DESKTOP_DEVICE_ID);
+  if (!selection) return;
+  const profile = getProfile(selection.profileId);
+  if (!profile || profile.isGuest) clearDeviceProfileSelection(DESKTOP_DEVICE_ID);
 }
 
 export async function selectProfile(
@@ -192,7 +200,7 @@ export function clearGuestSelection(deviceId: string): void {
 export function lockProfile(deviceId: string): ActiveProfileState {
   const selection = getDeviceProfileSelectionState(deviceId);
   if (selection) unlockedUntil.delete(unlockKey(deviceId, selection.profileId));
-  clearGuestSelection(deviceId);
+  clearDeviceProfileSelection(deviceId);
   broadcastActiveProfileChanged(deviceId);
   return getActiveProfileState(deviceId);
 }
@@ -212,9 +220,15 @@ export function resolveLanProfileId(deviceId: string | null, requireExplicitSele
   if (selection && getProfile(selection.profileId)) return selection.profileId;
   if (requireExplicitSelection) throw new ProfileError('profile_required', 'Select a profile to continue.');
   const owner = getOwnerProfile();
-  if (owner) return owner.id;
+  if (owner) {
+    selectDeviceProfile(deviceId, owner.id);
+    return owner.id;
+  }
   const first = listProfiles()[0];
-  if (first) return first.id;
+  if (first) {
+    selectDeviceProfile(deviceId, first.id);
+    return first.id;
+  }
   throw new ProfileError('profile_required', 'No profiles exist.');
 }
 
@@ -231,7 +245,15 @@ export function requireOwner(deviceId = DESKTOP_DEVICE_ID): ProfileRecord {
 }
 
 export async function changeProfilePin(profileId: string, pin: string | null): Promise<ProfileSummary> {
-  requireOwner();
+  const activeProfileId = requireDesktopProfileId();
+  const existingProfile = getProfile(profileId);
+  if (!existingProfile) throw new Error('That profile no longer exists.');
+  if (existingProfile.isGuest) throw new Error('Guest profiles cannot use a PIN.');
+  if (activeProfileId !== profileId) {
+    requireOwner();
+  } else if (existingProfile.hasPin && !isUnlocked(DESKTOP_DEVICE_ID, profileId)) {
+    throw new ProfileError('owner_required', 'Unlock this profile before changing its PIN.');
+  }
   const credentials = pin === null ? null : await hashProfilePin(pin);
   const profile = setProfilePinCredentials(profileId, credentials);
   if (pin === null) unlockedUntil.delete(unlockKey(DESKTOP_DEVICE_ID, profileId));
@@ -241,10 +263,13 @@ export async function changeProfilePin(profileId: string, pin: string | null): P
 }
 
 export function setDesktopAutomaticSignIn(enabled: boolean): ActiveProfileState {
-  requireOwner();
-  setDeviceAutomaticSignIn(DESKTOP_DEVICE_ID, enabled);
-  broadcastActiveProfileChanged(DESKTOP_DEVICE_ID);
-  return getDesktopActiveProfileState();
+  return setAutomaticSignIn(DESKTOP_DEVICE_ID, enabled);
+}
+
+export function setAutomaticSignIn(deviceId: string, enabled: boolean): ActiveProfileState {
+  setDeviceAutomaticSignIn(deviceId, enabled);
+  broadcastActiveProfileChanged(deviceId);
+  return getActiveProfileState(deviceId);
 }
 
 export function resetOwnerProfile(confirmation: string): ProfileSummary {
@@ -260,8 +285,9 @@ export function resetOwnerProfile(confirmation: string): ProfileSummary {
 
 export function broadcastProfilesChanged(): void {
   const profiles = profileSummaries();
+  const selectionRevision = getDeviceSelectionRevision(DESKTOP_DEVICE_ID);
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) window.webContents.send('profiles:changed', profiles);
+    if (!window.isDestroyed()) window.webContents.send('profiles:changed', { profiles, selectionRevision });
   }
 }
 

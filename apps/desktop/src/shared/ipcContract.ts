@@ -25,6 +25,7 @@ import type {
   ProfileRestrictions,
   ProfileCreateInput,
   ProfileSummary,
+  ProfileTransferResult,
   ProfileUpdateInput,
   SettingsPayload,
   SkipAnalysisRunScope,
@@ -69,7 +70,7 @@ export interface IpcContract {
   'network:set-device-name': { args: [name: string]; result: string };
   'network:status': { args: []; result: LocalNetworkStatus };
   'playback-track-preferences:get': { args: [scope?: string]; result: PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> };
-  'playback-track-preferences:save': { args: [scope: string, preferences: PlaybackTrackPreferences]; result: PlaybackTrackPreferences };
+  'playback-track-preferences:save': { args: [scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string]; result: PlaybackTrackPreferences };
   'playback:activity': { args: [key: string, active: boolean, label?: string]; result: boolean };
   'playback:analysis:season': { args: [mediaId: string, season: number]; result: MediaSegmentResponse };
   'playback:analysis:status': { args: []; result: LocalSegmentAnalysisStatus };
@@ -88,9 +89,12 @@ export interface IpcContract {
   'playback:segments:manage-erase': { args: [request: MediaSegmentRequest]; result: { removed: number } };
   'profiles:create': { args: [input: ProfileCreateInput]; result: ProfileSummary[] };
   'profiles:delete': { args: [profileId: string]; result: ProfileSummary[] };
+  'profiles:export': { args: [profileId: string]; result: ProfileTransferResult };
   'profiles:get-active': { args: []; result: ActiveProfileState };
   'profiles:lock': { args: []; result: ActiveProfileState };
   'profiles:list': { args: []; result: ProfileSummary[] };
+  'profiles:choose-avatar': { args: []; result: string | null };
+  'profiles:import': { args: []; result: ProfileTransferResult };
   'profiles:pin': { args: [profileId: string, pin: string | null]; result: ProfileSummary };
   'profiles:reorder': { args: [profileIds: string[]]; result: ProfileSummary[] };
   'profiles:reset-owner': { args: [confirmation: string]; result: ProfileSummary };
@@ -99,13 +103,13 @@ export interface IpcContract {
   'profiles:set-auto-sign-in': { args: [enabled: boolean]; result: ActiveProfileState };
   'profiles:update': { args: [profileId: string, patch: ProfileUpdateInput]; result: ProfileSummary[] };
   'profile-preferences:get': { args: []; result: ProfilePreferences };
-  'profile-preferences:save': { args: [patch: ProfilePreferences]; result: ProfilePreferences };
+  'profile-preferences:save': { args: [patch: ProfilePreferences, expectedProfileId?: string]; result: ProfilePreferences };
   'profile-restrictions:get': { args: [profileId: string]; result: ProfileRestrictions };
   'profile-restrictions:save': { args: [profileId: string, restrictions: Omit<ProfileRestrictions, 'revision'>]; result: ProfileRestrictions };
   'profile-lists:get': { args: [kind?: ProfileListKind]; result: ProfileListEntry[] };
-  'profile-lists:set': { args: [mediaId: string, kind: ProfileListKind, present: boolean]; result: ProfileListEntry[] };
+  'profile-lists:set': { args: [mediaId: string, kind: ProfileListKind, present: boolean, expectedProfileId?: string]; result: ProfileListEntry[] };
   'progress:get': { args: [filePath?: string]; result: Record<string, StoredProgress> | StoredProgress | null };
-  'progress:import': { args: [progress: ImportedProgress]; result: boolean };
+  'progress:import': { args: [progress: ImportedProgress, expectedProfileId?: string]; result: boolean };
   'progress:save': { args: [filePath: string, position: number, duration: number, expectedProfileId?: string]; result: StoredProgress };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
@@ -122,7 +126,7 @@ export type IpcInvokeChannel = keyof IpcContract;
 export interface IpcEventContract {
   'library:scan-progress': { args: [library: LibraryPayload, progress: import('./desktopProtocol.ts').LibraryScanProgress] };
   'profile:active-changed': { args: [state: ActiveProfileState] };
-  'profiles:changed': { args: [profiles: ProfileSummary[]] };
+  'profiles:changed': { args: [event: import('./desktopProtocol.ts').ProfilesChangedEvent] };
   'updates:state': { args: [state: UpdateState] };
 }
 

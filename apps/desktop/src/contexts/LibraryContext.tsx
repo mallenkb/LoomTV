@@ -2,6 +2,7 @@ import React, { createContext, useContext, useReducer, useEffect, useRef, ReactN
 import { desktopApi } from '@/lib/desktopApi';
 import { migrateLegacyArtwork } from '@/lib/customArtwork';
 import { hydrateProgressFromDatabase } from '@/lib/progress';
+import { useProfiles } from './ProfileContext';
 
 export interface MediaItem {
   id: string;
@@ -224,6 +225,7 @@ function hasConfiguredFolders(data: {
 }
 
 export function LibraryProvider({ children }: { children: ReactNode }) {
+  const { activeProfile } = useProfiles();
   const [state, dispatch] = useReducer(libraryReducer, initialState);
   const isScanningRef = useRef(false);
   const hasConfiguredFoldersRef = useRef(false);
@@ -365,7 +367,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           });
         }
 
-        if (hasConfiguredFolders(cached)) {
+        if (activeProfile?.type === 'owner' && hasConfiguredFolders(cached)) {
           isScanningRef.current = true;
           dispatch({ type: 'SET_SCANNING', payload: true });
           const scanned = await desktopApi.scanLibrary('quick');
@@ -387,12 +389,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [applyLibraryData]);
+  }, [activeProfile?.type, applyLibraryData]);
 
   useEffect(() => {
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
     const intervalId = window.setInterval(() => {
-      if (isScanningRef.current || !hasConfiguredFoldersRef.current) return;
+      if (activeProfile?.type !== 'owner' || isScanningRef.current || !hasConfiguredFoldersRef.current) return;
 
       void (async () => {
         isScanningRef.current = true;
@@ -412,7 +414,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }, intervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [applyLibraryData, state.autoSyncIntervalHours]);
+  }, [activeProfile?.type, applyLibraryData, state.autoSyncIntervalHours]);
 
   return (
     <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours }}>

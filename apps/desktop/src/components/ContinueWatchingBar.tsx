@@ -150,7 +150,7 @@ function findLatestCandidate(
       position: details.position,
       duration: details.duration,
       fraction: details.fraction,
-      updatedAt: details.updatedAt || movie.lastPlayed || 0,
+      updatedAt: details.updatedAt || 0,
       priority: 2,
       onPlayArgs: [
         movie.filePath,
@@ -210,7 +210,7 @@ function findLatestCandidate(
         position: details.position,
         duration: details.duration,
         fraction: details.fraction,
-        updatedAt: details.updatedAt || show.lastPlayed || 0,
+        updatedAt: details.updatedAt || 0,
         priority: 2,
         onPlayArgs: [
           episodeFile.filePath,
@@ -248,7 +248,7 @@ function findLatestCandidate(
       position: 0,
       duration: episodeFile.localMetadata?.durationSeconds || 0,
       fraction: 0,
-      updatedAt: lastWatched.details.updatedAt || show.lastPlayed || 0,
+      updatedAt: lastWatched.details.updatedAt || 0,
       priority: 1,
       onPlayArgs: [
         episodeFile.filePath,

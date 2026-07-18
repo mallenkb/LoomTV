@@ -77,9 +77,6 @@ interface PlayerSettingsPanelProps {
   onClose: () => void;
   mediaPanelTab: ControlTab;
   setMediaPanelTab: (tab: ControlTab) => void;
-  hasEpisodes: boolean;
-  autoplayNextEnabled: boolean;
-  toggleAutoplayNext: () => void;
   videoTracks: MediaTrack[];
   selectedVideoTrackIndex: number;
   selectVideoTrack: (trackIndex: number) => void;
@@ -112,9 +109,6 @@ export default function PlayerSettingsPanel({
   onClose,
   mediaPanelTab,
   setMediaPanelTab,
-  hasEpisodes,
-  autoplayNextEnabled,
-  toggleAutoplayNext,
   videoTracks,
   selectedVideoTrackIndex,
   selectVideoTrack,
@@ -184,21 +178,6 @@ export default function PlayerSettingsPanel({
         <div className="p-5 text-sm text-white/85">
           {mediaPanelTab === 'video' && (
             <div className="space-y-5">
-              {hasEpisodes && (
-                <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2.5 text-xs transition-colors hover:bg-white/15">
-                  <span>
-                    <span className="block font-semibold text-white">Autoplay next episode</span>
-                    <span className="mt-0.5 block text-white/50">Follow season order after a 3 second countdown.</span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={autoplayNextEnabled}
-                    onChange={toggleAutoplayNext}
-                    className="h-4 w-4 shrink-0 accent-[var(--loom-accent)]"
-                  />
-                </label>
-              )}
-
               <div>
                 <p className="mb-2 text-xs font-semibold text-white">Video track</p>
                 <div className="overflow-hidden rounded-lg bg-white/10">

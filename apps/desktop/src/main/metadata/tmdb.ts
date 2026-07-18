@@ -1,6 +1,7 @@
 import { movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers';
-import type { EpisodeMeta, MediaItem } from './types';
+import type { ContentRating, EpisodeMeta, MediaItem } from './types';
 import { safeFetch } from '../safeFetch';
+import { normalizeContentRating } from './contentRatings.ts';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -56,6 +57,12 @@ interface TMDBMedia {
   credits?: { cast?: TMDBPerson[] };
   external_ids?: TMDBExternalIds;
   seasons?: TMDBSeasonSummary[];
+  release_dates?: {
+    results?: Array<{ iso_3166_1?: string; release_dates?: Array<{ certification?: string }> }>;
+  };
+  content_ratings?: {
+    results?: Array<{ iso_3166_1?: string; rating?: string }>;
+  };
 }
 
 interface TMDBSearchResponse {
@@ -111,6 +118,20 @@ function tmdbBackdrop(path: string | null | undefined): string {
   return path ? `${TMDB_IMAGE_BASE}/w1280${path}` : '';
 }
 
+function tmdbContentRatings(d: TMDBMedia): Record<string, ContentRating> {
+  const ratings: Record<string, ContentRating> = {};
+  const accept = (country?: string, code?: string) => {
+    const normalized = normalizeContentRating(country || '', code, 'tmdb');
+    if (!normalized || !country) return;
+    if (!ratings[country] || normalized.minimumAge > ratings[country].minimumAge) ratings[country] = normalized;
+  };
+  for (const result of d.release_dates?.results || []) {
+    for (const release of result.release_dates || []) accept(result.iso_3166_1, release.certification);
+  }
+  for (const result of d.content_ratings?.results || []) accept(result.iso_3166_1, result.rating);
+  return ratings;
+}
+
 function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<MediaItem> | null {
   if (!d) return null;
   const cast = (d.credits?.cast ?? []).slice(0, 8).map((c) => ({
@@ -131,6 +152,7 @@ function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<Me
     logoCandidates: tmdbLogoCandidates(d),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
+    contentRatings: tmdbContentRatings(d),
     genres: (d.genres ?? []).map((g) => g.name as string),
     year: d.release_date ? new Date(d.release_date).getFullYear() : 0,
     cast,
@@ -197,7 +219,7 @@ export async function fetchTMDBMovieMetadata(
     }
     if (!hit) return null;
 
-    const d = await fetchTMDBJson<TMDBMedia>(`movie/${hit.id}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`movie/${hit.id}?append_to_response=credits,images,external_ids,release_dates`, tmdbCredential);
     const result = tmdbMovieResult(d, hit.title || title);
     return result ? { ...result, year: result.year || year || 0 } : null;
   } catch (err) {
@@ -212,7 +234,7 @@ export async function fetchTMDBMovieMetadataById(
 ): Promise<Partial<MediaItem> | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {
-    const d = await fetchTMDBJson<TMDBMedia>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,release_dates`, tmdbCredential);
     return tmdbMovieResult(d, '');
   } catch (err) {
     console.error('[TMDB movie id]', err);
@@ -271,6 +293,7 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
     logoCandidates: tmdbLogoCandidates(d),
     summary: (d.overview as string) || '',
     rating: (d.vote_average as number) ?? 0,
+    contentRatings: tmdbContentRatings(d),
     genres: (d.genres ?? []).map((g) => g.name as string),
     year: d.first_air_date ? new Date(d.first_air_date as string).getFullYear() : 0,
     cast,
@@ -331,7 +354,7 @@ export async function fetchTMDBTVMetadata(
     const hit = tmdbSearchResults(searchData)[0];
     if (!hit) return null;
 
-    const d = await fetchTMDBJson<TMDBMedia>(`tv/${hit.id}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`tv/${hit.id}?append_to_response=credits,images,external_ids,content_ratings`, tmdbCredential);
     const result = await tmdbTVResultFromDetails(d, hit.name || title, tmdbCredential);
     return result ? { ...result, year: result.year || year || 0 } : null;
   } catch (err) {
@@ -346,7 +369,7 @@ export async function fetchTMDBTVMetadataById(
 ): Promise<TMDBTVResult | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {
-    const d = await fetchTMDBJson<TMDBMedia>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,content_ratings`, tmdbCredential);
     return tmdbTVResultFromDetails(d, '', tmdbCredential);
   } catch (err) {
     console.error('[TMDB TV id]', err);
