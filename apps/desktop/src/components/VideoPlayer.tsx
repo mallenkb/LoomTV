@@ -1296,10 +1296,18 @@ export default function VideoPlayer({
     const onEnded = () => {
       const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
       const totalDuration = probedDurationRef.current || (Number.isFinite(video.duration) ? video.duration : 0);
-      const endedPosition = clampSeconds(absoluteMediaSeconds(currentTime, {
+      const eventPosition = clampSeconds(absoluteMediaSeconds(currentTime, {
         mode: streamIsTranscoded && !streamIsSeekableRef.current ? 'offset' : 'absolute',
         offsetSeconds: transcodeStartSecondsRef.current,
       }), totalDuration || undefined);
+      // Chromium/HLS can briefly report a reset or stale currentTime while
+      // dispatching `ended`. Keep the furthest confirmed playback snapshot so
+      // a true media ending is not mistaken for an early transcode cutoff and
+      // restarted from the beginning.
+      const endedPosition = clampSeconds(
+        Math.max(eventPosition, playbackPositionRef.current),
+        totalDuration || undefined,
+      );
       const nearEnoughToComplete = totalDuration > 0
         && totalDuration - endedPosition <= Math.max(END_COMPLETION_TOLERANCE_SECONDS, REPLAY_FROM_START_REMAINING_SECONDS);
       if (nearEnoughToComplete) {
