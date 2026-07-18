@@ -22,7 +22,7 @@ type PlaybackSettingsSectionProps = {
 };
 
 const INTRO_TYPES = ['intro', 'recap'] as const;
-const OUTRO_TYPES = ['credits', 'preview'] as const;
+const OUTRO_TYPES = ['outro', 'credits', 'preview'] as const;
 
 const STATE_LABELS: Record<string, string> = {
   idle: 'Idle — markers up to date',
@@ -271,7 +271,7 @@ export default function PlaybackSettingsSection({
                 <h3 className="text-sm font-medium text-white">Skip sections</h3>
                 <div className="mt-3 grid gap-4 lg:grid-cols-2">
                   <SegmentGroup title="Intro & recap" description="Opening sequences and previous-episode summaries." types={INTRO_TYPES} settings={skipAnalysis} update={update} />
-                  <SegmentGroup title="Outro & next preview" description="End credits and upcoming-episode previews." types={OUTRO_TYPES} settings={skipAnalysis} update={update} />
+                  <SegmentGroup title="Outro, credits & next preview" description="Ending sequences, production credits, and upcoming-episode previews." types={OUTRO_TYPES} settings={skipAnalysis} update={update} />
                 </div>
               </div>
 
@@ -393,7 +393,7 @@ function SegmentGroup({
 }: {
   title: string;
   description: string;
-  types: readonly ('intro' | 'recap' | 'credits' | 'preview')[];
+  types: readonly ('intro' | 'recap' | 'outro' | 'credits' | 'preview')[];
   settings: SkipAnalysisSettings;
   update: (patch: Partial<SkipAnalysisSettings>) => void;
 }) {

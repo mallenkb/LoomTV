@@ -398,7 +398,7 @@ export function registerIpcHandlers<
   handle('playback:segments:manage-update', (_event, candidateId, patch) => {
     deps.authorizeSettingsWrite();
     const status = patch?.status === 'active' || patch?.status === 'review' || patch?.status === 'rejected' ? patch.status : undefined;
-    const type = patch?.type === 'intro' || patch?.type === 'recap' || patch?.type === 'credits' || patch?.type === 'preview' ? patch.type : undefined;
+    const type = patch?.type === 'intro' || patch?.type === 'recap' || patch?.type === 'outro' || patch?.type === 'credits' || patch?.type === 'preview' ? patch.type : undefined;
     return deps.updateManagedMediaSegment(String(candidateId || '').slice(0, 240), { status, type });
   });
   handle('playback:segments:manage-erase', (_event, request) => {

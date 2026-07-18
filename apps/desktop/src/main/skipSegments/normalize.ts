@@ -18,8 +18,9 @@ const SOURCE_PRIORITY: Record<MediaSegmentSource, number> = {
 const TYPE_ORDER: Record<MediaSegmentType, number> = {
   recap: 0,
   intro: 1,
-  credits: 2,
-  preview: 3,
+  outro: 2,
+  credits: 3,
+  preview: 4,
 };
 
 export function normalizeSegment(
@@ -110,13 +111,14 @@ export function segmentRevision(segments: MediaSegment[]): string {
 export const CHAPTER_LABELS: Record<MediaSegmentType, readonly string[]> = {
   intro: ['intro', 'introduction', 'opening', 'op'],
   recap: ['recap', 'previously', 'previously on', 'summary', 'last episode'],
-  credits: ['credits', 'end credits', 'ending', 'ed', 'outro'],
+  outro: ['outro', 'ending', 'ending theme', 'closing theme', 'ed'],
+  credits: ['credits', 'end credits', 'production credits', 'closing credits'],
   preview: ['preview', 'pv', 'sneak peek', 'coming up', 'next episode', 'next episode preview'],
 };
 
 export function chapterType(title: string): MediaSegmentType | null {
   const normalized = title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  for (const type of ['intro', 'recap', 'credits', 'preview'] as const) {
+  for (const type of ['intro', 'recap', 'outro', 'credits', 'preview'] as const) {
     if (CHAPTER_LABELS[type].includes(normalized)) return type;
   }
   return null;
@@ -124,7 +126,7 @@ export function chapterType(title: string): MediaSegmentType | null {
 
 export function deduplicateProviderSegments(segments: NormalizedSegmentInput[], mediaDurationMs: number): NormalizedSegmentInput[] {
   const result: NormalizedSegmentInput[] = [];
-  for (const type of ['recap', 'intro', 'credits', 'preview'] as const) {
+  for (const type of ['recap', 'intro', 'outro', 'credits', 'preview'] as const) {
     const values = segments.filter((segment) => segment.type === type);
     if (values.length <= 1) {
       result.push(...values);

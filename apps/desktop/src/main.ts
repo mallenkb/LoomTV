@@ -1115,7 +1115,7 @@ function configureRendererSecurityPolicy(): void {
     `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' file: 'unsafe-inline'",
     "img-src 'self' file: data: blob: http: https: plexserver:",
-    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* plexserver:",
+    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* http://*:* https: plexserver:",
     `connect-src ${connectSrc.join(' ')}`,
     "font-src 'self' file: data:",
     "object-src 'none'",

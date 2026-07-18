@@ -320,11 +320,11 @@ export function createLocalSegmentAnalysis(deps: {
     return {
       enabled: deps.loadSettings().localSkipAnalysisEnabled !== false,
       analyzeNewMedia: true,
-      enabledTypes: { intro: true, recap: true, credits: true, preview: true },
-      promptTypes: { intro: true, recap: true, credits: true, preview: false },
+      enabledTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
+      promptTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
       durationLimits: {
         intro: { minSeconds: 15, maxSeconds: 180 }, recap: { minSeconds: 15, maxSeconds: 120 },
-        credits: { minSeconds: 15, maxSeconds: 300 }, preview: { minSeconds: 15, maxSeconds: 120 },
+        outro: { minSeconds: 15, maxSeconds: 300 }, credits: { minSeconds: 15, maxSeconds: 300 }, preview: { minSeconds: 15, maxSeconds: 120 },
         movieCredits: { minSeconds: 15, maxSeconds: 900 },
       },
       suppressFirstEpisodeIntro: false,
@@ -593,7 +593,7 @@ export function createLocalSegmentAnalysis(deps: {
               });
             }
           }
-          const localTypePriority: Record<FingerprintType, number> = { intro: 0, recap: 1, credits: 2, preview: 3 };
+          const localTypePriority: Record<MediaSegmentCandidate['type'], number> = { intro: 0, recap: 1, outro: 2, credits: 3, preview: 4 };
           const localOnly = candidates.filter((candidate, candidateIndex) => !candidates.some((other, otherIndex) => {
             if (candidateIndex === otherIndex || candidate.type === other.type) return false;
             const candidateEnd = candidate.endMs ?? episode.durationMs;

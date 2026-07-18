@@ -136,7 +136,7 @@ export interface SettingsPayload {
   localNetworkShareToken?: string;
 }
 
-export type SkipAnalysisSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
+export type SkipAnalysisSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
 export type SkipAnalysisMode = 'full' | 'chapter-only' | 'providers-only';
 export type SkipAnalysisDurationLimit = { minSeconds: number; maxSeconds: number };
 export interface SkipAnalysisSettings {
@@ -331,7 +331,7 @@ export interface ProfileTransferResult {
 export type StoredProgress = LanStoredProgress;
 export interface TrackPreference { enabled: boolean; index?: number; language?: string; title?: string; codec?: string; forced?: boolean }
 export interface PlaybackTrackPreferences { audio?: TrackPreference; subtitle?: TrackPreference }
-export type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
+export type MediaSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
 export type MediaSegmentSource = 'manual' | 'chapter' | 'theintrodb' | 'aniskip' | 'chromaprint';
 export interface MediaSegment {
   id: string;

@@ -37,7 +37,7 @@ test('skip prompt follows marker timing without depending on transient player st
   assert.equal(activeSkipSegmentAt([intro], 147), null);
 });
 
-test('credits are labeled as an outro for episodes and credits for movies', () => {
-  assert.equal(skipPromptLabel('credits', true), 'Outro');
+test('outro and credits retain distinct labels', () => {
+  assert.equal(skipPromptLabel('outro', true), 'Outro');
   assert.equal(skipPromptLabel('credits', false), 'Credits');
 });

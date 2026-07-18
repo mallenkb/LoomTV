@@ -42,6 +42,15 @@ import type {
   TranscodeSession,
   UpdateState,
 } from '../shared/desktopProtocol.ts';
+import {
+  clearRemoteDesktopSession,
+  getRemoteDesktopSession,
+  isRemoteDesktopMode,
+  remoteResourceId,
+  saveRemoteDesktopSession,
+  setDesktopLibraryMode,
+  updateRemoteDesktopSession,
+} from './remoteDesktop';
 export type {
   ActiveProfileState,
   ApiResult,
@@ -263,6 +272,7 @@ function normalizeLocalNetworkBaseUrl(value: string): string {
   const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   const parsed = new URL(withProtocol);
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Enter a valid HTTP or HTTPS address.');
+  if (!parsed.port) parsed.port = String(DEFAULT_MEDIA_PORT);
   return parsed.origin;
 }
 
@@ -281,13 +291,87 @@ function subnetCandidates(addresses: string[]): string[] {
 }
 
 async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
+  return fetchRequestWithTimeout(url, undefined, timeoutMs);
+}
+
+async function fetchRequestWithTimeout(url: string, init: RequestInit | undefined, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...(init || {}), signal: controller.signal });
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+const REMOTE_REQUEST_TIMEOUT_MS = 10_000;
+const REMOTE_PROFILE_API_HEADER = { 'X-Loom-Profile-Api-Version': '1' };
+
+async function refreshRemoteCredentials(): Promise<ReturnType<typeof getRemoteDesktopSession>> {
+  const session = getRemoteDesktopSession();
+  if (!session?.refreshToken) throw new Error('Pair this laptop with the host again.');
+  const response = await fetchRequestWithTimeout(`${session.baseUrl}/api/v2/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...REMOTE_PROFILE_API_HEADER },
+    body: JSON.stringify({ refreshToken: session.refreshToken, deviceName: 'LoomTV Desktop' }),
+  }, REMOTE_REQUEST_TIMEOUT_MS);
+  if (!response.ok) {
+    clearRemoteDesktopSession();
+    throw new Error('The host pairing expired or was revoked. Pair this laptop again.');
+  }
+  const credentials = await response.json() as Pick<RemoteLibraryConnection,
+    'deviceToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'> & { accessToken?: string };
+  return updateRemoteDesktopSession({
+    deviceToken: credentials.accessToken || credentials.deviceToken,
+    accessTokenExpiresAt: credentials.accessTokenExpiresAt,
+    refreshToken: credentials.refreshToken,
+    refreshTokenExpiresAt: credentials.refreshTokenExpiresAt,
+  });
+}
+
+async function remoteRequest(pathname: string, init: RequestInit = {}, retry = true): Promise<Response> {
+  let session = getRemoteDesktopSession();
+  if (!session || !isRemoteDesktopMode()) throw new Error('This laptop is not connected to a LoomTV host.');
+  if (session.accessTokenExpiresAt <= Date.now() + 60_000) {
+    session = await refreshRemoteCredentials();
+  }
+  if (!session) throw new Error('Pair this laptop with the host again.');
+  const response = await fetchRequestWithTimeout(`${session.baseUrl}${pathname}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${session.deviceToken}`,
+      ...REMOTE_PROFILE_API_HEADER,
+      ...(init.headers || {}),
+    },
+  }, REMOTE_REQUEST_TIMEOUT_MS);
+  if (response.status === 401 && retry) {
+    await refreshRemoteCredentials();
+    return remoteRequest(pathname, init, false);
+  }
+  return response;
+}
+
+async function remoteJson<T>(pathname: string, init?: RequestInit): Promise<T> {
+  const response = await remoteRequest(pathname, init);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(payload?.error || `The host returned ${response.status}.`);
+  }
+  return response.json() as Promise<T>;
+}
+
+function remoteProgressByStreamUrl(progress: Record<string, StoredProgress>): Record<string, StoredProgress> {
+  const library = getRemoteDesktopSession()?.library;
+  if (!library) return progress;
+  const mapped: Record<string, StoredProgress> = {};
+  for (const item of [...(library.movies || []), ...(library.tvShows || []), ...(library.animeShows || [])]) {
+    const paths = [item.filePath, ...(item.episodeFiles || []).map((episode) => episode.filePath)].filter(Boolean);
+    for (const streamUrl of paths) {
+      const value = progress[remoteResourceId(streamUrl)];
+      if (value) mapped[streamUrl] = value;
+    }
+  }
+  return mapped;
 }
 
 async function probeLanInfo(baseUrl: string, timeoutMs = 800): Promise<boolean> {
@@ -317,14 +401,17 @@ async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
   // Fallback: probe the /api/lan/info endpoint (no token) on each candidate.
   // Stops broadcasting the code to random IPs.
   const status = await desktopApi.getLocalNetworkStatus();
-  const ports = Array.from({ length: 8 }, (_, index) => status.port + index);
+  // Keep the fallback bounded. The previous 254-host × 8-port sweep could
+  // leave Windows clients appearing to loop for nearly a minute.
+  const ports = Array.from(new Set([status.port, DEFAULT_MEDIA_PORT]));
   const candidates = subnetCandidates(status.addresses);
   const urls = candidates.flatMap((address) => ports.map((port) => `http://${address}:${port}`));
   const batchSize = 32;
 
-  for (let index = 0; index < urls.length; index += batchSize) {
+  const deadline = Date.now() + 8_000;
+  for (let index = 0; index < urls.length && Date.now() < deadline; index += batchSize) {
     const batch = urls.slice(index, index + batchSize);
-    const results = await Promise.all(batch.map(async (baseUrl) => (await probeLanInfo(baseUrl) ? baseUrl : null)));
+    const results = await Promise.all(batch.map(async (baseUrl) => (await probeLanInfo(baseUrl, 500) ? baseUrl : null)));
     const found = results.find(Boolean);
     if (found) return found;
   }
@@ -344,11 +431,35 @@ function bearerHeaders(token: string, init?: RequestInit): RequestInit {
 
 export const desktopApi = {
   async getLibrary(): Promise<LibraryPayload> {
+    if (isRemoteDesktopMode()) {
+      const response = await remoteRequest('/api/v2/library');
+      if (!response.ok) {
+        if (response.status === 409) throw new Error('Select a profile from the host first.');
+        throw new Error(response.status === 401 ? 'Pairing was revoked on the host.' : 'Could not load the shared library.');
+      }
+      const library = await response.json() as LibraryPayload;
+      const session = getRemoteDesktopSession();
+      if (session) updateRemoteDesktopSession({ library, libraryEtag: response.headers.get('ETag') || session.libraryEtag });
+      return library;
+    }
     if (window.desktopApi) return window.desktopApi.getLibrary();
     return fetchJson<LibraryPayload>('/api/renderer/library');
   },
 
   async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {
+    if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
+      let fileName = 'Remote stream';
+      try { fileName = new URL(filePath).pathname.split('/').pop() || fileName; } catch { /* Keep fallback. */ }
+      return {
+        url: filePath,
+        contentType: 'video/mp4',
+        fileName,
+        isTranscoded: false,
+        isRemuxed: false,
+        playbackMode: 'direct-stream',
+        decisionReason: 'Signed stream supplied by the paired LoomTV host',
+      };
+    }
     if (window.desktopApi) {
       return window.desktopApi.getStreamUrl(filePath, options);
     }
@@ -435,11 +546,19 @@ export const desktopApi = {
     const deviceId = status?.deviceId || '';
     const deviceName = status?.deviceName || 'LoomTV device';
 
-    const response = await fetch(`${normalizedBaseUrl}/api/v2/pair`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: normalizedCode, deviceId, deviceName }),
-    });
+    let response: Response;
+    try {
+      response = await fetchRequestWithTimeout(`${normalizedBaseUrl}/api/v2/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...REMOTE_PROFILE_API_HEADER },
+        body: JSON.stringify({ code: normalizedCode, deviceId, deviceName }),
+      }, REMOTE_REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        throw new Error('The host did not respond within 10 seconds. Check the IP address, port, firewall, and Local Network Sharing.', { cause: error });
+      }
+      throw new Error('Could not reach that LoomTV host. Check that both computers are on the same network.', { cause: error });
+    }
 
     if (!response.ok) {
       if (response.status === 401) throw new Error('The sharing code was not accepted.');
@@ -473,6 +592,24 @@ export const desktopApi = {
     };
   },
 
+  activateRemoteLibrary(connection: RemoteLibraryConnection): void {
+    saveRemoteDesktopSession(connection);
+    setDesktopLibraryMode('remote');
+  },
+
+  useThisComputerAsHost(): void {
+    setDesktopLibraryMode('host');
+  },
+
+  isRemoteLibraryMode(): boolean {
+    return isRemoteDesktopMode();
+  },
+
+  disconnectRemoteDesktop(): void {
+    clearRemoteDesktopSession();
+    setDesktopLibraryMode('host');
+  },
+
   async refreshRemoteLibrary(
     baseUrl: string,
     deviceToken: string,
@@ -493,11 +630,11 @@ export const desktopApi = {
     let activeAccessExpiresAt = Number(accessTokenExpiresAt) || 0;
     let refreshExpiresAt = Number(refreshTokenExpiresAt) || 0;
     if (activeRefreshToken && activeAccessExpiresAt <= Date.now() + 60_000) {
-      const refreshResponse = await fetch(`${baseUrl}/api/v2/auth/refresh`, {
+      const refreshResponse = await fetchRequestWithTimeout(`${baseUrl}/api/v2/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...REMOTE_PROFILE_API_HEADER },
         body: JSON.stringify({ refreshToken: activeRefreshToken }),
-      });
+      }, REMOTE_REQUEST_TIMEOUT_MS);
       if (!refreshResponse.ok) throw new Error('The secure pairing session expired. Pair again.');
       const credentials = await refreshResponse.json() as {
         accessToken: string;
@@ -510,9 +647,9 @@ export const desktopApi = {
       activeRefreshToken = credentials.refreshToken;
       refreshExpiresAt = credentials.refreshTokenExpiresAt;
     }
-    const response = await fetch(`${baseUrl}/api/v2/library`, bearerHeaders(activeToken, {
-      headers: etag ? { 'If-None-Match': etag } : undefined,
-    }));
+    const response = await fetchRequestWithTimeout(`${baseUrl}/api/v2/library`, bearerHeaders(activeToken, {
+      headers: { ...REMOTE_PROFILE_API_HEADER, ...(etag ? { 'If-None-Match': etag } : {}) },
+    }), REMOTE_REQUEST_TIMEOUT_MS);
     if (response.status === 304) return null;
     if (!response.ok) {
       if (response.status === 401) throw new Error('Pairing was revoked on the host.');
@@ -612,6 +749,10 @@ export const desktopApi = {
   // Browser-rendered development sessions have no profile bridge; they behave
   // as a one-profile installation and never show the picker.
   async listProfiles(): Promise<ProfileSummary[]> {
+    if (isRemoteDesktopMode()) {
+      const payload = await remoteJson<{ profiles: ProfileSummary[] }>('/api/v2/profiles');
+      return payload.profiles || [];
+    }
     if (window.desktopApi?.listProfiles) return window.desktopApi.listProfiles();
     return [];
   },
@@ -622,6 +763,12 @@ export const desktopApi = {
   },
 
   async getActiveProfileState(): Promise<ActiveProfileState> {
+    if (isRemoteDesktopMode()) {
+      const response = await remoteRequest('/api/v2/profiles/active');
+      if (response.status === 409) return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
+      if (!response.ok) throw new Error('Could not read the active profile from the host.');
+      return response.json() as Promise<ActiveProfileState>;
+    }
     if (window.desktopApi?.getActiveProfileState) return window.desktopApi.getActiveProfileState();
     return { profileId: null, selectionRequired: false, selectionRevision: 0, automaticSignIn: false };
   },
@@ -648,16 +795,31 @@ export const desktopApi = {
   },
 
   async selectProfile(profileId: string, pin?: string): Promise<ProfileSummary> {
+    if (isRemoteDesktopMode()) {
+      const payload = await remoteJson<{ profile: ProfileSummary; active: ActiveProfileState }>('/api/v2/profiles/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, pin }),
+      });
+      updateRemoteDesktopSession({ selectedProfileId: payload.profile.id, selectionRevision: payload.active.selectionRevision });
+      return payload.profile;
+    }
     if (window.desktopApi?.selectProfile) return window.desktopApi.selectProfile(profileId, pin);
     throw new Error('Profiles can only be selected from the LoomTV desktop app.');
   },
 
   async selectGuestProfile(): Promise<ProfileSummary> {
+    if (isRemoteDesktopMode()) return this.selectProfile('guest');
     if (window.desktopApi?.selectGuestProfile) return window.desktopApi.selectGuestProfile();
     throw new Error('Guest is available only in the LoomTV desktop app.');
   },
 
   async lockProfile(): Promise<ActiveProfileState> {
+    if (isRemoteDesktopMode()) {
+      const state = await remoteJson<ActiveProfileState>('/api/v2/profiles/lock', { method: 'POST' });
+      updateRemoteDesktopSession({ selectedProfileId: null, selectionRevision: state.selectionRevision });
+      return state;
+    }
     if (window.desktopApi?.lockProfile) return window.desktopApi.lockProfile();
     return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
   },
@@ -678,15 +840,26 @@ export const desktopApi = {
   },
 
   async setAutomaticProfileSignIn(enabled: boolean): Promise<ActiveProfileState> {
+    if (isRemoteDesktopMode()) return remoteJson<ActiveProfileState>('/api/v2/profiles/auto-sign-in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
     if (window.desktopApi?.setAutomaticProfileSignIn) return window.desktopApi.setAutomaticProfileSignIn(enabled);
     throw new Error('Automatic sign-in can only be managed from the LoomTV desktop app.');
   },
 
   async getProfilePreferences(): Promise<ProfilePreferences> {
+    if (isRemoteDesktopMode()) return remoteJson<ProfilePreferences>('/api/v2/profile-preferences');
     return window.desktopApi?.getProfilePreferences?.() || {};
   },
 
   async saveProfilePreferences(patch: ProfilePreferences, expectedProfileId?: string): Promise<ProfilePreferences> {
+    if (isRemoteDesktopMode()) return remoteJson<ProfilePreferences>('/api/v2/profile-preferences', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...patch, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
+    });
     if (window.desktopApi?.saveProfilePreferences) return window.desktopApi.saveProfilePreferences(patch, expectedProfileId);
     return patch;
   },
@@ -702,10 +875,16 @@ export const desktopApi = {
   },
 
   async getProfileLists(kind?: ProfileListKind): Promise<ProfileListEntry[]> {
+    if (isRemoteDesktopMode()) return remoteJson<ProfileListEntry[]>(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
     return window.desktopApi?.getProfileLists?.(kind) || [];
   },
 
   async setProfileListEntry(mediaId: string, kind: ProfileListKind, present: boolean, expectedProfileId?: string): Promise<ProfileListEntry[]> {
+    if (isRemoteDesktopMode()) return remoteJson<ProfileListEntry[]>('/api/v2/profile-lists', {
+      method: present ? 'PUT' : 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaId, kind, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
+    });
     if (window.desktopApi?.setProfileListEntry) return window.desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
     return [];
   },
@@ -719,12 +898,26 @@ export const desktopApi = {
   },
 
   async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
+    if (isRemoteDesktopMode()) {
+      const all = await remoteJson<Record<string, StoredProgress>>('/api/v2/progress');
+      return filePath ? all[remoteResourceId(filePath)] || null : remoteProgressByStreamUrl(all);
+    }
     if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
     const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
     return fetchJson<Record<string, StoredProgress> | StoredProgress | null>(`/api/progress${query}`);
   },
 
   async saveProgress(filePath: string, position: number, duration: number, expectedProfileId?: string): Promise<StoredProgress> {
+    if (isRemoteDesktopMode()) return remoteJson<StoredProgress>('/api/v2/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mediaId: remoteResourceId(filePath),
+        position,
+        duration,
+        selectionRevision: getRemoteDesktopSession()?.selectionRevision,
+      }),
+    });
     if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration, expectedProfileId);
     return fetchJson<StoredProgress>('/api/progress', {
       method: 'POST',
@@ -733,6 +926,7 @@ export const desktopApi = {
   },
 
   async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string): Promise<boolean> {
+    if (isRemoteDesktopMode()) return true;
     if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress, expectedProfileId);
     const response = await fetchJson<{ ok: boolean }>('/api/progress/import', {
       method: 'POST',
@@ -742,12 +936,21 @@ export const desktopApi = {
   },
 
   async getPlaybackTrackPreferences(scope?: string): Promise<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>> {
+    if (isRemoteDesktopMode()) {
+      const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
+      return remoteJson<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>(`/api/v2/playback-track-preferences${query}`);
+    }
     if (window.desktopApi?.getPlaybackTrackPreferences) return window.desktopApi.getPlaybackTrackPreferences(scope);
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
     return fetchJson<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>(`/api/playback-track-preferences${query}`);
   },
 
   async savePlaybackTrackPreferences(scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string): Promise<PlaybackTrackPreferences> {
+    if (isRemoteDesktopMode()) return remoteJson<PlaybackTrackPreferences>('/api/v2/playback-track-preferences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, preferences, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
+    });
     if (window.desktopApi?.savePlaybackTrackPreferences) return window.desktopApi.savePlaybackTrackPreferences(scope, preferences, expectedProfileId);
     return fetchJson<PlaybackTrackPreferences>('/api/playback-track-preferences', {
       method: 'POST',
@@ -756,6 +959,12 @@ export const desktopApi = {
   },
 
   async getMediaSegments(request: MediaSegmentRequest): Promise<MediaSegmentResponse> {
+    if (isRemoteDesktopMode()) {
+      const params = new URLSearchParams({ mediaId: request.mediaId });
+      if (typeof request.season === 'number') params.set('season', String(request.season));
+      if (typeof request.episode === 'number') params.set('episode', String(request.episode));
+      return remoteJson<MediaSegmentResponse>(`/api/v2/playback/segments?${params.toString()}`);
+    }
     if (window.desktopApi?.getMediaSegments) return window.desktopApi.getMediaSegments(request);
     const params = new URLSearchParams({ mediaId: request.mediaId });
     if (typeof request.season === 'number') params.set('season', String(request.season));
@@ -982,6 +1191,9 @@ export const desktopApi = {
 
   media: {
     async probe(filePath: string): Promise<ApiResult<unknown>> {
+      if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
+        return { ok: false, error: 'Media probing is handled by the paired host.' };
+      }
       if (window.desktopApi?.media) return window.desktopApi.media.probe(filePath);
       return fetchJson<ApiResult<unknown>>('/api/renderer/media/probe', {
         method: 'POST',
@@ -990,12 +1202,22 @@ export const desktopApi = {
     },
 
     async canDirectPlay(filePath: string, backend: 'html5' | 'hls' = 'html5'): Promise<ApiResult<boolean>> {
+      if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) return { ok: true, data: backend === 'html5' };
       if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
       const probeResult = await this.probe(filePath);
       return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };
     },
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
+      if (isRemoteDesktopMode()) return remoteJson<ApiResult<TranscodeSession>>('/api/v2/start-hls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mediaId: remoteResourceId(filePath),
+          options,
+          selectionRevision: getRemoteDesktopSession()?.selectionRevision,
+        }),
+      });
       if (window.desktopApi?.media) return window.desktopApi.media.startTranscode(filePath, options);
       return fetchJson<ApiResult<TranscodeSession>>('/api/renderer/media/start-transcode', {
         method: 'POST',
@@ -1004,6 +1226,7 @@ export const desktopApi = {
     },
 
     async stopTranscode(sessionId: string): Promise<ApiResult<boolean>> {
+      if (isRemoteDesktopMode()) return { ok: true, data: true };
       if (window.desktopApi?.media) return window.desktopApi.media.stopTranscode(sessionId);
       return fetchJson<ApiResult<boolean>>('/api/renderer/media/stop-transcode', {
         method: 'POST',
