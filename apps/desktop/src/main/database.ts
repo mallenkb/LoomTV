@@ -190,8 +190,8 @@ export function savePlaybackTrackPreferences(profileId: string, scope: string, p
   return savePlaybackTrackPreferencesRecord(getDb(), profileId, scope, preferences);
 }
 
-export function listProfiles(): ProfileRecord[] {
-  return listProfileRecords(getDb());
+export function listProfiles(guestDeviceId?: string): ProfileRecord[] {
+  return listProfileRecords(getDb(), guestDeviceId);
 }
 
 export function getProfile(profileId: string): ProfileRecord | null {
