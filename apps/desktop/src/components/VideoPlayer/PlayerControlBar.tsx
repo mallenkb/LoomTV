@@ -92,41 +92,42 @@ export default function PlayerControlBar({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className="mb-3 flex items-center gap-3">
-      {/* Progress bar */}
-      <div
-        ref={seekSliderRef}
-        role="slider"
-        tabIndex={0}
-        aria-label="Seek"
-        aria-valuemin={0}
-        aria-valuemax={duration || 0}
-        aria-valuenow={Math.min(position, duration || position)}
-        aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
-        aria-keyshortcuts="ArrowLeft ArrowRight Home End"
-        onPointerDown={handleProgressPointerDown}
-        onKeyDown={handleProgressKeyDown}
-        className="group relative h-6 min-w-0 flex-1 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-      >
-        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
-          <div
-            ref={progressFillRef}
-            className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-            style={{ transform: `scaleX(${progressPct / 100})`, transformOrigin: 'left center' }}
-          />
-        </div>
         <div
-          ref={progressThumbRef}
-          className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-          style={{ left: `${progressPct}%` }}
-        />
-      </div>
-        <div
-          className="min-w-[6.75rem] shrink-0 select-none text-right text-sm font-medium tabular-nums text-white/90 sm:text-base"
+          className="min-w-[6.75rem] shrink-0 select-none text-left text-sm font-medium tabular-nums text-white/90 sm:text-base"
           aria-live="off"
         >
           <span ref={currentTimeTextRef} className="text-white">{formatTime(position)}</span>
           <span className="mx-1.5 text-white/45">/</span>
           <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
+        </div>
+
+        {/* Progress bar */}
+        <div
+          ref={seekSliderRef}
+          role="slider"
+          tabIndex={0}
+          aria-label="Seek"
+          aria-valuemin={0}
+          aria-valuemax={duration || 0}
+          aria-valuenow={Math.min(position, duration || position)}
+          aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
+          aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+          onPointerDown={handleProgressPointerDown}
+          onKeyDown={handleProgressKeyDown}
+          className="group relative h-6 min-w-0 flex-1 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+        >
+          <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
+            <div
+              ref={progressFillRef}
+              className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+              style={{ transform: `scaleX(${progressPct / 100})`, transformOrigin: 'left center' }}
+            />
+          </div>
+          <div
+            ref={progressThumbRef}
+            className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+            style={{ left: `${progressPct}%` }}
+          />
         </div>
       </div>
 
