@@ -14,11 +14,11 @@ const settings = (): AppSettings => ({
   skipAnalysis: {
     enabled: true,
     analyzeNewMedia: true,
-    enabledTypes: { intro: true, recap: true, credits: true, preview: true },
-    promptTypes: { intro: true, recap: true, credits: true, preview: false },
+    enabledTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
+    promptTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
     durationLimits: {
       intro: { minSeconds: 15, maxSeconds: 180 }, recap: { minSeconds: 15, maxSeconds: 120 },
-      credits: { minSeconds: 15, maxSeconds: 300 }, preview: { minSeconds: 15, maxSeconds: 120 },
+      outro: { minSeconds: 15, maxSeconds: 300 }, credits: { minSeconds: 15, maxSeconds: 300 }, preview: { minSeconds: 15, maxSeconds: 120 },
       movieCredits: { minSeconds: 15, maxSeconds: 900 },
     },
     suppressFirstEpisodeIntro: false,

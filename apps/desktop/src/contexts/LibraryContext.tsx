@@ -416,6 +416,15 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(intervalId);
   }, [activeProfile?.type, applyLibraryData, state.autoSyncIntervalHours]);
 
+  useEffect(() => {
+    if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;
+    const refreshRemote = () => void desktopApi.getLibrary()
+      .then(applyLibraryData)
+      .catch((error) => console.warn('Shared library refresh failed:', error));
+    const intervalId = window.setInterval(refreshRemote, 30_000);
+    return () => window.clearInterval(intervalId);
+  }, [activeProfile, applyLibraryData]);
+
   return (
     <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours }}>
       {children}

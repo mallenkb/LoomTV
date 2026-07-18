@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { desktopApi, type LibraryPayload, type ManagedMediaSegment, type MediaSegmentType, type SkipAnalysisSettings } from '@/lib/desktopApi';
 
-const TYPES = ['intro', 'recap', 'credits', 'preview'] as const;
+const TYPES = ['intro', 'recap', 'outro', 'credits', 'preview'] as const;
 const PREVIEW_LEASE_KEY = 'skip-timestamp-manager-preview';
 type MarkerForm = { candidateId?: string; mediaId: string; season: string; episode: string; type: MediaSegmentType; start: string; end: string };
 

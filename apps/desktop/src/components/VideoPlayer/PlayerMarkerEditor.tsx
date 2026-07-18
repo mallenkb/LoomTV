@@ -61,6 +61,7 @@ export default function PlayerMarkerEditor({
           <select value={markerType} onChange={(event) => onMarkerTypeChange(event.target.value as MediaSegmentType)} className="mt-2 w-full rounded-md border border-white/15 bg-black px-3 py-2 text-sm text-white">
             <option value="intro">Intro</option>
             <option value="recap">Recap</option>
+            <option value="outro">Outro</option>
             <option value="credits">Credits</option>
             <option value="preview">Preview</option>
           </select>

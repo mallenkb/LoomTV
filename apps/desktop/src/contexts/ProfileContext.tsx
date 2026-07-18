@@ -234,7 +234,11 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     [profiles, activeState.profileId],
   );
   const gateOpen = !isLoading && (!selectedThisSession || !activeProfile);
-  const canManageProfiles = Boolean(ownerSessionAuthorized && activeProfile?.type === 'owner');
+  const canManageProfiles = Boolean(
+    !desktopApi.isRemoteLibraryMode()
+    && ownerSessionAuthorized
+    && activeProfile?.type === 'owner',
+  );
 
   const value = useMemo<ProfileContextValue>(() => ({
     profiles,

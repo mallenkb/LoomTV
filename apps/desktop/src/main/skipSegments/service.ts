@@ -336,6 +336,7 @@ export function createSkipSegmentService(deps: {
     const lastKnown = getSegmentCandidates(context.fileRevision)
       .filter((candidate) => candidate.source === source
         && permitted(candidate)
+        && !(source === 'aniskip' && candidate.type === 'credits')
         && !refreshedTypes.has(candidate.type))
       .map((candidate) => ({ ...candidate, expiresAt: undefined }));
 
@@ -455,15 +456,14 @@ export function createSkipSegmentService(deps: {
     }
     let segments: MediaSegment[];
     if (context.item.type === 'anime') {
-      const aniSkip = await providerSegments(context, 'aniskip', waitForProvider);
-      segments = aniSkip.segments;
-      const aniSkipTypes = new Set(segments.map((segment) => segment.type));
-      // AniSkip frequently has an opening without an ending (or vice versa).
-      // Let TheIntroDB fill whichever primary marker is missing; source
-      // precedence still keeps AniSkip for any type it did return.
-      if (aniSkip.kind !== 'success' || !aniSkipTypes.has('intro') || !aniSkipTypes.has('credits')) {
-        segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
-      }
+      // AniSkip supplies anime openings/endings while TheIntroDB supplies
+      // independently timestamped intros, recaps, credits, and previews. Load
+      // both so an Ending is never used as a substitute for production credits.
+      await Promise.all([
+        providerSegments(context, 'aniskip', waitForProvider),
+        providerSegments(context, 'theintrodb', waitForProvider),
+      ]);
+      segments = resolvedSegmentsForContext(context);
     } else {
       segments = (await providerSegments(context, 'theintrodb', waitForProvider)).segments;
     }

@@ -138,7 +138,10 @@ export async function fetchTheIntroDbSegments(input: {
 }
 
 export function aniSkipLookupKey(malId: string | undefined, episode: number): string | null {
-  return malId ? `mal:${malId}:e${episode}` : null;
+  // v2 keeps Ending (ED) markers separate from production credits. Version the
+  // cache key so payloads normalized by the old ED -> credits mapping are not
+  // replayed after upgrading.
+  return malId ? `mal:${malId}:e${episode}:segments-v2` : null;
 }
 
 export async function fetchAniSkipSegments(input: {
@@ -170,7 +173,7 @@ export async function fetchAniSkipSegments(input: {
       const type = skipType === 'op' || skipType === 'mixed-op'
         ? 'intro'
         : skipType === 'ed' || skipType === 'mixed-ed'
-          ? 'credits'
+          ? 'outro'
           : skipType === 'recap'
             ? 'recap'
             : null;

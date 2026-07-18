@@ -35,11 +35,12 @@ import type {
 const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
   enabled: true,
   analyzeNewMedia: true,
-  enabledTypes: { intro: true, recap: true, credits: true, preview: true },
-  promptTypes: { intro: true, recap: true, credits: true, preview: false },
+  enabledTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
+  promptTypes: { intro: true, recap: true, outro: true, credits: true, preview: true },
   durationLimits: {
     intro: { minSeconds: 15, maxSeconds: 180 },
     recap: { minSeconds: 15, maxSeconds: 120 },
+    outro: { minSeconds: 15, maxSeconds: 300 },
     credits: { minSeconds: 15, maxSeconds: 300 },
     preview: { minSeconds: 15, maxSeconds: 120 },
     movieCredits: { minSeconds: 15, maxSeconds: 900 },
@@ -180,11 +181,14 @@ export default function Settings() {
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
   const [isCheckingUpdateServer, setIsCheckingUpdateServer] = useState(false);
   const [settingsPersistenceError, setSettingsPersistenceError] = useState('');
+  const isRemoteLibraryMode = desktopApi.isRemoteLibraryMode();
   const visibleSettingsSections = useMemo(
-    () => activeProfile?.type === 'owner'
+    () => isRemoteLibraryMode
+      ? SETTINGS_SECTIONS.filter((section) => section.id === 'profiles' || section.id === 'playback' || section.id === 'theme' || section.id === 'network' || section.id === 'about')
+      : activeProfile?.type === 'owner'
       ? SETTINGS_SECTIONS
       : SETTINGS_SECTIONS.filter((section) => section.id === 'profiles' || section.id === 'playback' || section.id === 'theme' || section.id === 'about'),
-    [activeProfile?.type],
+    [activeProfile?.type, isRemoteLibraryMode],
   );
   const peerScanInFlightRef = useRef(false);
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
@@ -245,7 +249,9 @@ export default function Settings() {
       setPlaybackSkipForwardSeconds(Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15);
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
-    if (activeProfile?.type === 'owner') void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
+    if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
+      void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
+    }
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
@@ -531,6 +537,7 @@ export default function Settings() {
       setRemoteLibraryAddress(connection.baseUrl);
       setRemoteShareCode('');
       setRemoteLibraryStatus(`Connected to ${connection.hostDeviceName || 'shared device'}. Found ${itemCount} shared item${itemCount === 1 ? '' : 's'}.`);
+      desktopApi.activateRemoteLibrary(connection);
     } catch (error) {
       setRemoteLibraryStatus(error instanceof Error ? error.message : 'Could not connect to that shared library.');
     } finally {
@@ -580,6 +587,7 @@ export default function Settings() {
     sharedLibrarySnapshotRef.current = null;
     setSharedLibrarySnapshot(null);
     setRemoteLibraryStatus('Disconnected from shared library.');
+    desktopApi.disconnectRemoteDesktop();
   };
 
   const scanForPeers = useCallback(async () => {
@@ -798,7 +806,7 @@ export default function Settings() {
               {activeSection === 'profiles' && <ProfilesSettingsSection />}
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
-                  showServerControls={activeProfile?.type === 'owner'}
+                  showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
                   skipBackSeconds={playbackSkipBackSeconds}
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   onSkipBackChange={setPlaybackSkipBackSeconds}

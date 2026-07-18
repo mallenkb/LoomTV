@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
@@ -16,6 +16,9 @@ import VideoPlayer from './components/VideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
 import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
+import DesktopOnboarding from './components/DesktopOnboarding';
+import { desktopApi } from './lib/desktopApi';
+import { getDesktopLibraryMode, getRemoteDesktopSession, type DesktopLibraryMode } from './lib/remoteDesktop';
 
 interface NowPlaying {
   mediaId?: string;
@@ -40,12 +43,83 @@ interface NowPlaying {
 
 export default function App() {
   return (
-    <ProfileProvider>
+    <HashRouter>
+      <DesktopBootstrap />
+    </HashRouter>
+  );
+}
+
+function DesktopBootstrap() {
+  const [mode, setMode] = useState<DesktopLibraryMode | null | 'loading'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolveMode = async () => {
+      const savedMode = getDesktopLibraryMode();
+      if (savedMode === 'remote' && !getRemoteDesktopSession()) {
+        if (!cancelled) setMode(null);
+        return;
+      }
+      if (savedMode) {
+        if (!cancelled) setMode(savedMode);
+        return;
+      }
+      const remoteSession = getRemoteDesktopSession();
+      if (remoteSession) {
+        desktopApi.activateRemoteLibrary(remoteSession);
+        if (!cancelled) setMode('remote');
+        return;
+      }
+      try {
+        const library = await desktopApi.getLibrary();
+        const hasExistingSetup = Boolean(
+          library.movies?.length
+          || library.tvShows?.length
+          || library.animeShows?.length
+          || library.libraryFolders?.length
+          || library.libraryFolderGroups?.movies?.length
+          || library.libraryFolderGroups?.tvShows?.length
+          || library.libraryFolderGroups?.anime?.length
+          || library.libraryFolderGroups?.others?.length,
+        );
+        if (hasExistingSetup) {
+          desktopApi.useThisComputerAsHost();
+          if (!cancelled) setMode('host');
+          return;
+        }
+      } catch {
+        // A new installation can continue to the explicit setup choice.
+      }
+      if (!cancelled) setMode(null);
+    };
+    void resolveMode();
+
+    const handleModeChanged = (event: Event) => {
+      const next = (event as CustomEvent<DesktopLibraryMode>).detail;
+      if (next === 'host' || next === 'remote') setMode(next);
+    };
+    window.addEventListener('loomtv:desktop-library-mode-changed', handleModeChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('loomtv:desktop-library-mode-changed', handleModeChanged);
+    };
+  }, []);
+
+  if (mode === 'loading') return <div className="h-screen bg-[var(--loom-bg)]" />;
+  if (!mode) {
+    return (
+      <DesktopOnboarding
+        onHostReady={() => setMode('host')}
+        onRemoteReady={() => setMode('remote')}
+      />
+    );
+  }
+
+  return (
+    <ProfileProvider key={mode}>
       <ThemeProvider>
         <ToastProvider>
-          <HashRouter>
-            <ProfileGateOrShell />
-          </HashRouter>
+          <ProfileGateOrShell />
         </ToastProvider>
       </ThemeProvider>
     </ProfileProvider>
