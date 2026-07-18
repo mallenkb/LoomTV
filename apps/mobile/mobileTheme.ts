@@ -3,41 +3,41 @@ import type { MobileThemeColors } from './mobileStyles';
 
 export type MobileThemeMode = 'auto' | 'dark' | 'light';
 export type ResolvedMobileThemeMode = Exclude<MobileThemeMode, 'auto'>;
+export type MobileThemeColor = 'yellow' | 'red' | 'blue' | 'orange' | 'twitch';
+
+export const MOBILE_THEME_COLOR_OPTIONS: ReadonlyArray<{ value: MobileThemeColor; label: string; color: string }> = [
+  { value: 'yellow', label: 'Orange', color: '#FF9900' },
+  { value: 'red', label: 'Netflix', color: '#E50914' },
+  { value: 'blue', label: 'Paramount', color: '#0064FF' },
+  { value: 'orange', label: 'Disney', color: '#02D6E8' },
+  { value: 'twitch', label: 'Twitch', color: '#9146FF' },
+];
 
 const MOBILE_ACCENTS: Record<string, Pick<MobileThemeColors,
   'accent' | 'accentSoft' | 'accentBorder' | 'accentForeground'>> = {
-  yellow: { accent: '#fbc500', accentSoft: 'rgba(251,197,0,0.16)', accentBorder: 'rgba(251,197,0,0.45)', accentForeground: '#08101a' },
-  red: { accent: '#931116', accentSoft: 'rgba(147,17,22,0.18)', accentBorder: 'rgba(147,17,22,0.48)', accentForeground: '#ffffff' },
-  blue: { accent: '#8FB8FF', accentSoft: 'rgba(143,184,255,0.18)', accentBorder: 'rgba(143,184,255,0.48)', accentForeground: '#071322' },
-  orange: { accent: '#FF9900', accentSoft: 'rgba(255,153,0,0.18)', accentBorder: 'rgba(255,153,0,0.48)', accentForeground: '#000000' },
+  yellow: { accent: '#FC9C03', accentSoft: 'rgba(252,156,3,0.18)', accentBorder: 'rgba(252,156,3,0.48)', accentForeground: '#000000' },
+  red: { accent: '#E20C17', accentSoft: 'rgba(226,12,23,0.18)', accentBorder: 'rgba(226,12,23,0.48)', accentForeground: '#ffffff' },
+  blue: { accent: '#0367FC', accentSoft: 'rgba(3,103,252,0.18)', accentBorder: 'rgba(3,103,252,0.48)', accentForeground: '#ffffff' },
+  orange: { accent: '#05D3EB', accentSoft: 'rgba(5,211,235,0.18)', accentBorder: 'rgba(5,211,235,0.48)', accentForeground: '#001719' },
+  twitch: { accent: '#9449FC', accentSoft: 'rgba(148,73,252,0.18)', accentBorder: 'rgba(148,73,252,0.48)', accentForeground: '#ffffff' },
 };
 
-const MOBILE_DARK_THEMES: Record<string, Pick<MobileThemeColors,
-  'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'>> = {
-  black: {
-    bg: '#15151b', panel: '#202127', panel2: '#1a1b21', border: '#34363f',
-    muted: '#b8b8c0', faint: '#7e808b', themeLabel: 'Cinematic',
-  },
-  default: {
-    bg: '#1a1a1a', panel: '#232323', panel2: '#1d1d1d', border: '#2d2d2d',
-    muted: '#a8a8a8', faint: '#777777', themeLabel: 'Default',
-  },
-  justwatch: {
-    bg: '#060d17', panel: '#101a28', panel2: '#0b1420', border: '#243348',
-    muted: '#9aa7b8', faint: '#647287', themeLabel: 'Navy Black',
-  },
+const MOBILE_DARK_THEME: Pick<MobileThemeColors,
+  'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'> = {
+  bg: '#121212', panel: '#171717', panel2: '#0f0f0f', border: '#262626',
+  muted: '#a3a3a3', faint: '#737373', themeLabel: 'Black',
 };
 
 const MOBILE_LIGHT_THEME: Pick<MobileThemeColors,
   'bg' | 'panel' | 'panel2' | 'border' | 'muted' | 'faint' | 'themeLabel'> = {
-  bg: '#f4f6f8', panel: '#ffffff', panel2: '#eef2f5', border: '#dce3e9',
+  bg: '#f5f5f5', panel: '#ffffff', panel2: '#eef2f5', border: '#dce3e9',
   muted: '#525252', faint: '#737373', themeLabel: 'Light',
 };
 
 export const DEFAULT_MOBILE_THEME: MobileThemeColors = {
   ...MOBILE_ACCENTS.yellow,
-  ...MOBILE_DARK_THEMES.black,
-  text: '#ffffff',
+  ...MOBILE_DARK_THEME,
+  text: '#fafafa',
 };
 
 export function mobileThemeFromSettings(
@@ -48,8 +48,8 @@ export function mobileThemeFromSettings(
   const light = mode === 'light';
   return {
     ...accentTheme,
-    ...(light ? MOBILE_LIGHT_THEME : MOBILE_DARK_THEMES[settings?.appDarkTheme || ''] || MOBILE_DARK_THEMES.black),
-    accentForeground: light && settings?.appThemeColor === 'yellow' ? '#000000' : accentTheme.accentForeground,
-    text: light ? '#000000' : '#ffffff',
+    ...(light ? MOBILE_LIGHT_THEME : MOBILE_DARK_THEME),
+    accentForeground: accentTheme.accentForeground,
+    text: light ? '#000000' : '#fafafa',
   };
 }

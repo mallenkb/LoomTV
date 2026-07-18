@@ -6,7 +6,7 @@
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#15151B",
+    "backgroundColor": "#121212",
     "ios": {
       "requireFullScreen": true,
       "supportsTablet": true,

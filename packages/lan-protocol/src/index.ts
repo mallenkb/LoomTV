@@ -31,6 +31,9 @@ export type LanStreamOptions = {
   subtitleStreamOrdinal?: number;
   subtitleCodec?: string;
   subtitleFilePath?: string;
+  subtitleStyle?: {
+    fontSize?: number;
+  };
 };
 
 export type LanApiResult<T> = {

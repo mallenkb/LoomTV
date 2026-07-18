@@ -29,11 +29,11 @@ export type PlaybackRecoveryAction = {
 
 const FAILURE_DEFAULTS: Record<PlaybackFailureCode, Omit<PlaybackFailure, 'code'>> = {
   DESKTOP_UNREACHABLE: {
-    message: 'The mobile app could not reach Loom Media Server. Make sure the desktop is online and on the same network.',
+    message: 'The mobile app could not reach LoomTV. Make sure the desktop is online and on the same network.',
     retryable: true,
   },
   DESKTOP_AUTHORIZATION_FAILED: {
-    message: 'This device is no longer authorized by Loom Media Server. Reconnect it from the pairing screen.',
+    message: 'This device is no longer authorized by LoomTV. Reconnect it from the pairing screen.',
     retryable: false,
   },
   LAN_ADDRESS_UNAVAILABLE: {
@@ -49,7 +49,7 @@ const FAILURE_DEFAULTS: Record<PlaybackFailureCode, Omit<PlaybackFailure, 'code'
     retryable: true,
   },
   TRANSCODER_UNAVAILABLE: {
-    message: 'The desktop transcoder is unavailable. Restart Loom Media Server or repair the desktop installation.',
+    message: 'The desktop transcoder is unavailable. Restart LoomTV or repair the desktop installation.',
     retryable: false,
   },
   TRANSCODE_TIMEOUT: {
@@ -61,7 +61,7 @@ const FAILURE_DEFAULTS: Record<PlaybackFailureCode, Omit<PlaybackFailure, 'code'
     retryable: true,
   },
   STREAM_START_FAILED: {
-    message: 'The desktop could not start this mobile stream. Check Loom Media Server and retry.',
+    message: 'The desktop could not start this mobile stream. Check LoomTV and retry.',
     retryable: true,
   },
   PLAYBACK_LOAD_FAILED: {

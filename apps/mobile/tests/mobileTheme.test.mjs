@@ -2,19 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DEFAULT_MOBILE_THEME, mobileThemeFromSettings } from '../mobileTheme.ts';
 
-test('default mobile theme remains the cinematic yellow dark theme', () => {
+test('default mobile theme matches the desktop Black theme', () => {
   assert.deepEqual(mobileThemeFromSettings(), DEFAULT_MOBILE_THEME);
-  assert.equal(DEFAULT_MOBILE_THEME.themeLabel, 'Cinematic');
-  assert.equal(DEFAULT_MOBILE_THEME.text, '#ffffff');
+  assert.equal(DEFAULT_MOBILE_THEME.themeLabel, 'Black');
+  assert.equal(DEFAULT_MOBILE_THEME.text, '#fafafa');
 });
 
-test('remote accent and dark-theme settings retain their existing color mapping', () => {
+test('remote theme settings only change the mobile accent palette', () => {
   const theme = mobileThemeFromSettings({ appThemeColor: 'blue', appDarkTheme: 'justwatch' }, 'dark');
 
-  assert.equal(theme.accent, '#8FB8FF');
-  assert.equal(theme.bg, '#060d17');
-  assert.equal(theme.themeLabel, 'Navy Black');
-  assert.equal(theme.text, '#ffffff');
+  assert.equal(theme.accent, '#0367FC');
+  assert.equal(theme.bg, DEFAULT_MOBILE_THEME.bg);
+  assert.equal(theme.panel, DEFAULT_MOBILE_THEME.panel);
+  assert.equal(theme.border, DEFAULT_MOBILE_THEME.border);
+  assert.equal(theme.themeLabel, 'Black');
+  assert.equal(theme.text, '#fafafa');
 });
 
 test('light mode keeps black text and the yellow contrast override', () => {
