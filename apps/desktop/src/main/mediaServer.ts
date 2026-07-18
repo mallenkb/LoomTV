@@ -13,7 +13,7 @@ import {
 } from './transcodeFilters';
 import { parseIntegerTag } from './mediaTags';
 import { srtToVtt } from './libraryItemHelpers';
-import { serveHls, startTranscode } from './transcodeManager';
+import { serveHls, startTranscode, stopTranscode } from './transcodeManager';
 import { acquireFfmpegToolSlot, acquirePlaybackActivityLease, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { buildEmbeddedSubtitleVttArgs } from './transcodePlan';
 import { cachedArtworkResponseHeaders } from './artworkCache';
@@ -30,6 +30,7 @@ import {
 import { getLocalNetworkAddresses, getLocalNetworkName } from './networkInfo';
 import type { TranscodeOptions } from './mediaTypes';
 import { browserPlaybackPlan } from './transcodeDecision';
+import { probeMedia } from './mediaProbe';
 import { isSubtitleFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
@@ -62,6 +63,7 @@ export interface MediaServerDependencies {
   isSignedLanRequestValid: (reqUrl: URL) => boolean;
   libraryEtagFor: (payload: unknown) => string;
   libraryForLocalNetwork: () => LibraryPayload;
+  libraryForRenderer: () => LibraryPayload;
   loadLibrary: () => { libraryFolders: string[] };
   loadSettings: () => AppSettings;
   localAccessQuery: (token: string) => string;
@@ -112,9 +114,9 @@ function writeLanLandingPage(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Loom Media Server</title>
+<title>LoomTV</title>
 <style>
-:root{color-scheme:dark;--bg:#050505;--panel:#101010;--line:#2a2a2a;--text:#fff;--muted:#a4a4a4;--accent:#fbc500;}
+:root{color-scheme:dark;--bg:#050505;--panel:#101010;--line:#2a2a2a;--text:#fff;--muted:#a4a4a4;--accent:#FC9C03;}
 *{box-sizing:border-box;letter-spacing:normal!important}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:grid;place-items:center;padding:24px}
 main{width:min(680px,100%);background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.38)}
 .brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}.mark{width:38px;height:38px;border-radius:12px;background:var(--accent);display:grid;place-items:center;color:#08101a;font-weight:900}.name{font-size:24px;font-weight:800}
@@ -127,13 +129,13 @@ ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:
 <main>
 <div class="brand"><div class="mark">L</div><div class="name">loomtv</div></div>
 <div class="eyebrow">LAN host online</div>
-<h1>This is your private Loom Media Server.</h1>
+<h1>This is your private LoomTV library.</h1>
 <p>${htmlEscape(statusCopy)}</p>
 <div class="box"><div class="label">Desktop address</div><div class="value">${htmlEscape(baseUrl)}</div></div>
 <ol>
 <li>Open <b>LoomTV mobile</b>, not this browser page.</li>
 <li>In the mobile app, choose <b>Pair device</b>.</li>
-<li>Enter this desktop address and the <b>one-time pairing secret shown in desktop Settings &gt; Network</b>.</li>
+<li>Enter this desktop address and the <b>6-digit pairing PIN shown in desktop Settings &gt; Network</b>.</li>
 </ol>
 <footer>${htmlEscape(details.deviceName)} &middot; ${htmlEscape(details.networkName)}</footer>
 </main>
@@ -177,6 +179,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     isSignedLanRequestValid,
     libraryEtagFor,
     libraryForLocalNetwork,
+    libraryForRenderer,
     loadLibrary,
     loadSettings,
     localAccessQuery,
@@ -259,6 +262,10 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         writeJson(res, 200, {
           ok: true,
           port: mediaServerPort,
+          // Only the configured local renderer origin may bootstrap its
+          // short-lived desktop access token. Other loopback callers receive
+          // the health response without credentials.
+          ...(corsAllowed && isLoopbackRequest(req) ? { localAccessToken: LOCAL_ACCESS_TOKEN } : {}),
         });
         return;
       }
@@ -267,7 +274,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         const settings = loadSettings();
         writeJson(res, 200, {
           ok: true,
-          app: 'Loom Media Server',
+          app: 'LoomTV',
           deviceId: settings.localNetworkDeviceId,
           deviceName: settings.localNetworkDeviceName || os.hostname(),
           sharingEnabled: Boolean(settings.localNetworkSharingEnabled),
@@ -437,6 +444,83 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         && !(isArtworkRoute && (hasLocalAccess || hasValidSignature))
         && !(scope ? requireV2Scope(scope) : requireLocalOrLanAccess(reqUrl, req, res))
       ) return;
+
+      // Browser-rendered development sessions do not have Electron's preload
+      // bridge. Keep their read/write surface narrowly scoped, authenticated,
+      // and local-only so they render the same library and preferences as the
+      // desktop window without exposing IPC administration routes.
+      if (reqUrl.pathname === '/api/renderer/library' && req.method === 'GET') {
+        writeJson(res, 200, libraryForRenderer());
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/settings') {
+        if (req.method === 'GET') {
+          writeJson(res, 200, loadSettings());
+          return;
+        }
+        if (req.method === 'POST') {
+          readJsonBody(req)
+            .then((patch) => {
+              saveSettings({ ...loadSettings(), ...patch });
+              writeJson(res, 200, { ok: true });
+            })
+            .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid settings payload.' }));
+          return;
+        }
+      }
+
+      if (reqUrl.pathname === '/api/renderer/ffmpeg' && req.method === 'GET') {
+        const ffmpegPath = findFFmpeg();
+        writeJson(res, 200, { available: Boolean(ffmpegPath), path: ffmpegPath });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/media/probe' && req.method === 'POST') {
+        readJsonBody(req)
+          .then(async (body) => {
+            try {
+              const data = await probeMedia(String(body.filePath || ''));
+              writeJson(res, 200, { ok: true, data });
+            } catch (error) {
+              writeJson(res, 200, { ok: false, error: error instanceof Error ? error.message : 'Unable to inspect media.' });
+            }
+          })
+          .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid media probe payload.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/media/start-transcode' && req.method === 'POST') {
+        readJsonBody(req)
+          .then(async (body) => {
+            try {
+              const session = await startTranscode(
+                String(body.filePath || ''),
+                (body.options || {}) as TranscodeOptions,
+                `http://127.0.0.1:${mediaServerPort}`,
+              );
+              const separator = session.playlistUrl.includes('?') ? '&' : '?';
+              writeJson(res, 200, {
+                ok: true,
+                data: {
+                  ...session,
+                  playlistUrl: `${session.playlistUrl}${separator}${localAccessQuery(LOCAL_ACCESS_TOKEN)}`,
+                },
+              });
+            } catch (error) {
+              writeJson(res, 200, { ok: false, error: error instanceof Error ? error.message : 'Unable to start local stream.' });
+            }
+          })
+          .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid transcode payload.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/media/stop-transcode' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => writeJson(res, 200, { ok: true, data: stopTranscode(String(body.sessionId || '')) }))
+          .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid transcode payload.' }));
+        return;
+      }
 
       if (reqUrl.pathname === '/api/v2/client-config' && req.method === 'GET') {
         const settings = loadSettings();

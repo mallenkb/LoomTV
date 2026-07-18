@@ -99,7 +99,7 @@ export default function MetadataSettingsSection({
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold text-white">{provider.label}</p>
                       {provider.badge && (
-                        <span className={`text-xs px-2 py-0.5 rounded font-normal ${provider.required ? 'bg-[var(--loom-accent)]/20 text-[var(--loom-accent)]' : 'bg-white/10 text-[var(--loom-muted)]'}`}>
+                        <span className={`text-xs px-2 py-0.5 rounded font-normal ${provider.required ? 'bg-[var(--loom-accent)]/20 text-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
                           {provider.badge}
                         </span>
                       )}
@@ -147,7 +147,7 @@ export default function MetadataSettingsSection({
                     disabled={!currentValue}
                     title={`Delete ${provider.label}`}
                     aria-label={`Delete ${provider.label}`}
-                    className="h-10 w-10 shrink-0 border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                    className="settings-destructive-text h-10 w-10 shrink-0 border-red-500/40 hover:bg-red-500/10"
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -210,7 +210,7 @@ export default function MetadataSettingsSection({
                       disabled={!currentValue}
                       title={`Delete ${providerId}`}
                       aria-label={`Delete ${providerId}`}
-                      className="h-10 w-10 shrink-0 border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                      className="settings-destructive-text h-10 w-10 shrink-0 border-red-500/40 hover:bg-red-500/10"
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>
@@ -265,7 +265,7 @@ export default function MetadataSettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="flex items-start gap-3 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] p-3">
+          <label className="flex items-start gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
             <input
               type="checkbox"
               checked={openSubtitlesAutoDownload}
@@ -319,7 +319,7 @@ export default function MetadataSettingsSection({
 
       <div className="flex flex-col gap-3">
         {metadataKeyTestResults.length > 0 && (
-          <div className="rounded-lg border border-[var(--loom-border)] bg-[var(--loom-panel)] p-3 text-sm">
+          <div className="rounded-lg bg-[var(--loom-panel)] p-3 text-sm">
             <div className="space-y-2">
               {metadataKeyTestResults.map((result) => (
                 <div key={result.provider} className="flex items-start gap-2">
@@ -328,7 +328,7 @@ export default function MetadataSettingsSection({
                     result.ok ? 'bg-emerald-400' : 'bg-red-400',
                   )}
                   />
-                  <p className={result.ok ? 'text-white/85' : 'text-red-200'}>
+                  <p className={result.ok ? 'text-white/85' : 'settings-status-error'}>
                     <span className="font-semibold uppercase">{result.provider}</span>
                     <span className="text-[var(--loom-muted)]"> - {result.message}</span>
                   </p>

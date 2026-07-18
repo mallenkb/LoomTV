@@ -169,7 +169,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           </span>
         )}
         {watched && !isCurrent && (
-          <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full border-2 border-[#101010] bg-emerald-500 shadow-[0_4px_14px_rgba(0,0,0,0.55)]">
+          <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full border-2 border-neutral-950 bg-emerald-500 shadow-[0_4px_14px_rgba(0,0,0,0.55)]">
             <Check className="h-4 w-4 text-white" strokeWidth={3.2} />
           </span>
         )}
@@ -286,7 +286,7 @@ export default function PlayerEpisodePanel({
 
   return (
     <aside
-      className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col border-l border-white/10 bg-[#101010] shadow-2xl"
+      className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col bg-neutral-950 shadow-2xl"
       style={{ width: clampSidePanelWidth(episodePanelWidth), maxWidth: '40vw' }}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -334,19 +334,27 @@ export default function PlayerEpisodePanel({
                     tabRefs.current[season] = node;
                   }}
                   onClick={() => jumpToSeason(season)}
-                  className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors
+                  title={isCurrentSeason ? `${seasonCode(season)} · now playing` : undefined}
+                  aria-pressed={isActive}
+                  className={`flex shrink-0 items-center gap-2 rounded-full border py-1.5 pl-3 pr-2 text-[11px] font-semibold tracking-tight transition-colors duration-150
                     ${isActive
-                      ? 'border-[var(--loom-accent)] bg-[var(--loom-accent)]/20 text-[var(--loom-accent)]'
-                      : 'border-white/10 bg-white/[0.03] text-white/75 hover:border-white/20 hover:bg-white/[0.07]'}
+                      ? 'border-[var(--loom-accent)]/70 bg-[var(--loom-accent)]/15 text-[var(--loom-accent)]'
+                      : 'border-white/10 bg-white/[0.03] text-white/70 hover:border-white/25 hover:bg-white/[0.06] hover:text-white'}
                   `}
                 >
+                  {isCurrentSeason && (
+                    <span
+                      aria-hidden="true"
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.20)]"
+                    />
+                  )}
                   <span>{seasonCode(season)}</span>
-                  <span className={`rounded-full px-1.5 py-0.5 text-[9px] leading-none ${isActive ? 'bg-[var(--loom-accent)]/20' : 'bg-white/10 text-white/55'}`}>
+                  <span
+                    className={`inline-flex min-w-[19px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none tabular-nums
+                      ${isActive ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/55'}`}
+                  >
                     {seasonEpisodeCount}
                   </span>
-                  {isCurrentSeason && (
-                    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-[var(--loom-accent)]' : 'bg-amber-400'}`} />
-                  )}
                 </button>
               );
             })}
@@ -362,7 +370,7 @@ export default function PlayerEpisodePanel({
               sectionRefs.current[season] = node;
             }}
           >
-            <div className="sticky top-0 z-10 flex items-baseline justify-between border-b border-white/[0.07] bg-[#101010]/90 px-5 py-2.5 backdrop-blur-md">
+            <div className="sticky top-0 z-10 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
               <span className="flex items-center gap-2 text-xs font-semibold text-white">
                 {seasonCode(season)}
                 {season === currentSeason && (

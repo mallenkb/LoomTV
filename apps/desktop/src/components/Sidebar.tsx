@@ -74,7 +74,19 @@ function AnimeIcon({ className, solid = false }: { className?: string; solid?: b
 }
 
 function AnimeSolidIcon({ className }: { className?: string }) {
-  return <AnimeIcon className={className} solid />;
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className={className}
+      aria-hidden="true"
+    >
+      <g fill="none" fillRule="evenodd">
+        <path d="m12.593 23.258-.011.002-.071.035-.02.004-.014-.004-.071-.035q-.016-.005-.024.005l-.004.01-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113-.013.002-.185.093-.01.01-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093q.019-.005.029-.024l.017-.43l-.003-.012l-.01-.01z" />
+        <path fill="currentColor" d="M21.778 3.372a1 1 0 0 1 .116 1.075l-2 4a1 1 0 0 1-.777.546q-1.557.178-3.117.306v1.366a58 58 0 0 0 3.797-.644a1 1 0 0 1 .406 1.958q-.6.122-1.203.23V18a1 1 0 1 1 0 2h-5a1 1 0 1 1 0-2v-5.095c-.692.059-1.374.095-2 .095s-1.308-.037-2-.095V18a1 1 0 1 1 0 2H5a1 1 0 1 1 0-2v-5.79a51 51 0 0 1-1.203-.23a1 1 0 0 1 .406-1.96c1.258.258 2.525.47 3.797.645V9.299a100 100 0 0 1-3.116-.306a1.01 1.01 0 0 1-.778-.546l-2-4a1 1 0 0 1 1.143-1.415l.47.117l.952.224l.856.191l.642.137l.337.069q.398.08.81.158l.83.15c1.392.24 2.798.422 3.854.422s2.462-.181 3.853-.421l.83-.15l.81-.16l.98-.205l.856-.19l.482-.113q.471-.11.939-.23a1 1 0 0 1 1.028.34ZM14 10.897v-1.46l-.827.04c-.407.014-.803.023-1.173.023s-.766-.009-1.173-.024L10 9.438v1.459c.703.063 1.387.103 2 .103c.49 0 1.026-.025 1.581-.068z" />
+      </g>
+    </svg>
+  );
 }
 
 function _HomeIcon({ className }: { className?: string }) {
@@ -230,10 +242,10 @@ export default function Sidebar() {
           : 'Updating';
 
   return (
-    <aside className="w-48 bg-[var(--loom-sidebar)] h-full flex flex-col shadow-[18px_0_48px_rgba(0,0,0,0.20)]">
-      <div className="loom-sidebar-brand relative p-4 bg-black/10">
+    <aside className="h-full w-48 bg-[var(--loom-sidebar)] flex flex-col">
+      <div className="loom-sidebar-brand relative bg-transparent p-4">
         <div className="loom-sidebar-drag-region" aria-hidden="true" />
-        <Link to="/" className="loom-no-drag relative z-10 inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="Loom Media Server home">
+        <Link to="/" className="loom-no-drag relative z-10 inline-flex h-10 items-center transition-opacity hover:opacity-85" aria-label="LoomTV home">
           <LoomLogo className="h-8 w-auto" />
         </Link>
       </div>
@@ -241,7 +253,7 @@ export default function Sidebar() {
         <div className="relative">
           {activeNavIndex >= 0 && (
             <motion.span
-              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-surface-3)] shadow-[0_10px_28px_rgba(0,0,0,0.26)]"
+              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-sidebar-active-bg)]"
               initial={false}
               animate={{ y: activeNavIndex * (navItemHeight + navItemGap) }}
               transition={{ type: 'spring', stiffness: 420, damping: 40, mass: 0.9 }}
@@ -259,8 +271,8 @@ export default function Sidebar() {
                 className={cn(
                   'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors',
                   isActive
-                    ? 'text-white'
-                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/70 hover:text-[var(--loom-text)]',
+                    ? 'text-[var(--loom-active-text)]'
+                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -280,8 +292,8 @@ export default function Sidebar() {
                 className={cn(
                   'loom-mobile-nav-link relative z-10 mb-1 hidden h-10 items-center gap-3 rounded-lg px-3 transition-colors',
                   isActive
-                    ? 'text-white'
-                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)]/70 hover:text-[var(--loom-text)]',
+                    ? 'text-[var(--loom-active-text)]'
+                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -299,8 +311,8 @@ export default function Sidebar() {
                 if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
               }}
               disabled={updateState?.status !== 'downloaded'}
-              className="mb-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
-              title={updateState?.message || 'Update Loom Media Server'}
+              className="mb-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[var(--loom-active-bg)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
+              title={updateState?.message || 'Update LoomTV'}
             >
               <Download className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
               <span>{updateButtonLabel}</span>
@@ -314,8 +326,8 @@ export default function Sidebar() {
             className={cn(
               'flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
               isSettingsActive
-                ? 'bg-[var(--loom-surface-3)] text-[var(--loom-text)]'
-                : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]',
+                ? 'bg-[var(--loom-sidebar-active-bg)] text-[var(--loom-active-text)]'
+                : 'text-[var(--loom-muted)] hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
             )}
           >
             {isSettingsActive ? <SettingsNavSolidExactIcon className="w-5 h-5 shrink-0" /> : <SettingsNavExactIcon className="w-5 h-5 shrink-0" />}

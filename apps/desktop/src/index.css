@@ -1,55 +1,66 @@
 @import "tailwindcss";
 
+/* Initial-paint defaults mirror the default "Black" dark theme on Tailwind's
+   Neutral scale; applyTheme() overrides them at runtime. */
 @theme {
-  --color-background: #060d17;
-  --color-foreground: #ffffff;
-  --color-card: #101a28;
-  --color-card-foreground: #ffffff;
-  --color-popover: #101a28;
-  --color-popover-foreground: #ffffff;
-  --color-primary: #fbc500;
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #172235;
-  --color-secondary-foreground: #ffffff;
-  --color-muted: #172235;
-  --color-muted-foreground: #9aa7b8;
-  --color-accent: #172235;
-  --color-accent-foreground: #ffffff;
+  --color-background: #0a0a0a;
+  --color-foreground: #fafafa;
+  --color-card: #171717;
+  --color-card-foreground: #fafafa;
+  --color-popover: #171717;
+  --color-popover-foreground: #fafafa;
+  --color-primary: #FC9C03;
+  --color-primary-foreground: #0a0a0a;
+  --color-secondary: #262626;
+  --color-secondary-foreground: #fafafa;
+  --color-muted: #262626;
+  --color-muted-foreground: #a3a3a3;
+  --color-accent: #262626;
+  --color-accent-foreground: #fafafa;
   --color-destructive: #dc2626;
   --color-destructive-foreground: #ffffff;
-  --color-border: #243348;
-  --color-input: #172235;
-  --color-ring: #fbc500;
-  
+  --color-border: #262626;
+  --color-input: #0f0f0f;
+  --color-ring: #FC9C03;
+
   --radius-sm: 0.25rem;
   --radius: 0.5rem;
   --radius-lg: 0.75rem;
 }
 
 :root {
-  --loom-bg: #060d17;
-  --loom-surface: #101a28;
-  --loom-surface-2: #0b1420;
-  --loom-surface-3: #172235;
-  --loom-text: #ffffff;
-  --loom-muted: #9aa7b8;
-  --loom-faint: #647287;
-  --loom-border: #243348;
-  --loom-sidebar: #080f19;
-  --loom-accent: #fbc500;
+  --loom-bg: #0a0a0a;
+  --loom-surface: #171717;
+  --loom-surface-2: #0f0f0f;
+  --loom-surface-3: #262626;
+  --loom-text: #fafafa;
+  --loom-muted: #a3a3a3;
+  --loom-faint: #737373;
+  --loom-border: #262626;
+  --loom-sidebar: #0a0a0a;
+  --loom-accent: #FC9C03;
   --loom-accent-hover: #ffd43b;
-  --loom-accent-foreground: #08101a;
-  --loom-accent-foreground-muted: #1d2a39;
-  --loom-logo-word: #ffffff;
-  --loom-panel: rgba(16, 26, 40, 0.82);
-  --loom-panel-border: rgba(148, 163, 184, 0.18);
-  --loom-focus-glow: rgba(251, 197, 0, 0.28);
-  --loom-body-start: #08111d;
-  --loom-body-end: #050a12;
+  --loom-accent-foreground: #0a0a0a;
+  --loom-accent-foreground-muted: #404040;
+  --loom-logo-word: #fafafa;
+  --loom-panel: rgba(23, 23, 23, 0.88);
+  --loom-panel-border: rgba(255, 255, 255, 0.10);
+  --loom-active-bg: rgb(68 64 60 / 0.40);
+  --loom-sidebar-active-bg: rgb(250 250 249 / 0.10) !important;
+  --loom-active-bg-strong: #44403c;
+  --loom-active-text: #fafaf9;
+  --loom-active-muted: #d6d3d1;
+  --loom-active-border: #44403c;
+  --loom-control-border: rgb(255 255 255 / 0.05) !important;
+  --loom-focus-glow: rgba(255, 255, 255, 0.14);
+  --loom-body-start: #0a0a0a;
+  --loom-body-end: #0a0a0a;
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
+  --loom-control-border: rgb(28 25 23 / 0.05) !important;
+  --loom-sidebar-active-bg: rgb(28 25 23 / 0.10) !important;
   color-scheme: light;
 }
 
@@ -184,6 +195,25 @@ body {
   background: var(--loom-bg);
 }
 
+/* Playback furniture stays cinema-dark in every app theme so artwork, controls,
+   and progress retain the same contrast and appearance. */
+.loom-continue-watching {
+  --loom-panel: rgba(23, 23, 23, 0.92);
+  --loom-panel-border: rgba(255, 255, 255, 0.10);
+  --loom-surface-3: #262626;
+  --loom-text: #fafafa;
+  --loom-muted: #a3a3a3;
+  --loom-faint: #737373;
+}
+
+/* In dark mode, tint the continue-watching surface toward the selected dark
+   theme while keeping enough separation from the page canvas. Light mode
+   deliberately retains the cinema-dark treatment above. */
+:root[data-theme="dark"] .loom-continue-watching {
+  --loom-panel: color-mix(in srgb, var(--loom-surface) 88%, transparent);
+  --loom-panel-border: color-mix(in srgb, var(--loom-text) 12%, transparent);
+}
+
 /* Most of the app uses theme tokens, but these utility classes predate the
    theme system. Keep their intent while making the light palette readable. */
 :root[data-theme="light"] .loom-page [class~="text-white"],
@@ -197,6 +227,16 @@ body {
 :root[data-theme="light"] .loom-page [class~="text-white\/50"],
 :root[data-theme="light"] .loom-page [class~="text-white\/45"] {
   color: var(--loom-text) !important;
+}
+
+:root[data-theme="light"] .loom-page [class~="hover\:text-white"]:hover,
+:root[data-theme="light"] .loom-page [class~="hover\:text-white\/85"]:hover {
+  color: var(--loom-text) !important;
+}
+
+:root[data-theme="light"] .loom-page [class~="hover\:bg-white\/10"]:hover,
+:root[data-theme="light"] .loom-page [class~="hover\:bg-white\/5"]:hover {
+  background-color: var(--loom-surface-3) !important;
 }
 
 :root[data-theme="light"] .loom-app-shell > aside [class~="text-white"] {
@@ -216,6 +256,34 @@ body {
 :root[data-theme="light"] .loom-page select,
 :root[data-theme="light"] .loom-page textarea {
   color: var(--loom-text);
+}
+
+/* Give every text-style form control the same visible themed edge. Specialized
+   controls keep their native/component-specific appearance. */
+.loom-app-shell :where(
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea
+) {
+  border-color: var(--loom-control-border);
+  border-style: solid;
+  border-width: 1px;
+}
+
+/* Search already draws its border on the rounded containing control. */
+.loom-library-search input {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.loom-library-search-inner > div:first-child {
+  border-color: var(--loom-control-border);
+}
+
+.loom-library-search-inner > div:first-child:focus-within {
+  border-color: var(--loom-control-border);
+  box-shadow: 0 0 0 2px var(--loom-focus-glow);
 }
 
 :root[data-theme="light"] .loom-settings-mobile-profile h1,
@@ -352,16 +420,11 @@ body.platform-darwin .loom-player-top-control {
 }
 
 :root[data-theme="dark"] .loom-chip,
+:root[data-theme="light"] .loom-chip,
 :root:not([data-theme]) .loom-chip {
   border-color: rgba(245, 196, 81, 0.42);
   background: rgba(0, 0, 0, 0.78);
   color: #F5C451 !important;
-}
-
-:root[data-theme="light"] .loom-chip {
-  border-color: #F5C451;
-  background: #FFF1BF;
-  color: #000000 !important;
 }
 
 .loom-chip svg {
@@ -377,18 +440,18 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .settings-panel {
-  border: 1px solid color-mix(in srgb, var(--loom-text) 9%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--loom-text) 16%, transparent) !important;
   background: var(--loom-surface-2);
 }
 
 .settings-panel-soft {
-  border: 1px solid color-mix(in srgb, var(--loom-text) 7%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--loom-text) 14%, transparent) !important;
   background: var(--loom-surface-2);
 }
 
 .settings-folder-row {
   border: 1px solid color-mix(in srgb, var(--loom-text) 12%, transparent);
-  background: var(--loom-surface-3);
+  background: color-mix(in srgb, var(--loom-surface-3) 32%, transparent);
 }
 
 .settings-network-card {
@@ -396,13 +459,121 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .settings-action-tile {
-  border: 1px solid color-mix(in srgb, var(--loom-text) 7%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--loom-text) 14%, transparent) !important;
   background: var(--loom-surface-2);
+}
+
+.loom-settings-tabs {
+  border-color: color-mix(in srgb, var(--loom-text) 16%, transparent) !important;
 }
 
 .settings-action-tile:hover {
   border-color: color-mix(in srgb, var(--loom-accent) 42%, var(--loom-border));
   background: var(--loom-surface-3);
+}
+
+/* Settings uses one restrained edge treatment across panels, tabs, buttons,
+   segmented controls, and form fields. Focus remains visible via the separate
+   focus glow instead of increasing border opacity. */
+.loom-settings-page {
+  --loom-settings-border: rgb(255 255 255 / 0.05);
+  --loom-border: var(--loom-settings-border);
+  --loom-panel-border: var(--loom-settings-border);
+  --loom-active-border: var(--loom-settings-border);
+  --loom-control-border: var(--loom-settings-border) !important;
+}
+
+:root[data-theme="light"] .loom-settings-page {
+  --loom-settings-border: rgb(28 25 23 / 0.05);
+}
+
+:root[data-theme="light"] .theme-color-option-label {
+  color: #000000 !important;
+}
+
+.settings-status-available {
+  color: #6ee7b7;
+}
+
+.settings-status-unavailable {
+  color: #fcd34d;
+}
+
+.settings-status-error {
+  color: #fca5a5;
+}
+
+.settings-destructive-text,
+.loom-status-error {
+  color: #fca5a5;
+}
+
+:root[data-theme="light"] .settings-status-available {
+  color: #047857;
+}
+
+:root[data-theme="light"] .settings-status-unavailable {
+  color: #b45309;
+}
+
+:root[data-theme="light"] .settings-status-error {
+  color: #b91c1c;
+}
+
+:root[data-theme="light"] .settings-destructive-text,
+:root[data-theme="light"] .loom-status-error {
+  color: #b91c1c;
+}
+
+.settings-destructive-text:hover {
+  color: #fecaca;
+}
+
+:root[data-theme="light"] .settings-destructive-text:hover {
+  color: #991b1b;
+}
+
+:root[data-theme="light"] .settings-status-banner-success {
+  background: rgb(16 185 129 / 0.08);
+  color: #047857;
+}
+
+:root[data-theme="light"] .settings-status-banner-warning {
+  background: rgb(245 158 11 / 0.08);
+  color: #92400e;
+}
+
+:root[data-theme="light"] .settings-destructive-panel {
+  background: rgb(239 68 68 / 0.06);
+}
+
+:root[data-theme="light"] .settings-destructive-title,
+:root[data-theme="light"] .settings-destructive-title svg,
+:root[data-theme="light"] .settings-destructive-button {
+  color: #b91c1c !important;
+}
+
+:root[data-theme="light"] .settings-destructive-button {
+  background: rgb(239 68 68 / 0.10);
+}
+
+:root[data-theme="light"] .settings-destructive-button:hover {
+  background: rgb(239 68 68 / 0.16);
+  color: #991b1b !important;
+}
+
+:root[data-theme="light"] .loom-destructive-button {
+  background: rgb(239 68 68 / 0.10);
+  color: #b91c1c;
+}
+
+:root[data-theme="light"] .loom-destructive-button:hover {
+  background: rgb(239 68 68 / 0.16);
+  color: #991b1b;
+}
+
+.loom-settings-page :where(*) {
+  border-color: var(--loom-settings-border) !important;
 }
 
 .loom-settings-mobile-menu,
@@ -428,7 +599,7 @@ body.platform-darwin .loom-player-top-control {
     width: auto;
     height: 4.9rem;
     flex-direction: row;
-    border-top: 1px solid rgba(148, 163, 184, 0.16);
+    border-top: 1px solid var(--loom-border);
     background: color-mix(in srgb, var(--loom-sidebar) 94%, transparent);
     box-shadow: 0 -18px 42px rgba(0, 0, 0, 0.34);
     backdrop-filter: blur(18px);
@@ -477,8 +648,8 @@ body.platform-darwin .loom-player-top-control {
   }
 
   .loom-app-shell > aside nav a[aria-current="page"] {
-    background: var(--loom-surface-3);
-    color: var(--loom-text);
+    background: var(--loom-sidebar-active-bg);
+    color: var(--loom-active-text);
   }
 
   .loom-app-shell > aside nav a svg {
@@ -687,7 +858,7 @@ body.platform-darwin .loom-player-top-control {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 1rem;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    border-bottom: 1px solid var(--loom-border);
     color: white;
     font-size: 1.05rem;
     font-weight: 650;
@@ -811,8 +982,32 @@ body.platform-darwin .loom-player-top-control {
 }
 
 :root[data-theme="light"] .loom-app-shell > aside {
+  background: var(--loom-bg);
   border-top-color: var(--loom-border);
-  box-shadow: 0 -18px 42px rgba(15, 23, 42, 0.12);
+  box-shadow: none;
+}
+
+.loom-sidebar-brand {
+  background: transparent;
+}
+
+/* Light mode is intentionally flat: separation comes from spacing and subtle
+   borders, while keyboard focus remains visible through a real outline. */
+:root[data-theme="light"] .loom-app-shell [class*="shadow-"] {
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .loom-app-shell :focus-visible:not(input):not(select):not(textarea) {
+  outline: 2px solid var(--loom-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Form controls get one clean, rounded Stone focus treatment. This suppresses
+   the native rectangular outline and any legacy accent-colored utility ring. */
+.loom-app-shell :where(input, select, textarea):focus-visible {
+  border-color: var(--loom-control-border) !important;
+  box-shadow: 0 0 0 2px var(--loom-focus-glow) !important;
+  outline: none !important;
 }
 
 :root[data-theme="light"] .loom-settings-mobile-list button:not(:last-child) {
@@ -820,10 +1015,16 @@ body.platform-darwin .loom-player-top-control {
 }
 
 @media (max-width: 640px) {
-  .loom-page .relative.h-\[45vh\],
-  .loom-page .relative.h-\[50vh\] {
-    height: 62vh;
-    min-height: 29rem;
+  .loom-detail-page .loom-detail-cover.relative.h-\[45vh\],
+  .loom-detail-page .loom-detail-cover.relative.h-\[50vh\] {
+    height: calc(75vw + 8.5rem);
+    min-height: 0;
+  }
+
+  .loom-detail-page .loom-detail-cover-image {
+    bottom: auto;
+    height: 75vw;
+    max-height: 30rem;
   }
 
   .loom-detail-hero-fade {
@@ -836,11 +1037,19 @@ body.platform-darwin .loom-player-top-control {
   }
 
   .loom-page .loom-no-drag.fixed:not(.loom-settings-tabs) {
-    left: 0.875rem !important;
     top: max(0.75rem, env(safe-area-inset-top)) !important;
     height: 2.35rem;
     padding-inline: 0.7rem;
     font-size: 0.78rem;
+  }
+
+  .loom-detail-page .loom-detail-cover > button.loom-no-drag.fixed {
+    left: 0.875rem !important;
+  }
+
+  .loom-detail-page .loom-detail-cover > div.loom-no-drag.fixed {
+    left: auto !important;
+    right: 0.875rem !important;
   }
 
   .loom-page .relative.h-\[45vh\] > .absolute.bottom-0,
@@ -852,11 +1061,61 @@ body.platform-darwin .loom-player-top-control {
     padding: 5.5rem 1rem 1rem;
   }
 
-  .loom-page .relative.h-\[45vh\] h1,
-  .loom-page .relative.h-\[50vh\] h1 {
-    font-size: clamp(1.85rem, 9vw, 2.4rem);
-    line-height: 1.04;
-    margin-bottom: 0.6rem;
+  .loom-detail-page .loom-detail-hero-content-wrap {
+    bottom: auto;
+    padding: 0 !important;
+    top: calc(75vw - 2rem);
+  }
+
+  .loom-detail-page .loom-detail-hero-content {
+    align-items: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 0 0.75rem 1rem;
+    width: 100%;
+  }
+
+  .loom-detail-page .loom-detail-hero-info {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+    width: 100%;
+  }
+
+  .loom-detail-page .loom-detail-hero-info h1 {
+    font-size: clamp(1.75rem, 8vw, 2.25rem);
+    line-height: 1.05;
+    max-width: 20rem;
+    overflow-wrap: anywhere;
+    width: 100%;
+  }
+
+  .loom-detail-page .loom-detail-hero-info > .flex {
+    justify-content: flex-start;
+  }
+
+  .loom-detail-page .loom-detail-hero-play {
+    border-radius: 0.75rem;
+    box-shadow: none;
+    margin-top: 0;
+    width: 100%;
+  }
+
+  .loom-detail-page .loom-detail-hero-play .min-w-28 {
+    align-items: center;
+    min-width: 0;
+  }
+
+  .loom-detail-page .loom-detail-content {
+    padding: 1rem 0.75rem calc(6.75rem + env(safe-area-inset-bottom));
+  }
+
+  .loom-detail-page .loom-detail-summary {
+    border-bottom: 1px solid var(--loom-control-border);
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
   }
 
   .loom-page .relative.h-\[45vh\] .text-sm,
@@ -874,7 +1133,7 @@ body.platform-darwin .loom-player-top-control {
   }
 
   .loom-page .page-bottom-safe-lg.p-8 {
-    padding: 1rem 1rem calc(6.75rem + env(safe-area-inset-bottom));
+    padding: 1rem 0.75rem calc(6.75rem + env(safe-area-inset-bottom));
   }
 
   .loom-page .grid.grid-cols-2.md\:grid-cols-4 {

@@ -157,6 +157,9 @@ async function discoverServerBase(): Promise<string> {
       const response = await fetch(`http://127.0.0.1:${port}/api/ping`);
       if (response.ok) {
         const ping = await response.json().catch(() => null) as { localAccessToken?: string } | null;
+        // A browser renderer must not bind to an older/stale LoomTV process
+        // that answers ping but cannot authenticate the shared renderer API.
+        if (!window.desktopApi && typeof ping?.localAccessToken !== 'string') continue;
         resolvedServerBase = `http://127.0.0.1:${port}`;
         resolvedLocalAccessToken = typeof ping?.localAccessToken === 'string' ? ping.localAccessToken : null;
         return resolvedServerBase;
@@ -183,16 +186,25 @@ async function localMediaUrl(pathname: string, params: URLSearchParams): Promise
 }
 
 async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
-  const base = await discoverServerBase();
-  const token = await discoverLocalAccessToken();
-  const response = await fetch(`${base}${pathname}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { [LOCAL_ACCESS_HEADER]: token } : {}),
-      ...(init?.headers || {}),
-    },
-  });
+  const request = async () => {
+    const base = await discoverServerBase();
+    const token = await discoverLocalAccessToken();
+    return fetch(`${base}${pathname}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { [LOCAL_ACCESS_HEADER]: token } : {}),
+        ...(init?.headers || {}),
+      },
+    });
+  };
+
+  let response = await request();
+  if (!window.desktopApi && response.status === 401) {
+    resolvedServerBase = null;
+    resolvedLocalAccessToken = null;
+    response = await request();
+  }
 
   if (!response.ok) {
     const message = await response.text();
@@ -240,7 +252,7 @@ async function probeLanInfo(baseUrl: string, timeoutMs = 800): Promise<boolean> 
     const response = await fetchWithTimeout(`${baseUrl}/api/lan/info`, timeoutMs);
     if (!response.ok) return false;
     const info = await response.json() as { app?: string };
-    return info?.app === 'Loom Media Server';
+    return info?.app === 'LoomTV' || info?.app === 'Loom Media Server';
   } catch {
     return false;
   }
@@ -248,7 +260,7 @@ async function probeLanInfo(baseUrl: string, timeoutMs = 800): Promise<boolean> 
 
 async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
   // mDNS first — fast and accurate when peers advertise. Returns the first host
-  // that publishes a Loom Media Server service.
+  // that publishes a LoomTV service.
   if (window.desktopApi?.discoverLocalNetworkPeers) {
     try {
       const peers = await window.desktopApi.discoverLocalNetworkPeers(2500);
@@ -274,7 +286,7 @@ async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
     if (found) return found;
   }
 
-  throw new Error('No shared Loom Media Server library was found on this network.');
+  throw new Error('No shared LoomTV library was found on this network.');
 }
 
 function bearerHeaders(token: string, init?: RequestInit): RequestInit {
@@ -290,7 +302,7 @@ function bearerHeaders(token: string, init?: RequestInit): RequestInit {
 export const desktopApi = {
   async getLibrary(): Promise<LibraryPayload> {
     if (window.desktopApi) return window.desktopApi.getLibrary();
-    return fetchJson<LibraryPayload>('/api/library');
+    return fetchJson<LibraryPayload>('/api/renderer/library');
   },
 
   async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {
@@ -368,8 +380,8 @@ export const desktopApi = {
 
   async connectToLocalNetworkLibrary(baseUrl: string, code: string): Promise<RemoteLibraryConnection> {
     const normalizedCode = code.trim();
-    if (!/^[A-Za-z0-9_-]{43}$/.test(normalizedCode)) {
-      throw new Error('Enter the one-time pairing secret.');
+    if (!/^\d{6}$/.test(normalizedCode)) {
+      throw new Error('Enter the 6-digit pairing PIN.');
     }
 
     const normalizedBaseUrl = baseUrl.trim()
@@ -378,7 +390,7 @@ export const desktopApi = {
 
     const status = await desktopApi.getLocalNetworkStatus().catch(() => null);
     const deviceId = status?.deviceId || '';
-    const deviceName = status?.deviceName || 'Loom Media Server device';
+    const deviceName = status?.deviceName || 'LoomTV device';
 
     const response = await fetch(`${normalizedBaseUrl}/api/v2/pair`, {
       method: 'POST',
@@ -389,7 +401,7 @@ export const desktopApi = {
     if (!response.ok) {
       if (response.status === 401) throw new Error('The sharing code was not accepted.');
       if (response.status === 429) throw new Error('Too many failed pairing attempts. Try again in a few minutes.');
-      throw new Error('Could not connect to that Loom Media Server library.');
+      throw new Error('Could not connect to that LoomTV library.');
     }
 
     const payload = await response.json() as {
@@ -491,10 +503,10 @@ export const desktopApi = {
 
   async scanLibrary(mode: LibraryScanMode = 'quick'): Promise<LibraryPayload> {
     if (window.desktopApi) return window.desktopApi.scanLibrary({ force: mode === 'full', mode });
-    return fetchJson<LibraryPayload>('/api/library/scan', {
-      method: 'POST',
-      body: JSON.stringify({ force: mode === 'full', mode }),
-    });
+    // Folder scanning is owned by Electron. In a browser renderer, refresh the
+    // shared desktop snapshot instead of calling the intentionally IPC-only
+    // scan route.
+    return this.getLibrary();
   },
 
   onLibraryScanProgress(callback: (library: LibraryPayload, progress: LibraryScanProgress) => void): () => void {
@@ -529,17 +541,17 @@ export const desktopApi = {
 
   async checkFFmpeg(): Promise<FFmpegStatus> {
     if (window.desktopApi) return window.desktopApi.checkFFmpeg();
-    return fetchJson<FFmpegStatus>('/api/ffmpeg');
+    return fetchJson<FFmpegStatus>('/api/renderer/ffmpeg');
   },
 
   async getSettings(): Promise<SettingsPayload> {
     if (window.desktopApi) return window.desktopApi.getSettings();
-    return fetchJson<SettingsPayload>('/api/settings');
+    return fetchJson<SettingsPayload>('/api/renderer/settings');
   },
 
   async saveSettings(settings: SettingsPayload): Promise<boolean> {
     if (window.desktopApi) return window.desktopApi.saveSettings(settings);
-    const response = await fetchJson<{ ok: boolean }>('/api/settings', {
+    const response = await fetchJson<{ ok: boolean }>('/api/renderer/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
     });
@@ -781,7 +793,7 @@ export const desktopApi = {
         releaseUrl: release.html_url,
         checkedAt: new Date().toISOString(),
         message: latestVersion
-          ? `Latest release is Loom Media Server ${latestVersion}.`
+          ? `Latest release is LoomTV ${latestVersion}.`
           : 'Checked for updates.',
       };
     } catch (error) {
@@ -819,7 +831,7 @@ export const desktopApi = {
   media: {
     async probe(filePath: string): Promise<ApiResult<unknown>> {
       if (window.desktopApi?.media) return window.desktopApi.media.probe(filePath);
-      return fetchJson<ApiResult<unknown>>('/api/media/probe', {
+      return fetchJson<ApiResult<unknown>>('/api/renderer/media/probe', {
         method: 'POST',
         body: JSON.stringify({ filePath }),
       });
@@ -833,7 +845,7 @@ export const desktopApi = {
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
       if (window.desktopApi?.media) return window.desktopApi.media.startTranscode(filePath, options);
-      return fetchJson<ApiResult<TranscodeSession>>('/api/media/start-transcode', {
+      return fetchJson<ApiResult<TranscodeSession>>('/api/renderer/media/start-transcode', {
         method: 'POST',
         body: JSON.stringify({ filePath, options }),
       });
@@ -841,7 +853,7 @@ export const desktopApi = {
 
     async stopTranscode(sessionId: string): Promise<ApiResult<boolean>> {
       if (window.desktopApi?.media) return window.desktopApi.media.stopTranscode(sessionId);
-      return fetchJson<ApiResult<boolean>>('/api/media/stop-transcode', {
+      return fetchJson<ApiResult<boolean>>('/api/renderer/media/stop-transcode', {
         method: 'POST',
         body: JSON.stringify({ sessionId }),
       });

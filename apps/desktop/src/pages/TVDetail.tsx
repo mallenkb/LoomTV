@@ -371,14 +371,14 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:border-[var(--loom-accent)]/45 hover:text-[var(--loom-accent)]"
+          className="loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           Back
         </button>
 
-        <div className="absolute bottom-0 left-0 right-0">
-          <div className="mx-auto flex max-w-[1440px] items-end gap-6 p-8">
+        <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
+          <div className="loom-detail-hero-content mx-auto flex max-w-[1440px] items-end gap-6 p-8">
           <SafeArtwork
             src={posterArtwork}
             alt={show.title}
@@ -392,7 +392,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </div>
             }
           />
-          <div className="flex-1 min-w-0">
+          <div className="loom-detail-hero-info min-w-0 flex-1">
             <h1 className="text-4xl font-bold text-white mb-2">{show.title}</h1>
             <div className="flex flex-wrap items-center gap-4 text-[var(--loom-muted)] text-sm mb-3">
               <span className="loom-rating flex items-center gap-1">
@@ -415,7 +415,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           {heroEpisode && (
             <Button
               onClick={handlePlayShow}
-              className="relative h-16 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38),0_0_0_1px_rgba(251,197,0,0.26)] hover:bg-[var(--loom-accent-hover)] gap-3"
+              className="loom-detail-hero-play relative h-16 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
             >
               {heroProgressPercent > 0 && (
                 <span
@@ -439,9 +439,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       </div>
 
       <div className="mx-auto max-w-[1440px]">
-      <div className="page-bottom-safe-lg p-8">
+      <div className="loom-detail-content page-bottom-safe-lg p-8">
         {show.summary && (
-          <section className="mb-8">
+          <section className="loom-detail-summary mb-8">
             <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
             <ExpandableSummary summary={show.summary} />
           </section>
@@ -469,7 +469,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                   : 0;
 
                 return (
-                  <div key={season.number} className="overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
+                  <div key={season.number} className="overflow-hidden rounded-lg bg-[var(--loom-panel)]">
                     {/* Season header - click anywhere to expand/collapse */}
                     <div 
                       onClick={() => setExpandedSeason(isExpanded ? null : season.number)}

@@ -62,7 +62,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           return (
             <div
               key={toast.id}
-              className="pointer-events-auto flex gap-3 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface)]/95 p-3 text-[var(--loom-text)] shadow-2xl backdrop-blur-md"
+              className="pointer-events-auto flex gap-3 rounded-lg bg-[var(--loom-surface)]/95 p-3 text-[var(--loom-text)] shadow-2xl backdrop-blur-md"
             >
               <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${tone.accent}`} />
               <div className="min-w-0 flex-1">

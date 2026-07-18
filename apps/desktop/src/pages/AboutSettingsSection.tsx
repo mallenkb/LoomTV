@@ -52,7 +52,7 @@ export default function AboutSettingsSection({
               <span className="rounded-full bg-[var(--loom-accent)]/15 px-2.5 py-0.5 text-xs font-semibold text-[var(--loom-accent)] ring-1 ring-[var(--loom-accent)]/25">
                 v{updateState?.currentVersion ?? APP_VERSION}
               </span>
-              <span className="rounded-full bg-white/5 px-2.5 py-0.5 text-xs font-medium text-[var(--loom-faint)] ring-1 ring-white/10">
+              <span className="rounded-full bg-[var(--loom-surface-3)] px-2.5 py-0.5 text-xs font-medium text-[var(--loom-faint)] ring-1 ring-[var(--loom-border)]">
                 {APP_LICENSE.license}
               </span>
             </div>
@@ -60,12 +60,12 @@ export default function AboutSettingsSection({
               Local media library and playback app powered by Electron, React, and FFmpeg.
             </p>
             <div className={cn(
-              'mt-3 inline-flex h-8 items-center gap-2 rounded-lg bg-[var(--loom-surface-2)] px-3 text-xs font-medium',
+              'mt-3 inline-flex h-8 items-center gap-2 rounded-lg border px-3 text-xs font-medium',
               ffmpegStatus === null
-                ? 'text-[var(--loom-faint)]'
+                ? 'border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] text-[var(--loom-faint)]'
                 : ffmpegStatus.available
-                  ? 'text-green-400'
-                  : 'bg-yellow-500/8 text-yellow-400 ring-1 ring-yellow-500/20',
+                  ? 'settings-status-available border-green-400/35 bg-green-400/10'
+                  : 'settings-status-unavailable border-yellow-500/30 bg-yellow-500/10',
             )}>
               {ffmpegStatus === null ? (
                 <>
@@ -161,9 +161,9 @@ export default function AboutSettingsSection({
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white">Bundled Media Tools</CardTitle>
           <CardDescription className="text-[var(--loom-faint)] text-xs leading-5">
-            Loom Media Server bundles FFmpeg and FFprobe for macOS and Windows. These binaries include GPL
+            LoomTV bundles FFmpeg and FFprobe for macOS and Windows. These binaries include GPL
             components and are distributed under GNU GPL v3 or later. FFmpeg is a trademark of
-            Fabrice Bellard; Loom Media Server is not affiliated with the FFmpeg project.
+            Fabrice Bellard; LoomTV is not affiliated with the FFmpeg project.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -200,12 +200,12 @@ export default function AboutSettingsSection({
         </CardHeader>
         <CardContent>
           <div className="settings-panel-soft overflow-hidden rounded-xl">
-            <div className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] bg-black/16 px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--loom-faint)]">
+            <div className="grid grid-cols-[minmax(0,1fr)_7rem_2.5rem] bg-[var(--loom-surface-3)] px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--loom-faint)]">
               <span>Project</span>
               <span>License</span>
               <span />
             </div>
-            <div className="max-h-72 overflow-y-auto divide-y divide-[rgba(148,163,184,0.30)]">
+            <div className="max-h-72 overflow-y-auto divide-y divide-[var(--loom-border)]">
               {THIRD_PARTY_DEPENDENCIES.map((dependency) => (
                 <div
                   key={dependency.name}

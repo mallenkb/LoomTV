@@ -3,7 +3,7 @@
 
 const PAIR_LOCKOUT_FAILS = 5;
 const PAIR_LOCKOUT_WINDOW_MS = 60 * 1000;
-const PAIR_LOCKOUT_DURATION_MS = 60 * 60 * 1000;
+const PAIR_LOCKOUT_DURATION_MS = 5 * 60 * 1000;
 
 type PairAttemptState = { fails: number[]; lockedUntil?: number };
 const pairAttempts = new Map<string, PairAttemptState>();
@@ -33,4 +33,8 @@ export function recordPairFailure(address: string): void {
 
 export function recordPairSuccess(address: string): void {
   pairAttempts.delete(address);
+}
+
+export function resetPairRateLimits(): void {
+  pairAttempts.clear();
 }

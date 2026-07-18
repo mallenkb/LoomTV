@@ -16,7 +16,7 @@ export function streamStartFailure(error: unknown): StreamStartFailure {
   if (/ffmpeg is not available/i.test(detail)) {
     return {
       code: 'TRANSCODER_UNAVAILABLE',
-      error: 'The desktop transcoder is unavailable. Restart Loom Media Server or repair the desktop installation.',
+      error: 'The desktop transcoder is unavailable. Restart LoomTV or repair the desktop installation.',
       retryable: false,
     };
   }
@@ -39,7 +39,7 @@ export function streamStartFailure(error: unknown): StreamStartFailure {
 
   return {
     code: 'STREAM_START_FAILED',
-    error: 'The desktop could not start this mobile stream. Check Loom Media Server and retry.',
+    error: 'The desktop could not start this mobile stream. Check LoomTV and retry.',
     retryable: true,
   };
 }

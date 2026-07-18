@@ -61,7 +61,7 @@ function makeTargets(): IForgeMaker[] {
   if (process.platform === 'linux' || hasBinary('rpmbuild')) {
     makers.push(new MakerRpm({
       options: {
-        bin: 'loom-media-server',
+        bin: 'loomtv',
       },
     }));
   }
@@ -69,7 +69,7 @@ function makeTargets(): IForgeMaker[] {
   if (process.platform === 'linux' || (hasBinary('dpkg') && hasBinary('fakeroot'))) {
     makers.push(new MakerDeb({
       options: {
-        bin: 'loom-media-server',
+        bin: 'loomtv',
       },
     }));
   }
@@ -85,7 +85,10 @@ function platformFolder(platform: string): 'win' | 'mac' | 'linux' {
 
 function resourcesPath(outputPath: string, platform: string): string {
   if (platform === 'darwin') {
-    return path.join(outputPath, 'Loom Media Server.app', 'Contents', 'Resources');
+    const appBundleName = fs.existsSync(path.join(outputPath, 'LoomTV.app'))
+      ? 'LoomTV.app'
+      : 'Loom Media Server.app';
+    return path.join(outputPath, appBundleName, 'Contents', 'Resources');
   }
   return path.join(outputPath, 'resources');
 }
@@ -150,12 +153,13 @@ const config: ForgeConfig = {
       identity: process.env.MACOS_SIGNING_IDENTITY || '-',
     },
     icon: 'resources/icon',
-    executableName: 'Loom Media Server',
+    executableName: 'LoomTV',
     extraResource: [
       'resources/ffmpeg',
       'resources/icon.png',
       'resources/icon.ico',
       'resources/icon.icns',
+      'resources/lmtv-icon-nobg.svg.png',
     ],
     afterPrune: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {

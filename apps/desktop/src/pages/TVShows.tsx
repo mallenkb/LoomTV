@@ -37,7 +37,7 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
       <LibrarySearch
         value={query}
         onChange={setQuery}
-        placeholder={kind === 'anime' ? 'Search anime' : 'Search TV shows'}
+        placeholder={kind === 'anime' ? 'Search anime' : 'Search tv shows'}
         rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
       />
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
@@ -87,14 +87,14 @@ function EmptyShowsState({
   const Icon = isAnime ? FolderPlus : Tv;
   const title = isAnime ? 'Add an Anime folder' : 'Add a TV Shows folder';
   const description = isAnime
-    ? 'Choose a folder containing anime series. Loom Media Server will scan episodes and organize them into your anime library.'
-    : 'Choose a folder containing TV series. Loom Media Server will scan episodes and organize them into your TV library.';
+    ? 'Choose a folder containing anime series. LoomTV will scan episodes and organize them into your anime library.'
+    : 'Choose a folder containing TV series. LoomTV will scan episodes and organize them into your TV library.';
   const buttonLabel = isAnime ? 'Add Anime Folder' : 'Add TV Shows Folder';
 
   return (
     <div className="flex min-h-[calc(100vh-260px)] items-center justify-center px-4">
       <div className="w-full max-w-[520px] text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] bg-[var(--loom-panel)]">
           <Icon className="h-9 w-9 text-[var(--loom-accent)]" />
         </div>
         <h3 className="text-2xl font-semibold text-white">{title}</h3>

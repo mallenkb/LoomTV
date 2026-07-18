@@ -1,4 +1,4 @@
-import { Palette } from 'lucide-react';
+import { Moon, Palette, Sun } from 'lucide-react';
 import LoomBrandLockup from '@/components/LoomBrandLockup';
 import LoomLoader from '@/components/LoomLoader';
 import LoomLogo from '@/components/LoomLogo';
@@ -6,10 +6,8 @@ import LoomPlayMark from '@/components/LoomPlayMark';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  type AppDarkTheme,
   type AppThemeColor,
   type AppThemeSettings,
-  DARK_THEMES,
   THEME_COLORS,
 } from '@/lib/theme';
 import { LOADER_OPTIONS } from './Settings.helpers';
@@ -30,39 +28,39 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-8">
+          <div>
+            <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Appearance</p>
+            <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Appearance mode">
+              {([
+                { mode: 'dark' as const, label: 'Dark', Icon: Moon },
+                { mode: 'light' as const, label: 'Light', Icon: Sun },
+              ]).map(({ mode, label, Icon }) => {
+                const isSelected = theme.mode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => void setTheme({ mode })}
+                    aria-pressed={isSelected}
+                    className={`flex h-14 items-center gap-3 rounded-lg border px-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
+                      isSelected
+                        ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
+                        : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
+                    }`}
+                  >
+                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${isSelected ? 'bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className={`text-sm font-semibold ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-text)]'}`}>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="space-y-7">
             <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Dark Theme</p>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(DARK_THEMES) as AppDarkTheme[]).map((darkTheme) => {
-                  const palette = DARK_THEMES[darkTheme];
-                  const isSelected = theme.darkTheme === darkTheme;
-                  return (
-                    <button
-                      key={darkTheme}
-                      type="button"
-                      onClick={() => void setTheme({ darkTheme })}
-                      className={`inline-flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
-                        isSelected
-                          ? 'bg-[var(--loom-accent)]/10 ring-1 ring-[var(--loom-accent)]/80'
-                          : 'bg-[var(--loom-bg)] hover:bg-[var(--loom-surface-3)]/55'
-                      }`}
-                    >
-                      <span className="text-sm font-semibold text-[var(--loom-text)]">{palette.label}</span>
-                      <span
-                        className="block h-6 w-14 rounded-md ring-1 ring-white/10"
-                        style={{ backgroundColor: palette.bg }}
-                      >
-                        <span className="sr-only">{palette.bg}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Logo Colour</p>
+              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Theme</p>
               <div className="flex flex-wrap gap-2">
                 {(Object.keys(THEME_COLORS) as AppThemeColor[]).map((color) => {
                   const palette = THEME_COLORS[color];
@@ -72,17 +70,17 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
                       key={color}
                       type="button"
                       onClick={() => void setTheme({ color })}
-                      className={`inline-flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+                      className={`inline-flex items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${
                         isSelected
-                          ? 'bg-[var(--loom-accent)]/10 ring-1 ring-[var(--loom-accent)]/80'
-                          : 'bg-[var(--loom-bg)] hover:bg-[var(--loom-surface-3)]/55'
+                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)]'
+                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
                       }`}
                     >
                       <span
-                        className="text-sm font-semibold"
-                        style={{ color: color === 'yellow' ? '#fbc500' : 'var(--loom-text)' }}
+                        className="theme-color-option-label text-sm font-semibold"
+                        style={{ color: isSelected ? 'var(--loom-active-text)' : 'var(--loom-text)' }}
                       >
-                        {color === 'yellow' ? 'Yellow' : palette.label}
+                        {palette.label}
                       </span>
                       <span
                         className="block h-6 w-14 rounded-md ring-1 ring-black/10"
@@ -100,20 +98,20 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
           <div className="space-y-7">
             <div>
               <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Preview</p>
-              <div className="grid gap-4 rounded-lg bg-[var(--loom-bg)] p-4 lg:grid-cols-[minmax(0,1fr)_13rem]">
-                <div className="flex min-h-52 items-center justify-center rounded-lg bg-[var(--loom-surface-2)] p-8">
+              <div className="grid gap-4 rounded-lg border bg-[var(--loom-bg)] p-4 lg:grid-cols-[minmax(0,1fr)_13rem]">
+                <div className="flex min-h-52 items-center justify-center rounded-lg border bg-[var(--loom-surface-2)] p-8">
                   <LoomBrandLockup className="h-32 w-auto" />
                 </div>
                 <div className="grid gap-3">
-                  <div className="flex items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] px-3 py-3">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-[var(--loom-surface-2)] px-3 py-3">
                     <span className="text-xs font-medium text-[var(--loom-muted)]">Icon</span>
                     <LoomPlayMark className="h-7 w-7 text-[var(--loom-accent)]" />
                   </div>
-                  <div className="flex items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] px-3 py-3">
+                  <div className="flex items-center justify-between gap-3 rounded-lg border bg-[var(--loom-surface-2)] px-3 py-3">
                     <span className="text-xs font-medium text-[var(--loom-muted)]">Horizontal</span>
                     <LoomLogo className="h-7 w-auto" />
                   </div>
-                  <Button className="h-12 gap-2">
+                  <Button className="h-12 gap-2 border">
                     <Palette className="h-4 w-4" />
                     Accent Action
                   </Button>
@@ -131,19 +129,19 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
                       key={option.id}
                       type="button"
                       onClick={() => void setTheme({ loaderStyle: option.id })}
-                      className={`flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg p-3 text-center transition-colors ${
+                      className={`flex min-h-28 flex-col items-center justify-center gap-3 rounded-lg border p-3 text-center transition-colors ${
                         isSelected
-                          ? 'bg-[var(--loom-accent)]/10 ring-1 ring-[var(--loom-accent)]/80'
-                          : 'bg-[var(--loom-bg)] hover:bg-[var(--loom-surface-3)]/55'
+                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)]'
+                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
                       }`}
                     >
                       <LoomLoader
                         style={option.id}
-                        className="h-12 w-12 rounded-full bg-white/10 text-white ring-1 ring-white/10"
+                        className="h-12 w-12 rounded-full bg-[var(--loom-surface-3)] text-[var(--loom-text)] ring-1 ring-[var(--loom-border)]"
                         markClassName={option.id === 'horizontal-logo' ? 'h-4 w-auto' : 'h-7 w-7'}
                         color="currentColor"
                       />
-                      <span className="block text-sm font-semibold text-[var(--loom-text)]">{option.label}</span>
+                      <span className={`block text-sm font-semibold ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-text)]'}`}>{option.label}</span>
                     </button>
                   );
                 })}

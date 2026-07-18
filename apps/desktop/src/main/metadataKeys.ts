@@ -65,7 +65,7 @@ async function testOpenSubtitlesKey(value: string): Promise<MetadataKeyTestResul
   const response = await safeFetch('https://api.opensubtitles.com/api/v1/infos/languages', {
     headers: {
       'Api-Key': key,
-      'User-Agent': 'Loom Media Server v1',
+      'User-Agent': 'LoomTV v1',
     },
   }, { allowedHosts: ['.opensubtitles.com'] });
   return {

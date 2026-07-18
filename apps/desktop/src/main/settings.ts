@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { app } from 'electron';
 import { loadSettingsFromDatabase, saveSettingsToDatabase } from './database';
 import { normalizeProviderId } from './metadataKeys';
@@ -16,7 +16,7 @@ const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' 
 };
 
 export function createLanShareCode(): string {
-  return randomBytes(32).toString('base64url');
+  return String(randomInt(100000, 1000000));
 }
 
 function pairedDeviceFingerprint(device: Pick<LanPairedDevice, 'name' | 'lastAddress'>): string {
@@ -176,17 +176,15 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     skipAnalysis,
     sidebarNavOrder,
     appThemeMode: raw.appThemeMode === 'light' ? 'light' : 'dark',
-    appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange'
+    appThemeColor: raw.appThemeColor === 'yellow' || raw.appThemeColor === 'red' || raw.appThemeColor === 'blue' || raw.appThemeColor === 'orange' || raw.appThemeColor === 'twitch'
       ? raw.appThemeColor
       : 'yellow',
-    appDarkTheme: raw.appDarkTheme === 'default' || raw.appDarkTheme === 'justwatch' || raw.appDarkTheme === 'black'
-      ? raw.appDarkTheme
-      : 'black',
+    appDarkTheme: 'black',
     appLoaderStyle: raw.appLoaderStyle === 'logo-mark' || raw.appLoaderStyle === 'horizontal-logo' || raw.appLoaderStyle === 'play-mark'
       ? raw.appLoaderStyle
       : 'play-mark',
     localNetworkSharingEnabled: Boolean(raw.localNetworkSharingEnabled),
-    localNetworkShareToken: raw.localNetworkShareToken && /^[A-Za-z0-9_-]{43}$/.test(raw.localNetworkShareToken)
+    localNetworkShareToken: raw.localNetworkShareToken && /^\d{6}$/.test(raw.localNetworkShareToken)
       ? raw.localNetworkShareToken
       : createLanShareCode(),
     localNetworkDeviceId: typeof raw.localNetworkDeviceId === 'string' && raw.localNetworkDeviceId.length >= 8
