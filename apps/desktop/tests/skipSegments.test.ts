@@ -155,7 +155,7 @@ test('AniSkip maps OP, ED, mixed markers, recap, and Retry-After', async () => {
   try {
     const result = await fetchAniSkipSegments({ malId: '1', episode: 1, durationMs: 1_400_000 });
     assert.equal(result.kind, 'success');
-    if (result.kind === 'success') assert.deepEqual(result.segments.map((segment) => segment.type), ['recap', 'intro', 'credits']);
+    if (result.kind === 'success') assert.deepEqual(result.segments.map((segment) => segment.type), ['recap', 'intro', 'outro']);
     globalThis.fetch = async () => new Response('', { status: 429, headers: { 'retry-after': '2' } });
     assert.deepEqual(await fetchAniSkipSegments({ malId: '1', episode: 1, durationMs: 1_400_000 }), { kind: 'retry', retryAfterMs: 2000 });
   } finally {
