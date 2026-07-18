@@ -8,9 +8,11 @@ import {
 } from '../src/lib/settingsTabs.ts';
 import { buildNetworkStatus, ffmpegAvailability } from '../src/main/ipcHandlerPolicy.ts';
 
-const settingsPageSource = () => readFileSync(new URL('../src/pages/Settings.tsx', import.meta.url), 'utf8');
-const settingsTabsSource = () => readFileSync(new URL('../src/pages/SettingsTabs.tsx', import.meta.url), 'utf8');
-const stylesheetSource = () => readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+const normalizedSource = (relativePath: string) =>
+  readFileSync(new URL(relativePath, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const settingsPageSource = () => normalizedSource('../src/pages/Settings.tsx');
+const settingsTabsSource = () => normalizedSource('../src/pages/SettingsTabs.tsx');
+const stylesheetSource = () => normalizedSource('../src/index.css');
 
 test('settings tab selection keeps the current section when the selected tab is already active', () => {
   assert.equal(nextSettingsSection('network', 'network'), 'network');
