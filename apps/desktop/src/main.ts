@@ -104,6 +104,7 @@ import {
   backupDatabase,
   cacheLibraryArtwork,
   clearDatabase,
+  clearAllGuestProfiles,
   cancelSegmentAnalysisJobs,
   cleanupOrphanedAutomaticSegments,
   cleanupOrphanedAnalysisData,
@@ -115,6 +116,7 @@ import {
   getSegmentAnalysisJobs,
   createProfile,
   deleteProfile,
+  exportProfileData,
   getAllProgress,
   getManagedSegmentCandidates,
   getPlaybackTrackPreferences,
@@ -123,6 +125,7 @@ import {
   getProfilePreferences,
   getProfileRestrictions,
   importCustomArtwork,
+  importProfileData,
   importProgress,
   reorderProfiles,
   updateProfile,
@@ -134,6 +137,7 @@ import {
   saveProfilePreferences,
   saveProfileRestrictions,
   saveProgress,
+  selectDeviceProfile,
   setProfileListEntry,
   saveSegmentAnalysisInventory,
   updateSegmentAnalysisJob,
@@ -144,19 +148,28 @@ import {
 } from './main/database';
 import {
   broadcastProfilesChanged,
+  broadcastActiveProfileChanged,
   changeProfilePin,
   createAndSelectGuest,
   DESKTOP_DEVICE_ID,
   getDesktopActiveProfileId,
   getDesktopActiveProfileState,
+  getActiveProfileState,
   lockProfile,
+  prepareDesktopProfileStartup,
   profileSummaries,
   requireDesktopProfileId,
   requireOwner,
+  resolveLanProfileId,
   resetOwnerProfile,
   setDesktopAutomaticSignIn,
   selectDesktopProfile,
 } from './main/profileService';
+import {
+  assertProfileCanAccessPath,
+  filterLibraryForProfile,
+  profileRestrictionIdentity,
+} from './main/contentPolicy.ts';
 import {
   cleanMediaTitle,
   isGenericGroupingFolderTitle,
@@ -354,7 +367,10 @@ async function safeResult<T>(fn: () => T | Promise<T>): Promise<ApiResult<T>> {
 }
 
 function clearAppData(): LibraryData {
-  clearDatabase();
+  const owner = clearDatabase();
+  selectDeviceProfile(DESKTOP_DEVICE_ID, owner.id);
+  broadcastProfilesChanged();
+  broadcastActiveProfileChanged(DESKTOP_DEVICE_ID);
   for (const filePath of [LIBRARY_FILE, SETTINGS_FILE]) {
     try {
       fs.rmSync(filePath, { force: true });
@@ -497,7 +513,6 @@ function preserveExistingItemDuringScan(fresh: MediaItem, existing?: MediaItem):
     genres: existing.genres?.length ? existing.genres : fresh.genres,
     cast: existing.cast?.length ? existing.cast : fresh.cast,
     providerIds: mergeProviderIds(existing.providerIds || {}, fresh.providerIds || {}),
-    lastPlayed: existing.lastPlayed || fresh.lastPlayed,
     seasons: seasons.size > 0
       ? [...seasons.values()].sort((a, b) => a.number - b.number)
       : fresh.seasons,
@@ -874,7 +889,11 @@ function loadLibrary(): LibraryData {
 }
 
 function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
-  return projectLibraryForRenderer(data);
+  const profileId = getDesktopActiveProfileId();
+  const scoped = profileId
+    ? filterLibraryForProfile(data, profileId)
+    : { ...data, movies: [], tvShows: [], animeShows: [] };
+  return projectLibraryForRenderer(scoped);
 }
 
 function appendLocalAccessTokenToUrl(url: string): string {
@@ -883,9 +902,20 @@ function appendLocalAccessTokenToUrl(url: string): string {
   return parsed.toString();
 }
 
-function signedStreamUrlForRemote(base: string, filePath: string): string {
+function signedStreamUrlForRemote(
+  base: string,
+  filePath: string,
+  identity?: { deviceId: string; profileId: string; selectionRevision: number },
+): string {
   const resourceId = registerResource(loadSettings().localNetworkHmacSecret || '', 'media', filePath);
-  return buildSignedLanUrl(base, '/stream', new URLSearchParams({ resourceId }));
+  return buildSignedLanUrl(base, '/stream', new URLSearchParams({
+    resourceId,
+    ...(identity ? {
+      deviceId: identity.deviceId,
+      profileId: identity.profileId,
+      selectionRevision: String(identity.selectionRevision),
+    } : {}),
+  }));
 }
 
 function localMetadataWithTracks(filePath: string, metadata: MediaItem['localMetadata']): MediaItem['localMetadata'] {
@@ -900,10 +930,20 @@ function localMetadataWithTracks(filePath: string, metadata: MediaItem['localMet
   }
 }
 
-function libraryForLocalNetwork(): LibraryData {
+function libraryForLocalNetwork(profileId?: string, deviceId?: string): LibraryData {
   const base = getLanServerBase() || `http://127.0.0.1:${getMediaServerPort()}`;
   const data = loadLibrary();
-  return projectLibraryForLocalNetwork(data, base);
+  const resolvedProfileId = profileId || resolveLanProfileId(deviceId || null, false);
+  const state = deviceId ? getActiveProfileState(deviceId) : null;
+  return projectLibraryForLocalNetwork(
+    filterLibraryForProfile(data, resolvedProfileId),
+    base,
+    deviceId ? {
+      deviceId,
+      profileId: resolvedProfileId,
+      selectionRevision: state?.selectionRevision ?? 0,
+    } : undefined,
+  );
 }
 
 let artworkCacheQueue: Promise<void> = Promise.resolve();
@@ -1138,9 +1178,27 @@ registerIpcHandlers<LibraryData, AppSettings>({
   removeFolderFromLibrary,
   saveLibraryMutation,
   assertLocalMediaPath,
+  authorizeMediaPath: (filePath) => assertProfileCanAccessPath(loadLibrary(), requireDesktopProfileId(), filePath),
   needsBrowserTranscoding,
   browserPlaybackPlan,
   loadSettings,
+  settingsForRenderer: () => {
+    const settings = loadSettings();
+    try {
+      requireOwner();
+      return settings;
+    } catch {
+      return {
+        appThemeMode: settings.appThemeMode,
+        appThemeColor: settings.appThemeColor,
+        appDarkTheme: settings.appDarkTheme,
+        appLoaderStyle: settings.appLoaderStyle,
+        playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
+        playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+      };
+    }
+  },
+  authorizeSettingsWrite: () => { requireOwner(); },
   saveSettings,
   onSettingsSaved: analysisCoordinator.settingsChanged,
   syncLanAdvertisement,
@@ -1163,8 +1221,34 @@ registerIpcHandlers<LibraryData, AppSettings>({
   },
   saveProgress: (filePath, position, duration, expectedProfileId) =>
     saveProgress(requireDesktopProfileId(expectedProfileId), filePath, position, duration),
-  importProgress: (progress) => importProgress(requireDesktopProfileId(), progress),
+  importProgress: (progress, expectedProfileId) => importProgress(requireDesktopProfileId(expectedProfileId), progress),
   listProfiles: profileSummaries,
+  chooseProfileAvatar: async () => {
+    requireOwner();
+    const result = await dialog.showOpenDialog({
+      title: 'Choose profile image',
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+    });
+    const filePath = result.filePaths[0];
+    if (result.canceled || !filePath) return null;
+    if ((await fs.promises.stat(filePath)).size > 10 * 1024 * 1024) {
+      throw new Error('Choose an image smaller than 10 MB.');
+    }
+    const source = nativeImage.createFromPath(filePath);
+    if (source.isEmpty()) throw new Error('That image could not be opened.');
+    const size = source.getSize();
+    const side = Math.min(size.width, size.height);
+    const square = source.crop({
+      x: Math.floor((size.width - side) / 2),
+      y: Math.floor((size.height - side) / 2),
+      width: side,
+      height: side,
+    }).resize({ width: 256, height: 256, quality: 'best' });
+    const avatar = `data:image/png;base64,${square.toPNG().toString('base64')}`;
+    if (avatar.length > 512 * 1024) throw new Error('That image is too complex. Try a smaller image.');
+    return avatar;
+  },
   getActiveProfileState: getDesktopActiveProfileState,
   createProfile: (input) => {
     requireOwner();
@@ -1183,6 +1267,51 @@ registerIpcHandlers<LibraryData, AppSettings>({
     deleteProfile(profileId);
     broadcastProfilesChanged();
     return profileSummaries();
+  },
+  exportProfile: async (profileId) => {
+    requireOwner();
+    try {
+      const bundle = exportProfileData(profileId);
+      const result = await dialog.showSaveDialog({
+        title: 'Export LoomTV profile',
+        defaultPath: `${bundle.profile.name.replace(/[^a-z0-9_-]+/gi, '-') || 'profile'}.loomprofile.json`,
+        filters: [{ name: 'LoomTV Profile', extensions: ['loomprofile.json', 'json'] }],
+      });
+      if (result.canceled || !result.filePath) return { ok: false };
+      await fs.promises.writeFile(result.filePath, JSON.stringify(bundle), { encoding: 'utf8', flag: 'wx' }).catch(async (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EEXIST') throw error;
+        await fs.promises.writeFile(result.filePath as string, JSON.stringify(bundle), 'utf8');
+      });
+      return { ok: true, path: result.filePath };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Profile export failed.' };
+    }
+  },
+  importProfile: async () => {
+    requireOwner();
+    try {
+      const result = await dialog.showOpenDialog({
+        title: 'Import LoomTV profile',
+        properties: ['openFile'],
+        filters: [{ name: 'LoomTV Profile', extensions: ['json'] }],
+      });
+      const filePath = result.filePaths[0];
+      if (result.canceled || !filePath) return { ok: false };
+      if ((await fs.promises.stat(filePath)).size > 25 * 1024 * 1024) throw new Error('The profile file is larger than 25 MB.');
+      const bundle = JSON.parse(await fs.promises.readFile(filePath, 'utf8')) as import('./shared/desktopProtocol.ts').ProfileExportV1;
+      const imported = importProfileData(bundle);
+      broadcastProfilesChanged();
+      return {
+        ok: true,
+        profile: profileSummaries().find((profile) => profile.id === imported.profile.id),
+        importedProgress: imported.importedProgress,
+        skippedProgress: imported.skippedProgress,
+        importedLists: imported.importedLists,
+        skippedLists: imported.skippedLists,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Profile import failed.' };
+    }
   },
   selectProfile: (profileId, pin) => selectDesktopProfile(profileId, pin),
   selectGuestProfile: () => createAndSelectGuest(DESKTOP_DEVICE_ID),
@@ -1207,7 +1336,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   resetOwnerProfile,
   setAutomaticSignIn: setDesktopAutomaticSignIn,
   getProfilePreferences: () => getProfilePreferences(requireDesktopProfileId()),
-  saveProfilePreferences: (patch) => saveProfilePreferences(requireDesktopProfileId(), patch),
+  saveProfilePreferences: (patch, expectedProfileId) => saveProfilePreferences(requireDesktopProfileId(expectedProfileId), patch),
   getProfileRestrictions: (profileId) => {
     requireOwner();
     return getProfileRestrictions(profileId);
@@ -1217,12 +1346,12 @@ registerIpcHandlers<LibraryData, AppSettings>({
     return saveProfileRestrictions(profileId, input);
   },
   getProfileLists: (kind) => getProfileLists(requireDesktopProfileId(), kind),
-  setProfileListEntry: (mediaId, kind, present) => setProfileListEntry(requireDesktopProfileId(), mediaId, kind, present),
+  setProfileListEntry: (mediaId, kind, present, expectedProfileId) => setProfileListEntry(requireDesktopProfileId(expectedProfileId), mediaId, kind, present),
   getPlaybackTrackPreferences: (scope) => {
     const profileId = getDesktopActiveProfileId();
     return profileId ? getPlaybackTrackPreferences(profileId, scope) : {};
   },
-  savePlaybackTrackPreferences: (scope, preferences) => savePlaybackTrackPreferences(requireDesktopProfileId(), scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[2]),
+  savePlaybackTrackPreferences: (scope, preferences, expectedProfileId) => savePlaybackTrackPreferences(requireDesktopProfileId(expectedProfileId), scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[2]),
   getMediaSegments: skipSegmentService.getSegments,
   saveManualMediaSegment: skipSegmentService.saveManualSegment,
   deleteManualMediaSegment: skipSegmentService.deleteManualSegment,
@@ -1312,8 +1441,10 @@ export const mediaServerDeps = {
   allowedCorsOrigin,
   authorizeLanRequest,
   authorizeLocalRequest,
+  assertProfileCanAccessPath: (profileId: string, filePath: string) => assertProfileCanAccessPath(loadLibrary(), profileId, filePath),
   decodeDataUrl,
   getLanServerBase,
+  getLibraryRevision: () => libraryMutationVersion,
   getMediaSegments: skipSegmentService.getSegments,
   handleLanPairRequest,
   handleLanRefreshRequest,
@@ -1327,6 +1458,7 @@ export const mediaServerDeps = {
   libraryForRenderer,
   loadLibrary,
   loadSettings,
+  profileRestrictionIdentity,
   localAccessQuery,
   readJsonBody,
   requireLocalOrLanAccess,
@@ -1340,6 +1472,7 @@ export const mediaServerDeps = {
 app.whenReady().then(async () => {
   applyAppIcon();
   cleanupOldTranscodes();
+  prepareDesktopProfileStartup();
   await startMediaServer(mediaServerDeps);
   analysisCoordinator.start();
   skipSegmentService.warmLibrary(loadLibrary());
@@ -1424,6 +1557,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isAppShuttingDown = true;
+  clearAllGuestProfiles();
   clearUpdateQuitFallback();
   destroyServerTray();
   destroyLanDiscovery();

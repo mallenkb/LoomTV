@@ -6,6 +6,7 @@ import type { LocalSegmentAnalysisStatus, SkipAnalysisSettings } from '@/lib/des
 import SkipTimestampManager from './SkipTimestampManager';
 
 type PlaybackSettingsSectionProps = {
+  showServerControls?: boolean;
   skipBackSeconds: number;
   skipForwardSeconds: number;
   onSkipBackChange: (value: number) => void;
@@ -34,6 +35,7 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 export default function PlaybackSettingsSection({
+  showServerControls = true,
   skipBackSeconds,
   skipForwardSeconds,
   onSkipBackChange,
@@ -126,9 +128,13 @@ export default function PlaybackSettingsSection({
               <input type="number" min={1} step={1} value={skipForwardSeconds} onChange={(event) => onSkipForwardChange(Number(event.target.value))} className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white outline-none" />
             </label>
           </div>
+          <div className="mt-4 flex justify-end">
+            <Button type="button" onClick={onSave}>Save playback settings</Button>
+          </div>
         </CardContent>
       </Card>
 
+      {showServerControls && <>
       <Card className="settings-panel">
         <CardHeader>
           <CardTitle className="text-white">Intro &amp; Outro Skipping</CardTitle>
@@ -322,6 +328,7 @@ export default function PlaybackSettingsSection({
           </CardContent>
         )}
       </Card>
+      </>}
     </div>
   );
 }

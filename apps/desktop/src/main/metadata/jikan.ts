@@ -1,6 +1,7 @@
 import { remoteMatchesAnyLocalTitle, yearFromDateString } from './helpers.ts';
 import type { EpisodeMeta, MediaItem } from './types.ts';
 import { safeFetch } from '../safeFetch.ts';
+import { jikanContentRating } from './contentRatings.ts';
 
 export interface JikanAnimeResult extends Partial<MediaItem> {
   episodes?: EpisodeMeta[];
@@ -42,6 +43,7 @@ interface JikanAnimeHit {
   genres?: JikanGenre[];
   year?: number;
   aired?: { from?: string };
+  rating?: string;
 }
 
 interface JikanListResponse<T> {
@@ -167,6 +169,7 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
       backdrop: '',
       summary: (hit.synopsis as string) || '',
       rating: (hit.score as number) ?? 0,
+      contentRatings: jikanContentRating(hit.rating),
       genres: (hit.genres ?? []).map((g) => g.name as string),
       year: (hit.year as number) ?? (hit.aired?.from ? new Date(hit.aired.from).getFullYear() : 0),
       cast,
@@ -204,6 +207,7 @@ export async function fetchJikanMetadataCandidates(title: string, localTitles: s
         backdrop: '',
         summary: (hit.synopsis as string) || '',
         rating: (hit.score as number) ?? 0,
+        contentRatings: jikanContentRating(hit.rating),
         genres: (hit.genres ?? []).map((genre) => genre.name as string),
         year: (hit.year as number) ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
         cast: [],

@@ -7,7 +7,6 @@ import {
   MAX_SIDE_PANEL_RATIO,
   MIN_SIDE_PANEL_WIDTH,
   SUBTITLES_DEFAULT_KEY,
-  TRACK_PREFERENCES_KEY,
 } from './constants';
 import type {
   MediaTrack,
@@ -147,29 +146,21 @@ export function trackPreferenceScope(mediaId: string | undefined, filePath: stri
   return mediaId ? `media:${mediaId}` : `file:${filePath}`;
 }
 
-export function loadTrackPreferences(scope: string): PlaybackTrackPreferences {
-  try {
-    const all = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) || '{}') as Record<string, PlaybackTrackPreferences>;
-    return all[scope] || {};
-  } catch {
-    return {};
-  }
-}
-
 export async function loadSharedTrackPreferences(scope: string): Promise<PlaybackTrackPreferences> {
   try {
     const preferences = await desktopApi.getPlaybackTrackPreferences(scope);
     return preferences && !('audio' in preferences || 'subtitle' in preferences) ? {} : preferences as PlaybackTrackPreferences;
   } catch {
-    return loadTrackPreferences(scope);
+    return {};
   }
 }
 
 export function saveTrackPreference(scope: string, type: TrackPreferenceType, track: MediaTrack | undefined, enabled: boolean): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) || '{}') as Record<string, PlaybackTrackPreferences>;
-    const nextPreferences = {
-      ...(all[scope] || {}),
+  void (async () => {
+    try {
+      const existing = await loadSharedTrackPreferences(scope);
+      const nextPreferences = {
+      ...existing,
       [type]: {
         enabled,
         index: track?.index,
@@ -179,12 +170,12 @@ export function saveTrackPreference(scope: string, type: TrackPreferenceType, tr
         forced: track?.forced,
       },
     };
-    all[scope] = nextPreferences;
-    localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify(all));
-    void desktopApi.savePlaybackTrackPreferences(scope, nextPreferences).catch(() => undefined);
-  } catch (_error) {
-    // Track selection still applies for the current session.
-  }
+      const active = await desktopApi.getActiveProfileState();
+      await desktopApi.savePlaybackTrackPreferences(scope, nextPreferences, active.profileId || undefined);
+    } catch {
+      // Track selection still applies for the current session.
+    }
+  })();
 }
 
 export function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceType, preference?: TrackPreference): number | null {

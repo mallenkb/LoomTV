@@ -28,6 +28,13 @@ test('database migrations create the complete schema and remain idempotent', () 
       'segment_analysis_state',
       'segment_analysis_jobs',
       'segment_analysis_inventory',
+      'profiles',
+      'profile_preferences',
+      'profile_restrictions',
+      'profile_library_access',
+      'profile_media_lists',
+      'device_profile_selections',
+      'device_profile_selection_revisions',
     ]) {
       assert.equal(tables.has(table), true, `Expected ${table} to exist.`);
     }
@@ -41,6 +48,9 @@ test('database migrations create the complete schema and remain idempotent', () 
     assert.equal(columns(database, 'media_segment_candidates').includes('analysis_metadata_json'), true);
     assert.equal(columns(database, 'segment_analysis_jobs').includes('config_hash'), true);
     assert.equal(columns(database, 'segment_analysis_inventory').includes('fingerprint_version'), true);
+    assert.equal(columns(database, 'media_items').includes('content_ratings_json'), true);
+    assert.equal(columns(database, 'device_profile_selections').includes('automatic_sign_in'), true);
+    assert.equal(columns(database, 'device_profile_selections').includes('selection_revision'), true);
   } finally {
     database.close();
   }
@@ -173,7 +183,58 @@ test('the profiles migration backfills legacy viewer state onto the Owner exactl
     assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n, 2);
 
     const ledger = database.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
-    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2]);
+    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2, 3, 4, 5, 6]);
+  } finally {
+    database.close();
+  }
+});
+
+test('profile feature migration moves personal settings and removes abandoned Guest state', () => {
+  const database = new BetterSqlite3(':memory:');
+  database.pragma('foreign_keys = ON');
+  try {
+    database.exec(`
+      CREATE TABLE playback_progress (
+        file_path TEXT PRIMARY KEY,
+        position REAL NOT NULL DEFAULT 0,
+        duration REAL NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        watched INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE playback_track_preferences (
+        scope TEXT PRIMARY KEY,
+        preferences_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE app_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO app_settings VALUES (
+        1,
+        '{"appThemeMode":"light","playbackSkipForwardSeconds":30,"localNetworkSharingEnabled":true}',
+        1
+      );
+    `);
+
+    migrateDatabase(database);
+    const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string };
+    const preferences = JSON.parse((database.prepare('SELECT preferences_json FROM profile_preferences WHERE profile_id = ?').get(owner.id) as { preferences_json: string }).preferences_json) as Record<string, unknown>;
+    const settings = JSON.parse((database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string }).data_json) as Record<string, unknown>;
+    assert.equal(preferences.appThemeMode, 'light');
+    assert.equal(preferences.playbackSkipForwardSeconds, 30);
+    assert.equal(settings.appThemeMode, undefined);
+    assert.equal(settings.localNetworkSharingEnabled, true);
+
+    database.prepare(`
+      INSERT INTO profiles (
+        id, name, avatar_key, color_key, profile_type, created_at, updated_at,
+        sort_order, is_guest, guest_device_id
+      ) VALUES ('guest', 'Guest', 'weave-08', 'slate', 'standard', 1, 1, 9999, 1, 'tablet')
+    `).run();
+    migrateDatabase(database);
+    assert.equal((database.prepare('SELECT COUNT(*) AS n FROM profiles WHERE is_guest = 1').get() as { n: number }).n, 0);
   } finally {
     database.close();
   }

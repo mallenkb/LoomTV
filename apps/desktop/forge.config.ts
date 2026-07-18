@@ -160,6 +160,7 @@ const config: ForgeConfig = {
       'resources/icon.ico',
       'resources/icon.icns',
       'resources/lmtv-icon-nobg.svg.png',
+      'resources/DICEBEAR_GLYPHS_LICENSE.md',
     ],
     afterPrune: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {

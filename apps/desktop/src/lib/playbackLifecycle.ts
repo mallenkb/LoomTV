@@ -14,3 +14,7 @@ export async function shutdownActivePlayback(): Promise<boolean> {
   await shutdown();
   return true;
 }
+
+export function hasActivePlayback(): boolean {
+  return shutdown !== null;
+}

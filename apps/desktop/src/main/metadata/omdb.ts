@@ -1,3 +1,7 @@
+import { safeFetch } from '../safeFetch.ts';
+import { normalizeContentRating } from './contentRatings.ts';
+import type { ContentRating } from './types.ts';
+
 export interface OMDbResponse {
   Response?: string;
   Title?: string;
@@ -9,7 +13,13 @@ export interface OMDbResponse {
   Plot?: string;
   Poster?: string;
   imdbRating?: string;
+  Rated?: string;
   [key: string]: string | undefined;
+}
+
+export function omdbContentRatings(metadata: OMDbResponse | null | undefined): Record<string, ContentRating> {
+  const rating = normalizeContentRating('US', metadata?.Rated, 'omdb');
+  return rating ? { US: rating } : {};
 }
 
 export async function fetchOMDbMetadata(title: string, year?: number, omdbApiKey?: string): Promise<OMDbResponse | null> {
@@ -40,4 +50,3 @@ export async function fetchOMDbMetadataById(imdbId: string | undefined, omdbApiK
     return null;
   }
 }
-import { safeFetch } from '../safeFetch';

@@ -12,6 +12,13 @@ export type MediaServerRouteAccess =
 export function lanRouteScope(pathname: string, method = 'GET'): LanRouteScope | null {
   if (pathname === '/api/v2/library' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/client-config' && method === 'GET') return 'catalog:read';
+  if (pathname === '/api/v2/profiles' && method === 'GET') return 'catalog:read';
+  if (pathname === '/api/v2/profiles/active' && method === 'GET') return 'catalog:read';
+  if (pathname === '/api/v2/profiles/select' && method === 'POST') return 'catalog:read';
+  if (pathname === '/api/v2/profiles/lock' && method === 'POST') return 'catalog:read';
+  if (pathname === '/api/v2/profiles/auto-sign-in' && method === 'POST') return 'catalog:read';
+  if (pathname === '/api/v2/profile-preferences' && (method === 'GET' || method === 'PATCH')) return 'playback:write';
+  if (pathname === '/api/v2/profile-lists' && (method === 'GET' || method === 'PUT' || method === 'DELETE')) return 'playback:write';
   if (pathname === '/api/v2/start-hls' && method === 'POST') return 'media:stream';
   if (pathname === '/api/v2/progress' && (method === 'GET' || method === 'POST')) return 'playback:write';
   if (pathname === '/api/v2/playback-track-preferences' && (method === 'GET' || method === 'POST')) return 'playback:write';

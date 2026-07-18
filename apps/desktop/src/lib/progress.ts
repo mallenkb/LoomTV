@@ -116,7 +116,7 @@ export async function hydrateProgressFromDatabase(): Promise<void> {
     // database's own rows would be wasted writes, and after a profile switch
     // it must never happen at all.
     if (Object.keys(localProgress).length > 0) {
-      await desktopApi.importProgress(progressCache);
+      await desktopApi.importProgress(progressCache, activeProfileId ?? undefined);
       if (generation !== profileGeneration) return;
     }
     localStorage.setItem(PROGRESS_MIGRATION_KEY, PROGRESS_MIGRATION_VERSION);

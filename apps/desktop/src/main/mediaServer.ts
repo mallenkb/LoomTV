@@ -24,8 +24,12 @@ import {
   getCachedArtwork,
   getCustomArtworkData,
   getPlaybackTrackPreferences,
+  getProfileLists,
+  getProfilePreferences,
   savePlaybackTrackPreferences,
+  saveProfilePreferences,
   saveProgress,
+  setProfileListEntry,
 } from './database';
 import { getLocalNetworkAddresses, getLocalNetworkName } from './networkInfo';
 import type { TranscodeOptions } from './mediaTypes';
@@ -34,7 +38,20 @@ import { probeMedia } from './mediaProbe';
 import { isSubtitleFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
-import { resolveLanProfileId } from './profileService';
+import {
+  createAndSelectGuest,
+  clearGuestSelection,
+  getActiveProfileState,
+  lockProfile,
+  ProfileError,
+  profileSummaries,
+  requireDesktopProfileId,
+  requireOwner,
+  resolveLanProfileId,
+  selectProfile,
+  setAutomaticSignIn,
+} from './profileService';
+import type { ProfileListKind } from './database.ts';
 import { canWriteResponse, handleResponseErrors, pipeResponse } from './httpResponses';
 import {
   deviceHasLanScope,
@@ -52,8 +69,10 @@ export interface MediaServerDependencies {
   allowedCorsOrigin: (origin: string | undefined, allowedOrigins: ReadonlySet<string>) => string | null;
   authorizeLanRequest: (reqUrl: URL, req: http.IncomingMessage) => { ok: boolean; device?: LanPairedDevice };
   authorizeLocalRequest: (reqUrl: URL, req: http.IncomingMessage) => boolean;
+  assertProfileCanAccessPath: (profileId: string, filePath: string) => void;
   decodeDataUrl: (dataUrl: string) => { buffer: Buffer; mimeType: string } | null;
   getLanServerBase: () => string | null;
+  getLibraryRevision: () => number;
   getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) => Promise<MediaSegmentResponse>;
   handleLanPairRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
   handleLanRefreshRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
@@ -63,7 +82,8 @@ export interface MediaServerDependencies {
   isLoopbackRequest: (req: http.IncomingMessage) => boolean;
   isSignedLanRequestValid: (reqUrl: URL) => boolean;
   libraryEtagFor: (payload: unknown) => string;
-  libraryForLocalNetwork: () => LibraryPayload;
+  libraryForLocalNetwork: (profileId?: string, deviceId?: string) => LibraryPayload;
+  profileRestrictionIdentity: (profileId: string) => string;
   libraryForRenderer: () => LibraryPayload;
   loadLibrary: () => { libraryFolders: string[] };
   loadSettings: () => AppSettings;
@@ -85,6 +105,7 @@ const LAN_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
 const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
+const hlsProfileBindings = new Map<string, { deviceId: string; profileId: string; selectionRevision: number; filePath: string }>();
 
 export function getMediaServer(): http.Server | null { return mediaServer; }
 export function getMediaServerPort(): number { return mediaServerPort; }
@@ -160,8 +181,8 @@ function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse, d
   if (!allowedOrigin) return !origin;
 
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-  res.setHeader('Access-Control-Allow-Headers', `Range, Content-Type, Authorization, ${LOCAL_ACCESS_HEADER}`);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', `Range, Content-Type, Authorization, If-None-Match, X-Loom-Profile-Api-Version, ${LOCAL_ACCESS_HEADER}`);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length');
   return true;
 }
@@ -171,8 +192,10 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     LOCAL_ACCESS_TOKEN,
     authorizeLanRequest,
     authorizeLocalRequest,
+    assertProfileCanAccessPath,
     decodeDataUrl,
     getLanServerBase,
+    getLibraryRevision,
     getMediaSegments,
     handleLanPairRequest,
     handleLanRefreshRequest,
@@ -186,6 +209,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     libraryForRenderer,
     loadLibrary,
     loadSettings,
+    profileRestrictionIdentity,
     localAccessQuery,
     readJsonBody,
     requireLocalOrLanAccess,
@@ -234,6 +258,70 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           });
         }
         return authorized;
+      };
+      const usesProfileApi = req.headers['x-loom-profile-api-version'] === '1';
+      const writeProfileError = (error: unknown): void => {
+        if (error instanceof ProfileError) {
+          const status = error.code === 'profile_required' || error.code === 'stale_profile_selection'
+            ? 409
+            : error.code === 'content_restricted' || error.code === 'owner_required'
+              ? 403
+              : 401;
+          writeJson(res, status, {
+            error: error.code,
+            ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
+          });
+          return;
+        }
+        writeJson(res, 500, { error: 'profile_operation_failed' });
+      };
+      const profileIdForRequest = (): string | null => {
+        try {
+          return resolveLanProfileId(lanDeviceId, usesProfileApi);
+        } catch (error) {
+          writeProfileError(error);
+          return null;
+        }
+      };
+      const assertCurrentSelectionRevision = (body: Record<string, unknown>): void => {
+        if (!usesProfileApi || !lanDeviceId) return;
+        const expected = Number(body.selectionRevision);
+        const active = getActiveProfileState(lanDeviceId);
+        if (!Number.isSafeInteger(expected) || expected !== active.selectionRevision) {
+          throw new ProfileError('stale_profile_selection', 'The profile selection changed before this request completed.');
+        }
+      };
+      const profileIdentityForMedia = (): { deviceId: string; profileId: string; selectionRevision: number } | null => {
+        const boundDeviceId = reqUrl.searchParams.get('deviceId') || '';
+        const boundProfileId = reqUrl.searchParams.get('profileId') || '';
+        const boundRevision = Number(reqUrl.searchParams.get('selectionRevision'));
+        const authorizedDeviceId = boundDeviceId || authorizeLanRequest(reqUrl, req).device?.id || lanDeviceId || '';
+        if (authorizedDeviceId) {
+          const active = getActiveProfileState(authorizedDeviceId);
+          const profileId = boundProfileId || active.profileId;
+          if (
+            !profileId
+            || (boundProfileId && active.profileId !== boundProfileId)
+            || (Number.isFinite(boundRevision) && boundRevision > 0 && active.selectionRevision !== boundRevision)
+          ) return null;
+          return { deviceId: authorizedDeviceId, profileId, selectionRevision: active.selectionRevision };
+        }
+        const profileId = profileIdForRequest();
+        return profileId ? { deviceId: '', profileId, selectionRevision: 0 } : null;
+      };
+      const requireProfileMediaAccess = (candidatePath: string): { deviceId: string; profileId: string; selectionRevision: number } | null => {
+        const identity = profileIdentityForMedia();
+        if (!identity) {
+          writeJson(res, 409, { error: 'stale_profile_selection' });
+          return null;
+        }
+        try {
+          assertProfileCanAccessPath(identity.profileId, candidatePath);
+          return identity;
+        } catch (error) {
+          writeProfileError(error);
+          return null;
+        }
       };
       const requestedPath = reqUrl.searchParams.get('path') || '';
       const resourceId = reqUrl.searchParams.get('resourceId') || '';
@@ -336,6 +424,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               return;
             }
             const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== requestedId);
+            clearGuestSelection(requestedId);
             saveSettings({ ...settings, localNetworkPairedDevices: remaining });
             writeJson(res, 200, { ok: true });
           })
@@ -348,8 +437,10 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/library' && req.method === 'GET') {
         if (!requireV2Scope('catalog:read')) return;
-        const payload = libraryForLocalNetwork();
-        const etag = `"${libraryEtagFor(payload)}"`;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
+        const payload = libraryForLocalNetwork(profileId, lanDeviceId || undefined);
+        const etag = `"${libraryEtagFor({ payload, profile: profileRestrictionIdentity(profileId), libraryRevision: getLibraryRevision() })}"`;
         const requestEtag = (req.headers['if-none-match'] || '') as string;
         if (requestEtag && requestEtag === etag) {
           res.writeHead(304, { ETag: etag });
@@ -368,6 +459,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         const token = requestToken(reqUrl, req);
         readJsonBody(req)
           .then(async (body) => {
+            assertCurrentSelectionRevision(body);
             const base = getLanServerBase();
             if (!base) {
               writeJson(res, 500, {
@@ -395,6 +487,8 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               });
               return;
             }
+            const identity = requireProfileMediaAccess(filePath);
+            if (!identity) return;
 
             const options = { ...((body.options || {}) as TranscodeOptions) };
             for (const field of ['subtitleFilePath', 'secondarySubtitleFilePath'] as const) {
@@ -420,12 +514,17 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
             }
 
             const session = await startTranscode(filePath, options, base);
+            hlsProfileBindings.set(session.sessionId, { ...identity, filePath });
             const playlistUrl = token
               ? `${session.playlistUrl}${session.playlistUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
               : session.playlistUrl;
             writeJson(res, 200, { ok: true, data: { ...session, playlistUrl } });
           })
           .catch((error) => {
+            if (error instanceof ProfileError) {
+              writeProfileError(error);
+              return;
+            }
             console.error('LAN start HLS API error:', error);
             writeJson(res, 500, { ok: false, ...streamStartFailure(error) });
           });
@@ -443,6 +542,15 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       const hasValidSignature = isLanSharingEnabled() && isSignedLanRequestValid(reqUrl);
       const isCacheableLanImageRequest = hasValidSignature && reqUrl.searchParams.get(LAN_IMAGE_CACHE_QUERY_PARAM) === '1';
       const hasLocalAccess = authorizeLocalRequest(reqUrl, req);
+      if (
+        isArtworkRoute
+        && !loopbackRequest
+        && hasValidSignature
+        && (!reqUrl.searchParams.get('deviceId') || !reqUrl.searchParams.get('profileId') || !profileIdentityForMedia())
+      ) {
+        writeJson(res, 409, { error: 'stale_profile_selection' });
+        return;
+      }
       const scope = routeAccess.kind === 'scoped' ? routeAccess.scope : null;
       if (!loopbackRequest && !isStreamRoute && !(isArtworkRoute && hasValidSignature) && !scope) {
         writeJson(res, 403, { error: 'This operation is only available to the desktop application.' });
@@ -469,6 +577,12 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           return;
         }
         if (req.method === 'POST') {
+          try {
+            requireOwner();
+          } catch (error) {
+            writeProfileError(error);
+            return;
+          }
           readJsonBody(req)
             .then((patch) => {
               saveSettings({ ...loadSettings(), ...patch });
@@ -489,7 +603,9 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         readJsonBody(req)
           .then(async (body) => {
             try {
-              const data = await probeMedia(String(body.filePath || ''));
+              const requestedFilePath = String(body.filePath || '');
+              assertProfileCanAccessPath(requireDesktopProfileId(), requestedFilePath);
+              const data = await probeMedia(requestedFilePath);
               writeJson(res, 200, { ok: true, data });
             } catch (error) {
               writeJson(res, 200, { ok: false, error: error instanceof Error ? error.message : 'Unable to inspect media.' });
@@ -503,8 +619,10 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         readJsonBody(req)
           .then(async (body) => {
             try {
+              const requestedFilePath = String(body.filePath || '');
+              assertProfileCanAccessPath(requireDesktopProfileId(), requestedFilePath);
               const session = await startTranscode(
-                String(body.filePath || ''),
+                requestedFilePath,
                 (body.options || {}) as TranscodeOptions,
                 `http://127.0.0.1:${mediaServerPort}`,
               );
@@ -532,23 +650,150 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       }
 
       if (reqUrl.pathname === '/api/v2/client-config' && req.method === 'GET') {
+        if (!requireV2Scope('catalog:read')) return;
+        const profileId = usesProfileApi && lanDeviceId
+          ? getActiveProfileState(lanDeviceId).profileId
+          : resolveLanProfileId(lanDeviceId, false);
         const settings = loadSettings();
+        const preferences = profileId ? getProfilePreferences(profileId) : {};
         writeJson(res, 200, {
-          appThemeMode: settings.appThemeMode,
-          appThemeColor: settings.appThemeColor,
-          appDarkTheme: settings.appDarkTheme,
-          appLoaderStyle: settings.appLoaderStyle,
-          playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
-          playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+          profileApiVersion: 1,
+          capabilities: {
+            profiles: true,
+            profilePins: true,
+            kidsRestrictions: true,
+            profilePreferences: true,
+            profileLists: true,
+          },
+          appThemeMode: preferences.appThemeMode ?? settings.appThemeMode,
+          appThemeColor: preferences.appThemeColor ?? settings.appThemeColor,
+          appDarkTheme: preferences.appDarkTheme ?? settings.appDarkTheme,
+          appLoaderStyle: preferences.appLoaderStyle ?? settings.appLoaderStyle,
+          playbackSkipBackSeconds: preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds,
+          playbackSkipForwardSeconds: preferences.playbackSkipForwardSeconds ?? settings.playbackSkipForwardSeconds,
+          autoplayNextEnabled: preferences.autoplayNextEnabled ?? true,
         });
         return;
       }
 
+      if (reqUrl.pathname === '/api/v2/profiles' && req.method === 'GET') {
+        if (!requireV2Scope('catalog:read')) return;
+        writeJson(res, 200, {
+          profiles: [
+            ...profileSummaries(lanDeviceId ?? undefined),
+            {
+              id: 'guest',
+              name: 'Guest',
+              avatarKey: 'weave-08',
+              colorKey: 'slate',
+              type: 'guest',
+              hasPin: false,
+              isGuest: true,
+              sortOrder: 9999,
+            },
+          ],
+        });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/profiles/active' && req.method === 'GET') {
+        if (!requireV2Scope('catalog:read')) return;
+        if (!lanDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
+        writeJson(res, 200, getActiveProfileState(lanDeviceId));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/profiles/select' && req.method === 'POST') {
+        if (!requireV2Scope('catalog:read')) return;
+        if (!lanDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
+        const deviceId = lanDeviceId;
+        readJsonBody(req).then(async (body) => {
+          const profileId = String(body.profileId || '');
+          const selected = profileId === 'guest'
+            ? createAndSelectGuest(deviceId)
+            : await selectProfile(deviceId, profileId, typeof body.pin === 'string' ? body.pin : undefined, req.socket.remoteAddress || 'lan');
+          writeJson(res, 200, { profile: selected, active: getActiveProfileState(deviceId) });
+        }).catch(writeProfileError);
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/profiles/lock' && req.method === 'POST') {
+        if (!requireV2Scope('catalog:read')) return;
+        if (!lanDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
+        writeJson(res, 200, lockProfile(lanDeviceId));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/profiles/auto-sign-in' && req.method === 'POST') {
+        if (!requireV2Scope('catalog:read')) return;
+        if (!lanDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
+        const deviceId = lanDeviceId;
+        readJsonBody(req)
+          .then((body) => writeJson(res, 200, setAutomaticSignIn(deviceId, Boolean(body.enabled))))
+          .catch(writeProfileError);
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/profile-preferences') {
+        if (!requireV2Scope('playback:write')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
+        if (req.method === 'GET') {
+          writeJson(res, 200, getProfilePreferences(profileId));
+          return;
+        }
+        if (req.method === 'PATCH') {
+          readJsonBody(req)
+            .then((body) => { assertCurrentSelectionRevision(body); writeJson(res, 200, saveProfilePreferences(profileId, body)); })
+            .catch((error) => error instanceof ProfileError ? writeProfileError(error) : writeJson(res, 400, { error: 'invalid_profile_preferences' }));
+          return;
+        }
+      }
+
+      if (reqUrl.pathname === '/api/v2/profile-lists') {
+        if (!requireV2Scope('playback:write')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
+        const kindValue = reqUrl.searchParams.get('kind');
+        const kind = kindValue === 'watchlist' || kindValue === 'favorite' ? kindValue : undefined;
+        if (req.method === 'GET') {
+          writeJson(res, 200, getProfileLists(profileId, kind));
+          return;
+        }
+        if (req.method === 'PUT' || req.method === 'DELETE') {
+          readJsonBody(req).then((body) => {
+            assertCurrentSelectionRevision(body);
+            const bodyKind = body.kind === 'watchlist' || body.kind === 'favorite' ? body.kind as ProfileListKind : null;
+            if (!bodyKind || !body.mediaId) {
+              writeJson(res, 400, { error: 'mediaId_and_kind_required' });
+              return;
+            }
+            writeJson(res, 200, setProfileListEntry(profileId, String(body.mediaId), bodyKind, req.method === 'PUT'));
+          }).catch((error) => error instanceof ProfileError ? writeProfileError(error) : writeJson(res, 400, { error: 'invalid_profile_list_entry' }));
+          return;
+        }
+      }
+
 
       if (reqUrl.pathname === '/api/v2/progress' && req.method === 'GET') {
+        if (!requireV2Scope('playback:write')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
         const secret = loadSettings().localNetworkHmacSecret || '';
         writeJson(res, 200, Object.fromEntries(
-          Object.entries(getAllProgress(resolveLanProfileId(lanDeviceId))).map(([storedPath, progress]) => [
+          Object.entries(getAllProgress(profileId)).map(([storedPath, progress]) => [
             registerResource(secret, 'media', storedPath),
             progress,
           ]),
@@ -557,8 +802,12 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       }
 
       if (reqUrl.pathname === '/api/v2/progress' && req.method === 'POST') {
+        if (!requireV2Scope('playback:write')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
         readJsonBody(req)
           .then((body) => {
+            assertCurrentSelectionRevision(body);
             let file = '';
             try {
               file = resolveLocalResource(String(body.mediaId || ''), MEDIA_RESOURCE_KIND, getLibraryRoots());
@@ -569,9 +818,13 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               writeJson(res, 400, { error: 'mediaId is required' });
               return;
             }
-            writeJson(res, 200, saveProgress(resolveLanProfileId(lanDeviceId), file, Number(body.position) || 0, Number(body.duration) || 0));
+            writeJson(res, 200, saveProgress(profileId, file, Number(body.position) || 0, Number(body.duration) || 0));
           })
           .catch((error) => {
+            if (error instanceof ProfileError) {
+              writeProfileError(error);
+              return;
+            }
             console.error('save progress API error:', error);
             writeJson(res, 500, { error: 'Failed to save progress' });
           });
@@ -580,22 +833,33 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
 
       if (reqUrl.pathname === '/api/v2/playback-track-preferences' && req.method === 'GET') {
+        if (!requireV2Scope('playback:write')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
         const scope = reqUrl.searchParams.get('scope') || '';
-        writeJson(res, 200, getPlaybackTrackPreferences(resolveLanProfileId(lanDeviceId), scope));
+        writeJson(res, 200, getPlaybackTrackPreferences(profileId, scope));
         return;
       }
 
       if (reqUrl.pathname === '/api/v2/playback-track-preferences' && req.method === 'POST') {
+        if (!requireV2Scope('playback:write')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
         readJsonBody(req)
           .then((body) => {
+            assertCurrentSelectionRevision(body);
             const scope = String(body.scope || '').trim();
             if (!scope) {
               writeJson(res, 400, { error: 'scope is required' });
               return;
             }
-            writeJson(res, 200, savePlaybackTrackPreferences(resolveLanProfileId(lanDeviceId), scope, body.preferences || {}));
+            writeJson(res, 200, savePlaybackTrackPreferences(profileId, scope, body.preferences || {}));
           })
           .catch((error) => {
+            if (error instanceof ProfileError) {
+              writeProfileError(error);
+              return;
+            }
             console.error('save playback track preferences API error:', error);
             writeJson(res, 500, { error: 'Failed to save playback track preferences' });
           });
@@ -603,6 +867,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       }
 
       if (reqUrl.pathname === '/api/v2/playback/segments' && req.method === 'GET') {
+        if (!requireV2Scope('catalog:read')) return;
         const mediaId = reqUrl.searchParams.get('mediaId') || '';
         if (!mediaId) {
           writeJson(res, 400, { error: 'mediaId is required' });
@@ -747,6 +1012,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           res.end();
           return;
         }
+        if (!requireProfileMediaAccess(filePath)) return;
         res.writeHead(200, {
           'Content-Type': 'image/jpeg',
           ...(isCacheableLanImageRequest ? { 'Cache-Control': LAN_IMAGE_CACHE_CONTROL } : {}),
@@ -807,6 +1073,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           res.end('Not found');
           return;
         }
+        if (!requireProfileMediaAccess(filePath)) return;
 
         const streamOrdinal = queryNumber(reqUrl.searchParams.get('streamOrdinal'));
         if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) {
@@ -865,7 +1132,19 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         return;
       }
 
-      if (reqUrl.pathname.startsWith('/hls/') && !requireStreamAccess(reqUrl, req, res)) return;
+      if (reqUrl.pathname.startsWith('/hls/')) {
+        if (!requireStreamAccess(reqUrl, req, res)) return;
+        const sessionId = reqUrl.pathname.split('/')[2] || '';
+        const binding = hlsProfileBindings.get(sessionId);
+        if (binding) {
+          const active = getActiveProfileState(binding.deviceId);
+          if (
+            active.profileId !== binding.profileId
+            || active.selectionRevision !== binding.selectionRevision
+            || !requireProfileMediaAccess(binding.filePath)
+          ) return;
+        }
+      }
       if (serveHls(
         reqUrl,
         res,
@@ -887,6 +1166,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         res.end('Not found');
         return;
       }
+      if (!requireProfileMediaAccess(filePath)) return;
 
       const releaseStreamLease = acquirePlaybackActivityLease(
         `http-stream:${Date.now()}:${Math.random().toString(36).slice(2)}`,

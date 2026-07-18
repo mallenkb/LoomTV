@@ -5,6 +5,10 @@ import type BetterSqlite3 from 'better-sqlite3';
 // introspection-style migrations below predate the ledger and stay outside it.
 export const PROFILES_MIGRATION_VERSION = 1;
 export const PROFILE_FEATURES_MIGRATION_VERSION = 2;
+export const PROFILE_SELECTION_LEDGER_MIGRATION_VERSION = 3;
+export const PROFILE_GUEST_TYPE_MIGRATION_VERSION = 4;
+export const PROFILE_GLYPH_AVATAR_MIGRATION_VERSION = 5;
+export const PROFILE_AUTOMATIC_SIGN_IN_MIGRATION_VERSION = 6;
 
 function ensureColumn(database: BetterSqlite3.Database, tableName: string, columnName: string, definition: string): void {
   const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
@@ -264,6 +268,121 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   makeProviderSegmentsDurable(database);
   migrateProfiles(database);
   migrateProfileFeatures(database);
+  migrateProfileSelectionLedger(database);
+  migrateProfileGuestType(database);
+  migrateProfileGlyphAvatars(database);
+  migrateProfileAutomaticSignIn(database);
+}
+
+function migrateProfileAutomaticSignIn(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PROFILE_AUTOMATIC_SIGN_IN_MIGRATION_VERSION)) return;
+  database.transaction(() => {
+    database.exec(`
+      UPDATE device_profile_selections
+      SET automatic_sign_in = 1
+      WHERE profile_id IN (
+        SELECT id FROM profiles WHERE is_guest = 0 AND pin_hash IS NULL
+      );
+    `);
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(PROFILE_AUTOMATIC_SIGN_IN_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+function migrateProfileGlyphAvatars(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PROFILE_GLYPH_AVATAR_MIGRATION_VERSION)) return;
+  database.transaction(() => {
+    database.prepare(`
+      UPDATE profiles
+      SET avatar_key = 'glyph-' || substr(avatar_key, -2), updated_at = ?
+      WHERE avatar_key GLOB 'weave-0[1-8]'
+    `).run(Date.now());
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(PROFILE_GLYPH_AVATAR_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+function migrateProfileGuestType(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PROFILE_GUEST_TYPE_MIGRATION_VERSION)) return;
+  const foreignKeysEnabled = Boolean(database.pragma('foreign_keys', { simple: true }));
+  database.pragma('foreign_keys = OFF');
+  try {
+    database.transaction(() => {
+      database.exec(`
+        CREATE TABLE profiles_v4 (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          avatar_key TEXT NOT NULL,
+          color_key TEXT NOT NULL,
+          profile_type TEXT NOT NULL CHECK (profile_type IN ('owner', 'standard', 'kid', 'guest')),
+          pin_hash TEXT,
+          pin_salt TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          last_used_at INTEGER,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_guest INTEGER NOT NULL DEFAULT 0,
+          guest_device_id TEXT
+        );
+        INSERT INTO profiles_v4 (
+          id, name, avatar_key, color_key, profile_type, pin_hash, pin_salt,
+          created_at, updated_at, last_used_at, sort_order, is_guest, guest_device_id
+        )
+        SELECT
+          id, name, avatar_key, color_key,
+          CASE WHEN is_guest = 1 THEN 'guest' ELSE profile_type END,
+          pin_hash, pin_salt, created_at, updated_at, last_used_at, sort_order,
+          is_guest, guest_device_id
+        FROM profiles;
+        DROP TABLE profiles;
+        ALTER TABLE profiles_v4 RENAME TO profiles;
+        CREATE UNIQUE INDEX one_owner ON profiles(profile_type) WHERE profile_type = 'owner';
+        CREATE UNIQUE INDEX one_guest_per_device ON profiles(guest_device_id) WHERE is_guest = 1;
+      `);
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+        .run(PROFILE_GUEST_TYPE_MIGRATION_VERSION, Date.now());
+    })();
+  } finally {
+    if (foreignKeysEnabled) database.pragma('foreign_keys = ON');
+  }
+  const violations = database.pragma('foreign_key_check') as unknown[];
+  if (violations.length > 0) throw new Error('Guest profile migration aborted: foreign key check failed.');
+}
+
+function migrateProfileSelectionLedger(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PROFILE_SELECTION_LEDGER_MIGRATION_VERSION)) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS device_profile_selection_revisions (
+        device_id TEXT PRIMARY KEY,
+        revision INTEGER NOT NULL DEFAULT 0
+      );
+      INSERT OR IGNORE INTO device_profile_selection_revisions (device_id, revision)
+      SELECT device_id, selection_revision FROM device_profile_selections;
+    `);
+    const settingsRow = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
+    const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string } | undefined;
+    if (settingsRow && owner) {
+      try {
+        const settings = JSON.parse(settingsRow.data_json) as Record<string, unknown>;
+        const keys = ['appThemeMode', 'appThemeColor', 'appDarkTheme', 'appLoaderStyle', 'sidebarNavOrder', 'playbackSkipBackSeconds', 'playbackSkipForwardSeconds'] as const;
+        const row = database.prepare('SELECT preferences_json FROM profile_preferences WHERE profile_id = ?').get(owner.id) as { preferences_json: string } | undefined;
+        const existing = row ? JSON.parse(row.preferences_json) as Record<string, unknown> : {};
+        const legacy = Object.fromEntries(keys.flatMap((key) => settings[key] === undefined ? [] : [[key, settings[key]]]));
+        database.prepare(`
+          INSERT INTO profile_preferences (profile_id, preferences_json, revision, updated_at)
+          VALUES (?, ?, 1, ?)
+          ON CONFLICT(profile_id) DO UPDATE SET preferences_json = excluded.preferences_json, revision = profile_preferences.revision + 1, updated_at = excluded.updated_at
+        `).run(owner.id, JSON.stringify({ ...legacy, ...existing }), Date.now());
+        keys.forEach((key) => { delete settings[key]; });
+        database.prepare('UPDATE app_settings SET data_json = ?, updated_at = ? WHERE id = 1').run(JSON.stringify(settings), Date.now());
+      } catch {
+        // Invalid legacy settings retain the normal settings-loader fallback.
+      }
+    }
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(PROFILE_SELECTION_LEDGER_MIGRATION_VERSION, Date.now());
+  })();
 }
 
 export function profilesMigrationPending(database: BetterSqlite3.Database): boolean {
@@ -450,6 +569,9 @@ function migrateProfileFeatures(database: BetterSqlite3.Database): void {
             INSERT OR IGNORE INTO profile_preferences (profile_id, preferences_json, revision, updated_at)
             VALUES (?, ?, 1, ?)
           `).run(owner.id, JSON.stringify(preferences), Date.now());
+          keys.forEach((key) => { delete settings[key]; });
+          database.prepare('UPDATE app_settings SET data_json = ?, updated_at = ? WHERE id = 1')
+            .run(JSON.stringify(settings), Date.now());
         } catch {
           // Invalid legacy settings are ignored; the normal settings loader
           // already falls back safely and no migration data is destroyed.
