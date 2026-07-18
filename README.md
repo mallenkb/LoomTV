@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.57](docs/releases/v1.0.57.md): fixes profile-service type contracts so the new desktop profile release builds successfully on every supported platform.
 - [LoomTV 1.0.56](docs/releases/v1.0.56.md): adds desktop viewer profiles with profile-specific progress, PIN protection, profile switching, and safer playback handoff behavior.
 - [LoomTV 1.0.55](docs/releases/v1.0.55.md): keeps desktop installer validation scoped to the desktop app so mobile-only failures cannot block desktop releases.
 - [LoomTV 1.0.54](docs/releases/v1.0.54.md): aligns desktop theme verification with the neutral light and dark palettes used by the app.
