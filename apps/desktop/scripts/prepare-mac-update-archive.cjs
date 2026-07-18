@@ -10,7 +10,7 @@ const LEGACY_APP_BUNDLE_NAME = 'LoomTV.app';
 /**
  * Keep the macOS update ZIP consumable by LoomTV 1.0.36's fallback installer.
  * That shipped helper requires a top-level LoomTV.app even though the product
- * has since been renamed to Loom Media Server. DMGs and the signed bundle keep
+ * has since been renamed to LoomTV. DMGs and the signed bundle keep
  * the current product name; only the updater ZIP's outer directory is renamed.
  */
 exports.default = async function prepareMacUpdateArchive(event) {

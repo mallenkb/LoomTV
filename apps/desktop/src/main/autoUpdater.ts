@@ -120,7 +120,7 @@ function showUpdateDialog(message: string, detail: string, type: 'info' | 'warni
   if (!mainWindow || mainWindow.isDestroyed()) return;
   void dialog.showMessageBox(mainWindow, {
     type,
-    title: 'Loom Media Server Updates',
+    title: 'LoomTV Updates',
     message,
     detail,
     buttons: ['OK'],
@@ -170,8 +170,8 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
       releaseUrl: release.html_url,
       checkedAt: new Date().toISOString(),
       message: hasUpdate
-        ? `Loom Media Server ${latestVersion} is available.`
-        : `Loom Media Server is up to date at ${currentVersion}.`,
+        ? `LoomTV ${latestVersion} is available.`
+        : `LoomTV is up to date at ${currentVersion}.`,
     });
   } catch (error) {
     return setUpdateState({
@@ -191,7 +191,7 @@ function showUpdateDownloadedPrompt() {
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update Ready',
-    message: 'Loom Media Server update downloaded',
+    message: 'LoomTV update downloaded',
     detail: `${stateMessage} Restart now to apply the update.`,
     buttons: ['Restart and Update', 'Later'],
     defaultId: 0,
@@ -239,7 +239,7 @@ function scheduleUpdateQuitFallback(): void {
 
     if (!updateInstallStarted) return;
 
-    console.warn('[updates] quitAndInstall did not begin app shutdown; forcing Loom Media Server to quit.');
+    console.warn('[updates] quitAndInstall did not begin app shutdown; forcing LoomTV to quit.');
     app.quit();
   }, fallbackDelayMs);
   updateQuitFallbackTimer.unref?.();
@@ -310,9 +310,8 @@ async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
     throw new Error(`Could not resolve the running macOS app bundle from ${app.getPath('exe')}.`);
   }
 
-  // Replace the bundle that was actually launched. The product was renamed
-  // from LoomTV to Loom Media Server, so deriving this path from app.getName()
-  // can install a second app while leaving the user's Dock icon on the old one.
+  // Replace the bundle that was actually launched so a legacy installation is
+  // updated in place instead of leaving the user's Dock icon behind.
   const targetAppPath = runningAppPath;
   const backupAppPath = path.join(helperDir, `${path.basename(targetAppPath)}.previous`);
   const extractDir = path.join(helperDir, 'extracted');
@@ -335,7 +334,7 @@ async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
 set -eu
 LOG=${shellQuote(logPath)}
 exec >> "$LOG" 2>&1
-echo "Starting Loom Media Server macOS update install at $(date)"
+echo "Starting LoomTV macOS update install at $(date)"
 PARENT_PID=${shellQuote(parentPid)}
 SOURCE_APP=${shellQuote(sourceAppPath)}
 TARGET_APP=${shellQuote(targetAppPath)}
@@ -392,7 +391,7 @@ if [ "$LAUNCHED" -ne 1 ]; then
 fi
 
 rm -rf "$BACKUP_APP" "$SOURCE_APP"
-echo "Finished Loom Media Server macOS update install at $(date)"
+echo "Finished LoomTV macOS update install at $(date)"
 `;
 
   let child: ReturnType<typeof spawn>;
@@ -552,7 +551,7 @@ async function handleManualUpdateCheck() {
   if (checkedState.status === 'checking') {
     showUpdateDialog(
       'Checking for updates',
-      'Loom Media Server is already checking for an update. You’ll get notified when it completes.',
+      'LoomTV is already checking for an update. You’ll get notified when it completes.',
     );
     return;
   }
@@ -571,7 +570,7 @@ async function handleManualUpdateCheck() {
   }
 
   if (checkedState.status === 'not-available') {
-    showUpdateDialog('No update found', `You’re already on Loom Media Server ${checkedState.currentVersion}.`);
+    showUpdateDialog('No update found', `You’re already on LoomTV ${checkedState.currentVersion}.`);
     return;
   }
 
@@ -590,11 +589,11 @@ export async function installDownloadedUpdate() {
   if (updateState.status !== 'downloaded') return updateState;
   updateInstallStarted = true;
 
-  setUpdateState({ status: 'installing', message: 'Installing update and restarting Loom Media Server...' });
+  setUpdateState({ status: 'installing', message: 'Installing update and restarting LoomTV...' });
 
   // Drain playback/server work before quitAndInstall. Active HTTP streams can
   // keep the process alive after every window has closed, which leaves the
-  // downloaded installer waiting for Loom Media Server to exit.
+  // downloaded installer waiting for LoomTV to exit.
   try {
     stopAllTranscodes();
     destroyLanDiscovery();
@@ -659,7 +658,7 @@ function configureAutoUpdater() {
   if (!app.isPackaged) {
     setUpdateState({
       status: 'disabled',
-      message: 'Automatic updates are enabled after Loom Media Server is packaged and published.',
+      message: 'Automatic updates are enabled after LoomTV is packaged and published.',
     });
     return;
   }
@@ -695,7 +694,7 @@ function configureAutoUpdater() {
   autoUpdater.on('update-not-available', () => {
     setUpdateState({
       status: 'not-available',
-      message: 'Loom Media Server is up to date.',
+      message: 'LoomTV is up to date.',
       checkedAt: new Date().toISOString(),
     });
   });
@@ -704,7 +703,7 @@ function configureAutoUpdater() {
     downloadedUpdateFilePath = event.downloadedFile;
     setUpdateState({
       status: 'downloaded',
-      message: 'Update downloaded. Restart Loom Media Server to install it.',
+      message: 'Update downloaded. Restart LoomTV to install it.',
       checkedAt: new Date().toISOString(),
     });
     showUpdateDownloadedPrompt();

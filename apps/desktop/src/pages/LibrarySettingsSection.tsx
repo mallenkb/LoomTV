@@ -81,6 +81,7 @@ export default function LibrarySettingsSection({
   const networkFolderCount = folderStatuses.filter((status) => status.isNetworkLike).length;
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [autoSyncMenuOpen, setAutoSyncMenuOpen] = useState(false);
 
   return (
     <>
@@ -95,8 +96,8 @@ export default function LibrarySettingsSection({
           {(networkFolderCount > 0 || unavailableCount > 0) && (
             <div className={`mb-4 rounded-lg border p-3 text-sm ${
               unavailableCount > 0
-                ? 'border-amber-500/30 bg-amber-500/10 text-amber-100'
-                : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-100'
+                ? 'settings-status-banner-warning border-amber-500/30 bg-amber-500/10 text-amber-100'
+                : 'settings-status-banner-success border-emerald-500/25 bg-emerald-500/10 text-emerald-100'
             }`}
             >
               <div className="flex items-start gap-2">
@@ -121,13 +122,13 @@ export default function LibrarySettingsSection({
                     <p className="text-sm font-semibold text-white">{section.title}</p>
                     <p className="text-xs text-[var(--loom-muted)]">{section.description}</p>
                   </div>
-                  <Button onClick={() => addLibraryFolder(section.key)} className="gap-2 shrink-0">
+                  <Button variant="outline" onClick={() => addLibraryFolder(section.key)} className="gap-2 shrink-0">
                     <FolderPlus className="w-4 h-4" />
                     Add
                   </Button>
                 </div>
 
-                <div className="flex flex-col divide-y divide-[rgba(148,163,184,0.30)]">
+                <div className="flex flex-col divide-y divide-[var(--loom-border)]">
                   {section.folders.length === 0 ? (
                     <p className="text-[var(--loom-faint)] text-sm py-2">No {section.title.toLowerCase()} folders added</p>
                   ) : (
@@ -169,7 +170,7 @@ export default function LibrarySettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-2">
+          <div className="space-y-2 rounded-lg bg-[var(--loom-surface-2)] p-2">
             {sidebarNavOrder.map((itemId, index) => (
               <div
                 key={itemId}
@@ -269,27 +270,59 @@ export default function LibrarySettingsSection({
             Automatic Sync
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Automatically refreshes your local files and metadata while Loom Media Server is open.
+            Automatically refreshes your local files and metadata while LoomTV is open.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap items-center gap-3">
-            <label className="relative inline-flex h-11 min-w-56 items-center rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] text-sm text-white transition-colors focus-within:border-[var(--loom-accent)]">
+            <div
+              className="relative min-w-56 text-sm"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setAutoSyncMenuOpen(false);
+              }}
+            >
               <Clock className="pointer-events-none absolute left-3 h-4 w-4 text-[var(--loom-accent)]" />
-              <select
-                value={autoSyncIntervalHours}
-                onChange={(event) => void setAutoSyncIntervalHours(Number(event.target.value))}
+              <button
+                type="button"
                 aria-label="Automatic sync interval"
-                className="h-full w-full cursor-pointer appearance-none rounded-lg bg-transparent py-0 pl-9 pr-10 text-sm font-medium text-white outline-none"
+                aria-haspopup="listbox"
+                aria-expanded={autoSyncMenuOpen}
+                onClick={() => setAutoSyncMenuOpen((open) => !open)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setAutoSyncMenuOpen(false);
+                }}
+                className="flex h-11 w-full items-center rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-bg)] pl-9 pr-10 text-left font-medium text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-2)] focus-visible:outline-none"
               >
-                {AUTO_SYNC_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-[var(--loom-muted)]" />
-            </label>
+                {AUTO_SYNC_OPTIONS.find((option) => option.value === autoSyncIntervalHours)?.label || `${autoSyncIntervalHours} hours`}
+              </button>
+              <ChevronDown className={`pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-[var(--loom-muted)] transition-transform ${autoSyncMenuOpen ? 'rotate-180' : ''}`} />
+              {autoSyncMenuOpen ? (
+                <div
+                  role="listbox"
+                  aria-label="Automatic sync interval options"
+                  className="absolute left-0 top-full z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] p-1 text-[var(--loom-text)]"
+                >
+                  {AUTO_SYNC_OPTIONS.map((option) => {
+                    const selected = option.value === autoSyncIntervalHours;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => {
+                          void setAutoSyncIntervalHours(option.value);
+                          setAutoSyncMenuOpen(false);
+                        }}
+                        className={`flex w-full items-center rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--loom-active-bg)] ${selected ? 'bg-[var(--loom-active-bg)] font-semibold' : ''}`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
             <p className="text-sm text-[var(--loom-muted)]">
               Current interval: {AUTO_SYNC_OPTIONS.find((option) => option.value === autoSyncIntervalHours)?.label.toLowerCase() || `${autoSyncIntervalHours} hours`}
             </p>
@@ -301,7 +334,7 @@ export default function LibrarySettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Data Management</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Back up the database or clear this device's local Loom Media Server data.
+            Back up the database or clear this device's local LoomTV data.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -325,10 +358,10 @@ export default function LibrarySettingsSection({
               {backupStatus && <p className="mt-3 min-w-0 truncate text-sm text-[var(--loom-muted)]">{backupStatus}</p>}
             </div>
 
-            <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
+            <div className="settings-destructive-panel rounded-xl border border-red-500/20 bg-red-500/5 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="flex items-center gap-2 text-sm font-semibold text-white">
+                  <p className="settings-destructive-title flex items-center gap-2 text-sm font-semibold text-white">
                     <Trash2 className="h-4 w-4 text-red-400" />
                     Clear App Data
                   </p>
@@ -341,7 +374,7 @@ export default function LibrarySettingsSection({
                   onClick={onClearAppData}
                   disabled={isClearingData}
                   variant="outline"
-                  className="gap-2 border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50"
+                  className="settings-destructive-button gap-2 border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50"
                 >
                   <Trash2 className="h-4 w-4" />
                   {isClearingData ? 'Clearing...' : 'Clear Data'}
@@ -367,7 +400,7 @@ function FolderStatusLine({ status }: { status?: LibraryFolderStatus }) {
     ? status.isNetworkLike ? 'NAS available' : 'Available'
     : status.isNetworkLike ? 'Reconnect NAS share' : 'Folder unavailable';
   return (
-    <span className={`mt-1 flex min-w-0 items-center gap-1.5 text-xs ${available ? 'text-emerald-300' : 'text-amber-300'}`}>
+    <span className={`mt-1 flex min-w-0 items-center gap-1.5 text-xs ${available ? 'settings-status-available' : 'settings-status-unavailable'}`}>
       <Icon className="h-3.5 w-3.5 shrink-0" />
       <span className="shrink-0 font-medium">{label}</span>
       <span className="min-w-0 truncate text-[var(--loom-faint)]">{status.message}</span>

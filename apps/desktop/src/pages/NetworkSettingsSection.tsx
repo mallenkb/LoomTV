@@ -95,7 +95,7 @@ export default function NetworkSettingsSection({
               onClick={() => setLocalNetworkSharing(!isNetworkSharingOn)}
               disabled={isTogglingNetworkSharing}
               variant={isNetworkSharingOn ? 'outline' : 'default'}
-              className={`gap-2 ${isNetworkSharingOn ? 'border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50' : ''}`}
+              className={`gap-2 ${isNetworkSharingOn ? 'settings-destructive-button border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50' : ''}`}
             >
               {isTogglingNetworkSharing ? (
                 <RefreshCw className="h-4 w-4 animate-spin" />
@@ -139,10 +139,10 @@ export default function NetworkSettingsSection({
                       </div>
                     </div>
                     <div className="settings-network-card rounded-lg bg-[var(--loom-bg)] p-3">
-                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">One-time pairing secret</p>
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--loom-faint)]">One-time pairing PIN</p>
                       <div className="flex items-center gap-2">
                         <code className="min-w-0 flex-1 truncate text-sm font-bold text-white">
-                          {localNetworkStatus?.token || 'Waiting for pairing secret'}
+                          {localNetworkStatus?.token || 'Waiting for pairing PIN'}
                         </code>
                         <button
                           type="button"
@@ -188,7 +188,7 @@ export default function NetworkSettingsSection({
                             <button
                               type="button"
                               onClick={() => revokePairedDevice(device.id)}
-                              className="ml-3 shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
+                              className="settings-destructive-text ml-3 shrink-0 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors hover:bg-red-500/10"
                             >
                               Revoke
                             </button>
@@ -247,12 +247,12 @@ export default function NetworkSettingsSection({
             Connect to Shared Library
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Find another Loom host on this network, enter its one-time pairing secret, and browse without copying files.
+            Find another Loom host on this network, enter its 6-digit pairing PIN, and browse without copying files.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="settings-network-card flex items-center gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12 text-emerald-400">
+            <span className="settings-status-available grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/12">
               <Wifi className="h-4 w-4" />
             </span>
             <div className="min-w-0">
@@ -275,7 +275,7 @@ export default function NetworkSettingsSection({
             </div>
             {discoveredPeers.length === 0 ? (
               <p className="text-xs text-[var(--loom-faint)]">
-                {isScanningPeers ? 'Looking for Loom Media Server devices...' : 'No other Loom Media Server devices found. Make sure sharing is on over there.'}
+                {isScanningPeers ? 'Looking for LoomTV devices...' : 'No other LoomTV devices found. Make sure sharing is on over there.'}
               </p>
             ) : (
               <div className="space-y-1">
@@ -290,7 +290,7 @@ export default function NetworkSettingsSection({
                         setRemoteLibraryAddress(peerBaseUrl);
                         setShowManualNetworkAddress(true);
                       }}
-                      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-[var(--loom-accent)]/15 text-white' : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
+                      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
                     >
                       <span className="truncate font-medium">{peer.deviceName}</span>
                       <span className="ml-3 shrink-0 text-[var(--loom-faint)]">{peer.host}:{peer.port}</span>
@@ -304,17 +304,18 @@ export default function NetworkSettingsSection({
           <div className="flex flex-wrap items-center gap-3">
             <input
               type="text"
-              maxLength={43}
+              inputMode="numeric"
+              maxLength={6}
               value={remoteShareCode}
-              onChange={(event) => setRemoteShareCode(event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 43))}
-              placeholder="One-time pairing secret"
-              aria-label="One-time pairing secret"
+              onChange={(event) => setRemoteShareCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="6-digit pairing PIN"
+              aria-label="One-time pairing PIN"
               className="h-10 w-44 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-sm font-semibold tracking-[0.28em] text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
             />
             <Button
               type="button"
               onClick={connectRemoteLibrary}
-              disabled={isConnectingRemoteLibrary || !/^[A-Za-z0-9_-]{43}$/.test(remoteShareCode)}
+              disabled={isConnectingRemoteLibrary || !/^\d{6}$/.test(remoteShareCode)}
               className="ml-auto gap-2 px-5"
             >
               <Wifi className="h-4 w-4" />

@@ -3,6 +3,7 @@ import { Menu, nativeImage, Tray } from 'electron';
 type ServerTrayOptions = {
   iconPath: string;
   onOpen: () => void;
+  onOpenWeb: () => void;
   onQuit: () => void;
   port: number;
 };
@@ -14,7 +15,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
 
   const sourceIcon = nativeImage.createFromPath(options.iconPath);
   if (sourceIcon.isEmpty()) {
-    console.warn('[tray] Could not load the Loom Media Server tray icon.');
+    console.warn('[tray] Could not load the LoomTV tray icon.');
     return null;
   }
 
@@ -25,7 +26,7 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
   if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
 
   serverTray = new Tray(trayIcon);
-  serverTray.setToolTip('Loom Media Server');
+  serverTray.setToolTip('LoomTV');
   serverTray.setContextMenu(Menu.buildFromTemplate([
     {
       label: `Server running on port ${options.port}`,
@@ -33,12 +34,16 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     },
     { type: 'separator' },
     {
-      label: 'Open Loom Media Server',
+      label: 'Open LoomTV',
       click: options.onOpen,
+    },
+    {
+      label: 'Open in Web',
+      click: options.onOpenWeb,
     },
     { type: 'separator' },
     {
-      label: 'Quit Loom Media Server',
+      label: 'Quit LoomTV',
       click: options.onQuit,
     },
   ]));

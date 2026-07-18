@@ -27,6 +27,17 @@ export function getWindowIconPath(): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
+export function getTrayIconPath(): string | null {
+  const fileName = 'lmtv-icon-nobg.svg.png';
+  const candidates = [
+    path.join(process.resourcesPath, fileName),
+    path.join(app.getAppPath(), 'resources', fileName),
+    path.join(__dirname, '../resources', fileName),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
 export function createWindow(): void {
   if (process.platform === 'darwin') void app.dock?.show();
 
@@ -42,7 +53,7 @@ export function createWindow(): void {
     height: 800,
     minWidth: 960,
     minHeight: 540,
-    title: 'Loom Media Server',
+    title: 'LoomTV',
     frame: process.platform === 'darwin',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
     trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 16 } : undefined,

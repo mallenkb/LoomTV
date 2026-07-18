@@ -78,13 +78,15 @@ function progressDetails(filePath: string, durationHint = 0, progress: Record<st
   };
 }
 
-function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-  return `${minutes}:${String(secs).padStart(2, '0')}`;
+function formatRemaining(position: number, duration: number): string {
+  if (!Number.isFinite(duration) || duration <= 0) return '';
+  const remaining = Math.max(0, duration - Math.max(0, position));
+  if (position <= 0) return `${Math.max(1, Math.round(duration / 60))} min`;
+  if (remaining < 60) return 'Less than a minute left';
+  const minutes = Math.round(remaining / 60);
+  if (minutes < 60) return `${minutes} min left`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m left`;
 }
 
 function formatThumbnailTime(position: number, duration: number): string {
@@ -154,7 +156,7 @@ function findLatestCandidate(
       filePath: movie.filePath,
       title: movie.title,
       label: 'Continue watching',
-      subtitle: `${formatTime(details.position)} / ${formatTime(details.duration)}`,
+      subtitle: '',
       position: details.position,
       duration: details.duration,
       fraction: details.fraction,
@@ -200,8 +202,8 @@ function findLatestCandidate(
         key: `${show.type}:${show.id}:${episodeFile.season}:${episodeFile.episode}`,
         filePath: episodeFile.filePath,
         title: show.title,
-        label: 'Continue episode',
-        subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` - ${episodeTitle}` : ''} · ${formatTime(details.position)} / ${formatTime(details.duration)}`,
+        label: 'Continue watching',
+        subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` · ${episodeTitle}` : ''}`,
         position: details.position,
         duration: details.duration,
         fraction: details.fraction,
@@ -247,7 +249,7 @@ function findLatestCandidate(
       filePath: episodeFile.filePath,
       title: show.title,
       label: 'Up next',
-      subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` - ${episodeTitle}` : ''}`,
+      subtitle: `${episodeCode(episodeFile.season, episodeFile.episode)}${episodeTitle ? ` · ${episodeTitle}` : ''}`,
       position: 0,
       duration: episodeFile.localMetadata?.durationSeconds || 0,
       fraction: 0,
@@ -291,7 +293,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   } | null>(null);
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [thumbnailFallbackUrl, setThumbnailFallbackUrl] = useState('');
-  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const [failedSources, setFailedSources] = useState<string[]>([]);
 
   const candidate = useMemo(
     () => findLatestCandidate(
@@ -315,7 +317,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
     let cancelled = false;
     setThumbnailUrl('');
     setThumbnailFallbackUrl('');
-    setThumbnailFailed(false);
+    setFailedSources([]);
 
     if (!candidate) return () => {
       cancelled = true;
@@ -345,38 +347,54 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   if (isHidden || !candidate || dismissedCandidate?.key === candidate.key) return null;
 
   const playCandidate = () => onPlay(...candidate.onPlayArgs, candidate.position);
-  const thumbnailSrc = thumbnailFailed ? thumbnailFallbackUrl : thumbnailUrl;
+  const artwork = candidate.onPlayArgs[8];
+  const thumbnailSources = [thumbnailUrl, thumbnailFallbackUrl, artwork?.backdrop || '', artwork?.poster || '']
+    .filter((source) => source && !failedSources.includes(source));
+  const thumbnailSrc = thumbnailSources[0] || '';
+  const remaining = formatRemaining(candidate.position, candidate.duration);
+  const metaLine = [candidate.subtitle, remaining].filter(Boolean).join(' · ');
+  const fractionPercent = Math.min(100, Math.max(0, candidate.fraction * 100));
 
   return (
     <div className="pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-5 pb-4">
-      <div className="pointer-events-auto mx-auto max-w-[1440px] overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] shadow-[0_14px_42px_rgba(0,0,0,0.42)] ring-1 ring-[var(--loom-accent)]/15 backdrop-blur-md">
+      <div className="loom-continue-watching group pointer-events-auto relative mx-auto max-w-[1440px] overflow-hidden rounded-xl bg-[var(--loom-panel)] shadow-[0_14px_42px_rgba(0,0,0,0.42)] backdrop-blur-md">
+        {artwork?.backdrop ? (
+          <img
+            src={artwork.backdrop}
+            alt=""
+            aria-hidden
+            className="pointer-events-none absolute inset-0 h-full w-full scale-105 object-cover object-[center_25%] opacity-20 blur-[2px]"
+          />
+        ) : null}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[var(--loom-panel)] via-[var(--loom-panel)]/80 to-[var(--loom-panel)]/40"
+        />
         <button
           type="button"
           onClick={playCandidate}
-          className="relative flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-white/[0.035]"
+          className="relative flex w-full items-center gap-[19px] pr-[14px] text-left transition-colors hover:bg-[color-mix(in_srgb,var(--loom-text)_4%,transparent)]"
         >
-          <span
-            className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-[var(--loom-accent)]"
-            style={{ width: `${Math.min(100, Math.max(0, candidate.fraction * 100))}%` }}
-          />
-          <span className="h-16 w-28 shrink-0 overflow-hidden rounded-md bg-black shadow-md">
+          <span className="relative h-[93px] w-[165px] shrink-0 overflow-hidden bg-[var(--loom-surface-3)]">
             {thumbnailSrc ? (
               <img
                 src={thumbnailSrc}
                 alt=""
                 className="h-full w-full object-cover"
-                onError={() => setThumbnailFailed(true)}
+                onError={() => setFailedSources((previous) => [...previous, thumbnailSrc])}
               />
             ) : (
-              <span className="flex h-full w-full items-center justify-center text-[10px] text-[var(--loom-faint)]">Loom Media Server</span>
+              <span className="flex h-full w-full items-center justify-center text-[10px] text-[var(--loom-faint)]">LoomTV</span>
             )}
+            <span className="absolute inset-0 grid place-items-center bg-black/40 transition-colors group-hover:bg-black/50">
+              <Play className="h-8 w-8 fill-current text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+            </span>
           </span>
-          <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate text-[20px] font-semibold text-[var(--loom-text)]">{candidate.title}</span>
-            <span className="mt-1 block truncate text-sm text-[var(--loom-muted)]">{candidate.subtitle}</span>
-          </span>
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] shadow-[0_0_0_5px_rgba(251,197,0,0.12),0_12px_24px_rgba(0,0,0,0.30)]">
-            <Play className="h-5 w-5 fill-current" />
+          <span className="min-w-0 flex-1 py-[14px] leading-tight">
+            <span className="block truncate text-[21px] font-semibold text-[var(--loom-text)]">{candidate.title}</span>
+            {metaLine ? (
+              <span className="mt-1.5 block truncate text-base text-[var(--loom-muted)]">{metaLine}</span>
+            ) : null}
           </span>
           <span
             role="button"
@@ -399,12 +417,20 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
                 updatedAt: candidate.updatedAt,
               });
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]"
+            className="grid h-[37px] w-[37px] shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] opacity-70 transition-all hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] hover:opacity-100"
             aria-label="Hide continue watching"
           >
-            <X className="h-4 w-4" />
+            <X className="h-[19px] w-[19px]" />
           </span>
         </button>
+        {fractionPercent > 0 ? (
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-[6px] bg-[color-mix(in_srgb,var(--loom-text)_10%,transparent)]">
+            <span
+              className="block h-full bg-[var(--loom-accent)]/60"
+              style={{ width: `${fractionPercent}%` }}
+            />
+          </span>
+        ) : null}
       </div>
     </div>
   );

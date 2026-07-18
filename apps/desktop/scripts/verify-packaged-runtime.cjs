@@ -31,6 +31,18 @@ function appBundlePath(packageDir) {
     .find(exists) || path.join(packageDir, 'LoomTV.app');
 }
 
+function productPath(packageDir, platform, arch) {
+  const forgePlatform = platform === 'win32' ? 'win32' : platform;
+  return ['LoomTV', 'Loom Media Server']
+    .map((name) => path.join(packageDir, `${name}-${forgePlatform}-${arch}`));
+}
+
+function mainExecutablePath(appBundle) {
+  return ['LoomTV', 'Loom Media Server']
+    .map((name) => path.join(appBundle, 'Contents', 'MacOS', name))
+    .find(exists) || path.join(appBundle, 'Contents', 'MacOS', 'LoomTV');
+}
+
 function codeSigningDetails(target) {
   const result = spawnSync('/usr/bin/codesign', ['-dvvv', target], { encoding: 'utf8' });
   return `${result.stdout || ''}\n${result.stderr || ''}`;
@@ -46,11 +58,9 @@ function hasHardenedRuntime(details) {
 
 function packageDirCandidates() {
   const builderDir = path.join(outDir, 'builder');
-  const forgePlatform = platform === 'win32' ? 'win32' : platform;
-
   if (platform === 'darwin') {
     return [
-      path.join(outDir, `Loom Media Server-${forgePlatform}-${arch}`),
+      ...productPath(outDir, platform, arch),
       path.join(builderDir, `mac-${arch}`),
       path.join(builderDir, 'mac'),
     ];
@@ -58,13 +68,13 @@ function packageDirCandidates() {
 
   if (platform === 'win32') {
     return [
-      path.join(outDir, `Loom Media Server-${forgePlatform}-${arch}`),
+      ...productPath(outDir, platform, arch),
       path.join(builderDir, 'win-unpacked'),
     ];
   }
 
   return [
-    path.join(outDir, `Loom Media Server-${forgePlatform}-${arch}`),
+    ...productPath(outDir, platform, arch),
     path.join(builderDir, 'linux-unpacked'),
   ];
 }
@@ -89,7 +99,7 @@ if (!exists(appAsar)) fail(`Missing app.asar: ${appAsar}`);
 
 if (platform === 'darwin') {
   const appBundle = appBundlePath(packageDir);
-  const mainExecutable = path.join(appBundle, 'Contents', 'MacOS', 'Loom Media Server');
+  const mainExecutable = mainExecutablePath(appBundle);
   const electronFramework = path.join(
     appBundle,
     'Contents',

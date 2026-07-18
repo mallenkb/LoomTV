@@ -105,7 +105,7 @@ export default function SkipTimestampManager({
   };
 
   return <div className="space-y-5">
-      <div className="grid gap-3 rounded-lg border border-[var(--loom-border)] bg-black/15 p-4 md:grid-cols-3">
+      <div className="grid gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4 md:grid-cols-3">
         <label className="text-xs text-[var(--loom-muted)]">Library title<select aria-label="Library title" value={selectedMediaId} onChange={(event) => setSelectedMediaId(event.target.value)} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{items.map((item) => <option key={item.id} value={item.id}>{item.type === 'movie' ? 'Movie' : item.type === 'anime' ? 'Anime' : 'TV'} · {item.title}</option>)}</select></label>
         <label className="text-xs text-[var(--loom-muted)]">Season<select aria-label="Season" value={selectedSeason} onChange={(event) => setSelectedSeason(Number(event.target.value))} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{seasons.map((season) => <option key={season} value={season}>{selectedItem?.type === 'movie' ? 'Movie' : `Season ${season}`}</option>)}</select></label>
         <label className="text-xs text-[var(--loom-muted)]">Episode<select aria-label="Episode" value={selectedEpisode} onChange={(event) => setSelectedEpisode(Number(event.target.value))} className="mt-1 w-full rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{episodes.map((episode) => <option key={episode} value={episode}>{selectedItem?.type === 'movie' ? 'Feature' : `Episode ${episode}`}</option>)}</select></label>
@@ -117,7 +117,7 @@ export default function SkipTimestampManager({
         </div>
       </div>
 
-      <div className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4">
+      <div className="rounded-lg bg-[var(--loom-surface-2)] p-4">
         <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-medium text-white">{form.candidateId ? 'Edit manual marker' : 'Add manual marker'}</h3>{form.candidateId && <Button type="button" variant="outline" onClick={() => setForm((current) => ({ ...current, candidateId: undefined }))}>Add new instead</Button>}</div>
         <div className="mt-3 grid gap-2 md:grid-cols-6">
           <select aria-label="Manual marker type" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as MediaSegmentType })} className="rounded-md border border-[var(--loom-border)] bg-[var(--loom-bg)] px-2 py-2 text-sm text-white">{TYPES.map((type) => <option key={type}>{type}</option>)}</select>
@@ -129,7 +129,7 @@ export default function SkipTimestampManager({
       </div>
 
       <input aria-label="Filter selected episode markers" value={filter} onChange={(event) => setFilter(event.target.value.toLowerCase())} placeholder="Filter markers by type, source, or state" className="w-full rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 py-2 text-sm text-white" />
-      <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{visible.map((segment) => <div key={segment.id} className="grid items-center gap-2 rounded-md border border-white/10 px-3 py-2 text-xs text-white md:grid-cols-[95px_1fr_110px_auto]">
+      <div className="max-h-[520px] space-y-2 overflow-y-auto pr-1">{visible.map((segment) => <div key={segment.id} className="grid items-center gap-2 rounded-md border border-[var(--loom-border)] px-3 py-2 text-xs text-[var(--loom-text)] md:grid-cols-[95px_1fr_110px_auto]">
         <select value={segment.type} disabled={segment.source === 'manual'} aria-label={`Segment type for ${segment.type}`} onChange={(event) => void updateCandidate(segment.id, { type: event.target.value as MediaSegmentType })} className="rounded bg-black px-2 py-1 disabled:opacity-60">{TYPES.map((type) => <option key={type}>{type}</option>)}</select>
         <button type="button" onClick={() => selectForEdit(segment)} className="text-left"><span>{(segment.startMs / 1000).toFixed(1)}–{segment.endMs === null ? 'end' : (segment.endMs / 1000).toFixed(1)}s</span><span className="ml-2 text-[var(--loom-muted)]">{segment.source} · {Math.round(segment.confidence * 100)}%{segment.analysisMetadata?.detector ? ` · ${segment.analysisMetadata.detector}` : ''}</span></button>
         <span className={segment.status === 'active' ? 'text-emerald-300' : segment.status === 'review' ? 'text-amber-300' : 'text-red-300'}>{segment.status}</span>

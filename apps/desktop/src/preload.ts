@@ -88,8 +88,8 @@ const desktopApi = {
     localSkipAnalysisEnabled?: boolean;
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';
-    appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue';
-    appDarkTheme?: 'default' | 'justwatch' | 'black';
+    appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue' | 'twitch';
+    appDarkTheme?: 'black';
     appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
     localNetworkSharingEnabled?: boolean;
     localNetworkShareToken?: string;

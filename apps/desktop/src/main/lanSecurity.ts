@@ -11,7 +11,7 @@ import {
 } from './serverSecurity';
 import { getMediaServerPort } from './mediaServer';
 import { getPrimaryLocalNetworkAddress } from './networkInfo';
-import { checkPairRateLimit, recordPairFailure, recordPairSuccess } from './pairRateLimit';
+import { checkPairRateLimit, recordPairFailure, recordPairSuccess, resetPairRateLimits } from './pairRateLimit';
 import { HttpBodyError, readJsonBody, writeJson } from './httpResponses';
 import { advertiseLanService, unadvertiseLanService } from './lanDiscovery';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
@@ -59,7 +59,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const settings = loadSettings();
     if (
       settings.localNetworkShareToken
-      && /^[A-Za-z0-9_-]{43}$/.test(settings.localNetworkShareToken)
+      && /^\d{6}$/.test(settings.localNetworkShareToken)
       && pairingSecretExpiresAt > Date.now()
     ) {
       return settings.localNetworkShareToken;
@@ -67,6 +67,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
 
     const token = createLanShareCode();
     pairingSecretExpiresAt = Date.now() + PAIRING_SESSION_TTL_MS;
+    resetPairRateLimits();
     saveSettings({ ...settings, localNetworkShareToken: token });
     return token;
   }
@@ -210,6 +211,9 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     }
 
     const address = getRequestRemoteAddress(req);
+    // Refresh an expired PIN session before applying its attempt limits. A new
+    // PIN invalidates every previous guess, so old lockouts can safely reset.
+    const expectedCode = getLanShareToken();
     const limit = checkPairRateLimit(address);
     if (!limit.allowed) {
       res.writeHead(429, {
@@ -234,7 +238,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
     const requestedDeviceId = String(body.deviceId || '').trim().slice(0, 64);
 
-    if (!timingSafeStringEqual(code, getLanShareToken())) {
+    if (!timingSafeStringEqual(code, expectedCode)) {
       recordPairFailure(address);
       writeJson(res, 401, { error: 'The sharing code was not accepted.' });
       return;
@@ -308,6 +312,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       throw error;
     }
     const refreshToken = String(body.refreshToken || '').trim();
+    const refreshedDeviceName = String(body.deviceName || '').trim().slice(0, 80);
     if (!refreshToken) {
       writeJson(res, 400, { error: 'refreshToken is required.' });
       return;
@@ -327,6 +332,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const nextRefreshToken = randomBytes(32).toString('base64url');
     const updated: LanPairedDevice = {
       ...device,
+      name: refreshedDeviceName || device.name,
       accessTokenHash: tokenHash(nextAccessToken),
       accessTokenExpiresAt: now + ACCESS_TOKEN_TTL_MS,
       refreshTokenHash: tokenHash(nextRefreshToken),

@@ -97,7 +97,7 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
       description: (
         <>
           Used for playback pause/start clearlogos. Create or sign in to Fanart.tv, open the API key page,
-          and copy the <span className="font-semibold text-white">Personal API Key</span>. That is the key Loom Media Server needs.{' '}
+          and copy the <span className="font-semibold text-white">Personal API Key</span>. That is the key LoomTV needs.{' '}
           <button
             type="button"
             onClick={() => openExternal('https://fanart.tv/get-an-api-key/#personal')}
@@ -440,7 +440,7 @@ export default function Settings() {
 
   const handleClearAppData = async () => {
     const confirmed = window.confirm(
-      'Clear all Loom Media Server library folders, metadata, artwork, watch progress, and settings from this device?',
+      'Clear all LoomTV library folders, metadata, artwork, watch progress, and settings from this device?',
     );
     if (!confirmed) return;
 
@@ -585,8 +585,12 @@ export default function Settings() {
     if (activeSection !== 'network') return;
     void refreshLocalNetworkStatus();
     void scanForPeers();
-    const id = setInterval(() => void scanForPeers(), 8000);
-    return () => clearInterval(id);
+    const peerScanId = setInterval(() => void scanForPeers(), 8000);
+    const pinRefreshId = setInterval(() => void refreshLocalNetworkStatus(), 15000);
+    return () => {
+      clearInterval(peerScanId);
+      clearInterval(pinRefreshId);
+    };
   }, [activeSection, refreshLocalNetworkStatus, scanForPeers]);
 
   useEffect(() => {
@@ -731,7 +735,7 @@ export default function Settings() {
   const activeSectionLabel = SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.label || 'Settings';
 
   return (
-    <div className={`loom-page h-full overflow-y-auto ${isMobileSettingsMenuOpen ? 'loom-settings-menu-open' : 'loom-settings-detail-open'}`}>
+    <div className={`loom-page loom-settings-page h-full overflow-y-auto ${isMobileSettingsMenuOpen ? 'loom-settings-menu-open' : 'loom-settings-detail-open'}`}>
       <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
         <div className="loom-settings-content mx-auto max-w-5xl pt-16">
           <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} />
@@ -739,7 +743,7 @@ export default function Settings() {
           <div className="loom-settings-mobile-menu">
             <div className="loom-settings-mobile-profile">
               <div className="loom-settings-mobile-logo">LT</div>
-              <h1>Loom Media Server</h1>
+              <h1>LoomTV</h1>
               <p>Manage your library, playback, network, metadata, theme, and app details.</p>
             </div>
             <div className="loom-settings-mobile-list">

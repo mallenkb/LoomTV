@@ -366,7 +366,7 @@ export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
 export async function backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
   const source = databasePath();
   const result = await dialog.showSaveDialog({
-    title: 'Back Up Loom Media Server Database',
+    title: 'Back Up LoomTV Database',
     defaultPath: `loomtv-backup-${new Date().toISOString().slice(0, 10)}.sqlite`,
     filters: [{ name: 'SQLite database', extensions: ['sqlite', 'db'] }],
   });

@@ -66,12 +66,12 @@ function EmptyOthersState({ onAddFolder }: { onAddFolder: () => Promise<void> })
   return (
     <div className="flex min-h-[calc(100vh-260px)] items-center justify-center px-4">
       <div className="w-full max-w-[520px] text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] bg-[var(--loom-panel)]">
           <FolderPlus className="h-9 w-9 text-[var(--loom-accent)]" />
         </div>
         <h3 className="text-2xl font-semibold text-white">Add an Others folder</h3>
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
-          Use Others for mixed folders. Loom Media Server will scan the files and sort detected movies, TV shows, and anime automatically.
+          Use Others for mixed folders. LoomTV will scan the files and sort detected movies, TV shows, and anime automatically.
         </p>
         <Button onClick={onAddFolder} className="mt-8 h-12 gap-2 px-5">
           <FolderPlus className="h-4 w-4" />

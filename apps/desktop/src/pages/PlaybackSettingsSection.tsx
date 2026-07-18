@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { LocalSegmentAnalysisStatus, SkipAnalysisSettings } from '@/lib/desktopApi';
@@ -136,16 +137,19 @@ export default function PlaybackSettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[var(--loom-border)] bg-black/15 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4">
             <label className="flex items-center gap-3 text-sm font-medium text-white">
-              <input
-                type="checkbox"
-                checked={skipAnalysis.enabled}
-                onChange={(event) => update(event.target.checked
-                  ? { enabled: true, analyzeNewMedia: true }
-                  : { enabled: false })}
-                className="h-5 w-5 accent-[var(--loom-accent)]"
-              />
+              <span className="relative grid h-5 w-5 shrink-0 place-items-center">
+                <input
+                  type="checkbox"
+                  checked={skipAnalysis.enabled}
+                  onChange={(event) => update(event.target.checked
+                    ? { enabled: true, analyzeNewMedia: true }
+                    : { enabled: false })}
+                  className="peer h-5 w-5 cursor-pointer appearance-none rounded border bg-[var(--loom-bg)] transition-colors checked:bg-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-glow)]"
+                />
+                <Check className="pointer-events-none absolute h-3.5 w-3.5 text-[var(--loom-accent-foreground)] opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
+              </span>
               Automatically detect and mark intros &amp; outros
             </label>
             <div className="flex flex-wrap items-center gap-2">
@@ -163,10 +167,10 @@ export default function PlaybackSettingsSection({
             Quick scan only analyzes items that aren&apos;t up to date yet. Full scan re-analyzes the entire library.
             Scans save your settings automatically, and stopping keeps everything already completed — only the rest stays remaining.
           </p>
-          {scanNotice && !scanActive && <p className="text-xs text-emerald-300">{scanNotice}</p>}
+          {scanNotice && !scanActive && <p className="settings-status-available text-xs">{scanNotice}</p>}
 
           {scanActive ? (
-            <div className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4" aria-live="polite">
+            <div className="rounded-lg bg-[var(--loom-surface-2)] p-4" aria-live="polite">
               <div className="flex items-center justify-between gap-3 text-xs">
                 <span className="font-medium text-white">
                   {analysisStatus?.paused ? 'Paused' : manualScanActive ? 'Analyzing library…' : 'Automatic analysis running…'}
@@ -181,7 +185,7 @@ export default function PlaybackSettingsSection({
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-label="Skip analysis progress"
-                className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--loom-surface-3)]"
               >
                 <div
                   className="h-full rounded-full bg-[var(--loom-accent)] transition-[width] duration-700 ease-out"
@@ -203,7 +207,7 @@ export default function PlaybackSettingsSection({
                   {coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : ''}
                 </p>
               )}
-              {analysisStatus?.lastError && <p role="alert" className="mt-1 text-xs text-red-300">{analysisStatus.lastError}</p>}
+              {analysisStatus?.lastError && <p role="alert" className="settings-status-error mt-1 text-xs">{analysisStatus.lastError}</p>}
               {!!analysisStatus?.recentJobs?.length && (
                 <div className="mt-3">
                   <Button
@@ -229,7 +233,7 @@ export default function PlaybackSettingsSection({
                   {coverageRemaining > 0 ? ` · ${coverageRemaining} remaining` : coverageWaiting === 0 ? ' — all caught up' : ''}
                 </p>
               )}
-              {analysisStatus?.lastError && <p role="alert" className="mt-1 text-red-300">{analysisStatus.lastError}</p>}
+              {analysisStatus?.lastError && <p role="alert" className="settings-status-error mt-1">{analysisStatus.lastError}</p>}
               {waiting > 0 && <p className="mt-1">{waiting} item{waiting === 1 ? '' : 's'} waiting for enough peer episodes; this does not keep the scanner active.</p>}
               {coordinatorDisabled && manualRemaining > 0 && (
                 <p className="mt-1">{manualRemaining} unfinished manual item{manualRemaining === 1 ? '' : 's'} retained and ready to resume when analysis is enabled.</p>
@@ -241,14 +245,16 @@ export default function PlaybackSettingsSection({
             <button
               type="button"
               onClick={() => setShowAdvanced((value) => !value)}
-              className="text-xs font-medium text-[var(--loom-muted)] underline-offset-2 hover:text-white hover:underline"
+              aria-expanded={showAdvanced}
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--loom-accent)] transition-colors hover:bg-[var(--loom-active-bg)]"
             >
               {showAdvanced ? 'Hide advanced options' : 'Show advanced options'}
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
             </button>
           </div>
 
           {showAdvanced && (
-            <div className="space-y-5 rounded-lg border border-[var(--loom-border)] bg-black/10 p-4">
+            <div className="space-y-5 rounded-lg bg-[var(--loom-surface-2)] p-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <Toggle label="Auto-scan new or changed media" checked={skipAnalysis.analyzeNewMedia} onChange={(analyzeNewMedia) => update({ analyzeNewMedia })} />
                 <Toggle label="Analyze Season 0 specials" checked={skipAnalysis.analyzeSpecials} onChange={(analyzeSpecials) => update({ analyzeSpecials })} />
@@ -270,7 +276,7 @@ export default function PlaybackSettingsSection({
                 <ListField label="Excluded local paths" value={skipAnalysis.exclusions.paths} onChange={(paths) => update({ exclusions: { ...skipAnalysis.exclusions, paths } })} />
               </div>
 
-              <div className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4">
+              <div className="rounded-lg bg-[var(--loom-surface-2)] p-4">
                 <p className="text-sm font-medium text-white">Maintenance</p>
                 <p className="mt-1 text-xs text-[var(--loom-muted)]">{analysisStatus?.fingerprintCount || 0} cached fingerprints · {formatBytes(analysisStatus?.fingerprintCacheBytes || 0)}{analysisStatus?.helperPath ? ` · ${analysisStatus.helperPath}` : ''}</p>
                 {analysisStatus?.progress && <p className="mt-1 text-xs text-[var(--loom-muted)]">Job history: {analysisStatus.progress.complete}/{analysisStatus.progress.total} complete</p>}
@@ -324,7 +330,7 @@ type ProgressJob = NonNullable<LocalSegmentAnalysisStatus['recentJobs']>[number]
 
 function AnalysisProgressList({ jobs }: { jobs: ProgressJob[] }) {
   return (
-    <div id="skip-analysis-progress-list" className="mt-3 max-h-52 overflow-y-auto rounded-md border border-white/10">
+    <div id="skip-analysis-progress-list" className="mt-3 max-h-52 overflow-y-auto rounded-md border border-[var(--loom-border)]">
       <table className="w-full text-left text-xs text-[var(--loom-muted)]">
         <caption className="sr-only">Completed, remaining, and failed skip-analysis items</caption>
         <thead className="sticky top-0 bg-[var(--loom-bg)]">
@@ -340,12 +346,12 @@ function AnalysisProgressList({ jobs }: { jobs: ProgressJob[] }) {
                   ? 'remaining'
                   : job.state;
             return (
-              <tr key={job.jobKey} className="border-t border-white/10">
+              <tr key={job.jobKey} className="border-t border-[var(--loom-border)]">
                 <td className={`px-2 py-1 font-semibold ${
                   job.state === 'complete'
-                    ? 'text-emerald-300'
+                    ? 'settings-status-available'
                     : job.state === 'error'
-                      ? 'text-red-300'
+                      ? 'settings-status-error'
                       : ''
                 }`}>{stateLabel}</td>
                 <td className="px-2 py-1">{job.mediaId} S{job.season}E{job.episode}</td>
@@ -384,7 +390,7 @@ function SegmentGroup({
   settings: SkipAnalysisSettings;
   update: (patch: Partial<SkipAnalysisSettings>) => void;
 }) {
-  return <section className="rounded-lg border border-[var(--loom-border)] bg-black/15 p-4"><h4 className="text-sm font-semibold text-white">{title}</h4><p className="mt-1 text-xs text-[var(--loom-muted)]">{description}</p><div className="mt-3 space-y-3">{types.map((type) => <div key={type} className="rounded-md border border-white/10 p-3"><div className="flex items-center justify-between gap-3"><Toggle label={type[0].toUpperCase() + type.slice(1)} checked={settings.enabledTypes[type]} onChange={(checked) => update({ enabledTypes: { ...settings.enabledTypes, [type]: checked } })} /><Toggle label="Show skip prompt" checked={settings.promptTypes[type]} onChange={(checked) => update({ promptTypes: { ...settings.promptTypes, [type]: checked } })} /></div><div className="mt-3 grid grid-cols-2 gap-2"><NumberField label="Min seconds" value={settings.durationLimits[type].minSeconds} onChange={(minSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], minSeconds } } })} /><NumberField label="Max seconds" value={settings.durationLimits[type].maxSeconds} onChange={(maxSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], maxSeconds } } })} /></div></div>)}</div></section>;
+  return <section className="rounded-lg bg-[var(--loom-surface-2)] p-4"><h4 className="text-sm font-semibold text-[var(--loom-text)]">{title}</h4><p className="mt-1 text-xs text-[var(--loom-muted)]">{description}</p><div className="mt-3 space-y-3">{types.map((type) => <div key={type} className="rounded-md border border-[var(--loom-border)] p-3"><div className="flex items-center justify-between gap-3"><Toggle label={type[0].toUpperCase() + type.slice(1)} checked={settings.enabledTypes[type]} onChange={(checked) => update({ enabledTypes: { ...settings.enabledTypes, [type]: checked } })} /><Toggle label="Show skip prompt" checked={settings.promptTypes[type]} onChange={(checked) => update({ promptTypes: { ...settings.promptTypes, [type]: checked } })} /></div><div className="mt-3 grid grid-cols-2 gap-2"><NumberField label="Min seconds" value={settings.durationLimits[type].minSeconds} onChange={(minSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], minSeconds } } })} /><NumberField label="Max seconds" value={settings.durationLimits[type].maxSeconds} onChange={(maxSeconds) => update({ durationLimits: { ...settings.durationLimits, [type]: { ...settings.durationLimits[type], maxSeconds } } })} /></div></div>)}</div></section>;
 }
 
 function formatBytes(bytes: number): string {

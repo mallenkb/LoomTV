@@ -76,12 +76,12 @@ function EmptyMoviesState({
   return (
     <div className="flex min-h-[calc(100vh-260px)] items-center justify-center px-4">
       <div className="w-full max-w-[520px] text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] bg-[var(--loom-panel)]">
           <Film className="h-9 w-9 text-[var(--loom-accent)]" />
         </div>
         <h3 className="text-2xl font-semibold text-white">Add a Movies folder</h3>
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
-          Choose a folder containing your films. Loom Media Server will scan it and build your movie library.
+          Choose a folder containing your films. LoomTV will scan it and build your movie library.
         </p>
         <Button onClick={onAddFolder} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">
           <Film className="h-4 w-4" />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronRight, Film, FolderPlus, Tv } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
@@ -117,12 +117,12 @@ function HomeEmptyState({
   return (
     <div className="flex min-h-[calc(100vh-220px)] items-center justify-center px-4">
       <div className="w-full max-w-[620px] text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)]">
+        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-[28px] bg-[var(--loom-panel)]">
           <FolderPlus className="h-9 w-9 text-[var(--loom-accent)]" />
         </div>
         <h2 className="text-2xl font-semibold text-white">Add your first library folder</h2>
         <p className="mx-auto mt-3 max-w-[460px] text-sm leading-6 text-[var(--loom-muted)]">
-          Choose where Loom Media Server should look for your movies, TV shows, or anime. The folder will be scanned right away.
+          Choose where LoomTV should look for your movies, TV shows, or anime. The folder will be scanned right away.
         </p>
         <div className="mt-8 grid gap-3 sm:grid-cols-3">
           <Button onClick={() => onAddFolder('movies')} disabled={isScanning} className="h-12 gap-2">
@@ -144,8 +144,62 @@ function HomeEmptyState({
 }
 
 function MediaRail({ items, isLoading, from }: { items: MediaItem[]; isLoading: boolean; from: string }) {
+  const railRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ active: false, dragged: false, startScrollLeft: 0, startX: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    const rail = railRef.current;
+    if (!rail || rail.scrollWidth <= rail.clientWidth) return;
+    dragRef.current = {
+      active: true,
+      dragged: false,
+      startScrollLeft: rail.scrollLeft,
+      startX: event.clientX,
+    };
+    rail.setPointerCapture(event.pointerId);
+  };
+
+  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const rail = railRef.current;
+    if (!drag.active || !rail) return;
+    const distance = event.clientX - drag.startX;
+    if (!drag.dragged && Math.abs(distance) < 5) return;
+    if (!drag.dragged) {
+      drag.dragged = true;
+      setIsDragging(true);
+    }
+    rail.scrollLeft = drag.startScrollLeft - distance;
+    event.preventDefault();
+  };
+
+  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current.active) return;
+    dragRef.current.active = false;
+    setIsDragging(false);
+    if (railRef.current?.hasPointerCapture(event.pointerId)) {
+      railRef.current.releasePointerCapture(event.pointerId);
+    }
+  };
+
   return (
-    <div className="flex gap-6 overflow-x-auto overflow-y-hidden pb-3 pr-6 [scrollbar-gutter:stable]">
+    <div
+      ref={railRef}
+      className={`flex select-none gap-6 overflow-x-auto overflow-y-hidden pb-3 pr-6 [scrollbar-gutter:stable] ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      onClickCapture={(event) => {
+        if (!dragRef.current.dragged) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dragRef.current.dragged = false;
+      }}
+      onDragStart={(event) => event.preventDefault()}
+      onPointerCancel={stopDrag}
+      onPointerDown={startDrag}
+      onPointerMove={moveDrag}
+      onPointerUp={stopDrag}
+    >
       {isLoading
         ? Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} className="h-[300px] w-[200px] flex-none rounded-lg" />
