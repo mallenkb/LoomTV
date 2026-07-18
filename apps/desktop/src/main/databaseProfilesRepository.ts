@@ -152,9 +152,10 @@ export function updateProfile(database: BetterSqlite3.Database, profileId: strin
   const name = patch.name === undefined ? existing.name : safeProfileName(patch.name);
   if (!name) throw new Error('A profile name is required.');
   // The Owner keeps its type; Standard and Kids may convert between each other.
-  const nextType: Exclude<ProfileType, 'guest'> = existing.type === 'owner'
+  const editableType: Exclude<ProfileType, 'guest'> = existing.type === 'guest' ? 'standard' : existing.type;
+  const nextType: Exclude<ProfileType, 'guest'> = editableType === 'owner'
     ? 'owner'
-    : patch.type === 'kid' ? 'kid' : patch.type === 'standard' ? 'standard' : existing.type;
+    : patch.type === 'kid' ? 'kid' : patch.type === 'standard' ? 'standard' : editableType;
   database.prepare(`
     UPDATE profiles SET name = ?, avatar_key = ?, color_key = ?, profile_type = ?, updated_at = ?
     WHERE id = ?
