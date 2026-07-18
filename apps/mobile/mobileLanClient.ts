@@ -81,5 +81,3 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch) {
     },
   };
 }
-
-export type MobileLanClient = ReturnType<typeof createMobileLanClient>;

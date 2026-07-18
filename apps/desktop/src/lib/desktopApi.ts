@@ -1,6 +1,14 @@
 import packageJson from '../../package.json';
 import type {
+  ActiveProfileState,
   ApiResult,
+  ProfileCreateInput,
+  ProfileListEntry,
+  ProfileListKind,
+  ProfilePreferences,
+  ProfileRestrictions,
+  ProfileSummary,
+  ProfileUpdateInput,
   FFmpegStatus,
   LibraryFolderKind,
   LibraryPayload,
@@ -33,6 +41,7 @@ import type {
   UpdateState,
 } from '../shared/desktopProtocol.ts';
 export type {
+  ActiveProfileState,
   ApiResult,
   LibraryFolderKind,
   LibraryPayload,
@@ -54,6 +63,14 @@ export type {
   OfficialMetadataCandidate,
   PlaybackLogoResult,
   PlaybackTrackPreferences,
+  ProfileCreateInput,
+  ProfileListEntry,
+  ProfileListKind,
+  ProfilePreferences,
+  ProfileRestrictions,
+  ProfileSummary,
+  ProfileType,
+  ProfileUpdateInput,
   RemoteLibraryConnection,
   SettingsPayload,
   SkipAnalysisRunScope,
@@ -92,8 +109,28 @@ export type DesktopBridgeApi = {
       discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
       revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
       setLocalNetworkDeviceName?: (name: string) => Promise<string>;
+      listProfiles?: () => Promise<ProfileSummary[]>;
+      getActiveProfileState?: () => Promise<ActiveProfileState>;
+      createProfile?: (input: ProfileCreateInput) => Promise<ProfileSummary[]>;
+      updateProfile?: (profileId: string, patch: ProfileUpdateInput) => Promise<ProfileSummary[]>;
+      deleteProfile?: (profileId: string) => Promise<ProfileSummary[]>;
+      selectProfile?: (profileId: string, pin?: string) => Promise<ProfileSummary>;
+      selectGuestProfile?: () => Promise<ProfileSummary>;
+      lockProfile?: () => Promise<ActiveProfileState>;
+      reorderProfiles?: (profileIds: string[]) => Promise<ProfileSummary[]>;
+      changeProfilePin?: (profileId: string, pin: string | null) => Promise<ProfileSummary>;
+      resetOwnerProfile?: (confirmation: string) => Promise<ProfileSummary>;
+      setAutomaticProfileSignIn?: (enabled: boolean) => Promise<ActiveProfileState>;
+      getProfilePreferences?: () => Promise<ProfilePreferences>;
+      saveProfilePreferences?: (patch: ProfilePreferences) => Promise<ProfilePreferences>;
+      getProfileRestrictions?: (profileId: string) => Promise<ProfileRestrictions>;
+      saveProfileRestrictions?: (profileId: string, restrictions: Omit<ProfileRestrictions, 'revision'>) => Promise<ProfileRestrictions>;
+      getProfileLists?: (kind?: ProfileListKind) => Promise<ProfileListEntry[]>;
+      setProfileListEntry?: (mediaId: string, kind: ProfileListKind, present: boolean) => Promise<ProfileListEntry[]>;
+      onProfilesChanged?: (callback: (profiles: ProfileSummary[]) => void) => () => void;
+      onActiveProfileChanged?: (callback: (state: ActiveProfileState) => void) => () => void;
       getProgress?: (filePath?: string) => Promise<Record<string, StoredProgress> | StoredProgress | null>;
-      saveProgress?: (filePath: string, position: number, duration: number) => Promise<StoredProgress>;
+      saveProgress?: (filePath: string, position: number, duration: number, expectedProfileId?: string) => Promise<StoredProgress>;
       importProgress?: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => Promise<boolean>;
       getPlaybackTrackPreferences?: (scope?: string) => Promise<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>;
       savePlaybackTrackPreferences?: (scope: string, preferences: PlaybackTrackPreferences) => Promise<PlaybackTrackPreferences>;
@@ -566,14 +603,112 @@ export const desktopApi = {
     });
   },
 
+  // Browser-rendered development sessions have no profile bridge; they behave
+  // as a one-profile installation and never show the picker.
+  async listProfiles(): Promise<ProfileSummary[]> {
+    if (window.desktopApi?.listProfiles) return window.desktopApi.listProfiles();
+    return [];
+  },
+
+  async getActiveProfileState(): Promise<ActiveProfileState> {
+    if (window.desktopApi?.getActiveProfileState) return window.desktopApi.getActiveProfileState();
+    return { profileId: null, selectionRequired: false, selectionRevision: 0, automaticSignIn: false };
+  },
+
+  async createProfile(input: ProfileCreateInput): Promise<ProfileSummary[]> {
+    if (window.desktopApi?.createProfile) return window.desktopApi.createProfile(input);
+    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+  },
+
+  async updateProfile(profileId: string, patch: ProfileUpdateInput): Promise<ProfileSummary[]> {
+    if (window.desktopApi?.updateProfile) return window.desktopApi.updateProfile(profileId, patch);
+    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+  },
+
+  async deleteProfile(profileId: string): Promise<ProfileSummary[]> {
+    if (window.desktopApi?.deleteProfile) return window.desktopApi.deleteProfile(profileId);
+    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+  },
+
+  async selectProfile(profileId: string, pin?: string): Promise<ProfileSummary> {
+    if (window.desktopApi?.selectProfile) return window.desktopApi.selectProfile(profileId, pin);
+    throw new Error('Profiles can only be selected from the LoomTV desktop app.');
+  },
+
+  async selectGuestProfile(): Promise<ProfileSummary> {
+    if (window.desktopApi?.selectGuestProfile) return window.desktopApi.selectGuestProfile();
+    throw new Error('Guest is available only in the LoomTV desktop app.');
+  },
+
+  async lockProfile(): Promise<ActiveProfileState> {
+    if (window.desktopApi?.lockProfile) return window.desktopApi.lockProfile();
+    return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
+  },
+
+  async reorderProfiles(profileIds: string[]): Promise<ProfileSummary[]> {
+    if (window.desktopApi?.reorderProfiles) return window.desktopApi.reorderProfiles(profileIds);
+    throw new Error('Profiles can only be managed from the LoomTV desktop app.');
+  },
+
+  async changeProfilePin(profileId: string, pin: string | null): Promise<ProfileSummary> {
+    if (window.desktopApi?.changeProfilePin) return window.desktopApi.changeProfilePin(profileId, pin);
+    throw new Error('Profile PINs can only be managed from the LoomTV desktop app.');
+  },
+
+  async resetOwnerProfile(confirmation: string): Promise<ProfileSummary> {
+    if (window.desktopApi?.resetOwnerProfile) return window.desktopApi.resetOwnerProfile(confirmation);
+    throw new Error('The Owner can only be reset from the LoomTV desktop app.');
+  },
+
+  async setAutomaticProfileSignIn(enabled: boolean): Promise<ActiveProfileState> {
+    if (window.desktopApi?.setAutomaticProfileSignIn) return window.desktopApi.setAutomaticProfileSignIn(enabled);
+    throw new Error('Automatic sign-in can only be managed from the LoomTV desktop app.');
+  },
+
+  async getProfilePreferences(): Promise<ProfilePreferences> {
+    return window.desktopApi?.getProfilePreferences?.() || {};
+  },
+
+  async saveProfilePreferences(patch: ProfilePreferences): Promise<ProfilePreferences> {
+    if (window.desktopApi?.saveProfilePreferences) return window.desktopApi.saveProfilePreferences(patch);
+    return patch;
+  },
+
+  async getProfileRestrictions(profileId: string): Promise<ProfileRestrictions> {
+    if (window.desktopApi?.getProfileRestrictions) return window.desktopApi.getProfileRestrictions(profileId);
+    return { country: 'US', maximumAge: null, allowUnrated: false, allowedFolders: [], revision: 0 };
+  },
+
+  async saveProfileRestrictions(profileId: string, restrictions: Omit<ProfileRestrictions, 'revision'>): Promise<ProfileRestrictions> {
+    if (window.desktopApi?.saveProfileRestrictions) return window.desktopApi.saveProfileRestrictions(profileId, restrictions);
+    return { ...restrictions, revision: 0 };
+  },
+
+  async getProfileLists(kind?: ProfileListKind): Promise<ProfileListEntry[]> {
+    return window.desktopApi?.getProfileLists?.(kind) || [];
+  },
+
+  async setProfileListEntry(mediaId: string, kind: ProfileListKind, present: boolean): Promise<ProfileListEntry[]> {
+    if (window.desktopApi?.setProfileListEntry) return window.desktopApi.setProfileListEntry(mediaId, kind, present);
+    return [];
+  },
+
+  onProfilesChanged(callback: (profiles: ProfileSummary[]) => void): () => void {
+    return window.desktopApi?.onProfilesChanged?.(callback) || (() => undefined);
+  },
+
+  onActiveProfileChanged(callback: (state: ActiveProfileState) => void): () => void {
+    return window.desktopApi?.onActiveProfileChanged?.(callback) || (() => undefined);
+  },
+
   async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
     if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
     const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
     return fetchJson<Record<string, StoredProgress> | StoredProgress | null>(`/api/progress${query}`);
   },
 
-  async saveProgress(filePath: string, position: number, duration: number): Promise<StoredProgress> {
-    if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration);
+  async saveProgress(filePath: string, position: number, duration: number, expectedProfileId?: string): Promise<StoredProgress> {
+    if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration, expectedProfileId);
     return fetchJson<StoredProgress>('/api/progress', {
       method: 'POST',
       body: JSON.stringify({ filePath, position, duration }),

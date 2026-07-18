@@ -271,19 +271,25 @@ body {
 }
 
 /* Search already draws its border on the rounded containing control. */
-.loom-library-search input {
+.loom-library-search-control input,
+.loom-library-search-control input:focus,
+.loom-library-search-control input:focus-visible {
+  appearance: none !important;
+  -webkit-appearance: none !important;
   border: 0 !important;
   box-shadow: none !important;
   outline: none !important;
 }
 
-.loom-library-search-inner > div:first-child {
+.loom-library-search-control {
   border-color: var(--loom-control-border);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
 }
 
-.loom-library-search-inner > div:first-child:focus-within {
-  border-color: var(--loom-control-border);
-  box-shadow: 0 0 0 2px var(--loom-focus-glow);
+.loom-library-search-control:focus-within {
+  border-color: var(--loom-focus-ring);
+  outline-color: var(--loom-focus-ring);
 }
 
 :root[data-theme="light"] .loom-settings-mobile-profile h1,

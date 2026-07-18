@@ -1,4 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
+
+// Ledger-versioned migrations begin with the profiles rebuild. The
+// introspection-style migrations below predate the ledger and stay outside it.
+export const PROFILES_MIGRATION_VERSION = 1;
+export const PROFILE_FEATURES_MIGRATION_VERSION = 2;
 
 function ensureColumn(database: BetterSqlite3.Database, tableName: string, columnName: string, definition: string): void {
   const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
@@ -256,6 +262,209 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateLibraryFoldersKind(database);
   migrateMediaSegmentsPrimaryKey(database);
   makeProviderSegmentsDurable(database);
+  migrateProfiles(database);
+  migrateProfileFeatures(database);
+}
+
+export function profilesMigrationPending(database: BetterSqlite3.Database): boolean {
+  const ledger = database
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
+    .get();
+  if (!ledger) return true;
+  return !database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PROFILES_MIGRATION_VERSION);
+}
+
+function migrateProfiles(database: BetterSqlite3.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    );
+  `);
+  // Version 0 marks the detected pre-profile schema without replaying anything.
+  database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (0, ?)').run(Date.now());
+
+  if (!profilesMigrationPending(database)) {
+    // The legacy tables survive the migration boot so a crash before this boot
+    // leaves the database recoverable; drop them once the app has come back up.
+    database.exec(`
+      DROP TABLE IF EXISTS playback_progress_legacy;
+      DROP TABLE IF EXISTS playback_track_preferences_legacy;
+    `);
+    return;
+  }
+
+  const migrate = database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        avatar_key TEXT NOT NULL,
+        color_key TEXT NOT NULL,
+        profile_type TEXT NOT NULL CHECK (profile_type IN ('owner', 'standard', 'kid')),
+        pin_hash TEXT,
+        pin_salt TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_used_at INTEGER,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS one_owner ON profiles(profile_type)
+        WHERE profile_type = 'owner';
+
+      CREATE TABLE IF NOT EXISTS device_profile_selections (
+        device_id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        selected_at INTEGER NOT NULL
+      );
+    `);
+
+    const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string } | undefined;
+    let ownerId = owner?.id;
+    if (!ownerId) {
+      ownerId = randomUUID();
+      const now = Date.now();
+      database.prepare(`
+        INSERT INTO profiles (id, name, avatar_key, color_key, profile_type, created_at, updated_at, sort_order)
+        VALUES (?, 'Owner', 'weave-01', 'ember', 'owner', ?, ?, 0)
+      `).run(ownerId, now, now);
+    }
+
+    database.exec(`
+      CREATE TABLE playback_progress_v2 (
+        profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        file_path TEXT NOT NULL,
+        position REAL NOT NULL DEFAULT 0,
+        duration REAL NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        watched INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (profile_id, file_path)
+      );
+
+      CREATE TABLE playback_track_preferences_v2 (
+        profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        scope TEXT NOT NULL,
+        preferences_json TEXT NOT NULL DEFAULT '{}',
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (profile_id, scope)
+      );
+    `);
+
+    database.prepare(`
+      INSERT INTO playback_progress_v2 (profile_id, file_path, position, duration, updated_at, watched)
+      SELECT ?, file_path, position, duration, updated_at, watched FROM playback_progress
+    `).run(ownerId);
+    database.prepare(`
+      INSERT INTO playback_track_preferences_v2 (profile_id, scope, preferences_json, updated_at)
+      SELECT ?, scope, preferences_json, updated_at FROM playback_track_preferences
+    `).run(ownerId);
+
+    const countOf = (table: string): number =>
+      (database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+    if (countOf('playback_progress') !== countOf('playback_progress_v2')) {
+      throw new Error('Profile migration aborted: playback progress row counts differ.');
+    }
+    if (countOf('playback_track_preferences') !== countOf('playback_track_preferences_v2')) {
+      throw new Error('Profile migration aborted: track preference row counts differ.');
+    }
+
+    database.exec(`
+      ALTER TABLE playback_progress RENAME TO playback_progress_legacy;
+      ALTER TABLE playback_progress_v2 RENAME TO playback_progress;
+      ALTER TABLE playback_track_preferences RENAME TO playback_track_preferences_legacy;
+      ALTER TABLE playback_track_preferences_v2 RENAME TO playback_track_preferences;
+    `);
+
+    const fkViolations = database.pragma('foreign_key_check(playback_progress)') as unknown[];
+    if (fkViolations.length > 0) {
+      throw new Error('Profile migration aborted: foreign key check failed.');
+    }
+
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(PROFILES_MIGRATION_VERSION, Date.now());
+  });
+  migrate();
+}
+
+function migrateProfileFeatures(database: BetterSqlite3.Database): void {
+  if (!database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(PROFILE_FEATURES_MIGRATION_VERSION)) {
+    const migrate = database.transaction(() => {
+      ensureColumn(database, 'profiles', 'is_guest', 'INTEGER NOT NULL DEFAULT 0');
+      ensureColumn(database, 'profiles', 'guest_device_id', 'TEXT');
+      ensureColumn(database, 'device_profile_selections', 'automatic_sign_in', 'INTEGER NOT NULL DEFAULT 0');
+      ensureColumn(database, 'device_profile_selections', 'selection_revision', 'INTEGER NOT NULL DEFAULT 0');
+      ensureColumn(database, 'media_items', 'content_ratings_json', "TEXT NOT NULL DEFAULT '{}'");
+
+      database.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS one_guest_per_device
+          ON profiles(guest_device_id) WHERE is_guest = 1;
+
+        CREATE TABLE IF NOT EXISTS profile_preferences (
+          profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+          preferences_json TEXT NOT NULL DEFAULT '{}',
+          revision INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS profile_restrictions (
+          profile_id TEXT PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+          country TEXT NOT NULL DEFAULT 'US' CHECK (country IN ('US', 'GB', 'CA', 'AU')),
+          maximum_age INTEGER,
+          allow_unrated INTEGER NOT NULL DEFAULT 0,
+          revision INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS profile_library_access (
+          profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          folder_path TEXT NOT NULL,
+          PRIMARY KEY (profile_id, folder_path)
+        );
+
+        CREATE TABLE IF NOT EXISTS profile_media_lists (
+          profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          media_id TEXT NOT NULL,
+          list_kind TEXT NOT NULL CHECK (list_kind IN ('watchlist', 'favorite')),
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (profile_id, media_id, list_kind)
+        );
+      `);
+
+      const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string } | undefined;
+      const settingsRow = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
+      if (owner && settingsRow) {
+        try {
+          const settings = JSON.parse(settingsRow.data_json) as Record<string, unknown>;
+          const keys = [
+            'appThemeMode',
+            'appThemeColor',
+            'appDarkTheme',
+            'appLoaderStyle',
+            'sidebarNavOrder',
+            'playbackSkipBackSeconds',
+            'playbackSkipForwardSeconds',
+          ] as const;
+          const preferences = Object.fromEntries(keys.flatMap((key) => settings[key] === undefined ? [] : [[key, settings[key]]]));
+          database.prepare(`
+            INSERT OR IGNORE INTO profile_preferences (profile_id, preferences_json, revision, updated_at)
+            VALUES (?, ?, 1, ?)
+          `).run(owner.id, JSON.stringify(preferences), Date.now());
+        } catch {
+          // Invalid legacy settings are ignored; the normal settings loader
+          // already falls back safely and no migration data is destroyed.
+        }
+      }
+
+      database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+        .run(PROFILE_FEATURES_MIGRATION_VERSION, Date.now());
+    });
+    migrate();
+  }
+
+  // Guest data is intentionally crash-resilient only for the active boot.
+  // Any abandoned guest rows from a previous process are purged on startup.
+  database.prepare('DELETE FROM profiles WHERE is_guest = 1').run();
 }
 
 function makeProviderSegmentsDurable(database: BetterSqlite3.Database): void {

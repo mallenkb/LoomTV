@@ -78,17 +78,6 @@ function progressDetails(filePath: string, durationHint = 0, progress: Record<st
   };
 }
 
-function formatRemaining(position: number, duration: number): string {
-  if (!Number.isFinite(duration) || duration <= 0) return '';
-  const remaining = Math.max(0, duration - Math.max(0, position));
-  if (position <= 0) return `${Math.max(1, Math.round(duration / 60))} min`;
-  if (remaining < 60) return 'Less than a minute left';
-  const minutes = Math.round(remaining / 60);
-  if (minutes < 60) return `${minutes} min left`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m left`;
-}
-
 function formatThumbnailTime(position: number, duration: number): string {
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const upperBound = safeDuration > 10 ? safeDuration - 5 : safeDuration;
@@ -151,6 +140,7 @@ function findLatestCandidate(
   movies.forEach((movie) => {
     const details = progressDetails(movie.filePath, movie.localMetadata?.durationSeconds, progress);
     if (!details.inProgress) return;
+    const movieLogoSources = logoSources(movie);
     candidates.push({
       key: `movie:${movie.id}`,
       filePath: movie.filePath,
@@ -172,8 +162,8 @@ function findLatestCandidate(
         undefined,
         movie.id,
         {
-          logo: logoSources(movie)[0] || '',
-          logoCandidates: logoSources(movie),
+          logo: movieLogoSources[0] || '',
+          logoCandidates: movieLogoSources,
           poster: movie.poster,
           posterCandidates: uniqueArtworkSources(movie.posterCandidates, movie.poster),
           backdrop: movie.backdrop,
@@ -186,6 +176,19 @@ function findLatestCandidate(
 
   shows.forEach((show) => {
     const playerEpisodes = playerEpisodesFor(show);
+    const playerEpisodesByKey = new Map(
+      playerEpisodes.map((episode) => [`${episode.season}:${episode.number}`, episode]),
+    );
+    const showLogoSources = logoSources(show);
+    const showArtwork = {
+      logo: showLogoSources[0] || '',
+      logoCandidates: showLogoSources,
+      poster: show.poster,
+      posterCandidates: uniqueArtworkSources(show.posterCandidates, show.poster),
+      backdrop: show.backdrop,
+      backdropCandidates: uniqueArtworkSources(show.backdropCandidates, show.backdrop),
+      rating: show.rating,
+    };
     const sortedFiles = (show.episodeFiles || [])
       .slice()
       .sort((a, b) => a.season - b.season || a.episode - b.episode);
@@ -196,7 +199,7 @@ function findLatestCandidate(
 
     episodeDetails.forEach(({ episodeFile, details }) => {
       if (!details.inProgress) return;
-      const episode = playerEpisodes.find((item) => item.season === episodeFile.season && item.number === episodeFile.episode);
+      const episode = playerEpisodesByKey.get(`${episodeFile.season}:${episodeFile.episode}`);
       const episodeTitle = cleanEpisodeTitleForDisplay(episode?.title, show.title, episodeFile.season, episodeFile.episode);
       candidates.push({
         key: `${show.type}:${show.id}:${episodeFile.season}:${episodeFile.episode}`,
@@ -218,15 +221,7 @@ function findLatestCandidate(
           episodeFile.season,
           episodeFile.episode,
           show.id,
-          {
-            logo: logoSources(show)[0] || '',
-            logoCandidates: logoSources(show),
-            poster: show.poster,
-            posterCandidates: uniqueArtworkSources(show.posterCandidates, show.poster),
-            backdrop: show.backdrop,
-            backdropCandidates: uniqueArtworkSources(show.backdropCandidates, show.backdrop),
-            rating: show.rating,
-          },
+          showArtwork,
         ],
       });
     });
@@ -242,7 +237,7 @@ function findLatestCandidate(
     if (!nextEpisode) return;
 
     const { episodeFile } = nextEpisode;
-    const episode = playerEpisodes.find((item) => item.season === episodeFile.season && item.number === episodeFile.episode);
+    const episode = playerEpisodesByKey.get(`${episodeFile.season}:${episodeFile.episode}`);
     const episodeTitle = cleanEpisodeTitleForDisplay(episode?.title, show.title, episodeFile.season, episodeFile.episode);
     candidates.push({
       key: `${show.type}:${show.id}:next:${episodeFile.season}:${episodeFile.episode}`,
@@ -264,15 +259,7 @@ function findLatestCandidate(
         episodeFile.season,
         episodeFile.episode,
         show.id,
-        {
-          logo: logoSources(show)[0] || '',
-          logoCandidates: logoSources(show),
-          poster: show.poster,
-          posterCandidates: uniqueArtworkSources(show.posterCandidates, show.poster),
-          backdrop: show.backdrop,
-          backdropCandidates: uniqueArtworkSources(show.backdropCandidates, show.backdrop),
-          rating: show.rating,
-        },
+        showArtwork,
       ],
     });
   });
@@ -351,8 +338,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   const thumbnailSources = [thumbnailUrl, thumbnailFallbackUrl, artwork?.backdrop || '', artwork?.poster || '']
     .filter((source) => source && !failedSources.includes(source));
   const thumbnailSrc = thumbnailSources[0] || '';
-  const remaining = formatRemaining(candidate.position, candidate.duration);
-  const metaLine = [candidate.subtitle, remaining].filter(Boolean).join(' · ');
+  const metaLine = candidate.subtitle;
   const fractionPercent = Math.min(100, Math.max(0, candidate.fraction * 100));
 
   return (

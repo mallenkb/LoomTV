@@ -2,6 +2,8 @@ import React, { useState, useCallback } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
+import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
+import ProfileGate from './components/profiles/ProfileGate';
 import Home from './pages/Home';
 import Movies from './pages/Movies';
 import Others from './pages/Others';
@@ -41,13 +43,27 @@ export default function App() {
     <LibraryProvider>
       <ThemeProvider>
         <ToastProvider>
-          <HashRouter>
-            <AppShell />
-          </HashRouter>
+          <ProfileProvider>
+            <HashRouter>
+              <ProfileGateOrShell />
+            </HashRouter>
+          </ProfileProvider>
         </ToastProvider>
       </ThemeProvider>
     </LibraryProvider>
   );
+}
+
+/**
+ * With several profiles the Who's Watching gate is the app's front door; the
+ * shell (and every progress consumer inside it) mounts only after a profile
+ * has been chosen for this session.
+ */
+function ProfileGateOrShell() {
+  const { gateOpen, isLoading } = useProfiles();
+  if (isLoading) return <div className="h-screen bg-[var(--loom-bg)]" />;
+  if (gateOpen) return <ProfileGate />;
+  return <AppShell />;
 }
 
 function AppShell() {

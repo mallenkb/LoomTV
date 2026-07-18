@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronRight, Film, FolderPlus, Tv } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Film, FolderPlus, Tv } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
+import { useProgressSnapshot } from '@/lib/progress';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 
@@ -14,14 +15,33 @@ export default function Home() {
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
+  const continueWatchingRailRef = useRef<HTMLDivElement>(null);
+  const animeRailRef = useRef<HTMLDivElement>(null);
+  const tvRailRef = useRef<HTMLDivElement>(null);
+  const moviesRailRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
 
-  const continueWatching = useMemo(() => [...movies, ...tvShows, ...animeShows]
-    .filter((item) => item.lastPlayed)
-    .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))
-    .slice(0, 30), [animeShows, movies, tvShows]);
+  // Recency comes from the active profile's progress, never from the shared
+  // catalog, so one profile's viewing cannot reorder Home for another.
+  const progress = useProgressSnapshot();
+  const continueWatching = useMemo(() => {
+    const recency = (item: MediaItem): number => {
+      let last = progress[item.filePath]?.updatedAt || 0;
+      for (const episodeFile of item.episodeFiles || []) {
+        const updatedAt = progress[episodeFile.filePath]?.updatedAt || 0;
+        if (updatedAt > last) last = updatedAt;
+      }
+      return last;
+    };
+    return [...movies, ...tvShows, ...animeShows]
+      .map((item) => [item, recency(item)] as const)
+      .filter(([, last]) => last > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([item]) => item);
+  }, [animeShows, movies, tvShows, progress]);
   const filteredAnime = useMemo(
     () => animeShows.filter((item) => matchesMediaItem(item, normalizedQuery)),
     [animeShows, normalizedQuery],
@@ -37,6 +57,11 @@ export default function Home() {
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
   const showMoviesSection = isLoading || filteredMovies.length > 0;
+  const scrollRail = (railRef: RefObject<HTMLDivElement | null>, direction: -1 | 1) => {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollLeft += direction * Math.max(240, rail.clientWidth * 0.8);
+  };
 
   return (
     <div className="loom-page h-full overflow-y-auto">
@@ -50,11 +75,30 @@ export default function Home() {
           <section className="mb-8">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="loom-section-title text-2xl font-bold text-white">Continue Watching</h3>
-              <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
-                See All <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => scrollRail(continueWatchingRailRef, -1)}
+                  aria-label="Scroll Continue Watching left"
+                  className="h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => scrollRail(continueWatchingRailRef, 1)}
+                  aria-label="Scroll Continue Watching right"
+                  className="h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </Button>
+              </div>
             </div>
-            <MediaRail items={continueWatching} isLoading={isLoading} from={currentRoute} />
+            <MediaRail items={continueWatching} isLoading={isLoading} from={currentRoute} scrollRef={continueWatchingRailRef} />
           </section>
         )}
 
@@ -62,13 +106,9 @@ export default function Home() {
           <section className="mb-8">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="loom-section-title text-2xl font-bold text-white">Anime</h3>
-              <Link to="/anime">
-                <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
-                  See All <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
-              </Link>
+              <RailHeaderControls label="Anime" seeAllTo="/anime" railRef={animeRailRef} onScroll={scrollRail} />
             </div>
-            <MediaRail items={filteredAnime.slice(0, 30)} isLoading={isLoading} from={currentRoute} />
+            <MediaRail items={filteredAnime.slice(0, 10)} isLoading={isLoading} from={currentRoute} scrollRef={animeRailRef} />
           </section>
         )}
 
@@ -76,13 +116,9 @@ export default function Home() {
           <section className="mb-8">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="loom-section-title text-2xl font-bold text-white">TV Shows</h3>
-              <Link to="/tv">
-                <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
-                  See All <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
-              </Link>
+              <RailHeaderControls label="TV Shows" seeAllTo="/tv" railRef={tvRailRef} onScroll={scrollRail} />
             </div>
-            <MediaRail items={filteredTVShows.slice(0, 30)} isLoading={isLoading} from={currentRoute} />
+            <MediaRail items={filteredTVShows.slice(0, 10)} isLoading={isLoading} from={currentRoute} scrollRef={tvRailRef} />
           </section>
         )}
 
@@ -90,19 +126,62 @@ export default function Home() {
           <section className="mb-8">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="loom-section-title text-2xl font-bold text-white">Movies</h3>
-              <Link to="/movies">
-                <Button variant="ghost" size="sm" className="text-[var(--loom-muted)]">
-                  See All <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
-              </Link>
+              <RailHeaderControls label="Movies" seeAllTo="/movies" railRef={moviesRailRef} onScroll={scrollRail} />
             </div>
-            <MediaRail items={filteredMovies.slice(0, 30)} isLoading={isLoading} from={currentRoute} />
+            <MediaRail items={filteredMovies.slice(0, 10)} isLoading={isLoading} from={currentRoute} scrollRef={moviesRailRef} />
           </section>
         )}
         {normalizedQuery && !isLoading && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
           <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
         )}
       </div>
+    </div>
+  );
+}
+
+const RAIL_ARROW_CLASS = 'h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]';
+
+function RailHeaderControls({
+  label,
+  seeAllTo,
+  railRef,
+  onScroll,
+}: {
+  label: string;
+  seeAllTo: string;
+  railRef: RefObject<HTMLDivElement | null>;
+  onScroll: (railRef: RefObject<HTMLDivElement | null>, direction: -1 | 1) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Link to={seeAllTo}>
+        <Button
+          variant="ghost"
+          className="h-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-4 text-[var(--loom-muted)] shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+        >
+          See All
+        </Button>
+      </Link>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={() => onScroll(railRef, -1)}
+        aria-label={`Scroll ${label} left`}
+        className={RAIL_ARROW_CLASS}
+      >
+        <ChevronLeft className="h-5 w-5" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={() => onScroll(railRef, 1)}
+        aria-label={`Scroll ${label} right`}
+        className={RAIL_ARROW_CLASS}
+      >
+        <ChevronRight className="h-5 w-5" />
+      </Button>
     </div>
   );
 }
@@ -143,13 +222,24 @@ function HomeEmptyState({
   );
 }
 
-function MediaRail({ items, isLoading, from }: { items: MediaItem[]; isLoading: boolean; from: string }) {
-  const railRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef({ active: false, dragged: false, startScrollLeft: 0, startX: 0 });
+function MediaRail({
+  items,
+  isLoading,
+  from,
+  scrollRef,
+}: {
+  items: MediaItem[];
+  isLoading: boolean;
+  from: string;
+  scrollRef?: RefObject<HTMLDivElement | null>;
+}) {
+  const internalRailRef = useRef<HTMLDivElement>(null);
+  const railRef = scrollRef || internalRailRef;
+  const dragRef = useRef({ active: false, dragged: false, startScrollLeft: 0, startX: 0, startY: 0 });
   const [isDragging, setIsDragging] = useState(false);
 
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     const rail = railRef.current;
     if (!rail || rail.scrollWidth <= rail.clientWidth) return;
     dragRef.current = {
@@ -157,8 +247,8 @@ function MediaRail({ items, isLoading, from }: { items: MediaItem[]; isLoading: 
       dragged: false,
       startScrollLeft: rail.scrollLeft,
       startX: event.clientX,
+      startY: event.clientY,
     };
-    rail.setPointerCapture(event.pointerId);
   };
 
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -166,10 +256,12 @@ function MediaRail({ items, isLoading, from }: { items: MediaItem[]; isLoading: 
     const rail = railRef.current;
     if (!drag.active || !rail) return;
     const distance = event.clientX - drag.startX;
-    if (!drag.dragged && Math.abs(distance) < 5) return;
+    const verticalDistance = event.clientY - drag.startY;
+    if (!drag.dragged && (Math.abs(distance) < 12 || Math.abs(distance) <= Math.abs(verticalDistance) * 1.2)) return;
     if (!drag.dragged) {
       drag.dragged = true;
       setIsDragging(true);
+      rail.setPointerCapture(event.pointerId);
     }
     rail.scrollLeft = drag.startScrollLeft - distance;
     event.preventDefault();
@@ -187,9 +279,12 @@ function MediaRail({ items, isLoading, from }: { items: MediaItem[]; isLoading: 
   return (
     <div
       ref={railRef}
-      className={`flex select-none gap-6 overflow-x-auto overflow-y-hidden pb-3 pr-6 [scrollbar-gutter:stable] ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+      className={`flex select-none gap-6 overflow-x-auto overflow-y-hidden scroll-smooth pb-3 pr-6 [scrollbar-gutter:stable] [touch-action:pan-y] ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       onClickCapture={(event) => {
         if (!dragRef.current.dragged) return;
+        // Pointer capture ends before the browser dispatches the synthetic
+        // click. Suppress only that click so a real tap still follows the
+        // card link, while a drag never opens the card underneath the pointer.
         event.preventDefault();
         event.stopPropagation();
         dragRef.current.dragged = false;

@@ -728,8 +728,10 @@ function EpisodeRow({
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col justify-center">
         <p className="text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          {ep.airDate && <p className="text-[#555] text-xs">{ep.airDate}</p>}
+        <div className="mt-1 flex items-start gap-2">
+          <p className="line-clamp-2 min-w-0 flex-1 text-xs leading-relaxed text-[var(--loom-muted)]">
+            {ep.summary || 'No episode description available.'}
+          </p>
           {episodeRating > 0 && (
             <span className="inline-flex items-center gap-1 rounded-full bg-[#f5c451]/15 px-2 py-0.5 text-[11px] font-semibold text-[#f5c451]">
               <Star className="h-3 w-3 fill-current" />

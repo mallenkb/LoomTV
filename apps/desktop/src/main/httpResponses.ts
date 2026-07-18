@@ -127,15 +127,6 @@ export function decodeDataUrl(dataUrl: string): { buffer: Buffer; mimeType: stri
   };
 }
 
-export function redirectToArtworkSource(res: ServerResponse, sourceUrl: string): void {
-  if (!canWriteResponse(res)) return;
-  res.writeHead(302, {
-    Location: sourceUrl,
-    'Cache-Control': 'public, max-age=3600',
-  });
-  res.end();
-}
-
 export function safeEndResponse(res: ServerResponse): void {
   if (!canWriteResponse(res)) return;
   try {

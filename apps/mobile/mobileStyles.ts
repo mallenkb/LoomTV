@@ -23,7 +23,7 @@ export type MobileThemeColors = {
 };
 
 export const settingsContentMaxWidth = 640;
-export const settingsMetricGap = 8;
+const settingsMetricGap = 8;
 export function createStyles(theme: MobileThemeColors) {
   const { accent, accentSoft, accentBorder, accentForeground, bg, panel, panel2, border, text, muted, faint } = theme;
   const isDarkTheme = text !== '#000000';
