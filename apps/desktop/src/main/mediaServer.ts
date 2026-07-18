@@ -34,6 +34,7 @@ import { probeMedia } from './mediaProbe';
 import { isSubtitleFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
+import { resolveLanProfileId } from './profileService';
 import { canWriteResponse, handleResponseErrors, pipeResponse } from './httpResponses';
 import {
   deviceHasLanScope,
@@ -81,6 +82,9 @@ let mediaServerPort = 3847;
 const mediaServerSockets = new Set<NodeSocket>();
 const LAN_IMAGE_CACHE_QUERY_PARAM = 'loomtvImageCache';
 const LAN_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
+const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
+const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
 
 export function getMediaServer(): http.Server | null { return mediaServer; }
 export function getMediaServerPort(): number { return mediaServerPort; }
@@ -195,27 +199,32 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
       handleResponseErrors(res);
       const corsAllowed = applyCorsHeaders(req, res, deps);
+      const loopbackRequest = isLoopbackRequest(req);
 
       if (req.method === 'OPTIONS') {
         res.writeHead(corsAllowed ? 204 : 403);
         res.end();
         return;
       }
-      if (!corsAllowed && !isLoopbackRequest(req)) {
+      if (!corsAllowed && !loopbackRequest) {
         writeJson(res, 403, { error: 'Browser origins are not accepted by the LAN API.' });
         return;
       }
 
       const reqUrl = new URL(req.url || '/', `http://127.0.0.1:${mediaServerPort}`);
       const routeAccess = mediaServerRouteAccess(reqUrl.pathname, req.method || 'GET');
+      // The paired device behind this request, when LAN-authorized. Local
+      // desktop requests keep null and resolve to the desktop's profile.
+      let lanDeviceId: string | null = null;
       const requireV2Scope = (requiredScope: LanRouteScope): boolean => {
         if (authorizeLocalRequest(reqUrl, req)) return true;
-        if (isLoopbackRequest(req)) {
+        if (loopbackRequest) {
           writeJson(res, 401, { error: 'Authenticated desktop access is required.' });
           return false;
         }
         const authorization = authorizeLanRequest(reqUrl, req);
         const device = authorization.device;
+        lanDeviceId = device?.id ?? null;
         const authorized = Boolean(device && deviceHasLanScope(device.scopes, requiredScope));
         if (!authorized) {
           writeJson(res, authorization.ok ? 403 : 401, {
@@ -234,11 +243,11 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         return libraryRoots;
       };
       let filePath = requestedPath;
-      if (!isLoopbackRequest(req)) {
+      if (!loopbackRequest) {
         filePath = resourceId
           ? (() => {
               try {
-                return resolveLocalResource(resourceId, new Set(['media', 'subtitle', 'image']), getLibraryRoots());
+                return resolveLocalResource(resourceId, ALL_LOCAL_RESOURCE_KINDS, getLibraryRoots());
               } catch {
                 return '';
               }
@@ -265,7 +274,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           // Only the configured local renderer origin may bootstrap its
           // short-lived desktop access token. Other loopback callers receive
           // the health response without credentials.
-          ...(corsAllowed && isLoopbackRequest(req) ? { localAccessToken: LOCAL_ACCESS_TOKEN } : {}),
+          ...(corsAllowed && loopbackRequest ? { localAccessToken: LOCAL_ACCESS_TOKEN } : {}),
         });
         return;
       }
@@ -322,7 +331,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               writeJson(res, 400, { error: 'deviceId required' });
               return;
             }
-            if (!isLoopbackRequest(req) && authResult.device && authResult.device.id !== requestedId) {
+            if (!loopbackRequest && authResult.device && authResult.device.id !== requestedId) {
               writeJson(res, 403, { error: 'Cannot revoke other devices' });
               return;
             }
@@ -373,7 +382,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
             const mediaResourceId = String(body.mediaId || '');
             let filePath = '';
             try {
-              filePath = resolveLocalResource(mediaResourceId, new Set(['media']), loadLibrary().libraryFolders || []);
+              filePath = resolveLocalResource(mediaResourceId, MEDIA_RESOURCE_KIND, getLibraryRoots());
             } catch {
               // The 404 response below intentionally does not reveal path details.
             }
@@ -394,8 +403,8 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               try {
                 const subtitleFilePath = resolveLocalResource(
                   subtitleResourceId,
-                  new Set(['subtitle']),
-                  loadLibrary().libraryFolders || [],
+                  SUBTITLE_RESOURCE_KIND,
+                  getLibraryRoots(),
                 );
                 if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
                 options[field] = subtitleFilePath;
@@ -435,7 +444,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       const isCacheableLanImageRequest = hasValidSignature && reqUrl.searchParams.get(LAN_IMAGE_CACHE_QUERY_PARAM) === '1';
       const hasLocalAccess = authorizeLocalRequest(reqUrl, req);
       const scope = routeAccess.kind === 'scoped' ? routeAccess.scope : null;
-      if (!isLoopbackRequest(req) && !isStreamRoute && !(isArtworkRoute && hasValidSignature) && !scope) {
+      if (!loopbackRequest && !isStreamRoute && !(isArtworkRoute && hasValidSignature) && !scope) {
         writeJson(res, 403, { error: 'This operation is only available to the desktop application.' });
         return;
       }
@@ -536,17 +545,10 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       }
 
 
-
-
-
-
-
-
-
       if (reqUrl.pathname === '/api/v2/progress' && req.method === 'GET') {
         const secret = loadSettings().localNetworkHmacSecret || '';
         writeJson(res, 200, Object.fromEntries(
-          Object.entries(getAllProgress()).map(([storedPath, progress]) => [
+          Object.entries(getAllProgress(resolveLanProfileId(lanDeviceId))).map(([storedPath, progress]) => [
             registerResource(secret, 'media', storedPath),
             progress,
           ]),
@@ -559,7 +561,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           .then((body) => {
             let file = '';
             try {
-              file = resolveLocalResource(String(body.mediaId || ''), new Set(['media']), loadLibrary().libraryFolders || []);
+              file = resolveLocalResource(String(body.mediaId || ''), MEDIA_RESOURCE_KIND, getLibraryRoots());
             } catch {
               // Avoid revealing whether a resource identifier exists.
             }
@@ -567,7 +569,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               writeJson(res, 400, { error: 'mediaId is required' });
               return;
             }
-            writeJson(res, 200, saveProgress(file, Number(body.position) || 0, Number(body.duration) || 0));
+            writeJson(res, 200, saveProgress(resolveLanProfileId(lanDeviceId), file, Number(body.position) || 0, Number(body.duration) || 0));
           })
           .catch((error) => {
             console.error('save progress API error:', error);
@@ -579,7 +581,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/playback-track-preferences' && req.method === 'GET') {
         const scope = reqUrl.searchParams.get('scope') || '';
-        writeJson(res, 200, getPlaybackTrackPreferences(scope));
+        writeJson(res, 200, getPlaybackTrackPreferences(resolveLanProfileId(lanDeviceId), scope));
         return;
       }
 
@@ -591,7 +593,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               writeJson(res, 400, { error: 'scope is required' });
               return;
             }
-            writeJson(res, 200, savePlaybackTrackPreferences(scope, body.preferences || {}));
+            writeJson(res, 200, savePlaybackTrackPreferences(resolveLanProfileId(lanDeviceId), scope, body.preferences || {}));
           })
           .catch((error) => {
             console.error('save playback track preferences API error:', error);
@@ -630,7 +632,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/cached-artwork') {
         let sourceUrl = reqUrl.searchParams.get('source') || '';
-        if (!isLoopbackRequest(req)) {
+        if (!loopbackRequest) {
           try {
             sourceUrl = resolveExternalArtworkResource(resourceId);
           } catch {

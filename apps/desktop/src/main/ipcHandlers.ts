@@ -79,8 +79,26 @@ export interface IpcHandlerDependencies<
   discoverLanPeers: (timeoutMs: number, ownDeviceId?: string) => Promise<IpcResult<'network:discover-peers'>>;
   getProgress: (filePath: string) => StoredProgress | null;
   getAllProgress: () => Record<string, StoredProgress>;
-  saveProgress: (filePath: string, position: number, duration: number) => IpcResult<'progress:save'>;
+  saveProgress: (filePath: string, position: number, duration: number, expectedProfileId?: string) => IpcResult<'progress:save'>;
   importProgress: (progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => void;
+  listProfiles: () => IpcResult<'profiles:list'>;
+  getActiveProfileState: () => IpcResult<'profiles:get-active'>;
+  createProfile: (input: IpcContract['profiles:create']['args'][0]) => IpcResult<'profiles:create'>;
+  updateProfile: (profileId: string, patch: IpcContract['profiles:update']['args'][1]) => IpcResult<'profiles:update'>;
+  deleteProfile: (profileId: string) => IpcResult<'profiles:delete'>;
+  selectProfile: (profileId: string, pin?: string) => IpcResult<'profiles:select'> | Promise<IpcResult<'profiles:select'>>;
+  selectGuestProfile: () => IpcResult<'profiles:select-guest'>;
+  lockProfile: () => IpcResult<'profiles:lock'>;
+  reorderProfiles: (profileIds: string[]) => IpcResult<'profiles:reorder'>;
+  changeProfilePin: (profileId: string, pin: string | null) => Promise<IpcResult<'profiles:pin'>>;
+  resetOwnerProfile: (confirmation: string) => IpcResult<'profiles:reset-owner'>;
+  setAutomaticSignIn: (enabled: boolean) => IpcResult<'profiles:set-auto-sign-in'>;
+  getProfilePreferences: () => IpcResult<'profile-preferences:get'>;
+  saveProfilePreferences: (patch: IpcContract['profile-preferences:save']['args'][0]) => IpcResult<'profile-preferences:save'>;
+  getProfileRestrictions: (profileId: string) => IpcResult<'profile-restrictions:get'>;
+  saveProfileRestrictions: (profileId: string, input: IpcContract['profile-restrictions:save']['args'][1]) => IpcResult<'profile-restrictions:save'>;
+  getProfileLists: (kind?: IpcContract['profile-lists:get']['args'][0]) => IpcResult<'profile-lists:get'>;
+  setProfileListEntry: (mediaId: string, kind: IpcContract['profile-lists:set']['args'][1], present: boolean) => IpcResult<'profile-lists:set'>;
   getPlaybackTrackPreferences: (scope?: string) => IpcResult<'playback-track-preferences:get'>;
   savePlaybackTrackPreferences: (
     scope: string,
@@ -303,9 +321,27 @@ export function registerIpcHandlers<
     return nextName;
   });
 
+  handle('profiles:list', () => deps.listProfiles());
+  handle('profiles:get-active', () => deps.getActiveProfileState());
+  handle('profiles:lock', () => deps.lockProfile());
+  handle('profiles:create', (_event, input) => deps.createProfile(input || { name: '' }));
+  handle('profiles:update', (_event, profileId: string, patch) => deps.updateProfile(String(profileId || ''), patch || {}));
+  handle('profiles:delete', (_event, profileId: string) => deps.deleteProfile(String(profileId || '')));
+  handle('profiles:select', (_event, profileId: string, pin?: string) => deps.selectProfile(String(profileId || ''), pin));
+  handle('profiles:select-guest', () => deps.selectGuestProfile());
+  handle('profiles:reorder', (_event, profileIds) => deps.reorderProfiles(Array.isArray(profileIds) ? profileIds.map(String) : []));
+  handle('profiles:pin', (_event, profileId, pin) => deps.changeProfilePin(String(profileId || ''), pin === null ? null : String(pin || '')));
+  handle('profiles:reset-owner', (_event, confirmation) => deps.resetOwnerProfile(String(confirmation || '')));
+  handle('profiles:set-auto-sign-in', (_event, enabled) => deps.setAutomaticSignIn(Boolean(enabled)));
+  handle('profile-preferences:get', () => deps.getProfilePreferences());
+  handle('profile-preferences:save', (_event, patch) => deps.saveProfilePreferences(patch || {}));
+  handle('profile-restrictions:get', (_event, profileId) => deps.getProfileRestrictions(String(profileId || '')));
+  handle('profile-restrictions:save', (_event, profileId, input) => deps.saveProfileRestrictions(String(profileId || ''), input));
+  handle('profile-lists:get', (_event, kind) => deps.getProfileLists(kind));
+  handle('profile-lists:set', (_event, mediaId, kind, present) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present)));
   handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress());
-  handle('progress:save', (_event, filePath: string, position: number, duration: number) =>
-    deps.saveProgress(filePath, Number(position) || 0, Number(duration) || 0));
+  handle('progress:save', (_event, filePath: string, position: number, duration: number, expectedProfileId?: string) =>
+    deps.saveProgress(filePath, Number(position) || 0, Number(duration) || 0, expectedProfileId));
   handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>) => {
     deps.importProgress(progress || {});
     return true;

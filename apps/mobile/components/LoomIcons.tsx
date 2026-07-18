@@ -1,4 +1,4 @@
-import Svg, { Circle, Path, Polyline, Rect } from 'react-native-svg';
+import Svg, { Circle, Path } from 'react-native-svg';
 
 export type IconProps = {
   size?: number;
@@ -41,15 +41,6 @@ export function PlayMark({ size = 24, color = '#ffffff' }: IconProps) {
   );
 }
 
-// Phosphor "House" — matches the desktop Sidebar HomeIcon.
-export function HomeIcon({ size = 24, color = '#ffffff' }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 256 256" fill={color}>
-      <Path d="M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z" />
-    </Svg>
-  );
-}
-
 // Matches the desktop Sidebar custom AnimeIcon verbatim, including the interior
 // kimono-fold cutouts that render via the even-odd fill rule.
 export function AnimeIcon({ size = 24, color = '#ffffff', solid = false }: IconProps & { solid?: boolean }) {
@@ -75,47 +66,11 @@ export function AnimeSolidIcon({ size = 24, color = '#ffffff' }: IconProps) {
   );
 }
 
-// lucide-react "Tv" — matches the desktop Sidebar.
-export function TVIcon({ size = 24, color = '#ffffff' }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <Rect x={2} y={7} width={20} height={15} rx={2} ry={2} />
-      <Polyline points="17 2 12 7 7 2" />
-    </Svg>
-  );
-}
-
-// lucide-react "Film" — matches the desktop Sidebar Movies icon.
-export function MoviesIcon({ size = 24, color = '#ffffff' }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <Rect x={3} y={3} width={18} height={18} rx={2} />
-      <Path d="M7 3v18" />
-      <Path d="M3 7.5h4" />
-      <Path d="M3 12h18" />
-      <Path d="M3 16.5h4" />
-      <Path d="M17 3v18" />
-      <Path d="M17 7.5h4" />
-      <Path d="M17 16.5h4" />
-    </Svg>
-  );
-}
-
 // lucide-react "Folder" — matches the desktop Sidebar Others icon.
 export function FolderIcon({ size = 24, color = '#ffffff' }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-    </Svg>
-  );
-}
-
-// lucide-react "Settings" — matches the desktop mobile-nav "More"/Settings slot.
-export function MoreIcon({ size = 24, color = '#ffffff' }: IconProps) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <Path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-      <Circle cx={12} cy={12} r={3} />
     </Svg>
   );
 }

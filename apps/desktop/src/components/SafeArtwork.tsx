@@ -23,19 +23,13 @@ export default function SafeArtwork({
   onError,
 }: SafeArtworkProps) {
   const [sourceIndex, setSourceIndex] = useState(0);
-  const [failedSources, setFailedSources] = useState<Set<string>>(() => new Set());
-  const failedSourcesRef = useRef(failedSources);
+  const failedSourcesRef = useRef<Set<string>>(new Set());
   const sources = useMemo(() => normalizeSources(src), [src]);
   const sourceKey = sources.join('|');
   const currentSource = sources[sourceIndex] || '';
 
   useEffect(() => {
-    failedSourcesRef.current = failedSources;
-  }, [failedSources]);
-
-  useEffect(() => {
     setSourceIndex(0);
-    setFailedSources(new Set());
     failedSourcesRef.current = new Set();
   }, [sourceKey]);
 
@@ -53,7 +47,6 @@ export default function SafeArtwork({
             onError?.();
             const nextFailed = new Set(failedSourcesRef.current).add(currentSource);
             failedSourcesRef.current = nextFailed;
-            setFailedSources(nextFailed);
             setSourceIndex((index) => {
               for (let nextIndex = index + 1; nextIndex < sources.length; nextIndex += 1) {
                 if (!nextFailed.has(sources[nextIndex])) return nextIndex;

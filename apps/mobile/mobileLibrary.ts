@@ -22,9 +22,17 @@ export function filePathFromUrl(value: string): string {
 }
 
 export function streamPathFor(item: MediaItem): string {
-  return item.type === 'movie'
-    ? item.filePath
-    : item.episodeFiles?.slice().sort((a, b) => a.season - b.season || a.episode - b.episode)[0]?.filePath || item.filePath;
+  if (item.type === 'movie' || !item.episodeFiles?.length) return item.filePath;
+
+  let earliestEpisode = item.episodeFiles[0];
+  for (let index = 1; index < item.episodeFiles.length; index += 1) {
+    const episode = item.episodeFiles[index];
+    if (episode.season < earliestEpisode.season
+      || (episode.season === earliestEpisode.season && episode.episode < earliestEpisode.episode)) {
+      earliestEpisode = episode;
+    }
+  }
+  return earliestEpisode.filePath;
 }
 
 export function needsTranscode(streamPath: string, meta?: LocalMediaDetails): boolean {
@@ -152,13 +160,15 @@ export function allItems(library: LibraryPayload): MediaItem[] {
 export function matchesQuery(item: MediaItem, query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
-  return [item.title, item.year ? String(item.year) : '', ...(item.genres || []), item.summary || '']
-    .some((value) => value.toLowerCase().includes(needle));
+  if (item.title.toLowerCase().includes(needle)) return true;
+  if (item.year && String(item.year).includes(needle)) return true;
+  if (item.summary?.toLowerCase().includes(needle)) return true;
+  return item.genres?.some((genre) => genre.toLowerCase().includes(needle)) ?? false;
 }
 
 export function matchesMobileSearchScope(item: MediaItem, scope: MobileSearchScope): boolean {
   if (scope === 'all') return true;
-  const genre = scope.replace('genre:', '').replace('-', ' ');
+  const genre = scope.slice('genre:'.length).replace('-', ' ');
   return (item.genres || []).some((itemGenre) => itemGenre.toLowerCase().includes(genre));
 }
 
@@ -174,12 +184,15 @@ export function matchesMobileLibraryFilter(
     if (filter === 'watched') return state.watched;
     return !state.inProgress && !state.watched;
   }
-  const episodeStates = (item.episodeFiles || []).map((episode) => (
-    progressStateFor(progress, episode.filePath, episode.localMetadata?.durationSeconds)
-  ));
-  const watchedCount = episodeStates.filter((state) => state.watched).length;
-  const inProgress = episodeStates.some((state) => state.inProgress);
-  const watched = episodeStates.length > 0 && watchedCount === episodeStates.length;
+  const episodes = item.episodeFiles || [];
+  let watchedCount = 0;
+  let inProgress = false;
+  for (const episode of episodes) {
+    const state = progressStateFor(progress, episode.filePath, episode.localMetadata?.durationSeconds);
+    if (state.watched) watchedCount += 1;
+    if (state.inProgress) inProgress = true;
+  }
+  const watched = episodes.length > 0 && watchedCount === episodes.length;
   const partiallyWatched = watchedCount > 0;
   if (filter === 'in-progress') return inProgress;
   if (filter === 'watched') return watched;

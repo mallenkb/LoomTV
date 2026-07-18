@@ -1,6 +1,7 @@
 import { app, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch';
 import type { LibraryData } from './appContracts.ts';
@@ -37,9 +38,53 @@ import type {
   MediaSegmentSource,
   ProviderCacheEntry,
 } from './skipSegments/types';
-import { migrateDatabase } from './databaseMigrations';
+import { migrateDatabase, profilesMigrationPending } from './databaseMigrations';
+import {
+  clearDeviceProfileSelection as clearDeviceProfileSelectionRecord,
+  createProfile as createProfileRecord,
+  createGuestProfile as createGuestProfileRecord,
+  deleteProfile as deleteProfileRecord,
+  getDeviceProfileSelection as getDeviceProfileSelectionRecord,
+  getDeviceProfileSelectionState as getDeviceProfileSelectionStateRecord,
+  getOwnerProfile as getOwnerProfileRecord,
+  getProfile as getProfileRecord,
+  getProfileLists as getProfileListsRecord,
+  getProfilePinCredentials as getProfilePinCredentialsRecord,
+  getProfilePreferences as getProfilePreferencesRecord,
+  getProfileRestrictions as getProfileRestrictionsRecord,
+  listProfiles as listProfileRecords,
+  profilePersonalDataCount as profilePersonalDataCountRecord,
+  reorderProfiles as reorderProfileRecords,
+  resetOwnerProfile as resetOwnerProfileRecord,
+  saveProfilePreferences as saveProfilePreferencesRecord,
+  saveProfileRestrictions as saveProfileRestrictionsRecord,
+  selectDeviceProfile as selectDeviceProfileRecord,
+  setDeviceAutomaticSignIn as setDeviceAutomaticSignInRecord,
+  setProfileListEntry as setProfileListEntryRecord,
+  setProfilePinCredentials as setProfilePinCredentialsRecord,
+  type DeviceProfileSelection,
+  type ProfileCreateInput,
+  type ProfileListEntry,
+  type ProfileListKind,
+  type ProfilePreferences,
+  type ProfileRecord,
+  type ProfileRestrictions,
+  type ProfileUpdateInput,
+  updateProfile as updateProfileRecord,
+} from './databaseProfilesRepository.ts';
 
 export type { PlaybackTrackPreferences, StoredProgress } from './databasePlaybackRepository.ts';
+export type {
+  DeviceProfileSelection,
+  ProfileCreateInput,
+  ProfileListEntry,
+  ProfileListKind,
+  ProfilePreferences,
+  ProfileRecord,
+  ProfileRestrictions,
+  ProfileType,
+  ProfileUpdateInput,
+} from './databaseProfilesRepository.ts';
 export type { CachedArtwork } from './databaseArtworkRepository.ts';
 export type { StoredMediaFingerprint } from './databaseSegmentsRepository.ts';
 
@@ -63,8 +108,39 @@ function getDb(): BetterSqlite3.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
+  backupBeforeProfilesMigration(db);
   migrateDatabase(db);
   return db;
+}
+
+// A plain file copy of an open WAL database misses recent writes, so the
+// pre-migration backup uses VACUUM INTO and is verified before migrating.
+function backupBeforeProfilesMigration(database: BetterSqlite3.Database): void {
+  try {
+    if (!profilesMigrationPending(database)) return;
+    const hasProgress = database
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'playback_progress'")
+      .get()
+      ? (database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n > 0
+      : false;
+    if (!hasProgress) return;
+    const backupPath = path.join(app.getPath('userData'), 'loomtv-pre-profiles-backup.sqlite');
+    if (!fs.existsSync(backupPath)) {
+      database.prepare('VACUUM INTO ?').run(backupPath);
+    }
+    const backup = new BetterSqlite3(backupPath, { readonly: true });
+    try {
+      const check = backup.pragma('quick_check') as Array<{ quick_check: string }>;
+      if (check[0]?.quick_check !== 'ok') throw new Error('Backup integrity check failed.');
+    } finally {
+      backup.close();
+    }
+  } catch (error) {
+    throw new Error(
+      `LoomTV could not create a pre-migration database backup: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 function getSegmentRepository(): ReturnType<typeof createDatabaseSegmentsRepository> {
@@ -82,7 +158,9 @@ function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkReposito
 
 
 export function loadLibraryFromDatabase(): LibraryData | null {
-  return loadLibraryRecord(getDb(), getProgressMap(), getCustomArtworkMap());
+  // The library payload is profile-neutral: viewer recency is derived from the
+  // selected profile's progress by each client, never baked into the catalog.
+  return loadLibraryRecord(getDb(), new Map(), getCustomArtworkMap());
 }
 
 export function saveLibraryToDatabase(data: LibraryData): void {
@@ -96,20 +174,112 @@ export function saveSettingsToDatabase(settings: SettingsData): void {
   saveSettingsRecord(getDb(), settings);
 }
 
-export function getProgress(filePath: string): StoredProgress | null {
-  return getProgressRecord(getDb(), filePath);
+export function getProgress(profileId: string, filePath: string): StoredProgress | null {
+  return getProgressRecord(getDb(), profileId, filePath);
 }
 
-export function getAllProgress(): Record<string, StoredProgress> {
-  return getAllProgressRecord(getDb());
+export function getAllProgress(profileId: string): Record<string, StoredProgress> {
+  return getAllProgressRecord(getDb(), profileId);
 }
 
-export function getPlaybackTrackPreferences(scope?: string): PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> {
-  return getPlaybackTrackPreferencesRecord(getDb(), scope);
+export function getPlaybackTrackPreferences(profileId: string, scope?: string): PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> {
+  return getPlaybackTrackPreferencesRecord(getDb(), profileId, scope);
 }
 
-export function savePlaybackTrackPreferences(scope: string, preferences: PlaybackTrackPreferences): PlaybackTrackPreferences {
-  return savePlaybackTrackPreferencesRecord(getDb(), scope, preferences);
+export function savePlaybackTrackPreferences(profileId: string, scope: string, preferences: PlaybackTrackPreferences): PlaybackTrackPreferences {
+  return savePlaybackTrackPreferencesRecord(getDb(), profileId, scope, preferences);
+}
+
+export function listProfiles(): ProfileRecord[] {
+  return listProfileRecords(getDb());
+}
+
+export function getProfile(profileId: string): ProfileRecord | null {
+  return getProfileRecord(getDb(), profileId);
+}
+
+export function getOwnerProfile(): ProfileRecord | null {
+  return getOwnerProfileRecord(getDb());
+}
+
+export function createProfile(input: ProfileCreateInput): ProfileRecord {
+  return createProfileRecord(getDb(), input);
+}
+
+export function updateProfile(profileId: string, patch: ProfileUpdateInput): ProfileRecord {
+  return updateProfileRecord(getDb(), profileId, patch);
+}
+
+export function deleteProfile(profileId: string): void {
+  deleteProfileRecord(getDb(), profileId);
+}
+
+export function getDeviceProfileSelection(deviceId: string): string | null {
+  return getDeviceProfileSelectionRecord(getDb(), deviceId);
+}
+
+export function selectDeviceProfile(deviceId: string, profileId: string): ProfileRecord {
+  return selectDeviceProfileRecord(getDb(), deviceId, profileId);
+}
+
+export function getDeviceProfileSelectionState(deviceId: string): DeviceProfileSelection | null {
+  return getDeviceProfileSelectionStateRecord(getDb(), deviceId);
+}
+
+export function clearDeviceProfileSelection(deviceId: string): void {
+  clearDeviceProfileSelectionRecord(getDb(), deviceId);
+}
+
+export function setDeviceAutomaticSignIn(deviceId: string, enabled: boolean): DeviceProfileSelection {
+  return setDeviceAutomaticSignInRecord(getDb(), deviceId, enabled);
+}
+
+export function createGuestProfile(deviceId: string): ProfileRecord {
+  return createGuestProfileRecord(getDb(), deviceId);
+}
+
+export function reorderProfiles(profileIds: readonly string[]): ProfileRecord[] {
+  return reorderProfileRecords(getDb(), profileIds);
+}
+
+export function getProfilePinCredentials(profileId: string): { hash: string; salt: string } | null {
+  return getProfilePinCredentialsRecord(getDb(), profileId);
+}
+
+export function setProfilePinCredentials(profileId: string, credentials: { hash: string; salt: string } | null): ProfileRecord {
+  return setProfilePinCredentialsRecord(getDb(), profileId, credentials);
+}
+
+export function getProfilePreferences(profileId: string): ProfilePreferences {
+  return getProfilePreferencesRecord(getDb(), profileId);
+}
+
+export function saveProfilePreferences(profileId: string, patch: ProfilePreferences): ProfilePreferences {
+  return saveProfilePreferencesRecord(getDb(), profileId, patch);
+}
+
+export function getProfileRestrictions(profileId: string): ProfileRestrictions {
+  return getProfileRestrictionsRecord(getDb(), profileId);
+}
+
+export function saveProfileRestrictions(profileId: string, input: Omit<ProfileRestrictions, 'revision'>): ProfileRestrictions {
+  return saveProfileRestrictionsRecord(getDb(), profileId, input);
+}
+
+export function getProfileLists(profileId: string, kind?: ProfileListKind): ProfileListEntry[] {
+  return getProfileListsRecord(getDb(), profileId, kind);
+}
+
+export function setProfileListEntry(profileId: string, mediaId: string, kind: ProfileListKind, present: boolean): ProfileListEntry[] {
+  return setProfileListEntryRecord(getDb(), profileId, mediaId, kind, present);
+}
+
+export function profilePersonalDataCount(profileId: string): number {
+  return profilePersonalDataCountRecord(getDb(), profileId);
+}
+
+export function resetOwnerProfile(): ProfileRecord {
+  return resetOwnerProfileRecord(getDb());
 }
 export function getSegmentSourceCache(
   provider: ProviderCacheEntry['provider'],
@@ -291,12 +461,12 @@ export function getSegmentAnalysisStates(mediaId?: string): Array<{
 export function cleanupOrphanedAutomaticSegments(limit = 250): number {
   return getSegmentRepository().cleanupOrphanedAutomaticSegments(limit);
 }
-export function saveProgress(filePath: string, position: number, duration: number): StoredProgress {
-  return saveProgressRecord(getDb(), filePath, position, duration);
+export function saveProgress(profileId: string, filePath: string, position: number, duration: number): StoredProgress {
+  return saveProgressRecord(getDb(), profileId, filePath, position, duration);
 }
 
-export function importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>): void {
-  importProgressRecords(getDb(), progress);
+export function importProgress(profileId: string, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>): void {
+  importProgressRecords(getDb(), profileId, progress);
 }
 export function saveCustomArtwork(mediaId: string, target: string, dataUrl: string): void {
   getArtworkRepository().saveCustomArtwork(mediaId, target, dataUrl);
@@ -313,10 +483,6 @@ export function getCustomArtworkData(mediaId: string, target: string): { dataUrl
 export function importCustomArtwork(entries: Record<string, Record<string, string>>): void {
   getArtworkRepository().importCustomArtwork(entries);
 }
-function getProgressMap(): Map<string, StoredProgress> {
-  return new Map(Object.entries(getAllProgress()));
-}
-
 function getCustomArtworkMap(): Map<string, Map<string, string>> {
   return getArtworkRepository().getCustomArtworkMap();
 }
@@ -378,7 +544,7 @@ export async function backupDatabase(): Promise<{ ok: boolean; path?: string; er
 
 export function clearDatabase(): void {
   const database = getDb();
-  database.exec(`
+  database.transaction(() => database.exec(`
     DELETE FROM segment_manual_history;
     DELETE FROM media_segments;
     DELETE FROM media_segment_candidates;
@@ -391,6 +557,13 @@ export function clearDatabase(): void {
     DELETE FROM artwork_cache;
     DELETE FROM custom_artwork;
     DELETE FROM playback_progress;
+    DELETE FROM playback_track_preferences;
+    DELETE FROM profile_media_lists;
+    DELETE FROM profile_library_access;
+    DELETE FROM profile_restrictions;
+    DELETE FROM profile_preferences;
+    DELETE FROM device_profile_selections;
+    DELETE FROM profiles;
     DELETE FROM episode_files;
     DELETE FROM episodes;
     DELETE FROM seasons;
@@ -398,7 +571,12 @@ export function clearDatabase(): void {
     DELETE FROM library_folders;
     DELETE FROM scan_cache;
     DELETE FROM app_settings;
-  `);
+  `))();
+  const now = Date.now();
+  database.prepare(`
+    INSERT INTO profiles (id, name, avatar_key, color_key, profile_type, created_at, updated_at, sort_order)
+    VALUES (?, 'Owner', 'weave-01', 'ember', 'owner', ?, ?, 0)
+  `).run(randomUUID(), now, now);
   database.pragma('wal_checkpoint(TRUNCATE)');
   database.exec('VACUUM;');
 }

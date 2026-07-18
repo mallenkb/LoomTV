@@ -9,21 +9,34 @@ const PROBE_CACHE_LIMIT = 1000;
 const probeCache = new Map<string, ProbeResult>();
 const execFileAsync = promisify(execFile);
 
+function statLocalMediaPath(filePath: string): fs.Stats {
+  if (!filePath || typeof filePath !== 'string') throw new Error('A local file path is required.');
+  if (/^[a-z]+:\/\//i.test(filePath)) throw new Error('Remote URLs are not allowed.');
+
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error('Media file does not exist.', { cause: error });
+    }
+    throw error;
+  }
+  if (!stats.isFile()) throw new Error('Media path is not a file.');
+  return stats;
+}
+
 function streamType(value?: string): MediaTrack['type'] {
   if (value === 'video' || value === 'audio' || value === 'subtitle' || value === 'data') return value;
   return 'unknown';
 }
 
 export function assertLocalMediaPath(filePath: string): string {
-  if (!filePath || typeof filePath !== 'string') throw new Error('A local file path is required.');
-  if (/^[a-z]+:\/\//i.test(filePath)) throw new Error('Remote URLs are not allowed.');
-  if (!fs.existsSync(filePath)) throw new Error('Media file does not exist.');
-  if (!fs.statSync(filePath).isFile()) throw new Error('Media path is not a file.');
+  statLocalMediaPath(filePath);
   return filePath;
 }
 
-function probeCacheKey(filePath: string): string {
-  const stats = fs.statSync(filePath);
+function probeCacheKey(filePath: string, stats: fs.Stats): string {
   return `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`;
 }
 
@@ -37,8 +50,8 @@ function cacheProbeResult(cacheKey: string, result: ProbeResult): ProbeResult {
 }
 
 export async function probeMedia(filePath: string): Promise<ProbeResult> {
-  assertLocalMediaPath(filePath);
-  const cacheKey = probeCacheKey(filePath);
+  const stats = statLocalMediaPath(filePath);
+  const cacheKey = probeCacheKey(filePath, stats);
   const cached = probeCache.get(cacheKey);
   if (cached) return cached;
 

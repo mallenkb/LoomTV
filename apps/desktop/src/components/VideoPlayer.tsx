@@ -16,6 +16,7 @@ import {
   type MediaSegmentType,
 } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
+import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
   getPlayableStartPosition,
   hydrateProgressFromDatabase,
@@ -197,6 +198,13 @@ export default function VideoPlayer({
   const subtitleStyleApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nativeSubtitleFallbackRef = useRef(false);
   const nativeSubtitleStyleRefreshRafRef = useRef<number | null>(null);
+  // Set before handing control to the next episode so queued events from the
+  // outgoing media element cannot restart that same episode during teardown.
+  const pendingEpisodeTransitionRef = useRef<string | null>(null);
+  // An open-ended credits/outro marker means "finish this episode". Keep that
+  // intent across the final seek so an ended event advances instead of being
+  // treated as an interrupted transcode that should restart this file.
+  const pendingOutroCompletionRef = useRef(false);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
@@ -410,6 +418,8 @@ export default function VideoPlayer({
   useEffect(() => {
     setDismissedNextPromptKey(null);
     setRejectedSegments([]);
+    pendingEpisodeTransitionRef.current = null;
+    pendingOutroCompletionRef.current = false;
   }, [filePath]);
 
   useEffect(() => {
@@ -659,13 +669,30 @@ export default function VideoPlayer({
     setNextCountdown(null);
   }, []);
 
+  const transitionToEpisode = useCallback((next: EpisodeFile) => {
+    if (!onEpisodeChange || !next.filePath || next.filePath === filePath) return;
+
+    pendingEpisodeTransitionRef.current = next.filePath;
+    clearNextEpisodeCountdown();
+    // Pause the outgoing element before changing its source. Suppress the
+    // resulting pause event so the next episode is still allowed to autoplay.
+    userPausedRef.current = false;
+    suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
+    const video = videoRef.current;
+    if (video) {
+      video.autoplay = false;
+      video.pause();
+    }
+    setPaused(true);
+    onEpisodeChange(next.filePath, next.season, next.episode);
+  }, [clearNextEpisodeCountdown, filePath, onEpisodeChange]);
+
   const goToEpisode = useCallback((season: number, episode: number) => {
     const next = episodeFiles.find((item) => item.season === season && item.episode === episode);
     if (next && onEpisodeChange) {
-      clearNextEpisodeCountdown();
-      onEpisodeChange(next.filePath, season, episode);
+      transitionToEpisode(next);
     }
-  }, [clearNextEpisodeCountdown, episodeFiles, onEpisodeChange]);
+  }, [episodeFiles, onEpisodeChange, transitionToEpisode]);
 
   const handlePrevEpisode = useCallback(() => {
     const currentIndex = playableEpisodeFiles.findIndex((item) =>
@@ -680,9 +707,11 @@ export default function VideoPlayer({
   }, [goToEpisode, nextEpisodeFile]);
 
   const markCurrentEpisodeComplete = useCallback(() => {
-    if (duration <= 0) return;
-    updatePlaybackSnapshot(duration, duration, { forceReact: true });
-    void savePlaybackProgress(filePath, duration, duration);
+    const videoDuration = Number.isFinite(videoRef.current?.duration) ? Number(videoRef.current?.duration) : 0;
+    const completeDuration = duration || playbackDurationRef.current || probedDurationRef.current || videoDuration;
+    if (completeDuration <= 0) return;
+    updatePlaybackSnapshot(completeDuration, completeDuration, { forceReact: true });
+    void savePlaybackProgress(filePath, completeDuration, completeDuration);
     setTick((n) => n + 1);
   }, [duration, filePath, updatePlaybackSnapshot]);
 
@@ -696,6 +725,10 @@ export default function VideoPlayer({
 
   const scheduleNextEpisode = useCallback(() => {
     if (!nextEpisodeFile || !onEpisodeChange) return;
+    // HLS/native playback can emit more than one end notification while the
+    // source is being released. Keep the original countdown instead of
+    // restarting it on every notification.
+    if (nextEpisodeTimerRef.current) return;
     clearNextEpisodeCountdown();
     let remainingSeconds = NEXT_EPISODE_COUNTDOWN_SECONDS;
     setNextCountdown(remainingSeconds);
@@ -703,12 +736,12 @@ export default function VideoPlayer({
       remainingSeconds -= 1;
       if (remainingSeconds <= 0) {
         clearNextEpisodeCountdown();
-        onEpisodeChange(nextEpisodeFile.filePath, nextEpisodeFile.season, nextEpisodeFile.episode);
+        goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
         return;
       }
       setNextCountdown(remainingSeconds);
     }, 1000);
-  }, [clearNextEpisodeCountdown, nextEpisodeFile, onEpisodeChange]);
+  }, [clearNextEpisodeCountdown, goToEpisode, nextEpisodeFile, onEpisodeChange]);
 
   const latestEpisodePlaybackRef = useRef({
     autoplayNextEnabled,
@@ -1294,6 +1327,11 @@ export default function VideoPlayer({
     };
 
     const onEnded = () => {
+      // The old source can still deliver an `ended` event after the parent has
+      // requested another episode. Never let that stale event restart playback.
+      if (sourceToken !== sourceLoadTokenRef.current || pendingEpisodeTransitionRef.current) return;
+      const outroCompletionRequested = pendingOutroCompletionRef.current;
+      pendingOutroCompletionRef.current = false;
       const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
       const totalDuration = probedDurationRef.current || (Number.isFinite(video.duration) ? video.duration : 0);
       const eventPosition = clampSeconds(absoluteMediaSeconds(currentTime, {
@@ -1308,6 +1346,17 @@ export default function VideoPlayer({
         Math.max(eventPosition, playbackPositionRef.current),
         totalDuration || undefined,
       );
+      if (outroCompletionRequested) {
+        latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
+        setPaused(true);
+        // Pressing Skip Outro is an explicit request to finish this episode,
+        // so advance even when the optional end-of-episode autoplay toggle is
+        // disabled. Normal, unprompted endings still respect that toggle.
+        if (latestEpisodePlaybackRef.current.nextEpisodeFile) {
+          latestEpisodePlaybackRef.current.scheduleNextEpisode();
+        }
+        return;
+      }
       const nearEnoughToComplete = totalDuration > 0
         && totalDuration - endedPosition <= Math.max(END_COMPLETION_TOLERANCE_SECONDS, REPLAY_FROM_START_REMAINING_SECONDS);
       if (nearEnoughToComplete) {
@@ -1457,7 +1506,7 @@ export default function VideoPlayer({
     video.pause();
   }, [playerState]);
 
-  const persistFinalPlaybackProgress = useCallback(() => {
+  const persistFinalPlaybackProgress = useCallback(async () => {
     const video = videoRef.current;
     const snapshot = playbackProgressForExit({
       videoPosition: video?.currentTime ?? 0,
@@ -1470,11 +1519,11 @@ export default function VideoPlayer({
     });
     if (snapshot.position <= 10 || snapshot.duration <= 0) return;
     updatePlaybackSnapshot(snapshot.position, snapshot.duration, { forceReact: true });
-    void savePlaybackProgress(filePath, snapshot.position, snapshot.duration);
+    await savePlaybackProgress(filePath, snapshot.position, snapshot.duration);
   }, [filePath, streamIsTranscoded, updatePlaybackSnapshot]);
 
-  const shutdownPlayback = useCallback(() => {
-    persistFinalPlaybackProgress();
+  const shutdownPlayback = useCallback(async () => {
+    await persistFinalPlaybackProgress();
     playerActiveRef.current = false;
     userPausedRef.current = true;
     loadTokenRef.current += 1;
@@ -1486,18 +1535,23 @@ export default function VideoPlayer({
       video.autoplay = false;
       video.pause();
     }
-    void stopTranscodeSession();
+    await stopTranscodeSession();
   }, [clearHls, clearNextEpisodeCountdown, persistFinalPlaybackProgress, stopTranscodeSession]);
+
+  useEffect(() => registerPlaybackShutdown(async () => {
+    await shutdownPlayback();
+    onClose();
+  }), [onClose, shutdownPlayback]);
 
   const handleClose = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    shutdownPlayback();
+    void shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
 
   const handleBack = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    shutdownPlayback();
+    void shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
 
@@ -2378,6 +2432,9 @@ export default function VideoPlayer({
               const targetSeconds = activeMediaSegment.endMs === null
                 ? Math.max(activeMediaSegment.startMs / 1000, activeMediaSegment.mediaDurationMs / 1000 - END_COMPLETION_TOLERANCE_SECONDS)
                 : activeMediaSegment.endMs / 1000;
+              if (activeMediaSegment.endMs === null) {
+                pendingOutroCompletionRef.current = true;
+              }
               seekTo(targetSeconds);
             }}
             className="absolute bottom-32 right-8 z-40 rounded-md border border-white/25 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-md transition hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"

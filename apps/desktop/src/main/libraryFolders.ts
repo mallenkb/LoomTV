@@ -39,13 +39,15 @@ export function normalizeLibraryFolderGroups(data?: Partial<LibraryData>): Libra
     normalized.others = [...(groups.others || [])];
   }
 
+  const knownFolders = new Set(flattenLibraryFolders(normalized));
   for (const folder of data?.libraryFolders || []) {
-    if (flattenLibraryFolders(normalized).includes(folder)) continue;
+    if (knownFolders.has(folder)) continue;
     const detected = detectLibraryFolderKind(folder);
     if (detected === 'movies') normalized.movies.push(folder);
     else if (detected === 'tv') normalized.tvShows.push(folder);
     else if (detected === 'anime') normalized.anime.push(folder);
     else normalized.others.push(folder);
+    knownFolders.add(folder);
   }
 
   return {

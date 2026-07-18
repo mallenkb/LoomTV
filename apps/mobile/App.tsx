@@ -897,6 +897,7 @@ function AppRoot() {
   const shouldAutoplayRef = useRef(false);
   const userPausedRef = useRef(false);
   const pendingSeekRef = useRef(0);
+  const autoAdvancedEpisodeRef = useRef<string | null>(null);
   const [isPairing, setIsPairing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshingArtworkId, setRefreshingArtworkId] = useState('');
@@ -1279,6 +1280,13 @@ function AppRoot() {
   }, [playbackUrl]);
 
   useEffect(() => {
+    const currentFilePath = playTarget ? filePathFromUrl(playTarget.streamPath) : null;
+    if (autoAdvancedEpisodeRef.current !== currentFilePath) {
+      autoAdvancedEpisodeRef.current = null;
+    }
+  }, [playTarget?.streamPath]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadSource() {
@@ -1374,6 +1382,33 @@ function AppRoot() {
     });
 
     const endSubscription = player.addListener?.('playToEnd', () => {
+      const endedTarget = playTarget;
+      const currentFilePath = endedTarget ? filePathFromUrl(endedTarget.streamPath) : '';
+      if (currentFilePath && autoAdvancedEpisodeRef.current === currentFilePath) return;
+
+      const currentItem = endedTarget?.mediaId
+        ? allItems(connection?.library || {}).find((item) => item.id === endedTarget.mediaId)
+        : undefined;
+      if (currentItem && currentItem.type !== 'movie' && endedTarget?.season !== undefined && endedTarget.episode !== undefined) {
+        const episodeFiles = sortedEpisodes(currentItem);
+        const currentIndex = episodeFiles.findIndex((episode) =>
+          episode.season === endedTarget.season && episode.episode === endedTarget.episode,
+        );
+        const nextEpisode = currentIndex >= 0 ? episodeFiles[currentIndex + 1] : undefined;
+        if (nextEpisode) {
+          void syncPlaybackProgress(endedTarget);
+          autoAdvancedEpisodeRef.current = currentFilePath;
+          playerReturnItemRef.current = currentItem;
+          shouldAutoplayRef.current = true;
+          userPausedRef.current = false;
+          setPlaybackFailure(null);
+          setPlaybackUrl(null);
+          setStreamOptions({});
+          setPlayTarget(episodePlayTarget(currentItem, nextEpisode, progress));
+          return;
+        }
+      }
+
       shouldAutoplayRef.current = false;
     });
 
@@ -1384,7 +1419,7 @@ function AppRoot() {
       sourceChangeSubscription?.remove?.();
       endSubscription?.remove?.();
     };
-  }, [playbackUrl, player, streamOptions.forceTranscode]);
+  }, [connection?.library, playbackUrl, playTarget, player, progress, streamOptions.forceTranscode]);
 
   useEffect(() => {
     if (!playbackUrl) return;

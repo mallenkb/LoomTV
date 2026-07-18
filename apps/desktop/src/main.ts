@@ -113,18 +113,28 @@ import {
   getSegmentAnalysisInventory,
   getSegmentAnalysisJobCounts,
   getSegmentAnalysisJobs,
+  createProfile,
+  deleteProfile,
   getAllProgress,
   getManagedSegmentCandidates,
   getPlaybackTrackPreferences,
   getProgress,
+  getProfileLists,
+  getProfilePreferences,
+  getProfileRestrictions,
   importCustomArtwork,
   importProgress,
+  reorderProfiles,
+  updateProfile,
   eraseAutomaticSegmentCandidates,
   loadLibraryFromDatabase,
   saveCustomArtwork,
   saveLibraryToDatabase,
   savePlaybackTrackPreferences,
+  saveProfilePreferences,
+  saveProfileRestrictions,
   saveProgress,
+  setProfileListEntry,
   saveSegmentAnalysisInventory,
   updateSegmentAnalysisJob,
   updateSegmentCandidate,
@@ -132,6 +142,21 @@ import {
   requeueWaitingSegmentAnalysisJobs,
   resetAutomaticAnalysisData,
 } from './main/database';
+import {
+  broadcastProfilesChanged,
+  changeProfilePin,
+  createAndSelectGuest,
+  DESKTOP_DEVICE_ID,
+  getDesktopActiveProfileId,
+  getDesktopActiveProfileState,
+  lockProfile,
+  profileSummaries,
+  requireDesktopProfileId,
+  requireOwner,
+  resetOwnerProfile,
+  setDesktopAutomaticSignIn,
+  selectDesktopProfile,
+} from './main/profileService';
 import {
   cleanMediaTitle,
   isGenericGroupingFolderTitle,
@@ -739,7 +764,7 @@ function pathExists(candidatePath?: string): boolean {
 function isExistingMediaFile(candidatePath?: string): boolean {
   if (!candidatePath) return false;
   try {
-    return fs.existsSync(candidatePath) && fs.statSync(candidatePath).isFile();
+    return fs.statSync(candidatePath).isFile();
   } catch {
     return false;
   }
@@ -1126,12 +1151,78 @@ registerIpcHandlers<LibraryData, AppSettings>({
   getLocalNetworkNameFast,
   getLocalNetworkAddresses,
   discoverLanPeers,
-  getProgress,
-  getAllProgress,
-  saveProgress,
-  importProgress,
-  getPlaybackTrackPreferences,
-  savePlaybackTrackPreferences: (scope, preferences) => savePlaybackTrackPreferences(scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[1]),
+  // Viewer state resolves the active desktop profile in the main process; the
+  // renderer never chooses a profile ID for progress calls.
+  getProgress: (filePath) => {
+    const profileId = getDesktopActiveProfileId();
+    return profileId ? getProgress(profileId, filePath) : null;
+  },
+  getAllProgress: () => {
+    const profileId = getDesktopActiveProfileId();
+    return profileId ? getAllProgress(profileId) : {};
+  },
+  saveProgress: (filePath, position, duration, expectedProfileId) =>
+    saveProgress(requireDesktopProfileId(expectedProfileId), filePath, position, duration),
+  importProgress: (progress) => importProgress(requireDesktopProfileId(), progress),
+  listProfiles: profileSummaries,
+  getActiveProfileState: getDesktopActiveProfileState,
+  createProfile: (input) => {
+    requireOwner();
+    createProfile(input);
+    broadcastProfilesChanged();
+    return profileSummaries();
+  },
+  updateProfile: (profileId, patch) => {
+    requireOwner();
+    updateProfile(profileId, patch);
+    broadcastProfilesChanged();
+    return profileSummaries();
+  },
+  deleteProfile: (profileId) => {
+    requireOwner();
+    deleteProfile(profileId);
+    broadcastProfilesChanged();
+    return profileSummaries();
+  },
+  selectProfile: (profileId, pin) => selectDesktopProfile(profileId, pin),
+  selectGuestProfile: () => createAndSelectGuest(DESKTOP_DEVICE_ID),
+  lockProfile: () => lockProfile(DESKTOP_DEVICE_ID),
+  reorderProfiles: (profileIds) => {
+    requireOwner();
+    const profiles = reorderProfiles(profileIds);
+    broadcastProfilesChanged();
+    return profiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      avatarKey: profile.avatarKey,
+      colorKey: profile.colorKey,
+      type: profile.type,
+      hasPin: profile.hasPin,
+      isGuest: profile.isGuest,
+      sortOrder: profile.sortOrder,
+      ...(profile.lastUsedAt ? { lastUsedAt: profile.lastUsedAt } : {}),
+    }));
+  },
+  changeProfilePin,
+  resetOwnerProfile,
+  setAutomaticSignIn: setDesktopAutomaticSignIn,
+  getProfilePreferences: () => getProfilePreferences(requireDesktopProfileId()),
+  saveProfilePreferences: (patch) => saveProfilePreferences(requireDesktopProfileId(), patch),
+  getProfileRestrictions: (profileId) => {
+    requireOwner();
+    return getProfileRestrictions(profileId);
+  },
+  saveProfileRestrictions: (profileId, input) => {
+    requireOwner();
+    return saveProfileRestrictions(profileId, input);
+  },
+  getProfileLists: (kind) => getProfileLists(requireDesktopProfileId(), kind),
+  setProfileListEntry: (mediaId, kind, present) => setProfileListEntry(requireDesktopProfileId(), mediaId, kind, present),
+  getPlaybackTrackPreferences: (scope) => {
+    const profileId = getDesktopActiveProfileId();
+    return profileId ? getPlaybackTrackPreferences(profileId, scope) : {};
+  },
+  savePlaybackTrackPreferences: (scope, preferences) => savePlaybackTrackPreferences(requireDesktopProfileId(), scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[2]),
   getMediaSegments: skipSegmentService.getSegments,
   saveManualMediaSegment: skipSegmentService.saveManualSegment,
   deleteManualMediaSegment: skipSegmentService.deleteManualSegment,

@@ -80,14 +80,14 @@ export function saveSettings(database: BetterSqlite3.Database, settings: Setting
   database.prepare('INSERT OR REPLACE INTO app_settings (id, data_json, updated_at) VALUES (1, ?, ?)').run(jsonString(settings), Date.now());
 }
 
-export function getProgress(database: BetterSqlite3.Database, filePath: string): StoredProgress | null {
-  const row = database.prepare('SELECT * FROM playback_progress WHERE file_path = ?').get(filePath) as ProgressRow | undefined;
+export function getProgress(database: BetterSqlite3.Database, profileId: string, filePath: string): StoredProgress | null {
+  const row = database.prepare('SELECT * FROM playback_progress WHERE profile_id = ? AND file_path = ?').get(profileId, filePath) as ProgressRow | undefined;
   if (!row) return null;
   return { position: row.position, duration: row.duration, updatedAt: row.updated_at, watched: Boolean(row.watched) };
 }
 
-export function getAllProgress(database: BetterSqlite3.Database): Record<string, StoredProgress> {
-  return Object.fromEntries((database.prepare('SELECT * FROM playback_progress').all() as ProgressRow[]).map((row): [string, StoredProgress] => [
+export function getAllProgress(database: BetterSqlite3.Database, profileId: string): Record<string, StoredProgress> {
+  return Object.fromEntries((database.prepare('SELECT * FROM playback_progress WHERE profile_id = ?').all(profileId) as ProgressRow[]).map((row): [string, StoredProgress] => [
     row.file_path,
     { position: row.position, duration: row.duration, updatedAt: row.updated_at, watched: Boolean(row.watched) },
   ]));
@@ -95,19 +95,21 @@ export function getAllProgress(database: BetterSqlite3.Database): Record<string,
 
 export function getPlaybackTrackPreferences(
   database: BetterSqlite3.Database,
+  profileId: string,
   scope?: string,
 ): PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> {
   if (scope) {
-    const row = database.prepare('SELECT preferences_json FROM playback_track_preferences WHERE scope = ?').get(scope) as Pick<PlaybackTrackPreferenceRow, 'preferences_json'> | undefined;
+    const row = database.prepare('SELECT preferences_json FROM playback_track_preferences WHERE profile_id = ? AND scope = ?').get(profileId, scope) as Pick<PlaybackTrackPreferenceRow, 'preferences_json'> | undefined;
     return row ? normalizeTrackPreferences(jsonParse(row.preferences_json, {})) : {};
   }
 
-  return Object.fromEntries((database.prepare('SELECT * FROM playback_track_preferences').all() as PlaybackTrackPreferenceRow[])
+  return Object.fromEntries((database.prepare('SELECT * FROM playback_track_preferences WHERE profile_id = ?').all(profileId) as PlaybackTrackPreferenceRow[])
     .map((row): [string, PlaybackTrackPreferences] => [row.scope, normalizeTrackPreferences(jsonParse(row.preferences_json, {}))]));
 }
 
 export function savePlaybackTrackPreferences(
   database: BetterSqlite3.Database,
+  profileId: string,
   scope: string,
   preferences: PlaybackTrackPreferences,
 ): PlaybackTrackPreferences {
@@ -115,14 +117,15 @@ export function savePlaybackTrackPreferences(
   if (!safeScope) return {};
   const stored = normalizeTrackPreferences(preferences);
   database.prepare(`
-    INSERT OR REPLACE INTO playback_track_preferences (scope, preferences_json, updated_at)
-    VALUES (?, ?, ?)
-  `).run(safeScope, jsonString(stored), Date.now());
+    INSERT OR REPLACE INTO playback_track_preferences (profile_id, scope, preferences_json, updated_at)
+    VALUES (?, ?, ?, ?)
+  `).run(profileId, safeScope, jsonString(stored), Date.now());
   return stored;
 }
 
 export function saveProgress(
   database: BetterSqlite3.Database,
+  profileId: string,
   filePath: string,
   position: number,
   duration: number,
@@ -137,20 +140,21 @@ export function saveProgress(
     watched,
   };
   database.prepare(`
-    INSERT OR REPLACE INTO playback_progress (file_path, position, duration, updated_at, watched)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(filePath, stored.position, stored.duration, stored.updatedAt, stored.watched ? 1 : 0);
+    INSERT OR REPLACE INTO playback_progress (profile_id, file_path, position, duration, updated_at, watched)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(profileId, filePath, stored.position, stored.duration, stored.updatedAt, stored.watched ? 1 : 0);
   return stored;
 }
 
 export function importProgress(
   database: BetterSqlite3.Database,
+  profileId: string,
   progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>,
 ): void {
   const upsert = database.prepare(`
-    INSERT INTO playback_progress (file_path, position, duration, updated_at, watched)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(file_path) DO UPDATE SET
+    INSERT INTO playback_progress (profile_id, file_path, position, duration, updated_at, watched)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(profile_id, file_path) DO UPDATE SET
       position = excluded.position,
       duration = excluded.duration,
       updated_at = excluded.updated_at,
@@ -163,7 +167,7 @@ export function importProgress(
       const duration = typeof value === 'object' ? Number(value.duration || 0) : 0;
       const updatedAt = typeof value === 'object' && value.updatedAt ? Number(value.updatedAt) : Date.now();
       const watched = duration > 0 && position / duration >= 0.9;
-      upsert.run(filePath, watched ? duration : position, duration, updatedAt, watched ? 1 : 0);
+      upsert.run(profileId, filePath, watched ? duration : position, duration, updatedAt, watched ? 1 : 0);
     }
   });
   tx();
