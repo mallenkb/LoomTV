@@ -57,12 +57,15 @@ export default function DesktopOnboarding({
     }
   };
 
+  // Shared content width — the main page defines it and the connect page inherits the same value.
+  const contentWidth = 'w-full max-w-[760px]';
+
   return (
     <div className="fixed inset-0 overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-8 py-10">
         <header className="flex min-h-10 items-center">
           {step === 'connect' && (
-            <div className="mx-auto w-full max-w-[760px]">
+            <div className={`mx-auto ${contentWidth}`}>
               <Button
                 variant="outline"
                 size="sm"
@@ -76,15 +79,15 @@ export default function DesktopOnboarding({
         </header>
 
         {step === 'choose' ? (
-          <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col py-12 lg:py-16">
+          <main className={`mx-auto flex ${contentWidth} flex-1 flex-col py-12 lg:py-16`}>
             <div className="flex flex-col items-center text-center">
-              <LoomBrandLockup className="mb-6 h-20 w-[108px]" />
+              <LoomBrandLockup className="mb-4 h-20 w-[108px]" />
               <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Where is your library?</h1>
-              <p className="mt-4 max-w-md text-base leading-7 text-[var(--loom-muted)]">
+              <p className="mt-2 max-w-md text-base leading-7 text-[var(--loom-muted)]">
                 Host a new library on this computer, or connect to one already on your network.
               </p>
             </div>
-            <div className="mt-12 grid w-full gap-4 sm:grid-cols-2">
+            <div className="mt-8 grid w-full gap-4 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => { desktopApi.useThisComputerAsHost(); onHostReady(); }}
@@ -106,11 +109,11 @@ export default function DesktopOnboarding({
             </div>
           </main>
         ) : (
-          <main className="mx-auto flex w-full max-w-[760px] flex-1 flex-col py-12 lg:py-16">
-            <div className="mb-8 flex flex-col items-center text-center">
-              <LoomBrandLockup className="mb-6 h-20 w-[108px]" />
+          <main className={`mx-auto flex ${contentWidth} flex-1 flex-col py-12 lg:py-16`}>
+            <div className="mb-6 flex flex-col items-center text-center">
+              <LoomBrandLockup className="mb-4 h-20 w-[108px]" />
               <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Connect to a host</h1>
-              <p className="mt-3 max-w-md text-sm leading-6 text-[var(--loom-muted)]">On the host, turn on Local Network Sharing, then find the 6-digit PIN in Settings → Network.</p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">On the host, turn on Local Network Sharing, then find the 6-digit PIN in Settings → Network.</p>
             </div>
 
             <section className="overflow-hidden rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] shadow-2xl shadow-black/20">
