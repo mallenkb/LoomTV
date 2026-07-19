@@ -293,8 +293,10 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
 
   useEffect(() => {
     if (!candidate || candidate.key !== dismissedCandidate?.key) return;
+    // Dismissing the bar should remain a dismissal. A metadata/progress sync
+    // can update the timestamp without the viewer actually resuming playback.
     const hasNewPlayback = candidate.updatedAt > dismissedCandidate.updatedAt
-      || candidate.position > dismissedCandidate.position + 1;
+      && candidate.position > dismissedCandidate.position + 1;
     if (hasNewPlayback || candidate.fraction <= 0 || candidate.fraction >= WATCHED_THRESHOLD) {
       setDismissedCandidate(null);
     }

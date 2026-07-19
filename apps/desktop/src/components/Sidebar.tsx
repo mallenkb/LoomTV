@@ -271,7 +271,7 @@ export default function Sidebar() {
   const location = useLocation();
   const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
-  const { animeShows, libraryFolderGroups, movies, tvShows } = state;
+  const { libraryFolderGroups } = state;
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
@@ -303,23 +303,21 @@ export default function Sidebar() {
       homeNavItem,
       ...navOrder.map((itemId) => sidebarNavItems[itemId]).filter((item) => {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        const itemCount = item.id === 'movies' ? movies.length : item.id === 'tv' ? tvShows.length : animeShows.length;
-        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0 || itemCount > 0;
+        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
       }),
     ],
-    [animeShows.length, libraryFolderGroups, movies.length, navOrder, tvShows.length],
+    [libraryFolderGroups, navOrder],
   );
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
       ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        const itemCount = item.id === 'movies' ? movies.length : item.id === 'tv' ? tvShows.length : animeShows.length;
-        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0 || itemCount > 0;
+        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
       }),
       settingsNavItem,
     ],
-    [animeShows.length, libraryFolderGroups, movies.length, tvShows.length],
+    [libraryFolderGroups],
   );
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
