@@ -1,51 +1,61 @@
 **Source visual truth**
 
-- `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-741871ab-4e6c-4613-9760-d4c98f59383c.png`
-- `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-20a67795-a4ce-473c-a6a0-db0b5f847b9d.png`
-- User direction: use medium-weight CTA labels and show desktop-style watched progress on the series detail CTA.
+- `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-eb8aaed5-3b79-40fd-abdb-b67ac33c691a.png`
+- `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-afdd6ddb-ebd9-4b83-942a-79f9d8eb92ff.png`
+- `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-50105736-9c92-44c0-819d-6f295fcab621.png`
+- `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-f2b11c5b-903f-449b-8f03-8e6f428eac61.png`
+- Latest user direction: increase the 10.45rem menu width by 16% without changing its rows, spacing, or styling.
 
 **Implementation evidence**
 
-- Home CTA: `/tmp/loomtv-mobile-medium-progress-initial.png`
-- In-progress detail CTA: `/tmp/loomtv-mobile-progress-detail-final.png`
-- Full-view comparison: `/tmp/loomtv-progress-button-comparison.png`
-- Focused CTA comparison: `/tmp/loomtv-progress-button-focused-comparison.png`
-- Viewport: 1080 × 2340, Samsung SM-S906B, Android, dark theme.
-- State: The Legend of Vox Machina home and detail views; S01E01 resumed at 12m of 27m.
+- Full desktop capture: `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/com.openai.sky.CUAService/Electron Screenshot 2026-07-18 at 11.22.02 PM.jpeg`
+- Focused menu crop: `/tmp/loomtv-profile-menu-implementation.png`
+- Viewport: 1229 × 768 desktop window.
+- State: Home screen, profile dropdown open, one active owner profile.
+- Primary interaction tested: Escape closes the menu; activating the focused profile button reopens it; Add profile and Manage profiles are exposed as menu actions.
+- Static validation: desktop TypeScript checks and `git diff --check` passed.
 
 **Findings**
 
-- No actionable P0, P1, or P2 differences remain for the requested controls.
-- Fonts and typography: both CTA labels now use weight 500. The detail CTA uses a medium 17px primary label and an 11px medium progress label with clear hierarchy.
-- Spacing and layout rhythm: the icon and two-line copy remain centered as one group without changing the CTA height, margins, or 12px radius.
-- Colors and visual tokens: existing accent/foreground tokens remain intact; the watched portion uses a subtle 20% black overlay consistent with the desktop progress treatment.
-- Image quality and asset fidelity: existing poster art and play icons are unchanged.
-- Copy and content: the detail CTA now reports the selected on-deck episode and, when in progress, the watched position and duration (for example, `S01E01 · 12m of 27m`).
+- No P0 or P1 interaction issues were found.
+- Fonts and typography: existing LoomTV type scale and weights are preserved; profile name, role, and actions retain clear hierarchy at the reduced width.
+- Spacing and layout rhythm: the menu width is increased from 10.45rem to 12.12rem (16%). Existing 48px profile rows, 40px actions, and the 4px outer inset remain unchanged.
+- Colors and visual tokens: the menu uses the existing panel, active-row, muted-text, and accent tokens. The outer border is removed and elevation comes from the existing shadow.
+- Image quality and asset fidelity: the actual profile avatar component and Lucide action icons are used; no placeholder or generated assets were introduced.
+- Copy and content: the unnecessary section title is removed. The menu contains only profiles, Add profile, and Manage profiles.
 
 **Comparison history**
 
-- Initial P2: home and detail CTA text used bold weight 700.
-  Fix: changed both CTA labels to medium weight 500.
-  Post-fix evidence: `/tmp/loomtv-mobile-medium-progress-initial.png` and `/tmp/loomtv-mobile-progress-detail-final.png`.
-- Initial P1: the series detail CTA only displayed `Watch S01E01` or `Resume S01E01`, hiding how far playback had progressed.
-  Fix: reused the existing on-deck progress state to render action, episode code, elapsed/total minutes, and a proportional background fill.
-  Post-fix evidence: `/tmp/loomtv-progress-button-focused-comparison.png`.
+- Initial P2: the menu was wider and taller than requested, with an outer border, title, chevron, and 8px inset.
+  Fix: reduced width from 18rem to 13.75rem, removed the border/title/chevron, set profile rows to 48px, actions to 40px, retained 12px/8px proportional radii, and reduced the outer inset to 4px.
+  Post-fix evidence: focused crop above plus successful runtime menu interaction.
+- Latest P2: the 13.75rem dropdown was still wider than requested.
+  Fix: reduced the dropdown width by exactly 24%, from 13.75rem to 10.45rem.
+  Post-fix evidence: static TypeScript validation passed; final visual capture remains blocked by the profile-loading screen.
+- Latest adjustment: the 10.45rem dropdown was narrower than desired.
+  Fix: increased its width by exactly 16%, to 12.12rem.
+  Post-fix evidence: static TypeScript validation passed; final visual capture remains blocked by the profile-loading screen.
 
 **Open Questions**
 
-- None.
+- Final pixel capture of the 12.12rem menu is unavailable because the browser preview remains on the profile-loading screen. The captured menu predates this latest width revision.
 
 **Implementation Checklist**
 
-- [x] Use medium weight on the home hero CTA.
-- [x] Use medium weight on the detail CTA.
-- [x] Show the current on-deck episode.
-- [x] Show elapsed and total minutes when playback is in progress.
-- [x] Show proportional watched progress in the CTA background.
-- [x] Verify a real in-progress episode on Android hardware.
+- [x] Open a dropdown from the sidebar profile control.
+- [x] List profiles and identify the active profile.
+- [x] Switch unprotected profiles directly.
+- [x] Open the selected profile's PIN screen directly when protected.
+- [x] Add profile and Manage profiles actions.
+- [x] Remove chevron, title, and outer border.
+- [x] Reduce width by 24%.
+- [x] Increase the resulting menu width by 16% to 12.12rem.
+- [x] Use 48px profile rows and 40px action rows.
+- [x] Use proportional radii and a 4px outer inset.
+- [ ] Capture the final 12.12rem menu after the profile-loading screen is resolved.
 
 **Follow-up Polish**
 
-- None required for this request.
+- Capture one final focused screenshot once the profile menu is reachable in the preview.
 
-final result: passed
+final result: blocked
