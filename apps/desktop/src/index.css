@@ -163,6 +163,13 @@ body {
   padding-bottom: calc(2rem + var(--loom-page-bottom-safe, 0px));
 }
 
+/* Poster grids need scrollable end space as well as padding. Without this,
+   short libraries can end above the viewport edge and remain covered by the
+   persistent now-playing bar. */
+.page-list-bottom-safe {
+  min-height: calc(100% + var(--loom-page-bottom-safe, 0px));
+}
+
 @keyframes player-flash {
   0%   { opacity: 0; transform: scale(0.7); }
   20%  { opacity: 1; transform: scale(1.05); }
