@@ -102,6 +102,7 @@ import {
   isPlayerControlTarget,
   playbackProgressForExit,
   resolveInitialPlaybackPosition,
+  shouldRestartUnseekableDirectStream,
   shouldRestartTranscodedSubtitleStyle,
   shouldShowSubtitleOverlay,
   shouldUseNativeSubtitleTracks,
@@ -1729,6 +1730,21 @@ export default function VideoPlayer({
       // unavoidable. Hold the scrubber at the requested spot and coalesce a
       // burst of seeks so FFmpeg restarts once for the final target.
       scheduleTranscodedSeekRestart(nextPosition, Boolean(options.restartTranscoded));
+      return;
+    }
+
+    if (shouldRestartUnseekableDirectStream({
+      streamIsTranscoded,
+      seekable: video.seekable,
+      targetSeconds: nextPosition,
+    })) {
+      transcodeSeekActiveRef.current = true;
+      hlsTranscodeRestartAttemptsRef.current = 0;
+      void startTranscodedFallback(nextPosition, {
+        force: true,
+        allowNearEnd: true,
+        showSeekingStatus: true,
+      });
       return;
     }
 
