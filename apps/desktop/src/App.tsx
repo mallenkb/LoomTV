@@ -18,7 +18,14 @@ import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import DesktopOnboarding from './components/DesktopOnboarding';
 import { desktopApi } from './lib/desktopApi';
-import { getDesktopLibraryMode, getRemoteDesktopSession, type DesktopLibraryMode } from './lib/remoteDesktop';
+import {
+  clearDesktopLibraryMode,
+  clearRemoteDesktopSession,
+  getDesktopLibraryMode,
+  getRemoteDesktopSession,
+  purgeRemoteDesktopSecrets,
+  type DesktopLibraryMode,
+} from './lib/remoteDesktop';
 
 interface NowPlaying {
   mediaId?: string;
@@ -51,20 +58,45 @@ export default function App() {
 
 function DesktopBootstrap() {
   const [mode, setMode] = useState<DesktopLibraryMode | null | 'loading'>('loading');
+  const [setupMessage, setSetupMessage] = useState('');
 
   useEffect(() => {
     let cancelled = false;
     const resolveMode = async () => {
+      purgeRemoteDesktopSecrets();
       const savedMode = getDesktopLibraryMode();
-      if (savedMode === 'remote' && !getRemoteDesktopSession()) {
-        if (!cancelled) setMode(null);
+      if (savedMode === 'remote') {
+        const cachedSession = getRemoteDesktopSession();
+        let persistedSession = null;
+        try {
+          persistedSession = await desktopApi.getPersistedRemoteLibrary();
+        } catch (error) {
+          setSetupMessage(error instanceof Error ? error.message : 'The saved pairing could not be restored. Pair this laptop again.');
+        }
+        if (!persistedSession) {
+          clearRemoteDesktopSession();
+          clearDesktopLibraryMode();
+          if (!cancelled) setMode(null);
+          return;
+        }
+        desktopApi.activateRemoteLibrary({
+          ...persistedSession,
+          library: cachedSession?.library || persistedSession.library,
+          libraryEtag: cachedSession?.libraryEtag || persistedSession.libraryEtag,
+        });
+        if (!cancelled) setMode('remote');
         return;
       }
       if (savedMode) {
         if (!cancelled) setMode(savedMode);
         return;
       }
-      const remoteSession = getRemoteDesktopSession();
+      let remoteSession = null;
+      try {
+        remoteSession = await desktopApi.getPersistedRemoteLibrary();
+      } catch (error) {
+        setSetupMessage(error instanceof Error ? error.message : 'The saved pairing could not be restored. Pair this laptop again.');
+      }
       if (remoteSession) {
         desktopApi.activateRemoteLibrary(remoteSession);
         if (!cancelled) setMode('remote');
@@ -111,6 +143,7 @@ function DesktopBootstrap() {
       <DesktopOnboarding
         onHostReady={() => setMode('host')}
         onRemoteReady={() => setMode('remote')}
+        initialMessage={setupMessage}
       />
     );
   }

@@ -33,6 +33,9 @@ import type {
   PlaybackMode,
   PlaybackTrackPreferences,
   RemoteLibraryConnection,
+  RemoteLibraryRequest,
+  RemoteLibraryResponse,
+  RemoteLibrarySessionState,
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
@@ -84,6 +87,8 @@ export type {
   ProfileType,
   ProfileUpdateInput,
   RemoteLibraryConnection,
+  RemoteLibraryRequest,
+  RemoteLibraryResponse,
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
@@ -119,6 +124,10 @@ export type DesktopBridgeApi = {
       testMetadataKeys?: (keys: MetadataApiKeys) => Promise<MetadataKeyTestResult[]>;
       getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
       discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
+      connectRemoteLibrary?: (baseUrl: string, code: string) => Promise<RemoteLibraryConnection>;
+      remoteLibraryRequest?: (pathname: string, request?: RemoteLibraryRequest) => Promise<RemoteLibraryResponse>;
+      getRemoteLibrarySession?: () => Promise<RemoteLibrarySessionState>;
+      disconnectRemoteLibrary?: (revoke?: boolean) => Promise<boolean>;
       revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
       setLocalNetworkDeviceName?: (name: string) => Promise<string>;
       listProfiles?: () => Promise<ProfileSummary[]>;
@@ -276,24 +285,6 @@ function normalizeLocalNetworkBaseUrl(value: string): string {
   return parsed.origin;
 }
 
-function subnetCandidates(addresses: string[]): string[] {
-  const hosts = new Set<string>();
-  addresses.forEach((address) => {
-    const parts = address.split('.');
-    if (parts.length !== 4) return;
-    const prefix = parts.slice(0, 3).join('.');
-    for (let host = 1; host <= 254; host += 1) {
-      const candidate = `${prefix}.${host}`;
-      if (candidate !== address) hosts.add(candidate);
-    }
-  });
-  return [...hosts];
-}
-
-async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
-  return fetchRequestWithTimeout(url, undefined, timeoutMs);
-}
-
 async function fetchRequestWithTimeout(url: string, init: RequestInit | undefined, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -330,6 +321,18 @@ async function refreshRemoteCredentials(): Promise<ReturnType<typeof getRemoteDe
 }
 
 async function remoteRequest(pathname: string, init: RequestInit = {}, retry = true): Promise<Response> {
+  if (window.desktopApi?.remoteLibraryRequest) {
+    if (!isRemoteDesktopMode()) throw new Error('This laptop is not connected to a LoomTV host.');
+    const headers = Object.fromEntries(new Headers(init.headers).entries());
+    const result = await window.desktopApi.remoteLibraryRequest(pathname, {
+      method: (init.method || 'GET') as RemoteLibraryRequest['method'],
+      headers,
+      body: typeof init.body === 'string' ? init.body : undefined,
+    });
+    const body = result.status === 204 || result.status === 205 || result.status === 304 ? null : result.body;
+    return new Response(body, { status: result.status, headers: result.headers });
+  }
+
   let session = getRemoteDesktopSession();
   if (!session || !isRemoteDesktopMode()) throw new Error('This laptop is not connected to a LoomTV host.');
   if (session.accessTokenExpiresAt <= Date.now() + 60_000) {
@@ -374,17 +377,6 @@ function remoteProgressByStreamUrl(progress: Record<string, StoredProgress>): Re
   return mapped;
 }
 
-async function probeLanInfo(baseUrl: string, timeoutMs = 800): Promise<boolean> {
-  try {
-    const response = await fetchWithTimeout(`${baseUrl}/api/lan/info`, timeoutMs);
-    if (!response.ok) return false;
-    const info = await response.json() as { app?: string };
-    return info?.app === 'LoomTV' || info?.app === 'Loom Media Server';
-  } catch {
-    return false;
-  }
-}
-
 async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
   // mDNS first — fast and accurate when peers advertise. Returns the first host
   // that publishes a LoomTV service.
@@ -398,25 +390,7 @@ async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
     }
   }
 
-  // Fallback: probe the /api/lan/info endpoint (no token) on each candidate.
-  // Stops broadcasting the code to random IPs.
-  const status = await desktopApi.getLocalNetworkStatus();
-  // Keep the fallback bounded. The previous 254-host × 8-port sweep could
-  // leave Windows clients appearing to loop for nearly a minute.
-  const ports = Array.from(new Set([status.port, DEFAULT_MEDIA_PORT]));
-  const candidates = subnetCandidates(status.addresses);
-  const urls = candidates.flatMap((address) => ports.map((port) => `http://${address}:${port}`));
-  const batchSize = 32;
-
-  const deadline = Date.now() + 8_000;
-  for (let index = 0; index < urls.length && Date.now() < deadline; index += batchSize) {
-    const batch = urls.slice(index, index + batchSize);
-    const results = await Promise.all(batch.map(async (baseUrl) => (await probeLanInfo(baseUrl, 500) ? baseUrl : null)));
-    const found = results.find(Boolean);
-    if (found) return found;
-  }
-
-  throw new Error('No shared LoomTV library was found on this network.');
+  throw new Error('No LoomTV host was discovered. Select a host or enter its IP address manually.');
 }
 
 function bearerHeaders(token: string, init?: RequestInit): RequestInit {
@@ -429,6 +403,45 @@ function bearerHeaders(token: string, init?: RequestInit): RequestInit {
   };
 }
 
+function remoteMediaSource(url: string): string {
+  if (!window.desktopApi?.remoteLibraryRequest) return url;
+  try {
+    const parsed = new URL(url);
+    const session = getRemoteDesktopSession();
+    if (!session || parsed.origin !== new URL(session.baseUrl).origin) return url;
+    return `plexserver://remote${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+function remoteLibrarySources(library: LibraryPayload): LibraryPayload {
+  const rewrite = (value?: string | null): string => value ? remoteMediaSource(value) : '';
+  const rewriteItem = (item: NonNullable<LibraryPayload['movies']>[number]) => ({
+    ...item,
+    poster: rewrite(item.poster),
+    backdrop: rewrite(item.backdrop),
+    logo: rewrite(item.logo),
+    posterCandidates: item.posterCandidates?.map(rewrite),
+    backdropCandidates: item.backdropCandidates?.map(rewrite),
+    logoCandidates: item.logoCandidates?.map(rewrite),
+    subtitles: item.subtitles?.map((subtitle) => ({ ...subtitle, url: rewrite(subtitle.url) })),
+    episodes: item.episodes?.map((episode) => ({ ...episode, still: rewrite(episode.still) })),
+    episodeFiles: item.episodeFiles?.map((episode) => ({
+      ...episode,
+      still: rewrite(episode.still),
+      thumbnail: rewrite(episode.thumbnail),
+      subtitles: episode.subtitles?.map((subtitle) => ({ ...subtitle, url: rewrite(subtitle.url) })),
+    })),
+  });
+  return {
+    ...library,
+    movies: library.movies.map(rewriteItem),
+    tvShows: library.tvShows.map(rewriteItem),
+    animeShows: library.animeShows?.map(rewriteItem),
+  };
+}
+
 export const desktopApi = {
   async getLibrary(): Promise<LibraryPayload> {
     if (isRemoteDesktopMode()) {
@@ -437,7 +450,7 @@ export const desktopApi = {
         if (response.status === 409) throw new Error('Select a profile from the host first.');
         throw new Error(response.status === 401 ? 'Pairing was revoked on the host.' : 'Could not load the shared library.');
       }
-      const library = await response.json() as LibraryPayload;
+      const library = remoteLibrarySources(await response.json() as LibraryPayload);
       const session = getRemoteDesktopSession();
       if (session) updateRemoteDesktopSession({ library, libraryEtag: response.headers.get('ETag') || session.libraryEtag });
       return library;
@@ -451,7 +464,7 @@ export const desktopApi = {
       let fileName = 'Remote stream';
       try { fileName = new URL(filePath).pathname.split('/').pop() || fileName; } catch { /* Keep fallback. */ }
       return {
-        url: filePath,
+        url: remoteMediaSource(filePath),
         contentType: 'video/mp4',
         fileName,
         isTranscoded: false,
@@ -501,6 +514,11 @@ export const desktopApi = {
   },
 
   async getSubtitleUrl(filePath: string, streamOrdinal?: number): Promise<{ url: string }> {
+    if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
+      const parsed = new URL(filePath);
+      if (parsed.pathname === '/subtitle') return { url: remoteMediaSource(filePath) };
+      throw new Error('Embedded remote subtitles require a host-provided subtitle URL.');
+    }
     if (window.desktopApi?.getSubtitleUrl) return window.desktopApi.getSubtitleUrl(filePath, streamOrdinal);
     const params = new URLSearchParams({ path: filePath });
     if (typeof streamOrdinal === 'number') params.set('streamOrdinal', String(streamOrdinal));
@@ -541,6 +559,10 @@ export const desktopApi = {
     const normalizedBaseUrl = baseUrl.trim()
       ? normalizeLocalNetworkBaseUrl(baseUrl)
       : await discoverLocalNetworkLibraryBaseUrl();
+
+    if (window.desktopApi?.connectRemoteLibrary) {
+      return window.desktopApi.connectRemoteLibrary(normalizedBaseUrl, normalizedCode);
+    }
 
     const status = await desktopApi.getLocalNetworkStatus().catch(() => null);
     const deviceId = status?.deviceId || '';
@@ -605,7 +627,16 @@ export const desktopApi = {
     return isRemoteDesktopMode();
   },
 
+  async getPersistedRemoteLibrary(): Promise<RemoteLibraryConnection | null> {
+    if (!window.desktopApi?.getRemoteLibrarySession) return getRemoteDesktopSession();
+    const state = await window.desktopApi.getRemoteLibrarySession();
+    if (state.status === 'connected') return state.connection;
+    if (state.status === 'pairing-required') throw new Error(state.reason);
+    return null;
+  },
+
   disconnectRemoteDesktop(): void {
+    void window.desktopApi?.disconnectRemoteLibrary?.(false);
     clearRemoteDesktopSession();
     setDesktopLibraryMode('host');
   },
@@ -625,6 +656,26 @@ export const desktopApi = {
     refreshToken: string;
     refreshTokenExpiresAt: number;
   } | null> {
+    if (window.desktopApi?.remoteLibraryRequest) {
+      const response = await remoteRequest('/api/v2/library', {
+        headers: etag ? { 'If-None-Match': etag } : {},
+      });
+      if (response.status === 304) return null;
+      if (!response.ok) {
+        if (response.status === 401) throw new Error('Pairing was revoked on the host.');
+        throw new Error('Could not refresh the shared library.');
+      }
+      const localSession = getRemoteDesktopSession();
+      return {
+        library: remoteLibrarySources(await response.json() as LibraryPayload),
+        etag: response.headers.get('ETag') || '',
+        deviceToken: '',
+        accessTokenExpiresAt: localSession?.accessTokenExpiresAt || 0,
+        refreshToken: '',
+        refreshTokenExpiresAt: localSession?.refreshTokenExpiresAt || 0,
+      };
+    }
+
     let activeToken = deviceToken;
     let activeRefreshToken = refreshToken || '';
     let activeAccessExpiresAt = Number(accessTokenExpiresAt) || 0;
@@ -667,6 +718,10 @@ export const desktopApi = {
   },
 
   async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string, deviceId: string): Promise<void> {
+    if (window.desktopApi?.disconnectRemoteLibrary) {
+      await window.desktopApi.disconnectRemoteLibrary(true);
+      return;
+    }
     await fetch(`${baseUrl}/api/v2/unpair`, bearerHeaders(deviceToken, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1225,15 +1280,21 @@ export const desktopApi = {
     },
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
-      if (isRemoteDesktopMode()) return remoteJson<ApiResult<TranscodeSession>>('/api/v2/start-hls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mediaId: remoteResourceId(filePath),
-          options,
-          selectionRevision: getRemoteDesktopSession()?.selectionRevision,
-        }),
-      });
+      if (isRemoteDesktopMode()) {
+        const result = await remoteJson<ApiResult<TranscodeSession>>('/api/v2/start-hls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mediaId: remoteResourceId(filePath),
+            options,
+            selectionRevision: getRemoteDesktopSession()?.selectionRevision,
+          }),
+        });
+        if (result.ok && result.data?.playlistUrl) {
+          return { ...result, data: { ...result.data, playlistUrl: remoteMediaSource(result.data.playlistUrl) } };
+        }
+        return result;
+      }
       if (window.desktopApi?.media) return window.desktopApi.media.startTranscode(filePath, options);
       return fetchJson<ApiResult<TranscodeSession>>('/api/renderer/media/start-transcode', {
         method: 'POST',

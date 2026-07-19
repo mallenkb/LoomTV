@@ -26,11 +26,16 @@ export function setDesktopLibraryMode(mode: DesktopLibraryMode): void {
   window.dispatchEvent(new CustomEvent('loomtv:desktop-library-mode-changed', { detail: mode }));
 }
 
+export function clearDesktopLibraryMode(): void {
+  if (!canUseStorage()) return;
+  window.localStorage.removeItem(DESKTOP_MODE_KEY);
+}
+
 export function getRemoteDesktopSession(): RemoteDesktopSession | null {
   if (!canUseStorage()) return null;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(REMOTE_SESSION_KEY) || 'null') as RemoteDesktopSession | null;
-    if (!parsed?.baseUrl || !parsed.deviceToken || !parsed.refreshToken) return null;
+    if (!parsed?.baseUrl || !parsed.deviceId) return null;
     return parsed;
   } catch {
     return null;
@@ -39,7 +44,10 @@ export function getRemoteDesktopSession(): RemoteDesktopSession | null {
 
 export function saveRemoteDesktopSession(session: RemoteDesktopSession): void {
   if (!canUseStorage()) return;
-  window.localStorage.setItem(REMOTE_SESSION_KEY, JSON.stringify(session));
+  const stored = window.desktopApi?.remoteLibraryRequest
+    ? { ...session, deviceToken: '', refreshToken: '' }
+    : session;
+  window.localStorage.setItem(REMOTE_SESSION_KEY, JSON.stringify(stored));
   window.localStorage.setItem('loomtv:last-remote-library', JSON.stringify({
     baseUrl: session.baseUrl,
     connectedAt: Date.now(),
@@ -58,6 +66,17 @@ export function clearRemoteDesktopSession(): void {
   if (!canUseStorage()) return;
   window.localStorage.removeItem(REMOTE_SESSION_KEY);
   window.localStorage.removeItem('loomtv:last-remote-library');
+}
+
+export function purgeRemoteDesktopSecrets(): void {
+  if (!canUseStorage() || !window.desktopApi?.remoteLibraryRequest) return;
+  const current = getRemoteDesktopSession();
+  if (!current || (!current.deviceToken && !current.refreshToken)) return;
+  window.localStorage.setItem(REMOTE_SESSION_KEY, JSON.stringify({
+    ...current,
+    deviceToken: '',
+    refreshToken: '',
+  }));
 }
 
 export function isRemoteDesktopMode(): boolean {

@@ -59,6 +59,7 @@ import {
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
 import { createServerTray, destroyServerTray } from './main/serverTray';
+import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
   getMediaServer,
   getMediaServerPort,
@@ -303,6 +304,7 @@ const ALLOWED_CORS_ORIGINS = new Set<string>(
     LAN_RENDERER_URL ? new URL(LAN_RENDERER_URL).origin : '',
   ].filter(Boolean),
 );
+const remoteLibraryClient = createRemoteLibraryClient();
 
 const {
   isLoopbackRequest,
@@ -1224,6 +1226,10 @@ registerIpcHandlers<LibraryData, AppSettings>({
   getLocalNetworkNameFast,
   getLocalNetworkAddresses,
   discoverLanPeers,
+  connectRemoteLibrary: remoteLibraryClient.connect,
+  requestRemoteLibrary: remoteLibraryClient.request,
+  getRemoteLibrarySession: remoteLibraryClient.getSession,
+  disconnectRemoteLibrary: remoteLibraryClient.disconnect,
   // Viewer state resolves the active desktop profile in the main process; the
   // renderer never chooses a profile ID for progress calls.
   getProgress: (filePath) => {
@@ -1534,15 +1540,19 @@ app.whenReady().then(async () => {
   protocol.handle('plexserver', async (request: Request) => {
     try {
       const parsed = new URL(request.url);
-      parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-      const targetUrl = `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
+      const targetUrl = parsed.hostname === 'remote'
+        ? remoteLibraryClient.resolveMediaUrl(`${parsed.pathname}${parsed.search}`)
+        : (() => {
+            parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
+            return `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
+          })();
 
       // Forward Range header so video seeking works correctly
       const headers: Record<string, string> = {};
       const range = request.headers.get('Range');
       if (range) headers['Range'] = range;
 
-      const response = await net.fetch(targetUrl, { headers });
+      const response = await net.fetch(targetUrl, { headers, redirect: 'error' });
       return response;
     } catch (err) {
       console.error('[plexserver protocol] fetch error:', err);
