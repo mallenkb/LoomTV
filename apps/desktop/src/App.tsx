@@ -60,6 +60,10 @@ function DesktopBootstrap() {
   const onboardingPreview = new URLSearchParams(window.location.search).get('onboarding') === 'connect';
   const [mode, setMode] = useState<DesktopLibraryMode | null | 'loading'>(onboardingPreview ? null : 'loading');
   const [setupMessage, setSetupMessage] = useState('');
+  // Set only when this session just went through onboarding, so the profile
+  // gate can route a first-run host into setting up its first profile rather
+  // than showing a bare "Who's watching?" tile.
+  const [initialSetup, setInitialSetup] = useState<DesktopLibraryMode | null>(null);
 
   useEffect(() => {
     if (onboardingPreview) return;
@@ -153,8 +157,8 @@ function DesktopBootstrap() {
   if (!mode) {
     return (
       <DesktopOnboarding
-        onHostReady={() => setMode('host')}
-        onRemoteReady={() => setMode('remote')}
+        onHostReady={() => { setInitialSetup('host'); setMode('host'); }}
+        onRemoteReady={() => { setInitialSetup('remote'); setMode('remote'); }}
         initialMessage={setupMessage}
       />
     );
@@ -164,7 +168,7 @@ function DesktopBootstrap() {
     <ProfileProvider key={mode}>
       <ThemeProvider>
         <ToastProvider>
-          <ProfileGateOrShell />
+          <ProfileGateOrShell initialSetup={initialSetup} />
         </ToastProvider>
       </ThemeProvider>
     </ProfileProvider>
@@ -176,10 +180,10 @@ function DesktopBootstrap() {
  * shell (and every progress consumer inside it) mounts only after a profile
  * has been chosen for this session.
  */
-function ProfileGateOrShell() {
+function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode | null }) {
   const { activeProfile, gateOpen, generation, isLoading } = useProfiles();
   if (isLoading) return <div className="h-screen bg-[var(--loom-bg)]" />;
-  if (!activeProfile) return <ProfileGate />;
+  if (!activeProfile) return <ProfileGate initialSetup={initialSetup} />;
   return (
     <>
       <LibraryProvider key={generation}>
@@ -271,7 +275,7 @@ function AppShell() {
       </main>
       {nowPlaying && (
         <VideoPlayer
-          key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
+          key={`${nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : 'file'}:${nowPlaying.filePath}`}
           mediaId={nowPlaying.mediaId}
           filePath={nowPlaying.filePath}
           title={nowPlaying.title}

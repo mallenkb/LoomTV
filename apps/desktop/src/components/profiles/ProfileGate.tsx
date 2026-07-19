@@ -15,10 +15,12 @@ type EditorTarget = ProfileSummary | 'new';
  * profiles mode, and the focused profile detail editor. It is the startup
  * surface and becomes an overlay when opened from an active profile.
  */
-export default function ProfileGate() {
+export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'host' | 'remote' | null }) {
   const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  const [setupMode, setSetupMode] = useState(false);
+  const initialRoutedRef = useRef(false);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
   const [pinTarget, setPinTarget] = useState<ProfileSummary | null>(null);
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
@@ -112,6 +114,22 @@ export default function ProfileGate() {
     requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-profile-id="${CSS.escape(profileId)}"]`)?.focus());
   }, [editorTarget, pinTarget]);
 
+  // First run after onboarding: a fresh host starts with only the auto-created
+  // Owner, so send the user straight into setting up that first profile
+  // (Disney+/Netflix style). Connecting to an existing host keeps the default
+  // "Who's watching?" picker, which already offers both choosing an existing
+  // profile and adding a new one.
+  useEffect(() => {
+    if (initialRoutedRef.current) return;
+    initialRoutedRef.current = true;
+    if (initialSetup !== 'host' || activeProfile) return;
+    const owner = profiles.find((profile) => profile.type === 'owner');
+    if (owner) {
+      setSetupMode(true);
+      setEditorTarget(owner);
+    }
+  }, [initialSetup, activeProfile, profiles]);
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       {!editorTarget && <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
@@ -167,7 +185,8 @@ export default function ProfileGate() {
       ) : editorTarget ? (
         <ProfileDetailEditor
           target={editorTarget}
-          onClose={() => setEditorTarget(null)}
+          setupMode={setupMode}
+          onClose={() => { setEditorTarget(null); setSetupMode(false); }}
         />
       ) : (
         <main className="flex flex-1 flex-col items-center justify-center px-8 pb-[8vh]">
@@ -418,7 +437,7 @@ function AddProfileCard({ onClick }: { onClick: () => void }) {
   );
 }
 
-function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClose: () => void }) {
+function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: EditorTarget; onClose: () => void; setupMode?: boolean }) {
   const {
     activeProfile,
     activeState,
@@ -429,6 +448,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
     getRestrictions,
     resetOwnerProfile,
     saveRestrictions,
+    selectProfile,
     setAutomaticSignIn,
     updateProfile,
   } = useProfiles();
@@ -504,6 +524,11 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
       if (savedProfile && (pin || removePin)) {
         await changeProfilePin(savedProfile.id, removePin ? null : pin);
       }
+      // First-run setup: drop the user straight into the app on this profile
+      // instead of returning them to the picker for a redundant tap.
+      if (setupMode && savedProfile && !savedProfile.hasPin && !pin) {
+        await selectProfile(savedProfile.id);
+      }
       onClose();
     } catch (saveError) {
       if (createdProfileId) {
@@ -535,29 +560,32 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
   return (
     <>
       <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </button>
+        {setupMode ? <span /> : (
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+        )}
         <button
           type="button"
           onClick={() => void handleSave()}
           disabled={saveDisabled}
           className="rounded-lg bg-[var(--loom-accent)] px-5 py-2 text-sm font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:opacity-40"
         >
-          {busy ? 'Saving…' : 'Save'}
+          {busy ? 'Saving…' : setupMode ? 'Save and continue' : 'Save'}
         </button>
       </header>
 
       <main className="flex flex-1 items-center justify-center px-8 pb-[6vh]">
       <div className="flex w-full max-w-[720px] flex-col-reverse items-center gap-10 md:flex-row md:items-start md:justify-between">
         <div className="flex w-full max-w-[360px] flex-col gap-5">
-          <h1 className="text-2xl font-bold">{isNew ? 'Add profile' : 'Edit profile'}</h1>
+          <h1 className="text-2xl font-bold">{setupMode ? 'Set up your profile' : isNew ? 'Add profile' : 'Edit profile'}</h1>
+          {setupMode && <p className="-mt-2 text-sm text-[var(--loom-muted)]">Name it and pick a look. You can change this anytime in Settings.</p>}
 
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Profile name</span>
@@ -689,7 +717,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
             </div>
           )}
 
-          {!isRemoteCreate && <div className="flex flex-col gap-1.5">
+          {!isRemoteCreate && !setupMode && <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">{existing?.hasPin ? 'Change PIN' : 'Profile PIN'}</span>
             <PinDigitInput
               value={pin}
@@ -715,7 +743,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
-          {existing && !existing.isGuest && (
+          {existing && !existing.isGuest && !setupMode && (
             <button
               type="button"
               disabled={busy}

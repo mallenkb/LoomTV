@@ -511,11 +511,10 @@ export default function VideoPlayer({
 
   const nextEpisodeFile = useMemo(() => {
     if (!hasEpisodes) return null;
-    const currentIndex = playableEpisodeFiles.findIndex((item) =>
-      item.season === currentSeason && item.episode === currentEpisode,
-    );
-    return currentIndex >= 0 ? playableEpisodeFiles[currentIndex + 1] || null : null;
-  }, [currentEpisode, currentSeason, hasEpisodes, playableEpisodeFiles]);
+    const currentIndex = playableEpisodeFiles.findIndex((item) => item.filePath === filePath);
+    if (currentIndex < 0) return null;
+    return playableEpisodeFiles.slice(currentIndex + 1).find((item) => item.filePath !== filePath) || null;
+  }, [filePath, hasEpisodes, playableEpisodeFiles]);
 
   const stopTranscodeSession = useCallback(async () => {
     const sessionIds = new Set([
@@ -737,7 +736,7 @@ export default function VideoPlayer({
   }, [duration, goToEpisode, markCurrentEpisodeComplete, nextEpisodeFile, position]);
 
   const scheduleNextEpisode = useCallback(() => {
-    if (!nextEpisodeFile || !onEpisodeChange) return;
+    if (!nextEpisodeFile || !onEpisodeChange || nextEpisodeFile.filePath === filePath) return;
     // HLS/native playback can emit more than one end notification while the
     // source is being released. Keep the original countdown instead of
     // restarting it on every notification.
@@ -754,7 +753,7 @@ export default function VideoPlayer({
       }
       setNextCountdown(remainingSeconds);
     }, 1000);
-  }, [clearNextEpisodeCountdown, goToEpisode, nextEpisodeFile, onEpisodeChange]);
+  }, [clearNextEpisodeCountdown, filePath, goToEpisode, nextEpisodeFile, onEpisodeChange]);
 
   const latestEpisodePlaybackRef = useRef({
     autoplayNextEnabled,
