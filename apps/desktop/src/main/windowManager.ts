@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { windowChromeOptions } from './windowChrome';
 
 const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
@@ -54,9 +55,7 @@ export function createWindow(): void {
     minWidth: 960,
     minHeight: 540,
     title: 'LoomTV',
-    frame: process.platform === 'darwin',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : undefined,
-    trafficLightPosition: process.platform === 'darwin' ? { x: 16, y: 16 } : undefined,
+    ...windowChromeOptions(process.platform),
     backgroundColor: '#1a1a1a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
