@@ -271,7 +271,6 @@ export default function Sidebar() {
   const location = useLocation();
   const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
-  const { libraryFolderGroups } = state;
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
@@ -299,25 +298,18 @@ export default function Sidebar() {
   }, [activeProfile?.id]);
 
   const navItems = useMemo(
-    () => [
-      homeNavItem,
-      ...navOrder.map((itemId) => sidebarNavItems[itemId]).filter((item) => {
-        const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
-      }),
-    ],
-    [libraryFolderGroups, navOrder],
+    () => [homeNavItem, ...navOrder.map((itemId) => sidebarNavItems[itemId])],
+    [navOrder],
   );
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
-      ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
-        const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
-      }),
+      sidebarNavItems.anime,
+      sidebarNavItems.tv,
+      sidebarNavItems.movies,
       settingsNavItem,
     ],
-    [libraryFolderGroups],
+    [],
   );
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);

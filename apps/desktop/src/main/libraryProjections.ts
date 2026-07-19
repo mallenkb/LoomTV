@@ -151,15 +151,18 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     };
   };
 
-  const libraryForLocalNetwork = (data: LibraryData, base: string, identity?: RemoteProfileIdentity): LibraryData => ({
-    ...data,
-    libraryFolders: [],
-    libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] },
-    libraryFolderStatuses: [],
-    movies: (data.movies || []).map((item) => itemForLocalNetwork(item, base, identity)),
-    tvShows: (data.tvShows || []).map((item) => itemForLocalNetwork(item, base, identity)),
-    animeShows: (data.animeShows || []).map((item) => itemForLocalNetwork(item, base, identity)),
-  });
+  const libraryForLocalNetwork = (data: LibraryData, base: string, identity?: RemoteProfileIdentity): LibraryData => {
+    const libraryFolderGroups = normalizeLibraryFolderGroups(data);
+    return {
+      ...data,
+      libraryFolders: flattenLibraryFolders(libraryFolderGroups),
+      libraryFolderGroups,
+      libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
+      movies: (data.movies || []).map((item) => itemForLocalNetwork(item, base, identity)),
+      tvShows: (data.tvShows || []).map((item) => itemForLocalNetwork(item, base, identity)),
+      animeShows: (data.animeShows || []).map((item) => itemForLocalNetwork(item, base, identity)),
+    };
+  };
 
   return { itemForLocalNetwork, itemWithArtworkDeliveryUrls, libraryForLocalNetwork, libraryForRenderer };
 }
