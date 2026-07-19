@@ -4,6 +4,7 @@ import { useLibrary, EpisodeFile, EpisodeMeta, MediaItem, TVShow } from '@/conte
 import { desktopApi } from '@/lib/desktopApi';
 import type { StoredProgress } from '@/lib/desktopApi';
 import { useProgressSnapshot } from '@/lib/progress';
+import { useProfiles } from '@/contexts/ProfileContext';
 import {
   cleanEpisodeTitleForDisplay,
   episodeCode as formatEpisodeCode,
@@ -12,6 +13,49 @@ import {
 import { logoSources, uniqueArtworkSources } from '@/lib/artwork';
 
 const WATCHED_THRESHOLD = 0.9;
+const DISMISSED_CONTINUE_WATCHING_STORAGE_KEY = 'loomtv.dismissedContinueWatching.v1';
+
+type DismissedCandidate = {
+  position: number;
+  updatedAt: number;
+};
+
+type DismissedCandidates = Record<string, DismissedCandidate>;
+
+function dismissedCandidatesStorageKey(profileId: string | null | undefined): string {
+  return `${DISMISSED_CONTINUE_WATCHING_STORAGE_KEY}:${profileId || 'default'}`;
+}
+
+function readDismissedCandidates(profileId: string | null | undefined): DismissedCandidates {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(dismissedCandidatesStorageKey(profileId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, Partial<DismissedCandidate>>;
+    return Object.fromEntries(Object.entries(parsed)
+      .filter(([, candidate]) => Number.isFinite(candidate.position) && Number.isFinite(candidate.updatedAt))
+      .map(([key, candidate]) => [key, {
+        position: Number(candidate.position),
+        updatedAt: Number(candidate.updatedAt),
+      }]));
+  } catch {
+    return {};
+  }
+}
+
+function writeDismissedCandidates(profileId: string | null | undefined, candidates: DismissedCandidates): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const storageKey = dismissedCandidatesStorageKey(profileId);
+    if (Object.keys(candidates).length === 0) {
+      localStorage.removeItem(storageKey);
+      return;
+    }
+    localStorage.setItem(storageKey, JSON.stringify(candidates));
+  } catch {
+    // A persistence failure should never prevent playback controls from working.
+  }
+}
 
 type ContinueCandidate = {
   key: string;
@@ -272,12 +316,11 @@ function findLatestCandidate(
 
 export default function ContinueWatchingBar({ isHidden = false, onPlay }: ContinueWatchingBarProps) {
   const { state } = useLibrary();
+  const { activeProfile } = useProfiles();
   const progress = useProgressSnapshot();
-  const [dismissedCandidate, setDismissedCandidate] = useState<{
-    key: string;
-    position: number;
-    updatedAt: number;
-  } | null>(null);
+  const activeProfileId = activeProfile?.id ?? null;
+  const [dismissedCandidates, setDismissedCandidates] = useState<DismissedCandidates>({});
+  const [dismissalsLoadedForProfile, setDismissalsLoadedForProfile] = useState<string | null | undefined>(undefined);
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [thumbnailFallbackUrl, setThumbnailFallbackUrl] = useState('');
   const [failedSources, setFailedSources] = useState<string[]>([]);
@@ -292,15 +335,27 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   );
 
   useEffect(() => {
-    if (!candidate || candidate.key !== dismissedCandidate?.key) return;
+    setDismissedCandidates(readDismissedCandidates(activeProfileId));
+    setDismissalsLoadedForProfile(activeProfileId);
+  }, [activeProfileId]);
+
+  const dismissedCandidate = candidate ? dismissedCandidates[candidate.key] : undefined;
+
+  useEffect(() => {
+    if (!candidate || !dismissedCandidate) return;
     // Dismissing the bar should remain a dismissal. A metadata/progress sync
     // can update the timestamp without the viewer actually resuming playback.
     const hasNewPlayback = candidate.updatedAt > dismissedCandidate.updatedAt
       && candidate.position > dismissedCandidate.position + 1;
     if (hasNewPlayback || candidate.fraction <= 0 || candidate.fraction >= WATCHED_THRESHOLD) {
-      setDismissedCandidate(null);
+      setDismissedCandidates((previous) => {
+        const remaining = { ...previous };
+        delete remaining[candidate.key];
+        writeDismissedCandidates(activeProfileId, remaining);
+        return remaining;
+      });
     }
-  }, [candidate, dismissedCandidate]);
+  }, [activeProfileId, candidate, dismissedCandidate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -333,7 +388,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
     };
   }, [candidate]);
 
-  if (isHidden || !candidate || dismissedCandidate?.key === candidate.key) return null;
+  if (dismissalsLoadedForProfile !== activeProfileId || isHidden || !candidate || dismissedCandidate) return null;
 
   const playCandidate = () => onPlay(...candidate.onPlayArgs, candidate.position);
   const artwork = candidate.onPlayArgs[8];
@@ -389,20 +444,32 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
             tabIndex={0}
             onClick={(event) => {
               event.stopPropagation();
-              setDismissedCandidate({
-                key: candidate.key,
-                position: candidate.position,
-                updatedAt: candidate.updatedAt,
+              setDismissedCandidates((previous) => {
+                const next = {
+                  ...previous,
+                  [candidate.key]: {
+                    position: candidate.position,
+                    updatedAt: candidate.updatedAt,
+                  },
+                };
+                writeDismissedCandidates(activeProfileId, next);
+                return next;
               });
             }}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' && event.key !== ' ') return;
               event.preventDefault();
               event.stopPropagation();
-              setDismissedCandidate({
-                key: candidate.key,
-                position: candidate.position,
-                updatedAt: candidate.updatedAt,
+              setDismissedCandidates((previous) => {
+                const next = {
+                  ...previous,
+                  [candidate.key]: {
+                    position: candidate.position,
+                    updatedAt: candidate.updatedAt,
+                  },
+                };
+                writeDismissedCandidates(activeProfileId, next);
+                return next;
               });
             }}
             className="grid h-[37px] w-[37px] shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] opacity-70 transition-all hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] hover:opacity-100"
