@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.70](docs/releases/v1.0.70.md): fixes missing macOS updater metadata and hardens packaged update checks.
 - [LoomTV 1.0.69](docs/releases/v1.0.69.md): improves folder-aware navigation and makes desktop update progress clearer.
 - [LoomTV 1.0.67](docs/releases/v1.0.67.md): improves desktop remote profile sync, onboarding, playback recovery, and Continue Watching behavior.
 - [LoomTV 1.0.66](docs/releases/v1.0.66.md): adds secure paired remote-library access, resilient session restoration, and safer remote media playback.
