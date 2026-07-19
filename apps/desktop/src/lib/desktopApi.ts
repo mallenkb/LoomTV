@@ -49,6 +49,7 @@ import {
   clearRemoteDesktopSession,
   getRemoteDesktopSession,
   isRemoteDesktopMode,
+  remoteProfileSessionPatch,
   remoteResourceId,
   saveRemoteDesktopSession,
   setDesktopLibraryMode,
@@ -442,6 +443,17 @@ function remoteLibrarySources(library: LibraryPayload): LibraryPayload {
   };
 }
 
+async function refreshRemoteActiveProfileState(): Promise<ActiveProfileState> {
+  const response = await remoteRequest('/api/v2/profiles/active');
+  if (response.status === 409) {
+    return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
+  }
+  if (!response.ok) throw new Error('Could not read the active profile from the host.');
+  const state = await response.json() as ActiveProfileState;
+  updateRemoteDesktopSession(remoteProfileSessionPatch(state));
+  return state;
+}
+
 export const desktopApi = {
   async getLibrary(): Promise<LibraryPayload> {
     if (isRemoteDesktopMode()) {
@@ -820,10 +832,7 @@ export const desktopApi = {
 
   async getActiveProfileState(): Promise<ActiveProfileState> {
     if (isRemoteDesktopMode()) {
-      const response = await remoteRequest('/api/v2/profiles/active');
-      if (response.status === 409) return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
-      if (!response.ok) throw new Error('Could not read the active profile from the host.');
-      return response.json() as Promise<ActiveProfileState>;
+      return refreshRemoteActiveProfileState();
     }
     if (window.desktopApi?.getActiveProfileState) return window.desktopApi.getActiveProfileState();
     return fetchJson<ActiveProfileState>('/api/v2/profiles/active');
@@ -1289,6 +1298,7 @@ export const desktopApi = {
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
       if (isRemoteDesktopMode()) {
+        await refreshRemoteActiveProfileState();
         const result = await remoteJson<ApiResult<TranscodeSession>>('/api/v2/start-hls', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
