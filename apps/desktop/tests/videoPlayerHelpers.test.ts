@@ -13,6 +13,7 @@ import {
   transcodeSeekRestartOptions,
   isEditableShortcutTarget,
   isPlayerControlTarget,
+  shouldRestartUnseekableDirectStream,
   shouldRestartTranscodedSubtitleStyle,
   shouldShowSubtitleOverlay,
   shouldUseNativeSubtitleTracks,
@@ -140,6 +141,30 @@ test('buffered seek checks tolerate tiny boundary drift without treating gaps as
   assert.equal(isTimeBuffered(buffered, 39.8), true);
   assert.equal(isTimeBuffered(buffered, 9.4), false);
   assert.equal(isTimeBuffered(null, 15), false);
+});
+
+test('forward-only shared streams restart through HLS when the target is not seekable', () => {
+  const seekable = {
+    length: 1,
+    start: () => 0,
+    end: () => 3,
+  } as TimeRanges;
+
+  assert.equal(shouldRestartUnseekableDirectStream({
+    streamIsTranscoded: false,
+    seekable,
+    targetSeconds: 600,
+  }), true);
+  assert.equal(shouldRestartUnseekableDirectStream({
+    streamIsTranscoded: false,
+    seekable,
+    targetSeconds: 2,
+  }), false);
+  assert.equal(shouldRestartUnseekableDirectStream({
+    streamIsTranscoded: true,
+    seekable,
+    targetSeconds: 600,
+  }), false);
 });
 
 test('continue-watching positions take precedence over a later progress-cache lookup', () => {

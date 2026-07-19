@@ -108,6 +108,18 @@ export function isTimeBuffered(
   return false;
 }
 
+export function shouldRestartUnseekableDirectStream({
+  streamIsTranscoded,
+  seekable,
+  targetSeconds,
+}: {
+  streamIsTranscoded: boolean;
+  seekable: TimeRanges | null | undefined;
+  targetSeconds: number;
+}): boolean {
+  return !streamIsTranscoded && !isTimeBuffered(seekable, targetSeconds);
+}
+
 export function transcodeSeekRestartOptions({ forceRestart }: { forceRestart: boolean }) {
   return {
     force: true,

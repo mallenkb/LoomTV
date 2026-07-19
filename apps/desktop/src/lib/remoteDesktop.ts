@@ -7,6 +7,16 @@ export type RemoteDesktopSession = RemoteLibraryConnection & {
   selectedProfileId?: string | null;
 };
 
+export function remoteProfileSessionPatch(state: {
+  profileId: string | null;
+  selectionRevision: number;
+}): Pick<RemoteDesktopSession, 'selectedProfileId' | 'selectionRevision'> {
+  return {
+    selectedProfileId: state.profileId,
+    selectionRevision: state.selectionRevision,
+  };
+}
+
 const DESKTOP_MODE_KEY = 'loomtv:desktop-library-mode.v1';
 const REMOTE_SESSION_KEY = 'loomtv:shared-library';
 
