@@ -1,8 +1,9 @@
 {
   "name": "@loom-media-server/mobile",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.ts",
   "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
     "expo": "~54.0.35",
     "expo-blur": "~15.0.8",
     "expo-brightness": "~14.0.8",

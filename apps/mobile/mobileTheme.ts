@@ -6,11 +6,11 @@ export type ResolvedMobileThemeMode = Exclude<MobileThemeMode, 'auto'>;
 export type MobileThemeColor = 'yellow' | 'red' | 'blue' | 'orange' | 'twitch';
 
 export const MOBILE_THEME_COLOR_OPTIONS: ReadonlyArray<{ value: MobileThemeColor; label: string; color: string }> = [
-  { value: 'yellow', label: 'Orange', color: '#FF9900' },
-  { value: 'red', label: 'Netflix', color: '#E50914' },
-  { value: 'blue', label: 'Paramount', color: '#0064FF' },
-  { value: 'orange', label: 'Disney', color: '#02D6E8' },
-  { value: 'twitch', label: 'Twitch', color: '#9146FF' },
+  { value: 'yellow', label: 'Sunbeam', color: '#FF9900' },
+  { value: 'red', label: 'Ember', color: '#E50914' },
+  { value: 'blue', label: 'Cobalt', color: '#0064FF' },
+  { value: 'orange', label: 'Tide', color: '#02D6E8' },
+  { value: 'twitch', label: 'Aurora', color: '#9146FF' },
 ];
 
 const MOBILE_ACCENTS: Record<string, Pick<MobileThemeColors,
