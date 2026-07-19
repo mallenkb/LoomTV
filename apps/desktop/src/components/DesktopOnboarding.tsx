@@ -9,11 +9,13 @@ type OnboardingChoice = 'choose' | 'connect';
 export default function DesktopOnboarding({
   onHostReady,
   onRemoteReady,
+  initialMessage = '',
 }: {
   onHostReady: () => void;
   onRemoteReady: () => void;
+  initialMessage?: string;
 }) {
-  const [step, setStep] = useState<OnboardingChoice>('choose');
+  const [step, setStep] = useState<OnboardingChoice>(initialMessage ? 'connect' : 'choose');
   const [peers, setPeers] = useState<LocalNetworkPeer[]>([]);
   const [address, setAddress] = useState('');
   const [pin, setPin] = useState('');
@@ -169,6 +171,7 @@ export default function DesktopOnboarding({
                 </label>
               </div>
 
+              {initialMessage && <p role="status" className="mt-4 rounded-lg bg-[var(--loom-surface-2)] px-3 py-2 text-sm text-[var(--loom-muted)]">{initialMessage}</p>}
               {message && <p role="alert" className="mt-4 rounded-lg bg-[var(--loom-surface-2)] px-3 py-2 text-sm text-[var(--loom-muted)]">{message}</p>}
 
               <Button

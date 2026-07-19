@@ -80,6 +80,17 @@ export interface IpcHandlerDependencies<
   getLocalNetworkNameFast: () => string;
   getLocalNetworkAddresses: () => string[];
   discoverLanPeers: (timeoutMs: number, ownDeviceId?: string) => Promise<IpcResult<'network:discover-peers'>>;
+  connectRemoteLibrary: (
+    baseUrl: string,
+    code: string,
+    device: { id?: string; name: string },
+  ) => Promise<IpcResult<'network:remote-connect'>>;
+  requestRemoteLibrary: (
+    pathname: string,
+    request?: IpcContract['network:remote-request']['args'][1],
+  ) => Promise<IpcResult<'network:remote-request'>>;
+  getRemoteLibrarySession: () => IpcResult<'network:remote-session'>;
+  disconnectRemoteLibrary: (revoke?: boolean) => Promise<boolean>;
   getProgress: (filePath: string) => StoredProgress | null;
   getAllProgress: () => Record<string, StoredProgress>;
   saveProgress: (filePath: string, position: number, duration: number, expectedProfileId?: string) => IpcResult<'progress:save'>;
@@ -324,6 +335,22 @@ export function registerIpcHandlers<
       return [];
     }
   });
+
+  handle('network:remote-connect', (_event, baseUrl, code) => {
+    const settings = deps.loadSettings();
+    return deps.connectRemoteLibrary(String(baseUrl || ''), String(code || ''), {
+      id: settings.localNetworkDeviceId,
+      name: settings.localNetworkDeviceName || os.hostname(),
+    });
+  });
+
+  handle('network:remote-request', (_event, pathname, request) =>
+    deps.requestRemoteLibrary(String(pathname || ''), request));
+
+  handle('network:remote-session', () => deps.getRemoteLibrarySession());
+
+  handle('network:remote-disconnect', (_event, revoke) =>
+    deps.disconnectRemoteLibrary(Boolean(revoke)));
 
   handle('network:revoke-paired-device', (_event, deviceId: string) => {
     deps.authorizeSettingsWrite();

@@ -223,7 +223,7 @@ export function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceT
 }
 
 export function subtitleSource(url: string, serverBase: string): string {
-  if (/^https?:\/\//i.test(url)) return url;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
   if (!serverBase) return url;
   return `${serverBase}${url.startsWith('/') ? url : `/${url}`}`;
 }

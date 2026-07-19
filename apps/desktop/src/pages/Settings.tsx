@@ -256,7 +256,9 @@ export default function Settings() {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
       if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
       const savedSharedLibrary = JSON.parse(localStorage.getItem('loomtv:shared-library') || 'null') as SharedLibrarySnapshot | null;
-      if (savedSharedLibrary?.library && savedSharedLibrary?.deviceToken) setSharedLibrarySnapshot(savedSharedLibrary);
+      if (savedSharedLibrary?.library && (savedSharedLibrary.deviceToken || desktopApi.isRemoteLibraryMode())) {
+        setSharedLibrarySnapshot(savedSharedLibrary);
+      }
     } catch {
       // Ignore invalid saved pairing data.
     }
