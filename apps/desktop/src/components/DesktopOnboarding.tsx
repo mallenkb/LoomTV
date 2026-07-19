@@ -60,24 +60,26 @@ export default function DesktopOnboarding({
   return (
     <div className="fixed inset-0 overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-8 py-10">
-        <header className="relative flex min-h-10 items-center">
+        <header className="flex min-h-10 items-center">
           {step === 'connect' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => { setStep('choose'); setMessage(''); }}
-              className="gap-2"
-            >
-              <ArrowLeft className="h-4 w-4" /> Back
-            </Button>
+            <div className="mx-auto w-full max-w-[760px]">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setStep('choose'); setMessage(''); }}
+                className="gap-2"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back
+              </Button>
+            </div>
           )}
         </header>
 
         {step === 'choose' ? (
           <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col py-12 lg:py-16">
             <div className="flex flex-col items-center text-center">
-              <LoomBrandLockup className="mb-6 h-10 w-[54px]" />
-              <h1 className="text-[clamp(32px,4.5vw,52px)] font-bold leading-[1.08] tracking-tight">Where is your library?</h1>
+              <LoomBrandLockup className="mb-6 h-20 w-[108px]" />
+              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Where is your library?</h1>
               <p className="mt-4 max-w-md text-base leading-7 text-[var(--loom-muted)]">
                 Host a new library on this computer, or connect to one already on your network.
               </p>
@@ -106,7 +108,7 @@ export default function DesktopOnboarding({
         ) : (
           <main className="mx-auto flex w-full max-w-[760px] flex-1 flex-col py-12 lg:py-16">
             <div className="mb-8 flex flex-col items-center text-center">
-              <LoomBrandLockup className="mb-6 h-10 w-[54px]" />
+              <LoomBrandLockup className="mb-6 h-20 w-[108px]" />
               <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Connect to a host</h1>
               <p className="mt-3 max-w-md text-sm leading-6 text-[var(--loom-muted)]">On the host, turn on Local Network Sharing, then find the 6-digit PIN in Settings → Network.</p>
             </div>
