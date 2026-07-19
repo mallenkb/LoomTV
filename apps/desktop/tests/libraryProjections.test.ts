@@ -110,8 +110,9 @@ test('renderer and LAN projections preserve media fields while rewriting deliver
   assert.equal(renderer.libraryFolderStatuses?.[0].state, 'available');
 
   const lan = projection.libraryForLocalNetwork(input, 'http://loom.local');
-  assert.deepEqual(lan.libraryFolders, []);
-  assert.deepEqual(lan.libraryFolderGroups, { movies: [], tvShows: [], anime: [], others: [] });
+  assert.deepEqual(lan.libraryFolders, ['/library']);
+  assert.deepEqual(lan.libraryFolderGroups, { movies: [], tvShows: ['/library'], anime: [], others: [] });
+  assert.equal(lan.libraryFolderStatuses?.[0].state, 'available');
   assert.equal(lan.tvShows[0].filePath, 'http://loom.local/stream/%2Flibrary%2Fshow');
   assert.equal(lan.tvShows[0].episodeFiles?.[0].still, 'http://loom.local/remote/delivered:still.jpg');
   assert.equal(lan.tvShows[0].episodeFiles?.[0].subtitles?.[0].url, 'http://loom.local/subtitle/en');
