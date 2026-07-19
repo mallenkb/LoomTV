@@ -61,7 +61,10 @@ export function playbackProgressForExit({
     ? Math.max(0, transcodeStartSeconds) + safeVideoPosition
     : safeVideoPosition;
   const safeSnapshotPosition = Number.isFinite(snapshotPosition) ? Math.max(0, snapshotPosition) : 0;
-  const position = absoluteVideoPosition > 0 ? absoluteVideoPosition : safeSnapshotPosition;
+  // Browsers can reset currentTime to zero as an ended source is released.
+  // The snapshot is updated throughout playback, so keep the furthest verified
+  // position rather than overwriting a completed item with that zero value.
+  const position = Math.max(absoluteVideoPosition, safeSnapshotPosition);
 
   return {
     position: duration > 0 ? Math.min(position, duration) : position,
