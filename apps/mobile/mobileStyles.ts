@@ -584,6 +584,7 @@ export function createStyles(theme: MobileThemeColors) {
     zIndex: 1,
   },
   heroCardFooter: {
+    alignItems: 'center',
     bottom: 0,
     gap: 8,
     left: 0,
@@ -597,11 +598,29 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 26,
     fontWeight: '800',
     lineHeight: 30,
+    textAlign: 'center',
+  },
+  heroCardMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
   },
   heroCardMeta: {
-    color: 'rgba(255,255,255,0.82)',
+    color: 'rgba(255,255,255,0.94)',
     fontSize: 13,
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  heroCardRating: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  heroCardRatingText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   heroPlayButton: {
     alignItems: 'center',
@@ -727,6 +746,7 @@ export function createStyles(theme: MobileThemeColors) {
     borderWidth: 1,
     height: 72,
     justifyContent: 'center',
+    overflow: 'hidden',
     width: 72,
   },
   emptyIconText: {
@@ -770,14 +790,15 @@ export function createStyles(theme: MobileThemeColors) {
   },
   settingsAvatar: {
     alignItems: 'center',
-    backgroundColor: accent,
-    borderColor: accentBorder,
+    backgroundColor: panel,
+    borderColor: border,
     borderRadius: 36,
     borderWidth: 1,
     height: 72,
     justifyContent: 'center',
-    shadowColor: accent,
-    shadowOpacity: 0.22,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
     shadowRadius: 18,
     width: 72,
   },
@@ -803,6 +824,42 @@ export function createStyles(theme: MobileThemeColors) {
   },
   settingsList: {
     paddingTop: 2,
+  },
+  settingsGroupTitle: {
+    color: muted,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    marginBottom: 8,
+    marginLeft: 6,
+    textTransform: 'uppercase',
+  },
+  settingsGroup: {
+    backgroundColor: panel,
+    borderColor: border,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  settingsGroupRow: {
+    alignItems: 'center',
+    borderBottomColor: 'rgba(148,163,184,0.14)',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 52,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  settingsGroupRowLast: {
+    borderBottomWidth: 0,
+  },
+  settingsRowDangerText: {
+    color: dangerText,
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   settingsListItem: {
     alignItems: 'center',
@@ -904,12 +961,17 @@ export function createStyles(theme: MobileThemeColors) {
     gap: 8,
     paddingBottom: 4,
   },
-  settingsBackButton: {
+  settingsDetailHeaderSticky: {
+    backgroundColor: bg,
+    paddingBottom: 12,
+  },
+  subpageBackButton: {
     alignItems: 'center',
-    height: 32,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 22,
+    height: 44,
     justifyContent: 'center',
-    marginLeft: -7,
-    width: 32,
+    width: 44,
   },
   settingsDetailTitle: {
     color: text,
@@ -1058,6 +1120,12 @@ export function createStyles(theme: MobileThemeColors) {
     justifyContent: 'center',
     minHeight: 26,
     minWidth: 32,
+  },
+  bottomNavAvatar: {
+    borderRadius: 13,
+    height: 26,
+    overflow: 'hidden',
+    width: 26,
   },
   bottomNavLabel: {
     color: faint,
@@ -1229,6 +1297,10 @@ export function createStyles(theme: MobileThemeColors) {
     height: 44,
     justifyContent: 'center',
     width: 44,
+  },
+  detailTopActions: {
+    flexDirection: 'row',
+    gap: 8,
   },
   detailStickyTitle: {
     color: '#ffffff',

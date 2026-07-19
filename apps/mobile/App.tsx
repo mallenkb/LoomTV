@@ -21,6 +21,7 @@ import {
   ScrollView,
   StyleSheet,
   type StyleProp,
+  Switch,
   Text,
   TextInput,
   useColorScheme,
@@ -30,6 +31,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image as ExpoImage, type ImageContentFit } from 'expo-image';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as SecureStore from 'expo-secure-store';
@@ -66,6 +68,8 @@ import {
   SunIcon,
   StarIcon,
   SubtitlesIcon,
+  UserCircleIcon,
+  UserCircleSolidIcon,
   navIcons,
   type IconProps,
 } from './components/LoomIcons';
@@ -119,6 +123,10 @@ import type {
   LocalMediaTrack,
   MediaItem,
   MediaSegment,
+  MobileActiveProfile,
+  MobileProfile,
+  MobileProfileListEntry,
+  MobileProfilePreferences,
   MobileLibraryFilter,
   MobileSearchScope,
   OfficialArtworkResponse,
@@ -181,6 +189,35 @@ const MOBILE_SUBTITLE_SIZE_OPTIONS = [
   { value: 96, label: '300%' },
 ];
 const mobileLanClient = createMobileLanClient();
+const PROFILE_COLOR_HEX: Record<string, string> = {
+  ember: 'f97316',
+  gold: 'f59e0b',
+  crimson: 'dc3f4f',
+  ocean: '207ce5',
+  violet: '8551dc',
+  teal: '24a9a1',
+  rose: 'de3d72',
+  slate: '64748b',
+};
+
+function mobileProfileAvatarUri(profile: Pick<MobileProfile, 'avatarKey' | 'colorKey'>): string {
+  if (profile.avatarKey.startsWith('data:image/')) return profile.avatarKey;
+  const match = /(?:glyph|weave)-(\d+)$/.exec(profile.avatarKey);
+  const parsed = match ? Number.parseInt(match[1], 10) : 1;
+  const variantNumber = Number.isFinite(parsed) && parsed > 0 ? ((parsed - 1) % 12) + 1 : 1;
+  const variant = String(variantNumber).padStart(2, '0');
+  const color = PROFILE_COLOR_HEX[profile.colorKey] || PROFILE_COLOR_HEX.ember;
+  const params = new URLSearchParams({
+    seed: `loomtv-glyph-${variant}`,
+    shapeVariant: `variant${variant}`,
+    backgroundColor: color,
+    backgroundColorFill: 'solid',
+    glyphColor: color,
+    glyphColorFill: 'solid',
+    size: '256',
+  });
+  return `https://api.dicebear.com/10.x/glyphs/png?${params.toString()}`;
+}
 
 function mobileDeviceName(): string {
   return Device.deviceName?.trim()
@@ -226,7 +263,27 @@ const settingsSections: { id: SettingsSection; label: string; description: strin
   { id: 'library', label: 'Library', description: 'Refresh and review the paired desktop library.' },
   { id: 'network', label: 'Network', description: 'Pairing status and desktop connection details.' },
   { id: 'appearance', label: 'Appearance', description: 'Choose a light or dark theme for this device.' },
+  { id: 'about', label: 'About', description: 'App information and third-party attribution.' },
 ];
+
+const MOBILE_OPEN_SOURCE_NOTICES = [
+  { name: 'Expo', license: 'MIT' },
+  { name: '@expo/vector-icons', license: 'MIT' },
+  { name: 'expo-blur', license: 'MIT' },
+  { name: 'expo-brightness', license: 'MIT' },
+  { name: 'expo-build-properties', license: 'MIT' },
+  { name: 'expo-device', license: 'MIT' },
+  { name: 'expo-image', license: 'MIT' },
+  { name: 'expo-screen-orientation', license: 'MIT' },
+  { name: 'expo-secure-store', license: 'MIT' },
+  { name: 'expo-status-bar', license: 'MIT' },
+  { name: 'expo-video', license: 'MIT' },
+  { name: 'React', license: 'MIT' },
+  { name: 'React Native', license: 'MIT' },
+  { name: 'react-native-safe-area-context', license: 'MIT' },
+  { name: 'react-native-svg', license: 'MIT' },
+  { name: 'react-native-zeroconf', license: 'MIT' },
+] as const;
 
 function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
@@ -651,7 +708,7 @@ function FallbackImage({
 }
 
 const ShimmerOverlay = memo(function ShimmerOverlay() {
-  const { colors: { themeLabel }, styles } = useMobileTheme();
+  const { styles } = useMobileTheme();
   const progress = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
 
@@ -851,6 +908,154 @@ function useEntrance(translateY = 0) {
   };
 }
 
+function SubpageBackButton({
+  accessibilityLabel = 'Back',
+  onPress,
+  style,
+}: {
+  accessibilityLabel?: string;
+  onPress: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const { styles } = useMobileTheme();
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.subpageBackButton, style, pressed && styles.pressed]}
+    >
+      <BackIcon size={24} color="#ffffff" />
+    </Pressable>
+  );
+}
+
+function MobileProfilePicker({
+  activeProfile,
+  error,
+  onSelect,
+  pin,
+  pinTarget,
+  profiles,
+  setPin,
+  setPinTarget,
+}: {
+  activeProfile: MobileProfile | null;
+  error: string;
+  onSelect: (profile: MobileProfile, pin?: string) => void;
+  pin: string;
+  pinTarget: MobileProfile | null;
+  profiles: MobileProfile[];
+  setPin: (value: string) => void;
+  setPinTarget: (profile: MobileProfile | null) => void;
+}) {
+  const { colors } = useMobileTheme();
+  const insets = useSafeAreaInsets();
+  if (pinTarget) {
+    const append = (digit: string) => {
+      const next = `${pin}${digit}`.slice(0, 4);
+      setPin(next);
+      if (next.length === 4) onSelect(pinTarget, next);
+    };
+    return (
+      <View style={[mobileProfileStyles.screen, { backgroundColor: colors.bg }]}>
+        <SubpageBackButton
+          accessibilityLabel="Back to profiles"
+          onPress={() => setPinTarget(null)}
+          style={[mobileProfileStyles.pinBackButton, { top: insets.top + 12 }]}
+        />
+        <Text style={[mobileProfileStyles.title, { color: colors.text }]}>Enter PIN</Text>
+        <Text style={{ color: colors.muted }}>Unlock {pinTarget.name}</Text>
+        <View style={mobileProfileStyles.dots}>
+          {[0, 1, 2, 3].map((index) => <View key={index} style={[mobileProfileStyles.dot, { backgroundColor: index < pin.length ? colors.text : colors.border }]} />)}
+        </View>
+        <View style={mobileProfileStyles.pinGrid}>
+          {'123456789'.split('').map((digit) => (
+            <Pressable key={digit} onPress={() => append(digit)} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}>
+              <Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>{digit}</Text>
+            </Pressable>
+          ))}
+          <View style={mobileProfileStyles.pinKey} />
+          <Pressable onPress={() => append('0')} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}><Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>0</Text></Pressable>
+          <Pressable onPress={() => setPin(pin.slice(0, -1))} style={mobileProfileStyles.pinKey}><Text style={{ color: colors.muted }}>Delete</Text></Pressable>
+        </View>
+        {error ? <Text style={mobileProfileStyles.error}>{error}</Text> : null}
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={[mobileProfileStyles.screen, { backgroundColor: colors.bg }]}>
+      <LoomLogo width={132} height={44} wordColor={colors.text} />
+      <Text style={[mobileProfileStyles.title, { color: colors.text }]}>Who’s watching?</Text>
+      <View style={mobileProfileStyles.grid}>
+        {profiles.map((profile) => (
+          <Pressable
+            key={profile.id}
+            accessibilityRole="button"
+            accessibilityLabel={`${profile.name}${profile.hasPin ? ', PIN protected' : ''}`}
+            accessibilityState={{ selected: profile.id === activeProfile?.id }}
+            onPress={() => profile.hasPin ? setPinTarget(profile) : onSelect(profile)}
+            style={mobileProfileStyles.card}
+          >
+            <View style={[
+              mobileProfileStyles.avatar,
+              { backgroundColor: colors.panel, borderColor: colors.border },
+            ]}>
+              <ExpoImage source={{ uri: mobileProfileAvatarUri(profile) }} style={mobileProfileStyles.avatarImage} contentFit="cover" />
+            </View>
+            <Text numberOfLines={1} style={[mobileProfileStyles.name, { color: colors.text }]}>{profile.name}</Text>
+            {profile.id === activeProfile?.id ? (
+              <Text style={[mobileProfileStyles.activeProfileLabel, { color: colors.accent }]}>Active</Text>
+            ) : null}
+            {profile.hasPin ? <Text style={{ color: colors.muted, fontSize: 11 }}>PIN protected</Text> : null}
+          </Pressable>
+        ))}
+      </View>
+      {error ? <Text style={mobileProfileStyles.error}>{error}</Text> : null}
+    </ScrollView>
+  );
+}
+
+const mobileProfileStyles = StyleSheet.create({
+  screen: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 56, gap: 12 },
+  title: { fontSize: 30, fontWeight: '800', marginTop: 24 },
+  grid: { width: '100%', maxWidth: 560, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 22, marginTop: 28 },
+  card: { width: 116, alignItems: 'center', gap: 8 },
+  avatar: { width: 104, height: 104, borderRadius: 52, borderWidth: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 52 },
+  avatarText: { fontSize: 42, fontWeight: '800' },
+  name: { maxWidth: 116, fontSize: 15, fontWeight: '700' },
+  activeProfileLabel: { fontSize: 12, fontWeight: '700', marginTop: -5 },
+  pinBackButton: { left: 16, position: 'absolute' },
+  dots: { flexDirection: 'row', gap: 14, marginVertical: 20 },
+  dot: { width: 14, height: 14, borderRadius: 7 },
+  pinGrid: { width: 276, flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  pinKey: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center' },
+  pinText: { fontSize: 28, fontWeight: '700' },
+  error: { color: '#f87171', textAlign: 'center', marginTop: 8 },
+  settingsActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  settingsAction: { borderWidth: 1, borderRadius: 10, minHeight: 42, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  autoSignInRow: { width: '100%', maxWidth: 340, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingHorizontal: 12 },
+});
+
+const mobileSplashStyles = StyleSheet.create({
+  screen: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    backgroundColor: '#0b0b0b',
+    justifyContent: 'center',
+    zIndex: 100,
+  },
+  accentLine: {
+    backgroundColor: '#fc9c03',
+    borderRadius: 2,
+    height: 3,
+    marginTop: 18,
+    width: 28,
+  },
+});
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -864,10 +1069,49 @@ function AppRoot() {
   const insets = useSafeAreaInsets();
   const systemColorScheme = useColorScheme();
   const isTablet = Math.min(width, height) >= 760;
+  const [showStartupSplash, setShowStartupSplash] = useState(true);
+  const splashOpacity = useRef(new Animated.Value(1)).current;
+  const splashScale = useRef(new Animated.Value(0.96)).current;
+
+  useEffect(() => {
+    let animation: ReturnType<typeof Animated.parallel> | null = null;
+    const timer = setTimeout(() => {
+      animation = Animated.parallel([
+        Animated.timing(splashOpacity, {
+          toValue: 0,
+          duration: 180,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(splashScale, {
+          toValue: 1.03,
+          duration: 180,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]);
+      animation.start(({ finished }) => {
+        if (finished) setShowStartupSplash(false);
+      });
+    }, 380);
+    return () => {
+      clearTimeout(timer);
+      animation?.stop();
+    };
+  }, [splashOpacity, splashScale]);
 
   const [baseUrl, setBaseUrl] = useState('');
   const [shareCode, setShareCode] = useState('');
   const [connection, setConnection] = useState<Connection | null>(null);
+  const [profiles, setProfiles] = useState<MobileProfile[]>([]);
+  const [activeProfile, setActiveProfile] = useState<MobileProfile | null>(null);
+  const [automaticProfileSignIn, setAutomaticProfileSignIn] = useState(false);
+  const [showProfilePicker, setShowProfilePicker] = useState(false);
+  const [profilePinTarget, setProfilePinTarget] = useState<MobileProfile | null>(null);
+  const [profilePin, setProfilePin] = useState('');
+  const [profileError, setProfileError] = useState('');
+  const [profileLists, setProfileLists] = useState<MobileProfileListEntry[]>([]);
+  const profileHydrationGenerationRef = useRef(0);
   const [savedConnection, setSavedConnection] = useState<SavedConnection | null>(null);
   const [discoveredHosts, setDiscoveredHosts] = useState<DiscoveredHost[]>([]);
   const [isDiscoveringHosts, setIsDiscoveringHosts] = useState(true);
@@ -1101,6 +1345,9 @@ function AppRoot() {
         if (!cancelled) setIsRestoringConnection(false);
       });
     return () => { cancelled = true; };
+    // This runs once to restore the saved session; the callback only uses refs,
+    // setters, and the saved value, so it is intentionally not reactive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1160,18 +1407,24 @@ function AppRoot() {
       void SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
       void reconnectSavedConnection(updated);
     }
+    // Keep the reconnect cadence tied to saved-session state, not callback identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, discoveredHosts, savedConnection]);
 
   useEffect(() => {
     if (!savedConnection || connection) return;
     const retry = setInterval(() => void reconnectSavedConnection(savedConnection), 5000);
     return () => clearInterval(retry);
+    // Keep the retry interval stable while the saved session remains unchanged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, savedConnection]);
 
   useEffect(() => {
     if (!connection) return;
     const healthCheck = setInterval(() => void checkDesktopConnection(), 10000);
     return () => clearInterval(healthCheck);
+    // These connection fields intentionally own the health-check lifecycle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag]);
 
   useEffect(() => {
@@ -1210,7 +1463,7 @@ function AppRoot() {
     setMobileTheme(mobileThemeFromSettings({ appThemeColor: mobileThemeColor }, resolvedMobileThemeMode));
   }, [mobileThemeColor, resolvedMobileThemeMode]);
 
-  const library = connection?.library || {};
+  const library = useMemo(() => connection?.library || {}, [connection?.library]);
   const grouped = useMemo(() => collections(library), [library]);
   const everything = useMemo(() => allItems(library), [library]);
   const filterSource = useMemo(() => {
@@ -1219,9 +1472,31 @@ function AppRoot() {
   }, [activeKind, everything, grouped]);
   const hasActiveFilters = libraryFilter !== 'all';
   const continueWatching = useMemo(
-    () => everything.filter((item) => item.lastPlayed).sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0)).slice(0, 16),
-    [everything],
+    () => everything
+      .map((item) => {
+        const paths = [streamPathFor(item), ...(item.episodeFiles || []).map((episode) => episode.filePath)];
+        return [item, Math.max(0, ...paths.map((filePath) => progress[filePath]?.updatedAt || 0))] as const;
+      })
+      .filter(([, updatedAt]) => updatedAt > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 16)
+      .map(([item]) => item),
+    [everything, progress],
   );
+  const mobileMyListItems = useMemo(() => {
+    const byId = new Map(everything.map((item) => [item.id, item]));
+    const seen = new Set<string>();
+    return profileLists
+      .filter((entry) => entry.kind === 'watchlist' || entry.kind === 'favorite')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .filter((entry) => {
+        if (seen.has(entry.mediaId)) return false;
+        seen.add(entry.mediaId);
+        return true;
+      })
+      .map((entry) => byId.get(entry.mediaId))
+      .filter((item): item is MediaItem => Boolean(item));
+  }, [everything, profileLists]);
   const visibleItems = useMemo(() => {
     if (activeKind === 'settings') return [];
     const source = searchOpen ? everything : filterSource;
@@ -1251,6 +1526,37 @@ function AppRoot() {
     lastDetailByKindRef.current.delete(activeKind);
     setDetailItem(null);
   }, [activeKind]);
+
+  const setMobileProfileListEntry = useCallback(async (
+    mediaId: string,
+    kind: 'watchlist' | 'favorite',
+    present: boolean,
+  ) => {
+    if (!connection) return;
+    let response = await mobileLanClient.setProfileList(
+      connection.baseUrl,
+      connection.deviceToken,
+      mediaId,
+      kind,
+      present,
+      connection.selectionRevision,
+    );
+    if (!response.ok) throw new Error('The profile list could not be updated.');
+    let nextLists = await response.json() as MobileProfileListEntry[];
+    if (kind === 'watchlist' && !present) {
+      response = await mobileLanClient.setProfileList(
+        connection.baseUrl,
+        connection.deviceToken,
+        mediaId,
+        'favorite',
+        false,
+        connection.selectionRevision,
+      );
+      if (!response.ok) throw new Error('The profile list could not be updated.');
+      nextLists = await response.json() as MobileProfileListEntry[];
+    }
+    setProfileLists(nextLists);
+  }, [connection]);
 
   const playHomeItem = useCallback((item: MediaItem) => {
     playerReturnItemRef.current = item;
@@ -1284,7 +1590,7 @@ function AppRoot() {
     if (autoAdvancedEpisodeRef.current !== currentFilePath) {
       autoAdvancedEpisodeRef.current = null;
     }
-  }, [playTarget?.streamPath]);
+  }, [playTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1308,7 +1614,7 @@ function AppRoot() {
     return () => {
       cancelled = true;
     };
-  }, [connection?.deviceToken, playbackUrl, player]);
+  }, [connection?.deviceToken, playbackUrl, playTarget, player]);
 
   useEffect(() => {
     if (!playbackUrl) return;
@@ -1419,6 +1725,9 @@ function AppRoot() {
       sourceChangeSubscription?.remove?.();
       endSubscription?.remove?.();
     };
+    // The listener intentionally captures the current progress callback for this
+    // player session instead of re-registering on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection?.library, playbackUrl, playTarget, player, progress, streamOptions.forceTranscode]);
 
   useEffect(() => {
@@ -1464,6 +1773,7 @@ function AppRoot() {
           connection.deviceToken,
           filePathFromUrl(playTarget.streamPath),
           options,
+          connection.selectionRevision,
         );
         const result = (await response.json()) as ApiResult<HlsSession>;
         if (!response.ok || !result.ok || !result.data?.playlistUrl) {
@@ -1488,7 +1798,9 @@ function AppRoot() {
     return () => {
       cancelled = true;
     };
-  }, [connection?.baseUrl, connection?.deviceToken, playTarget, streamOptionsKey, streamRetryNonce]);
+    // streamOptionsKey is the stable serialized dependency for this preparation flow.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, streamOptionsKey, streamRetryNonce]);
 
   const retryPlayback = useCallback(() => {
     setPlaybackFailure(null);
@@ -1513,6 +1825,7 @@ function AppRoot() {
           mediaId: filePathFromUrl(target.streamPath),
           position,
           duration: Number.isFinite(duration) ? duration : 0,
+          selectionRevision: connection.selectionRevision,
       });
       if (response.ok) {
         const stored = (await response.json()) as StoredProgress;
@@ -1589,6 +1902,8 @@ function AppRoot() {
     } finally {
       closingPlayerRef.current = false;
     }
+    // closePlayer intentionally keeps its current player-session callback stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKind, connection?.library, detailItem?.id, playTarget, playbackFailure, player]);
 
   useEffect(() => {
@@ -1627,7 +1942,9 @@ function AppRoot() {
       void syncPlaybackProgress(playTarget);
     }, 15000);
     return () => clearInterval(interval);
-  }, [playTarget, playbackUrl, connection?.baseUrl, connection?.deviceToken, player]);
+    // The interval is keyed to the active player session, not callback identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playTarget, playbackUrl, connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, player]);
 
   async function hydrateProgress(nextConnection = connection) {
     if (!nextConnection) return;
@@ -1662,6 +1979,94 @@ function AppRoot() {
     return updated;
   }
 
+  async function hydrateSelectedProfile(nextConnection: Connection, profile: MobileProfile, activeState?: MobileActiveProfile): Promise<void> {
+    const generation = ++profileHydrationGenerationRef.current;
+    const [libraryResponse, progressResponse, preferencesResponse, listsResponse] = await Promise.all([
+      mobileLanClient.getLibrary(nextConnection.baseUrl, nextConnection.deviceToken),
+      mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken),
+      mobileLanClient.getProfilePreferences(nextConnection.baseUrl, nextConnection.deviceToken),
+      mobileLanClient.getProfileLists(nextConnection.baseUrl, nextConnection.deviceToken),
+    ]);
+    if (generation !== profileHydrationGenerationRef.current) return;
+    if (!libraryResponse.ok) throw new Error(`Desktop sharing is unavailable (${libraryResponse.status}).`);
+    const library = await libraryResponse.json() as LibraryPayload;
+    const hydratedConnection = {
+      ...nextConnection,
+      library,
+      libraryEtag: libraryResponse.headers.get('ETag') || '',
+      selectionRevision: activeState?.selectionRevision ?? nextConnection.selectionRevision,
+    };
+    setConnection(hydratedConnection);
+    setActiveProfile(profile);
+    setShowProfilePicker(false);
+    setProfilePinTarget(null);
+    setProfilePin('');
+    setProfileError('');
+    setProgress(progressResponse.ok ? await progressResponse.json() as Record<string, StoredProgress> : {});
+    if (preferencesResponse.ok) {
+      const preferences = await preferencesResponse.json() as MobileProfilePreferences;
+      if (preferences.appThemeMode) setMobileThemeMode(preferences.appThemeMode);
+      if (preferences.appThemeColor && MOBILE_THEME_COLOR_OPTIONS.some((option) => option.value === preferences.appThemeColor)) {
+        setMobileThemeColor(preferences.appThemeColor as MobileThemeColor);
+      }
+    }
+    setProfileLists(listsResponse.ok ? await listsResponse.json() as MobileProfileListEntry[] : []);
+  }
+
+  async function selectMobileProfile(nextConnection: Connection, profile: MobileProfile, pin?: string): Promise<void> {
+    setProfileError('');
+    const response = await mobileLanClient.selectProfile(nextConnection.baseUrl, nextConnection.deviceToken, {
+      profileId: profile.id,
+      ...(pin ? { pin } : {}),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as { error?: string; retryAfterMs?: number };
+      if (payload.error === 'profile_locked') {
+        const wait = payload.retryAfterMs ? ` Try again in ${Math.ceil(payload.retryAfterMs / 1000)} seconds.` : '';
+        throw new Error(`That PIN could not be accepted.${wait}`);
+      }
+      throw new Error('That profile could not be selected.');
+    }
+    const payload = await response.json() as { profile: MobileProfile; active: MobileActiveProfile };
+    setAutomaticProfileSignIn(payload.active.automaticSignIn);
+    await hydrateSelectedProfile(nextConnection, payload.profile, payload.active);
+  }
+
+  async function initializeProfiles(nextConnection: Connection): Promise<boolean> {
+    const configResponse = await mobileLanClient.getClientConfig(nextConnection.baseUrl, nextConnection.deviceToken);
+    if (!configResponse.ok) return false;
+    const profilesResponse = await mobileLanClient.getProfiles(nextConnection.baseUrl, nextConnection.deviceToken);
+    if (!profilesResponse.ok) return false;
+    const payload = await profilesResponse.json() as { profiles: MobileProfile[] };
+    setProfiles(payload.profiles);
+    const activeResponse = await mobileLanClient.getActiveProfile(nextConnection.baseUrl, nextConnection.deviceToken);
+    const activeState = activeResponse.ok ? await activeResponse.json() as MobileActiveProfile : null;
+    setAutomaticProfileSignIn(Boolean(activeState?.automaticSignIn));
+    const selected = payload.profiles.find((profile) => profile.id === activeState?.profileId);
+    if (selected && activeState?.automaticSignIn) {
+      await hydrateSelectedProfile(nextConnection, selected, activeState || undefined);
+      return true;
+    }
+    setConnection({ ...nextConnection, library: {}, libraryEtag: '', selectionRevision: activeState?.selectionRevision });
+    setActiveProfile(selected || null);
+    setShowProfilePicker(true);
+    return true;
+  }
+
+  async function refreshProfiles(nextConnection: Connection): Promise<void> {
+    try {
+      const response = await mobileLanClient.getProfiles(nextConnection.baseUrl, nextConnection.deviceToken);
+      if (!response.ok) return;
+      const payload = await response.json() as { profiles: MobileProfile[] };
+      setProfiles(payload.profiles);
+      setActiveProfile((current) => current
+        ? payload.profiles.find((profile) => profile.id === current.id) || current
+        : current);
+    } catch {
+      // Profile updates are opportunistic; the existing connection check reports real outages.
+    }
+  }
+
   async function reconnectSavedConnection(saved: SavedConnection) {
     if (reconnectingSavedConnectionRef.current) return;
     reconnectingSavedConnectionRef.current = true;
@@ -1671,6 +2076,14 @@ function AppRoot() {
         || saved.clientDeviceName !== mobileDeviceName()
         ? await refreshSavedCredentials(saved)
         : saved;
+      const baseConnection: Connection = { ...activeSaved, library: {}, libraryEtag: '' };
+      const profileInitialized = await initializeProfiles(baseConnection);
+      if (profileInitialized) {
+        setBaseUrl(baseConnection.baseUrl);
+        setError('');
+        setIsServerOffline(false);
+        return;
+      }
       const response = await mobileLanClient.getLibrary(activeSaved.baseUrl, activeSaved.deviceToken);
       if (response.status === 401) {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
@@ -1752,10 +2165,12 @@ function AppRoot() {
       await SecureStore.setItemAsync(MOBILE_DEVICE_ID_KEY, nextConnection.deviceId);
       await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection));
       setSavedConnection(nextSavedConnection);
-      setConnection(nextConnection);
       setShareCode('');
       setIsServerOffline(false);
-      void hydrateProgress(nextConnection);
+      if (!await initializeProfiles(nextConnection)) {
+        setConnection(nextConnection);
+        void hydrateProgress(nextConnection);
+      }
     } catch (nextError) {
       const connectionError = connectionErrorFor(nextError, 'Pairing failed.');
       setError(connectionError.message);
@@ -1805,6 +2220,7 @@ function AppRoot() {
     setIsServerOffline(false);
     setIsRefreshing(true);
     try {
+      void refreshProfiles(connection);
       const response = await mobileLanClient.getLibrary(
         connection.baseUrl,
         connection.deviceToken,
@@ -1835,6 +2251,7 @@ function AppRoot() {
     if (!connection || connectionHealthCheckRef.current || isRefreshing) return;
     connectionHealthCheckRef.current = true;
     try {
+      void refreshProfiles(connection);
       const response = await mobileLanClient.getLibrary(
         connection.baseUrl,
         connection.deviceToken,
@@ -1962,7 +2379,7 @@ function AppRoot() {
   return (
     <MobileThemeProvider value={themeContextValue}>
     <View style={styles.app}>
-      <StatusBar style={text !== '#000000' ? 'light' : 'dark'} />
+      <StatusBar style={showStartupSplash || text !== '#000000' ? 'light' : 'dark'} />
       {!connection ? (
         <PairingScreen
           baseUrl={baseUrl}
@@ -1983,6 +2400,22 @@ function AppRoot() {
           shareCode={shareCode}
           onPair={pairWithDesktop}
         />
+      ) : showProfilePicker ? (
+        <MobileProfilePicker
+          activeProfile={activeProfile}
+          error={profileError}
+          pin={profilePin}
+          pinTarget={profilePinTarget}
+          profiles={profiles}
+          setPin={setProfilePin}
+          setPinTarget={(profile) => { setProfilePinTarget(profile); setProfilePin(''); setProfileError(''); }}
+          onSelect={(profile, pin) => {
+            void selectMobileProfile(connection, profile, pin).catch((nextError) => {
+              setProfilePin('');
+              setProfileError(nextError instanceof Error ? nextError.message : 'That profile could not be selected.');
+            });
+          }}
+        />
       ) : (
         <View style={styles.shell}>
           <View style={styles.main}>
@@ -1994,8 +2427,19 @@ function AppRoot() {
                 onScroll={rememberMainScroll}
                 refreshControl={libraryRefreshControl}
                 scrollEventThrottle={120}
+                showsVerticalScrollIndicator={false}
+                stickyHeaderIndices={settingsSection ? [0] : undefined}
               >
+                {settingsSection ? (
+                  <SettingsDetailHeader
+                    label={settingsSections.find((section) => section.id === settingsSection)?.label ?? 'Settings'}
+                    onBack={() => setSettingsSection(null)}
+                    sticky
+                  />
+                ) : null}
                 <SettingsScreen
+                  activeProfile={activeProfile}
+                  automaticProfileSignIn={automaticProfileSignIn}
                   activeSection={settingsSection}
                   connection={connection}
                   counts={{
@@ -2008,7 +2452,27 @@ function AppRoot() {
                   isRefreshing={isRefreshing}
                   mobileThemeColor={mobileThemeColor}
                   mobileThemeMode={mobileThemeMode}
+                  onLockProfile={() => {
+                    void mobileLanClient.lockProfile(connection.baseUrl, connection.deviceToken).then(() => {
+                      profileHydrationGenerationRef.current += 1;
+                      setActiveProfile(null);
+                      setAutomaticProfileSignIn(false);
+                      setProfileLists([]);
+                      setProgress({});
+                      setConnection((current) => current ? { ...current, library: {} } : current);
+                      setShowProfilePicker(true);
+                    });
+                  }}
+                  onSetAutomaticSignIn={(enabled) => {
+                    void mobileLanClient.setAutomaticSignIn(connection.baseUrl, connection.deviceToken, enabled).then(async (response) => {
+                      if (!response.ok) return;
+                      const state = await response.json() as MobileActiveProfile;
+                      setAutomaticProfileSignIn(state.automaticSignIn);
+                    });
+                  }}
+                  onSwitchProfile={() => setShowProfilePicker(true)}
                   onDisconnect={() => {
+                    profileHydrationGenerationRef.current += 1;
                     void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
                     setSavedConnection(null);
                     setConnection(null);
@@ -2032,6 +2496,7 @@ function AppRoot() {
                   onRefresh={refreshLibrary}
                   onSelectTheme={selectMobileTheme}
                   onSelectThemeColor={selectMobileThemeColor}
+                  showDetailHeader={!settingsSection}
                   setActiveSection={setSettingsSection}
                 />
               </ScrollView>
@@ -2095,6 +2560,7 @@ function AppRoot() {
                         continueWatching={continueWatching}
                         grouped={grouped}
                         isTablet={isTablet}
+                        myList={mobileMyListItems}
                         onOpenKind={navigateToKind}
                         onResume={playHomeItem}
                         onSelect={openDetailItem}
@@ -2163,6 +2629,7 @@ function AppRoot() {
             ) : null}
             {!searchOpen ? (
               <BottomNav
+                activeProfile={activeProfile}
                 activeKind={activeKind}
                 setActiveKind={navigateToKind}
               />
@@ -2172,17 +2639,20 @@ function AppRoot() {
       )}
 
       <DetailModal
+        activeProfile={activeProfile}
         activeKind={activeKind}
         artworkCacheBusters={artworkCacheBusters}
         baseUrl={connection?.baseUrl || ''}
         hasMiniPlayer={Boolean(miniPlayerTarget)}
         isTablet={isTablet}
         item={detailItem}
+        isWatchlisted={Boolean(detailItem && profileLists.some((entry) => entry.mediaId === detailItem.id && (entry.kind === 'watchlist' || entry.kind === 'favorite')))}
         progress={progress}
         artworkRefreshError={artworkRefreshError}
         isRefreshingArtwork={Boolean(detailItem && refreshingArtworkId === detailItem.id)}
         onClose={closeDetail}
         onOpenKind={navigateToKind}
+        onToggleList={(kind, present) => detailItem ? setMobileProfileListEntry(detailItem.id, kind, present) : Promise.resolve()}
         onPlay={(target) => {
           playerReturnItemRef.current = detailItem;
           setMiniPlayerTarget(null);
@@ -2223,6 +2693,7 @@ function AppRoot() {
       <PlayerModal
         baseUrl={connection?.baseUrl || ''}
         deviceToken={connection?.deviceToken || ''}
+        selectionRevision={connection?.selectionRevision}
         isPreparing={isPreparingStream}
         target={playTarget}
         failure={playbackFailure}
@@ -2232,6 +2703,19 @@ function AppRoot() {
         onRetry={retryPlayback}
         onStreamOptionsChange={setStreamOptions}
       />
+      {showStartupSplash ? (
+        <Animated.View
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={[mobileSplashStyles.screen, { opacity: splashOpacity }]}
+        >
+          <Animated.View style={{ transform: [{ scale: splashScale }] }}>
+            <LoomLogo width={146} height={41} accent="#fc9c03" wordColor="#ffffff" />
+          </Animated.View>
+          <View style={mobileSplashStyles.accentLine} />
+        </Animated.View>
+      ) : null}
     </View>
     </MobileThemeProvider>
   );
@@ -2634,7 +3118,7 @@ function BottomNavItem({
   isActive,
   onPress,
 }: {
-  item: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement };
+  item: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement; avatarUri?: string };
   isActive: boolean;
   onPress: () => void;
 }) {
@@ -2659,7 +3143,15 @@ function BottomNavItem({
       accessibilityLabel={item.label}
     >
       <Animated.View style={[styles.bottomNavIconWrap, { transform: [{ scale: iconScale }] }]}>
-        <Icon size={24} color={isActive ? accent : faint} />
+        {item.avatarUri ? (
+          <ExpoImage
+            source={{ uri: item.avatarUri }}
+            style={styles.bottomNavAvatar}
+            contentFit="cover"
+          />
+        ) : (
+          <Icon size={24} color={isActive ? accent : faint} />
+        )}
       </Animated.View>
       <Text style={[styles.bottomNavLabel, isActive && styles.bottomNavLabelActive]} numberOfLines={1}>{item.label}</Text>
     </Pressable>
@@ -2668,9 +3160,11 @@ function BottomNavItem({
 
 // The bottom nav mirrors the primary library destinations and settings.
 function BottomNav({
+  activeProfile,
   activeKind,
   setActiveKind,
 }: {
+  activeProfile?: MobileProfile | null;
   activeKind: LibraryKind;
   setActiveKind: (kind: LibraryKind) => void;
 }) {
@@ -2680,12 +3174,12 @@ function BottomNav({
   const androidGlassBackground = themeLabel === 'Light'
     ? 'rgba(255,255,255,0.42)'
     : 'rgba(10,10,10,0.88)';
-  const bottomItems: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement; isActive: boolean; onPress: () => void }[] = [
+  const bottomItems: { id: string; label: string; Icon: (props: IconProps) => ReactElement; ActiveIcon?: (props: IconProps) => ReactElement; avatarUri?: string; isActive: boolean; onPress: () => void }[] = [
     { id: 'home', label: 'Home', Icon: navIcons.home, ActiveIcon: navIcons.homeActive, isActive: activeKind === 'home', onPress: () => setActiveKind('home') },
     { id: 'anime', label: 'Anime', Icon: navIcons.anime, ActiveIcon: navIcons.animeActive, isActive: activeKind === 'anime', onPress: () => setActiveKind('anime') },
     { id: 'tv', label: 'TV Shows', Icon: navIcons.tv, ActiveIcon: navIcons.tvActive, isActive: activeKind === 'tv', onPress: () => setActiveKind('tv') },
     { id: 'movies', label: 'Movies', Icon: navIcons.movies, ActiveIcon: navIcons.moviesActive, isActive: activeKind === 'movies', onPress: () => setActiveKind('movies') },
-    { id: 'settings', label: 'Settings', Icon: navIcons.settings, ActiveIcon: navIcons.settingsActive, isActive: activeKind === 'settings', onPress: () => setActiveKind('settings') },
+    { id: 'settings', label: 'Settings', Icon: UserCircleIcon, ActiveIcon: UserCircleSolidIcon, avatarUri: activeProfile ? mobileProfileAvatarUri(activeProfile) : undefined, isActive: activeKind === 'settings', onPress: () => setActiveKind('settings') },
   ];
   const items = (
     <View style={styles.bottomNavRow}>
@@ -2816,6 +3310,7 @@ function MiniPlayerStrip({
 }
 
 function DetailModal({
+  activeProfile,
   activeKind,
   artworkCacheBusters,
   artworkRefreshError,
@@ -2824,12 +3319,15 @@ function DetailModal({
   isRefreshingArtwork,
   isTablet,
   item,
+  isWatchlisted,
   progress,
   onClose,
   onOpenKind,
+  onToggleList,
   onPlay,
   onRefreshArtwork,
 }: {
+  activeProfile: MobileProfile | null;
   activeKind: LibraryKind;
   artworkCacheBusters: Record<string, string>;
   artworkRefreshError: string;
@@ -2838,9 +3336,11 @@ function DetailModal({
   isRefreshingArtwork: boolean;
   isTablet: boolean;
   item: MediaItem | null;
+  isWatchlisted: boolean;
   progress: Record<string, StoredProgress>;
   onClose: () => void;
   onOpenKind: (kind: LibraryKind) => void;
+  onToggleList: (kind: 'watchlist' | 'favorite', present: boolean) => Promise<void>;
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
@@ -2849,6 +3349,7 @@ function DetailModal({
   return (
     <DetailContent
       key={item.id}
+      activeProfile={activeProfile}
       activeKind={activeKind}
       artworkCacheBusters={artworkCacheBusters}
       artworkRefreshError={artworkRefreshError}
@@ -2857,9 +3358,11 @@ function DetailModal({
       isRefreshingArtwork={isRefreshingArtwork}
       isTablet={isTablet}
       item={item}
+      isWatchlisted={isWatchlisted}
       progress={progress}
       onClose={onClose}
       onOpenKind={onOpenKind}
+      onToggleList={onToggleList}
       onPlay={onPlay}
       onRefreshArtwork={onRefreshArtwork}
     />
@@ -2883,6 +3386,7 @@ const HeroGradient = memo(function HeroGradient() {
 });
 
 function DetailContent({
+  activeProfile,
   activeKind,
   artworkCacheBusters,
   artworkRefreshError,
@@ -2891,12 +3395,15 @@ function DetailContent({
   isRefreshingArtwork,
   isTablet,
   item,
+  isWatchlisted,
   progress,
   onClose,
   onOpenKind,
+  onToggleList,
   onPlay,
   onRefreshArtwork,
 }: {
+  activeProfile: MobileProfile | null;
   activeKind: LibraryKind;
   artworkCacheBusters: Record<string, string>;
   artworkRefreshError: string;
@@ -2905,9 +3412,11 @@ function DetailContent({
   isRefreshingArtwork: boolean;
   isTablet: boolean;
   item: MediaItem;
+  isWatchlisted: boolean;
   progress: Record<string, StoredProgress>;
   onClose: () => void;
   onOpenKind: (kind: LibraryKind) => void;
+  onToggleList: (kind: 'watchlist' | 'favorite', present: boolean) => Promise<void>;
   onPlay: (target: PlayTarget) => void;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
@@ -3186,14 +3695,7 @@ function DetailContent({
             },
           ]}
         />
-        <Pressable
-          style={({ pressed }) => [styles.detailTopAction, pressed && styles.pressed]}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <BackIcon size={24} color="#ffffff" />
-        </Pressable>
+        <SubpageBackButton onPress={onClose} />
         <Animated.Text
           numberOfLines={1}
           style={[
@@ -3207,22 +3709,33 @@ function DetailContent({
         >
           {item.title}
         </Animated.Text>
-        <Pressable
-          style={({ pressed }) => [styles.detailTopAction, isRefreshingArtwork && styles.disabledButton, pressed && styles.pressed]}
-          onPress={() => onRefreshArtwork(item)}
-          disabled={isRefreshingArtwork}
-          accessibilityRole="button"
-          accessibilityLabel={`Refresh poster for ${item.title}`}
-        >
-          {isRefreshingArtwork ? (
-            <ActivityIndicator color={accent} size="small" />
-          ) : (
-            <RefreshIcon size={20} color="#ffffff" />
-          )}
-        </Pressable>
+        <View style={styles.detailTopActions}>
+          <Pressable
+            accessibilityLabel={isWatchlisted ? `Remove ${item.title} from My List` : `Add ${item.title} to My List`}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isWatchlisted }}
+            onPress={() => void onToggleList('watchlist', !isWatchlisted)}
+            style={({ pressed }) => [styles.detailTopAction, pressed && styles.pressed]}
+          >
+            <Ionicons name={isWatchlisted ? 'bookmark' : 'bookmark-outline'} size={22} color={isWatchlisted ? accent : '#ffffff'} />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.detailTopAction, isRefreshingArtwork && styles.disabledButton, pressed && styles.pressed]}
+            onPress={() => onRefreshArtwork(item)}
+            disabled={isRefreshingArtwork}
+            accessibilityRole="button"
+            accessibilityLabel={`Refresh poster for ${item.title}`}
+          >
+            {isRefreshingArtwork ? (
+              <ActivityIndicator color={accent} size="small" />
+            ) : (
+              <RefreshIcon size={20} color="#ffffff" />
+            )}
+          </Pressable>
+        </View>
       </Animated.View>
       {!isTablet ? (
-        <BottomNav activeKind={activeKind} setActiveKind={onOpenKind} />
+        <BottomNav activeProfile={activeProfile} activeKind={activeKind} setActiveKind={onOpenKind} />
       ) : null}
     </Animated.View>
   );
@@ -3505,6 +4018,7 @@ function EpisodeRow({
 function PlayerModal({
   baseUrl,
   deviceToken,
+  selectionRevision,
   failure,
   isPreparing,
   target,
@@ -3516,6 +4030,7 @@ function PlayerModal({
 }: {
   baseUrl: string;
   deviceToken: string;
+  selectionRevision?: number;
   failure: PlaybackFailure | null;
   isPreparing: boolean;
   target: PlayTarget | null;
@@ -3532,6 +4047,7 @@ function PlayerModal({
       key={target.streamPath}
       baseUrl={baseUrl}
       deviceToken={deviceToken}
+      selectionRevision={selectionRevision}
       failure={failure}
       isPreparing={isPreparing}
       target={target}
@@ -3631,6 +4147,7 @@ function PlayerSegmentedControl<T extends string | number>({
 function PlayerContent({
   baseUrl,
   deviceToken,
+  selectionRevision,
   failure,
   isPreparing,
   target,
@@ -3642,6 +4159,7 @@ function PlayerContent({
 }: {
   baseUrl: string;
   deviceToken: string;
+  selectionRevision?: number;
   failure: PlaybackFailure | null;
   isPreparing: boolean;
   target: PlayTarget;
@@ -3676,7 +4194,10 @@ function PlayerContent({
   const recoveryAction = failure ? recoveryActionFor(failure) : null;
   const [trackPreferences, setTrackPreferences] = useState<PlaybackTrackPreferences>({});
   const [gestureLevel, setGestureLevel] = useState<{ kind: PlayerVerticalGesture; value: number } | null>(null);
-  const preferenceScope = useMemo(() => playbackPreferenceScope(target), [target.mediaId, target.streamPath]);
+  const preferenceScope = useMemo(
+    () => playbackPreferenceScope({ mediaId: target.mediaId, streamPath: target.streamPath }),
+    [target.mediaId, target.streamPath],
+  );
   const appliedPreferenceKeyRef = useRef('');
   const gestureStateRef = useRef<{
     kind: PlayerVerticalGesture | null;
@@ -4008,6 +4529,8 @@ function PlayerContent({
     onPanResponderTerminate: () => {
       gestureStateRef.current = { kind: null, startValue: 0, started: false };
     },
+    // Gesture handlers intentionally use the current render's player controls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [playerWidth, player]);
 
   const toggleMenu = (nextMenu: 'video' | 'speed' | 'audio' | 'subtitles') => {
@@ -4136,6 +4659,9 @@ function PlayerContent({
     const startSeconds = Number(player.currentTime || position || 0);
     onStreamOptionsChange(streamOptionsForSelection(nextAudioKey, nextSubtitleKey, startSeconds) || {});
     applyNativeTrackSelection(nextAudioKey, nextSubtitleKey);
+    // Track application intentionally runs once per resolved option set; the
+    // helper functions are local to that player render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeAudioKey,
     activeSubtitleKey,
@@ -4157,7 +4683,7 @@ function PlayerContent({
     const nextPreferences = { ...trackPreferences, ...nextPreference };
     setTrackPreferences(nextPreferences);
     if (!baseUrl || !deviceToken || !preferenceScope) return;
-    mobileLanClient.saveTrackPreferences(baseUrl, deviceToken, preferenceScope, nextPreferences).catch(() => {});
+    mobileLanClient.saveTrackPreferences(baseUrl, deviceToken, preferenceScope, nextPreferences, selectionRevision).catch(() => {});
   };
 
   const selectAudioOption = (option: PlayerAudioOption) => {
@@ -4540,6 +5066,8 @@ function PlayerContent({
 }
 
 function SettingsScreen({
+  activeProfile,
+  automaticProfileSignIn,
   activeSection,
   connection,
   counts,
@@ -4547,12 +5075,18 @@ function SettingsScreen({
   isRefreshing,
   mobileThemeColor,
   mobileThemeMode,
+  onLockProfile,
+  onSetAutomaticSignIn,
+  onSwitchProfile,
   onDisconnect,
   onRefresh,
   onSelectTheme,
   onSelectThemeColor,
+  showDetailHeader,
   setActiveSection,
 }: {
+  activeProfile: MobileProfile | null;
+  automaticProfileSignIn: boolean;
   activeSection: SettingsSection | null;
   connection: Connection;
   counts: Record<'anime' | 'tv' | 'movies' | 'others', number>;
@@ -4560,92 +5094,152 @@ function SettingsScreen({
   isRefreshing: boolean;
   mobileThemeColor: MobileThemeColor;
   mobileThemeMode: MobileThemeMode;
+  onLockProfile: () => void;
+  onSetAutomaticSignIn: (enabled: boolean) => void;
+  onSwitchProfile: () => void;
   onDisconnect: () => void;
   onRefresh: () => void;
   onSelectTheme: (mode: MobileThemeMode) => void;
   onSelectThemeColor: (color: MobileThemeColor) => void;
+  showDetailHeader: boolean;
   setActiveSection: (section: SettingsSection | null) => void;
 }) {
-  const { colors: { accent, muted }, styles } = useMobileTheme();
+  const { colors: { accent, muted, panel }, styles } = useMobileTheme();
   const active = settingsSections.find((section) => section.id === activeSection);
 
   if (active) {
     return (
       <View style={styles.settingsPage}>
-        <View style={styles.settingsDetailHeader}>
-          <Pressable
-            style={({ pressed }) => [styles.settingsBackButton, pressed && styles.pressed]}
-            onPress={() => setActiveSection(null)}
-            accessibilityRole="button"
-            accessibilityLabel="Back to settings"
-          >
-            <BackIcon size={26} color={accent} />
-          </Pressable>
-          <Text selectable numberOfLines={1} style={styles.settingsDetailTitle}>{active.label}</Text>
-        </View>
+        {showDetailHeader ? (
+          <SettingsDetailHeader label={active.label} onBack={() => setActiveSection(null)} />
+        ) : null}
         <SettingsDetail
           section={active}
           connection={connection}
           counts={counts}
           isTablet={isTablet}
           isRefreshing={isRefreshing}
+          mobileThemeColor={mobileThemeColor}
+          mobileThemeMode={mobileThemeMode}
           onRefresh={onRefresh}
+          onSelectTheme={onSelectTheme}
+          onSelectThemeColor={onSelectThemeColor}
         />
       </View>
     );
   }
 
+  const themeModeLabel = mobileThemeMode === 'auto' ? 'Auto' : mobileThemeMode === 'light' ? 'Light' : 'Dark';
+  const themeColorLabel = MOBILE_THEME_COLOR_OPTIONS.find((option) => option.value === mobileThemeColor)?.label;
+  const showAutomaticSignIn = Boolean(activeProfile && !activeProfile.hasPin && !activeProfile.isGuest);
+
   return (
     <View style={styles.settingsPage}>
       <View style={styles.settingsProfile}>
         <View style={styles.settingsAvatar}>
-          <Text style={styles.settingsAvatarText}>LT</Text>
+          {activeProfile ? (
+            <ExpoImage source={{ uri: mobileProfileAvatarUri(activeProfile) }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          ) : (
+            <Text style={styles.settingsAvatarText}>LT</Text>
+          )}
         </View>
-        <Text selectable style={styles.settingsProfileTitle}>Loom Media Player</Text>
+        <Text selectable style={styles.settingsProfileTitle}>{activeProfile?.name || 'LoomTV profile'}</Text>
         <Text selectable style={styles.settingsProfileCopy}>
-          Refresh your library or manage the paired desktop connection.
+          {activeProfile?.type === 'owner' ? 'Owner profile' : activeProfile?.type === 'kid' ? 'Kids profile' : 'Personal profile'}
         </Text>
       </View>
-      <View style={styles.settingsList}>
-        {settingsSections.map((section) => (
-          <Fragment key={section.id}>
-            {section.id === 'appearance' ? (
-              <View style={[styles.settingsListItem, styles.settingsAppearanceRow]}>
-                <Text selectable style={styles.settingsListText}>{section.label}</Text>
-                <Text selectable style={styles.settingsListValue}>
-                  {mobileThemeMode === 'auto' ? 'Auto' : mobileThemeMode === 'light' ? 'Light' : 'Dark'}
-                </Text>
-              </View>
-            ) : (
-              <Pressable
-                style={({ pressed }) => [styles.settingsListItem, pressed && styles.pressed]}
-                onPress={() => setActiveSection(section.id)}
-                accessibilityRole="button"
-              >
-                <Text selectable style={styles.settingsListText}>{section.label}</Text>
-                <ChevronRightIcon size={22} color={muted} />
-              </Pressable>
-            )}
-            {section.id === 'appearance' ? (
-              <MobileThemePicker
-                color={mobileThemeColor}
-                mode={mobileThemeMode}
-                onSelectColor={onSelectThemeColor}
-                onSelectTheme={onSelectTheme}
-              />
-            ) : null}
-          </Fragment>
-        ))}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Disconnect device"
-          style={({ pressed }) => [styles.settingsDangerButton, styles.settingsDisconnectButton, pressed && styles.pressed]}
-          onPress={onDisconnect}
-        >
-          <Text style={styles.settingsDangerButtonText}>Disconnect device</Text>
-        </Pressable>
+
+      <View>
+        <Text selectable style={styles.settingsGroupTitle}>Profile</Text>
+        <View style={styles.settingsGroup}>
+          <SettingsRow label="Switch profile" onPress={onSwitchProfile} />
+          {showAutomaticSignIn && (
+            <SettingsRow
+              label="Automatic sign-in"
+              right={(
+                <Switch
+                  accessibilityLabel="Automatic sign-in"
+                  value={automaticProfileSignIn}
+                  onValueChange={onSetAutomaticSignIn}
+                  ios_backgroundColor={muted}
+                  thumbColor={automaticProfileSignIn ? '#ffffff' : panel}
+                  trackColor={{ false: muted, true: accent }}
+                  style={{ transform: [{ translateY: 4 }] }}
+                />
+              )}
+            />
+          )}
+          <SettingsRow label="Lock profile" onPress={onLockProfile} last />
+        </View>
+      </View>
+
+      <View>
+        <Text selectable style={styles.settingsGroupTitle}>Server</Text>
+        <View style={styles.settingsGroup}>
+          <SettingsRow label="Library" onPress={() => setActiveSection('library')} />
+          <SettingsRow label="Network" onPress={() => setActiveSection('network')} last />
+        </View>
+      </View>
+
+      <View>
+        <Text selectable style={styles.settingsGroupTitle}>Appearance</Text>
+        <View style={styles.settingsGroup}>
+          <SettingsRow
+            label="Theme"
+            value={themeColorLabel ? `${themeModeLabel} · ${themeColorLabel}` : themeModeLabel}
+            onPress={() => setActiveSection('appearance')}
+            last
+          />
+        </View>
+      </View>
+
+      <View style={styles.settingsGroup}>
+        <SettingsRow label="About" onPress={() => setActiveSection('about')} />
+        <SettingsRow label="Disconnect device" onPress={onDisconnect} danger last />
       </View>
     </View>
+  );
+}
+
+function SettingsRow({
+  label,
+  value,
+  right,
+  onPress,
+  danger,
+  last,
+}: {
+  label: string;
+  value?: string;
+  right?: ReactElement;
+  onPress?: () => void;
+  danger?: boolean;
+  last?: boolean;
+}) {
+  const { colors: { muted }, styles } = useMobileTheme();
+  const content = (
+    <>
+      {danger
+        ? <Text style={styles.settingsRowDangerText}>{label}</Text>
+        : <Text selectable style={styles.settingsListText}>{label}</Text>}
+      {value ? <Text selectable style={styles.settingsListValue}>{value}</Text> : null}
+      {right}
+      {onPress && !danger ? <ChevronRightIcon size={20} color={muted} /> : null}
+    </>
+  );
+
+  if (!onPress) {
+    return <View style={[styles.settingsGroupRow, last && styles.settingsGroupRowLast]}>{content}</View>;
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.settingsGroupRow, last && styles.settingsGroupRowLast, pressed && styles.pressed]}
+    >
+      {content}
+    </Pressable>
   );
 }
 
@@ -4722,20 +5316,47 @@ function MobileThemePicker({
   );
 }
 
+function SettingsDetailHeader({
+  label,
+  onBack,
+  sticky = false,
+}: {
+  label: string;
+  onBack: () => void;
+  sticky?: boolean;
+}) {
+  const { styles } = useMobileTheme();
+
+  return (
+    <View style={[styles.settingsDetailHeader, sticky && styles.settingsDetailHeaderSticky]}>
+      <SubpageBackButton accessibilityLabel="Back to settings" onPress={onBack} />
+      <Text selectable numberOfLines={1} style={styles.settingsDetailTitle}>{label}</Text>
+    </View>
+  );
+}
+
 function SettingsDetail({
   section,
   connection,
   counts,
   isTablet,
   isRefreshing,
+  mobileThemeColor,
+  mobileThemeMode,
   onRefresh,
+  onSelectTheme,
+  onSelectThemeColor,
 }: {
   section: { id: SettingsSection; label: string; description: string };
   connection: Connection;
   counts: Record<'anime' | 'tv' | 'movies' | 'others', number>;
   isTablet: boolean;
   isRefreshing: boolean;
+  mobileThemeColor: MobileThemeColor;
+  mobileThemeMode: MobileThemeMode;
   onRefresh: () => void;
+  onSelectTheme: (mode: MobileThemeMode) => void;
+  onSelectThemeColor: (color: MobileThemeColor) => void;
 }) {
   const { styles } = useMobileTheme();
   const { width, fontScale } = useWindowDimensions();
@@ -4793,6 +5414,48 @@ function SettingsDetail({
     );
   }
 
+  if (section.id === 'appearance') {
+    return (
+      <View style={styles.settingsCards}>
+        <View style={styles.settingsCard}>
+          <MobileThemePicker
+            color={mobileThemeColor}
+            mode={mobileThemeMode}
+            onSelectColor={onSelectThemeColor}
+            onSelectTheme={onSelectTheme}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  if (section.id === 'about') {
+    return (
+      <View style={styles.settingsCards}>
+        <View style={styles.settingsCard}>
+          <Text selectable style={styles.settingsCardTitle}>Avatar attribution</Text>
+          <Text selectable style={styles.settingsCardCopy}>
+            DiceBear Glyphs remixes “Abstract Avatars for All Creative Profile Use” by Matt Houser, licensed under CC BY 4.0.
+          </Text>
+          <Text selectable style={styles.settingsValue}>dicebear.com/styles/glyphs</Text>
+        </View>
+        <View style={styles.settingsCard}>
+          <Text selectable style={styles.settingsCardTitle}>Open-source notices</Text>
+          <Text selectable style={styles.settingsCardCopy}>
+            LoomTV Mobile includes the following runtime components.
+          </Text>
+          <View style={{ gap: 6 }}>
+            {MOBILE_OPEN_SOURCE_NOTICES.map((notice) => (
+              <Text key={notice.name} selectable style={styles.settingsValue}>
+                {notice.name} · {notice.license}
+              </Text>
+            ))}
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return null;
 }
 
@@ -4818,6 +5481,7 @@ function HomeSections({
   continueWatching,
   grouped,
   isTablet,
+  myList,
   onOpenKind,
   onResume,
   onSelect,
@@ -4827,6 +5491,7 @@ function HomeSections({
   continueWatching: MediaItem[];
   grouped: ReturnType<typeof collections>;
   isTablet: boolean;
+  myList: MediaItem[];
   onOpenKind: (kind: LibraryKind) => void;
   onResume: (item: MediaItem) => void;
   onSelect: (item: MediaItem) => void;
@@ -4863,6 +5528,7 @@ function HomeSections({
           baseUrl={baseUrl}
           isTablet={isTablet}
           item={heroItem}
+          resume={continueWatching.some((item) => item.id === heroItem.id)}
           onPlay={onResume}
           onSelect={onSelect}
         />
@@ -4870,6 +5536,7 @@ function HomeSections({
       {continueWatching.length > 0 ? (
         <Rail title="Continue Watching" artworkCacheBusters={artworkCacheBusters} items={continueWatching} baseUrl={baseUrl} onSelect={onSelect} />
       ) : null}
+      {myList.length > 0 ? <Rail title="My List" artworkCacheBusters={artworkCacheBusters} items={myList} baseUrl={baseUrl} onSelect={onSelect} /> : null}
       <Rail title="Anime" artworkCacheBusters={artworkCacheBusters} items={grouped.anime.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('anime')} />
       <Rail title="TV Shows" artworkCacheBusters={artworkCacheBusters} items={grouped.tv.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('tv')} />
       <Rail title="Movies" artworkCacheBusters={artworkCacheBusters} items={grouped.movies.slice(0, 24)} baseUrl={baseUrl} onSelect={onSelect} onPressTitle={() => onOpenKind('movies')} />
@@ -4885,6 +5552,7 @@ function HomeHero({
   baseUrl,
   isTablet,
   item,
+  resume,
   onPlay,
   onSelect,
 }: {
@@ -4892,6 +5560,7 @@ function HomeHero({
   baseUrl: string;
   isTablet: boolean;
   item: MediaItem;
+  resume: boolean;
   onPlay: (item: MediaItem) => void;
   onSelect: (item: MediaItem) => void;
 }) {
@@ -4908,6 +5577,7 @@ function HomeHero({
         cacheBust={artworkCacheBusters[item.id]}
         height={cardHeight}
         item={item}
+        resume={resume}
         onPlay={() => onPlay(item)}
         onSelect={() => onSelect(item)}
         width={cardWidth}
@@ -4921,6 +5591,7 @@ function HeroCard({
   cacheBust,
   height,
   item,
+  resume,
   onPlay,
   onSelect,
   width,
@@ -4929,6 +5600,7 @@ function HeroCard({
   cacheBust?: string;
   height: number;
   item: MediaItem;
+  resume: boolean;
   onPlay: () => void;
   onSelect: () => void;
   width: number;
@@ -4944,6 +5616,7 @@ function HeroCard({
     item.year ? String(item.year) : null,
     item.type === 'movie' ? (item.localMetadata?.durationSeconds ? formatDuration(item.localMetadata.durationSeconds) : null) : seasonCountLabel(item),
   ].filter(Boolean).join(' · ');
+  const rating = item.rating && item.rating > 0 ? item.rating : null;
 
   return (
     <PressableScale
@@ -4966,24 +5639,35 @@ function HeroCard({
       <Svg pointerEvents="none" style={styles.heroCardShade} viewBox="0 0 1 1" preserveAspectRatio="none">
         <Defs>
           <SvgLinearGradient id="heroCardBottomFade" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0.45" stopColor="#050505" stopOpacity={0} />
-            <Stop offset="0.74" stopColor="#050505" stopOpacity={0.55} />
-            <Stop offset="1" stopColor="#050505" stopOpacity={0.92} />
+            <Stop offset="0.28" stopColor="#050505" stopOpacity={0.12} />
+            <Stop offset="0.50" stopColor="#050505" stopOpacity={0.68} />
+            <Stop offset="0.74" stopColor="#050505" stopOpacity={0.9} />
+            <Stop offset="1" stopColor="#050505" stopOpacity={0.98} />
           </SvgLinearGradient>
         </Defs>
         <SvgRect x="0" y="0" width="1" height="1" fill="url(#heroCardBottomFade)" />
       </Svg>
       <View style={styles.heroCardFooter}>
         <Text numberOfLines={2} style={styles.heroCardTitle}>{item.title}</Text>
-        {meta ? <Text numberOfLines={1} style={styles.heroCardMeta}>{meta}</Text> : null}
+        {(meta || rating !== null) ? (
+          <View style={styles.heroCardMetaRow}>
+            {meta ? <Text numberOfLines={1} style={styles.heroCardMeta}>{meta}</Text> : null}
+            {rating !== null ? (
+              <View accessibilityLabel={`Rated ${rating.toFixed(1)} out of 10`} style={styles.heroCardRating}>
+                <StarIcon size={13} color="#f5c451" />
+                <Text style={styles.heroCardRatingText}>{rating.toFixed(1)}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
         <Pressable
-          accessibilityLabel={`${item.lastPlayed ? 'Resume' : 'Play'} ${item.title}`}
+          accessibilityLabel={`${resume ? 'Resume' : 'Play'} ${item.title}`}
           accessibilityRole="button"
           onPress={onPlay}
           style={({ pressed }) => [styles.heroPlayButton, pressed && styles.heroPlayButtonPressed]}
         >
           <PlayIcon size={22} color={accentForeground} />
-          <Text style={styles.heroPlayButtonText}>{item.lastPlayed ? 'Resume' : 'Play'}</Text>
+          <Text style={styles.heroPlayButtonText}>{resume ? 'Resume' : 'Play'}</Text>
         </Pressable>
       </View>
     </PressableScale>
