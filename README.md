@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.67](docs/releases/v1.0.67.md): improves desktop remote profile sync, onboarding, playback recovery, and Continue Watching behavior.
 - [LoomTV 1.0.66](docs/releases/v1.0.66.md): adds secure paired remote-library access, resilient session restoration, and safer remote media playback.
 - [LoomTV 1.0.65](docs/releases/v1.0.65.md): adds mobile profile switching, PIN unlock, profile-aware settings, improved pairing, and mobile playback polish.
 - [LoomTV 1.0.64](docs/releases/v1.0.64.md): adds faster profile switching, unified My List controls, and more reliable profile-aware LAN browser access.

@@ -83,9 +83,6 @@ export default function DesktopOnboarding({
             <div className="flex flex-col items-center text-center">
               <LoomBrandLockup className="mb-4 h-20 w-[108px]" />
               <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Where is your library?</h1>
-              <p className="mt-2 max-w-md text-base leading-7 text-[var(--loom-muted)]">
-                Host a new library on this computer, or connect to one already on your network.
-              </p>
             </div>
             <div className="mt-8 grid w-full gap-4 sm:grid-cols-2">
               <button
