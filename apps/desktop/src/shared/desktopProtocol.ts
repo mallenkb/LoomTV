@@ -284,6 +284,23 @@ export interface RemoteLibraryConnection {
   libraryEtag: string;
 }
 
+export interface RemoteLibraryRequest {
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+export interface RemoteLibraryResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
+export type RemoteLibrarySessionState =
+  | { status: 'connected'; connection: RemoteLibraryConnection }
+  | { status: 'none' }
+  | { status: 'pairing-required'; reason: string };
+
 export type ProfileType = LanProfileType;
 export type ProfileSummary = LanProfileSummary;
 export type ActiveProfileState = LanActiveProfile;

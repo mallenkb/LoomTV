@@ -27,6 +27,10 @@ import type {
   ProfileSummary,
   ProfileTransferResult,
   ProfileUpdateInput,
+  RemoteLibraryConnection,
+  RemoteLibraryRequest,
+  RemoteLibraryResponse,
+  RemoteLibrarySessionState,
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
@@ -66,6 +70,10 @@ export interface IpcContract {
   'media:stop-transcode': { args: [sessionId: string]; result: ApiResult<boolean> };
   'metadata:test-keys': { args: [keys: MetadataApiKeys]; result: MetadataKeyTestResult[] };
   'network:discover-peers': { args: [timeoutMs?: number]; result: LocalNetworkPeer[] };
+  'network:remote-connect': { args: [baseUrl: string, code: string]; result: RemoteLibraryConnection };
+  'network:remote-disconnect': { args: [revoke?: boolean]; result: boolean };
+  'network:remote-request': { args: [pathname: string, request?: RemoteLibraryRequest]; result: RemoteLibraryResponse };
+  'network:remote-session': { args: []; result: RemoteLibrarySessionState };
   'network:revoke-paired-device': { args: [deviceId: string]; result: LocalNetworkPairedDevice[] };
   'network:set-device-name': { args: [name: string]; result: string };
   'network:status': { args: []; result: LocalNetworkStatus };
