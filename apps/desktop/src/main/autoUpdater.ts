@@ -663,6 +663,15 @@ function configureAutoUpdater() {
     return;
   }
 
+  const updateConfigPath = path.join(process.resourcesPath, 'app-update.yml');
+  if (!fs.existsSync(updateConfigPath)) {
+    setUpdateState({
+      status: 'disabled',
+      message: 'Automatic updates are unavailable because this build has no update configuration.',
+    });
+    return;
+  }
+
   autoUpdater.autoDownload = true;
   // We control the install moment via quitAndInstall(true, true). Letting
   // electron-updater also install on natural app quit would double-install
@@ -737,7 +746,7 @@ export function startUpdateAdapter() {
 
 export async function checkForUpdates(): Promise<UpdateState> {
   configureAutoUpdater();
-  if (!updateState.supported || !app.isPackaged) {
+  if (!updateState.supported || !app.isPackaged || updateState.status === 'disabled') {
     return checkLatestGitHubRelease();
   }
   if (updateCheckInFlight || updateState.status === 'downloading' || updateState.status === 'downloaded') {
