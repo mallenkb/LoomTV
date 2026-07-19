@@ -29,6 +29,10 @@ const sidebarNavItems: Record<SidebarNavItemId, SidebarNavItem> = {
   others: { id: 'others', path: '/others', label: 'Others', icon: FolderNavIcon, activeIcon: FolderNavSolidIcon },
 };
 
+function hasLinkedLibraryFolder(folders: readonly unknown[] | undefined): boolean {
+  return Boolean(folders?.some((folder) => typeof folder === 'string' && folder.trim().length > 0));
+}
+
 function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | null {
   const detailRoute = pathname.startsWith('/movie/') || pathname.startsWith('/tv/') || pathname.startsWith('/anime/');
   const activePath = detailRoute && fromPath ? fromPath : pathname;
@@ -271,6 +275,7 @@ export default function Sidebar() {
   const location = useLocation();
   const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
+  const { libraryFolderGroups } = state;
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
@@ -298,18 +303,29 @@ export default function Sidebar() {
   }, [activeProfile?.id]);
 
   const navItems = useMemo(
-    () => [homeNavItem, ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder).map((itemId) => sidebarNavItems[itemId]),]
-    [navOrder],
+    () => [
+      homeNavItem,
+      ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder)
+        .map((itemId) => sidebarNavItems[itemId])
+        .filter((item) => {
+          if (desktopApi.isRemoteLibraryMode()) return true;
+          const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
+          return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
+        }),
+    ],
+    [libraryFolderGroups, navOrder],
   );
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
-      sidebarNavItems.anime,
-      sidebarNavItems.tv,
-      sidebarNavItems.movies,
+      ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
+        if (desktopApi.isRemoteLibraryMode()) return true;
+        const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
+        return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
+      }),
       settingsNavItem,
     ],
-    [],
+    [libraryFolderGroups],
   );
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
@@ -329,14 +345,20 @@ export default function Sidebar() {
   }, []);
 
   const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const isUpdateProgressing = updateState?.status === 'downloading' || updateState?.status === 'installing';
+  const updateProgress = updateState?.status === 'downloading'
+    ? Math.max(0, Math.min(100, updateState.downloadPercent || 0))
+    : updateState?.status === 'installing'
+      ? 100
+      : 0;
   const updateButtonLabel =
     updateState?.status === 'downloaded'
       ? 'Update ready'
       : updateState?.status === 'installing'
         ? 'Restarting'
         : updateState?.downloadPercent
-          ? `${updateState.downloadPercent}%`
-          : 'Updating';
+          ? `Downloading ${Math.round(updateState.downloadPercent)}%`
+          : 'Downloading';
 
   return (
     <aside className="h-full w-48 bg-[var(--loom-sidebar)] flex flex-col">
@@ -408,11 +430,22 @@ export default function Sidebar() {
                 if (updateState?.status === 'downloaded') void desktopApi.installUpdate();
               }}
               disabled={updateState?.status !== 'downloaded'}
-              className="mb-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-[var(--loom-active-bg)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
+              className="relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-[var(--loom-active-bg)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
               title={updateState?.message || 'Update LoomTV'}
             >
-              <Download className={cn('h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
-              <span>{updateButtonLabel}</span>
+              {isUpdateProgressing && (
+                <span
+                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-surface-3)] transition-[width] duration-300"
+                  style={{ width: `${updateProgress}%` }}
+                  role="progressbar"
+                  aria-label="Update progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(updateProgress)}
+                />
+              )}
+              <Download className={cn('relative z-10 h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
+              <span className="relative z-10">{updateButtonLabel}</span>
             </button>
           )}
         </div>
