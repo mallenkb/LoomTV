@@ -131,7 +131,7 @@ function SettingsNavSolidExactIcon({ className }: { className?: string }) {
 }
 
 function SidebarProfileSwitcher() {
-  const { activeProfile, canManageProfiles, openGate, profiles, selectProfile } = useProfiles();
+  const { activeProfile, canCreateProfiles, canManageProfiles, openGate, profiles, selectProfile } = useProfiles();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -216,8 +216,7 @@ function SidebarProfileSwitcher() {
           </div>
 
           <div className="my-2 border-t border-[var(--loom-panel-border)] opacity-50" />
-          {canManageProfiles && (
-            <>
+          {canCreateProfiles && (
               <button
                 type="button"
                 role="menuitem"
@@ -232,6 +231,9 @@ function SidebarProfileSwitcher() {
                 </span>
                 Add profile
               </button>
+          )}
+          {canManageProfiles && (
+            <>
               <button
                 type="button"
                 role="menuitem"
@@ -269,7 +271,7 @@ export default function Sidebar() {
   const location = useLocation();
   const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
-  const { libraryFolderGroups } = state;
+  const { animeShows, libraryFolderGroups, movies, tvShows } = state;
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
@@ -301,21 +303,23 @@ export default function Sidebar() {
       homeNavItem,
       ...navOrder.map((itemId) => sidebarNavItems[itemId]).filter((item) => {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
+        const itemCount = item.id === 'movies' ? movies.length : item.id === 'tv' ? tvShows.length : animeShows.length;
+        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0 || itemCount > 0;
       }),
     ],
-    [navOrder, libraryFolderGroups],
+    [animeShows.length, libraryFolderGroups, movies.length, navOrder, tvShows.length],
   );
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
       ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
-        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0;
+        const itemCount = item.id === 'movies' ? movies.length : item.id === 'tv' ? tvShows.length : animeShows.length;
+        return libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]?.length > 0 || itemCount > 0;
       }),
       settingsNavItem,
     ],
-    [libraryFolderGroups],
+    [animeShows.length, libraryFolderGroups, movies.length, tvShows.length],
   );
   const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);

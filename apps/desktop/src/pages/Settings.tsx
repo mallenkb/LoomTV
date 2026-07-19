@@ -923,6 +923,7 @@ export default function Settings() {
             isUpdateBusy={isUpdateBusy}
             isUpdateChecking={isUpdateChecking}
             isUpdateDownloading={isUpdateDownloading}
+            updateDownloadPercent={updateDownloadPercent}
             updateButtonStyle={updateButtonStyle}
             updateButtonLabel={updateButtonLabel}
             updateStatusCopy={updateStatusCopy}

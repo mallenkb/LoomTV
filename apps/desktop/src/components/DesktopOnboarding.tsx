@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Laptop2, Library, Loader2, RefreshCw, Server, Wifi } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Check, Laptop2, Library, Loader2, RefreshCw, Server, Wifi } from 'lucide-react';
 import LoomBrandLockup from './LoomBrandLockup';
 import { Button } from './ui/button';
 import { desktopApi, type LocalNetworkPeer } from '@/lib/desktopApi';
@@ -10,12 +10,14 @@ export default function DesktopOnboarding({
   onHostReady,
   onRemoteReady,
   initialMessage = '',
+  initialStep,
 }: {
   onHostReady: () => void;
   onRemoteReady: () => void;
   initialMessage?: string;
+  initialStep?: OnboardingChoice;
 }) {
-  const [step, setStep] = useState<OnboardingChoice>(initialMessage ? 'connect' : 'choose');
+  const [step, setStep] = useState<OnboardingChoice>(initialStep ?? (initialMessage ? 'connect' : 'choose'));
   const [peers, setPeers] = useState<LocalNetworkPeer[]>([]);
   const [address, setAddress] = useState('');
   const [pin, setPin] = useState('');
@@ -58,72 +60,70 @@ export default function DesktopOnboarding({
   return (
     <div className="fixed inset-0 overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-8 py-10">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <LoomBrandLockup className="h-12 w-16" />
-            <div>
-              <p className="text-sm font-semibold">LoomTV</p>
-              <p className="text-xs text-[var(--loom-muted)]">Desktop setup</p>
-            </div>
-          </div>
+        <header className="relative flex min-h-10 items-center">
           {step === 'connect' && (
-            <Button variant="ghost" onClick={() => { setStep('choose'); setMessage(''); }} className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setStep('choose'); setMessage(''); }}
+              className="gap-2"
+            >
               <ArrowLeft className="h-4 w-4" /> Back
             </Button>
           )}
         </header>
 
         {step === 'choose' ? (
-          <main className="flex flex-1 flex-col justify-center py-14">
-            <div className="mb-10 max-w-2xl">
-              <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-[var(--loom-accent)]">Welcome to LoomTV</p>
-              <h1 className="text-[clamp(34px,5vw,64px)] font-bold leading-[1.05]">Where is your library?</h1>
-              <p className="mt-5 max-w-xl text-base leading-7 text-[var(--loom-muted)]">
-                Set up this computer as a new host, or connect it to a LoomTV host that already has your library and profiles.
+          <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col py-12 lg:py-16">
+            <div className="flex flex-col items-center text-center">
+              <LoomBrandLockup className="mb-6 h-10 w-[54px]" />
+              <h1 className="text-[clamp(32px,4.5vw,52px)] font-bold leading-[1.08] tracking-tight">Where is your library?</h1>
+              <p className="mt-4 max-w-md text-base leading-7 text-[var(--loom-muted)]">
+                Host a new library on this computer, or connect to one already on your network.
               </p>
             </div>
-            <div className="grid gap-5 md:grid-cols-2">
+            <div className="mt-12 grid w-full gap-4 sm:grid-cols-2">
               <button
                 type="button"
                 onClick={() => { desktopApi.useThisComputerAsHost(); onHostReady(); }}
-                className="group min-h-56 rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-7 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               >
-                <span className="mb-8 grid h-12 w-12 place-items-center rounded-xl bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Server className="h-6 w-6" /></span>
-                <span className="flex items-center justify-between gap-4 text-xl font-semibold">Start fresh <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" /></span>
-                <span className="mt-3 block text-sm leading-6 text-[var(--loom-muted)]">Create a new local library on this computer and add your media folders.</span>
+                <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Server className="h-5 w-5" /></span>
+                <span className="flex items-center justify-between gap-3 text-lg font-semibold">Start fresh <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
+                <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Create a library on this computer.</span>
               </button>
               <button
                 type="button"
                 onClick={() => setStep('connect')}
-                className="group min-h-56 rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-7 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               >
-                <span className="mb-8 grid h-12 w-12 place-items-center rounded-xl bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Library className="h-6 w-6" /></span>
-                <span className="flex items-center justify-between gap-4 text-xl font-semibold">Connect to an existing host <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" /></span>
-                <span className="mt-3 block text-sm leading-6 text-[var(--loom-muted)]">Use the library, profiles, watch progress, and preferences already stored on another LoomTV computer.</span>
+                <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Library className="h-5 w-5" /></span>
+                <span className="flex items-center justify-between gap-3 text-lg font-semibold">Connect to a host <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
+                <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Find and connect to a host on your network.</span>
               </button>
             </div>
           </main>
         ) : (
-          <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center py-12">
-            <div className="mb-8">
-              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.18em] text-[var(--loom-accent)]">Existing host</p>
-              <h1 className="text-4xl font-bold">Connect this laptop</h1>
-              <p className="mt-3 text-sm leading-6 text-[var(--loom-muted)]">On the host, turn on Local Network Sharing and keep Settings → Network open to see the current 6-digit PIN.</p>
+          <main className="mx-auto flex w-full max-w-[760px] flex-1 flex-col py-12 lg:py-16">
+            <div className="mb-8 flex flex-col items-center text-center">
+              <LoomBrandLockup className="mb-6 h-10 w-[54px]" />
+              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Connect to a host</h1>
+              <p className="mt-3 max-w-md text-sm leading-6 text-[var(--loom-muted)]">On the host, turn on Local Network Sharing, then find the 6-digit PIN in Settings → Network.</p>
             </div>
 
-            <section className="rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-6">
-              <div className="mb-4 flex items-center justify-between gap-4">
+            <section className="overflow-hidden rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] shadow-2xl shadow-black/20">
+              <div className="flex items-start justify-between gap-4 border-b border-[var(--loom-border)] px-5 py-5 sm:px-6">
                 <div>
-                  <h2 className="font-semibold">Hosts on this network</h2>
-                  <p className="text-xs text-[var(--loom-muted)]">Select a discovered host or enter its address manually.</p>
+                  <h2 className="text-base font-semibold">Hosts on this network</h2>
+                  <p className="mt-1 text-sm text-[var(--loom-muted)]">Choose a discovered host or enter its address manually.</p>
                 </div>
-                <Button variant="outline" size="sm" onClick={() => void scan()} disabled={isScanning} className="gap-2">
+                <Button variant="outline" size="sm" onClick={() => void scan()} disabled={isScanning} className="shrink-0 gap-2">
                   {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                   {isScanning ? 'Scanning' : 'Rescan'}
                 </Button>
               </div>
 
-              <div className="mb-6 grid gap-2">
+              <div className="grid gap-2 px-5 py-4 sm:px-6">
                 {peers.length ? peers.map((peer) => {
                   const peerAddress = `http://${peer.host}:${peer.port}`;
                   const selected = address === peerAddress;
@@ -132,57 +132,66 @@ export default function DesktopOnboarding({
                       key={peer.deviceId}
                       type="button"
                       onClick={() => setAddress(peerAddress)}
-                      className={`flex min-h-14 items-center gap-3 rounded-xl border px-4 text-left transition ${selected ? 'border-[var(--loom-accent)] bg-[var(--loom-active-bg)]' : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:bg-[var(--loom-surface-2)]'}`}
+                      aria-pressed={selected}
+                      className={`flex min-h-16 items-center gap-3 rounded-xl border px-4 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${selected ? 'border-[var(--loom-accent)] bg-[var(--loom-active-bg)]' : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:bg-[var(--loom-surface-2)]'}`}
                     >
-                      <Laptop2 className={`h-5 w-5 ${selected ? 'text-[var(--loom-accent)]' : 'text-[var(--loom-muted)]'}`} />
+                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${selected ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}><Laptop2 className="h-5 w-5" /></span>
                       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{peer.deviceName}</span><span className="block truncate text-xs text-[var(--loom-muted)]">{peer.host}:{peer.port}</span></span>
+                      {selected && <Check className="h-5 w-5 shrink-0 stroke-[2.5] text-[var(--loom-accent)]" aria-hidden="true" />}
                     </button>
                   );
                 }) : (
-                  <div className="rounded-xl border border-dashed border-[var(--loom-border)] px-4 py-5 text-center text-sm text-[var(--loom-muted)]">
+                  <div className="rounded-xl border border-dashed border-[var(--loom-border)] bg-[var(--loom-bg)] px-4 py-5 text-center text-sm text-[var(--loom-muted)]">
                     {isScanning ? 'Looking for LoomTV hosts…' : 'No host was found automatically.'}
                   </div>
                 )}
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-[1fr_190px]">
-                <label className="grid gap-2 text-xs font-medium text-[var(--loom-muted)]">
-                  Host IP address and port
-                  <input
-                    value={address}
-                    onChange={(event) => setAddress(event.target.value)}
-                    placeholder="192.168.1.50:3847"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    className="h-11 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-sm text-[var(--loom-text)] outline-none focus:border-[var(--loom-accent)]"
-                  />
-                </label>
-                <label className="grid gap-2 text-xs font-medium text-[var(--loom-muted)]">
-                  Pairing PIN
-                  <input
-                    value={pin}
-                    onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                    onKeyDown={(event) => { if (event.key === 'Enter') void connect(); }}
-                    placeholder="000000"
-                    inputMode="numeric"
-                    maxLength={6}
-                    className="h-11 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-sm font-semibold tracking-[0.3em] text-[var(--loom-text)] outline-none focus:border-[var(--loom-accent)]"
-                  />
-                </label>
+              <div className="border-t border-[var(--loom-border)] px-5 py-5 sm:px-6">
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9.5rem]">
+                  <label className="grid min-w-0 gap-2 text-xs font-semibold text-[var(--loom-muted)]">
+                    Host IP address and port
+                    <input
+                      value={address}
+                      onChange={(event) => setAddress(event.target.value)}
+                      placeholder="192.168.1.50:3847"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      className="h-12 w-full min-w-0 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] px-4 text-sm text-[var(--loom-text)] outline-none transition placeholder:text-[var(--loom-muted)]/60 focus:border-[var(--loom-accent)] focus:ring-1 focus:ring-[var(--loom-accent)]"
+                    />
+                  </label>
+                  <label className="grid min-w-0 gap-2 text-xs font-semibold text-[var(--loom-muted)]">
+                    Pairing PIN
+                    <input
+                      value={pin}
+                      onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      onKeyDown={(event) => { if (event.key === 'Enter') void connect(); }}
+                      placeholder="000000"
+                      inputMode="numeric"
+                      maxLength={6}
+                      className="h-12 w-full min-w-0 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-base font-semibold tracking-[0.2em] text-[var(--loom-text)] outline-none transition placeholder:text-[var(--loom-muted)]/45 focus:border-[var(--loom-accent)] focus:ring-1 focus:ring-[var(--loom-accent)]"
+                    />
+                  </label>
+                </div>
+
+                {initialMessage && <p role="status" className="mt-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-4 py-3 text-sm leading-5 text-[var(--loom-muted)]">{initialMessage}</p>}
+                {message && (
+                  <p role="alert" className="mt-4 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm leading-5 text-red-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>{message}</span>
+                  </p>
+                )}
+
+                <Button
+                  size="lg"
+                  onClick={() => void connect()}
+                  disabled={isConnecting || !address.trim() || !/^\d{6}$/.test(pin)}
+                  className="mt-5 h-12 w-full gap-2 rounded-xl font-semibold"
+                >
+                  {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
+                  {isConnecting ? 'Connecting to host…' : 'Connect and choose a profile'}
+                </Button>
               </div>
-
-              {initialMessage && <p role="status" className="mt-4 rounded-lg bg-[var(--loom-surface-2)] px-3 py-2 text-sm text-[var(--loom-muted)]">{initialMessage}</p>}
-              {message && <p role="alert" className="mt-4 rounded-lg bg-[var(--loom-surface-2)] px-3 py-2 text-sm text-[var(--loom-muted)]">{message}</p>}
-
-              <Button
-                size="lg"
-                onClick={() => void connect()}
-                disabled={isConnecting || !address.trim() || !/^\d{6}$/.test(pin)}
-                className="mt-6 w-full gap-2"
-              >
-                {isConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
-                {isConnecting ? 'Connecting to host…' : 'Connect and choose a profile'}
-              </Button>
             </section>
           </main>
         )}

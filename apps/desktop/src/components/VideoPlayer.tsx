@@ -9,6 +9,7 @@ import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
+import { useLibrary } from '@/contexts/LibraryContext';
 import {
   desktopApi,
   type ManagedMediaSegment,
@@ -133,6 +134,7 @@ export default function VideoPlayer({
   onEpisodeChange,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { state: libraryState } = useLibrary();
   const playbackActivityKeyRef = useRef(`desktop-player:${crypto.randomUUID()}`);
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -210,6 +212,19 @@ export default function VideoPlayer({
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+
+  const libraryDurationHint = useMemo(() => {
+    const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
+    const media = (mediaId ? items.find((item) => item.id === mediaId) : undefined)
+      || items.find((item) => item.filePath === filePath || item.episodeFiles?.some((episode) => episode.filePath === filePath));
+    if (!media) return 0;
+    if (media.filePath === filePath || media.type === 'movie') return media.localMetadata?.durationSeconds || 0;
+    const episode = media.episodeFiles?.find((candidate) =>
+      candidate.filePath === filePath
+      || (candidate.season === currentSeason && candidate.episode === currentEpisode),
+    );
+    return episode?.localMetadata?.durationSeconds || 0;
+  }, [currentEpisode, currentSeason, filePath, libraryState.animeShows, libraryState.movies, libraryState.tvShows, mediaId]);
 
   const [paused, setPaused] = useState(true);
   const [position, setPosition] = useState(0);
@@ -908,7 +923,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     let cancelled = false;
-    probedDurationRef.current = 0;
+    probedDurationRef.current = libraryDurationHint;
     probeTracksRef.current = externalSubtitleTracks;
     setMediaTracks(externalSubtitleTracks);
     const preferences = sharedTrackPreferences;
@@ -919,14 +934,14 @@ export default function VideoPlayer({
     selectedSubtitleTrackIndexRef.current = firstExternalSubtitle;
     setSelectedSubtitleTrackIndex(firstExternalSubtitle);
     setSubtitlesDefaultEnabled(externalSubtitlesEnabled);
-    updatePlaybackSnapshot(playbackPositionRef.current, 0, { forceReact: true });
+    updatePlaybackSnapshot(playbackPositionRef.current, libraryDurationHint, { forceReact: true });
 
     void desktopApi.media.probe(filePath).then((result) => {
       if (cancelled || !result.ok) return;
       applyProbeData(result.data);
     }).catch(() => {
       if (!cancelled) {
-        probedDurationRef.current = 0;
+        probedDurationRef.current = libraryDurationHint;
         applyNativeTextTrackVisibilityRef.current();
       }
     });
@@ -934,7 +949,7 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [applyProbeData, externalSubtitleTracks, filePath, sharedTrackPreferences, updatePlaybackSnapshot]);
+  }, [applyProbeData, externalSubtitleTracks, filePath, libraryDurationHint, sharedTrackPreferences, updatePlaybackSnapshot]);
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
@@ -2131,7 +2146,6 @@ export default function VideoPlayer({
   const videoStyle: React.CSSProperties = {
     objectFit: cropMode === 'none' ? 'contain' : 'cover',
     transform: rotation === 0 ? undefined : `rotate(${rotation}deg)`,
-    ...(fullscreen ? { objectPosition: 'center 24px' } : {}),
   };
 
   const currentEpLabel = useMemo(() => {

@@ -24,6 +24,7 @@ type AboutSettingsSectionProps = {
   isUpdateBusy: boolean;
   isUpdateChecking: boolean;
   isUpdateDownloading: boolean;
+  updateDownloadPercent: number;
   updateButtonStyle?: React.CSSProperties;
   updateButtonLabel: string;
   updateStatusCopy: string;
@@ -37,6 +38,7 @@ export default function AboutSettingsSection({
   isUpdateBusy,
   isUpdateChecking,
   isUpdateDownloading,
+  updateDownloadPercent,
   updateButtonStyle,
   updateButtonLabel,
   updateStatusCopy,
@@ -94,7 +96,7 @@ export default function AboutSettingsSection({
                 onClick={onUpdateAction}
                 disabled={isUpdateBusy}
                 className={cn(
-                  'inline-flex h-9 w-auto items-center justify-center gap-2 whitespace-nowrap rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors',
+                  'relative inline-flex h-9 min-w-36 items-center justify-center gap-2 overflow-hidden whitespace-nowrap rounded-md bg-[var(--loom-accent)] px-3 text-xs font-semibold text-[var(--loom-accent-foreground)] transition-colors',
                   isUpdateBusy
                     ? 'cursor-wait shadow-inner shadow-black/20'
                     : 'hover:bg-[var(--loom-accent-hover)]',
@@ -116,7 +118,27 @@ export default function AboutSettingsSection({
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                {updateButtonLabel}
+                {isUpdateDownloading ? (
+                  <>
+                    <span>Downloading</span>
+                    <span className="tabular-nums">{updateDownloadPercent}%</span>
+                  </>
+                ) : updateButtonLabel}
+                {isUpdateDownloading && (
+                  <span
+                    className="pointer-events-none absolute inset-x-2 bottom-1 h-1 overflow-hidden rounded-full bg-black/25"
+                    role="progressbar"
+                    aria-label="Update download progress"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={updateDownloadPercent}
+                  >
+                    <span
+                      className="block h-full rounded-full bg-white/90 transition-[width] duration-300"
+                      style={{ width: `${updateDownloadPercent}%` }}
+                    />
+                  </span>
+                )}
               </button>
             </div>
             {updateStatusCopy && (

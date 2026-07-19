@@ -830,6 +830,14 @@ export const desktopApi = {
   },
 
   async createProfile(input: ProfileCreateInput): Promise<ProfileSummary[]> {
+    if (isRemoteDesktopMode()) {
+      const payload = await remoteJson<{ profile: ProfileSummary; profiles: ProfileSummary[] }>('/api/v2/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      return payload.profiles || [payload.profile];
+    }
     if (window.desktopApi?.createProfile) return window.desktopApi.createProfile(input);
     throw new Error('Profiles can only be managed from the LoomTV desktop app.');
   },

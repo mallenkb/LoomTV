@@ -57,10 +57,12 @@ export default function App() {
 }
 
 function DesktopBootstrap() {
-  const [mode, setMode] = useState<DesktopLibraryMode | null | 'loading'>('loading');
+  const onboardingPreview = new URLSearchParams(window.location.search).get('onboarding') === 'connect';
+  const [mode, setMode] = useState<DesktopLibraryMode | null | 'loading'>(onboardingPreview ? null : 'loading');
   const [setupMessage, setSetupMessage] = useState('');
 
   useEffect(() => {
+    if (onboardingPreview) return;
     let cancelled = false;
     const resolveMode = async () => {
       purgeRemoteDesktopSecrets();
@@ -135,7 +137,17 @@ function DesktopBootstrap() {
       cancelled = true;
       window.removeEventListener('loomtv:desktop-library-mode-changed', handleModeChanged);
     };
-  }, []);
+  }, [onboardingPreview]);
+
+  if (onboardingPreview) {
+    return (
+      <DesktopOnboarding
+        onHostReady={() => undefined}
+        onRemoteReady={() => undefined}
+        initialStep="connect"
+      />
+    );
+  }
 
   if (mode === 'loading') return <div className="h-screen bg-[var(--loom-bg)]" />;
   if (!mode) {
