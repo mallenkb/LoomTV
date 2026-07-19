@@ -98,6 +98,7 @@ import {
 import {
   getLocalNetworkAddresses,
   getLocalNetworkNameFast,
+  getPrimaryLocalNetworkAddress,
 } from './main/networkInfo';
 import { closeServerForUpdateInstall } from './main/updateInstall';
 import {
@@ -285,8 +286,22 @@ let libraryMutationVersion = 0;
 const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
 const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
+
+function getLanRendererUrl(): string | null {
+  const address = getPrimaryLocalNetworkAddress();
+  if (!address || !MAIN_WINDOW_DEV_SERVER_URL) return null;
+
+  const rendererUrl = new URL(MAIN_WINDOW_DEV_SERVER_URL);
+  rendererUrl.hostname = address;
+  return rendererUrl.toString();
+}
+
+const LAN_RENDERER_URL = getLanRendererUrl();
 const ALLOWED_CORS_ORIGINS = new Set<string>(
-  [MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : ''].filter(Boolean),
+  [
+    MAIN_WINDOW_DEV_SERVER_URL ? new URL(MAIN_WINDOW_DEV_SERVER_URL).origin : '',
+    LAN_RENDERER_URL ? new URL(LAN_RENDERER_URL).origin : '',
+  ].filter(Boolean),
 );
 
 const {
@@ -1486,7 +1501,17 @@ app.whenReady().then(async () => {
         createWindow();
       },
       onOpenWeb: () => {
-        void shell.openExternal(MAIN_WINDOW_DEV_SERVER_URL || 'http://localhost:5174');
+        const rendererUrl = getLanRendererUrl();
+        if (rendererUrl) ALLOWED_CORS_ORIGINS.add(new URL(rendererUrl).origin);
+        const webUrl = rendererUrl || getLanServerBase();
+        if (!webUrl) {
+          dialog.showErrorBox(
+            'LoomTV Web is unavailable',
+            'Connect this computer to a local network, then try again.',
+          );
+          return;
+        }
+        void shell.openExternal(webUrl);
       },
       onQuit: () => app.quit(),
       port: getMediaServerPort(),

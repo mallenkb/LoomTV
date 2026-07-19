@@ -14,7 +14,7 @@ const devRendererCsp = [
   "style-src 'self' file: 'unsafe-inline'",
   "img-src 'self' file: data: blob: http: https: plexserver:",
   "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* http://*:* https: plexserver:",
-  "connect-src 'self' file: http://127.0.0.1:* http://localhost:* http://[::1]:* http://*:* https: plexserver: ws://localhost:* ws://127.0.0.1:* ws://[::1]:*",
+  "connect-src 'self' file: http://127.0.0.1:* http://localhost:* http://[::1]:* http://*:* https: plexserver: ws://*:*",
   "font-src 'self' file: data:",
   "object-src 'none'",
   "base-uri 'none'",
@@ -74,6 +74,7 @@ export default defineConfig({
     entries: ['index.html'],
   },
   server: {
+    host: '0.0.0.0',
     port: 5174,
     strictPort: false,
     watch: {

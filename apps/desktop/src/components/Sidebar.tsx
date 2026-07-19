@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Download, RefreshCw } from 'lucide-react';
+import { Check, Download, LockKeyhole, Plus, RefreshCw, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -131,20 +131,137 @@ function SettingsNavSolidExactIcon({ className }: { className?: string }) {
 }
 
 function SidebarProfileSwitcher() {
-  const { activeProfile, openGate } = useProfiles();
+  const { activeProfile, canManageProfiles, openGate, profiles, selectProfile } = useProfiles();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen]);
+
   if (!activeProfile) return null;
+  const selectableProfiles = profiles.filter((profile) => !profile.isGuest);
+  const handleProfileSelect = (profileId: string, hasPin: boolean) => {
+    setMenuOpen(false);
+    if (profileId === activeProfile.id) return;
+    if (hasPin) {
+      openGate({ mode: 'select', profileId });
+      return;
+    }
+    void selectProfile(profileId).catch(() => undefined);
+  };
+
   return (
-    <button
-      type="button"
-      onClick={openGate}
-      title="Switch profile"
-      className="mb-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]"
-    >
-      <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full">
-        <ProfileAvatar name={activeProfile.name} avatarKey={activeProfile.avatarKey} colorKey={activeProfile.colorKey} />
-      </span>
-      <span className="truncate text-sm font-medium">{activeProfile.name}</span>
-    </button>
+    <div ref={menuRef} className="relative min-w-0 flex-1">
+      <button
+        type="button"
+        onClick={() => setMenuOpen((open) => !open)}
+        title="Switch profile"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        className={cn(
+          'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
+          menuOpen && 'bg-[var(--loom-sidebar-active-bg)] text-[var(--loom-text)]',
+        )}
+      >
+        <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full">
+          <ProfileAvatar name={activeProfile.name} avatarKey={activeProfile.avatarKey} colorKey={activeProfile.colorKey} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{activeProfile.name}</span>
+      </button>
+
+      {menuOpen && (
+        <div
+          role="menu"
+          aria-label="Profiles"
+          className="absolute bottom-full left-0 z-50 mb-2 w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-2xl"
+        >
+          <div className="max-h-64 space-y-0.5 overflow-y-auto">
+            {selectableProfiles.map((profile) => {
+              const isActive = profile.id === activeProfile.id;
+              return (
+                <button
+                  key={profile.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => handleProfileSelect(profile.id, profile.hasPin)}
+                  className="flex h-12 w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors hover:bg-[var(--loom-surface-2)]"
+                >
+                  <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full">
+                    <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-[2px]">
+                    <span className="block truncate text-sm font-semibold leading-none">{profile.name}</span>
+                    {profile.type === 'owner' && (
+                      <span className="block text-xs leading-none text-[var(--loom-muted)]">Owner profile</span>
+                    )}
+                  </span>
+                  {profile.hasPin && <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-[var(--loom-muted)]" />}
+                  {isActive && <Check strokeWidth={3} className="h-4 w-4 shrink-0 text-[var(--loom-accent)]" />}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="my-2 border-t border-[var(--loom-panel-border)] opacity-50" />
+          {canManageProfiles && (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  openGate({ mode: 'edit', editProfileId: 'new' });
+                }}
+                className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
+                  <Plus className="h-4 w-4" />
+                </span>
+                Add profile
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  openGate({ mode: 'edit' });
+                }}
+                className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
+                  <UsersRound className="h-4 w-4" />
+                </span>
+                Manage profiles
+              </button>
+            </>
+          )}
+          <Link
+            to="/settings"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+            className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
+              <SettingsNavExactIcon className="h-4 w-4" />
+            </span>
+            Settings
+          </Link>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -153,7 +270,6 @@ export default function Sidebar() {
   const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
-  const isSettingsActive = location.pathname === '/settings';
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
@@ -307,21 +423,8 @@ export default function Sidebar() {
           )}
         </div>
 
-        <SidebarProfileSwitcher />
-
         <div className="flex items-center gap-1">
-          <Link
-            to="/settings"
-            className={cn(
-              'flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 rounded-lg transition-colors',
-              isSettingsActive
-                ? 'bg-[var(--loom-sidebar-active-bg)] text-[var(--loom-active-text)]'
-                : 'text-[var(--loom-muted)] hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
-            )}
-          >
-            {isSettingsActive ? <SettingsNavSolidExactIcon className="w-5 h-5 shrink-0" /> : <SettingsNavExactIcon className="w-5 h-5 shrink-0" />}
-            <span className="truncate text-sm font-medium">Settings</span>
-          </Link>
+          <SidebarProfileSwitcher />
           <button
             type="button"
             onClick={() => void scanLibrary()}

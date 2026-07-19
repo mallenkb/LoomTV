@@ -5,6 +5,7 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, type ProfileSummary } from '@/lib/desktopApi';
 import ProfileAvatar, { PROFILE_AVATAR_KEYS, PROFILE_COLOR_KEYS, PROFILE_COLOR_PRESETS } from './ProfileAvatar';
 import PinDigitInput from './PinDigitInput';
+import LoomLogo from '@/components/LoomLogo';
 
 type GateMode = 'select' | 'edit';
 type EditorTarget = ProfileSummary | 'new';
@@ -15,7 +16,7 @@ type EditorTarget = ProfileSummary | 'new';
  * surface and becomes an overlay when opened from an active profile.
  */
 export default function ProfileGate() {
-  const { activeProfile, canManageProfiles, closeGate, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
+  const { activeProfile, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
@@ -71,6 +72,26 @@ export default function ProfileGate() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeProfile, closeGate, editorTarget, mode, pinTarget]);
 
+  // Sidebar and Settings can deep-link into the exact profile flow without
+  // making the user repeat their selection inside the full-screen gate.
+  useEffect(() => {
+    if (!gateIntent) return;
+    if (gateIntent.mode === 'edit' && canManage) {
+      setMode('edit');
+      if (gateIntent.editProfileId === 'new') {
+        setEditorTarget('new');
+      } else if (gateIntent.editProfileId) {
+        const target = profiles.find((profile) => profile.id === gateIntent.editProfileId);
+        if (target) setEditorTarget(target);
+      }
+    } else if (gateIntent.mode === 'select') {
+      setMode('select');
+      const target = profiles.find((profile) => profile.id === gateIntent.profileId);
+      if (target?.hasPin) setPinTarget(target);
+    }
+    clearGateIntent();
+  }, [gateIntent, canManage, profiles, clearGateIntent]);
+
   const handleSelect = useCallback(async (profile: ProfileSummary) => {
     focusRestoreId.current = profile.id;
     setBusyProfileId(profile.id);
@@ -93,12 +114,21 @@ export default function ProfileGate() {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
-      <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
+      {!editorTarget && <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
         {mode === 'select' && activeProfile && !editorTarget && !pinTarget ? (
           <button
             type="button"
             onClick={closeGate}
-            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-surface-3)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+        ) : mode === 'edit' && !pinTarget ? (
+          <button
+            type="button"
+            onClick={() => setMode('select')}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
@@ -122,7 +152,7 @@ export default function ProfileGate() {
             )}
           </div>
         )}
-      </header>
+      </header>}
 
       {pinTarget ? (
         <ProfilePinPad
@@ -141,6 +171,7 @@ export default function ProfileGate() {
         />
       ) : (
         <main className="flex flex-1 flex-col items-center justify-center px-8 pb-[8vh]">
+          <LoomLogo className="mb-8 h-9 w-auto" />
           <h1 className="mb-2 text-center text-[clamp(26px,3.2vw,40px)] font-bold">
             {mode === 'select' ? "Who's watching?" : 'Edit profiles'}
           </h1>
@@ -251,9 +282,9 @@ function ProfileCard({
             {profile.name}
           </span>
           <span className="flex min-h-5 flex-wrap items-center justify-center gap-1">
-            {active && (
+            {active && !editMode && (
               <span className="rounded-full bg-[var(--loom-accent)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-[var(--loom-accent-foreground)]">
-                Active
+                Current
               </span>
             )}
             {profile.type === 'kid' && (
@@ -498,8 +529,31 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
     }
   };
 
+  const saveDisabled = busy || !name.trim() || Boolean(pin && pin.length !== 4) || (isKid && maximumAge === null);
+
   return (
-    <main className="flex flex-1 items-center justify-center px-8 pb-[6vh]">
+    <>
+      <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saveDisabled}
+          className="rounded-lg bg-[var(--loom-accent)] px-5 py-2 text-sm font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] disabled:opacity-40"
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </header>
+
+      <main className="flex flex-1 items-center justify-center px-8 pb-[6vh]">
       <div className="flex w-full max-w-[720px] flex-col-reverse items-center gap-10 md:flex-row md:items-start md:justify-between">
         <div className="flex w-full max-w-[360px] flex-col gap-5">
           <h1 className="text-2xl font-bold">{isNew ? 'Add profile' : 'Edit profile'}</h1>
@@ -526,8 +580,8 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                   onClick={() => setAvatarKey(key)}
                   aria-pressed={avatarKey === key}
                   className={cn(
-                    'aspect-square overflow-hidden rounded-full transition-transform hover:scale-105',
-                    avatarKey === key && 'ring-2 ring-[var(--loom-accent)]',
+                    'aspect-square overflow-hidden rounded-full transition-transform hover:scale-105 hover:ring-2 hover:ring-[var(--loom-active-border)]',
+                    avatarKey === key && 'ring-2 ring-[var(--loom-accent)] hover:ring-[var(--loom-accent)]',
                   )}
                 >
                   <ProfileAvatar name={name || 'A'} avatarKey={key} colorKey={colorKey} />
@@ -540,7 +594,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
               disabled={avatarBusy}
               aria-pressed={avatarKey.startsWith('data:image/')}
               className={cn(
-                'mt-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5 text-sm text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)] disabled:opacity-50',
+                'mt-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--loom-border)] px-3 py-2.5 text-sm text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50',
                 avatarKey.startsWith('data:image/') && 'border-[var(--loom-accent)] text-[var(--loom-text)]',
               )}
             >
@@ -560,8 +614,8 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                   aria-label={`${key} color`}
                   aria-pressed={colorKey === key}
                   className={cn(
-                    'grid h-8 w-8 place-items-center rounded-full transition-transform hover:scale-110',
-                    colorKey === key && 'ring-2 ring-[var(--loom-text)] ring-offset-2 ring-offset-[var(--loom-bg)]',
+                    'grid h-8 w-8 place-items-center rounded-full transition-transform hover:scale-110 hover:ring-2 hover:ring-[var(--loom-active-border)]',
+                    colorKey === key && 'ring-2 ring-[var(--loom-text)] ring-offset-2 ring-offset-[var(--loom-bg)] hover:ring-[var(--loom-text)]',
                   )}
                   style={{ backgroundColor: PROFILE_COLOR_PRESETS[key] }}
                 >
@@ -660,25 +714,6 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={busy || !name.trim() || Boolean(pin && pin.length !== 4) || (isKid && maximumAge === null)}
-              className="rounded-lg bg-[var(--loom-accent)] px-6 py-2.5 text-sm font-bold uppercase tracking-wide text-[var(--loom-accent-foreground)] transition-opacity hover:opacity-90 disabled:opacity-50"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={busy}
-              className="rounded-lg border border-[var(--loom-surface-3)] px-6 py-2.5 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-text)] hover:text-[var(--loom-text)]"
-            >
-              Cancel
-            </button>
-          </div>
-
           {existing && !existing.isGuest && (
             <button
               type="button"
@@ -745,6 +780,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
           </div>
         </div>
       </div>
-    </main>
+      </main>
+    </>
   );
 }

@@ -746,15 +746,16 @@ export const desktopApi = {
     });
   },
 
-  // Browser-rendered development sessions have no profile bridge; they behave
-  // as a one-profile installation and never show the picker.
+  // Browser-rendered host sessions use the same authenticated loopback profile
+  // endpoints as the Electron renderer instead of falling into an empty gate.
   async listProfiles(): Promise<ProfileSummary[]> {
     if (isRemoteDesktopMode()) {
       const payload = await remoteJson<{ profiles: ProfileSummary[] }>('/api/v2/profiles');
       return payload.profiles || [];
     }
     if (window.desktopApi?.listProfiles) return window.desktopApi.listProfiles();
-    return [];
+    const payload = await fetchJson<{ profiles: ProfileSummary[] }>('/api/v2/profiles');
+    return payload.profiles || [];
   },
 
   async chooseProfileAvatar(): Promise<string | null> {
@@ -770,7 +771,7 @@ export const desktopApi = {
       return response.json() as Promise<ActiveProfileState>;
     }
     if (window.desktopApi?.getActiveProfileState) return window.desktopApi.getActiveProfileState();
-    return { profileId: null, selectionRequired: false, selectionRevision: 0, automaticSignIn: false };
+    return fetchJson<ActiveProfileState>('/api/v2/profiles/active');
   },
 
   async createProfile(input: ProfileCreateInput): Promise<ProfileSummary[]> {
@@ -805,7 +806,11 @@ export const desktopApi = {
       return payload.profile;
     }
     if (window.desktopApi?.selectProfile) return window.desktopApi.selectProfile(profileId, pin);
-    throw new Error('Profiles can only be selected from the LoomTV desktop app.');
+    const payload = await fetchJson<{ profile: ProfileSummary; active: ActiveProfileState }>('/api/v2/profiles/select', {
+      method: 'POST',
+      body: JSON.stringify({ profileId, pin }),
+    });
+    return payload.profile;
   },
 
   async selectGuestProfile(): Promise<ProfileSummary> {
@@ -821,7 +826,7 @@ export const desktopApi = {
       return state;
     }
     if (window.desktopApi?.lockProfile) return window.desktopApi.lockProfile();
-    return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
+    return fetchJson<ActiveProfileState>('/api/v2/profiles/lock', { method: 'POST' });
   },
 
   async reorderProfiles(profileIds: string[]): Promise<ProfileSummary[]> {
@@ -846,12 +851,16 @@ export const desktopApi = {
       body: JSON.stringify({ enabled }),
     });
     if (window.desktopApi?.setAutomaticProfileSignIn) return window.desktopApi.setAutomaticProfileSignIn(enabled);
-    throw new Error('Automatic sign-in can only be managed from the LoomTV desktop app.');
+    return fetchJson<ActiveProfileState>('/api/v2/profiles/auto-sign-in', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
   },
 
   async getProfilePreferences(): Promise<ProfilePreferences> {
     if (isRemoteDesktopMode()) return remoteJson<ProfilePreferences>('/api/v2/profile-preferences');
-    return window.desktopApi?.getProfilePreferences?.() || {};
+    if (window.desktopApi?.getProfilePreferences) return window.desktopApi.getProfilePreferences();
+    return fetchJson<ProfilePreferences>('/api/v2/profile-preferences');
   },
 
   async saveProfilePreferences(patch: ProfilePreferences, expectedProfileId?: string): Promise<ProfilePreferences> {
@@ -861,7 +870,10 @@ export const desktopApi = {
       body: JSON.stringify({ ...patch, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
     });
     if (window.desktopApi?.saveProfilePreferences) return window.desktopApi.saveProfilePreferences(patch, expectedProfileId);
-    return patch;
+    return fetchJson<ProfilePreferences>('/api/v2/profile-preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
   },
 
   async getProfileRestrictions(profileId: string): Promise<ProfileRestrictions> {
@@ -876,7 +888,8 @@ export const desktopApi = {
 
   async getProfileLists(kind?: ProfileListKind): Promise<ProfileListEntry[]> {
     if (isRemoteDesktopMode()) return remoteJson<ProfileListEntry[]>(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
-    return window.desktopApi?.getProfileLists?.(kind) || [];
+    if (window.desktopApi?.getProfileLists) return window.desktopApi.getProfileLists(kind);
+    return fetchJson<ProfileListEntry[]>(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
   },
 
   async setProfileListEntry(mediaId: string, kind: ProfileListKind, present: boolean, expectedProfileId?: string): Promise<ProfileListEntry[]> {
@@ -886,7 +899,10 @@ export const desktopApi = {
       body: JSON.stringify({ mediaId, kind, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
     });
     if (window.desktopApi?.setProfileListEntry) return window.desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
-    return [];
+    return fetchJson<ProfileListEntry[]>('/api/v2/profile-lists', {
+      method: present ? 'PUT' : 'DELETE',
+      body: JSON.stringify({ mediaId, kind }),
+    });
   },
 
   onProfilesChanged(callback: (event: ProfilesChangedEvent) => void): () => void {
