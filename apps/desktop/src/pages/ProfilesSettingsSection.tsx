@@ -67,7 +67,7 @@ export default function ProfilesSettingsSection() {
           <h2 className="truncate text-xl font-semibold">{activeProfile.name}</h2>
           <p className="text-sm capitalize text-[var(--loom-muted)]">{activeProfile.type} profile</p>
         </div>
-        <button type="button" onClick={openGate} className="flex items-center gap-2 rounded-lg bg-[var(--loom-surface-2)] px-4 py-2 text-sm font-medium hover:bg-[var(--loom-surface-3)]">
+        <button type="button" onClick={() => openGate()} className="flex items-center gap-2 rounded-lg bg-[var(--loom-surface-2)] px-4 py-2 text-sm font-medium hover:bg-[var(--loom-surface-3)]">
           <Users className="h-4 w-4" /> {activeProfile.type === 'owner' ? 'Switch or manage' : 'Switch profile'}
         </button>
         <button type="button" onClick={() => void handleLock()} className="flex items-center gap-2 rounded-lg border border-[var(--loom-surface-3)] px-4 py-2 text-sm text-[var(--loom-muted)] hover:text-[var(--loom-text)]">

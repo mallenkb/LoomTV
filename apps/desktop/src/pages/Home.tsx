@@ -18,22 +18,26 @@ export default function Home() {
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const continueWatchingRailRef = useRef<HTMLDivElement>(null);
-  const watchlistRailRef = useRef<HTMLDivElement>(null);
-  const favoritesRailRef = useRef<HTMLDivElement>(null);
+  const myListRailRef = useRef<HTMLDivElement>(null);
   const animeRailRef = useRef<HTMLDivElement>(null);
   const tvRailRef = useRef<HTMLDivElement>(null);
   const moviesRailRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
-  const profileListItems = useMemo(() => {
+  const myListItems = useMemo(() => {
     const byId = new Map([...movies, ...tvShows, ...animeShows].map((item) => [item.id, item]));
-    const resolve = (kind: 'watchlist' | 'favorite') => lists
-      .filter((entry) => entry.kind === kind)
+    const seen = new Set<string>();
+    return lists
+      .filter((entry) => entry.kind === 'watchlist' || entry.kind === 'favorite')
       .sort((a, b) => b.createdAt - a.createdAt)
+      .filter((entry) => {
+        if (seen.has(entry.mediaId)) return false;
+        seen.add(entry.mediaId);
+        return true;
+      })
       .map((entry) => byId.get(entry.mediaId))
       .filter((item): item is MediaItem => Boolean(item));
-    return { watchlist: resolve('watchlist'), favorites: resolve('favorite') };
   }, [animeShows, lists, movies, tvShows]);
 
   // Recency comes from the active profile's progress, never from the shared
@@ -84,11 +88,8 @@ export default function Home() {
           <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
         )}
 
-        {!normalizedQuery && profileListItems.watchlist.length > 0 && (
-          <ProfileListRail title="Watchlist" items={profileListItems.watchlist} railRef={watchlistRailRef} from={currentRoute} onScroll={scrollRail} />
-        )}
-        {!normalizedQuery && profileListItems.favorites.length > 0 && (
-          <ProfileListRail title="Favorites" items={profileListItems.favorites} railRef={favoritesRailRef} from={currentRoute} onScroll={scrollRail} />
+        {!normalizedQuery && myListItems.length > 0 && (
+          <ProfileListRail title="My List" items={myListItems} railRef={myListRailRef} from={currentRoute} onScroll={scrollRail} />
         )}
 
         {!normalizedQuery && continueWatching.length > 0 && (

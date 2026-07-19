@@ -14,6 +14,15 @@ import {
 import { hasActivePlayback, shutdownActivePlayback } from '@/lib/playbackLifecycle';
 import { flushProgressWrites, setProgressProfile } from '@/lib/progress';
 
+/**
+ * Optional destination when opening the gate: jump straight into edit mode,
+ * optionally with a specific profile's editor (or the new-profile editor)
+ * already open. Lets Settings deep-link into management without extra hops.
+ */
+export type GateIntent =
+  | { mode: 'edit'; editProfileId?: string | 'new' }
+  | { mode: 'select'; profileId: string };
+
 type ProfileContextValue = {
   profiles: ProfileSummary[];
   activeProfile: ProfileSummary | null;
@@ -22,9 +31,11 @@ type ProfileContextValue = {
   lists: ProfileListEntry[];
   isLoading: boolean;
   gateOpen: boolean;
+  gateIntent: GateIntent | null;
+  clearGateIntent: () => void;
   generation: number;
   canManageProfiles: boolean;
-  openGate: () => void;
+  openGate: (intent?: GateIntent) => void;
   closeGate: () => void;
   selectProfile: (profileId: string, pin?: string) => Promise<void>;
   selectGuestProfile: () => Promise<void>;
@@ -225,8 +236,14 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, [refreshProfiles]);
 
-  const openGate = useCallback(() => setSelectedThisSession(false), []);
+  const [gateIntent, setGateIntent] = useState<GateIntent | null>(null);
+  const openGate = useCallback((intent?: GateIntent) => {
+    setGateIntent(intent ?? null);
+    setSelectedThisSession(false);
+  }, []);
+  const clearGateIntent = useCallback(() => setGateIntent(null), []);
   const closeGate = useCallback(() => {
+    setGateIntent(null);
     if (activeState.profileId) setSelectedThisSession(true);
   }, [activeState.profileId]);
   const activeProfile = useMemo(
@@ -235,7 +252,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   );
   const gateOpen = !isLoading && (!selectedThisSession || !activeProfile);
   const canManageProfiles = Boolean(
-    !desktopApi.isRemoteLibraryMode()
+    window.desktopApi
+    && !desktopApi.isRemoteLibraryMode()
     && ownerSessionAuthorized
     && activeProfile?.type === 'owner',
   );
@@ -248,6 +266,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     lists,
     isLoading,
     gateOpen,
+    gateIntent,
+    clearGateIntent,
     generation,
     canManageProfiles,
     openGate,
@@ -269,7 +289,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     exportProfile,
     importProfile,
   }), [
-    profiles, activeProfile, activeState, preferences, lists, isLoading, gateOpen, generation, canManageProfiles,
+    profiles, activeProfile, activeState, preferences, lists, isLoading, gateOpen, gateIntent, clearGateIntent,
+    generation, canManageProfiles,
     openGate, closeGate, selectProfile, selectGuestProfile, lock, createProfile, updateProfile,
     deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry,
     exportProfile, importProfile,
