@@ -124,21 +124,6 @@ export default function AboutSettingsSection({
                     <span className="tabular-nums">{updateDownloadPercent}%</span>
                   </>
                 ) : updateButtonLabel}
-                {isUpdateDownloading && (
-                  <span
-                    className="pointer-events-none absolute inset-x-2 bottom-1 h-1 overflow-hidden rounded-full bg-black/25"
-                    role="progressbar"
-                    aria-label="Update download progress"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={updateDownloadPercent}
-                  >
-                    <span
-                      className="block h-full rounded-full bg-white/90 transition-[width] duration-300"
-                      style={{ width: `${updateDownloadPercent}%` }}
-                    />
-                  </span>
-                )}
               </button>
             </div>
             {updateStatusCopy && (
