@@ -298,7 +298,7 @@ export default function Sidebar() {
   }, [activeProfile?.id]);
 
   const navItems = useMemo(
-    () => [homeNavItem, ...navOrder.map((itemId) => sidebarNavItems[itemId])],
+    () => [homeNavItem, ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder).map((itemId) => sidebarNavItems[itemId]),]
     [navOrder],
   );
   const mobileNavItems = useMemo(
