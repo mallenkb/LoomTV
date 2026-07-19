@@ -13,6 +13,7 @@ export function lanRouteScope(pathname: string, method = 'GET'): LanRouteScope |
   if (pathname === '/api/v2/library' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/client-config' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/profiles' && method === 'GET') return 'catalog:read';
+  if (pathname === '/api/v2/profiles' && method === 'POST') return 'playback:write';
   if (pathname === '/api/v2/profiles/active' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/profiles/select' && method === 'POST') return 'catalog:read';
   if (pathname === '/api/v2/profiles/lock' && method === 'POST') return 'catalog:read';

@@ -87,7 +87,11 @@ export function createWindow(): void {
   });
 
   if (MAIN_WINDOW_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_DEV_SERVER_URL);
+    const rendererUrl = new URL(MAIN_WINDOW_DEV_SERVER_URL);
+    if (process.env.LOOMTV_ONBOARDING_PREVIEW === 'connect') {
+      rendererUrl.searchParams.set('onboarding', 'connect');
+    }
+    mainWindow.loadURL(rendererUrl.toString());
   } else {
     mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`));
   }

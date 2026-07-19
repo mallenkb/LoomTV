@@ -16,7 +16,7 @@ type EditorTarget = ProfileSummary | 'new';
  * surface and becomes an overlay when opened from an active profile.
  */
 export default function ProfileGate() {
-  const { activeProfile, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
+  const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
@@ -76,7 +76,7 @@ export default function ProfileGate() {
   // making the user repeat their selection inside the full-screen gate.
   useEffect(() => {
     if (!gateIntent) return;
-    if (gateIntent.mode === 'edit' && canManage) {
+    if (gateIntent.mode === 'edit' && (canManage || (gateIntent.editProfileId === 'new' && canCreateProfiles))) {
       setMode('edit');
       if (gateIntent.editProfileId === 'new') {
         setEditorTarget('new');
@@ -90,7 +90,7 @@ export default function ProfileGate() {
       if (target?.hasPin) setPinTarget(target);
     }
     clearGateIntent();
-  }, [gateIntent, canManage, profiles, clearGateIntent]);
+  }, [gateIntent, canCreateProfiles, canManage, profiles, clearGateIntent]);
 
   const handleSelect = useCallback(async (profile: ProfileSummary) => {
     focusRestoreId.current = profile.id;
@@ -210,7 +210,7 @@ export default function ProfileGate() {
                 } : undefined}
               />
             ))}
-            {mode === 'select' && canManage && <AddProfileCard onClick={() => setEditorTarget('new')} />}
+            {mode === 'select' && canCreateProfiles && <AddProfileCard onClick={() => setEditorTarget('new')} />}
             {mode === 'edit' && canManage && <AddProfileCard onClick={() => setEditorTarget('new')} />}
           </div>
           {mode === 'edit' && canManage && (
@@ -433,6 +433,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
     updateProfile,
   } = useProfiles();
   const isNew = target === 'new';
+  const isRemoteCreate = isNew && desktopApi.isRemoteLibraryMode();
   const existing = isNew ? null : target;
   const [name, setName] = useState(existing?.name || '');
   const [avatarKey, setAvatarKey] = useState(existing?.avatarKey || PROFILE_AVATAR_KEYS[0]);
@@ -588,7 +589,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                 </button>
               ))}
             </div>
-            <button
+            {!isRemoteCreate && <button
               type="button"
               onClick={() => void chooseCustomAvatar()}
               disabled={avatarBusy}
@@ -600,7 +601,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
             >
               <ImagePlus className="h-4 w-4" />
               {avatarBusy ? 'Opening…' : avatarKey.startsWith('data:image/') ? 'Change uploaded image' : 'Upload your own image'}
-            </button>
+            </button>}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -625,7 +626,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
             </div>
           </div>
 
-          {!isOwner && (
+          {!isOwner && !isRemoteCreate && (
             <label className="flex items-center justify-between rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5">
               <span className="flex flex-col">
                 <span className="text-sm font-medium">Kids profile</span>
@@ -688,7 +689,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
             </div>
           )}
 
-          <div className="flex flex-col gap-1.5">
+          {!isRemoteCreate && <div className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">{existing?.hasPin ? 'Change PIN' : 'Profile PIN'}</span>
             <PinDigitInput
               value={pin}
@@ -703,7 +704,7 @@ function ProfileDetailEditor({ target, onClose }: { target: EditorTarget; onClos
                 {removePin ? 'PIN will be removed when saved' : 'Remove PIN'}
               </button>
             )}
-          </div>
+          </div>}
 
           {existing && existing.id === activeProfile?.id && !existing.hasPin && !existing.isGuest && (
             <label className="flex items-center justify-between rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5">

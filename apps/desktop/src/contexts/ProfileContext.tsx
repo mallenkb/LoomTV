@@ -35,6 +35,7 @@ type ProfileContextValue = {
   clearGateIntent: () => void;
   generation: number;
   canManageProfiles: boolean;
+  canCreateProfiles: boolean;
   openGate: (intent?: GateIntent) => void;
   closeGate: () => void;
   selectProfile: (profileId: string, pin?: string) => Promise<void>;
@@ -122,10 +123,20 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     const unsubscribeActive = desktopApi.onActiveProfileChanged((state) => {
       if (mountedRef.current) setActiveState(state);
     });
+    const remoteProfileRefresh = desktopApi.isRemoteLibraryMode()
+      ? window.setInterval(() => {
+          if (document.visibilityState !== 'visible') return;
+          void desktopApi.listProfiles().then((nextProfiles) => {
+            if (!mountedRef.current) return;
+            setProfiles((current) => JSON.stringify(current) === JSON.stringify(nextProfiles) ? current : nextProfiles);
+          }).catch(() => undefined);
+        }, 5_000)
+      : null;
     return () => {
       mountedRef.current = false;
       unsubscribeProfiles();
       unsubscribeActive();
+      if (remoteProfileRefresh !== null) window.clearInterval(remoteProfileRefresh);
     };
   }, [hydratePersonalState]);
 
@@ -257,6 +268,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     && ownerSessionAuthorized
     && activeProfile?.type === 'owner',
   );
+  const canCreateProfiles = canManageProfiles || desktopApi.isRemoteLibraryMode();
 
   const value = useMemo<ProfileContextValue>(() => ({
     profiles,
@@ -270,6 +282,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     clearGateIntent,
     generation,
     canManageProfiles,
+    canCreateProfiles,
     openGate,
     closeGate,
     selectProfile,
@@ -290,7 +303,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     importProfile,
   }), [
     profiles, activeProfile, activeState, preferences, lists, isLoading, gateOpen, gateIntent, clearGateIntent,
-    generation, canManageProfiles,
+    generation, canManageProfiles, canCreateProfiles,
     openGate, closeGate, selectProfile, selectGuestProfile, lock, createProfile, updateProfile,
     deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry,
     exportProfile, importProfile,
