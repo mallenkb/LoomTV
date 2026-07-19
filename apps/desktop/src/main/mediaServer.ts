@@ -41,6 +41,7 @@ import { registerResource, resolveExternalArtworkResource, resolveLocalResource 
 import {
   createAndSelectGuest,
   clearGuestSelection,
+  DESKTOP_DEVICE_ID,
   getActiveProfileState,
   lockProfile,
   ProfileError,
@@ -283,6 +284,9 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           return null;
         }
       };
+      const profileDeviceIdForRequest = (): string | null => (
+        lanDeviceId || (authorizeLocalRequest(reqUrl, req) ? DESKTOP_DEVICE_ID : null)
+      );
       const assertCurrentSelectionRevision = (body: Record<string, unknown>): void => {
         if (!usesProfileApi || !lanDeviceId) return;
         const expected = Number(body.selectionRevision);
@@ -678,9 +682,10 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/profiles' && req.method === 'GET') {
         if (!requireV2Scope('catalog:read')) return;
+        const profileDeviceId = profileDeviceIdForRequest();
         writeJson(res, 200, {
           profiles: [
-            ...profileSummaries(lanDeviceId ?? undefined),
+            ...profileSummaries(profileDeviceId ?? undefined),
             {
               id: 'guest',
               name: 'Guest',
@@ -698,21 +703,23 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/profiles/active' && req.method === 'GET') {
         if (!requireV2Scope('catalog:read')) return;
-        if (!lanDeviceId) {
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        writeJson(res, 200, getActiveProfileState(lanDeviceId));
+        writeJson(res, 200, getActiveProfileState(profileDeviceId));
         return;
       }
 
       if (reqUrl.pathname === '/api/v2/profiles/select' && req.method === 'POST') {
         if (!requireV2Scope('catalog:read')) return;
-        if (!lanDeviceId) {
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        const deviceId = lanDeviceId;
+        const deviceId = profileDeviceId;
         readJsonBody(req).then(async (body) => {
           const profileId = String(body.profileId || '');
           const selected = profileId === 'guest'
@@ -725,21 +732,23 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/profiles/lock' && req.method === 'POST') {
         if (!requireV2Scope('catalog:read')) return;
-        if (!lanDeviceId) {
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        writeJson(res, 200, lockProfile(lanDeviceId));
+        writeJson(res, 200, lockProfile(profileDeviceId));
         return;
       }
 
       if (reqUrl.pathname === '/api/v2/profiles/auto-sign-in' && req.method === 'POST') {
         if (!requireV2Scope('catalog:read')) return;
-        if (!lanDeviceId) {
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        const deviceId = lanDeviceId;
+        const deviceId = profileDeviceId;
         readJsonBody(req)
           .then((body) => writeJson(res, 200, setAutomaticSignIn(deviceId, Boolean(body.enabled))))
           .catch(writeProfileError);

@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Bookmark, CheckCircle, Heart, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
+import { Bookmark, CheckCircle, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
 import { useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
@@ -232,8 +232,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     .find((file) => !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
 
   const heroEpisode = resumeEpisode || nextEpisode || firstPlayableEpisode || null;
-  const inWatchlist = lists.some((entry) => entry.mediaId === show.id && entry.kind === 'watchlist');
-  const isFavorite = lists.some((entry) => entry.mediaId === show.id && entry.kind === 'favorite');
+  const inMyList = lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
   const heroIsResume = Boolean(resumeEpisode);
   const heroProgress = heroEpisode
     ? getProgressState(heroEpisode.filePath, heroEpisode.localMetadata?.durationSeconds)
@@ -416,6 +415,20 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               ))}
             </div>
           </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              aria-pressed={inMyList}
+              onClick={() => void (async () => {
+                await setListEntry(show.id, 'watchlist', !inMyList);
+                if (inMyList) await setListEntry(show.id, 'favorite', false);
+              })()}
+              className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15"
+              title={inMyList ? 'Remove from My List' : 'Add to My List'}
+            >
+              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+            </button>
+          </div>
           {heroEpisode && (
             <Button
               onClick={handlePlayShow}
@@ -438,14 +451,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
-          <div className="flex shrink-0 gap-2">
-            <button type="button" aria-pressed={isFavorite} onClick={() => void setListEntry(show.id, 'favorite', !isFavorite)} className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15" title={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}>
-              <Heart className={`h-5 w-5 ${isFavorite ? 'fill-current' : ''}`} />
-            </button>
-            <button type="button" aria-pressed={inWatchlist} onClick={() => void setListEntry(show.id, 'watchlist', !inWatchlist)} className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15" title={inWatchlist ? 'Remove from Watchlist' : 'Add to Watchlist'}>
-              <Bookmark className={`h-5 w-5 ${inWatchlist ? 'fill-current' : ''}`} />
-            </button>
-          </div>
           </div>
         </div>
       </div>
