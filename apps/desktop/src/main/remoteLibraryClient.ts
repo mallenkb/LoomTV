@@ -44,7 +44,7 @@ type RemotePairPayload = {
 
 const REMOTE_ROUTE_POLICY = new Map<string, ReadonlySet<string>>([
   ['/api/v2/library', new Set(['GET'])],
-  ['/api/v2/profiles', new Set(['GET'])],
+  ['/api/v2/profiles', new Set(['GET', 'POST'])],
   ['/api/v2/profiles/active', new Set(['GET'])],
   ['/api/v2/profiles/select', new Set(['POST'])],
   ['/api/v2/profiles/lock', new Set(['POST'])],

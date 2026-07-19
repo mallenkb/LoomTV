@@ -240,8 +240,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           Back
         </button>
 
-        <div className="absolute bottom-0 left-0 right-0">
-          <div className="mx-auto flex max-w-[1440px] items-end gap-6 p-8">
+        <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
+          <div className="loom-detail-hero-content mx-auto flex max-w-[1440px] items-end gap-6 p-8">
           <SafeArtwork
             key={posterKey}
             src={posterArtwork}
@@ -256,7 +256,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </div>
             }
           />
-          <div className="flex-1 min-w-0">
+          <div className="loom-detail-hero-info min-w-0 flex-1">
             <h1 className="text-4xl font-bold text-white mb-2">{movie.title}</h1>
             <div className="flex items-center gap-4 text-[var(--loom-muted)] text-sm mb-3">
               <span className="loom-rating flex items-center gap-1">
@@ -288,26 +288,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </div>
             )}
           </div>
-          <Button
-            onClick={handlePlay}
-            className="relative h-16 min-w-[9rem] shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
-          >
-            {hasResumeProgress && progressPercent > 0 && (
-              <span
-                className="pointer-events-none absolute inset-y-0 left-0 bg-black/20"
-                style={{ width: `${progressPercent}%` }}
-              />
-            )}
-            <span className="relative z-10 flex items-center gap-3">
-              <Play className="h-7 w-7" />
-              <span className="flex flex-col items-start leading-tight">
-                <span>{hasResumeProgress ? 'Resume' : 'Play'}</span>
-                {hasResumeProgress && progressCopy && (
-                  <span className="text-[11px] font-medium text-[var(--loom-accent-foreground-muted)]">{progressCopy}</span>
-                )}
-              </span>
-            </span>
-          </Button>
           <div className="flex shrink-0 gap-2">
             <button
               type="button"
@@ -322,6 +302,26 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
             </button>
           </div>
+          <Button
+            onClick={handlePlay}
+            className="loom-detail-hero-play relative h-16 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
+          >
+            {hasResumeProgress && progressPercent > 0 && (
+              <span
+                className="pointer-events-none absolute inset-y-0 left-0 bg-black/20"
+                style={{ width: `${progressPercent}%` }}
+              />
+            )}
+            <span className="relative z-10 flex items-center gap-3">
+              <Play className="h-7 w-7" />
+              <span className="flex min-w-28 flex-col items-start leading-tight">
+                <span>{hasResumeProgress ? 'Resume' : 'Play'}</span>
+                {hasResumeProgress && progressCopy && (
+                  <span className="text-[11px] font-medium text-[var(--loom-accent-foreground-muted)]">{progressCopy}</span>
+                )}
+              </span>
+            </span>
+          </Button>
           </div>
         </div>
       </div>

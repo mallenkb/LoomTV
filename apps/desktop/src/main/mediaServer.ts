@@ -20,6 +20,7 @@ import { cachedArtworkResponseHeaders } from './artworkCache';
 import { trackServerConnections } from './updateInstall';
 import {
   cacheArtworkSource,
+  createProfile,
   getAllProgress,
   getCachedArtwork,
   getCustomArtworkData,
@@ -40,6 +41,7 @@ import { streamStartFailure } from './streamStartErrors';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
 import {
   createAndSelectGuest,
+  broadcastProfilesChanged,
   clearGuestSelection,
   DESKTOP_DEVICE_ID,
   getActiveProfileState,
@@ -664,6 +666,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           profileApiVersion: 1,
           capabilities: {
             profiles: true,
+            profileCreation: true,
             profilePins: true,
             kidsRestrictions: true,
             profilePreferences: true,
@@ -698,6 +701,25 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
             },
           ],
         });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/profiles' && req.method === 'POST') {
+        if (!requireV2Scope('playback:write')) return;
+        readJsonBody(req)
+          .then((body) => {
+            const created = createProfile({
+              name: String(body.name || ''),
+              avatarKey: typeof body.avatarKey === 'string' ? body.avatarKey : undefined,
+              colorKey: typeof body.colorKey === 'string' ? body.colorKey : undefined,
+              type: body.type === 'kid' ? 'kid' : 'standard',
+            });
+            broadcastProfilesChanged();
+            writeJson(res, 201, { profile: created, profiles: profileSummaries() });
+          })
+          .catch((error) => writeJson(res, 400, {
+            error: error instanceof Error ? error.message : 'The profile could not be created.',
+          }));
         return;
       }
 
