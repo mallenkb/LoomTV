@@ -2,13 +2,18 @@ import type {
   LanApiResult,
   LanHlsSession,
   LanLibraryPayload,
+  LanActiveProfile,
+  LanClientConfig,
   LanPairResponse,
+  LanProfileListEntry,
+  LanProfilePreferences,
+  LanProfileSummary,
   LanStoredProgress,
   LanStreamOptions,
 } from '../../packages/lan-protocol/src';
 
 export type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
-export type SettingsSection = 'library' | 'network' | 'appearance';
+export type SettingsSection = 'library' | 'network' | 'appearance' | 'about';
 export type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched';
 export type MobileSearchScope = 'all' | 'genre:drama' | 'genre:animation' | 'genre:action-adventure' | 'genre:comedy';
 
@@ -89,6 +94,7 @@ export type Connection = {
   clientDeviceName: string;
   library: LibraryPayload;
   libraryEtag: string;
+  selectionRevision?: number;
 };
 
 export type SavedConnection = Pick<Connection,
@@ -159,7 +165,7 @@ export type PlayTarget = {
   thumbnailCandidates?: string[];
 };
 
-export type MediaSegmentType = 'intro' | 'recap' | 'credits' | 'preview';
+export type MediaSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';
 export type MediaSegment = {
   id: string;
   type: MediaSegmentType;
@@ -175,17 +181,22 @@ export function activeKnownMediaSegmentAt(
   segments: ReadonlyArray<MediaSegment | (Omit<MediaSegment, 'type'> & { type: string })>,
   positionSeconds: number,
 ): MediaSegment | null {
-  return segments.find((segment): segment is MediaSegment => {
-    if (segment.type !== 'intro' && segment.type !== 'recap' && segment.type !== 'credits' && segment.type !== 'preview') return false;
-    if (segment.type === 'preview') return false;
+  const active = segments.filter((segment): segment is MediaSegment => {
+    if (segment.type !== 'intro' && segment.type !== 'recap' && segment.type !== 'outro' && segment.type !== 'credits' && segment.type !== 'preview') return false;
     const endSeconds = (segment.endMs ?? segment.mediaDurationMs) / 1000;
     return positionSeconds >= segment.startMs / 1000 && positionSeconds < endSeconds - 0.25;
-  }) || null;
+  });
+  const priority: Record<MediaSegmentType, number> = { recap: 0, intro: 1, outro: 2, preview: 3, credits: 4 };
+  return active.sort((left, right) => priority[left.type] - priority[right.type] || left.startMs - right.startMs)[0] || null;
 }
 
-export function mobileMediaSegmentLabel(type: string, movie: boolean): string {
-  if (type === 'credits') return movie ? 'Credits' : 'Outro';
-  return ({ intro: 'Intro', recap: 'Recap', preview: 'Preview' } as Record<string, string>)[type] || 'Skip';
+export function mobileMediaSegmentLabel(type: string, _movie: boolean): string {
+  return ({ intro: 'Intro', recap: 'Recap', outro: 'Outro', credits: 'Credits', preview: 'Preview' } as Record<string, string>)[type] || 'Skip';
 }
 
 export type StoredProgress = LanStoredProgress;
+export type MobileProfile = LanProfileSummary;
+export type MobileActiveProfile = LanActiveProfile;
+export type MobileProfilePreferences = LanProfilePreferences;
+export type MobileProfileListEntry = LanProfileListEntry;
+export type MobileClientConfig = LanClientConfig;
