@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.72](docs/releases/v1.0.72.md): republishes the modern desktop experience with desktop-scoped dependency auditing in release CI.
 - [LoomTV 1.0.71](docs/releases/v1.0.71.md): adds a cinematic modern desktop experience, refreshed navigation and search, and cleaner update controls.
 - [LoomTV 1.0.70](docs/releases/v1.0.70.md): fixes missing macOS updater metadata and hardens packaged update checks.
 - [LoomTV 1.0.69](docs/releases/v1.0.69.md): improves folder-aware navigation and makes desktop update progress clearer.

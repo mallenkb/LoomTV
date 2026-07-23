@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "LoomTV",
-  "version": "1.0.71",
+  "version": "1.0.72",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.13.1+sha512.b2fc7683b8a6525414e7d13e1ba28caaddde96bf66ec540bfaeb7e702b81f3e0be4d1f295edf7f9fe0396740a8dce4509c582ddf79891f4543fea32d37645f25",
@@ -32,6 +32,7 @@
     "make": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && node scripts/run-electron-forge.cjs make",
     "make:all": "corepack pnpm run rebuild:natives && corepack pnpm run clean:out && node scripts/run-electron-forge.cjs make --platform=darwin --arch=arm64 && node scripts/run-electron-forge.cjs make --platform=win32 --arch=x64 && node scripts/run-electron-forge.cjs make --platform=linux --arch=x64",
     "verify:runtime": "node scripts/verify-packaged-runtime.cjs",
+    "audit:prod": "node scripts/audit-production.cjs",
     "publish": "corepack pnpm run release",
     "dist": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=never",
     "dist:dir": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --dir --publish=never",
