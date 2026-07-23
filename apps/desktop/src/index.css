@@ -68,6 +68,20 @@
   color-scheme: dark;
 }
 
+:root[data-theme="dark"][data-home-style="modern"] {
+  --loom-bg: #000000;
+  --loom-sidebar: #000000;
+  --loom-surface: #111111;
+  --loom-surface-2: #0b0b0c;
+  --loom-surface-3: #202022;
+  --loom-panel: rgba(12, 12, 14, 0.72);
+  --loom-panel-border: rgba(255, 255, 255, 0.10);
+  --loom-text: #ffffff;
+  --loom-muted: rgba(255, 255, 255, 0.62);
+  --loom-faint: rgba(255, 255, 255, 0.38);
+  --loom-border: rgba(255, 255, 255, 0.08);
+}
+
 body {
   background: var(--loom-bg);
   color: var(--loom-text);
@@ -198,8 +212,202 @@ body {
   animation: player-side-panel-in 220ms cubic-bezier(0.2, 0.85, 0.25, 1) both;
 }
 
+/* Modern home style carries its floating, glassy furniture into playback while
+   leaving the player structure and interaction model unchanged. */
+.loom-player-modern .loom-player-top-control {
+  border-color: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+  background: rgba(8, 8, 10, 0.58);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+
+.loom-player-modern .loom-player-controls {
+  right: 1.5rem;
+  bottom: 1.25rem;
+  left: 1.5rem;
+  padding: 2.5rem 1.25rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.5rem;
+  background: linear-gradient(180deg, rgba(16, 16, 18, 0.3), rgba(5, 5, 7, 0.86));
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(20px) saturate(135%);
+}
+
+.loom-player-modern .player-side-panel {
+  inset: 0.75rem 0.75rem 0.75rem auto;
+  height: auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 1.5rem;
+  background: rgba(12, 12, 15, 0.86);
+  backdrop-filter: blur(24px) saturate(140%);
+}
+
+@media (max-width: 720px) {
+  .loom-player-modern .loom-player-controls {
+    right: 0.5rem;
+    bottom: 0.5rem;
+    left: 0.5rem;
+    border-radius: 1rem;
+  }
+}
+
 .loom-app-shell {
   background: var(--loom-bg);
+}
+
+.loom-modern-sidebar {
+  background: transparent;
+  box-shadow: none;
+  filter: none;
+}
+
+.loom-modern-home {
+  color-scheme: inherit;
+}
+
+.loom-modern-sidebar-action {
+  color: var(--loom-muted);
+}
+
+.loom-modern-sidebar-action:hover,
+.loom-modern-sidebar-action-active {
+  background: var(--loom-sidebar-active-bg);
+  color: var(--loom-text);
+}
+
+.loom-modern-category-pill {
+  border-color: var(--loom-panel-border);
+  background: color-mix(in srgb, var(--loom-panel) 82%, transparent);
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--loom-text) 14%, transparent);
+}
+
+.loom-modern-category-active {
+  background: var(--loom-text);
+  color: var(--loom-bg);
+}
+
+.loom-modern-category-idle {
+  color: var(--loom-muted);
+}
+
+.loom-modern-category-idle:hover {
+  color: var(--loom-text);
+}
+
+.loom-modern-search-overlay {
+  background: color-mix(in srgb, var(--loom-bg) 88%, transparent);
+}
+
+.loom-modern-search-control {
+  border-color: var(--loom-panel-border);
+  background: var(--loom-panel);
+  color: var(--loom-text);
+  box-shadow: 0 24px 70px color-mix(in srgb, var(--loom-text) 14%, transparent);
+}
+
+.loom-modern-hero-vignette {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.97) 0%,
+      rgba(0, 0, 0, 0.76) 24%,
+      rgba(0, 0, 0, 0.28) 42%,
+      transparent 52%,
+      transparent 60%,
+      rgba(0, 0, 0, 0.03) 64%,
+      rgba(0, 0, 0, 0.08) 69%,
+      rgba(0, 0, 0, 0.16) 74%,
+      rgba(0, 0, 0, 0.28) 80%,
+      rgba(0, 0, 0, 0.42) 86%,
+      rgba(0, 0, 0, 0.58) 91%,
+      rgba(0, 0, 0, 0.74) 95%,
+      rgba(0, 0, 0, 0.88) 98%,
+      #000000 100%
+    ),
+    linear-gradient(0deg, #000000 0%, transparent 58%);
+}
+
+:root[data-theme="light"][data-home-style="modern"] .loom-modern-hero-vignette {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.94) 0%,
+      rgba(0, 0, 0, 0.72) 24%,
+      rgba(0, 0, 0, 0.24) 42%,
+      transparent 56%,
+      transparent 84%,
+      color-mix(in srgb, var(--loom-bg) 12%, transparent) 91%,
+      color-mix(in srgb, var(--loom-bg) 48%, transparent) 97%,
+      var(--loom-bg) 100%
+    ),
+    linear-gradient(
+      0deg,
+      var(--loom-bg) 0%,
+      color-mix(in srgb, var(--loom-bg) 68%, transparent) 6%,
+      color-mix(in srgb, var(--loom-bg) 22%, transparent) 12%,
+      transparent 20%
+    );
+}
+
+/* The first rail overlaps the artwork by design. Keep its heading legible while
+   the remainder of the light-mode library uses the normal dark page copy. */
+:root[data-theme="light"][data-home-style="modern"] .loom-modern-home > main > section:first-child > h2 {
+  color: #ffffff;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.72);
+}
+
+.loom-modern-search-input:focus,
+.loom-modern-search-input:focus-visible {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.loom-modern-content-frame {
+  width: calc(100% - 10rem);
+  max-width: 90rem;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+:root[data-theme="dark"][data-home-style="modern"] .loom-page {
+  background: #000000;
+  color-scheme: dark;
+}
+
+:root[data-home-style="modern"] .page-list-bottom-safe {
+  width: calc(100% - 10rem);
+  max-width: 90rem;
+  padding-right: 2rem;
+  padding-left: 2rem;
+}
+
+:root[data-theme="dark"][data-home-style="modern"] .loom-poster-frame {
+  border-radius: 1rem;
+  background: #111111;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-home-style="modern"] .loom-poster-link {
+  transition: none;
+}
+
+:root[data-home-style="modern"] .loom-poster-link:hover {
+  transform: none;
+}
+
+:root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot button {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+:root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot [role="menu"] {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 1rem;
+  background: rgba(10, 10, 12, 0.92);
+  backdrop-filter: blur(22px) saturate(135%);
 }
 
 /* Playback furniture stays cinema-dark in every app theme so artwork, controls,
@@ -211,6 +419,18 @@ body {
   --loom-text: #fafafa;
   --loom-muted: #a3a3a3;
   --loom-faint: #737373;
+}
+
+:root[data-home-style="modern"] .loom-continue-watching-shell {
+  left: 5rem;
+  right: 5rem;
+}
+
+:root[data-theme="dark"][data-home-style="modern"] .loom-continue-watching {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 1.5rem;
+  background: rgba(12, 12, 14, 0.74);
+  backdrop-filter: blur(22px) saturate(130%);
 }
 
 /* In dark mode, tint the continue-watching surface toward the selected dark
@@ -347,6 +567,18 @@ body.platform-darwin .loom-main-drag-region {
   height: 4.5rem;
 }
 
+:root[data-home-style="modern"] .loom-main-drag-region {
+  height: 2.5rem;
+}
+
+.loom-main-drag-region.loom-main-drag-region-settings {
+  left: auto;
+  right: 1rem;
+  width: clamp(11rem, 28vw, 16rem);
+  top: 0.45rem;
+  z-index: 46;
+}
+
 .loom-player-drag-region {
   display: none;
 }
@@ -412,6 +644,242 @@ body.platform-darwin .loom-player-top-control {
   background: linear-gradient(90deg, var(--loom-sidebar) 0%, color-mix(in srgb, var(--loom-sidebar) 58%, transparent) 8%, color-mix(in srgb, var(--loom-sidebar) 20%, transparent) 20%, transparent 28%, transparent 72%, color-mix(in srgb, var(--loom-sidebar) 20%, transparent) 80%, color-mix(in srgb, var(--loom-sidebar) 58%, transparent) 92%, var(--loom-sidebar) 100%);
 }
 
+/* Modern home style carries the same cinematic, floating-control language into
+   movie, series, and anime details without changing the default detail layout. */
+.loom-detail-page-modern .loom-detail-cover {
+  height: 76vh;
+  min-height: 42.5rem;
+  max-height: 52rem;
+  background: #050505;
+}
+
+.loom-detail-page-modern .loom-detail-cover-image {
+  left: 50%;
+  right: auto;
+  width: calc(100% - 10rem);
+  max-width: 90rem;
+  margin: 0;
+  translate: -50% 0;
+  transform: none;
+}
+
+.loom-detail-page-modern .loom-detail-cover-image::after {
+  background:
+    linear-gradient(90deg, #050505 0%, rgba(5, 5, 5, 0.72) 18%, rgba(5, 5, 5, 0.2) 32%, transparent 42%, transparent 58%, rgba(5, 5, 5, 0.2) 68%, rgba(5, 5, 5, 0.72) 82%, #050505 100%);
+  box-shadow: none;
+}
+
+.loom-detail-page-modern .loom-detail-hero-fade {
+  z-index: 2;
+  bottom: -1px;
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.04) 0%,
+    transparent 24%,
+    rgba(0, 0, 0, 0.22) 44%,
+    rgba(0, 0, 0, 0.68) 68%,
+    rgba(0, 0, 0, 0.94) 88%,
+    #000000 100%
+  );
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-cover {
+  background: var(--loom-bg);
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-cover-image::after {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.84) 0%,
+      rgba(0, 0, 0, 0.66) 20%,
+      rgba(0, 0, 0, 0.34) 38%,
+      rgba(0, 0, 0, 0.08) 54%,
+      transparent 70%,
+      color-mix(in srgb, var(--loom-bg) 16%, transparent) 84%,
+      color-mix(in srgb, var(--loom-bg) 58%, transparent) 95%,
+      var(--loom-bg) 100%
+    );
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-fade {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    transparent 78%,
+    color-mix(in srgb, var(--loom-bg) 12%, transparent) 84%,
+    color-mix(in srgb, var(--loom-bg) 58%, transparent) 94%,
+    var(--loom-bg) 100%
+  );
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-content {
+  color: #ffffff;
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-info :where(h1, p, span, svg) {
+  color: #ffffff !important;
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-back,
+:root[data-theme="light"] .loom-detail-page-modern .loom-artwork-editor-controls {
+  color: var(--loom-text) !important;
+}
+
+:root[data-theme="light"] .loom-detail-page .loom-detail-back {
+  border-color: rgba(23, 23, 23, 0.16) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  color: #171717 !important;
+  box-shadow: 0 8px 24px rgba(23, 23, 23, 0.16) !important;
+  text-shadow: none;
+}
+
+:root[data-theme="light"] .loom-detail-page .loom-detail-back:hover {
+  background: #e7e5e4 !important;
+  color: #171717 !important;
+}
+
+:root[data-theme="light"] .loom-detail-page .loom-detail-back:focus-visible {
+  outline: 3px solid #171717 !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.92), 0 8px 24px rgba(23, 23, 23, 0.18) !important;
+}
+
+.loom-detail-page-modern .loom-detail-hero-content-wrap {
+  z-index: 3;
+}
+
+.loom-detail-page-modern .loom-detail-hero-content {
+  width: calc(100% - 10rem);
+  max-width: 90rem;
+  flex-wrap: wrap;
+  align-content: flex-end;
+  justify-content: flex-start;
+  gap: 0.75rem;
+  padding: 3rem 0 5.5rem;
+}
+
+.loom-detail-page-modern .loom-detail-hero-info {
+  order: 1;
+  flex: 0 0 100%;
+  max-width: none;
+}
+
+.loom-detail-page-modern .loom-detail-hero-info h1 {
+  max-width: 46rem;
+  font-size: clamp(2.5rem, 5vw, 4.75rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.loom-detail-kicker,
+.loom-detail-hero-summary {
+  display: none;
+}
+
+.loom-detail-page-modern .loom-detail-kicker {
+  display: block;
+  width: fit-content;
+  margin-bottom: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.25rem 0.75rem;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.loom-detail-page-modern .loom-detail-hero-info > .flex {
+  max-width: 46rem;
+}
+
+.loom-detail-page-modern .loom-detail-hero-summary {
+  display: -webkit-box;
+  max-width: 36rem;
+  margin-top: 1rem;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 1rem;
+  line-height: 1.75rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.loom-detail-page-modern .loom-poster-frame {
+  display: none;
+}
+
+.loom-detail-page-modern .loom-detail-hero-actions {
+  order: 3;
+}
+
+.loom-detail-page-modern .loom-detail-hero-play {
+  order: 2;
+  height: 3.5rem;
+  border-radius: 9999px;
+  min-width: 9rem;
+  background: var(--loom-accent);
+  color: var(--loom-accent-foreground);
+}
+
+.loom-detail-page-modern .loom-detail-hero-play:hover {
+  background: var(--loom-accent-hover);
+}
+
+.loom-detail-page-modern .loom-detail-hero-play [class*="loom-accent-foreground-muted"] {
+  color: var(--loom-accent-foreground-muted);
+}
+
+.loom-detail-page-modern .loom-detail-back {
+  left: max(5rem, calc((100vw - 90rem) / 2));
+  border-radius: 9999px;
+}
+
+body.platform-darwin .loom-detail-page-modern .loom-detail-back {
+  left: max(5rem, calc((100vw - 90rem) / 2));
+}
+
+.loom-detail-page-modern .loom-artwork-editor-controls {
+  right: max(1rem, calc((100vw - 90rem) / 2 + 1rem));
+}
+
+.loom-detail-page-modern .loom-artwork-fix-button,
+.loom-detail-page-modern .loom-artwork-more-button {
+  border-radius: 9999px;
+}
+
+.loom-detail-page-modern .loom-detail-body {
+  width: calc(100% - 10rem);
+  max-width: 90rem;
+}
+
+.loom-detail-page-modern .loom-detail-body > .page-bottom-safe-lg,
+.loom-detail-page-modern .loom-detail-body > .loom-detail-content {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.loom-detail-page-modern .loom-detail-content > section,
+.loom-detail-page-modern .page-bottom-safe-lg > section {
+  border-radius: 1.25rem;
+}
+
+@media (min-width: 641px) and (max-width: 1100px) {
+  .loom-detail-page-modern .loom-detail-cover {
+    height: 76vh;
+    min-height: 38rem;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-content {
+    padding-inline: 0;
+  }
+}
+
 .loom-section-title {
   text-transform: none;
 }
@@ -435,7 +903,7 @@ body.platform-darwin .loom-player-top-control {
 :root[data-theme="dark"] .loom-chip,
 :root[data-theme="light"] .loom-chip,
 :root:not([data-theme]) .loom-chip {
-  border-color: rgba(245, 196, 81, 0.42);
+  border-color: rgba(15, 15, 15, 0.65);
   background: rgba(0, 0, 0, 0.78);
   color: #F5C451 !important;
 }
@@ -494,6 +962,84 @@ body.platform-darwin .loom-player-top-control {
   --loom-panel-border: var(--loom-settings-border);
   --loom-active-border: var(--loom-settings-border);
   --loom-control-border: var(--loom-settings-border) !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-page {
+  background: var(--loom-bg);
+}
+
+:root[data-home-style="modern"] .loom-settings-page > .page-bottom-safe {
+  max-width: none;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+:root[data-home-style="modern"] .loom-settings-content {
+  width: calc(100% - 10rem);
+  max-width: 50rem;
+  padding-top: 6rem;
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs {
+  left: 50% !important;
+  transform: translateX(-50%);
+  overflow: hidden;
+  border-color: var(--loom-panel-border) !important;
+  border-radius: 9999px !important;
+  background: color-mix(in srgb, var(--loom-panel) 84%, transparent);
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--loom-text) 12%, transparent);
+  backdrop-filter: blur(22px) saturate(135%);
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs button,
+:root[data-home-style="modern"] .loom-settings-tabs button > span:first-child {
+  border-radius: 9999px !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs button[aria-pressed="true"] {
+  color: var(--loom-bg) !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs button[aria-pressed="true"] > span:first-child {
+  background: var(--loom-text);
+}
+
+:root[data-home-style="modern"] .settings-panel,
+:root[data-home-style="modern"] .settings-panel-soft,
+:root[data-home-style="modern"] .settings-action-tile {
+  border-color: var(--loom-panel-border) !important;
+  border-radius: 1.5rem !important;
+  background: color-mix(in srgb, var(--loom-panel) 88%, transparent);
+  box-shadow: 0 22px 60px color-mix(in srgb, var(--loom-text) 10%, transparent);
+  backdrop-filter: blur(20px) saturate(125%);
+}
+
+:root[data-home-style="modern"] .settings-folder-row,
+:root[data-home-style="modern"] .settings-network-card {
+  border-color: var(--loom-panel-border) !important;
+  border-radius: 1.125rem !important;
+  background: color-mix(in srgb, var(--loom-surface-3) 46%, transparent);
+}
+
+:root[data-home-style="modern"] .loom-settings-page :where(button, [role="button"], input, select) {
+  border-radius: 9999px !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-page button.text-left,
+:root[data-home-style="modern"] .loom-settings-page .settings-action-tile {
+  border-radius: 24px !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-page button.theme-appearance-option {
+  border-radius: 16px !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-page button.theme-loader-option {
+  border-radius: 16px !important;
+}
+
+:root[data-home-style="modern"] .loom-settings-page textarea {
+  border-radius: 1rem !important;
 }
 
 :root[data-theme="light"] .loom-settings-page {
@@ -1023,11 +1569,26 @@ body.platform-darwin .loom-player-top-control {
   outline: none !important;
 }
 
+/* Modern search is already contained by its floating glass control. Keep the
+   input itself visually quiet even when the shared form focus rule applies. */
+:root[data-home-style="modern"] .loom-modern-search-input:focus,
+:root[data-home-style="modern"] .loom-modern-search-input:focus-visible {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 :root[data-theme="light"] .loom-settings-mobile-list button:not(:last-child) {
   border-bottom-color: var(--loom-border);
 }
 
 @media (max-width: 640px) {
+  .loom-detail-page-modern .loom-detail-cover-image {
+    left: 0;
+    width: 100%;
+    translate: none;
+  }
+
   .loom-detail-page .loom-detail-cover.relative.h-\[45vh\],
   .loom-detail-page .loom-detail-cover.relative.h-\[50vh\] {
     height: calc(75vw + 8.5rem);
@@ -1176,5 +1737,75 @@ body.platform-darwin .loom-player-top-control {
   .loom-poster-link {
     width: 9.75rem !important;
     max-width: 9.75rem !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .loom-modern-content-frame,
+  :root[data-home-style="modern"] .page-list-bottom-safe,
+  :root[data-home-style="modern"] .loom-settings-content,
+  .loom-detail-page-modern .loom-detail-hero-content,
+  .loom-detail-page-modern .loom-detail-body {
+    width: 100%;
+  }
+
+  :root[data-home-style="modern"] .loom-continue-watching-shell {
+    right: 0;
+    left: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  .loom-modern-header {
+    top: max(0.75rem, env(safe-area-inset-top));
+    padding-inline: 1rem;
+  }
+
+  .loom-modern-header nav {
+    max-width: calc(100vw - 5.5rem);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .loom-modern-header nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .loom-modern-header nav a {
+    padding-inline: 0.75rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .loom-modern-home > main.loom-modern-content-frame {
+    margin-top: -3rem;
+    padding-inline: 1rem;
+  }
+
+  .loom-modern-hero {
+    height: min(72vh, 40rem);
+    min-height: 34rem;
+  }
+
+  .loom-modern-hero-frame {
+    min-height: 100%;
+  }
+
+  .loom-modern-hero-frame > div {
+    max-width: 100%;
+    padding: 6rem 1rem 5rem;
+  }
+
+  .loom-modern-hero h1 {
+    font-size: clamp(2.25rem, 11vw, 3.5rem);
+  }
+
+  .loom-modern-hero .text-base {
+    font-size: 0.9rem;
+    line-height: 1.5rem;
+  }
+
+  .loom-continue-watching-card {
+    width: clamp(14rem, 78vw, 17.5rem);
   }
 }

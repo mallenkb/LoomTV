@@ -3,12 +3,14 @@ export type AppThemeMode = 'dark' | 'light';
 export type AppThemeColor = 'red' | 'blue' | 'orange' | 'yellow' | 'twitch';
 export type AppDarkTheme = 'black';
 export type AppLoaderStyle = 'play-mark' | 'logo-mark' | 'horizontal-logo';
+export type AppHomeStyle = 'default' | 'modern';
 
 export type AppThemeSettings = {
   mode: AppThemeMode;
   color: AppThemeColor;
   darkTheme: AppDarkTheme;
   loaderStyle: AppLoaderStyle;
+  homeStyle: AppHomeStyle;
 };
 
 export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
@@ -16,7 +18,10 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   color: 'yellow',
   darkTheme: 'black',
   loaderStyle: 'play-mark',
+  homeStyle: 'default',
 };
+
+export const THEME_CACHE_KEY = 'loomtv:theme-settings';
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
   yellow: { label: 'Sunbeam', hex: '#FC9C03', hover: '#FCB303', foreground: '#0a0a0a', foregroundMuted: '#404040' },
@@ -82,10 +87,46 @@ export function normalizeLoaderStyle(value?: string): AppLoaderStyle {
     : DEFAULT_THEME_SETTINGS.loaderStyle;
 }
 
+export function normalizeHomeStyle(value?: string): AppHomeStyle {
+  return value === 'modern' ? 'modern' : 'default';
+}
+
+export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {}): AppThemeSettings {
+  const homeStyle = normalizeHomeStyle(settings.homeStyle);
+  return {
+    // Modern is a single cinematic dark experience. Keeping this invariant here
+    // also migrates older saved Light + Modern combinations safely.
+    mode: homeStyle === 'modern' ? 'dark' : normalizeThemeMode(settings.mode),
+    color: normalizeThemeColor(settings.color),
+    darkTheme: normalizeDarkTheme(settings.darkTheme),
+    loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
+    homeStyle,
+  };
+}
+
+export function readCachedTheme(): AppThemeSettings | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cachedTheme = window.localStorage.getItem(THEME_CACHE_KEY);
+    return cachedTheme ? normalizeThemeSettings(JSON.parse(cachedTheme) as Partial<AppThemeSettings>) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedTheme(theme: AppThemeSettings) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(normalizeThemeSettings(theme)));
+  } catch {}
+}
+
 export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
-  const mode = normalizeThemeMode(settings.mode);
+  const requestedMode = normalizeThemeMode(settings.mode);
   const color = normalizeThemeColor(settings.color);
   const darkTheme = normalizeDarkTheme(settings.darkTheme);
+  const homeStyle = normalizeHomeStyle(settings.homeStyle);
+  const mode = homeStyle === 'modern' ? 'dark' : requestedMode;
   const palette = THEME_COLORS[color];
   const darkPalette = DARK_THEMES[darkTheme];
   // Light surfaces mirror the dark ramp on Tailwind Neutral:
@@ -115,6 +156,7 @@ export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
   root.dataset.theme = mode;
   root.dataset.themeColor = color;
   root.dataset.darkTheme = darkTheme;
+  root.dataset.homeStyle = homeStyle;
   root.style.setProperty('--loom-accent', palette.hex);
   root.style.setProperty('--loom-accent-hover', palette.hover);
   root.style.setProperty('--loom-accent-foreground', accentForeground);

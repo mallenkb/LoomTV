@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -709,13 +709,6 @@ export default function Settings() {
     : 0;
   const updateButtonLabel = isUpdateChecking ? 'Checking...' : getUpdateButtonLabel(updateState);
   const updateStatusCopy = isUpdateBusy ? '' : getCompactUpdateStatus(updateState);
-  const updateButtonStyle: React.CSSProperties | undefined = isUpdateDownloading
-    ? {
-        background: `linear-gradient(to right, color-mix(in srgb, var(--loom-accent) 72%, black) ${updateDownloadPercent}%, color-mix(in srgb, var(--loom-accent) 38%, black) ${updateDownloadPercent}%)`,
-      }
-    : isUpdateBusy
-      ? { backgroundColor: 'color-mix(in srgb, var(--loom-accent) 58%, black)' }
-      : undefined;
 
   const handleUpdateAction = async () => {
     if (isUpdateBusy) return;
@@ -785,7 +778,7 @@ export default function Settings() {
             <div className="loom-settings-mobile-list">
               {visibleSettingsSections.map((section) => (
                 <button key={section.id} type="button" onClick={() => handleSectionSelect(section.id)}>
-                  <span>{section.label}</span>
+                  <span className="whitespace-nowrap">{section.label}</span>
                   <ChevronRight className="h-5 w-5" />
                 </button>
               ))}
@@ -924,7 +917,6 @@ export default function Settings() {
             isUpdateChecking={isUpdateChecking}
             isUpdateDownloading={isUpdateDownloading}
             updateDownloadPercent={updateDownloadPercent}
-            updateButtonStyle={updateButtonStyle}
             updateButtonLabel={updateButtonLabel}
             updateStatusCopy={updateStatusCopy}
             onUpdateAction={() => void handleUpdateAction()}

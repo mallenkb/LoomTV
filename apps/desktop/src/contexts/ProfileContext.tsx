@@ -20,8 +20,8 @@ import { flushProgressWrites, setProgressProfile } from '@/lib/progress';
  * already open. Lets Settings deep-link into management without extra hops.
  */
 export type GateIntent =
-  | { mode: 'edit'; editProfileId?: string | 'new' }
-  | { mode: 'select'; profileId: string };
+  | { mode: 'edit'; editProfileId?: string | 'new'; returnTo?: string }
+  | { mode: 'select'; profileId: string; returnTo?: string };
 
 type ProfileContextValue = {
   profiles: ProfileSummary[];

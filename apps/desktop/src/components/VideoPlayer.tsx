@@ -138,6 +138,7 @@ export default function VideoPlayer({
   const { state: libraryState } = useLibrary();
   const playbackActivityKeyRef = useRef(`desktop-player:${crypto.randomUUID()}`);
   const { theme } = useTheme();
+  const isModern = theme.homeStyle === 'modern';
   const containerRef = useRef<HTMLDivElement>(null);
   const seekSliderRef = useRef<HTMLDivElement>(null);
   const progressFillRef = useRef<HTMLDivElement>(null);
@@ -2327,7 +2328,10 @@ export default function VideoPlayer({
     }
   };
   return (
-    <div className="loom-player-root fixed inset-0 z-50 flex bg-black" ref={containerRef}>
+    <div
+      className={`loom-player-root fixed inset-0 z-50 flex bg-black ${isModern ? 'loom-player-modern' : ''}`}
+      ref={containerRef}
+    >
       <style>
         {`video::cue {
           color: ${subtitleStyle.fontColor};
@@ -2338,7 +2342,7 @@ export default function VideoPlayer({
       </style>
       <div
         className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-black ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
-        onMouseMove={handlePointerMove}
+        onPointerMove={handlePointerMove}
         onClick={handleSurfaceClick}
         onDoubleClickCapture={handleSurfaceDoubleClickCapture}
       >

@@ -77,6 +77,7 @@ export type LanProfilePreferences = {
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue' | 'twitch';
   appDarkTheme?: 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
+  appHomeStyle?: 'default' | 'modern';
   sidebarNavOrder?: string[];
   autoplayNextEnabled?: boolean;
   playbackSkipBackSeconds?: number;

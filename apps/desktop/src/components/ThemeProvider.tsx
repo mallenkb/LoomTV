@@ -5,13 +5,10 @@ import {
   AppThemeSettings,
   DEFAULT_THEME_SETTINGS,
   applyTheme,
-  normalizeDarkTheme,
-  normalizeLoaderStyle,
-  normalizeThemeMode,
-  normalizeThemeColor,
+  normalizeThemeSettings,
+  readCachedTheme,
+  writeCachedTheme,
 } from '@/lib/theme';
-
-const THEME_CACHE_KEY = 'loomtv:theme-settings';
 
 type ThemeContextValue = {
   theme: AppThemeSettings;
@@ -19,32 +16,6 @@ type ThemeContextValue = {
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {}): AppThemeSettings {
-  return {
-    mode: normalizeThemeMode(settings.mode),
-    color: normalizeThemeColor(settings.color),
-    darkTheme: normalizeDarkTheme(settings.darkTheme),
-    loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
-  };
-}
-
-function readCachedTheme(): AppThemeSettings | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const cachedTheme = window.localStorage.getItem(THEME_CACHE_KEY);
-    return cachedTheme ? normalizeThemeSettings(JSON.parse(cachedTheme) as Partial<AppThemeSettings>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedTheme(theme: AppThemeSettings) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(theme));
-  } catch {}
-}
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { activeProfile } = useProfiles();
@@ -64,8 +35,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
           appThemeColor: preferences.appThemeColor,
           appDarkTheme: preferences.appDarkTheme,
           appLoaderStyle: preferences.appLoaderStyle,
+          appHomeStyle: preferences.appHomeStyle,
         };
-        const hasSavedTheme = Boolean(profileTheme.appThemeMode || profileTheme.appThemeColor || profileTheme.appDarkTheme || profileTheme.appLoaderStyle || settings.appThemeMode || settings.appThemeColor || settings.appDarkTheme || settings.appLoaderStyle);
+        const hasSavedTheme = Boolean(profileTheme.appThemeMode || profileTheme.appThemeColor || profileTheme.appDarkTheme || profileTheme.appLoaderStyle || profileTheme.appHomeStyle || settings.appThemeMode || settings.appThemeColor || settings.appDarkTheme || settings.appLoaderStyle);
         const cachedTheme = readCachedTheme();
         const loadedTheme = hasSavedTheme
           ? normalizeThemeSettings({
@@ -73,6 +45,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
               color: profileTheme.appThemeColor ?? settings.appThemeColor,
               darkTheme: profileTheme.appDarkTheme ?? settings.appDarkTheme,
               loaderStyle: profileTheme.appLoaderStyle ?? settings.appLoaderStyle,
+              homeStyle: profileTheme.appHomeStyle ?? cachedTheme?.homeStyle,
             })
           : cachedTheme || DEFAULT_THEME_SETTINGS;
         setThemeState(loadedTheme);
@@ -84,6 +57,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             appThemeColor: loadedTheme.color,
             appDarkTheme: loadedTheme.darkTheme,
             appLoaderStyle: loadedTheme.loaderStyle,
+            appHomeStyle: loadedTheme.homeStyle,
           }, activeProfile?.id);
         }
       })
@@ -112,6 +86,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       appThemeColor: nextTheme.color,
       appDarkTheme: nextTheme.darkTheme,
       appLoaderStyle: nextTheme.loaderStyle,
+      appHomeStyle: nextTheme.homeStyle,
     }, activeProfile?.id);
   }, [activeProfile?.id, theme]);
 
