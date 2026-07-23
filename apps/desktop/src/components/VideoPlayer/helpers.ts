@@ -155,27 +155,41 @@ export async function loadSharedTrackPreferences(scope: string): Promise<Playbac
   }
 }
 
-export function saveTrackPreference(scope: string, type: TrackPreferenceType, track: MediaTrack | undefined, enabled: boolean): void {
-  void (async () => {
+const trackPreferenceSaveQueues = new Map<string, Promise<void>>();
+
+export function saveTrackPreference(
+  scope: string,
+  type: TrackPreferenceType,
+  track: MediaTrack | undefined,
+  enabled: boolean,
+): TrackPreference {
+  const preference: TrackPreference = {
+    enabled,
+    index: track?.index,
+    language: normalizeTrackField(track?.language),
+    title: normalizeTrackField(track?.title),
+    codec: normalizeTrackField(track?.codec),
+    forced: track?.forced,
+  };
+  const previousSave = trackPreferenceSaveQueues.get(scope) ?? Promise.resolve();
+  const queuedSave = previousSave.then(async () => {
     try {
       const existing = await loadSharedTrackPreferences(scope);
       const nextPreferences = {
-      ...existing,
-      [type]: {
-        enabled,
-        index: track?.index,
-        language: normalizeTrackField(track?.language),
-        title: normalizeTrackField(track?.title),
-        codec: normalizeTrackField(track?.codec),
-        forced: track?.forced,
-      },
-    };
+        ...existing,
+        [type]: preference,
+      };
       const active = await desktopApi.getActiveProfileState();
       await desktopApi.savePlaybackTrackPreferences(scope, nextPreferences, active.profileId || undefined);
     } catch {
       // Track selection still applies for the current session.
     }
-  })();
+  });
+  trackPreferenceSaveQueues.set(scope, queuedSave);
+  void queuedSave.finally(() => {
+    if (trackPreferenceSaveQueues.get(scope) === queuedSave) trackPreferenceSaveQueues.delete(scope);
+  });
+  return preference;
 }
 
 export function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceType, preference?: TrackPreference): number | null {
@@ -192,9 +206,6 @@ export function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceT
   const language = normalizeTrackField(preference.language);
   const title = normalizeTrackField(preference.title);
   const codec = normalizeTrackField(preference.codec);
-
-  const sameIndex = scopedCandidates.find((track) => track.index === preference.index);
-  if (sameIndex) return sameIndex.index;
 
   const exact = scopedCandidates.find((track) =>
     language && normalizeTrackField(track.language) === language
@@ -219,6 +230,9 @@ export function preferredTrackIndex(tracks: MediaTrack[], type: TrackPreferenceT
   );
   if (titleMatch) return titleMatch.index;
 
+  // Stream indexes are file-local and may refer to a different language in
+  // the next episode, so use the saved index only when semantic metadata did
+  // not identify a matching track.
   return scopedCandidates.find((track) => track.index === preference.index)?.index ?? null;
 }
 

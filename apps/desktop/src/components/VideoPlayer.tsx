@@ -345,11 +345,25 @@ export default function VideoPlayer({
 
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
   const [sharedTrackPreferences, setSharedTrackPreferences] = useState<PlaybackTrackPreferences>({});
+  const sharedTrackPreferencesRef = useRef<PlaybackTrackPreferences>({});
   useEffect(() => {
     let cancelled = false;
+    sharedTrackPreferencesRef.current = {};
     setSharedTrackPreferences({});
     void loadSharedTrackPreferences(trackPreferenceScopeKey).then((preferences) => {
-      if (!cancelled) setSharedTrackPreferences(preferences);
+      if (!cancelled) {
+        // A quick user selection can happen while the saved preferences are
+        // still loading. Keep that newer in-session choice when the request
+        // completes instead of overwriting it with the older stored value.
+        const currentPreferences = sharedTrackPreferencesRef.current;
+        const mergedPreferences = {
+          ...preferences,
+          ...(currentPreferences.audio ? { audio: currentPreferences.audio } : {}),
+          ...(currentPreferences.subtitle ? { subtitle: currentPreferences.subtitle } : {}),
+        };
+        sharedTrackPreferencesRef.current = mergedPreferences;
+        setSharedTrackPreferences(mergedPreferences);
+      }
     });
     return () => {
       cancelled = true;
@@ -1921,7 +1935,10 @@ export default function VideoPlayer({
   const selectAudioTrack = useCallback((trackIndex: number) => {
     if (selectedAudioTrackIndexRef.current === trackIndex) return;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'audio');
-    saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
+    const preference = saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
+    const nextPreferences = { ...sharedTrackPreferencesRef.current, audio: preference };
+    sharedTrackPreferencesRef.current = nextPreferences;
+    setSharedTrackPreferences(nextPreferences);
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
     restartForTrackChange();
@@ -1936,7 +1953,10 @@ export default function VideoPlayer({
       selectedSubtitleIsBitmap: Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec)),
       activeSubtitleIsBurnedIn: selectedSubtitleIsBurnedIn(),
     });
-    saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
+    const preference = saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
+    const nextPreferences = { ...sharedTrackPreferencesRef.current, subtitle: preference };
+    sharedTrackPreferencesRef.current = nextPreferences;
+    setSharedTrackPreferences(nextPreferences);
     subtitlesDefaultEnabledRef.current = enabled;
     setSubtitlesDefaultEnabled(enabled);
     saveSubtitlesDefaultEnabled(enabled);
