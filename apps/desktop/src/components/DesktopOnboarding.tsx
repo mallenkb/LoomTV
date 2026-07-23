@@ -1,8 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ArrowLeft, ArrowRight, Check, Laptop2, Library, Loader2, RefreshCw, Server, Wifi } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Check, Clapperboard, Laptop2, LayoutGrid, Library, Loader2, RefreshCw, Server, Wifi } from 'lucide-react';
 import LoomBrandLockup from './LoomBrandLockup';
 import { Button } from './ui/button';
 import { desktopApi, type LocalNetworkPeer } from '@/lib/desktopApi';
+import {
+  applyTheme,
+  DEFAULT_THEME_SETTINGS,
+  type AppHomeStyle,
+  readCachedTheme,
+  writeCachedTheme,
+} from '@/lib/theme';
 
 type OnboardingChoice = 'choose' | 'connect';
 
@@ -24,6 +31,18 @@ export default function DesktopOnboarding({
   const [isScanning, setIsScanning] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [message, setMessage] = useState('');
+  const [homeStyle, setHomeStyle] = useState<AppHomeStyle>(() => readCachedTheme()?.homeStyle ?? DEFAULT_THEME_SETTINGS.homeStyle);
+
+  const chooseHomeStyle = (nextHomeStyle: AppHomeStyle) => {
+    const nextTheme = {
+      ...(readCachedTheme() ?? DEFAULT_THEME_SETTINGS),
+      homeStyle: nextHomeStyle,
+      ...(nextHomeStyle === 'modern' ? { mode: 'dark' as const } : {}),
+    };
+    setHomeStyle(nextHomeStyle);
+    writeCachedTheme(nextTheme);
+    applyTheme(nextTheme);
+  };
 
   const scan = useCallback(async () => {
     setIsScanning(true);
@@ -82,28 +101,70 @@ export default function DesktopOnboarding({
           <main className={`mx-auto flex ${contentWidth} flex-1 flex-col py-12 lg:py-16`}>
             <div className="flex flex-col items-center text-center">
               <LoomBrandLockup className="mb-4 h-20 w-[108px]" />
-              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Where is your library?</h1>
+              <h1 className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">Set up LoomTV</h1>
+              <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">Choose how LoomTV looks, then tell us where your library lives.</p>
             </div>
-            <div className="mt-8 grid w-full gap-4 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => { desktopApi.useThisComputerAsHost(); onHostReady(); }}
-                className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-              >
-                <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Server className="h-5 w-5" /></span>
-                <span className="flex items-center justify-between gap-3 text-lg font-semibold">Start fresh <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
-                <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Create a library on this computer.</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep('connect')}
-                className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-              >
-                <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Library className="h-5 w-5" /></span>
-                <span className="flex items-center justify-between gap-3 text-lg font-semibold">Connect to a host <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
-                <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Find and connect to a host on your network.</span>
-              </button>
-            </div>
+
+            <section className="mt-8">
+              <h2 className="text-sm font-semibold text-[var(--loom-text)]">Choose your style</h2>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="LoomTV style">
+                {([
+                  { id: 'default', label: 'Default', description: 'The familiar LoomTV library layout.', Icon: LayoutGrid },
+                  { id: 'modern', label: 'Modern', description: 'A cinematic hero with floating navigation.', Icon: Clapperboard },
+                ] as const).map(({ id, label, description, Icon }) => {
+                  const selected = homeStyle === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => chooseHomeStyle(id)}
+                      className={`flex min-h-24 items-start gap-3 rounded-2xl border p-4 text-left outline-none transition focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
+                        selected
+                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)]'
+                          : 'border-[var(--loom-border)] bg-[var(--loom-surface)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-surface-2)]'
+                      }`}
+                    >
+                      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${selected ? 'bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
+                        <Icon className="h-5 w-5" aria-hidden="true" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-3 text-sm font-semibold text-[var(--loom-text)]">
+                          {label}
+                          {selected && <Check className="h-4 w-4 shrink-0 stroke-[2.5] text-[var(--loom-accent)]" aria-hidden="true" />}
+                        </span>
+                        <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">{description}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="mt-8">
+              <h2 className="text-sm font-semibold text-[var(--loom-text)]">Where is your library?</h2>
+              <div className="mt-3 grid w-full gap-4 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => { desktopApi.useThisComputerAsHost(); onHostReady(); }}
+                  className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                >
+                  <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Server className="h-5 w-5" /></span>
+                  <span className="flex items-center justify-between gap-3 text-lg font-semibold">Start fresh <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
+                  <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Create a library on this computer.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep('connect')}
+                  className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                >
+                  <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Library className="h-5 w-5" /></span>
+                  <span className="flex items-center justify-between gap-3 text-lg font-semibold">Connect to a host <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
+                  <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Find and connect to a host on your network.</span>
+                </button>
+              </div>
+            </section>
           </main>
         ) : (
           <main className={`mx-auto flex ${contentWidth} flex-1 flex-col py-12 lg:py-16`}>

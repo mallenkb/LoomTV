@@ -416,7 +416,7 @@ export default function ArtworkEditorControls({
     <>
       <div
         ref={artworkMenuRef}
-        className="loom-no-drag fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex items-center gap-2"
+        className="loom-artwork-editor-controls loom-no-drag fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex items-center gap-2"
       >
         <Button
           type="button"
@@ -425,7 +425,7 @@ export default function ArtworkEditorControls({
           title="Fix metadata match"
           onClick={openMetadataCandidates}
           disabled={isFetchingArtwork}
-          className={`${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70`}
+          className={`loom-artwork-fix-button ${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70`}
         >
           {isFetchingArtwork ? (
             <Loader2 className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4 animate-spin text-[var(--loom-accent)]`} />
@@ -443,7 +443,7 @@ export default function ArtworkEditorControls({
             aria-haspopup="menu"
             aria-expanded={artworkMenuOpen}
             onClick={() => setArtworkMenuOpen((open) => !open)}
-            className="h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+            className="loom-artwork-more-button h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
           >
             {isFetchingArtwork ? (
               <Loader2 className="h-5 w-5 animate-spin text-[var(--loom-accent)]" />
@@ -742,7 +742,7 @@ export default function ArtworkEditorControls({
                           type="button"
                           onClick={() => applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId)}
-                          className="h-8 bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]"
+                          className="h-8 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-xs text-[var(--loom-text)] shadow-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
                         >
                           {isApplying ? 'Applying...' : 'Apply'}
                         </Button>

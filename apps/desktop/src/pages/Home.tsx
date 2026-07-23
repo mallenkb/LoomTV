@@ -10,8 +10,15 @@ import { useProgressSnapshot } from '@/lib/progress';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { useProfiles } from '@/contexts/ProfileContext';
+import { useTheme } from '@/components/ThemeProvider';
+import ModernHome from '@/components/ModernHome';
 
 export default function Home() {
+  const { theme } = useTheme();
+  return theme.homeStyle === 'modern' ? <ModernHome /> : <DefaultHome />;
+}
+
+function DefaultHome() {
   const { state, addLibraryFolder } = useLibrary();
   const { lists } = useProfiles();
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;

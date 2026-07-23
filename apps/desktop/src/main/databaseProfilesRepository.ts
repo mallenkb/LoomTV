@@ -343,6 +343,7 @@ function normalizePreferences(value: ProfilePreferences): ProfilePreferences {
   const themeModes = new Set(['dark', 'light']);
   const colors = new Set(['orange', 'yellow', 'red', 'blue', 'twitch']);
   const loaders = new Set(['play-mark', 'logo-mark', 'horizontal-logo']);
+  const homeStyles = new Set(['default', 'modern']);
   const seconds = (candidate: unknown): number | undefined => {
     const parsed = Number(candidate);
     return Number.isFinite(parsed) ? Math.min(120, Math.max(1, Math.round(parsed))) : undefined;
@@ -352,6 +353,7 @@ function normalizePreferences(value: ProfilePreferences): ProfilePreferences {
     ...(colors.has(String(value.appThemeColor)) ? { appThemeColor: value.appThemeColor } : {}),
     ...(value.appDarkTheme === 'black' ? { appDarkTheme: 'black' as const } : {}),
     ...(loaders.has(String(value.appLoaderStyle)) ? { appLoaderStyle: value.appLoaderStyle } : {}),
+    ...(homeStyles.has(String(value.appHomeStyle)) ? { appHomeStyle: value.appHomeStyle } : {}),
     ...(Array.isArray(value.sidebarNavOrder) ? {
       sidebarNavOrder: [...new Set(value.sidebarNavOrder.map(String).map((item) => item.trim()).filter(Boolean))].slice(0, 32),
     } : {}),

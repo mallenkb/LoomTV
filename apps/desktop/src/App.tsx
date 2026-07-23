@@ -197,7 +197,11 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 function AppShell() {
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const location = useLocation();
-  const hideContinueBar = Boolean(nowPlaying) || location.pathname === '/settings';
+  const isSettingsRoute =
+    location.pathname === '/settings'
+    || location.pathname.startsWith('/settings/')
+    || location.hash.includes('/settings');
+  const hideContinueBar = Boolean(nowPlaying) || isSettingsRoute;
   const reserveContinueBarSpace = !hideContinueBar;
 
   const handlePlayMedia = useCallback((
@@ -255,7 +259,10 @@ function AppShell() {
   return (
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <Sidebar />
-      <div className="loom-main-drag-region" aria-hidden="true" />
+      <div
+        className={`loom-main-drag-region${isSettingsRoute ? ' loom-main-drag-region-settings' : ''}`}
+        aria-hidden="true"
+      />
       <main
         className="flex-1 overflow-hidden"
         style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '8rem' : '0px' } as React.CSSProperties}

@@ -399,7 +399,7 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
   const fractionPercent = Math.min(100, Math.max(0, candidate.fraction * 100));
 
   return (
-    <div className="pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-5 pb-4">
+    <div className="loom-continue-watching-shell pointer-events-none fixed bottom-0 left-48 right-0 z-40 px-5 pb-4">
       <div className="loom-continue-watching group pointer-events-auto relative mx-auto max-w-[1440px] overflow-hidden rounded-xl bg-[var(--loom-panel)] shadow-[0_14px_42px_rgba(0,0,0,0.42)] backdrop-blur-md">
         {artwork?.backdrop ? (
           <img

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Check, Download, LockKeyhole, Plus, RefreshCw, UsersRound } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -9,6 +9,7 @@ import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
 import LoomLogo from '@/components/LoomLogo';
 import ProfileAvatar from '@/components/profiles/ProfileAvatar';
+import { useTheme } from '@/components/ThemeProvider';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | SidebarNavItemId | 'settings';
@@ -18,6 +19,11 @@ type SidebarNavItem = { id: NavItemId; path: string; label: string; icon: Sideba
 const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 const navItemHeight = 40;
 const navItemGap = 4;
+const modernCategoryItems = [
+  { label: 'Anime', path: '/anime', routePrefix: '/anime' },
+  { label: 'TV Shows', path: '/tv', routePrefix: '/tv' },
+  { label: 'Movies', path: '/movies', routePrefix: '/movie' },
+] as const;
 
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
 const settingsNavItem: SidebarNavItem = { id: 'settings', path: '/settings', label: 'Settings', icon: SettingsNavExactIcon, activeIcon: SettingsNavSolidExactIcon };
@@ -57,6 +63,39 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
     ...uniqueSavedOrder.filter((item): item is SidebarNavItemId => defaultSidebarNavOrder.includes(item as SidebarNavItemId)),
     ...defaultSidebarNavOrder.filter((item) => !uniqueSavedOrder.includes(item)),
   ];
+}
+
+function ModernCategoryPill({ pathname, homeCategory }: { pathname: string; homeCategory: string }) {
+  return (
+    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-5 z-50 flex justify-center px-5">
+      <nav
+        className="loom-modern-category-pill loom-no-drag flex h-12 items-center rounded-full border p-1 backdrop-blur-2xl"
+        aria-label="Library categories"
+      >
+        {modernCategoryItems.map((category) => {
+          const isActive = pathname === '/' ? category.path === homeCategory : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`);
+          return (
+            <Link
+              key={category.path}
+              to={category.path}
+              aria-current={isActive ? 'page' : undefined}
+              aria-pressed={isActive}
+              className={cn(
+                'inline-flex h-full items-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none',
+                isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
+              )}
+            >
+              {category.label}
+            </Link>
+          );
+        })}
+      </nav>
+    </header>
+  );
+}
+
+function isModernDetailRoute(pathname: string): boolean {
+  return pathname.startsWith('/anime/') || pathname.startsWith('/tv/') || pathname.startsWith('/movie/');
 }
 
 function AnimeIcon({ className, solid = false }: { className?: string; solid?: boolean }) {
@@ -134,10 +173,12 @@ function SettingsNavSolidExactIcon({ className }: { className?: string }) {
   </svg>;
 }
 
-function SidebarProfileSwitcher() {
+function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
   const { activeProfile, canCreateProfiles, canManageProfiles, openGate, profiles, selectProfile } = useProfiles();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -161,14 +202,14 @@ function SidebarProfileSwitcher() {
     setMenuOpen(false);
     if (profileId === activeProfile.id) return;
     if (hasPin) {
-      openGate({ mode: 'select', profileId });
+      openGate({ mode: 'select', profileId, returnTo });
       return;
     }
     void selectProfile(profileId).catch(() => undefined);
   };
 
   return (
-    <div ref={menuRef} className="relative min-w-0 flex-1">
+    <div ref={menuRef} className={cn('relative', compact ? 'w-12' : 'min-w-0 flex-1')}>
       <button
         type="button"
         onClick={() => setMenuOpen((open) => !open)}
@@ -176,21 +217,25 @@ function SidebarProfileSwitcher() {
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         className={cn(
-          'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
+          'flex w-full items-center gap-3 rounded-lg text-left text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-active-text)]',
+          compact ? 'h-12 justify-center p-0 hover:bg-white/8' : 'px-3 py-2 hover:bg-[var(--loom-sidebar-active-bg)]',
           menuOpen && 'bg-[var(--loom-sidebar-active-bg)] text-[var(--loom-text)]',
         )}
       >
-        <span className="h-6 w-6 shrink-0 overflow-hidden rounded-full">
+        <span className={cn('shrink-0 overflow-hidden rounded-full', compact ? 'h-9 w-9 ring-1 ring-white/20' : 'h-6 w-6')}>
           <ProfileAvatar name={activeProfile.name} avatarKey={activeProfile.avatarKey} colorKey={activeProfile.colorKey} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{activeProfile.name}</span>
+        <span className={cn('min-w-0 flex-1 truncate text-sm font-medium', compact && 'sr-only')}>{activeProfile.name}</span>
       </button>
 
       {menuOpen && (
         <div
           role="menu"
           aria-label="Profiles"
-          className="absolute bottom-full left-0 z-50 mb-2 w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-2xl"
+          className={cn(
+            'absolute z-50 w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-2xl',
+            compact ? 'bottom-0 left-full ml-2' : 'bottom-full left-0 mb-2',
+          )}
         >
           <div className="max-h-64 space-y-0.5 overflow-y-auto">
             {selectableProfiles.map((profile) => {
@@ -226,7 +271,7 @@ function SidebarProfileSwitcher() {
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false);
-                  openGate({ mode: 'edit', editProfileId: 'new' });
+                  openGate({ mode: 'edit', editProfileId: 'new', returnTo });
                 }}
                 className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
               >
@@ -243,7 +288,7 @@ function SidebarProfileSwitcher() {
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false);
-                  openGate({ mode: 'edit' });
+                  openGate({ mode: 'edit', returnTo });
                 }}
                 className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
               >
@@ -273,6 +318,8 @@ function SidebarProfileSwitcher() {
 
 export default function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { theme } = useTheme();
   const { activeProfile } = useProfiles();
   const { state, scanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
@@ -345,12 +392,6 @@ export default function Sidebar() {
   }, []);
 
   const showUpdateButton = updateState?.status === 'downloaded' || updateState?.status === 'downloading' || updateState?.status === 'installing';
-  const isUpdateProgressing = updateState?.status === 'downloading' || updateState?.status === 'installing';
-  const updateProgress = updateState?.status === 'downloading'
-    ? Math.max(0, Math.min(100, updateState.downloadPercent || 0))
-    : updateState?.status === 'installing'
-      ? 100
-      : 0;
   const updateButtonLabel =
     updateState?.status === 'downloaded'
       ? 'Update ready'
@@ -359,6 +400,56 @@ export default function Sidebar() {
         : updateState?.downloadPercent
           ? `Downloading ${Math.round(updateState.downloadPercent)}%`
           : 'Downloading';
+
+  const isModern = theme.homeStyle === 'modern';
+  const modernHomeCategory = state.animeShows.length > 0
+    ? '/anime'
+    : state.tvShows.length > 0
+      ? '/tv'
+      : state.movies.length > 0
+        ? '/movies'
+        : '/anime';
+
+  if (isModern) {
+    return (
+      <>
+        <aside className="loom-modern-sidebar loom-no-drag fixed inset-y-0 left-0 z-50 flex w-20 flex-col items-center py-5">
+          <nav className="mt-6 flex flex-1 flex-col items-center gap-3" aria-label="Primary navigation">
+            <button
+              type="button"
+              onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
+              title="Search library"
+              aria-label="Search library"
+              className="loom-modern-sidebar-action grid h-12 w-12 place-items-center rounded-full transition-[color,transform,background-color] hover:scale-105"
+            >
+              <Search className="h-6 w-6" />
+            </button>
+            {navItems.map((item) => {
+              const isActive = activeNavItemId === item.id;
+              const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
+              return (
+                <Link
+                  key={`modern-${item.path}`}
+                  to={item.path}
+                  title={item.label}
+                  aria-label={item.label}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    'loom-modern-sidebar-action grid h-12 w-12 place-items-center rounded-full transition-[color,transform,background-color] hover:scale-105',
+                    isActive && 'loom-modern-sidebar-action-active',
+                  )}
+                >
+                  <Icon className="h-6 w-6" />
+                </Link>
+              );
+            })}
+          </nav>
+          <SidebarProfileSwitcher compact />
+        </aside>
+        {!isModernDetailRoute(location.pathname) && !location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} homeCategory={modernHomeCategory} />}
+      </>
+    );
+  }
 
   return (
     <aside className="h-full w-48 bg-[var(--loom-sidebar)] flex flex-col">
@@ -433,17 +524,6 @@ export default function Sidebar() {
               className="relative mb-2 flex h-9 w-full items-center justify-center gap-2 overflow-hidden rounded-lg bg-[var(--loom-active-bg)] px-3 text-xs font-semibold text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] disabled:cursor-wait disabled:text-[var(--loom-muted)]"
               title={updateState?.message || 'Update LoomTV'}
             >
-              {isUpdateProgressing && (
-                <span
-                  className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--loom-surface-3)] transition-[width] duration-300"
-                  style={{ width: `${updateProgress}%` }}
-                  role="progressbar"
-                  aria-label="Update progress"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(updateProgress)}
-                />
-              )}
               <Download className={cn('relative z-10 h-4 w-4', updateState?.status === 'downloading' && 'animate-pulse')} />
               <span className="relative z-10">{updateButtonLabel}</span>
             </button>

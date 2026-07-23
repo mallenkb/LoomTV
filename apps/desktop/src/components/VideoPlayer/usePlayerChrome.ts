@@ -51,14 +51,17 @@ export function usePlayerChrome(paused: boolean, containerRef: RefObject<HTMLDiv
 
   useEffect(() => {
     const doc = document as WebkitDocument;
-    const onFullscreenChange = () => setFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
+    const onFullscreenChange = () => {
+      setFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
+      resetHideTimer();
+    };
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
     return () => {
       document.removeEventListener('fullscreenchange', onFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
     };
-  }, []);
+  }, [resetHideTimer]);
 
   const toggleFullscreen = useCallback(() => {
     const element = containerRef.current as WebkitFullscreenElement | null;

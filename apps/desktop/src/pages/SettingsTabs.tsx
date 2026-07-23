@@ -20,7 +20,7 @@ export default function SettingsTabs({ activeSection, onSelect, sections = SETTI
             type="button"
             onClick={() => onSelect(section.id)}
             aria-pressed={isActive}
-            className={`relative h-9 rounded-[8px] px-4 text-sm font-medium transition-colors ${
+            className={`relative h-9 whitespace-nowrap rounded-[8px] px-4 text-sm font-medium transition-colors ${
               isActive
                 ? 'text-[var(--loom-active-text)]'
                 : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
@@ -33,7 +33,7 @@ export default function SettingsTabs({ activeSection, onSelect, sections = SETTI
                 style={{ borderRadius: 8 }}
               />
             )}
-            <span className="relative z-10">{section.label}</span>
+            <span className="relative z-10 whitespace-nowrap">{section.label}</span>
           </button>
         );
       })}
