@@ -13,6 +13,7 @@ import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueA
 import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
+import { useTheme } from '@/components/ThemeProvider';
 
 interface MovieDetailProps {
   onPlay?: (
@@ -94,6 +95,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const navigate = useNavigate();
   const { state, refreshLibrary } = useLibrary();
   const { canManageProfiles, lists, setListEntry } = useProfiles();
+  const { theme } = useTheme();
   const [movie, setMovie] = useState<MediaItem | null>(null);
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const progressTick = useProgressRefreshRevision();
@@ -193,6 +195,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const progressCopy = progress.duration > 0
     ? `${formatShortMinutes(progress.position)} of ${formatShortMinutes(progress.duration)}`
     : null;
+  const isModern = theme.homeStyle === 'modern';
   void progressTick;
 
   const handlePlay = async () => {
@@ -206,7 +209,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const handleBack = () => navigate(backTarget);
 
   return (
-    <div className="loom-page loom-detail-page h-full overflow-y-auto">
+    <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       <div className="loom-detail-cover relative h-[50vh] w-full overflow-hidden">
         <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[1440px] -translate-x-1/2">
           <SafeArtwork
@@ -234,7 +237,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ArrowLeft className="w-5 h-5" />
           Back
@@ -287,8 +290,9 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
                 ))}
               </div>
             )}
+            {movie.summary && <p className="loom-detail-hero-summary">{movie.summary}</p>}
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
             <button
               type="button"
               aria-pressed={inMyList}
@@ -326,10 +330,10 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1440px]">
+      <div className="loom-detail-body mx-auto max-w-[1440px]">
       <div className="page-bottom-safe-lg p-8">
-        {movie.summary && (
-          <section className="mb-8">
+        {movie.summary && !isModern && (
+          <section className="loom-detail-summary mb-8">
             <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
             <ExpandableSummary summary={movie.summary} />
           </section>
@@ -367,6 +371,13 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
                 </div>
               )}
             </div>
+          </section>
+        )}
+
+        {movie.summary && isModern && (
+          <section className="loom-detail-summary mb-8">
+            <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
+            <ExpandableSummary summary={movie.summary} />
           </section>
         )}
 

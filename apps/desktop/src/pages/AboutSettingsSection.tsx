@@ -1,5 +1,4 @@
 import { CheckCircle, Download, ExternalLink, RefreshCw } from 'lucide-react';
-import type React from 'react';
 import LoomLoader from '@/components/LoomLoader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { APP_VERSION, desktopApi, type UpdateState } from '@/lib/desktopApi';
@@ -25,7 +24,6 @@ type AboutSettingsSectionProps = {
   isUpdateChecking: boolean;
   isUpdateDownloading: boolean;
   updateDownloadPercent: number;
-  updateButtonStyle?: React.CSSProperties;
   updateButtonLabel: string;
   updateStatusCopy: string;
   onUpdateAction: () => void;
@@ -39,7 +37,6 @@ export default function AboutSettingsSection({
   isUpdateChecking,
   isUpdateDownloading,
   updateDownloadPercent,
-  updateButtonStyle,
   updateButtonLabel,
   updateStatusCopy,
   onUpdateAction,
@@ -101,7 +98,6 @@ export default function AboutSettingsSection({
                     ? 'cursor-wait shadow-inner shadow-black/20'
                     : 'hover:bg-[var(--loom-accent-hover)]',
                 )}
-                style={updateButtonStyle}
                 aria-busy={isUpdateBusy}
               >
                 {isUpdateChecking ? (

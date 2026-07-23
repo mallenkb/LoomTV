@@ -14,6 +14,7 @@ import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
+import { useTheme } from '@/components/ThemeProvider';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -60,6 +61,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const navigate = useNavigate();
   const { state, refreshLibrary } = useLibrary();
   const { canManageProfiles, lists, setListEntry } = useProfiles();
+  const { theme } = useTheme();
   const [show, setShow] = useState<TVShow | null>(null);
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
   const progressTick = useProgressRefreshRevision();
@@ -339,9 +341,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     ? sourceRoute
     : fallbackRoute;
   const handleBack = () => navigate(backTarget);
+  const isModern = theme.homeStyle === 'modern';
 
   return (
-    <div className="loom-page loom-detail-page h-full overflow-y-auto">
+    <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       {/* Hero backdrop */}
       <div className="loom-detail-cover relative h-[45vh] w-full overflow-hidden">
         <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[1440px] -translate-x-1/2">
@@ -374,7 +377,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-white shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           Back
@@ -414,8 +417,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 </Badge>
               ))}
             </div>
+            {show.summary && <p className="loom-detail-hero-summary">{show.summary}</p>}
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
             <button
               type="button"
               aria-pressed={inMyList}
@@ -455,9 +459,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1440px]">
+      <div className="loom-detail-body mx-auto max-w-[1440px]">
       <div className="loom-detail-content page-bottom-safe-lg p-8">
-        {show.summary && (
+        {show.summary && !isModern && (
           <section className="loom-detail-summary mb-8">
             <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
             <ExpandableSummary summary={show.summary} />
@@ -580,6 +584,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             </div>
           )}
         </section>
+
+        {show.summary && isModern && (
+          <section className="loom-detail-summary mb-8">
+            <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
+            <ExpandableSummary summary={show.summary} />
+          </section>
+        )}
 
         {/* Cast */}
         {detailsReady && show.cast.length > 0 && (
@@ -759,7 +770,12 @@ function EpisodeRow({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--loom-accent)]">resume</span>}
-        {progress.watched && <CheckCircle className="h-4 w-4 text-green-500" />}
+        {progress.watched && (
+          <CheckCircle
+            aria-label="Watched"
+            className="h-4 w-4 fill-green-500 text-black"
+          />
+        )}
       </div>
     </button>
   );

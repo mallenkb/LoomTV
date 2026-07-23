@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, ImagePlus, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, type ProfileSummary } from '@/lib/desktopApi';
@@ -9,6 +10,7 @@ import LoomLogo from '@/components/LoomLogo';
 
 type GateMode = 'select' | 'edit';
 type EditorTarget = ProfileSummary | 'new';
+type EditorOrigin = 'gate' | 'source';
 
 /**
  * Full-window profile gate: the Who's Watching picker, its in-place Edit
@@ -19,21 +21,40 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
   const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
+  const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>('gate');
   const [setupMode, setSetupMode] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
   const initialRoutedRef = useRef(false);
   const [busyProfileId, setBusyProfileId] = useState<string | null>(null);
   const [pinTarget, setPinTarget] = useState<ProfileSummary | null>(null);
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
+  const [returnTo, setReturnTo] = useState<string | null>(null);
   const focusRestoreId = useRef<string | null>(null);
   const canManage = canManageProfiles;
+
+  const closeAndReturn = useCallback(() => {
+    const destination = returnTo;
+    const current = `${location.pathname}${location.search}${location.hash}`;
+    closeGate();
+    if (destination && destination !== current) {
+      navigate(destination, { replace: true });
+    }
+  }, [closeGate, returnTo, location.hash, location.pathname, location.search, navigate]);
+
+  const closeEditor = useCallback(() => {
+    setEditorTarget(null);
+    setSetupMode(false);
+    if (editorOrigin === 'source') closeAndReturn();
+  }, [closeAndReturn, editorOrigin]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (pinTarget) setPinTarget(null);
-        else if (editorTarget) setEditorTarget(null);
+        else if (editorTarget) closeEditor();
         else if (mode === 'edit') setMode('select');
-        else if (activeProfile) closeGate();
+        else if (activeProfile) closeAndReturn();
         return;
       }
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
@@ -72,27 +93,38 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeProfile, closeGate, editorTarget, mode, pinTarget]);
+  }, [activeProfile, closeAndReturn, closeEditor, editorTarget, mode, pinTarget]);
 
   // Sidebar and Settings can deep-link into the exact profile flow without
   // making the user repeat their selection inside the full-screen gate.
   useEffect(() => {
     if (!gateIntent) return;
     if (gateIntent.mode === 'edit' && (canManage || (gateIntent.editProfileId === 'new' && canCreateProfiles))) {
+      setReturnTo(gateIntent.returnTo ?? null);
       setMode('edit');
       if (gateIntent.editProfileId === 'new') {
+        setEditorOrigin('source');
         setEditorTarget('new');
       } else if (gateIntent.editProfileId) {
         const target = profiles.find((profile) => profile.id === gateIntent.editProfileId);
-        if (target) setEditorTarget(target);
+        if (target) {
+          setEditorOrigin('source');
+          setEditorTarget(target);
+        }
       }
     } else if (gateIntent.mode === 'select') {
+      setReturnTo(gateIntent.returnTo ?? null);
       setMode('select');
       const target = profiles.find((profile) => profile.id === gateIntent.profileId);
       if (target?.hasPin) setPinTarget(target);
     }
     clearGateIntent();
   }, [gateIntent, canCreateProfiles, canManage, profiles, clearGateIntent]);
+
+  useEffect(() => {
+    if (gateIntent) return;
+    setReturnTo(null);
+  }, [gateIntent]);
 
   const handleSelect = useCallback(async (profile: ProfileSummary) => {
     focusRestoreId.current = profile.id;
@@ -125,6 +157,7 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
     if (initialSetup !== 'host' || activeProfile) return;
     const owner = profiles.find((profile) => profile.type === 'owner');
     if (owner) {
+      setEditorOrigin('gate');
       setSetupMode(true);
       setEditorTarget(owner);
     }
@@ -136,7 +169,7 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
         {mode === 'select' && activeProfile && !editorTarget && !pinTarget ? (
           <button
             type="button"
-            onClick={closeGate}
+            onClick={closeAndReturn}
             className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -145,7 +178,7 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
         ) : mode === 'edit' && !pinTarget ? (
           <button
             type="button"
-            onClick={() => setMode('select')}
+            onClick={returnTo ? closeAndReturn : () => setMode('select')}
             className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -186,7 +219,7 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
         <ProfileDetailEditor
           target={editorTarget}
           setupMode={setupMode}
-          onClose={() => { setEditorTarget(null); setSetupMode(false); }}
+          onClose={closeEditor}
         />
       ) : (
         <main className="flex flex-1 flex-col items-center justify-center px-8 pb-[8vh]">
@@ -208,7 +241,10 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
                 busy={busyProfileId === profile.id}
                 onClick={() => {
                   focusRestoreId.current = profile.id;
-                  if (mode === 'edit') setEditorTarget(profile);
+                  if (mode === 'edit') {
+                    setEditorOrigin('gate');
+                    setEditorTarget(profile);
+                  }
                   else void handleSelect(profile);
                 }}
                 move={mode === 'edit' && canManage ? {
@@ -229,8 +265,8 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
                 } : undefined}
               />
             ))}
-            {mode === 'select' && canCreateProfiles && <AddProfileCard onClick={() => setEditorTarget('new')} />}
-            {mode === 'edit' && canManage && <AddProfileCard onClick={() => setEditorTarget('new')} />}
+            {mode === 'select' && canCreateProfiles && <AddProfileCard onClick={() => { setEditorOrigin('gate'); setEditorTarget('new'); }} />}
+            {mode === 'edit' && canManage && <AddProfileCard onClick={() => { setEditorOrigin('gate'); setEditorTarget('new'); }} />}
           </div>
           {mode === 'edit' && canManage && (
             <button

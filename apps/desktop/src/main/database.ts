@@ -370,6 +370,7 @@ function validateProfileImport(value: unknown): asserts value is ProfileExportV1
     ['appThemeColor', new Set(['orange', 'yellow', 'red', 'blue', 'twitch'])],
     ['appDarkTheme', new Set(['black'])],
     ['appLoaderStyle', new Set(['play-mark', 'logo-mark', 'horizontal-logo'])],
+    ['appHomeStyle', new Set(['default', 'modern'])],
   ];
   for (const [key, allowed] of allowedPreferenceValues) {
     if (preferences[key] !== undefined && !allowed.has(String(preferences[key]))) throw new Error('The profile preferences are invalid.');
