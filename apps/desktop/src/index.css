@@ -910,13 +910,16 @@ body.platform-darwin .loom-player-top-control {
   background: var(--loom-bg);
 }
 
+/* The backdrop is centred with `left: 0; right: 0; margin-inline: auto`, never
+   with a translate. A `-translate-x-1/2` here could not be overridden
+   reliably: the CSS minifier folds `translate` into a sibling `transform`
+   declaration and drops it, so any `translate: none` reset written alongside
+   `transform: none` disappeared from the bundle and the utility won. */
 .loom-detail-page-modern .loom-detail-cover-image {
   right: auto;
   left: var(--loom-detail-frame-start);
   width: var(--loom-detail-frame-width);
   margin: 0;
-  translate: none;
-  transform: none;
 }
 
 /* Electron's viewport includes the overlay rail while the detail page's
@@ -929,8 +932,6 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   left: 0;
   width: 100%;
   max-width: none;
-  translate: 0 !important;
-  transform: none !important;
 }
 
 /* The side fades ease out over eleven stops per edge instead of three. Alpha
@@ -2016,7 +2017,6 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   .loom-detail-page-modern .loom-detail-cover-image {
     left: 0;
     width: 100%;
-    translate: none;
   }
 
   .loom-detail-page .loom-detail-cover.relative.h-\[45vh\],
