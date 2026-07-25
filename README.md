@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.85](docs/releases/v1.0.85.md): fixes the remaining Electron hero translation and restores full-width desktop artwork.
 - [LoomTV 1.0.84](docs/releases/v1.0.84.md): fixes the desktop Modern detail hero while preserving the working web layout.
 - [LoomTV 1.0.83](docs/releases/v1.0.83.md): fixes the continue-watching thumbnail overlay and macOS settings-tab interaction.
 - [LoomTV 1.0.82](docs/releases/v1.0.82.md): fixes the continue-watching thumbnail overlay so artwork stays clear.
