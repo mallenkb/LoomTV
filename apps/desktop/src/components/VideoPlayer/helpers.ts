@@ -146,7 +146,9 @@ export function trackPreferenceScope(mediaId: string | undefined, filePath: stri
   return mediaId ? `media:${mediaId}` : `file:${filePath}`;
 }
 
-export async function loadSharedTrackPreferences(scope: string): Promise<PlaybackTrackPreferences> {
+const PROFILE_TRACK_PREFERENCE_SCOPE = 'player:defaults';
+
+async function loadStoredTrackPreferences(scope: string): Promise<PlaybackTrackPreferences> {
   try {
     const preferences = await desktopApi.getPlaybackTrackPreferences(scope);
     return preferences && !('audio' in preferences || 'subtitle' in preferences) ? {} : preferences as PlaybackTrackPreferences;
@@ -155,7 +157,23 @@ export async function loadSharedTrackPreferences(scope: string): Promise<Playbac
   }
 }
 
+export async function loadSharedTrackPreferences(scope: string): Promise<PlaybackTrackPreferences> {
+  if (scope === PROFILE_TRACK_PREFERENCE_SCOPE) {
+    return loadStoredTrackPreferences(scope);
+  }
+
+  const [profileDefaults, scopedPreferences] = await Promise.all([
+    loadStoredTrackPreferences(PROFILE_TRACK_PREFERENCE_SCOPE),
+    loadStoredTrackPreferences(scope),
+  ]);
+  return {
+    ...profileDefaults,
+    ...scopedPreferences,
+  };
+}
+
 const trackPreferenceSaveQueues = new Map<string, Promise<void>>();
+const TRACK_PREFERENCE_SAVE_QUEUE = 'player:preferences';
 
 export function saveTrackPreference(
   scope: string,
@@ -171,23 +189,28 @@ export function saveTrackPreference(
     codec: normalizeTrackField(track?.codec),
     forced: track?.forced,
   };
-  const previousSave = trackPreferenceSaveQueues.get(scope) ?? Promise.resolve();
+  const previousSave = trackPreferenceSaveQueues.get(TRACK_PREFERENCE_SAVE_QUEUE) ?? Promise.resolve();
   const queuedSave = previousSave.then(async () => {
     try {
-      const existing = await loadSharedTrackPreferences(scope);
-      const nextPreferences = {
-        ...existing,
-        [type]: preference,
-      };
       const active = await desktopApi.getActiveProfileState();
-      await desktopApi.savePlaybackTrackPreferences(scope, nextPreferences, active.profileId || undefined);
+      const storageScopes = Array.from(new Set([PROFILE_TRACK_PREFERENCE_SCOPE, scope]));
+      for (const storageScope of storageScopes) {
+        const existing = await loadStoredTrackPreferences(storageScope);
+        const nextPreferences = {
+          ...existing,
+          [type]: preference,
+        };
+        await desktopApi.savePlaybackTrackPreferences(storageScope, nextPreferences, active.profileId || undefined);
+      }
     } catch {
       // Track selection still applies for the current session.
     }
   });
-  trackPreferenceSaveQueues.set(scope, queuedSave);
+  trackPreferenceSaveQueues.set(TRACK_PREFERENCE_SAVE_QUEUE, queuedSave);
   void queuedSave.finally(() => {
-    if (trackPreferenceSaveQueues.get(scope) === queuedSave) trackPreferenceSaveQueues.delete(scope);
+    if (trackPreferenceSaveQueues.get(TRACK_PREFERENCE_SAVE_QUEUE) === queuedSave) {
+      trackPreferenceSaveQueues.delete(TRACK_PREFERENCE_SAVE_QUEUE);
+    }
   });
   return preference;
 }

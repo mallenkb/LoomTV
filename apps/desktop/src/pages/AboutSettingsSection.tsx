@@ -100,26 +100,35 @@ export default function AboutSettingsSection({
                 )}
                 aria-busy={isUpdateBusy}
               >
-                {isUpdateChecking ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : isUpdateDownloading ? (
-                  <Download className="h-4 w-4 animate-pulse" />
-                ) : updateState?.status === 'installing' ? (
-                  <LoomLoader
-                    style={theme.loaderStyle}
-                    className="grid h-4 w-4 place-items-center text-current"
-                    markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-2.5 w-auto' : 'h-3.5 w-3.5'}
-                    color="currentColor"
+                {isUpdateDownloading && (
+                  <span
+                    className="pointer-events-none absolute inset-y-0 left-0 bg-black/20 transition-[width] duration-300"
+                    style={{ width: `${updateDownloadPercent}%` }}
+                    aria-hidden="true"
                   />
-                ) : (
-                  <Download className="h-4 w-4" />
                 )}
-                {isUpdateDownloading ? (
-                  <>
-                    <span>Downloading</span>
-                    <span className="tabular-nums">{updateDownloadPercent}%</span>
-                  </>
-                ) : updateButtonLabel}
+                <span className="relative z-10 inline-flex items-center gap-2">
+                  {isUpdateChecking ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : isUpdateDownloading ? (
+                    <Download className="h-4 w-4 animate-pulse" />
+                  ) : updateState?.status === 'installing' ? (
+                    <LoomLoader
+                      style={theme.loaderStyle}
+                      className="grid h-4 w-4 place-items-center text-current"
+                      markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-2.5 w-auto' : 'h-3.5 w-3.5'}
+                      color="currentColor"
+                    />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {isUpdateDownloading ? (
+                    <>
+                      <span>Downloading</span>
+                      <span className="tabular-nums">{updateDownloadPercent}%</span>
+                    </>
+                  ) : updateButtonLabel}
+                </span>
               </button>
             </div>
             {updateStatusCopy && (

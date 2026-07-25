@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FolderOpen, Image, Loader2, MoreHorizontal, RefreshCw, Search, Star, X } from 'lucide-react';
+import { Image, ImageUp, Loader2, MoreHorizontal, PanelsTopLeft, Search, Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
@@ -101,7 +101,6 @@ interface ArtworkEditorControlsProps {
   mediaId: string;
   legacyStorageKey: string;
   onCustomArtworkChange: React.Dispatch<React.SetStateAction<CustomArtworkState>>;
-  onOpenFolderPath?: () => Promise<void> | void;
   onSaved?: () => Promise<void> | void;
   officialThumbnailSources?: string[];
   officialCoverSources?: string[];
@@ -115,7 +114,6 @@ export default function ArtworkEditorControls({
   mediaId,
   legacyStorageKey,
   onCustomArtworkChange,
-  onOpenFolderPath,
   onSaved,
   officialThumbnailSources = [],
   officialCoverSources = [],
@@ -272,7 +270,7 @@ export default function ArtworkEditorControls({
     }
   };
 
-  const refreshOfficialMetadata = async (target: OfficialArtworkRefreshTarget = 'all') => {
+  const fixOfficialArtwork = async (target: Exclude<OfficialArtworkRefreshTarget, 'all'>) => {
     if (!mediaId || isFetchingArtwork || !onFetchOfficialArtwork) return;
 
     setIsFetchingArtwork(true);
@@ -282,48 +280,28 @@ export default function ArtworkEditorControls({
       const refreshedArtwork = await onFetchOfficialArtwork(target);
       const hasFreshOfficialArtwork = target === 'poster'
         ? Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.posterCandidates?.find(Boolean))
-        : target === 'cover'
-          ? Boolean(refreshedArtwork?.cover || refreshedArtwork?.backdropCandidates?.find(Boolean))
-          : Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
-      const refreshLabel = target === 'poster' ? 'Poster' : target === 'cover' ? 'Cover photo' : 'Metadata';
+        : Boolean(refreshedArtwork?.cover || refreshedArtwork?.backdropCandidates?.find(Boolean));
+      const artworkLabel = target === 'poster' ? 'Poster' : 'Cover';
       if (!hasFreshOfficialArtwork) {
         showToast({
-          title: `${refreshLabel} checked`,
-          description: target === 'all'
-            ? 'No new official artwork was found, but available metadata was checked.'
-            : `No new official ${target === 'poster' ? 'poster' : 'cover photo'} was found.`,
+          title: `No official ${artworkLabel.toLowerCase()} found`,
+          description: `LoomTV could not find a replacement ${artworkLabel.toLowerCase()} from the connected metadata APIs.`,
           tone: 'warning',
         });
       }
       await saveOfficialArtwork(refreshedArtwork, target);
       if (hasFreshOfficialArtwork) {
         showToast({
-          title: `${refreshLabel} refreshed`,
-          description: target === 'all'
-            ? 'This item was refreshed from the connected metadata APIs.'
-            : `Only the ${target === 'poster' ? 'poster' : 'cover photo'} was refreshed.`,
+          title: `${artworkLabel} fixed`,
+          description: `LoomTV replaced only the ${artworkLabel.toLowerCase()} using the selected metadata source.`,
           tone: 'success',
         });
       }
     } catch (error) {
-      setArtworkSaveError(error instanceof Error ? error.message : 'Unable to refresh metadata.');
+      setArtworkSaveError(error instanceof Error ? error.message : `Unable to fix the ${target}.`);
     } finally {
       setIsFetchingArtwork(false);
     }
-  };
-
-  const openFolderPath = () => {
-    if (!onOpenFolderPath) return;
-    setArtworkMenuOpen(false);
-    void Promise.resolve()
-      .then(onOpenFolderPath)
-      .catch((error) => {
-        showToast({
-          title: 'Could not open folder',
-          description: error instanceof Error ? error.message : 'Unable to locate this folder.',
-          tone: 'error',
-        });
-      });
   };
 
   const applyMetadataCandidate = async (candidate: OfficialMetadataCandidate) => {
@@ -477,59 +455,36 @@ export default function ArtworkEditorControls({
                 role="menuitem"
                 onClick={() => {
                   setArtworkMenuOpen(false);
-                  void refreshOfficialMetadata();
+                  void fixOfficialArtwork('poster');
                 }}
                 disabled={!onFetchOfficialArtwork || isFetchingArtwork}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
-                <RefreshCw className="h-4 w-4" />
-                Refresh metadata
+                <Image className="h-4 w-4" />
+                Fix poster
               </button>
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   setArtworkMenuOpen(false);
-                  void refreshOfficialMetadata('poster');
+                  void fixOfficialArtwork('cover');
                 }}
                 disabled={!onFetchOfficialArtwork || isFetchingArtwork}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
-                <RefreshCw className="h-4 w-4" />
-                Refresh poster only
+                <PanelsTopLeft className="h-4 w-4" />
+                Fix cover
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setArtworkMenuOpen(false);
-                  void refreshOfficialMetadata('cover');
-                }}
-                disabled={!onFetchOfficialArtwork || isFetchingArtwork}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Refresh cover only
-              </button>
-              {onOpenFolderPath && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={openFolderPath}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-                >
-                  <FolderOpen className="h-4 w-4" />
-                  Open folder
-                </button>
-              )}
+              <div role="separator" className="my-1 border-t border-[var(--loom-control-border)]" />
               <button
                 type="button"
                 role="menuitem"
                 onClick={() => openArtworkPicker('thumbnail')}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
-                <Image className="h-4 w-4" />
-                {ARTWORK_TARGETS.thumbnail.menuLabel}
+                <ImageUp className="h-4 w-4" />
+                Upload poster
               </button>
               <button
                 type="button"
@@ -537,8 +492,8 @@ export default function ArtworkEditorControls({
                 onClick={() => openArtworkPicker('cover')}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
-                <Image className="h-4 w-4" />
-                {ARTWORK_TARGETS.cover.menuLabel}
+                <ImageUp className="h-4 w-4" />
+                Upload cover
               </button>
             </div>
           )}
