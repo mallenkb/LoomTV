@@ -38,6 +38,7 @@ catalog:
   vite-plus: latest
 overrides:
   vite: 'catalog:'
+  builder-util-runtime: 9.7.0
   '@expo/cli>tar': 7.5.16
   '@expo/cli>undici': 6.27.0
   '@expo/cli>ws': 8.21.0

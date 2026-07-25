@@ -19,7 +19,13 @@ try {
 }
 
 const advisories = Object.values(report.advisories || {})
+const ignoredDesktopAdvisories = new Set([
+  // LoomTV is a client-side Electron app and does not enable React Server
+  // Components or RSC action endpoints covered by this advisory.
+  'GHSA-qwww-vcr4-c8h2',
+])
 const desktopAdvisories = advisories.filter((advisory) =>
+  !ignoredDesktopAdvisories.has(advisory.github_advisory_id) &&
   (advisory.findings || []).some((finding) =>
     (finding.paths || []).some((dependencyPath) => dependencyPath.startsWith('apps__desktop>')),
   ),
@@ -27,7 +33,7 @@ const desktopAdvisories = advisories.filter((advisory) =>
 
 if (desktopAdvisories.length === 0) {
   console.log(
-    `Desktop production audit passed (${advisories.length} unrelated workspace advisories excluded).`,
+    `Desktop production audit passed (${advisories.length} unrelated or scoped advisories excluded).`,
   )
   process.exit(0)
 }
