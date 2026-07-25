@@ -3,6 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "overrides": {
+    "builder-util-runtime": "9.7.0",
     "string-width": "4.2.3",
     "@expo/cli>wrap-ansi>string-width": "4.2.3",
     "wrap-ansi@7.0.0>string-width": "4.2.3"
