@@ -77,7 +77,7 @@ function PauseOverlay({
                   </span>
                 )}
                 {rating > 0 && (
-                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold leading-none text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--loom-rating-surface)] px-3 py-1 text-sm font-bold leading-none text-[var(--loom-rating)] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
                     <Star className="h-4 w-4 fill-current" />
                     {rating.toFixed(1)}
                   </span>
@@ -85,7 +85,7 @@ function PauseOverlay({
               </div>
             )}
             {rating > 0 && !hasEpisodes && !episodeTitle && (
-              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[#f5c451]/15 px-3 py-1 text-sm font-bold text-[#f5c451] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
+              <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--loom-rating-surface)] px-3 py-1 text-sm font-bold text-[var(--loom-rating)] shadow-[0_4px_16px_rgba(0,0,0,0.35)]">
                 <Star className="h-4 w-4 fill-current" />
                 {rating.toFixed(1)}
               </span>

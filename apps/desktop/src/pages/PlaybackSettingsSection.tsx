@@ -152,7 +152,7 @@ export default function PlaybackSettingsSection({
                   onChange={(event) => update(event.target.checked
                     ? { enabled: true, analyzeNewMedia: true }
                     : { enabled: false })}
-                  className="peer h-5 w-5 cursor-pointer appearance-none rounded border bg-[var(--loom-bg)] transition-colors checked:bg-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-glow)]"
+                  className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-bg)] transition-colors checked:border-[var(--loom-accent)] checked:bg-[var(--loom-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-glow)]"
                 />
                 <Check className="pointer-events-none absolute h-3.5 w-3.5 text-[var(--loom-accent-foreground)] opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
               </span>

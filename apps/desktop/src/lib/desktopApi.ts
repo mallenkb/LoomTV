@@ -28,6 +28,7 @@ import type {
   MetadataApiKeys,
   MetadataKeyTestResult,
   OfficialArtworkResult,
+  OfficialArtworkRefreshTarget,
   OfficialMetadataCandidate,
   PlaybackLogoResult,
   PlaybackMode,
@@ -75,6 +76,7 @@ export type {
   MetadataApiKeys,
   MetadataKeyTestResult,
   OfficialArtworkResult,
+  OfficialArtworkRefreshTarget,
   OfficialMetadataCandidate,
   PlaybackLogoResult,
   PlaybackTrackPreferences,
@@ -179,7 +181,7 @@ export type DesktopBridgeApi = {
       saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
       getOfficialMetadataCandidates?: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
       applyOfficialMetadata?: (mediaId: string, candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
-      refreshOfficialArtwork?: (mediaId: string) => Promise<OfficialArtworkResult>;
+      refreshOfficialArtwork?: (mediaId: string, target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
       getPlaybackLogo?: (mediaId: string) => Promise<PlaybackLogoResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
@@ -1146,11 +1148,11 @@ export const desktopApi = {
     });
   },
 
-  async refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkResult> {
-    if (window.desktopApi?.refreshOfficialArtwork) return window.desktopApi.refreshOfficialArtwork(mediaId);
+  async refreshOfficialArtwork(mediaId: string, target: OfficialArtworkRefreshTarget = 'all'): Promise<OfficialArtworkResult> {
+    if (window.desktopApi?.refreshOfficialArtwork) return window.desktopApi.refreshOfficialArtwork(mediaId, target);
     return fetchJson<OfficialArtworkResult>('/api/artwork/refresh-official', {
       method: 'POST',
-      body: JSON.stringify({ mediaId }),
+      body: JSON.stringify({ mediaId, target }),
     });
   },
 

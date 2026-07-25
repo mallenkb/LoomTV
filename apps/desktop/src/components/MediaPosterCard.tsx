@@ -16,47 +16,24 @@ interface MediaPosterCardProps {
   metaLine?: string;
 }
 
+/* Poster frame is 200x300 and the title block below it adds ~40px, matching the
+   340px row height VirtualPosterGrid reserves. contain-intrinsic-size takes
+   width then height, so these must stay in that order or skipped cards
+   under-reserve space and the scroll position drifts as they render. */
+const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_340px] [content-visibility:auto]';
+
 const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'loom-poster-link group block w-[200px] flex-none [contain-intrinsic-size:300px_200px] [content-visibility:auto]',
-  movies: 'loom-poster-link group block w-full max-w-[200px] [contain-intrinsic-size:300px_200px] [content-visibility:auto]',
-  tv: 'loom-poster-link group block w-full max-w-[200px] [contain-intrinsic-size:300px_200px] [content-visibility:auto]',
-  others: 'loom-poster-link group block w-full max-w-[200px] [contain-intrinsic-size:300px_200px] [content-visibility:auto]',
+  home: `loom-poster-link group block w-[200px] flex-none ${SKIPPED_CARD_SIZE}`,
+  movies: `loom-poster-link group block w-full max-w-[200px] ${SKIPPED_CARD_SIZE}`,
+  tv: `loom-poster-link group block w-full max-w-[200px] ${SKIPPED_CARD_SIZE}`,
+  others: `loom-poster-link group block w-full max-w-[200px] ${SKIPPED_CARD_SIZE}`,
 };
 
-const FALLBACK_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'w-full h-full bg-[var(--loom-surface)] flex flex-col items-center justify-center gap-2 p-3',
-  movies: 'w-full h-full bg-[var(--loom-surface)] flex flex-col items-center justify-center gap-2 p-3',
-  tv: 'w-full h-full bg-[var(--loom-surface)] flex flex-col items-center justify-center gap-2 p-3',
-  others: 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3',
-};
-
-const FALLBACK_ICON_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'w-8 h-8 text-[var(--loom-accent)] shrink-0',
-  movies: 'w-8 h-8 text-[var(--loom-accent)] shrink-0',
-  tv: 'w-8 h-8 text-[var(--loom-accent)] shrink-0',
-  others: 'h-8 w-8 shrink-0 text-[var(--loom-accent)]',
-};
-
-const FALLBACK_TEXT_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'text-[var(--loom-muted)] text-xs text-center leading-tight line-clamp-4',
-  movies: 'text-[var(--loom-muted)] text-xs text-center leading-tight line-clamp-4',
-  tv: 'text-[var(--loom-muted)] text-xs text-center leading-tight line-clamp-4',
-  others: 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]',
-};
-
-const BACKDROP_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40',
-  movies: 'absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors',
-  tv: 'absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors',
-  others: 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40',
-};
-
-const PLAY_OVERLAY_CLASS: Record<MediaPosterCardVariant, string> = {
-  home: 'absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity',
-  movies: 'absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity',
-  tv: 'absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity',
-  others: 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100',
-};
+const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
+const FALLBACK_ICON_CLASS = 'h-8 w-8 shrink-0 text-[var(--loom-accent)]';
+const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]';
+const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
+const PLAY_OVERLAY_CLASS = 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100';
 
 export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
@@ -126,15 +103,15 @@ const MediaPosterCard = memo(function MediaPosterCard({
           className="h-full w-full transition-transform group-hover:scale-105"
           imgClassName="object-cover"
           fallback={(
-            <div className={FALLBACK_CLASS[variant]}>
-              <Play className={FALLBACK_ICON_CLASS[variant]} />
-              <p className={FALLBACK_TEXT_CLASS[variant]}>{item.title}</p>
+            <div className={FALLBACK_CLASS}>
+              <Play className={FALLBACK_ICON_CLASS} />
+              <p className={FALLBACK_TEXT_CLASS}>{item.title}</p>
             </div>
           )}
         />
         <RatingBadge rating={item.rating} />
-        <div className={BACKDROP_CLASS[variant]} />
-        <div className={PLAY_OVERLAY_CLASS[variant]}>
+        <div className={BACKDROP_CLASS} />
+        <div className={PLAY_OVERLAY_CLASS}>
           <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
         </div>
       </div>

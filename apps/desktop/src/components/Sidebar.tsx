@@ -20,6 +20,7 @@ const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'ot
 const navItemHeight = 40;
 const navItemGap = 4;
 const modernCategoryItems = [
+  { label: 'Home', path: '/', routePrefix: '/' },
   { label: 'Anime', path: '/anime', routePrefix: '/anime' },
   { label: 'TV Shows', path: '/tv', routePrefix: '/tv' },
   { label: 'Movies', path: '/movies', routePrefix: '/movie' },
@@ -65,7 +66,7 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
   ];
 }
 
-function ModernCategoryPill({ pathname, homeCategory }: { pathname: string; homeCategory: string }) {
+function ModernCategoryPill({ pathname }: { pathname: string }) {
   return (
     <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-5 z-50 flex justify-center px-5">
       <nav
@@ -73,7 +74,9 @@ function ModernCategoryPill({ pathname, homeCategory }: { pathname: string; home
         aria-label="Library categories"
       >
         {modernCategoryItems.map((category) => {
-          const isActive = pathname === '/' ? category.path === homeCategory : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`);
+          const isActive = category.path === '/'
+            ? pathname === '/'
+            : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`);
           return (
             <Link
               key={category.path}
@@ -234,7 +237,7 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
           aria-label="Profiles"
           className={cn(
             'absolute z-50 w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-2xl',
-            compact ? 'bottom-0 left-full ml-2' : 'bottom-full left-0 mb-2',
+            'bottom-full left-0 mb-2',
           )}
         >
           <div className="max-h-64 space-y-0.5 overflow-y-auto">
@@ -402,13 +405,6 @@ export default function Sidebar() {
           : 'Downloading';
 
   const isModern = theme.homeStyle === 'modern';
-  const modernHomeCategory = state.animeShows.length > 0
-    ? '/anime'
-    : state.tvShows.length > 0
-      ? '/tv'
-      : state.movies.length > 0
-        ? '/movies'
-        : '/anime';
 
   if (isModern) {
     return (
@@ -446,7 +442,7 @@ export default function Sidebar() {
           </nav>
           <SidebarProfileSwitcher compact />
         </aside>
-        {!isModernDetailRoute(location.pathname) && !location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} homeCategory={modernHomeCategory} />}
+        {!isModernDetailRoute(location.pathname) && !location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
       </>
     );
   }

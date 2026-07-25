@@ -15,6 +15,7 @@ import type {
   MetadataApiKeys,
   MetadataKeyTestResult,
   OfficialArtworkResult,
+  OfficialArtworkRefreshTarget,
   OfficialMetadataCandidate,
   ActiveProfileState,
   PlaybackLogoResult,
@@ -49,7 +50,7 @@ export interface IpcContract {
   'artwork:import': { args: [entries: Record<string, Record<string, string>>]; result: boolean };
   'artwork:official-candidates': { args: [mediaId: string]; result: OfficialMetadataCandidate[] };
   'artwork:playback-logo': { args: [mediaId: string]; result: PlaybackLogoResult };
-  'artwork:refresh-official': { args: [mediaId: string]; result: OfficialArtworkResult };
+  'artwork:refresh-official': { args: [mediaId: string, target?: OfficialArtworkRefreshTarget]; result: OfficialArtworkResult };
   'artwork:save': { args: [mediaId: string, target: string, dataUrl: string]; result: Record<string, string> };
   'database:backup': { args: []; result: { ok: boolean; path?: string; error?: string } };
   'database:clear': { args: []; result: LibraryPayload };

@@ -1,14 +1,14 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Bookmark, CheckCircle, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
+import { Bookmark, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
 import { useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
+import { WatchedSolidIcon } from '@/components/LoomIcons';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
@@ -64,23 +64,42 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const { theme } = useTheme();
   const [show, setShow] = useState<TVShow | null>(null);
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
+  const accordionPageKeyRef = useRef('');
+  const accordionWasToggledRef = useRef(false);
   const progressTick = useProgressRefreshRevision();
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [detailsReady, setDetailsReady] = useState(false);
 
   useEffect(() => {
+    const pageKey = `${kind}:${id || ''}`;
+    if (accordionPageKeyRef.current !== pageKey) {
+      accordionPageKeyRef.current = pageKey;
+      accordionWasToggledRef.current = false;
+    }
+
     const collection = kind === 'anime' ? state.animeShows : state.tvShows;
     const found = collection.find((s) => s.id === id);
     setShow(found || null);
-    if (found) {
+    if (found && !accordionWasToggledRef.current) {
       const firstVisibleSeason = (found.seasons || []).find((season) =>
         (found.episodeFiles?.some((ef) => ef.season === season.number) || false)
         || (found.episodes?.some((ep) => ep.season === season.number) || false),
       );
-      setExpandedSeason(firstVisibleSeason?.number ?? null);
+      const resumeEpisode = found.episodeFiles?.find((file) =>
+        getProgressState(file.filePath, file.localMetadata?.durationSeconds).inProgress,
+      );
+      const nextEpisode = found.episodeFiles?.find((file) =>
+        !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched,
+      );
+      setExpandedSeason(resumeEpisode?.season ?? nextEpisode?.season ?? firstVisibleSeason?.number ?? null);
     }
-  }, [id, kind, state.animeShows, state.tvShows]);
+  }, [id, kind, progressTick, state.animeShows, state.tvShows]);
+
+  const toggleSeason = (seasonNumber: number) => {
+    accordionWasToggledRef.current = true;
+    setExpandedSeason((current) => current === seasonNumber ? null : seasonNumber);
+  };
 
   useEffect(() => {
     setDetailsReady(false);
@@ -150,7 +169,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   if (!show) {
     return (
       <div className="loom-page h-full overflow-y-auto">
-        <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
+        <div className="loom-frame page-bottom-safe pt-6">
           <Skeleton className="h-[400px] w-full rounded-lg" />
           <div className="mt-4 space-y-2">
             <Skeleton className="h-8 w-64" />
@@ -278,6 +297,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     backdropCandidates: heroArtwork,
     rating: show.rating,
   };
+  const heroMetadata = [
+    show.year > 0 ? String(show.year) : '',
+    visibleSeasons.length > 0 ? `${visibleSeasons.length} ${visibleSeasons.length === 1 ? 'Season' : 'Seasons'}` : '',
+    ...show.genres.slice(0, 2),
+  ].filter(Boolean).join(' • ');
 
   const handlePlayEpisode = (season: number, episode: number) => {
     const filePath = findEpisodeFile(season, episode);
@@ -341,13 +365,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     ? sourceRoute
     : fallbackRoute;
   const handleBack = () => navigate(backTarget);
-  const isModern = theme.homeStyle === 'modern';
 
   return (
     <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       {/* Hero backdrop */}
       <div className="loom-detail-cover relative h-[45vh] w-full overflow-hidden">
-        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[1440px] -translate-x-1/2">
+        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[var(--loom-frame-max-width)] -translate-x-1/2">
           <SafeArtwork
             src={heroArtwork}
             alt={show.title}
@@ -370,21 +393,21 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={generatedArtwork[0] || ''}
-          onFetchOfficialArtwork={() => desktopApi.refreshOfficialArtwork(show.id)}
+          onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(show.id, target)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(show.id)}
           onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(show.id, candidate)}
         />}
         <button
           type="button"
           onClick={handleBack}
-          className="loom-detail-back loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag fixed top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           Back
         </button>
 
         <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
-          <div className="loom-detail-hero-content mx-auto flex max-w-[1440px] items-end gap-6 p-8">
+          <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
           <SafeArtwork
             src={posterArtwork}
             alt={show.title}
@@ -399,25 +422,14 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             }
           />
           <div className="loom-detail-hero-info min-w-0 flex-1">
-            <h1 className="text-4xl font-bold text-white mb-2">{show.title}</h1>
-            <div className="flex flex-wrap items-center gap-4 text-[var(--loom-muted)] text-sm mb-3">
+            <h1 className="text-4xl font-semibold text-white">{show.title}</h1>
+            <div className="mt-5 flex flex-wrap items-center gap-4 text-[var(--loom-muted)] text-sm">
               <span className="loom-rating flex items-center gap-1">
                 <Star className="w-4 h-4" fill="currentColor" />
                 {show.rating ? show.rating.toFixed(1) : 'N/A'}
               </span>
-              {show.year > 0 && <span>{show.year}</span>}
-              {visibleSeasons.length > 0 && (
-                <span>{visibleSeasons.length} {visibleSeasons.length === 1 ? 'Season' : 'Seasons'}</span>
-              )}
+              {heroMetadata && <span>{heroMetadata}</span>}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {show.genres.map((genre) => (
-                <Badge key={genre} variant="outline" className="text-white border-white/30 text-xs">
-                  {genre}
-                </Badge>
-              ))}
-            </div>
-            {show.summary && <p className="loom-detail-hero-summary">{show.summary}</p>}
           </div>
           <div className="loom-detail-hero-actions flex shrink-0 gap-2">
             <button
@@ -427,7 +439,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 await setListEntry(show.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(show.id, 'favorite', false);
               })()}
-              className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15"
+              className="grid h-14 w-14 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15"
               title={inMyList ? 'Remove from My List' : 'Add to My List'}
             >
               <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
@@ -459,25 +471,17 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </div>
       </div>
 
-      <div className="loom-detail-body mx-auto max-w-[1440px]">
+      <div className="loom-detail-body loom-frame">
       <div className="loom-detail-content page-bottom-safe-lg p-8">
-        {show.summary && !isModern && (
-          <section className="loom-detail-summary mb-8">
-            <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
-            <ExpandableSummary summary={show.summary} />
-          </section>
-        )}
-
-        {/* Seasons & Episodes */}
         <section className="mb-8">
-          <h3 className="text-lg font-semibold text-white mb-3">Seasons & Episodes</h3>
+          <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Seasons &amp; Episodes</h3>
           {visibleSeasons.length === 0 ? (
             <p className="text-[var(--loom-muted)]">No season information available. Try scanning the library.</p>
           ) : (
             <div className="space-y-2">
               {visibleSeasons.map((season) => {
                 const seasonEps = episodesWithFilesForSeason(season.number);
-                const fileCount = show.episodeFiles?.filter((ef) => ef.season === season.number).length || 0;
+                const fileCount = show.episodeFiles?.filter((file) => file.season === season.number).length || 0;
                 const hasFiles = fileCount > 0;
                 const isExpanded = expandedSeason === season.number;
                 const seasonPlaybackEpisode = getSeasonPlaybackEpisode(season.number);
@@ -491,91 +495,64 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
                 return (
                   <div key={season.number} className="overflow-hidden rounded-lg bg-[var(--loom-panel)]">
-                    {/* Season header - click anywhere to expand/collapse */}
-                    <div 
-                      onClick={() => setExpandedSeason(isExpanded ? null : season.number)}
+                    <div
+                      onClick={() => toggleSeason(season.number)}
                       className="flex cursor-pointer items-center justify-between bg-[var(--loom-panel)] p-4 transition-colors hover:bg-[var(--loom-surface-3)]"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="text-white">
-                          {isExpanded ? (
-                            <ChevronDown className="w-4 h-4 text-[var(--loom-muted)]" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4 text-[var(--loom-muted)]" />
-                          )}
+                        <span className="text-[var(--loom-text)]">
+                          {isExpanded ? <ChevronDown className="h-4 w-4 text-[var(--loom-muted)]" /> : <ChevronRight className="h-4 w-4 text-[var(--loom-muted)]" />}
                         </span>
-                        <span className="font-medium text-white">{season.title}</span>
-                        <span className="text-[var(--loom-muted)] text-sm">
+                        <span className="font-medium text-[var(--loom-text)]">{season.title}</span>
+                        <span className="text-sm text-[var(--loom-muted)]">
                           {seasonEps.length > 0 ? `${seasonEps.length} episodes` : `${season.episodeCount || fileCount} episodes`}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3">
-                        {hasFiles && (
-                          <Button
-                            size="sm"
-                            onClick={(e) => { e.stopPropagation(); handlePlaySeason(season.number); }}
-                            className="relative h-7 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] gap-1"
-                          >
-                            {seasonIsResume && seasonProgressPercent > 0 && (
-                              <span
-                                className="pointer-events-none absolute inset-y-0 left-0 bg-black/20"
-                                style={{ width: `${seasonProgressPercent}%` }}
-                              />
-                            )}
-                            <span className="relative z-10 flex items-center gap-1">
-                              <Play className="w-3 h-3" />
-                              {seasonIsResume ? 'Resume' : 'Play'}
-                            </span>
-                          </Button>
-                        )}
-                      </div>
+                      {hasFiles && (
+                        <Button
+                          size="sm"
+                          onClick={(event) => { event.stopPropagation(); handlePlaySeason(season.number); }}
+                          className="relative h-7 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] gap-1"
+                        >
+                          {seasonIsResume && seasonProgressPercent > 0 && (
+                            <span className="pointer-events-none absolute inset-y-0 left-0 bg-black/20" style={{ width: `${seasonProgressPercent}%` }} />
+                          )}
+                          <span className="relative z-10 flex items-center gap-1">
+                            <Play className="h-3 w-3" />
+                            {seasonIsResume ? 'Resume' : 'Play'}
+                          </span>
+                        </Button>
+                      )}
                     </div>
 
-                    {/* Episode list */}
                     {isExpanded && (
                       <div className="divide-y divide-[var(--loom-panel-border)] bg-[var(--loom-surface-2)]">
-                        {seasonEps.length > 0 ? (
-                          seasonEps.map((ep) => {
-                            const filePath = findEpisodeFile(season.number, ep.number);
-                            return (
-                              <EpisodeRow
-                                key={ep.number}
-                                ep={ep}
-                                seriesTitle={show.title}
-                                filePath={filePath}
-                                seasonNum={season.number}
-                                progressTick={progressTick}
-                                durationHint={show.episodeFiles?.find((ef) => ef.season === season.number && ef.episode === ep.number)?.localMetadata?.durationSeconds}
-                                onPlay={() => handlePlayEpisode(season.number, ep.number)}
-                              />
-                            );
-                          })
-                        ) : (
-                          // No TVmaze episode data — show episode files directly
-                          show.episodeFiles
-                            ?.filter((ef) => ef.season === season.number)
-                            .sort((a, b) => a.episode - b.episode)
-                            .map((ef) => (
-                              <EpisodeRow
-                                key={ef.episode}
-                                ep={{
-                                  season: season.number,
-                                  number: ef.episode,
-                                  title: cleanEpisodeTitle(ef.filePath, season.number, ef.episode),
-                                  summary: '',
-                                  still: '',
-                                  rating: 0,
-                                  airDate: '',
-                                }}
-                                seriesTitle={show.title}
-                                filePath={ef.filePath}
-                                seasonNum={season.number}
-                                progressTick={progressTick}
-                                durationHint={ef.localMetadata?.durationSeconds}
-                                onPlay={() => onPlay && onPlay(ef.filePath, show.title, ef.subtitles || show.subtitles, playerEpisodes, show.episodeFiles, season.number, ef.episode, show.id, playerArtwork)}
-                              />
-                            ))
-                        )}
+                        {seasonEps.length > 0 ? seasonEps.map((episode) => (
+                          <EpisodeRow
+                            key={episode.number}
+                            ep={episode}
+                            seriesTitle={show.title}
+                            filePath={findEpisodeFile(season.number, episode.number)}
+                            seasonNum={season.number}
+                            progressTick={progressTick}
+                            durationHint={show.episodeFiles?.find((file) => file.season === season.number && file.episode === episode.number)?.localMetadata?.durationSeconds}
+                            onPlay={() => handlePlayEpisode(season.number, episode.number)}
+                          />
+                        )) : show.episodeFiles
+                          ?.filter((file) => file.season === season.number)
+                          .sort((left, right) => left.episode - right.episode)
+                          .map((file) => (
+                            <EpisodeRow
+                              key={file.episode}
+                              ep={{ season: season.number, number: file.episode, title: cleanEpisodeTitle(file.filePath, season.number, file.episode), summary: '', still: '', rating: 0, airDate: '' }}
+                              seriesTitle={show.title}
+                              filePath={file.filePath}
+                              seasonNum={season.number}
+                              progressTick={progressTick}
+                              durationHint={file.localMetadata?.durationSeconds}
+                              onPlay={() => onPlay && onPlay(file.filePath, show.title, file.subtitles || show.subtitles, playerEpisodes, show.episodeFiles, season.number, file.episode, show.id, playerArtwork)}
+                            />
+                          ))}
                       </div>
                     )}
                   </div>
@@ -585,31 +562,24 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           )}
         </section>
 
-        {show.summary && isModern && (
+        {show.summary && (
           <section className="loom-detail-summary mb-8">
-            <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
+            <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Summary</h3>
             <ExpandableSummary summary={show.summary} />
           </section>
         )}
 
-        {/* Cast */}
         {detailsReady && show.cast.length > 0 && (
           <section>
-            <h3 className="text-lg font-semibold text-white mb-3">Cast</h3>
+            <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
             <div className="flex gap-4 overflow-x-auto pb-2">
-              {show.cast.slice(0, 8).map((actor) => (
-                <div key={actor.name} className="flex-shrink-0 w-20 text-center">
-                  <Avatar className="w-16 h-16 mx-auto mb-2">
-                    {actor.image ? (
-                      <AvatarImage src={actor.image} alt={actor.name} />
-                    ) : (
-                      <AvatarFallback className="bg-[var(--loom-surface-3)] text-white text-xs">
-                        {actor.name.charAt(0)}
-                      </AvatarFallback>
-                    )}
+              {show.cast.slice(0, 12).map((actor) => (
+                <div key={actor.name} className="w-20 flex-shrink-0 text-center">
+                  <Avatar className="mx-auto mb-2 h-16 w-16">
+                    {actor.image ? <AvatarImage src={actor.image} alt="" /> : <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{actor.name.charAt(0)}</AvatarFallback>}
                   </Avatar>
-                  <p className="text-xs text-white truncate">{actor.name}</p>
-                  <p className="text-xs text-[var(--loom-muted)] truncate">{actor.character}</p>
+                  <p className="truncate text-xs text-[var(--loom-text)]">{actor.name}</p>
+                  <p className="truncate text-xs text-[var(--loom-muted)]">{actor.character}</p>
                 </div>
               ))}
             </div>
@@ -716,6 +686,17 @@ function EpisodeRow({
   const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
   const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
   const progress = getProgressState(filePath, durationHint);
+  const isResumable = progress.inProgress && !progress.watched;
+  const remainingCopy = progress.duration > 0
+    ? formatShortMinutes(Math.max(0, progress.duration - progress.position))
+    : '';
+  // The badge and the resume bar are the visual channel; this is the same
+  // state spoken aloud, so the row is not silent about it to a screen reader.
+  const watchStatusCopy = progress.watched
+    ? 'Watched'
+    : isResumable
+      ? `Partly watched${remainingCopy ? `, ${remainingCopy} left` : ''}`
+      : '';
   void progressTick;
 
   return (
@@ -723,59 +704,73 @@ function EpisodeRow({
       type="button"
       className="group relative flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
       onClick={onPlay}
-      aria-label={`Play ${epLabel}: ${displayTitle}`}
+      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
     >
-      {(progress.inProgress || progress.watched) && progress.fraction > 0 && (
-        <span
-          className={`pointer-events-none absolute bottom-0 left-0 h-0.5 ${progress.watched ? 'bg-green-500' : 'bg-[var(--loom-accent)]'}`}
-          style={{ width: `${Math.min(100, progress.fraction * 100)}%` }}
-        />
-      )}
-      {/* Thumbnail */}
-      <div className="shrink-0 w-28 h-16 rounded overflow-hidden bg-[var(--loom-surface-3)] relative">
+      {/* Thumbnail. Watch state lives here rather than in a right-hand column:
+          the still is what the eye lands on when scanning a season, so the
+          badge and the resume bar read without a second stop. */}
+      <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded bg-[var(--loom-surface-3)]">
         {(thumbnailUrl || ep.still) && !imgError ? (
           <img
             src={thumbnailUrl || ep.still}
-            alt={ep.title || epLabel}
-            className="w-full h-full object-cover"
+            alt=""
+            className="h-full w-full object-cover"
             loading="lazy"
             onError={() => setImgError(true)}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <span className="text-[#555] text-xs font-mono">{epLabel}</span>
+          <div className="flex h-full w-full items-center justify-center">
+            <span className="font-mono text-xs text-[var(--loom-faint)]">{epLabel}</span>
           </div>
         )}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100">
-          <span aria-hidden="true" className="w-8 h-8 rounded-full bg-[var(--loom-accent)] flex items-center justify-center">
-            <Play className="w-4 h-4 text-[var(--loom-accent-foreground)]" />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-[opacity,background-color] group-hover:bg-black/40 group-hover:opacity-100">
+          <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--loom-accent)]">
+            <Play className="h-4 w-4 fill-current text-[var(--loom-accent-foreground)]" />
           </span>
         </div>
+        {progress.watched && (
+          <WatchedSolidIcon
+            aria-hidden="true"
+            className="absolute right-1 top-1 h-5 w-5 text-emerald-500 drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]"
+          />
+        )}
+        {/* Partly-watched episodes get a resume bar across the foot of the
+            still. Finished ones show the badge alone — a full-width bar next to
+            a check is the same fact told twice. */}
+        {!progress.watched && progress.inProgress && progress.fraction > 0 && (
+          <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[7px] bg-[var(--loom-media-track)]">
+            <span
+              className="block h-full bg-[var(--loom-accent)]"
+              style={{ width: `${Math.min(100, Math.max(4, progress.fraction * 100))}%` }}
+            />
+          </span>
+        )}
       </div>
 
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col justify-center">
-        <p className="text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="min-w-0 truncate text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
+          {isResumable && (
+            <span
+              aria-hidden="true"
+              className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--loom-accent)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent-foreground)]"
+            >
+              Resume
+            </span>
+          )}
+        </div>
         <div className="mt-1 flex items-start gap-2">
           <p className="line-clamp-2 min-w-0 flex-1 text-xs leading-relaxed text-[var(--loom-muted)]">
             {ep.summary || 'No episode description available.'}
           </p>
           {episodeRating > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#f5c451]/15 px-2 py-0.5 text-[11px] font-semibold text-[#f5c451]">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--loom-rating-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--loom-rating)]">
               <Star className="h-3 w-3 fill-current" />
               {episodeRating.toFixed(1)}
             </span>
           )}
         </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        {progress.inProgress && <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--loom-accent)]">resume</span>}
-        {progress.watched && (
-          <CheckCircle
-            aria-label="Watched"
-            className="h-4 w-4 fill-green-500 text-black"
-          />
-        )}
       </div>
     </button>
   );

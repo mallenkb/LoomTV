@@ -4,6 +4,7 @@ export type AppThemeColor = 'red' | 'blue' | 'orange' | 'yellow' | 'twitch';
 export type AppDarkTheme = 'black';
 export type AppLoaderStyle = 'play-mark' | 'logo-mark' | 'horizontal-logo';
 export type AppHomeStyle = 'default' | 'modern';
+export type AppModernHeroMode = 'continue-watching' | 'featured';
 
 export type AppThemeSettings = {
   mode: AppThemeMode;
@@ -11,6 +12,7 @@ export type AppThemeSettings = {
   darkTheme: AppDarkTheme;
   loaderStyle: AppLoaderStyle;
   homeStyle: AppHomeStyle;
+  modernHeroMode: AppModernHeroMode;
 };
 
 export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
@@ -19,6 +21,7 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   darkTheme: 'black',
   loaderStyle: 'play-mark',
   homeStyle: 'default',
+  modernHeroMode: 'continue-watching',
 };
 
 export const THEME_CACHE_KEY = 'loomtv:theme-settings';
@@ -91,6 +94,10 @@ export function normalizeHomeStyle(value?: string): AppHomeStyle {
   return value === 'modern' ? 'modern' : 'default';
 }
 
+export function normalizeModernHeroMode(value?: string): AppModernHeroMode {
+  return value === 'featured' ? 'featured' : 'continue-watching';
+}
+
 export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {}): AppThemeSettings {
   const homeStyle = normalizeHomeStyle(settings.homeStyle);
   return {
@@ -101,6 +108,7 @@ export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {})
     darkTheme: normalizeDarkTheme(settings.darkTheme),
     loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
     homeStyle,
+    modernHeroMode: normalizeModernHeroMode(settings.modernHeroMode),
   };
 }
 

@@ -677,6 +677,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           appDarkTheme: preferences.appDarkTheme ?? settings.appDarkTheme,
           appLoaderStyle: preferences.appLoaderStyle ?? settings.appLoaderStyle,
           appHomeStyle: preferences.appHomeStyle,
+          appModernHeroMode: preferences.appModernHeroMode,
           playbackSkipBackSeconds: preferences.playbackSkipBackSeconds ?? settings.playbackSkipBackSeconds,
           playbackSkipForwardSeconds: preferences.playbackSkipForwardSeconds ?? settings.playbackSkipForwardSeconds,
           autoplayNextEnabled: preferences.autoplayNextEnabled ?? true,
