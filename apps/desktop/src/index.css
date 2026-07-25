@@ -929,6 +929,8 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   left: 0;
   width: 100%;
   max-width: none;
+  translate: 0 !important;
+  transform: none !important;
 }
 
 /* The side fades ease out over eleven stops per edge instead of three. Alpha
