@@ -1,0 +1,21 @@
+{
+  "name": "@loom-media-server/lan-protocol",
+  "version": "1.0.0",
+  "description": "Shared LAN pairing and library payload contracts for the LoomTV desktop host and mobile client",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
+}

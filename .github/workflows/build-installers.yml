@@ -65,13 +65,13 @@ jobs:
         run: corepack pnpm --filter loom-media-server-desktop run audit:prod
 
       - name: Lint
-        run: corepack pnpm --filter loom-media-server-desktop lint
+        run: corepack pnpm lint
 
       - name: Typecheck
-        run: corepack pnpm --filter loom-media-server-desktop typecheck
+        run: corepack pnpm typecheck
 
       - name: Test
-        run: corepack pnpm --filter loom-media-server-desktop test
+        run: corepack pnpm test
 
       - name: Build installers
         env:

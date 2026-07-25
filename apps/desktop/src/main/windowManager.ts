@@ -28,13 +28,15 @@ export function getWindowIconPath(): string | null {
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
+// The tray asset is the bare logo glyph on transparency, sized for the menu bar.
+// `trayIcon@2x.png` sits beside it and Electron picks it up automatically on
+// Retina displays, so only the 1x path is resolved here.
 export function getTrayIconPath(): string | null {
-  const fileName = 'lmtv-icon-nobg.svg.png';
-  const candidates = [
+  const candidates = ['trayIcon.png', 'lmtv-icon-nobg.svg.png'].flatMap((fileName) => [
     path.join(process.resourcesPath, fileName),
     path.join(app.getAppPath(), 'resources', fileName),
     path.join(__dirname, '../resources', fileName),
-  ];
+  ]);
 
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
 }

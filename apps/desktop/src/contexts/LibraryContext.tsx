@@ -350,42 +350,61 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    const loadFromDevice = async () => {
+    // The cached library is the only thing the first paint waits on. Artwork
+    // migration, progress hydration and the startup scan all run afterwards so
+    // the app is usable immediately instead of sitting on a skeleton — progress
+    // is a subscribed store and the scan streams results through
+    // `library:scan-progress`, so both land in the UI on their own.
+    const loadCachedLibrary = async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       try {
-        await migrateLegacyArtwork();
-        await hydrateProgressFromDatabase();
         const cached = await desktopApi.getLibrary();
-        if (cancelled) return;
+        if (cancelled) return null;
         applyLibraryData(cached);
-
-        const settings = await desktopApi.getSettings().catch(() => null);
-        if (!cancelled && settings?.autoSyncIntervalHours) {
-          dispatch({
-            type: 'SET_AUTO_SYNC_INTERVAL_HOURS',
-            payload: settings.autoSyncIntervalHours,
-          });
-        }
-
-        if (activeProfile?.type === 'owner' && hasConfiguredFolders(cached)) {
-          isScanningRef.current = true;
-          dispatch({ type: 'SET_SCANNING', payload: true });
-          const scanned = await desktopApi.scanLibrary('quick');
-          if (cancelled) return;
-          applyLibraryData(scanned);
-        }
+        return cached;
       } catch (error) {
         console.error('Failed to load library:', error);
+        return null;
+      } finally {
+        if (!cancelled) dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    };
+
+    const catchUpInBackground = async (cached: Awaited<ReturnType<typeof desktopApi.getLibrary>>) => {
+      await migrateLegacyArtwork().catch((error) => console.error('Artwork migration failed:', error));
+      await hydrateProgressFromDatabase().catch((error) => console.error('Progress hydration failed:', error));
+      if (cancelled) return;
+
+      const settings = await desktopApi.getSettings().catch(() => null);
+      if (cancelled) return;
+      if (settings?.autoSyncIntervalHours) {
+        dispatch({
+          type: 'SET_AUTO_SYNC_INTERVAL_HOURS',
+          payload: settings.autoSyncIntervalHours,
+        });
+      }
+
+      if (activeProfile?.type !== 'owner' || !hasConfiguredFolders(cached)) return;
+      isScanningRef.current = true;
+      dispatch({ type: 'SET_SCANNING', payload: true });
+      try {
+        const scanned = await desktopApi.scanLibrary('quick');
+        if (cancelled) return;
+        applyLibraryData(scanned);
+      } catch (error) {
+        console.error('Failed to scan library:', error);
       } finally {
         if (!cancelled) {
           isScanningRef.current = false;
           dispatch({ type: 'SET_SCANNING', payload: false });
-          dispatch({ type: 'SET_LOADING', payload: false });
         }
       }
     };
 
-    void loadFromDevice();
+    void loadCachedLibrary().then((cached) => {
+      if (cancelled || !cached) return undefined;
+      return catchUpInBackground(cached);
+    });
     return () => {
       cancelled = true;
     };

@@ -22,7 +22,8 @@ test('remote theme settings only change the mobile accent palette', () => {
 test('light mode keeps black text and the yellow contrast override', () => {
   const theme = mobileThemeFromSettings({ appThemeColor: 'yellow', appDarkTheme: 'black' }, 'light');
 
-  assert.equal(theme.bg, '#f4f6f8');
+  // Mirrors the desktop light palette's --loom-bg (see apps/desktop/src/lib/theme.ts).
+  assert.equal(theme.bg, '#f5f5f5');
   assert.equal(theme.text, '#000000');
   assert.equal(theme.accentForeground, '#000000');
   assert.equal(theme.themeLabel, 'Light');

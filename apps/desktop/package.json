@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "LoomTV",
-  "version": "1.0.87",
+  "version": "1.0.88",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
   "packageManager": "pnpm@11.17.0",
@@ -41,7 +41,8 @@
     "release": "corepack pnpm run rebuild:natives && corepack pnpm run build && electron-builder --publish=always",
     "release:all-platforms": "corepack pnpm run release",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "lint": "eslint --ext .ts,.tsx .",
+    "lint": "eslint .",
+    "pretest": "node scripts/ensure-node-natives.cjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.ts"
   },
   "keywords": [],
@@ -85,6 +86,7 @@
     "vite-plus": "catalog:"
   },
   "dependencies": {
+    "@loom-media-server/lan-protocol": "workspace:*",
     "better-sqlite3": "12.11.1",
     "bonjour-service": "1.3.0",
     "clsx": "2.1.1",
@@ -128,6 +130,14 @@
       {
         "from": "resources/icon.icns",
         "to": "icon.icns"
+      },
+      {
+        "from": "resources/trayIcon.png",
+        "to": "trayIcon.png"
+      },
+      {
+        "from": "resources/trayIcon@2x.png",
+        "to": "trayIcon@2x.png"
       },
       {
         "from": "resources/fpcalc/NOTICE.md",

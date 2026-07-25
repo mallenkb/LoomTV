@@ -3,7 +3,7 @@ import type {
   LanProfileListKind,
   LanProfilePreferences,
   LanProfileSelectionRequest,
-} from '../../packages/lan-protocol/src/index.ts';
+} from '@loom-media-server/lan-protocol';
 
 export type FetchImplementation = (input: string, init?: RequestInit) => Promise<Response>;
 

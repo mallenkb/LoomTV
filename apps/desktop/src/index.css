@@ -922,16 +922,16 @@ body.platform-darwin .loom-player-top-control {
   margin: 0;
 }
 
-/* Electron's viewport includes the overlay rail while the detail page's
-   containing block does not. Reusing the framed-content width here therefore
-   constrains the backdrop on desktop even though the same layout is correct
-   in the web app. Keep only the artwork full-bleed in Electron; hero content
-   and the detail body remain aligned to the shared frame. */
+/* Match the Modern home hero's centred artwork frame in Electron as well.
+   The old desktop exception forced this image to 100% width, which made it
+   spill beyond the shared max-width canvas on ultrawide displays. */
 body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-modern .loom-detail-cover-image {
   right: 0;
   left: 0;
-  width: 100%;
-  max-width: none;
+  width: calc(100% - (var(--loom-frame-gutter) * 2));
+  max-width: var(--loom-frame-max-width);
+  margin-right: auto;
+  margin-left: auto;
 }
 
 /* The side fades ease out over eleven stops per edge instead of three. Alpha

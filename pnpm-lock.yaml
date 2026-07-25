@@ -30,6 +30,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@loom-media-server/lan-protocol':
+        specifier: workspace:*
+        version: link:../../packages/lan-protocol
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
@@ -184,6 +187,9 @@ importers:
       '@expo/vector-icons':
         specifier: ^15.1.1
         version: 15.1.1(expo-font@14.0.12(expo@54.0.35(@babel/core@7.29.7(supports-color@8.1.1))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(supports-color@8.1.1)(typescript@5.9.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)
+      '@loom-media-server/lan-protocol':
+        specifier: workspace:*
+        version: link:../../packages/lan-protocol
       expo:
         specifier: ~54.0.35
         version: 54.0.35(@babel/core@7.29.7(supports-color@8.1.1))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))(react@19.1.0)(supports-color@8.1.1)(typescript@5.9.3)
@@ -236,6 +242,12 @@ importers:
       typescript:
         specifier: ~5.9.2
         version: 5.9.3
+
+  packages/lan-protocol:
+    devDependencies:
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
 
 packages:
 

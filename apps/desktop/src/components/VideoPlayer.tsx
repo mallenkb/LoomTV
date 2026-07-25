@@ -346,21 +346,25 @@ export default function VideoPlayer({
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
   const [sharedTrackPreferences, setSharedTrackPreferences] = useState<PlaybackTrackPreferences>({});
   const sharedTrackPreferencesRef = useRef<PlaybackTrackPreferences>({});
+  const trackPreferencesLoadRef = useRef<Promise<PlaybackTrackPreferences>>(Promise.resolve({}));
   useEffect(() => {
     let cancelled = false;
     sharedTrackPreferencesRef.current = {};
     setSharedTrackPreferences({});
-    void loadSharedTrackPreferences(trackPreferenceScopeKey).then((preferences) => {
+    const loadPreferences = loadSharedTrackPreferences(trackPreferenceScopeKey).then((preferences) => {
+      const currentPreferences = sharedTrackPreferencesRef.current;
+      return {
+        ...preferences,
+        ...(currentPreferences.audio ? { audio: currentPreferences.audio } : {}),
+        ...(currentPreferences.subtitle ? { subtitle: currentPreferences.subtitle } : {}),
+      };
+    });
+    trackPreferencesLoadRef.current = loadPreferences;
+    void loadPreferences.then((mergedPreferences) => {
       if (!cancelled) {
         // A quick user selection can happen while the saved preferences are
         // still loading. Keep that newer in-session choice when the request
         // completes instead of overwriting it with the older stored value.
-        const currentPreferences = sharedTrackPreferencesRef.current;
-        const mergedPreferences = {
-          ...preferences,
-          ...(currentPreferences.audio ? { audio: currentPreferences.audio } : {}),
-          ...(currentPreferences.subtitle ? { subtitle: currentPreferences.subtitle } : {}),
-        };
         sharedTrackPreferencesRef.current = mergedPreferences;
         setSharedTrackPreferences(mergedPreferences);
       }
@@ -669,10 +673,13 @@ export default function VideoPlayer({
     refreshNativeSubtitleTrackStyles();
   }, [refreshNativeSubtitleTrackStyles, subtitleStyle]);
 
-  const applyProbeData = useCallback((data: unknown) => {
+  const applyProbeData = useCallback((
+    data: unknown,
+    preferencesOverride?: PlaybackTrackPreferences,
+  ) => {
     const nextDuration = probeDurationSeconds(data);
     const nextTracks = [...probeTracks(data), ...externalSubtitleTracks];
-    const preferences = sharedTrackPreferences;
+    const preferences = preferencesOverride ?? sharedTrackPreferencesRef.current;
     const hasSubtitlePreference = preferences.subtitle !== undefined;
     const firstVideo = firstTrackIndex(nextTracks, 'video');
     const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
@@ -694,7 +701,7 @@ export default function VideoPlayer({
     setSelectedAudioTrackIndex(firstAudio);
     setSelectedSubtitleTrackIndex(firstSubtitle);
     setSubtitlesDefaultEnabled(subtitlesEnabled);
-  }, [externalSubtitleTracks, sharedTrackPreferences, updatePlaybackSnapshot]);
+  }, [externalSubtitleTracks, updatePlaybackSnapshot]);
 
   // ─── Episode navigation ────────────────────────────────────────────────────
 
@@ -1019,6 +1026,18 @@ export default function VideoPlayer({
 
     (async () => {
       try {
+        // Track selection affects the transcoder command itself. Resolve the
+        // saved preference and this episode's actual stream indexes before
+        // opening the source, otherwise the default audio can begin playing
+        // and subtitles can be mapped against the previous episode.
+        const preferences = await trackPreferencesLoadRef.current;
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+        sharedTrackPreferencesRef.current = preferences;
+        setSharedTrackPreferences(preferences);
+        const probeResult = await desktopApi.media.probe(filePath);
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+        if (probeResult.ok) applyProbeData(probeResult.data, preferences);
+
         const stream = await desktopApi.getStreamUrl(
           filePath,
           requestedStartPosition > 10 ? { startSeconds: requestedStartPosition } : {},
@@ -1054,7 +1073,7 @@ export default function VideoPlayer({
       sourceLoadTokenRef.current += 1;
       void stopTranscodeSession();
     };
-  }, [filePath, reloadToken, startPosition, startTranscodedFallback, stopTranscodeSession, updatePlaybackSnapshot]);
+  }, [applyProbeData, filePath, reloadToken, startPosition, startTranscodedFallback, stopTranscodeSession, updatePlaybackSnapshot]);
 
   // ─── Player binding, events, and fallback ────────────────────────────────
   useEffect(() => {

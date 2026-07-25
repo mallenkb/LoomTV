@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -132,13 +133,20 @@ function cleanupStaleTranscodeProcesses(): void {
   if (killed > 0) console.log(`[transcode] stopped ${killed} stale ffmpeg process${killed === 1 ? '' : 'es'}`);
 }
 
-export function cleanupOldTranscodes(): void {
+/**
+ * Clears the stale transcode cache left behind by a previous run. A large cache
+ * can take seconds to delete, so the sweep yields between entries instead of
+ * blocking the main process while the window is trying to paint. Session
+ * directories are named with a UUID, so a playback session that starts mid-sweep
+ * cannot collide with the entries listed here.
+ */
+export async function cleanupOldTranscodes(): Promise<void> {
   const root = transcodeRoot();
   try {
     cleanupStaleTranscodeProcesses();
-    fs.mkdirSync(root, { recursive: true });
-    for (const entry of fs.readdirSync(root)) {
-      fs.rmSync(path.join(root, entry), {
+    await fsPromises.mkdir(root, { recursive: true });
+    for (const entry of await fsPromises.readdir(root)) {
+      await fsPromises.rm(path.join(root, entry), {
         recursive: true,
         force: true,
         maxRetries: 3,

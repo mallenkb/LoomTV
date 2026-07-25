@@ -10,7 +10,7 @@ import type {
   LanProfileType,
   LanStoredProgress,
   LanStreamOptions,
-} from '../../../../packages/lan-protocol/src/index.ts';
+} from '@loom-media-server/lan-protocol';
 
 export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 export type LibraryScanMode = 'quick' | 'metadata' | 'full';

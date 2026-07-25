@@ -215,6 +215,16 @@ if (!exists(fpcalcNotice)) {
   fail(`Missing fpcalc distribution notice. Checked ${fpcalcNotice}`);
 }
 
+// When these are absent the tray silently falls back to the full-colour app
+// icon, which macOS then renders as a solid rounded square because a template
+// image is drawn from the alpha channel alone.
+for (const trayAsset of ['trayIcon.png', 'trayIcon@2x.png']) {
+  const trayIconPath = path.join(resources, trayAsset);
+  if (!exists(trayIconPath)) {
+    fail(`Missing tray icon asset. Checked ${trayIconPath}`);
+  }
+}
+
 if (process.exitCode) process.exit(process.exitCode);
 
 console.log('[runtime-check] Packaged runtime dependencies are present.');

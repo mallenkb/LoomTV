@@ -59,6 +59,26 @@ export default defineConfig([
     },
   },
   {
+    basePath: 'packages/lan-protocol',
+    files: ['**/*.ts'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: { sourceType: 'module' },
+    },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
+  },
+  {
     basePath: 'apps/mobile',
     files: ['**/*.{ts,tsx}'],
     extends: [

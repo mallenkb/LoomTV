@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.88](docs/releases/v1.0.88.md): speeds up desktop startup, improves tray packaging, and strengthens shared LAN support across desktop and mobile.
 - [LoomTV 1.0.87](docs/releases/v1.0.87.md): improves next-episode playback from preview skip prompts.
 - [LoomTV 1.0.86](docs/releases/v1.0.86.md): fixes the actual cause of the desktop hero positioning bug — a minifier quirk that dropped the transform reset.
 - [LoomTV 1.0.85](docs/releases/v1.0.85.md): fixes the remaining Electron hero translation and restores full-width desktop artwork.

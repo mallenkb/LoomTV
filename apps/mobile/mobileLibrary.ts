@@ -12,12 +12,17 @@ import type {
 const TRANSCODE_EXTENSIONS = ['mkv', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', 'm2ts', '3gp', 'ts'];
 const DIRECT_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm'];
 
+// Desktop registers stream resources as a base64url SHA-256 HMAC digest (43
+// chars, see apps/desktop/src/main/resourceRegistry.ts). A stream path reaches
+// us either as a full URL carrying ?resourceId=, or as that bare opaque id.
+const RESOURCE_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
 export function filePathFromUrl(value: string): string {
   try {
     const parsed = new URL(value);
     return parsed.searchParams.get('resourceId') || '';
   } catch {
-    return /^\d{6}$/.test(value) ? value : '';
+    return RESOURCE_ID_PATTERN.test(value) ? value : '';
   }
 }
 

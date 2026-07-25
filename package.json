@@ -21,6 +21,7 @@
     "mobile:ios": "pnpm --filter @loom-media-server/mobile ios",
     "mobile:android": "pnpm --filter @loom-media-server/mobile android",
     "mobile:web": "pnpm --filter @loom-media-server/mobile web",
+    "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   }

@@ -10,7 +10,7 @@ import type {
   LanProfileSummary,
   LanStoredProgress,
   LanStreamOptions,
-} from '../../packages/lan-protocol/src';
+} from '@loom-media-server/lan-protocol';
 
 export type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
 export type SettingsSection = 'library' | 'network' | 'appearance' | 'about';

@@ -7,7 +7,7 @@ import type {
   LanProfilePreferences,
   LanProfileRestrictions,
   LanProfileType,
-} from '../../../../packages/lan-protocol/src/index.ts';
+} from '@loom-media-server/lan-protocol';
 
 export type ProfileType = LanProfileType;
 export type ProfilePreferences = LanProfilePreferences;

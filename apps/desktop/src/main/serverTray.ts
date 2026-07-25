@@ -2,6 +2,13 @@ import { Menu, nativeImage, Tray } from 'electron';
 
 type ServerTrayOptions = {
   iconPath: string;
+  /**
+   * True when `iconPath` is the dedicated glyph-on-transparency tray asset.
+   * A macOS template image is drawn from the alpha channel alone, so marking
+   * the full-colour app icon as a template renders it as a solid rounded
+   * square — the shape of its opaque background, not the logo.
+   */
+  iconIsTemplate: boolean;
   onOpen: () => void;
   onOpenWeb: () => void;
   onQuit: () => void;
@@ -19,11 +26,13 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     return null;
   }
 
-  const trayIcon = sourceIcon.resize({
-    width: process.platform === 'darwin' ? 18 : 20,
-    height: process.platform === 'darwin' ? 18 : 20,
-  });
-  if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
+  // The tray asset already ships at menu-bar size with an @2x variant, and
+  // resizing it would collapse those representations into a single blurry one.
+  // Only the oversized app-icon fallback needs scaling down.
+  const trayIcon = options.iconIsTemplate
+    ? sourceIcon
+    : sourceIcon.resize({ width: process.platform === 'darwin' ? 18 : 20, height: process.platform === 'darwin' ? 18 : 20 });
+  if (process.platform === 'darwin' && options.iconIsTemplate) trayIcon.setTemplateImage(true);
 
   serverTray = new Tray(trayIcon);
   serverTray.setToolTip('LoomTV');

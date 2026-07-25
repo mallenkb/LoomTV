@@ -1490,18 +1490,20 @@ export const mediaServerDeps = {
   writeJson,
 } satisfies MediaServerDependencies;
 
-app.whenReady().then(async () => {
-  applyAppIcon();
-  cleanupOldTranscodes();
-  prepareDesktopProfileStartup();
-  await startMediaServer(mediaServerDeps);
-  analysisCoordinator.start();
-  skipSegmentService.warmLibrary(loadLibrary());
-  syncLanAdvertisement();
-  const trayIconPath = getTrayIconPath() || getWindowIconPath();
+/**
+ * Everything the first paint does not depend on. Kicked off without awaiting so
+ * the window is already on screen while the library warms, the stale transcode
+ * cache is swept, and the LAN advertisement goes out.
+ */
+async function startBackgroundServices(): Promise<void> {
+  // The tray comes first: closing the window enters host mode rather than
+  // quitting, so until the tray exists there is no way back into the app.
+  const trayGlyphPath = getTrayIconPath();
+  const trayIconPath = trayGlyphPath || getWindowIconPath();
   if (trayIconPath) {
     createServerTray({
       iconPath: trayIconPath,
+      iconIsTemplate: Boolean(trayGlyphPath),
       onOpen: () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
         createWindow();
@@ -1532,6 +1534,18 @@ app.whenReady().then(async () => {
     },
   });
   buildUpdateMenu();
+  startUpdateAdapter();
+  syncLanAdvertisement();
+  analysisCoordinator.start();
+  // loadLibrary() reads and sanitises the whole library synchronously, so it is
+  // called here rather than being evaluated as an argument on the launch path.
+  skipSegmentService.warmLibrary(loadLibrary());
+  await cleanupOldTranscodes();
+}
+
+app.whenReady().then(async () => {
+  applyAppIcon();
+  prepareDesktopProfileStartup();
 
   // ── plexserver:// protocol handler ──────────────────────────────────────────
   // Translates plexserver://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>
@@ -1561,8 +1575,15 @@ app.whenReady().then(async () => {
   });
 
   configureRendererSecurityPolicy();
+  // Only the media server has to be listening before the window opens: the
+  // renderer builds its artwork and stream URLs from the bound port. It is just
+  // a listen() call, so everything genuinely slow is deferred below instead.
+  await startMediaServer(mediaServerDeps);
   createWindow();
-  startUpdateAdapter();
+
+  void startBackgroundServices().catch((error) => {
+    console.error('LoomTV background startup failed:', error);
+  });
 }).catch((error) => {
   console.error('Failed to start LoomTV:', error);
   app.quit();

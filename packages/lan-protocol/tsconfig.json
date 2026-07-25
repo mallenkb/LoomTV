@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext"],
+    "strict": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    // Pure type contracts with no runtime dependencies. Without this, the
+    // hoisted node_modules/@types/* at the workspace root get auto-included.
+    "types": [],
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*"]
+}

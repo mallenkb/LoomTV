@@ -18,6 +18,7 @@ test('library requests preserve bearer authorization and conditional ETag header
   assert.equal(requests[0].input, 'http://192.168.1.20:3847/api/v2/library');
   assert.deepEqual(requests[0].init.headers, {
     Authorization: 'Bearer device-token',
+    'X-Loom-Profile-Api-Version': '1',
     'If-None-Match': '"library-etag"',
   });
 });
@@ -32,7 +33,10 @@ test('pairing sends exactly the existing JSON request contract without authoriza
 
   assert.equal(requests[0].input, 'http://desktop.local:3847/api/v2/pair');
   assert.equal(requests[0].init.method, 'POST');
-  assert.deepEqual(requests[0].init.headers, { 'Content-Type': 'application/json' });
+  assert.deepEqual(requests[0].init.headers, {
+    'Content-Type': 'application/json',
+    'X-Loom-Profile-Api-Version': '1',
+  });
   assert.deepEqual(JSON.parse(requests[0].init.body), {
     code: 'pairing-secret',
     deviceId: 'mobile-device',
@@ -50,6 +54,7 @@ test('HLS preparation preserves media ID, options, and bearer headers', async ()
 
   assert.deepEqual(requests[0].init.headers, {
     Authorization: 'Bearer token',
+    'X-Loom-Profile-Api-Version': '1',
     'Content-Type': 'application/json',
   });
   assert.deepEqual(JSON.parse(requests[0].init.body), {
