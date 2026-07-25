@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.83](docs/releases/v1.0.83.md): fixes the continue-watching thumbnail overlay and macOS settings-tab interaction.
 - [LoomTV 1.0.82](docs/releases/v1.0.82.md): fixes the continue-watching thumbnail overlay so artwork stays clear.
 - [LoomTV 1.0.81](docs/releases/v1.0.81.md): improves targeted artwork repair, metadata selection, and desktop detail views.
 - [LoomTV 1.0.80](docs/releases/v1.0.80.md): improves artwork repair, playback preferences, update progress, and player styling.
