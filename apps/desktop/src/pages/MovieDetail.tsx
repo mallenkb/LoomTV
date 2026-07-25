@@ -157,7 +157,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   if (!movie) {
     return (
       <div className="loom-page h-full overflow-y-auto">
-        <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
+        <div className="loom-frame page-bottom-safe pt-6">
           <Skeleton className="h-[400px] w-full rounded-lg" />
           <div className="mt-4 space-y-2">
             <Skeleton className="h-8 w-64" />
@@ -211,7 +211,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   return (
     <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       <div className="loom-detail-cover relative h-[50vh] w-full overflow-hidden">
-        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[1440px] -translate-x-1/2">
+        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[var(--loom-frame-max-width)] -translate-x-1/2">
           <SafeArtwork
             key={heroKey}
             src={heroArtwork}
@@ -230,21 +230,21 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={fallbackThumbnails[0] || ''}
-          onFetchOfficialArtwork={() => desktopApi.refreshOfficialArtwork(movie.id)}
+          onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(movie.id, target)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(movie.id)}
           onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(movie.id, candidate)}
         />}
         <button
           type="button"
           onClick={handleBack}
-          className="loom-detail-back loom-no-drag fixed left-[max(calc(12rem+1rem),calc(12rem+((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag fixed top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ArrowLeft className="w-5 h-5" />
           Back
         </button>
 
         <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
-          <div className="loom-detail-hero-content mx-auto flex max-w-[1440px] items-end gap-6 p-8">
+          <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
           <SafeArtwork
             key={posterKey}
             src={posterArtwork}
@@ -330,7 +330,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         </div>
       </div>
 
-      <div className="loom-detail-body mx-auto max-w-[1440px]">
+      <div className="loom-detail-body loom-frame">
       <div className="page-bottom-safe-lg p-8">
         {movie.summary && !isModern && (
           <section className="loom-detail-summary mb-8">

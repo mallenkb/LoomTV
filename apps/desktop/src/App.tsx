@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { MotionConfig } from 'motion/react';
 import { LibraryProvider } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
@@ -14,6 +15,8 @@ import Settings from './pages/Settings';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
+import { ConfirmProvider } from './components/ConfirmProvider';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import DesktopOnboarding from './components/DesktopOnboarding';
@@ -50,9 +53,14 @@ interface NowPlaying {
 
 export default function App() {
   return (
-    <HashRouter>
-      <DesktopBootstrap />
-    </HashRouter>
+    // `reducedMotion="user"` makes every motion/react component in the app drop
+    // transform and layout animations when the OS asks for reduced motion,
+    // keeping only opacity. CSS transitions are handled separately in index.css.
+    <MotionConfig reducedMotion="user">
+      <HashRouter>
+        <DesktopBootstrap />
+      </HashRouter>
+    </MotionConfig>
   );
 }
 
@@ -165,13 +173,24 @@ function DesktopBootstrap() {
   }
 
   return (
-    <ProfileProvider key={mode}>
-      <ThemeProvider>
-        <ToastProvider>
-          <ProfileGateOrShell initialSetup={initialSetup} />
-        </ToastProvider>
-      </ThemeProvider>
-    </ProfileProvider>
+    <ErrorBoundary
+      title="LoomTV could not start this session"
+      description="Reloading keeps your library, profiles, and saved positions intact."
+      actionLabel="Reload LoomTV"
+      containerClassName="h-screen w-screen"
+      onReset={() => window.location.reload()}
+    >
+      {/* Above ProfileProvider so profile switching can await a confirmation. */}
+      <ConfirmProvider>
+        <ProfileProvider key={mode}>
+          <ThemeProvider>
+            <ToastProvider>
+              <ProfileGateOrShell initialSetup={initialSetup} />
+            </ToastProvider>
+          </ThemeProvider>
+        </ProfileProvider>
+      </ConfirmProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -267,35 +286,51 @@ function AppShell() {
         className="flex-1 overflow-hidden"
         style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '8rem' : '0px' } as React.CSSProperties}
       >
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/movies" element={<Movies />} />
-          <Route path="/others" element={<Others />} />
-          <Route path="/tv" element={<TVShows kind="series" />} />
-          <Route path="/anime" element={<TVShows kind="anime" />} />
-          <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
-          <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
-          <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {/* Keyed on the route so navigating with the sidebar clears a failed
+            page instead of stranding the user on the error panel. */}
+        <ErrorBoundary
+          key={location.pathname}
+          title="This page ran into a problem"
+          description="The rest of LoomTV is still running. Retry, or pick another section from the sidebar."
+        >
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/movies" element={<Movies />} />
+            <Route path="/others" element={<Others />} />
+            <Route path="/tv" element={<TVShows kind="series" />} />
+            <Route path="/anime" element={<TVShows kind="anime" />} />
+            <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
+            <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
+            <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </ErrorBoundary>
       </main>
       {nowPlaying && (
-        <VideoPlayer
-          key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
-          mediaId={nowPlaying.mediaId}
-          filePath={nowPlaying.filePath}
-          title={nowPlaying.title}
-          artwork={nowPlaying.artwork}
-          subtitles={nowPlaying.subtitles}
-          episodes={nowPlaying.episodes}
-          episodeFiles={nowPlaying.episodeFiles}
-          currentSeason={nowPlaying.currentSeason}
-          currentEpisode={nowPlaying.currentEpisode}
-          startPosition={nowPlaying.startPosition}
-          onEpisodeChange={handleEpisodeSelect}
-          onClose={handleClose}
-        />
+        <ErrorBoundary
+          title="Playback stopped unexpectedly"
+          description="Your position was saved. Closing the player returns you to the library."
+          actionLabel="Close player"
+          containerClassName="fixed inset-0 z-50"
+          onReset={handleClose}
+        >
+          <VideoPlayer
+            key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
+            mediaId={nowPlaying.mediaId}
+            filePath={nowPlaying.filePath}
+            title={nowPlaying.title}
+            artwork={nowPlaying.artwork}
+            subtitles={nowPlaying.subtitles}
+            episodes={nowPlaying.episodes}
+            episodeFiles={nowPlaying.episodeFiles}
+            currentSeason={nowPlaying.currentSeason}
+            currentEpisode={nowPlaying.currentEpisode}
+            startPosition={nowPlaying.startPosition}
+            onEpisodeChange={handleEpisodeSelect}
+            onClose={handleClose}
+          />
+        </ErrorBoundary>
       )}
       <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
     </div>

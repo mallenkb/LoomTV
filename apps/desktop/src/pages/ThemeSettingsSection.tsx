@@ -59,6 +59,44 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
             </div>
           </div>
 
+          {theme.homeStyle === 'modern' && (
+            <div>
+              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Home hero</p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={theme.modernHeroMode === 'continue-watching'}
+                onClick={() => void setTheme({
+                  modernHeroMode: theme.modernHeroMode === 'continue-watching' ? 'featured' : 'continue-watching',
+                })}
+                className="flex w-full items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] p-4 text-left outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)]"
+              >
+                <span>
+                  <span className="block text-sm font-semibold text-[var(--loom-text)]">Show last watched title</span>
+                  <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">
+                    {theme.modernHeroMode === 'continue-watching'
+                      ? 'The hero stays on your most recently watched title.'
+                      : 'The hero rotates through the featured library carousel.'}
+                  </span>
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                    theme.modernHeroMode === 'continue-watching'
+                      ? 'bg-[var(--loom-accent)]'
+                      : 'bg-[var(--loom-surface-3)]'
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                      theme.modernHeroMode === 'continue-watching' ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </span>
+              </button>
+            </div>
+          )}
+
           {canChooseAppearance && (
             <div>
               <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Appearance</p>

@@ -281,7 +281,7 @@ export default function LibrarySettingsSection({
                 if (!event.currentTarget.contains(event.relatedTarget)) setAutoSyncMenuOpen(false);
               }}
             >
-              <Clock className="pointer-events-none absolute left-3 h-4 w-4 text-[var(--loom-accent)]" />
+              <Clock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-accent)]" />
               <button
                 type="button"
                 aria-label="Automatic sync interval"

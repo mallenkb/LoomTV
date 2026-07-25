@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.75](docs/releases/v1.0.75.md): refreshes desktop discovery, pairing, profiles, artwork, and the Modern viewing experience.
 - [LoomTV 1.0.74](docs/releases/v1.0.74.md): fixes saved audio and subtitle track preferences during fast playback changes.
 - [LoomTV 1.0.73](docs/releases/v1.0.73.md): improves modern desktop panel shadows for consistent dark-mode contrast.
 - [LoomTV 1.0.72](docs/releases/v1.0.72.md): republishes the modern desktop experience with desktop-scoped dependency auditing in release CI.

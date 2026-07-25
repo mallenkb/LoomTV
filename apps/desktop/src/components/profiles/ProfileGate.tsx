@@ -64,28 +64,31 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
         .filter((button) => button.offsetParent !== null);
       if (controls.length === 0) return;
       const current = activeElement instanceof HTMLButtonElement ? activeElement : controls[0];
-      const origin = current.getBoundingClientRect();
-      const originX = origin.left + origin.width / 2;
-      const originY = origin.top + origin.height / 2;
-      const candidates = controls.filter((button) => {
-        if (button === current) return false;
+      // Read every rect exactly once up front; interleaving layout reads with
+      // the direction/scoring passes below would force repeated reflows.
+      const centers = controls.map((button) => {
         const rect = button.getBoundingClientRect();
-        const dx = rect.left + rect.width / 2 - originX;
-        const dy = rect.top + rect.height / 2 - originY;
-        return event.key === 'ArrowLeft' ? dx < -4
+        return { button, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      });
+      const origin = centers.find((entry) => entry.button === current) ?? centers[0];
+      const horizontal = event.key === 'ArrowLeft' || event.key === 'ArrowRight';
+      let next: HTMLButtonElement | null = null;
+      let bestScore = Infinity;
+      for (const entry of centers) {
+        if (entry.button === current) continue;
+        const dx = entry.x - origin.x;
+        const dy = entry.y - origin.y;
+        const inDirection = event.key === 'ArrowLeft' ? dx < -4
           : event.key === 'ArrowRight' ? dx > 4
             : event.key === 'ArrowUp' ? dy < -4
               : dy > 4;
-      });
-      const next = candidates.sort((a, b) => {
-        const score = (button: HTMLButtonElement) => {
-          const rect = button.getBoundingClientRect();
-          const dx = Math.abs(rect.left + rect.width / 2 - originX);
-          const dy = Math.abs(rect.top + rect.height / 2 - originY);
-          return event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? dx + dy * 2 : dy + dx * 2;
-        };
-        return score(a) - score(b);
-      })[0];
+        if (!inDirection) continue;
+        const score = horizontal ? Math.abs(dx) + Math.abs(dy) * 2 : Math.abs(dy) + Math.abs(dx) * 2;
+        if (score < bestScore) {
+          bestScore = score;
+          next = entry.button;
+        }
+      }
       if (next) {
         event.preventDefault();
         next.focus();
@@ -525,7 +528,6 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
   };
 
   useEffect(() => {
-    void desktopApi.getLibrary().then((library) => setFolderOptions(library.libraryFolders || []));
     if (!existing) return;
     void getRestrictions(existing.id).then((restrictions) => {
       setCountry(restrictions.country);
@@ -534,6 +536,16 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
       setAllowedFolders(restrictions.allowedFolders);
     });
   }, [existing, getRestrictions]);
+
+  // Library folders are only needed by the Kids library-access picker, so this
+  // (potentially large, network-backed in remote mode) library fetch is
+  // deferred until a profile is actually marked as a Kids profile.
+  const foldersLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!isKid || foldersLoadedRef.current) return;
+    foldersLoadedRef.current = true;
+    void desktopApi.getLibrary().then((library) => setFolderOptions(library.libraryFolders || []));
+  }, [isKid]);
 
   const handleSave = async () => {
     setBusy(true);

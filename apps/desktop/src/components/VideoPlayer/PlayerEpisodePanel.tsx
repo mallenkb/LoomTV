@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Check, Play, Star, X } from 'lucide-react';
+import { Play, Star, X } from 'lucide-react';
 import SafeArtwork from '../SafeArtwork';
+import { WatchedSolidIcon } from '../LoomIcons';
 import { desktopApi } from '@/lib/desktopApi';
 import { isWatched, progressFraction } from '@/lib/progress';
 import { ScrollArea } from '../ui/scroll-area';
@@ -169,9 +170,11 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           </span>
         )}
         {watched && !isCurrent && (
-          <span className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-full border-2 border-neutral-950 bg-emerald-500 shadow-[0_4px_14px_rgba(0,0,0,0.55)]">
-            <Check className="h-4 w-4 text-white" strokeWidth={3.2} />
-          </span>
+          <WatchedSolidIcon
+            role="img"
+            aria-label="Watched"
+            className="absolute right-1.5 top-1.5 h-6 w-6 text-emerald-500 drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]"
+          />
         )}
         {runtime && (
           <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1 py-0.5 text-[9px] font-medium leading-none text-white/90">
@@ -194,7 +197,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
             {episode.number}. {episodeTitle}
           </span>
           {episodeRating > 0 && (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[#f5c451]">
+            <span className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-[var(--loom-rating)]">
               <Star className="h-2.5 w-2.5 fill-current" />
               {episodeRating.toFixed(1)}
             </span>

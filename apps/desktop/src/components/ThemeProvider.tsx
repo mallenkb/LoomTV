@@ -36,8 +36,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
           appDarkTheme: preferences.appDarkTheme,
           appLoaderStyle: preferences.appLoaderStyle,
           appHomeStyle: preferences.appHomeStyle,
+          appModernHeroMode: preferences.appModernHeroMode,
         };
-        const hasSavedTheme = Boolean(profileTheme.appThemeMode || profileTheme.appThemeColor || profileTheme.appDarkTheme || profileTheme.appLoaderStyle || profileTheme.appHomeStyle || settings.appThemeMode || settings.appThemeColor || settings.appDarkTheme || settings.appLoaderStyle);
+        const hasSavedTheme = Boolean(profileTheme.appThemeMode || profileTheme.appThemeColor || profileTheme.appDarkTheme || profileTheme.appLoaderStyle || profileTheme.appHomeStyle || profileTheme.appModernHeroMode || settings.appThemeMode || settings.appThemeColor || settings.appDarkTheme || settings.appLoaderStyle);
         const cachedTheme = readCachedTheme();
         const loadedTheme = hasSavedTheme
           ? normalizeThemeSettings({
@@ -46,6 +47,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
               darkTheme: profileTheme.appDarkTheme ?? settings.appDarkTheme,
               loaderStyle: profileTheme.appLoaderStyle ?? settings.appLoaderStyle,
               homeStyle: profileTheme.appHomeStyle ?? cachedTheme?.homeStyle,
+              modernHeroMode: profileTheme.appModernHeroMode ?? cachedTheme?.modernHeroMode,
             })
           : cachedTheme || DEFAULT_THEME_SETTINGS;
         setThemeState(loadedTheme);
@@ -58,6 +60,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             appDarkTheme: loadedTheme.darkTheme,
             appLoaderStyle: loadedTheme.loaderStyle,
             appHomeStyle: loadedTheme.homeStyle,
+            appModernHeroMode: loadedTheme.modernHeroMode,
           }, activeProfile?.id);
         }
       })
@@ -87,6 +90,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       appDarkTheme: nextTheme.darkTheme,
       appLoaderStyle: nextTheme.loaderStyle,
       appHomeStyle: nextTheme.homeStyle,
+      appModernHeroMode: nextTheme.modernHeroMode,
     }, activeProfile?.id);
   }, [activeProfile?.id, theme]);
 

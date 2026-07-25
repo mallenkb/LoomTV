@@ -33,6 +33,8 @@ export type OfficialArtworkRefreshResult = {
   contentRatings?: Record<string, ContentRating>;
 };
 
+export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
+
 export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   id: string;
   source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
@@ -584,7 +586,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     return fetchOfficialMetadataCandidatesForItem(target);
   }
 
-  async function refreshOfficialArtwork(mediaId: string): Promise<OfficialArtworkRefreshResult> {
+  async function refreshOfficialArtwork(
+    mediaId: string,
+    requestedTarget: OfficialArtworkRefreshTarget = 'all',
+  ): Promise<OfficialArtworkRefreshResult> {
     const library = loadLibrary();
     const target = findLibraryMediaItem(library, mediaId);
 
@@ -593,31 +598,56 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
 
     const refreshed = await fetchOfficialArtworkForItem(target);
-    if (refreshed.thumbnail || refreshed.cover || refreshed.logo || refreshed.summary || refreshed.rating || refreshed.contentRatings || refreshed.episodes?.length) {
-      if (refreshed.thumbnail) target.poster = refreshed.thumbnail;
-      if (refreshed.cover) target.backdrop = refreshed.cover;
-      if (refreshed.logo) target.logo = refreshed.logo;
-      if (refreshed.summary) target.summary = refreshed.summary;
-      if (refreshed.rating) target.rating = refreshed.rating;
-      if (refreshed.contentRatings) target.contentRatings = refreshed.contentRatings;
-      mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
-      target.posterCandidates = orderedArtworkCandidates(
+    const refreshTarget = requestedTarget === 'poster' || requestedTarget === 'cover' ? requestedTarget : 'all';
+    const refreshPoster = refreshTarget === 'all' || refreshTarget === 'poster';
+    const refreshCover = refreshTarget === 'all' || refreshTarget === 'cover';
+    const refreshMetadata = refreshTarget === 'all';
+    const refreshedPoster = refreshed.thumbnail || refreshed.posterCandidates?.find(Boolean);
+    const refreshedCover = refreshed.cover || refreshed.backdropCandidates?.find(Boolean);
+    const hasRefresh = Boolean(
+      (refreshPoster && refreshedPoster)
+      || (refreshCover && refreshedCover)
+      || (refreshMetadata && (refreshed.logo || refreshed.summary || refreshed.rating || refreshed.contentRatings || refreshed.episodes?.length)),
+    );
+
+    if (hasRefresh) {
+      if (refreshPoster && refreshedPoster) target.poster = refreshedPoster;
+      if (refreshCover && refreshedCover) target.backdrop = refreshedCover;
+      if (refreshMetadata && refreshed.logo) target.logo = refreshed.logo;
+      if (refreshMetadata && refreshed.summary) target.summary = refreshed.summary;
+      if (refreshMetadata && refreshed.rating) target.rating = refreshed.rating;
+      if (refreshMetadata && refreshed.contentRatings) target.contentRatings = refreshed.contentRatings;
+      if (refreshMetadata) mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
+      if (refreshPoster) target.posterCandidates = orderedArtworkCandidates(
         ...(refreshed.posterCandidates || []),
         ...officialArtworkOnly(target.posterCandidates || []),
         target.poster,
       );
-      target.backdropCandidates = orderedArtworkCandidates(
+      if (refreshCover) target.backdropCandidates = orderedArtworkCandidates(
         ...(refreshed.backdropCandidates || []),
         ...officialArtworkOnly(target.backdropCandidates || []),
         target.backdrop,
       );
-      target.logoCandidates = orderedArtworkCandidates(
+      if (refreshMetadata) target.logoCandidates = orderedArtworkCandidates(
         ...(refreshed.logoCandidates || []),
         ...officialArtworkOnly(target.logoCandidates || []),
         target.logo,
       );
       saveLibrary(library);
       await cacheArtworkNow(library);
+    }
+
+    if (refreshTarget === 'poster') {
+      return {
+        thumbnail: refreshedPoster,
+        posterCandidates: target.posterCandidates || refreshed.posterCandidates,
+      };
+    }
+    if (refreshTarget === 'cover') {
+      return {
+        cover: refreshedCover,
+        backdropCandidates: target.backdropCandidates || refreshed.backdropCandidates,
+      };
     }
 
     return {

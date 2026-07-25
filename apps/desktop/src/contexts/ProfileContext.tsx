@@ -11,6 +11,7 @@ import {
   type ProfileTransferResult,
   type ProfileUpdateInput,
 } from '@/lib/desktopApi';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { hasActivePlayback, shutdownActivePlayback } from '@/lib/playbackLifecycle';
 import { flushProgressWrites, setProgressProfile } from '@/lib/progress';
 
@@ -66,6 +67,7 @@ const EMPTY_ACTIVE_STATE: ActiveProfileState = {
 const ProfileContext = createContext<ProfileContextValue | null>(null);
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
+  const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
   const [activeState, setActiveState] = useState<ActiveProfileState>(EMPTY_ACTIVE_STATE);
   const [preferences, setPreferences] = useState<ProfilePreferences>({});
@@ -123,12 +125,20 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     const unsubscribeActive = desktopApi.onActiveProfileChanged((state) => {
       if (mountedRef.current) setActiveState(state);
     });
+    // Remote hosts have no push channel for profile edits, so poll while the
+    // window is visible. Comparing the incoming payload against the last one we
+    // applied avoids both a redundant re-render and re-serializing the current
+    // list every tick.
+    let lastRemoteProfilesSignature = '';
     const remoteProfileRefresh = desktopApi.isRemoteLibraryMode()
       ? window.setInterval(() => {
           if (document.visibilityState !== 'visible') return;
           void desktopApi.listProfiles().then((nextProfiles) => {
             if (!mountedRef.current) return;
-            setProfiles((current) => JSON.stringify(current) === JSON.stringify(nextProfiles) ? current : nextProfiles);
+            const signature = JSON.stringify(nextProfiles);
+            if (signature === lastRemoteProfilesSignature) return;
+            lastRemoteProfilesSignature = signature;
+            setProfiles(nextProfiles);
           }).catch(() => undefined);
         }, 5_000)
       : null;
@@ -143,12 +153,16 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const prepareForSwitch = useCallback(async (profileId: string) => {
     if (activeState.profileId === profileId) return;
     if (hasActivePlayback()) {
-      const confirmed = window.confirm('Stop playback and switch profiles? Your current position will be saved.');
+      const confirmed = await confirm({
+        title: 'Switch profiles?',
+        description: 'Playback will stop. Your current position is saved first, so you can pick this title back up later.',
+        confirmLabel: 'Stop and switch',
+      });
       if (!confirmed) throw new Error('Profile switch cancelled.');
       await shutdownActivePlayback();
     }
     await flushProgressWrites();
-  }, [activeState.profileId]);
+  }, [activeState.profileId, confirm]);
 
   const selectProfile = useCallback(async (profileId: string, pin?: string) => {
     await prepareForSwitch(profileId);

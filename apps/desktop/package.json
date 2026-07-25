@@ -1,10 +1,10 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "LoomTV",
-  "version": "1.0.74",
+  "version": "1.0.75",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
-  "packageManager": "pnpm@11.13.1+sha512.b2fc7683b8a6525414e7d13e1ba28caaddde96bf66ec540bfaeb7e702b81f3e0be4d1f295edf7f9fe0396740a8dce4509c582ddf79891f4543fea32d37645f25",
+  "packageManager": "pnpm@11.17.0",
   "private": true,
   "repository": {
     "type": "git",
@@ -76,7 +76,7 @@
     "eslint-plugin-import-x": "4.17.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.7.0",
-    "pnpm": "11.13.1",
+    "pnpm": "11.17.0",
     "postcss": "8.5.14",
     "tailwindcss": "4.2.4",
     "typescript": "5.7.3",

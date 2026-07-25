@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type SkipAnalysisSettings } from '@/lib/desktopApi';
+import { useConfirm } from '@/components/ConfirmProvider';
 import { useTheme } from '@/components/ThemeProvider';
 import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
 import {
@@ -137,6 +138,7 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
 export default function Settings() {
   const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, refreshLibrary, clearAppData, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
   const { activeProfile } = useProfiles();
+  const confirm = useConfirm();
   const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
@@ -469,9 +471,12 @@ export default function Settings() {
   };
 
   const handleClearAppData = async () => {
-    const confirmed = window.confirm(
-      'Clear all LoomTV library folders, metadata, artwork, watch progress, and settings from this device?',
-    );
+    const confirmed = await confirm({
+      title: 'Clear all app data?',
+      description: 'This removes every library folder, metadata record, cached artwork, watch position, and setting from this device. Your media files are not touched. This cannot be undone.',
+      confirmLabel: 'Clear app data',
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setIsClearingData(true);
@@ -765,7 +770,7 @@ export default function Settings() {
 
   return (
     <div className={`loom-page loom-settings-page h-full overflow-y-auto ${isMobileSettingsMenuOpen ? 'loom-settings-menu-open' : 'loom-settings-detail-open'}`}>
-      <div className="page-bottom-safe mx-auto max-w-[1440px] p-6">
+      <div className="loom-frame page-bottom-safe pt-6">
         <div className="loom-settings-content mx-auto max-w-5xl pt-16">
           <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} sections={visibleSettingsSections} />
 
