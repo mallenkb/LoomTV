@@ -485,8 +485,7 @@ body {
    own hand-tuned calc(). The Modern style overrides these further down, where
    its rail overlays the canvas rather than sitting in flow. Classic keeps the
    1rem offset it always had. */
-.loom-detail-back,
-.loom-settings-tabs {
+.loom-detail-back {
   left: calc(
     var(--loom-sidebar-width)
     + max(0px, (100vw - var(--loom-sidebar-width) - var(--loom-frame-max-width)) / 2)
@@ -499,6 +498,11 @@ body {
     max(0px, (100vw - var(--loom-sidebar-width) - var(--loom-frame-max-width)) / 2)
     + 1rem
   );
+}
+
+.loom-settings-tabs-positioner {
+  right: 0;
+  left: var(--loom-sidebar-width);
 }
 
 .loom-modern-content-frame,
@@ -1040,23 +1044,28 @@ body.platform-darwin .loom-player-top-control {
   margin-right: var(--loom-detail-frame-end);
   margin-left: var(--loom-detail-frame-start);
   flex-wrap: wrap;
-  align-content: flex-end;
+  align-items: flex-end;
   justify-content: flex-start;
-  gap: 0.75rem;
+  gap: 1.5rem;
   padding: 3rem var(--loom-frame-inset) 2.5rem;
+}
+
+@media (min-width: 768px) {
+  .loom-detail-page-modern .loom-detail-hero-content {
+    flex-wrap: nowrap;
+  }
 }
 
 .loom-detail-page-modern .loom-detail-hero-info {
   order: 1;
-  flex: 0 0 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: none;
 }
 
 .loom-detail-page-modern .loom-detail-hero-info h1 {
   max-width: 46rem;
-  font-size: clamp(2.64rem, 5vw, 3.96rem);
-  line-height: 0.94;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
@@ -1066,7 +1075,7 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .loom-detail-page-modern .loom-detail-kicker {
-  display: block;
+  display: none;
   width: fit-content;
   margin-bottom: 1rem;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -1086,7 +1095,7 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .loom-detail-page-modern .loom-detail-hero-summary {
-  display: -webkit-box;
+  display: none;
   max-width: 36rem;
   margin-top: 1rem;
   overflow: hidden;
@@ -1097,12 +1106,31 @@ body.platform-darwin .loom-player-top-control {
   -webkit-line-clamp: 3;
 }
 
+/* The poster column is part of the layout again, sitting ahead of the title
+   with the same 2:3 frame the default detail hero uses. Visibility stays with
+   the markup's own `hidden md:block`, so narrow windows still drop it. */
 .loom-detail-page-modern .loom-poster-frame {
-  display: none;
+  order: 0;
 }
 
 .loom-detail-page-modern .loom-detail-hero-actions {
   order: 3;
+}
+
+.loom-detail-page-modern .loom-detail-hero-controls {
+  order: 2;
+}
+
+.loom-detail-page-modern .loom-detail-hero-play,
+.loom-detail-page-modern .loom-detail-bookmark {
+  height: 3.5rem;
+  min-height: 3.5rem;
+}
+
+.loom-detail-page-modern .loom-detail-bookmark {
+  width: 3.5rem;
+  min-width: 3.5rem;
+  border-radius: 9999px;
 }
 
 .loom-detail-page-modern .loom-detail-hero-play {
@@ -1120,6 +1148,22 @@ body.platform-darwin .loom-player-top-control {
 
 .loom-detail-page-modern .loom-detail-hero-play [class*="loom-accent-foreground-muted"] {
   color: var(--loom-accent-foreground-muted);
+}
+
+@media (min-width: 1101px) {
+  .loom-detail-page-modern .loom-detail-hero-content {
+    align-items: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-info {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-controls {
+    margin-left: auto;
+  }
 }
 
 .loom-detail-page-modern .loom-detail-back {
@@ -1193,6 +1237,24 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   border-radius: 1.25rem;
 }
 
+/* Classic detail pages used three separate horizontal insets: the fixed Back
+   control sat at 1rem, the hero used p-8, and the framed body added its own
+   padding beneath another p-8. Keep every detail surface on the same edge as
+   the top controls, matching the single-frame behavior of the Modern style. */
+@media (min-width: 641px) {
+  .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-content,
+  .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-body {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-body > .loom-detail-content,
+  .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-body > .page-bottom-safe-lg {
+    padding-right: 0;
+    padding-left: 0;
+  }
+}
+
 @media (min-width: 641px) and (max-width: 1100px) {
   .loom-detail-page-modern .loom-detail-cover {
     height: 76vh;
@@ -1201,6 +1263,14 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
   .loom-detail-page-modern .loom-detail-hero-content {
     padding-inline: 0;
+  }
+}
+
+@media (min-width: 641px) {
+  .loom-detail-page .loom-detail-cover {
+    height: 600px;
+    min-height: 600px;
+    max-height: 600px;
   }
 }
 
@@ -1304,9 +1374,24 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   padding-top: 6rem;
 }
 
+:root[data-home-style="modern"] .loom-settings-tabs-positioner {
+  left: 0;
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs-positioner > .loom-frame {
+  max-width: none;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+:root[data-home-style="modern"] .loom-settings-tabs-frame {
+  width: calc(100% - (var(--loom-frame-gutter) * 2));
+  max-width: 50rem;
+}
+
 :root[data-home-style="modern"] .loom-settings-tabs {
-  left: 50% !important;
-  transform: translateX(-50%);
+  left: auto !important;
+  transform: none;
   overflow: hidden;
   border-color: var(--loom-panel-border) !important;
   border-radius: 9999px !important;

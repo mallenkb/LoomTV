@@ -276,16 +276,23 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
         <AnimatePresence initial={false} mode="wait">
           <motion.div
             key={`hero-copy-${item.id}`}
-            className="flex w-full max-w-3xl flex-col justify-center px-[var(--loom-frame-inset)] pb-24 pt-40"
+            className="flex w-full max-w-3xl flex-col justify-center px-[var(--loom-frame-inset)] pb-24 pt-64"
             initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: -22 }}
             animate={{ opacity: 1, x: 0 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 14 }}
             transition={copyTransition}
           >
             <h1 className="font-semibold leading-[0.94] tracking-[-0.045em] drop-shadow-2xl text-[clamp(2.64rem,5vw,3.96rem)]">{item.title}</h1>
-            {metadata && <p className="mt-5 text-sm font-medium text-[var(--loom-on-media-muted)]">{metadata}</p>}
-            {item.summary && <p className="mt-4 max-w-xl text-base leading-7 text-[var(--loom-on-media-muted)] line-clamp-3">{item.summary}</p>}
-            <div className="mt-7 flex items-center gap-3">
+            <div className="mt-5 flex flex-wrap items-center gap-3 text-sm font-medium text-[var(--loom-on-media-muted)]">
+              {item.rating > 0 && (
+                <span className="loom-rating flex items-center gap-1">
+                  <Star className="h-4 w-4" fill="currentColor" />
+                  {item.rating.toFixed(1)}
+                </span>
+              )}
+              {metadata && <span>{metadata}</span>}
+            </div>
+            <div className="mt-7 flex items-center gap-[6px]">
               <Link to={mediaLink(item)} state={{ from, artwork: routeArtworkState(item, posterSources(item)) }} className="inline-flex h-14 items-center gap-2 rounded-full bg-white px-7 text-sm font-bold text-black transition-transform hover:scale-[1.02]">
                 <Play className="h-5 w-5 fill-current" /> View details
               </Link>

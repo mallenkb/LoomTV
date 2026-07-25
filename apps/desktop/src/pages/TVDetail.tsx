@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Bookmark, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
 import { useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
@@ -54,6 +54,7 @@ function formatThumbnailTime(seconds: number, duration = 0): string {
 }
 
 const CUSTOM_ARTWORK_KEY = 'loomtvCustomShowArtwork';
+type DetailTab = 'episodes' | 'details';
 
 export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const { id } = useParams<{ id: string }>();
@@ -70,6 +71,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [detailsReady, setDetailsReady] = useState(false);
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('episodes');
 
   useEffect(() => {
     const pageKey = `${kind}:${id || ''}`;
@@ -103,17 +105,25 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
   useEffect(() => {
     setDetailsReady(false);
+    setActiveDetailTab('episodes');
     const frame = window.requestAnimationFrame(() => setDetailsReady(true));
     return () => window.cancelAnimationFrame(frame);
   }, [show?.id]);
 
+  // Custom artwork is keyed by media id, so it reloads only when the title
+  // changes. Reloading it whenever an artwork field changes would blank the
+  // crop the user just applied: saving triggers refreshLibrary(), which
+  // rewrites exactly those fields, and the page would fall back to stale art
+  // until it was reopened.
+  useEffect(() => {
+    if (!show?.id) return;
+    setCustomArtwork({});
+    void loadCustomArtwork(show.id, CUSTOM_ARTWORK_KEY)
+      .then((artwork) => setCustomArtwork(artwork as CustomArtworkState));
+  }, [show?.id]);
+
   useEffect(() => {
     setFallbackThumbnails([]);
-    setCustomArtwork({});
-    if (show?.id) {
-      void loadCustomArtwork(show.id, CUSTOM_ARTWORK_KEY)
-        .then((artwork) => setCustomArtwork(artwork as CustomArtworkState));
-    }
 
     const hasStoredArtwork = Boolean(
       show?.poster
@@ -165,6 +175,19 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     }, 100 + index * 150));
     return () => timers.forEach((timer) => window.clearTimeout(timer));
   }, [show?.episodeFiles, show?.id]);
+
+  // refreshLibrary() updates the item, but the artwork snapshot captured in
+  // router state when navigating in takes precedence over it inside
+  // posterSources()/backdropSources(). Dropping that snapshot is what makes a
+  // newly applied poster or cover appear immediately instead of only after
+  // reopening the title.
+  const handleArtworkSaved = useCallback(async () => {
+    await refreshLibrary();
+    const routeState = (location.state || {}) as Record<string, unknown>;
+    if (!routeState.artwork) return;
+    const { artwork: _staleArtwork, ...rest } = routeState;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
+  }, [location.pathname, location.search, location.state, navigate, refreshLibrary]);
 
   if (!show) {
     return (
@@ -365,6 +388,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     : fallbackRoute;
   const handleBack = () => navigate(backTarget);
 
+
   return (
     <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       {/* Hero backdrop */}
@@ -383,13 +407,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
-          onSaved={refreshLibrary}
+          onSaved={handleArtworkSaved}
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={generatedArtwork[0] || ''}
           onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(show.id, target)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(show.id)}
-          onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(show.id, candidate)}
+          onApplyOfficialArtworkCandidate={(candidate, target) => desktopApi.applyOfficialMetadata(show.id, candidate, target)}
         />}
         <button
           type="button"
@@ -425,24 +449,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               {heroMetadata && <span>{heroMetadata}</span>}
             </div>
           </div>
-          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
-            <button
-              type="button"
-              aria-pressed={inMyList}
-              onClick={() => void (async () => {
-                await setListEntry(show.id, 'watchlist', !inMyList);
-                if (inMyList) await setListEntry(show.id, 'favorite', false);
-              })()}
-              className="grid h-14 w-14 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15"
-              title={inMyList ? 'Remove from My List' : 'Add to My List'}
-            >
-              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
-            </button>
-          </div>
+          <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
           {heroEpisode && (
             <Button
               onClick={handlePlayShow}
-              className="loom-detail-hero-play relative h-16 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
+              className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
             >
               {heroProgressPercent > 0 && (
                 <span
@@ -461,14 +472,61 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
+          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+            <button
+              type="button"
+              aria-pressed={inMyList}
+              onClick={() => void (async () => {
+                await setListEntry(show.id, 'watchlist', !inMyList);
+                if (inMyList) await setListEntry(show.id, 'favorite', false);
+              })()}
+              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-lg border border-white/25 bg-black/30 text-white hover:bg-white/15"
+              title={inMyList ? 'Remove from My List' : 'Add to My List'}
+            >
+              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+            </button>
+          </div>
+          </div>
           </div>
         </div>
       </div>
 
       <div className="loom-detail-body loom-frame">
       <div className="loom-detail-content page-bottom-safe-lg p-8">
-        <section className="mb-8">
-          <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Seasons &amp; Episodes</h3>
+        <div
+          className="mb-6 flex items-center gap-8 border-b border-[var(--loom-panel-border)]"
+          role="tablist"
+          aria-label="Title information"
+        >
+          {(['episodes', 'details'] as const).map((tab) => {
+            const isActive = activeDetailTab === tab;
+            const label = tab === 'episodes' ? 'Episodes' : 'Details';
+            return (
+              <button
+                key={tab}
+                id={`detail-tab-${tab}`}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                aria-controls={`detail-panel-${tab}`}
+                onClick={() => setActiveDetailTab(tab)}
+                className={`relative -mb-px border-b-2 px-0 pb-3 pt-1 text-sm font-semibold uppercase tracking-[0.16em] transition-colors ${isActive
+                  ? 'border-[var(--loom-text)] text-[var(--loom-text)]'
+                  : 'border-transparent text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeDetailTab === 'episodes' && (
+        <section
+          id="detail-panel-episodes"
+          role="tabpanel"
+          aria-labelledby="detail-tab-episodes"
+        >
           {visibleSeasons.length === 0 ? (
             <p className="text-[var(--loom-muted)]">No season information available. Try scanning the library.</p>
           ) : (
@@ -555,81 +613,42 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             </div>
           )}
         </section>
-
-        {show.summary && (
-          <section className="loom-detail-summary mb-8">
-            <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Summary</h3>
-            <ExpandableSummary summary={show.summary} />
-          </section>
         )}
 
-        {detailsReady && show.cast.length > 0 && (
-          <section>
-            <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
-            <div className="flex gap-4 overflow-x-auto pb-2">
-              {show.cast.slice(0, 12).map((actor) => (
-                <div key={actor.name} className="w-20 flex-shrink-0 text-center">
-                  <Avatar className="mx-auto mb-2 h-16 w-16">
-                    {actor.image ? <AvatarImage src={actor.image} alt="" /> : <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{actor.name.charAt(0)}</AvatarFallback>}
-                  </Avatar>
-                  <p className="truncate text-xs text-[var(--loom-text)]">{actor.name}</p>
-                  <p className="truncate text-xs text-[var(--loom-muted)]">{actor.character}</p>
+        {activeDetailTab === 'details' && (
+          <div
+            id="detail-panel-details"
+            role="tabpanel"
+            aria-labelledby="detail-tab-details"
+            className="space-y-8"
+          >
+            {show.summary && (
+              <section className="loom-detail-summary">
+                <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Summary</h3>
+                <p className="whitespace-pre-line text-[var(--loom-muted)] leading-relaxed">{show.summary}</p>
+              </section>
+            )}
+
+            {detailsReady && show.cast.length > 0 && (
+              <section>
+                <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
+                <div className="flex gap-4 overflow-x-auto pb-2">
+                  {show.cast.slice(0, 12).map((actor) => (
+                    <div key={actor.name} className="w-20 flex-shrink-0 text-center">
+                      <Avatar className="mx-auto mb-2 h-16 w-16">
+                        {actor.image ? <AvatarImage src={actor.image} alt="" /> : <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{actor.name.charAt(0)}</AvatarFallback>}
+                      </Avatar>
+                      <p className="truncate text-xs text-[var(--loom-text)]">{actor.name}</p>
+                      <p className="truncate text-xs text-[var(--loom-muted)]">{actor.character}</p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
+            )}
+          </div>
         )}
       </div>
       </div>
-    </div>
-  );
-}
-
-function ExpandableSummary({ summary }: { summary: string }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [canExpand, setCanExpand] = useState(false);
-  const summaryRef = useRef<HTMLParagraphElement | null>(null);
-  const toggleSummary = () => setIsExpanded((expanded) => !expanded);
-
-  useLayoutEffect(() => {
-    const element = summaryRef.current;
-    if (!element) return;
-    const measure = () => {
-      const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight) || 24;
-      setCanExpand(element.scrollHeight > lineHeight * 3 + 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [summary]);
-
-  return (
-    <div
-      onClick={toggleSummary}
-      className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70"
-    >
-      <div className="overflow-hidden">
-        <p
-          ref={summaryRef}
-          className={`text-[var(--loom-muted)] leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}
-        >
-          {summary}
-        </p>
-      </div>
-      {canExpand && (
-        <button
-          type="button"
-          aria-expanded={isExpanded}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSummary();
-          }}
-          className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
-        >
-          {isExpanded ? 'Show Less' : 'Show More'}
-        </button>
-      )}
     </div>
   );
 }

@@ -34,6 +34,7 @@ export type OfficialArtworkRefreshResult = {
 };
 
 export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
+export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episodes';
 
 export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   id: string;
@@ -523,7 +524,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     };
   }
 
-  async function applyOfficialMetadataCandidate(mediaId: string, candidate: OfficialMetadataCandidate): Promise<OfficialArtworkRefreshResult> {
+  async function applyOfficialMetadataCandidate(
+    mediaId: string,
+    candidate: OfficialMetadataCandidate,
+    requestedTarget: OfficialMetadataApplyTarget = 'all',
+  ): Promise<OfficialArtworkRefreshResult> {
     const library = loadLibrary();
     const target = findLibraryMediaItem(library, mediaId);
 
@@ -531,48 +536,66 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       throw new Error('Media item was not found in the library.');
     }
 
-    if (candidate.title) target.title = candidate.title;
-    if (candidate.year) target.year = candidate.year;
-    if (candidate.thumbnail) target.poster = candidate.thumbnail;
-    if (candidate.cover) target.backdrop = candidate.cover;
-    if (candidate.logo) target.logo = candidate.logo;
-    if (candidate.summary) target.summary = candidate.summary;
-    if (candidate.rating) target.rating = candidate.rating;
-    if (candidate.genres?.length) target.genres = candidate.genres;
-    if (candidate.contentRatings) target.contentRatings = candidate.contentRatings;
-    mergeEpisodeMetadataForTarget(target, candidate.episodes, candidate.source);
-    target.posterCandidates = orderedArtworkCandidates(
-      ...(candidate.posterCandidates || []),
-      candidate.thumbnail,
-      ...officialArtworkOnly(target.posterCandidates || []),
-      target.poster,
-    );
-    target.backdropCandidates = orderedArtworkCandidates(
-      ...(candidate.backdropCandidates || []),
-      candidate.cover,
-      ...officialArtworkOnly(target.backdropCandidates || []),
-      target.backdrop,
-    );
-    target.logoCandidates = orderedArtworkCandidates(
-      ...(candidate.logoCandidates || []),
-      candidate.logo,
-      ...officialArtworkOnly(target.logoCandidates || []),
-      target.logo,
-    );
+    const applyTarget = requestedTarget === 'poster'
+      || requestedTarget === 'cover'
+      || requestedTarget === 'episodes'
+      ? requestedTarget
+      : 'all';
+    const applyAll = applyTarget === 'all';
+    const applyPoster = applyAll || applyTarget === 'poster';
+    const applyCover = applyAll || applyTarget === 'cover';
+    const applyEpisodes = applyAll || applyTarget === 'episodes';
+    const selectedPoster = candidate.thumbnail || candidate.posterCandidates?.find(Boolean) || '';
+    const selectedCover = candidate.cover || candidate.backdropCandidates?.find(Boolean) || '';
+
+    if (applyAll && candidate.title) target.title = candidate.title;
+    if (applyAll && candidate.year) target.year = candidate.year;
+    if (applyPoster && selectedPoster) target.poster = selectedPoster;
+    if (applyCover && selectedCover) target.backdrop = selectedCover;
+    if (applyAll && candidate.logo) target.logo = candidate.logo;
+    if (applyAll && candidate.summary) target.summary = candidate.summary;
+    if (applyAll && candidate.rating) target.rating = candidate.rating;
+    if (applyAll && candidate.genres?.length) target.genres = candidate.genres;
+    if (applyAll && candidate.contentRatings) target.contentRatings = candidate.contentRatings;
+    if (applyEpisodes) mergeEpisodeMetadataForTarget(target, candidate.episodes, candidate.source);
+    if (applyPoster) {
+      target.posterCandidates = orderedArtworkCandidates(
+        ...(candidate.posterCandidates || []),
+        candidate.thumbnail,
+        ...officialArtworkOnly(target.posterCandidates || []),
+        target.poster,
+      );
+    }
+    if (applyCover) {
+      target.backdropCandidates = orderedArtworkCandidates(
+        ...(candidate.backdropCandidates || []),
+        candidate.cover,
+        ...officialArtworkOnly(target.backdropCandidates || []),
+        target.backdrop,
+      );
+    }
+    if (applyAll) {
+      target.logoCandidates = orderedArtworkCandidates(
+        ...(candidate.logoCandidates || []),
+        candidate.logo,
+        ...officialArtworkOnly(target.logoCandidates || []),
+        target.logo,
+      );
+    }
     saveLibrary(library);
-    await cacheArtworkNow(library);
+    if (applyPoster || applyCover || applyAll) await cacheArtworkNow(library);
 
     return {
-      thumbnail: candidate.thumbnail || target.poster || '',
-      cover: candidate.cover || target.backdrop || candidate.thumbnail || target.poster || '',
-      summary: candidate.summary || target.summary || '',
-      rating: candidate.rating || target.rating || 0,
-      contentRatings: candidate.contentRatings || target.contentRatings,
+      thumbnail: target.poster || '',
+      cover: target.backdrop || target.poster || '',
+      summary: target.summary || '',
+      rating: target.rating || 0,
+      contentRatings: target.contentRatings,
       episodes: target.type === 'movie' ? undefined : target.episodes,
       episodeSource: candidate.source,
       posterCandidates: target.posterCandidates || [],
       backdropCandidates: target.backdropCandidates || [],
-      logo: candidate.logo || target.logo || '',
+      logo: target.logo || '',
       logoCandidates: target.logoCandidates || [],
     };
   }

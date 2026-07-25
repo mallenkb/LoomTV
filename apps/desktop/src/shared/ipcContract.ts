@@ -16,6 +16,7 @@ import type {
   MetadataKeyTestResult,
   OfficialArtworkResult,
   OfficialArtworkRefreshTarget,
+  OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
   ActiveProfileState,
   PlaybackLogoResult,
@@ -45,7 +46,7 @@ import type {
 type ImportedProgress = Record<string, number | { position?: number; duration?: number; updatedAt?: number }>;
 
 export interface IpcContract {
-  'artwork:apply-official': { args: [mediaId: string, candidate: OfficialMetadataCandidate]; result: OfficialArtworkResult };
+  'artwork:apply-official': { args: [mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget]; result: OfficialArtworkResult };
   'artwork:get': { args: [mediaId: string]; result: Record<string, string> };
   'artwork:import': { args: [entries: Record<string, Record<string, string>>]; result: boolean };
   'artwork:official-candidates': { args: [mediaId: string]; result: OfficialMetadataCandidate[] };

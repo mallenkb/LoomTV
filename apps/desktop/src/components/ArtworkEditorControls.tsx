@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
 import { useToast } from '@/components/ToastProvider';
-import type { OfficialArtworkRefreshTarget, OfficialMetadataCandidate } from '@/lib/desktopApi';
+import type { OfficialArtworkRefreshTarget, OfficialMetadataApplyTarget, OfficialMetadataCandidate } from '@/lib/desktopApi';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
 export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster', string>>;
@@ -107,7 +107,7 @@ interface ArtworkEditorControlsProps {
   fallbackFrameSource?: string;
   onFetchOfficialArtwork?: (target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
   onFetchOfficialArtworkCandidates?: () => Promise<OfficialMetadataCandidate[]>;
-  onApplyOfficialArtworkCandidate?: (candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
+  onApplyOfficialArtworkCandidate?: (candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => Promise<OfficialArtworkResult>;
 }
 
 export default function ArtworkEditorControls({
@@ -129,6 +129,7 @@ export default function ArtworkEditorControls({
   const [isFetchingArtwork, setIsFetchingArtwork] = useState(false);
   const [metadataCandidates, setMetadataCandidates] = useState<OfficialMetadataCandidate[]>([]);
   const [metadataDialogOpen, setMetadataDialogOpen] = useState(false);
+  const [metadataApplyTarget, setMetadataApplyTarget] = useState<OfficialMetadataApplyTarget>('all');
   const [applyingCandidateId, setApplyingCandidateId] = useState('');
   const [metadataError, setMetadataError] = useState('');
   const [artworkSaveError, setArtworkSaveError] = useState('');
@@ -167,6 +168,7 @@ export default function ArtworkEditorControls({
     setIsSavingArtwork(false);
     setMetadataCandidates([]);
     setMetadataDialogOpen(false);
+    setMetadataApplyTarget('all');
     setApplyingCandidateId('');
     setMetadataError('');
   }, [mediaId]);
@@ -229,9 +231,11 @@ export default function ArtworkEditorControls({
     return true;
   };
 
-  const openMetadataCandidates = async () => {
+  const openMetadataCandidates = async (target: OfficialMetadataApplyTarget = 'all') => {
     if (!mediaId || isFetchingArtwork) return;
 
+    setArtworkMenuOpen(false);
+    setMetadataApplyTarget(target);
     setIsFetchingArtwork(true);
     setArtworkSaveError('');
     setMetadataError('');
@@ -250,7 +254,8 @@ export default function ArtworkEditorControls({
         return;
       }
 
-      const refreshedArtwork = onFetchOfficialArtwork ? await onFetchOfficialArtwork() : null;
+      const artworkTarget = target === 'poster' || target === 'cover' ? target : 'all';
+      const refreshedArtwork = onFetchOfficialArtwork ? await onFetchOfficialArtwork(artworkTarget) : null;
       const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
       if (onFetchOfficialArtwork && !hasFreshOfficialArtwork) {
         showToast({
@@ -261,44 +266,10 @@ export default function ArtworkEditorControls({
           tone: 'warning',
         });
       }
-      await saveOfficialArtwork(refreshedArtwork);
+      await saveOfficialArtwork(refreshedArtwork, artworkTarget);
     } catch (error) {
       setMetadataError(error instanceof Error ? error.message : 'Unable to refresh metadata.');
       setMetadataDialogOpen(true);
-    } finally {
-      setIsFetchingArtwork(false);
-    }
-  };
-
-  const fixOfficialArtwork = async (target: Exclude<OfficialArtworkRefreshTarget, 'all'>) => {
-    if (!mediaId || isFetchingArtwork || !onFetchOfficialArtwork) return;
-
-    setIsFetchingArtwork(true);
-    setArtworkSaveError('');
-    setMetadataError('');
-    try {
-      const refreshedArtwork = await onFetchOfficialArtwork(target);
-      const hasFreshOfficialArtwork = target === 'poster'
-        ? Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.posterCandidates?.find(Boolean))
-        : Boolean(refreshedArtwork?.cover || refreshedArtwork?.backdropCandidates?.find(Boolean));
-      const artworkLabel = target === 'poster' ? 'Poster' : 'Cover';
-      if (!hasFreshOfficialArtwork) {
-        showToast({
-          title: `No official ${artworkLabel.toLowerCase()} found`,
-          description: `LoomTV could not find a replacement ${artworkLabel.toLowerCase()} from the connected metadata APIs.`,
-          tone: 'warning',
-        });
-      }
-      await saveOfficialArtwork(refreshedArtwork, target);
-      if (hasFreshOfficialArtwork) {
-        showToast({
-          title: `${artworkLabel} fixed`,
-          description: `LoomTV replaced only the ${artworkLabel.toLowerCase()} using the selected metadata source.`,
-          tone: 'success',
-        });
-      }
-    } catch (error) {
-      setArtworkSaveError(error instanceof Error ? error.message : `Unable to fix the ${target}.`);
     } finally {
       setIsFetchingArtwork(false);
     }
@@ -309,12 +280,23 @@ export default function ArtworkEditorControls({
     setApplyingCandidateId(candidate.id);
     setMetadataError('');
     try {
-      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidate);
-      await saveOfficialArtwork(refreshedArtwork);
+      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidate, metadataApplyTarget);
+      if (metadataApplyTarget === 'episodes') {
+        await onSaved?.();
+      } else {
+        await saveOfficialArtwork(refreshedArtwork, metadataApplyTarget);
+      }
       setMetadataDialogOpen(false);
+      const appliedLabel = metadataApplyTarget === 'poster'
+        ? 'Poster'
+        : metadataApplyTarget === 'cover'
+          ? 'Cover'
+          : metadataApplyTarget === 'episodes'
+            ? 'Episode names'
+            : 'Metadata';
       showToast({
-        title: 'Metadata updated',
-        description: `${candidate.title} from ${candidate.source} was applied.`,
+        title: `${appliedLabel} updated`,
+        description: `${appliedLabel} from ${candidate.title} on ${candidate.source} was applied.`,
         tone: 'success',
       });
     } catch (error) {
@@ -405,6 +387,33 @@ export default function ArtworkEditorControls({
   const activeArtworkTarget = artworkPreview?.target || artworkPrepareState?.target || 'thumbnail';
   const previewConfig = ARTWORK_TARGETS[activeArtworkTarget];
   const artworkDialogOpen = Boolean(artworkPreview || artworkPrepareState || artworkSaveError);
+  const metadataDialogTitle = metadataApplyTarget === 'poster'
+    ? 'Choose Poster'
+    : metadataApplyTarget === 'cover'
+      ? 'Choose Cover'
+      : metadataApplyTarget === 'episodes'
+        ? 'Choose Episode Names'
+        : 'Choose Metadata';
+  const metadataDialogDescription = metadataApplyTarget === 'poster'
+    ? 'Choose a match to replace only the poster. The cover, title, summary, and episode names will stay unchanged.'
+    : metadataApplyTarget === 'cover'
+      ? 'Choose a match to replace only the cover. The poster, title, summary, and episode names will stay unchanged.'
+      : metadataApplyTarget === 'episodes'
+        ? 'Choose a match to replace only the episode names. Artwork and the rest of the show metadata will stay unchanged.'
+        : 'Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, genres, and episode names from that source.';
+  const isCoverTarget = metadataApplyTarget === 'cover';
+  // Choosing a cover means choosing between covers, so results that have none
+  // are dropped rather than listed with a disabled button.
+  const visibleMetadataCandidates = isCoverTarget
+    ? metadataCandidates.filter((candidate) => Boolean(candidate.cover || candidate.backdropCandidates?.[0]))
+    : metadataCandidates;
+  const metadataApplyLabel = metadataApplyTarget === 'poster'
+    ? 'Use poster'
+    : metadataApplyTarget === 'cover'
+      ? 'Use cover'
+      : metadataApplyTarget === 'episodes'
+        ? 'Use names'
+        : 'Apply';
 
   return (
     <>
@@ -417,7 +426,7 @@ export default function ArtworkEditorControls({
           variant="ghost"
           aria-label="Fix metadata match"
           title="Fix metadata match"
-          onClick={openMetadataCandidates}
+          onClick={() => void openMetadataCandidates('all')}
           disabled={isFetchingArtwork}
           className={`loom-artwork-fix-button ${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70`}
         >
@@ -454,23 +463,9 @@ export default function ArtworkEditorControls({
                 type="button"
                 role="menuitem"
                 onClick={() => {
-                  setArtworkMenuOpen(false);
-                  void fixOfficialArtwork('poster');
+                  void openMetadataCandidates('cover');
                 }}
-                disabled={!onFetchOfficialArtwork || isFetchingArtwork}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-              >
-                <Image className="h-4 w-4" />
-                Fix poster
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setArtworkMenuOpen(false);
-                  void fixOfficialArtwork('cover');
-                }}
-                disabled={!onFetchOfficialArtwork || isFetchingArtwork}
+                disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
               >
                 <PanelsTopLeft className="h-4 w-4" />
@@ -647,7 +642,7 @@ export default function ArtworkEditorControls({
       >
         <DialogContent>
           <DialogHeader className="border-b border-[var(--loom-panel-border)] px-5 py-4 pr-14">
-            <DialogTitle className="text-base text-[var(--loom-text)]">Choose Metadata</DialogTitle>
+            <DialogTitle className="text-base text-[var(--loom-text)]">{metadataDialogTitle}</DialogTitle>
             <Button
               type="button"
               variant="ghost"
@@ -662,18 +657,52 @@ export default function ArtworkEditorControls({
           </DialogHeader>
           <div className="space-y-4 p-5">
             <p className="text-sm text-[var(--loom-muted)]">
-              Select the result you want to apply. LoomTV will update the poster, cover, summary, rating, genres, and episode names from that source.
+              {metadataDialogDescription}
             </p>
-            {metadataCandidates.length === 0 ? (
+            {visibleMetadataCandidates.length === 0 ? (
               <div className="rounded-lg bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
-                No matching metadata was found from the connected metadata APIs.
+                {isCoverTarget
+                  ? 'None of the matching results provide a cover image.'
+                  : 'No matching metadata was found from the connected metadata APIs.'}
               </div>
             ) : (
               <div className="grid max-h-[62vh] gap-2 overflow-y-auto pr-1">
-                {metadataCandidates.map((candidate) => {
+                {visibleMetadataCandidates.map((candidate) => {
                   const posterImage = candidate.thumbnail || candidate.posterCandidates?.[0] || '';
-                  const coverImage = candidate.cover || candidate.backdropCandidates?.[0] || posterImage;
+                  const candidateCoverImage = candidate.cover || candidate.backdropCandidates?.[0] || '';
+                  const coverImage = candidateCoverImage || posterImage;
                   const isApplying = applyingCandidateId === candidate.id;
+                  const candidateSupportsTarget = metadataApplyTarget === 'all'
+                    || (metadataApplyTarget === 'poster' && Boolean(posterImage))
+                    || (metadataApplyTarget === 'cover' && Boolean(candidateCoverImage))
+                    || (metadataApplyTarget === 'episodes' && Boolean(candidate.episodes?.length));
+                  if (isCoverTarget) {
+                    return (
+                      <div key={candidate.id} className="grid gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
+                        <div className="aspect-video w-full overflow-hidden rounded-md bg-[var(--loom-surface)]">
+                          <img src={candidateCoverImage} alt={`${candidate.title} cover`} className="h-full w-full object-cover" />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <h3 className="truncate text-sm font-semibold text-[var(--loom-text)]">{candidate.title}</h3>
+                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
+                              <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={() => applyMetadataCandidate(candidate)}
+                            disabled={Boolean(applyingCandidateId)}
+                            className="h-8 shrink-0 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-xs text-[var(--loom-text)] shadow-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                          >
+                            {isApplying ? 'Applying...' : metadataApplyLabel}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div
                       key={candidate.id}
@@ -738,10 +767,10 @@ export default function ArtworkEditorControls({
                         <Button
                           type="button"
                           onClick={() => applyMetadataCandidate(candidate)}
-                          disabled={Boolean(applyingCandidateId)}
+                          disabled={Boolean(applyingCandidateId) || !candidateSupportsTarget}
                           className="h-8 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-xs text-[var(--loom-text)] shadow-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
                         >
-                          {isApplying ? 'Applying...' : 'Apply'}
+                          {isApplying ? 'Applying...' : candidateSupportsTarget ? metadataApplyLabel : 'Unavailable'}
                         </Button>
                       </div>
                     </div>

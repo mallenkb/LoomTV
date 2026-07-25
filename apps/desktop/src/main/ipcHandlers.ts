@@ -41,6 +41,7 @@ type NetworkSettings = {
 type OpenExternalResult = ReturnType<typeof shell.openExternal>;
 type IpcResult<C extends IpcInvokeChannel> = IpcContract[C]['result'];
 type OfficialMetadataCandidate = IpcContract['artwork:apply-official']['args'][1];
+type OfficialMetadataApplyTarget = IpcContract['artwork:apply-official']['args'][2];
 type OfficialArtworkRefreshTarget = IpcContract['artwork:refresh-official']['args'][1];
 export interface IpcHandlerDependencies<
   TLibraryData,
@@ -142,7 +143,7 @@ export interface IpcHandlerDependencies<
   customArtworkForRenderer: (mediaId: string) => IpcResult<'artwork:get'>;
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => void;
   getOfficialMetadataCandidates: (mediaId: string) => IpcResult<'artwork:official-candidates'> | Promise<IpcResult<'artwork:official-candidates'>>;
-  applyOfficialMetadataCandidate: (mediaId: string, candidate: OfficialMetadataCandidate) => IpcResult<'artwork:apply-official'> | Promise<IpcResult<'artwork:apply-official'>>;
+  applyOfficialMetadataCandidate: (mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => IpcResult<'artwork:apply-official'> | Promise<IpcResult<'artwork:apply-official'>>;
   refreshOfficialArtwork: (mediaId: string, target?: OfficialArtworkRefreshTarget) => IpcResult<'artwork:refresh-official'> | Promise<IpcResult<'artwork:refresh-official'>>;
   getPlaybackLogo: (mediaId: string) => IpcResult<'artwork:playback-logo'> | Promise<IpcResult<'artwork:playback-logo'>>;
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => void;
@@ -494,9 +495,9 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.getOfficialMetadataCandidates(mediaId);
   });
-  handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate) => {
+  handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => {
     deps.authorizeSettingsWrite();
-    return deps.applyOfficialMetadataCandidate(mediaId, candidate);
+    return deps.applyOfficialMetadataCandidate(mediaId, candidate, target);
   });
   handle('artwork:refresh-official', (_event, mediaId: string, target?: OfficialArtworkRefreshTarget) => {
     deps.authorizeSettingsWrite();
