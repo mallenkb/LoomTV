@@ -527,10 +527,19 @@ export default function VideoPlayer({
 
   const nextEpisodeFile = useMemo(() => {
     if (!hasEpisodes) return null;
+    const nextByEpisodeNumber = playableEpisodeFiles.find((item) =>
+      item.season > currentSeason
+      || (item.season === currentSeason && item.episode > currentEpisode),
+    );
+    if (nextByEpisodeNumber) return nextByEpisodeNumber;
+
+    // Some playback sources use a normalized/stream URL rather than the local
+    // file path stored in episodeFiles. Keep path matching as a fallback, but
+    // do not make next-episode navigation depend on that exact string match.
     const currentIndex = playableEpisodeFiles.findIndex((item) => item.filePath === filePath);
     if (currentIndex < 0) return null;
     return playableEpisodeFiles.slice(currentIndex + 1).find((item) => item.filePath !== filePath) || null;
-  }, [filePath, hasEpisodes, playableEpisodeFiles]);
+  }, [currentEpisode, currentSeason, filePath, hasEpisodes, playableEpisodeFiles]);
 
   const stopTranscodeSession = useCallback(async () => {
     const sessionIds = new Set([
@@ -743,9 +752,9 @@ export default function VideoPlayer({
     setTick((n) => n + 1);
   }, [duration, filePath, updatePlaybackSnapshot]);
 
-  const playNextEpisodeNow = useCallback(() => {
+  const playNextEpisodeNow = useCallback((forceComplete = false) => {
     if (!nextEpisodeFile) return;
-    if (duration > 0 && position / duration >= WATCHED_THRESHOLD) {
+    if (forceComplete || (duration > 0 && position / duration >= WATCHED_THRESHOLD)) {
       markCurrentEpisodeComplete();
     }
     goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
@@ -2471,6 +2480,10 @@ export default function VideoPlayer({
             type="button"
             onClick={(event) => {
               event.stopPropagation();
+              if (activeMediaSegment.type === 'preview' && nextEpisodeFile) {
+                playNextEpisodeNow(true);
+                return;
+              }
               const targetSeconds = activeMediaSegment.endMs === null
                 ? Math.max(activeMediaSegment.startMs / 1000, activeMediaSegment.mediaDurationMs / 1000 - END_COMPLETION_TOLERANCE_SECONDS)
                 : activeMediaSegment.endMs / 1000;
