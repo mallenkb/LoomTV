@@ -224,7 +224,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   return (
     <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       <div className="loom-detail-cover relative h-[50vh] w-full overflow-hidden">
-        <div className="loom-detail-cover-image absolute inset-y-0 left-1/2 w-full max-w-[var(--loom-frame-max-width)] -translate-x-1/2">
+        <div className="loom-detail-cover-image absolute inset-y-0 left-0 right-0 mx-auto w-full max-w-[var(--loom-frame-max-width)]">
           <SafeArtwork
             key={heroKey}
             src={heroArtwork}
