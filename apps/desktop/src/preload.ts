@@ -10,6 +10,7 @@ import type {
   MediaSegmentRequest,
   MediaSegmentType,
   OfficialMetadataCandidate,
+  OfficialMetadataApplyTarget,
   OfficialArtworkRefreshTarget,
   PlaybackTrackPreferences,
   ProfileListKind,
@@ -172,7 +173,8 @@ const desktopApi = {
   getCustomArtwork: (mediaId: string) => ipcRenderer.invoke('artwork:get', mediaId),
   saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => ipcRenderer.invoke('artwork:save', mediaId, target, dataUrl),
   getOfficialMetadataCandidates: (mediaId: string) => ipcRenderer.invoke('artwork:official-candidates', mediaId),
-  applyOfficialMetadata: (mediaId: string, candidate: OfficialMetadataCandidate) => ipcRenderer.invoke('artwork:apply-official', mediaId, candidate),
+  applyOfficialMetadata: (mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) =>
+    ipcRenderer.invoke('artwork:apply-official', mediaId, candidate, target),
   refreshOfficialArtwork: (mediaId: string, target?: OfficialArtworkRefreshTarget) => ipcRenderer.invoke('artwork:refresh-official', mediaId, target),
   getPlaybackLogo: (mediaId: string) => ipcRenderer.invoke('artwork:playback-logo', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),

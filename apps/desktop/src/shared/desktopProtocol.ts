@@ -430,6 +430,7 @@ export interface OfficialArtworkResult {
 }
 
 export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
+export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episodes';
 
 export type OfficialMetadataCandidate = OfficialArtworkResult & {
   id: string;

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Bookmark, Play, Star, Clock, ArrowLeft } from 'lucide-react';
 import { useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
@@ -154,6 +154,19 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     };
   }, [movie?.backdrop, movie?.backdropCandidates?.length, movie?.filePath, movie?.localMetadata?.durationSeconds, movie?.poster, movie?.posterCandidates?.length]);
 
+  // refreshLibrary() updates the item, but the artwork snapshot captured in
+  // router state when navigating in takes precedence over it inside
+  // posterSources()/backdropSources(). Dropping that snapshot is what makes a
+  // newly applied poster or cover appear immediately instead of only after
+  // reopening the title.
+  const handleArtworkSaved = useCallback(async () => {
+    await refreshLibrary();
+    const routeState = (location.state || {}) as Record<string, unknown>;
+    if (!routeState.artwork) return;
+    const { artwork: _staleArtwork, ...rest } = routeState;
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: rest });
+  }, [location.pathname, location.search, location.state, navigate, refreshLibrary]);
+
   if (!movie) {
     return (
       <div className="loom-page h-full overflow-y-auto">
@@ -195,7 +208,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const progressCopy = progress.duration > 0
     ? `${formatShortMinutes(progress.position)} of ${formatShortMinutes(progress.duration)}`
     : null;
-  const isModern = theme.homeStyle === 'modern';
   void progressTick;
 
   const handlePlay = async () => {
@@ -207,6 +219,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/') ? sourceRoute : '/movies';
   const handleBack = () => navigate(backTarget);
+
 
   return (
     <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
@@ -226,13 +239,13 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
-          onSaved={refreshLibrary}
+          onSaved={handleArtworkSaved}
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={fallbackThumbnails[0] || ''}
           onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(movie.id, target)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(movie.id)}
-          onApplyOfficialArtworkCandidate={(candidate) => desktopApi.applyOfficialMetadata(movie.id, candidate)}
+          onApplyOfficialArtworkCandidate={(candidate, target) => desktopApi.applyOfficialMetadata(movie.id, candidate, target)}
         />}
         <button
           type="button"
@@ -292,23 +305,10 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             )}
             {movie.summary && <p className="loom-detail-hero-summary">{movie.summary}</p>}
           </div>
-          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
-            <button
-              type="button"
-              aria-pressed={inMyList}
-              onClick={() => void (async () => {
-                await setListEntry(movie.id, 'watchlist', !inMyList);
-                if (inMyList) await setListEntry(movie.id, 'favorite', false);
-              })()}
-              className="grid h-12 w-12 place-items-center rounded-full border border-white/25 bg-black/30 text-white hover:bg-white/15"
-              title={inMyList ? 'Remove from My List' : 'Add to My List'}
-            >
-              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
-            </button>
-          </div>
+          <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
           <Button
             onClick={handlePlay}
-            className="loom-detail-hero-play relative h-16 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
+            className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
           >
             {hasResumeProgress && progressPercent > 0 && (
               <span
@@ -326,16 +326,31 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </span>
             </span>
           </Button>
+          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+            <button
+              type="button"
+              aria-pressed={inMyList}
+              onClick={() => void (async () => {
+                await setListEntry(movie.id, 'watchlist', !inMyList);
+                if (inMyList) await setListEntry(movie.id, 'favorite', false);
+              })()}
+              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-lg border border-white/25 bg-black/30 text-white hover:bg-white/15"
+              title={inMyList ? 'Remove from My List' : 'Add to My List'}
+            >
+              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+            </button>
+          </div>
+          </div>
           </div>
         </div>
       </div>
 
       <div className="loom-detail-body loom-frame">
       <div className="page-bottom-safe-lg p-8">
-        {movie.summary && !isModern && (
+        {movie.summary && (
           <section className="loom-detail-summary mb-8">
             <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
-            <ExpandableSummary summary={movie.summary} />
+            <p className="whitespace-pre-line text-[var(--loom-muted)] leading-relaxed">{movie.summary}</p>
           </section>
         )}
 
@@ -374,13 +389,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           </section>
         )}
 
-        {movie.summary && isModern && (
-          <section className="loom-detail-summary mb-8">
-            <h3 className="text-lg font-semibold text-white mb-3">Summary</h3>
-            <ExpandableSummary summary={movie.summary} />
-          </section>
-        )}
-
         {detailsReady && movie.cast.length > 0 && (
           <section>
             <h3 className="text-lg font-semibold text-white mb-3">Cast</h3>
@@ -405,55 +413,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         )}
       </div>
       </div>
-    </div>
-  );
-}
-
-function ExpandableSummary({ summary }: { summary: string }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [canExpand, setCanExpand] = useState(false);
-  const summaryRef = useRef<HTMLParagraphElement | null>(null);
-  const toggleSummary = () => setIsExpanded((expanded) => !expanded);
-
-  useLayoutEffect(() => {
-    const element = summaryRef.current;
-    if (!element) return;
-    const measure = () => {
-      const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight) || 24;
-      setCanExpand(element.scrollHeight > lineHeight * 3 + 1);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [summary]);
-
-  return (
-    <div
-      onClick={toggleSummary}
-      className="group cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70"
-    >
-      <div className="overflow-hidden">
-        <p
-          ref={summaryRef}
-          className={`text-[var(--loom-muted)] leading-relaxed ${isExpanded ? '' : 'line-clamp-3'}`}
-        >
-          {summary}
-        </p>
-      </div>
-      {canExpand && (
-        <button
-          type="button"
-          aria-expanded={isExpanded}
-          onClick={(event) => {
-            event.stopPropagation();
-            toggleSummary();
-          }}
-          className="mt-2 text-sm font-medium text-[var(--loom-accent)] transition-colors group-hover:text-[var(--loom-accent-hover)] hover:text-[var(--loom-accent-hover)]"
-        >
-          {isExpanded ? 'Show Less' : 'Show More'}
-        </button>
-      )}
     </div>
   );
 }

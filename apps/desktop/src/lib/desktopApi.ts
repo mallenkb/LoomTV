@@ -29,6 +29,7 @@ import type {
   MetadataKeyTestResult,
   OfficialArtworkResult,
   OfficialArtworkRefreshTarget,
+  OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
   PlaybackLogoResult,
   PlaybackMode,
@@ -77,6 +78,7 @@ export type {
   MetadataKeyTestResult,
   OfficialArtworkResult,
   OfficialArtworkRefreshTarget,
+  OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
   PlaybackLogoResult,
   PlaybackTrackPreferences,
@@ -180,7 +182,7 @@ export type DesktopBridgeApi = {
       getCustomArtwork?: (mediaId: string) => Promise<Record<string, string>>;
       saveCustomArtwork?: (mediaId: string, target: string, dataUrl: string) => Promise<Record<string, string>>;
       getOfficialMetadataCandidates?: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
-      applyOfficialMetadata?: (mediaId: string, candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
+      applyOfficialMetadata?: (mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => Promise<OfficialArtworkResult>;
       refreshOfficialArtwork?: (mediaId: string, target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
       getPlaybackLogo?: (mediaId: string) => Promise<PlaybackLogoResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
@@ -1172,11 +1174,11 @@ export const desktopApi = {
     });
   },
 
-  async applyOfficialMetadata(mediaId: string, candidate: OfficialMetadataCandidate): Promise<OfficialArtworkResult> {
-    if (window.desktopApi?.applyOfficialMetadata) return window.desktopApi.applyOfficialMetadata(mediaId, candidate);
+  async applyOfficialMetadata(mediaId: string, candidate: OfficialMetadataCandidate, target: OfficialMetadataApplyTarget = 'all'): Promise<OfficialArtworkResult> {
+    if (window.desktopApi?.applyOfficialMetadata) return window.desktopApi.applyOfficialMetadata(mediaId, candidate, target);
     return fetchJson<OfficialArtworkResult>('/api/artwork/apply-official', {
       method: 'POST',
-      body: JSON.stringify({ mediaId, candidate }),
+      body: JSON.stringify({ mediaId, candidate, target }),
     });
   },
 
