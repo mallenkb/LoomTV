@@ -287,7 +287,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     sourceArtwork?.backdropCandidates,
     sourceArtwork?.backdrop,
   );
-  const isFolderPathOpenable = Boolean(show.filePath && !/^[a-z]+:\/\//i.test(show.filePath));
   const playerArtwork = {
     logo: logoSources(show, sourceArtwork)[0] || '',
     logoCandidates: logoSources(show, sourceArtwork),
@@ -384,11 +383,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
-          onOpenFolderPath={
-            isFolderPathOpenable
-              ? () => desktopApi.openFolderPath(show.filePath)
-              : undefined
-          }
           onSaved={refreshLibrary}
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
