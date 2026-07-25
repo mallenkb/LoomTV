@@ -9,7 +9,7 @@ type SettingsTabsProps = {
 export default function SettingsTabs({ activeSection, onSelect, sections = SETTINGS_SECTIONS }: SettingsTabsProps) {
   return (
     <div
-      className="loom-settings-tabs loom-no-drag fixed left-[max(calc(12rem+1.5rem),calc(12rem+((100vw-12rem-64rem)/2)))] top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
+      className="loom-settings-tabs loom-no-drag fixed top-6 z-40 inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
       style={{ borderRadius: 12 }}
     >
       {sections.map((section) => {

@@ -4,7 +4,7 @@ import { getMediaServerPort } from './mediaServer';
 import { isLoopbackHost } from './networkInfo';
 import { durableArtworkSource, isInlineArtworkSource } from './artworkSources';
 import { customArtworkReference, parseCustomArtworkReference } from './artworkCache';
-import { getCustomArtwork } from './database';
+import { getCustomArtwork, getCustomArtworkData } from './database';
 import { isImageFileName } from './fileClassification';
 import type { MediaItem } from './metadata/types';
 import type { LocalResourceKind } from './resourceRegistry';
@@ -93,9 +93,16 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       // candidate become the primary image immediately.
       const customDataUrl = getCustomArtwork(customArtwork.mediaId)[customArtwork.target] || '';
       if (!/^data:image\/[^;,]+;base64,[A-Za-z0-9+/=\r\n]+$/i.test(customDataUrl)) return '';
+      // The reference itself is content-independent, so without a version the
+      // delivery URL is byte-identical before and after an edit. React then
+      // reconciles the <img> with an unchanged src and never re-requests, which
+      // is why a new poster or cover only appeared on the page that saved it.
+      // Stamping the row's updated_at busts that everywhere at once.
+      const version = getCustomArtworkData(customArtwork.mediaId, customArtwork.target)?.updatedAt;
       const params = addLocalAccessToken(new URLSearchParams({
         mediaId: customArtwork.mediaId,
         target: customArtwork.target,
+        ...(version ? { v: String(version) } : {}),
       }), localAccessToken);
       return `http://127.0.0.1:${getMediaServerPort()}/api/custom-artwork?${params.toString()}`;
     }

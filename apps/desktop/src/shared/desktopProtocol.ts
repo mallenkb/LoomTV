@@ -429,6 +429,8 @@ export interface OfficialArtworkResult {
   logo?: string;
 }
 
+export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
+
 export type OfficialMetadataCandidate = OfficialArtworkResult & {
   id: string;
   source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';

@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Film, FolderPlus, Tv } from 'lucide-react';
+import { Film, FolderPlus, Tv } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import MediaRail from '@/components/MediaRail';
 import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { useProgressSnapshot } from '@/lib/progress';
@@ -17,18 +18,12 @@ export default function Home() {
   const { theme } = useTheme();
   return theme.homeStyle === 'modern' ? <ModernHome /> : <DefaultHome />;
 }
-
 function DefaultHome() {
   const { state, addLibraryFolder } = useLibrary();
   const { lists } = useProfiles();
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
-  const continueWatchingRailRef = useRef<HTMLDivElement>(null);
-  const myListRailRef = useRef<HTMLDivElement>(null);
-  const animeRailRef = useRef<HTMLDivElement>(null);
-  const tvRailRef = useRef<HTMLDivElement>(null);
-  const moviesRailRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
@@ -81,83 +76,43 @@ function DefaultHome() {
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
   const showMoviesSection = isLoading || filteredMovies.length > 0;
-  const scrollRail = (railRef: RefObject<HTMLDivElement | null>, direction: -1 | 1) => {
-    const rail = railRef.current;
-    if (!rail) return;
-    rail.scrollLeft += direction * Math.max(240, rail.clientWidth * 0.8);
-  };
 
   return (
     <div className="loom-page h-full overflow-y-auto">
       <LibrarySearch value={query} onChange={setQuery} placeholder="Search all libraries" />
-      <div className="page-bottom-safe mx-auto max-w-[1440px] p-6 pt-24">
+      <div className="loom-frame page-bottom-safe pt-24">
         {!normalizedQuery && !isLoading && !hasLibraryItems && (
           <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
         )}
 
         {!normalizedQuery && myListItems.length > 0 && (
-          <ProfileListRail title="My List" items={myListItems} railRef={myListRailRef} from={currentRoute} onScroll={scrollRail} />
+          <MediaRail title="My List" className="mb-8">
+            <PosterCards items={myListItems.slice(0, 20)} from={currentRoute} />
+          </MediaRail>
         )}
 
         {!normalizedQuery && continueWatching.length > 0 && (
-          <section className="mb-8">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="loom-section-title text-2xl font-bold text-white">Continue Watching</h3>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => scrollRail(continueWatchingRailRef, -1)}
-                  aria-label="Scroll Continue Watching left"
-                  className="h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => scrollRail(continueWatchingRailRef, 1)}
-                  aria-label="Scroll Continue Watching right"
-                  className="h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </Button>
-              </div>
-            </div>
-            <MediaRail items={continueWatching} isLoading={isLoading} from={currentRoute} scrollRef={continueWatchingRailRef} />
-          </section>
+          <MediaRail title="Continue Watching" className="mb-8">
+            <PosterCards items={continueWatching} from={currentRoute} isLoading={isLoading} />
+          </MediaRail>
         )}
 
         {showAnimeSection && (
-          <section className="mb-8">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="loom-section-title text-2xl font-bold text-white">Anime</h3>
-              <RailHeaderControls label="Anime" seeAllTo="/anime" railRef={animeRailRef} onScroll={scrollRail} />
-            </div>
-            <MediaRail items={filteredAnime.slice(0, 10)} isLoading={isLoading} from={currentRoute} scrollRef={animeRailRef} />
-          </section>
+          <MediaRail title="Anime" className="mb-8" action={<SeeAllLink to="/anime" />}>
+            <PosterCards items={filteredAnime.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
+          </MediaRail>
         )}
 
         {showTVSection && (
-          <section className="mb-8">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="loom-section-title text-2xl font-bold text-white">TV Shows</h3>
-              <RailHeaderControls label="TV Shows" seeAllTo="/tv" railRef={tvRailRef} onScroll={scrollRail} />
-            </div>
-            <MediaRail items={filteredTVShows.slice(0, 10)} isLoading={isLoading} from={currentRoute} scrollRef={tvRailRef} />
-          </section>
+          <MediaRail title="TV Shows" className="mb-8" action={<SeeAllLink to="/tv" />}>
+            <PosterCards items={filteredTVShows.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
+          </MediaRail>
         )}
 
         {showMoviesSection && (
-          <section className="mb-8">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="loom-section-title text-2xl font-bold text-white">Movies</h3>
-              <RailHeaderControls label="Movies" seeAllTo="/movies" railRef={moviesRailRef} onScroll={scrollRail} />
-            </div>
-            <MediaRail items={filteredMovies.slice(0, 10)} isLoading={isLoading} from={currentRoute} scrollRef={moviesRailRef} />
-          </section>
+          <MediaRail title="Movies" className="mb-8" action={<SeeAllLink to="/movies" />}>
+            <PosterCards items={filteredMovies.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
+          </MediaRail>
         )}
         {normalizedQuery && !isLoading && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
           <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
@@ -167,77 +122,35 @@ function DefaultHome() {
   );
 }
 
-function ProfileListRail({
-  title,
-  items,
-  railRef,
-  from,
-  onScroll,
-}: {
-  title: string;
-  items: MediaItem[];
-  railRef: RefObject<HTMLDivElement | null>;
-  from: string;
-  onScroll: (railRef: RefObject<HTMLDivElement | null>, direction: -1 | 1) => void;
-}) {
+function SeeAllLink({ to }: { to: string }) {
   return (
-    <section className="mb-8">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="loom-section-title text-2xl font-bold text-white">{title}</h3>
-        <div className="flex items-center gap-1">
-          <Button type="button" variant="ghost" size="icon" onClick={() => onScroll(railRef, -1)} aria-label={`Scroll ${title} left`} className={RAIL_ARROW_CLASS}><ChevronLeft className="h-5 w-5" /></Button>
-          <Button type="button" variant="ghost" size="icon" onClick={() => onScroll(railRef, 1)} aria-label={`Scroll ${title} right`} className={RAIL_ARROW_CLASS}><ChevronRight className="h-5 w-5" /></Button>
-        </div>
-      </div>
-      <MediaRail items={items.slice(0, 20)} isLoading={false} from={from} scrollRef={railRef} />
-    </section>
+    <Link to={to}>
+      <Button
+        variant="ghost"
+        className="h-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-4 text-[var(--loom-muted)] shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+      >
+        See All
+      </Button>
+    </Link>
   );
 }
 
-const RAIL_ARROW_CLASS = 'h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-white shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]';
-
-function RailHeaderControls({
-  label,
-  seeAllTo,
-  railRef,
-  onScroll,
-}: {
-  label: string;
-  seeAllTo: string;
-  railRef: RefObject<HTMLDivElement | null>;
-  onScroll: (railRef: RefObject<HTMLDivElement | null>, direction: -1 | 1) => void;
-}) {
+function PosterCards({ items, from, isLoading = false }: { items: MediaItem[]; from: string; isLoading?: boolean }) {
+  if (isLoading) {
+    return (
+      <>
+        {Array.from({ length: 8 }).map((_, index) => (
+          <Skeleton key={index} className="h-[300px] w-[200px] flex-none rounded-lg" />
+        ))}
+      </>
+    );
+  }
   return (
-    <div className="flex items-center gap-1">
-      <Link to={seeAllTo}>
-        <Button
-          variant="ghost"
-          className="h-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-4 text-[var(--loom-muted)] shadow-lg backdrop-blur-md hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-        >
-          See All
-        </Button>
-      </Link>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={() => onScroll(railRef, -1)}
-        aria-label={`Scroll ${label} left`}
-        className={RAIL_ARROW_CLASS}
-      >
-        <ChevronLeft className="h-5 w-5" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={() => onScroll(railRef, 1)}
-        aria-label={`Scroll ${label} right`}
-        className={RAIL_ARROW_CLASS}
-      >
-        <ChevronRight className="h-5 w-5" />
-      </Button>
-    </div>
+    <>
+      {items.map((item) => (
+        <MediaPosterCard key={item.id} item={item} from={from} variant="home" metaLine={mediaMetaLine(item)} />
+      ))}
+    </>
   );
 }
 
@@ -273,90 +186,6 @@ function HomeEmptyState({
           </Button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MediaRail({
-  items,
-  isLoading,
-  from,
-  scrollRef,
-}: {
-  items: MediaItem[];
-  isLoading: boolean;
-  from: string;
-  scrollRef?: RefObject<HTMLDivElement | null>;
-}) {
-  const internalRailRef = useRef<HTMLDivElement>(null);
-  const railRef = scrollRef || internalRailRef;
-  const dragRef = useRef({ active: false, dragged: false, startScrollLeft: 0, startX: 0, startY: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-
-  const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
-    const rail = railRef.current;
-    if (!rail || rail.scrollWidth <= rail.clientWidth) return;
-    dragRef.current = {
-      active: true,
-      dragged: false,
-      startScrollLeft: rail.scrollLeft,
-      startX: event.clientX,
-      startY: event.clientY,
-    };
-  };
-
-  const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    const rail = railRef.current;
-    if (!drag.active || !rail) return;
-    const distance = event.clientX - drag.startX;
-    const verticalDistance = event.clientY - drag.startY;
-    if (!drag.dragged && (Math.abs(distance) < 12 || Math.abs(distance) <= Math.abs(verticalDistance) * 1.2)) return;
-    if (!drag.dragged) {
-      drag.dragged = true;
-      setIsDragging(true);
-      rail.setPointerCapture(event.pointerId);
-    }
-    rail.scrollLeft = drag.startScrollLeft - distance;
-    event.preventDefault();
-  };
-
-  const stopDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current.active) return;
-    dragRef.current.active = false;
-    setIsDragging(false);
-    if (railRef.current?.hasPointerCapture(event.pointerId)) {
-      railRef.current.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  return (
-    <div
-      ref={railRef}
-      className={`flex select-none gap-6 overflow-x-auto overflow-y-hidden scroll-smooth pb-3 pr-6 [scrollbar-gutter:stable] [touch-action:pan-y] ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-      onClickCapture={(event) => {
-        if (!dragRef.current.dragged) return;
-        // Pointer capture ends before the browser dispatches the synthetic
-        // click. Suppress only that click so a real tap still follows the
-        // card link, while a drag never opens the card underneath the pointer.
-        event.preventDefault();
-        event.stopPropagation();
-        dragRef.current.dragged = false;
-      }}
-      onDragStart={(event) => event.preventDefault()}
-      onPointerCancel={stopDrag}
-      onPointerDown={startDrag}
-      onPointerMove={moveDrag}
-      onPointerUp={stopDrag}
-    >
-      {isLoading
-        ? Array.from({ length: 8 }).map((_, i) => (
-            <Skeleton key={i} className="h-[300px] w-[200px] flex-none rounded-lg" />
-          ))
-        : items.map((item) => (
-            <MediaPosterCard key={item.id} item={item} from={from} variant="home" metaLine={mediaMetaLine(item)} />
-          ))}
     </div>
   );
 }

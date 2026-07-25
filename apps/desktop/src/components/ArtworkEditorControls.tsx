@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
 import { useToast } from '@/components/ToastProvider';
-import type { OfficialMetadataCandidate } from '@/lib/desktopApi';
+import type { OfficialArtworkRefreshTarget, OfficialMetadataCandidate } from '@/lib/desktopApi';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
 export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster', string>>;
@@ -106,7 +106,7 @@ interface ArtworkEditorControlsProps {
   officialThumbnailSources?: string[];
   officialCoverSources?: string[];
   fallbackFrameSource?: string;
-  onFetchOfficialArtwork?: () => Promise<OfficialArtworkResult>;
+  onFetchOfficialArtwork?: (target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
   onFetchOfficialArtworkCandidates?: () => Promise<OfficialMetadataCandidate[]>;
   onApplyOfficialArtworkCandidate?: (candidate: OfficialMetadataCandidate) => Promise<OfficialArtworkResult>;
 }
@@ -194,19 +194,24 @@ export default function ArtworkEditorControls({
     setArtworkMenuOpen(false);
   };
 
-  const saveOfficialArtwork = async (refreshedArtwork: OfficialArtworkResult | null) => {
-    const thumbnailSource =
+  const saveOfficialArtwork = async (
+    refreshedArtwork: OfficialArtworkResult | null,
+    target: OfficialArtworkRefreshTarget = 'all',
+  ) => {
+    const thumbnailSource = target !== 'cover' ? (
       refreshedArtwork?.thumbnail
       || refreshedArtwork?.posterCandidates?.find(Boolean)
       || officialThumbnailSources.find(Boolean)
-      || fallbackFrameSource;
-    const coverSource =
+      || fallbackFrameSource
+    ) : '';
+    const coverSource = target !== 'poster' ? (
       refreshedArtwork?.cover
       || refreshedArtwork?.backdropCandidates?.find(Boolean)
       || refreshedArtwork?.thumbnail
       || officialCoverSources.find(Boolean)
       || officialThumbnailSources.find(Boolean)
-      || fallbackFrameSource;
+      || fallbackFrameSource
+    ) : '';
 
     if (!thumbnailSource && !coverSource) {
       setArtworkMenuOpen(false);
@@ -267,28 +272,39 @@ export default function ArtworkEditorControls({
     }
   };
 
-  const refreshOfficialMetadata = async () => {
+  const refreshOfficialMetadata = async (target: OfficialArtworkRefreshTarget = 'all') => {
     if (!mediaId || isFetchingArtwork || !onFetchOfficialArtwork) return;
 
     setIsFetchingArtwork(true);
     setArtworkSaveError('');
     setMetadataError('');
     try {
-      const refreshedArtwork = await onFetchOfficialArtwork();
-      const hasFreshOfficialArtwork = Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
+      const refreshedArtwork = await onFetchOfficialArtwork(target);
+      const hasFreshOfficialArtwork = target === 'poster'
+        ? Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.posterCandidates?.find(Boolean))
+        : target === 'cover'
+          ? Boolean(refreshedArtwork?.cover || refreshedArtwork?.backdropCandidates?.find(Boolean))
+          : Boolean(refreshedArtwork?.thumbnail || refreshedArtwork?.cover);
+      const refreshLabel = target === 'poster' ? 'Poster' : target === 'cover' ? 'Cover photo' : 'Metadata';
       if (!hasFreshOfficialArtwork) {
         showToast({
-          title: 'Metadata refreshed',
-          description: 'No new official artwork was found, but available metadata was checked.',
+          title: `${refreshLabel} checked`,
+          description: target === 'all'
+            ? 'No new official artwork was found, but available metadata was checked.'
+            : `No new official ${target === 'poster' ? 'poster' : 'cover photo'} was found.`,
           tone: 'warning',
         });
       }
-      await saveOfficialArtwork(refreshedArtwork);
-      showToast({
-        title: 'Metadata refreshed',
-        description: 'This item was refreshed from the connected metadata APIs.',
-        tone: 'success',
-      });
+      await saveOfficialArtwork(refreshedArtwork, target);
+      if (hasFreshOfficialArtwork) {
+        showToast({
+          title: `${refreshLabel} refreshed`,
+          description: target === 'all'
+            ? 'This item was refreshed from the connected metadata APIs.'
+            : `Only the ${target === 'poster' ? 'poster' : 'cover photo'} was refreshed.`,
+          tone: 'success',
+        });
+      }
     } catch (error) {
       setArtworkSaveError(error instanceof Error ? error.message : 'Unable to refresh metadata.');
     } finally {
@@ -416,7 +432,7 @@ export default function ArtworkEditorControls({
     <>
       <div
         ref={artworkMenuRef}
-        className="loom-artwork-editor-controls loom-no-drag fixed right-[max(1rem,calc(((100vw-12rem-1440px)/2)+1rem))] top-4 z-50 flex items-center gap-2"
+        className="loom-artwork-editor-controls loom-no-drag fixed top-4 z-50 flex items-center gap-2"
       >
         <Button
           type="button"
@@ -468,6 +484,32 @@ export default function ArtworkEditorControls({
               >
                 <RefreshCw className="h-4 w-4" />
                 Refresh metadata
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setArtworkMenuOpen(false);
+                  void refreshOfficialMetadata('poster');
+                }}
+                disabled={!onFetchOfficialArtwork || isFetchingArtwork}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh poster only
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setArtworkMenuOpen(false);
+                  void refreshOfficialMetadata('cover');
+                }}
+                disabled={!onFetchOfficialArtwork || isFetchingArtwork}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh cover only
               </button>
               {onOpenFolderPath && (
                 <button
@@ -700,7 +742,7 @@ export default function ArtworkEditorControls({
                                 {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
                                 <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
                                 {candidate.rating ? (
-                                  <span className="loom-rating inline-flex items-center gap-1 rounded-full bg-[#f5c451]/15 px-2 py-0.5 text-[11px] font-medium">
+                                  <span className="loom-rating inline-flex items-center gap-1 rounded-full bg-[var(--loom-rating-surface)] px-2 py-0.5 text-[11px] font-medium">
                                     <Star className="h-3 w-3 fill-current" />
                                     {candidate.rating.toFixed(1)}
                                   </span>
