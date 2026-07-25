@@ -44,6 +44,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.79](docs/releases/v1.0.79.md): publishes the complete desktop installer set with the corrected updater packaging.
 - [LoomTV 1.0.78](docs/releases/v1.0.78.md): fixes macOS packaging with the patched Electron updater runtime.
 - [LoomTV 1.0.77](docs/releases/v1.0.77.md): republishes the desktop release with corrected dependency auditing and updater runtime security.
 - [LoomTV 1.0.76](docs/releases/v1.0.76.md): republishes the desktop discovery and Modern experience with corrected pnpm release CI.
