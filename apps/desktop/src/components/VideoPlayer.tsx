@@ -2479,7 +2479,7 @@ export default function VideoPlayer({
               }
               seekTo(targetSeconds);
             }}
-            className="absolute bottom-32 right-8 z-40 rounded-md border border-white/25 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-md transition hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            className="loom-player-skip-prompt absolute bottom-32 right-8 z-40 rounded-md border border-white/25 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-md transition hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
           >
             Skip {skipPromptLabel(activeMediaSegment.type, hasEpisodes)}
           </button>

@@ -911,12 +911,24 @@ body.platform-darwin .loom-player-top-control {
 }
 
 .loom-detail-page-modern .loom-detail-cover-image {
-  left: var(--loom-detail-frame-start);
   right: auto;
+  left: var(--loom-detail-frame-start);
   width: var(--loom-detail-frame-width);
   margin: 0;
   translate: none;
   transform: none;
+}
+
+/* Electron's viewport includes the overlay rail while the detail page's
+   containing block does not. Reusing the framed-content width here therefore
+   constrains the backdrop on desktop even though the same layout is correct
+   in the web app. Keep only the artwork full-bleed in Electron; hero content
+   and the detail body remain aligned to the shared frame. */
+body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-modern .loom-detail-cover-image {
+  right: 0;
+  left: 0;
+  width: 100%;
+  max-width: none;
 }
 
 /* The side fades ease out over eleven stops per edge instead of three. Alpha
@@ -1181,6 +1193,10 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
 .loom-detail-page-modern .loom-artwork-fix-button,
 .loom-detail-page-modern .loom-artwork-more-button {
+  border-radius: 9999px;
+}
+
+.loom-player-modern .loom-player-skip-prompt {
   border-radius: 9999px;
 }
 
