@@ -15,6 +15,7 @@ export type OpenSubtitlesScanOptions = {
   languages?: string;
   autoDownload?: boolean;
   userAgent?: string;
+  isEnabled?: () => boolean;
 };
 
 type OpenSubtitlesSession = {
@@ -47,7 +48,7 @@ type OpenSubtitlesDownloadResponse = {
   file_name?: string;
 };
 
-type OpenSubtitlesDownloadStatus = 'disabled' | 'skipped' | 'downloaded' | 'not-found' | 'error';
+type OpenSubtitlesDownloadStatus = 'disabled' | 'quota-limited' | 'skipped' | 'downloaded' | 'not-found' | 'error';
 
 export type OpenSubtitlesDownloadResult = {
   status: OpenSubtitlesDownloadStatus;
@@ -58,6 +59,23 @@ export type OpenSubtitlesDownloadResult = {
 };
 
 let sessionCache: { key: string; session: OpenSubtitlesSession } | null = null;
+let quotaUnavailableUntilMs = 0;
+
+function quotaResetTime(message: string): number | null {
+  const timestamp = message.match(/\bts=(\d{9,})\b/i)?.[1];
+  if (timestamp) return Number(timestamp) * 1000;
+  const dateText = message.match(/quota will be renewed.*?\(([^)]+)\)/i)?.[1];
+  const parsed = dateText ? Date.parse(dateText) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isQuotaError(message: string): boolean {
+  return /downloaded your allowed|download quota|quota will be renewed/i.test(message);
+}
+
+function openSubtitlesQuotaAvailable(): boolean {
+  return Date.now() >= quotaUnavailableUntilMs;
+}
 
 function normalizeOpenSubtitlesLanguages(value?: string): string[] {
   const source = value && value.trim() ? value : 'en';
@@ -89,6 +107,7 @@ function normalizeOpenSubtitlesLanguages(value?: string): string[] {
 export function openSubtitlesIsConfigured(options?: OpenSubtitlesScanOptions): boolean {
   return Boolean(
     options?.autoDownload
+    && options.isEnabled?.() !== false
     && options.apiKey?.trim()
     && options.username?.trim()
     && options.password?.trim()
@@ -285,11 +304,18 @@ export async function downloadMissingOpenSubtitlesForVideo(
   if (!openSubtitlesIsConfigured(options)) {
     return [{ status: 'disabled', videoPath }];
   }
+  if (!openSubtitlesQuotaAvailable()) {
+    return [{ status: 'quota-limited', videoPath }];
+  }
 
   const languages = normalizeOpenSubtitlesLanguages(options?.languages);
   const results: OpenSubtitlesDownloadResult[] = [];
 
   for (const language of languages) {
+    if (!openSubtitlesIsConfigured(options)) {
+      results.push({ status: 'disabled', videoPath, language });
+      break;
+    }
     if (sidecarSubtitleExists(videoPath, language)) {
       results.push({ status: 'skipped', videoPath, language });
       continue;
@@ -311,11 +337,21 @@ export async function downloadMissingOpenSubtitlesForVideo(
       await saveSubtitleFromLink(link, targetPath);
       results.push({ status: 'downloaded', videoPath, subtitlePath: targetPath, language });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isQuotaError(message)) {
+        quotaUnavailableUntilMs = quotaResetTime(message) || (Date.now() + 24 * 60 * 60 * 1000);
+        console.warn(
+          '[OpenSubtitles] Daily download quota reached; pausing downloads until',
+          new Date(quotaUnavailableUntilMs).toISOString(),
+        );
+        results.push({ status: 'quota-limited', videoPath, language, message });
+        break;
+      }
       results.push({
         status: 'error',
         videoPath,
         language,
-        message: error instanceof Error ? error.message : String(error),
+        message,
       });
     }
   }
@@ -355,6 +391,7 @@ export async function downloadMissingOpenSubtitlesForFolder(
   results.length = 0;
 
   for (const videoPath of videos) {
+    if (!openSubtitlesIsConfigured(options) || !openSubtitlesQuotaAvailable()) break;
     results.push(...await downloadMissingOpenSubtitlesForVideo(videoPath, options));
   }
 

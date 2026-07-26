@@ -345,3 +345,4 @@ SOFTWARE.
 ```
 
 Bundled third-party tools and dependencies remain under their own licenses. In particular, bundled FFmpeg/FFprobe builds are covered by their applicable FFmpeg and GPL notices as described above.
+- [LoomTV 1.0.90](docs/releases/v1.0.90.md): improves playback stream stability and OpenSubtitles controls.

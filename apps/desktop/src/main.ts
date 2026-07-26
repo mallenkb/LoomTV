@@ -559,6 +559,7 @@ async function scanLibrary(
       languages: settings.openSubtitlesLanguages,
       autoDownload: settings.openSubtitlesAutoDownload,
       userAgent: `LoomTV v${app.getVersion() || 'dev'}`,
+      isEnabled: () => Boolean(loadSettings().openSubtitlesAutoDownload),
     },
   };
   const subtitleProfile = openSubtitlesCacheKey(ctx.openSubtitles);

@@ -361,6 +361,13 @@ export default function Settings() {
     setTimeout(() => setSavedKey(false), 2000);
   };
 
+  const handleOpenSubtitlesEnabledChange = useCallback((enabled: boolean) => {
+    setOpenSubtitlesAutoDownload(enabled);
+    void persistSettings({ openSubtitlesAutoDownload: enabled }).then((saved) => {
+      if (!saved) setOpenSubtitlesAutoDownload(!enabled);
+    });
+  }, [persistSettings]);
+
   const cleanedMetadataKeys = () => Object.fromEntries(
     Object.entries(metadataKeys)
       .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
@@ -902,7 +909,7 @@ export default function Settings() {
             setOpenSubtitlesUsername={setOpenSubtitlesUsername}
             setOpenSubtitlesPassword={setOpenSubtitlesPassword}
             setOpenSubtitlesLanguages={setOpenSubtitlesLanguages}
-            setOpenSubtitlesAutoDownload={setOpenSubtitlesAutoDownload}
+            setOpenSubtitlesAutoDownload={handleOpenSubtitlesEnabledChange}
             setNewProviderName={setNewProviderName}
             setNewProviderKey={setNewProviderKey}
             addMetadataKey={handleAddMetadataKey}

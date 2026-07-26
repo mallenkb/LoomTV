@@ -30,7 +30,15 @@ export function buildBrowserStreamArgs({
   const args: string[] = ['-nostdin'];
 
   if (typeof options.startSeconds === 'number' && options.startSeconds > 0) {
-    args.push('-ss', String(Math.floor(options.startSeconds)));
+    // Stream-copy seeks can land video and audio on different packet
+    // boundaries. Preserve their shared source timestamps, then shift that
+    // shared timeline to zero for Chromium instead of normalizing each stream
+    // independently.
+    args.push(
+      '-ss', String(Math.floor(options.startSeconds)),
+      '-copyts',
+      '-start_at_zero',
+    );
   }
   args.push('-i', filePath);
 

@@ -258,10 +258,10 @@ export default function MetadataSettingsSection({
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
             <Download className="w-4 h-4 text-[var(--loom-accent)]" />
-            Subtitle Downloads
+            OpenSubtitles
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            OpenSubtitles can save missing sidecar subtitles next to your media during library scans.
+            Optional online subtitle downloads. Embedded tracks and subtitle files already beside your videos do not use OpenSubtitles.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -273,9 +273,9 @@ export default function MetadataSettingsSection({
               className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
             />
             <span>
-              <span className="block text-sm font-semibold text-white">Download missing subtitles while scanning</span>
+              <span className="block text-sm font-semibold text-white">Enable OpenSubtitles downloads</span>
               <span className="mt-1 block text-xs text-[var(--loom-muted)]">
-                Requires an OpenSubtitles API key, username, and password. Downloads count against your OpenSubtitles account limits.
+                Off by default. Disabling this stops further OpenSubtitles requests, including the remaining items in an active library scan.
               </span>
             </span>
           </label>

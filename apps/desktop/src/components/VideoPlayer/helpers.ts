@@ -131,11 +131,30 @@ function normalizeTrackField(value?: string): string {
   return (value || '').trim().toLowerCase();
 }
 
+const SIGNS_ONLY_SUBTITLE_PATTERNS = [
+  /\bsigns?\b/,
+  /\bsongs?\b/,
+  /\bs&s\b/,
+  /\bkaraoke\b/,
+  /\btypesett?ing\b/,
+];
+
+export function isSignsOnlySubtitleTrack(track: MediaTrack): boolean {
+  const title = normalizeTrackField(track.title);
+  if (!title) return false;
+  if (/\bfull\b|\bdialogu?e\b|\bcomplete\b/.test(title)) return false;
+  return SIGNS_ONLY_SUBTITLE_PATTERNS.some((pattern) => pattern.test(title));
+}
+
 export function firstSubtitleTrackIndex(tracks: MediaTrack[]): number {
   const candidates = tracks.filter((track) => track.type === 'subtitle');
   if (candidates.length === 0) return -1;
 
-  const fullSubtitle = candidates.find((track) => track.default && !track.forced)
+  const dialogue = candidates.filter((track) => !track.forced && !isSignsOnlySubtitleTrack(track));
+  const fullSubtitle = dialogue.find((track) => track.default)
+    || dialogue.find((track) => normalizeTrackField(track.language).startsWith('en'))
+    || dialogue[0]
+    || candidates.find((track) => track.default && !track.forced)
     || candidates.find((track) => normalizeTrackField(track.language).startsWith('en') && !track.forced)
     || candidates.find((track) => !track.forced);
 
