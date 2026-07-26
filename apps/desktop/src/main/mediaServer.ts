@@ -77,6 +77,8 @@ export interface MediaServerDependencies {
   getLanServerBase: () => string | null;
   getLibraryRevision: () => number;
   getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) => Promise<MediaSegmentResponse>;
+  getWebRendererDevServerUrl: () => string | null;
+  getWebRendererRoot: () => string | null;
   handleLanPairRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
   handleLanRefreshRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
   isExternalArtworkUrl: (source: string) => boolean;
@@ -105,6 +107,7 @@ let mediaServerPort = 3847;
 const mediaServerSockets = new Set<NodeSocket>();
 const LAN_IMAGE_CACHE_QUERY_PARAM = 'loomtvImageCache';
 const LAN_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+const THUMBNAIL_SCALE_FILTER = "scale='min(640,iw)':-2";
 const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
@@ -176,6 +179,108 @@ ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:
   res.end(body);
 }
 
+const WEB_ASSET_CONTENT_TYPES: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml; charset=utf-8',
+  '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+function serveWebRendererAsset(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  reqUrl: URL,
+  rendererRoot: string,
+): void {
+  if (reqUrl.pathname === '/app') {
+    res.writeHead(302, { Location: '/app/', 'Cache-Control': 'no-store' });
+    res.end();
+    return;
+  }
+
+  let relativePath: string;
+  try {
+    relativePath = decodeURIComponent(reqUrl.pathname.slice('/app/'.length)) || 'index.html';
+  } catch {
+    res.writeHead(400);
+    res.end();
+    return;
+  }
+
+  const root = path.resolve(rendererRoot);
+  const candidate = path.resolve(root, relativePath);
+  const relativeCandidate = path.relative(root, candidate);
+  if (relativeCandidate.startsWith('..') || path.isAbsolute(relativeCandidate)) {
+    res.writeHead(403);
+    res.end();
+    return;
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(candidate);
+  } catch {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+  if (!stat.isFile()) {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+
+  const extension = path.extname(candidate).toLowerCase();
+  res.writeHead(200, {
+    'Content-Type': WEB_ASSET_CONTENT_TYPES[extension] || 'application/octet-stream',
+    'Content-Length': stat.size,
+    'Cache-Control': extension === '.html' ? 'no-store' : 'public, max-age=31536000, immutable',
+  });
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  fs.createReadStream(candidate).pipe(res);
+}
+
+function proxyWebRendererAsset(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  reqUrl: URL,
+  devServerUrl: string,
+): void {
+  const target = new URL(devServerUrl);
+  target.pathname = reqUrl.pathname.startsWith('/app/')
+    ? `/${reqUrl.pathname.slice('/app/'.length)}`
+    : reqUrl.pathname;
+  target.search = reqUrl.search;
+  const proxyRequest = http.request(target, {
+    method: req.method,
+    headers: {
+      ...req.headers,
+      host: target.host,
+    },
+  }, (proxyResponse) => {
+    res.writeHead(proxyResponse.statusCode || 502, proxyResponse.headers);
+    proxyResponse.pipe(res);
+  });
+  proxyRequest.on('error', () => {
+    if (!res.headersSent) res.writeHead(502);
+    res.end('The LoomTV web development server is unavailable.');
+  });
+  proxyRequest.end();
+}
+
 function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse, deps: MediaServerDependencies): boolean {
   const { allowedCorsOrigin, ALLOWED_CORS_ORIGINS, LOCAL_ACCESS_HEADER } = deps;
   const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
@@ -200,6 +305,8 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     getLanServerBase,
     getLibraryRevision,
     getMediaSegments,
+    getWebRendererDevServerUrl,
+    getWebRendererRoot,
     handleLanPairRequest,
     handleLanRefreshRequest,
     isExternalArtworkUrl,
@@ -349,6 +456,40 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           : '';
       }
       const startSec = parseFloat(reqUrl.searchParams.get('t') || '0');
+
+      const webDevServerUrl = getWebRendererDevServerUrl();
+      const isWebAppRoute = reqUrl.pathname === '/app' || reqUrl.pathname.startsWith('/app/');
+      const isViteAssetRoute = Boolean(webDevServerUrl) && (
+        reqUrl.pathname.startsWith('/@')
+        || reqUrl.pathname.startsWith('/src/')
+        || reqUrl.pathname.startsWith('/node_modules/')
+        || reqUrl.pathname === '/package.json'
+      );
+      if ((req.method === 'GET' || req.method === 'HEAD') && (isWebAppRoute || isViteAssetRoute)) {
+        if (!loopbackRequest) {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        if (webDevServerUrl) {
+          proxyWebRendererAsset(req, res, reqUrl, webDevServerUrl);
+          return;
+        }
+        const rendererRoot = getWebRendererRoot();
+        if (!rendererRoot) {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        serveWebRendererAsset(req, res, reqUrl, rendererRoot);
+        return;
+      }
+
+      if (req.method === 'GET' && reqUrl.pathname === '/' && loopbackRequest) {
+        res.writeHead(302, { Location: '/app/', 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
 
       if (req.method === 'GET' && (reqUrl.pathname === '/' || reqUrl.pathname === '/pair')) {
         const settings = loadSettings();
@@ -1048,19 +1189,20 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         if (!requireProfileMediaAccess(filePath)) return;
         res.writeHead(200, {
           'Content-Type': 'image/jpeg',
-          ...(isCacheableLanImageRequest ? { 'Cache-Control': LAN_IMAGE_CACHE_CONTROL } : {}),
+          'Cache-Control': isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : 'private, max-age=3600',
         });
         const args = embedded
           ? [
               '-i', filePath,
               ...(streamIndex !== undefined ? ['-map', `0:${streamIndex}`] : ['-map', '0:v:0']),
+              '-vf', THUMBNAIL_SCALE_FILTER,
               '-frames:v', '1',
               '-f', 'image2',
               '-vcodec', 'mjpeg',
               '-q:v', '2',
               'pipe:1',
             ]
-          : ['-ss', time, '-i', filePath, '-vframes', '1', '-f', 'image2', '-vcodec', 'mjpeg', '-q:v', '2', 'pipe:1'];
+          : ['-ss', time, '-i', filePath, '-vf', THUMBNAIL_SCALE_FILTER, '-vframes', '1', '-f', 'image2', '-vcodec', 'mjpeg', '-q:v', '2', 'pipe:1'];
         // Thumbnail requests arrive in bursts (one per episode row); the tool
         // queue keeps them to a couple of concurrent ffmpeg processes.
         acquireFfmpegToolSlot('thumbnail')

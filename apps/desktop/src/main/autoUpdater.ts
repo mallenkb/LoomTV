@@ -47,11 +47,13 @@ export interface UpdateState {
 interface AutoUpdaterDeps {
   getMainWindow: () => BrowserWindow | null;
   closeMediaServer: () => Promise<void>;
+  stopNativePlayback: () => void;
 }
 
 let deps: AutoUpdaterDeps = {
   getMainWindow: () => null,
   closeMediaServer: async () => { /* replaced by initAutoUpdater */ },
+  stopNativePlayback: () => { /* replaced by initAutoUpdater */ },
 };
 
 export function initAutoUpdater(injected: AutoUpdaterDeps): void {
@@ -596,6 +598,7 @@ export async function installDownloadedUpdate() {
   // downloaded installer waiting for LoomTV to exit.
   try {
     stopAllTranscodes();
+    deps.stopNativePlayback();
     destroyLanDiscovery();
     await deps.closeMediaServer();
     stopUpdateCheckTimer();

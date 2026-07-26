@@ -258,10 +258,10 @@ export default function MetadataSettingsSection({
         <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
             <Download className="w-4 h-4 text-[var(--loom-accent)]" />
-            OpenSubtitles
+            OpenSubtitles (optional)
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Optional online subtitle downloads. Embedded tracks and subtitle files already beside your videos do not use OpenSubtitles.
+            Online subtitles are kept separate from tracks embedded in the video and subtitle files you add yourself.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -273,9 +273,9 @@ export default function MetadataSettingsSection({
               className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
             />
             <span>
-              <span className="block text-sm font-semibold text-white">Enable OpenSubtitles downloads</span>
+              <span className="block text-sm font-semibold text-white">Enable OpenSubtitles</span>
               <span className="mt-1 block text-xs text-[var(--loom-muted)]">
-                Off by default. Disabling this stops further OpenSubtitles requests, including the remaining items in an active library scan.
+                Off by default. When enabled, LoomTV may download missing subtitles during scans and shows them in a separate OpenSubtitles group in the player. Embedded and added subtitle files remain available either way.
               </span>
             </span>
           </label>

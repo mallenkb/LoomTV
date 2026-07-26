@@ -52,6 +52,11 @@ const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
   seasonOverrides: {},
 };
 
+type SavedPlaybackSettings = {
+  skipBackSeconds: number;
+  skipForwardSeconds: number;
+};
+
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
   return [
     {
@@ -163,6 +168,7 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
+  const [savedPlaybackSettings, setSavedPlaybackSettings] = useState<SavedPlaybackSettings | null>(null);
   const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
@@ -247,8 +253,14 @@ export default function Settings() {
       setCustomFolderNames(s.customFolderNames || {});
       const skipBack = profilePreferences.playbackSkipBackSeconds ?? s.playbackSkipBackSeconds;
       const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
-      setPlaybackSkipBackSeconds(Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10);
-      setPlaybackSkipForwardSeconds(Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15);
+      const loadedSkipBack = Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10;
+      const loadedSkipForward = Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15;
+      setPlaybackSkipBackSeconds(loadedSkipBack);
+      setPlaybackSkipForwardSeconds(loadedSkipForward);
+      setSavedPlaybackSettings({
+        skipBackSeconds: loadedSkipBack,
+        skipForwardSeconds: loadedSkipForward,
+      });
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
     if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
@@ -406,11 +418,23 @@ export default function Settings() {
       return false;
     }
     if (activeProfile?.type === 'owner') {
-      if (!await persistSettings({ localSkipAnalysisEnabled: skipAnalysis.enabled, skipAnalysis })) return false;
+      if (!await persistSettings({
+        localSkipAnalysisEnabled: skipAnalysis.enabled,
+        skipAnalysis,
+      })) return false;
       setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
     }
+    setSavedPlaybackSettings({
+      skipBackSeconds: normalizedBack,
+      skipForwardSeconds: normalizedForward,
+    });
     return true;
   };
+
+  const playbackSettingsDirty = savedPlaybackSettings !== null && (
+    playbackSkipBackSeconds !== savedPlaybackSettings.skipBackSeconds
+    || playbackSkipForwardSeconds !== savedPlaybackSettings.skipForwardSeconds
+  );
 
   const handleAnalysisAction = async (
     action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
@@ -818,6 +842,7 @@ export default function Settings() {
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   onSkipBackChange={setPlaybackSkipBackSeconds}
                   onSkipForwardChange={setPlaybackSkipForwardSeconds}
+                  playbackSettingsDirty={playbackSettingsDirty}
                   skipAnalysis={skipAnalysis}
                   onSkipAnalysisChange={setSkipAnalysis}
                   analysisStatus={localAnalysisStatus}

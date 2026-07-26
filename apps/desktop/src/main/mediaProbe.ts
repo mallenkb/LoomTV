@@ -26,6 +26,19 @@ function statLocalMediaPath(filePath: string): fs.Stats {
   return stats;
 }
 
+// ffprobe reports frame rates as exact rationals ("24000/1001"). Keeping the
+// division here rather than trusting a rounded decimal matters: 23.976 and
+// 24000/1001 diverge by whole frames over the length of an episode.
+function parseFrameRate(value?: string): number | undefined {
+  if (!value) return undefined;
+  const [numerator, denominator = '1'] = value.split('/');
+  const top = Number(numerator);
+  const bottom = Number(denominator);
+  if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom === 0 || top <= 0) return undefined;
+  const fps = top / bottom;
+  return Number.isFinite(fps) && fps > 0 ? fps : undefined;
+}
+
 function streamType(value?: string): MediaTrack['type'] {
   if (value === 'video' || value === 'audio' || value === 'subtitle' || value === 'data') return value;
   return 'unknown';
@@ -71,6 +84,8 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
       codec_name?: string;
       profile?: string;
       pix_fmt?: string;
+      avg_frame_rate?: string;
+      r_frame_rate?: string;
       width?: number;
       height?: number;
       channels?: number;
@@ -90,6 +105,7 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
     height: stream.height,
     profile: stream.profile,
     pixelFormat: stream.pix_fmt,
+    frameRate: parseFrameRate(stream.avg_frame_rate) ?? parseFrameRate(stream.r_frame_rate),
     default: stream.disposition?.default === 1,
     forced: stream.disposition?.forced === 1,
   }));

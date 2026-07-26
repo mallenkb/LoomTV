@@ -14,6 +14,12 @@ import type { IpcInvokeChannel } from '../shared/ipcChannels';
 import type { IpcContract } from '../shared/ipcContract';
 import type { StoredProgress } from '../shared/desktopProtocol.ts';
 import { buildNetworkStatus, ffmpegAvailability } from './ipcHandlerPolicy.ts';
+import {
+  commandMpvPlayback,
+  mpvAvailability,
+  startMpvPlayback,
+  stopMpvPlayback,
+} from './mpvPlayback.ts';
 
 type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -322,6 +328,22 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.testMetadataKeys(keys || {});
   });
+
+  handle('mpv:availability', () => mpvAvailability());
+
+  handle('mpv:start', (event, filePath, options) => {
+    deps.authorizeMediaPath(filePath);
+    deps.assertLocalMediaPath(filePath);
+    for (const subtitleFile of options?.subtitleFiles || []) {
+      deps.authorizeMediaPath(subtitleFile.path);
+      deps.assertLocalMediaPath(subtitleFile.path);
+    }
+    return startMpvPlayback(event.sender, filePath, options);
+  });
+
+  handle('mpv:command', (_event, sessionId, command) => commandMpvPlayback(sessionId, command));
+
+  handle('mpv:stop', (_event, sessionId) => stopMpvPlayback(sessionId));
 
   handle('network:status', () => {
     const status = buildNetworkStatus(deps);

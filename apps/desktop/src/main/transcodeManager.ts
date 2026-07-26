@@ -16,6 +16,7 @@ import {
   HLS_WINDOW_SEGMENTS,
   buildHlsArgs,
   buildVodPlaylist,
+  frameAlignedSegmentSeconds,
   shouldRepositionEncoder,
   transcodeSegmentCount,
   transcodeSegmentName,
@@ -211,6 +212,7 @@ async function hlsMediaInfo(filePath: string, options: TranscodeOptions): Promis
 
     return {
       videoCodec: video?.codec,
+      frameRate: video?.frameRate,
       videoProfile: video?.profile,
       pixelFormat: video?.pixelFormat,
       audioCodec: audio?.codec,
@@ -427,8 +429,13 @@ async function startInitialWindow(ffmpeg: string, session: ActiveSession, startI
           : () => linearPlaylistReady(session),
       );
       session.preset = attempt.preset;
-      session.options = { ...attempt.options };
-      session.mediaInfo = await hlsMediaInfo(session.filePath, attempt.options);
+      // Only the fallback attempts change track selection, and therefore what
+      // hlsMediaInfo would report. Re-probing on the first attempt just adds an
+      // ffprobe to the critical path before the player receives its playlist.
+      if (attempt.options !== session.options) {
+        session.options = { ...attempt.options };
+        session.mediaInfo = await hlsMediaInfo(session.filePath, attempt.options);
+      }
       session.lastRequestedIndex = startIndex;
       return;
     } catch (error) {
@@ -560,7 +567,11 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
     // Treat an unprobeable duration as a non-seekable stream.
   }
 
-  const segmentSeconds = SEGMENT_SECONDS;
+  // Resolved before the segment grid: the encoder splits on frame boundaries, so
+  // the playlist must be built on the same frame-aligned length or a segment's
+  // declared start drifts away from the content it actually holds.
+  const mediaInfo = await hlsMediaInfo(filePath, options);
+  const segmentSeconds = frameAlignedSegmentSeconds(SEGMENT_SECONDS, mediaInfo?.frameRate);
   const seekable = durationSeconds > 0;
   const segmentCount = transcodeSegmentCount(durationSeconds, segmentSeconds);
   const sessionId = randomUUID();
@@ -580,7 +591,7 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
     playlistUrl: playlistUrlFor(serverBase, sessionId),
     options,
     preset: selectedPreset(ffmpeg, options),
-    mediaInfo: await hlsMediaInfo(filePath, options),
+    mediaInfo,
     durationSeconds,
     segmentSeconds,
     segmentCount,

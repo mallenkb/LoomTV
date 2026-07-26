@@ -31,6 +31,7 @@ export interface MediaTrack {
   pixelFormat?: string;
   default?: boolean;
   forced?: boolean;
+  source?: 'embedded' | 'sidecar' | 'opensubtitles';
 }
 
 export type ProbeData = { durationSeconds?: number; tracks?: MediaTrack[] };
@@ -84,7 +85,13 @@ export interface VideoPlayerProps {
     backdropCandidates?: string[];
     rating?: number;
   };
-  subtitles?: { lang: string; label: string; url: string }[];
+  subtitles?: {
+    lang: string;
+    label: string;
+    url: string;
+    source?: 'sidecar' | 'opensubtitles';
+    format?: string;
+  }[];
   episodes?: EpisodeMeta[];
   episodeFiles?: EpisodeFile[];
   currentSeason?: number;

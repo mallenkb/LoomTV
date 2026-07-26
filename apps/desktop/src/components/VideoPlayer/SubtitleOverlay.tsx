@@ -7,6 +7,7 @@ interface SubtitleOverlayProps {
   cues: SubtitleCue[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
   transcodeStartSecondsRef: React.RefObject<number>;
+  streamIsSeekableRef: React.RefObject<boolean>;
   streamIsTranscoded: boolean;
   style: SubtitleStyleSettings;
   visible: boolean;
@@ -72,6 +73,7 @@ function SubtitleOverlay({
   cues,
   videoRef,
   transcodeStartSecondsRef,
+  streamIsSeekableRef,
   streamIsTranscoded,
   style,
   visible,
@@ -96,7 +98,9 @@ function SubtitleOverlay({
     const tick = () => {
       const video = videoRef.current;
       if (video) {
-        const offset = streamIsTranscoded ? transcodeStartSecondsRef.current || 0 : 0;
+        const offset = streamIsTranscoded && !streamIsSeekableRef.current
+          ? transcodeStartSecondsRef.current || 0
+          : 0;
         const time = video.currentTime + offset - style.delaySeconds;
         const cueIndex = findActiveCueIndex(sortedCues, time, activeCueIndexRef.current);
         activeCueIndexRef.current = cueIndex;
@@ -111,7 +115,7 @@ function SubtitleOverlay({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [sortedCues, videoRef, transcodeStartSecondsRef, streamIsTranscoded, style.delaySeconds, visible]);
+  }, [sortedCues, videoRef, transcodeStartSecondsRef, streamIsSeekableRef, streamIsTranscoded, style.delaySeconds, visible]);
 
   const textShadow = useMemo(() => {
     const outlineWidth = style.borderEnabled

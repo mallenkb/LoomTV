@@ -131,6 +131,10 @@ function normalizeTrackField(value?: string): string {
   return (value || '').trim().toLowerCase();
 }
 
+// Release groups routinely ship a signs-and-songs track — on-screen text and
+// karaoke only, no dialogue — and mark it `default`. Honouring that flag leaves
+// the viewer staring at an apparently subtitle-less episode, so these tracks are
+// only chosen when nothing carrying dialogue is available.
 const SIGNS_ONLY_SUBTITLE_PATTERNS = [
   /\bsigns?\b/,
   /\bsongs?\b/,
@@ -142,6 +146,7 @@ const SIGNS_ONLY_SUBTITLE_PATTERNS = [
 export function isSignsOnlySubtitleTrack(track: MediaTrack): boolean {
   const title = normalizeTrackField(track.title);
   if (!title) return false;
+  // "Signs & Songs" qualifies, but "Full (incl. signs)" is a dialogue track.
   if (/\bfull\b|\bdialogu?e\b|\bcomplete\b/.test(title)) return false;
   return SIGNS_ONLY_SUBTITLE_PATTERNS.some((pattern) => pattern.test(title));
 }
@@ -151,14 +156,15 @@ export function firstSubtitleTrackIndex(tracks: MediaTrack[]): number {
   if (candidates.length === 0) return -1;
 
   const dialogue = candidates.filter((track) => !track.forced && !isSignsOnlySubtitleTrack(track));
-  const fullSubtitle = dialogue.find((track) => track.default)
+  const preferred = dialogue.find((track) => track.default)
     || dialogue.find((track) => normalizeTrackField(track.language).startsWith('en'))
     || dialogue[0]
+    // Nothing with dialogue: fall back to the old ordering rather than nothing.
     || candidates.find((track) => track.default && !track.forced)
     || candidates.find((track) => normalizeTrackField(track.language).startsWith('en') && !track.forced)
     || candidates.find((track) => !track.forced);
 
-  return (fullSubtitle || candidates[0]).index;
+  return (preferred || candidates[0]).index;
 }
 
 export function trackPreferenceScope(mediaId: string | undefined, filePath: string): string {

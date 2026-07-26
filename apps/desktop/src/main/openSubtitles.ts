@@ -211,7 +211,9 @@ function sidecarSubtitleExists(videoPath: string, language: string): boolean {
         const lowerBase = baseName.toLowerCase();
         return subtitleBase === lowerBase
           || subtitleBase === `${lowerBase}.${language}`
-          || subtitleBase.startsWith(`${lowerBase}.${language}.`);
+          || subtitleBase.startsWith(`${lowerBase}.${language}.`)
+          || subtitleBase === `${lowerBase}.opensubtitles.${language}`
+          || subtitleBase.startsWith(`${lowerBase}.opensubtitles.${language}.`);
       });
   } catch {
     return false;
@@ -331,7 +333,7 @@ export async function downloadMissingOpenSubtitlesForVideo(
 
       const targetPath = path.join(
         path.dirname(videoPath),
-        `${path.basename(videoPath, path.extname(videoPath))}.${language}.srt`,
+        `${path.basename(videoPath, path.extname(videoPath))}.opensubtitles.${language}.srt`,
       );
       const link = await requestDownloadLink(file.file_id, language, options as OpenSubtitlesScanOptions, session);
       await saveSubtitleFromLink(link, targetPath);

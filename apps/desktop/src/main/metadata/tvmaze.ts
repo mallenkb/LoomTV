@@ -97,7 +97,10 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
     image: c.person?.image?.medium || '',
   }));
 
-  const posterUrl = details.image?.original || details.image?.medium || '';
+  // TVmaze's medium portrait already exceeds LoomTV's 200px poster card and
+  // detail-panel display size. Prefer it so Chromium does not decode the much
+  // larger original for the same visible result.
+  const posterUrl = details.image?.medium || details.image?.original || '';
 
   return {
     title: details.name || fallbackTitle,
@@ -164,7 +167,7 @@ export async function fetchTVMetadataCandidates(title: string, localYear?: numbe
       }
       return {
         title: show.name || title,
-        poster: show.image?.original || show.image?.medium || '',
+        poster: show.image?.medium || show.image?.original || '',
         backdrop: '',
         summary: show.summary ? String(show.summary).replace(/<[^>]*>/g, '') : '',
         rating: show.rating?.average || 0,

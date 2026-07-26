@@ -9,6 +9,9 @@ import type {
   ManualMediaSegmentInput,
   MediaSegmentRequest,
   MediaSegmentType,
+  MpvCommand,
+  MpvPlaybackState,
+  MpvStartOptions,
   OfficialMetadataCandidate,
   OfficialMetadataApplyTarget,
   OfficialArtworkRefreshTarget,
@@ -198,6 +201,18 @@ const desktopApi = {
     const handler = (_: Electron.IpcRendererEvent, state: UpdateState) => callback(state);
     ipcRenderer.on('updates:state', handler);
     return () => ipcRenderer.removeListener('updates:state', handler);
+  },
+
+  mpv: {
+    availability: () => ipcRenderer.invoke('mpv:availability'),
+    start: (filePath: string, options?: MpvStartOptions) => ipcRenderer.invoke('mpv:start', filePath, options || {}),
+    command: (sessionId: string, command: MpvCommand) => ipcRenderer.invoke('mpv:command', sessionId, command),
+    stop: (sessionId: string) => ipcRenderer.invoke('mpv:stop', sessionId),
+    onState: (callback: (state: MpvPlaybackState) => void) => {
+      const handler = (_: Electron.IpcRendererEvent, state: MpvPlaybackState) => callback(state);
+      ipcRenderer.on('mpv:state', handler);
+      return () => ipcRenderer.removeListener('mpv:state', handler);
+    },
   },
 
   media: {

@@ -11,6 +11,7 @@ type PlaybackSettingsSectionProps = {
   skipForwardSeconds: number;
   onSkipBackChange: (value: number) => void;
   onSkipForwardChange: (value: number) => void;
+  playbackSettingsDirty: boolean;
   skipAnalysis: SkipAnalysisSettings;
   onSkipAnalysisChange: (value: SkipAnalysisSettings) => void;
   analysisStatus: LocalSegmentAnalysisStatus | null;
@@ -40,6 +41,7 @@ export default function PlaybackSettingsSection({
   skipForwardSeconds,
   onSkipBackChange,
   onSkipForwardChange,
+  playbackSettingsDirty,
   skipAnalysis,
   onSkipAnalysisChange,
   analysisStatus,
@@ -129,7 +131,7 @@ export default function PlaybackSettingsSection({
             </label>
           </div>
           <div className="mt-4 flex justify-end">
-            <Button type="button" onClick={onSave}>Save playback settings</Button>
+            <Button type="button" disabled={!playbackSettingsDirty} onClick={onSave}>Save playback settings</Button>
           </div>
         </CardContent>
       </Card>

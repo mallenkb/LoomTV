@@ -7,6 +7,10 @@ import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
   LocalSegmentAnalysisStatus,
+  MpvAvailability,
+  MpvCommand,
+  MpvPlaybackState,
+  MpvStartOptions,
   ManualMediaSegmentInput,
   ManagedMediaSegment,
   MediaSegmentRequest,
@@ -71,6 +75,10 @@ export interface IpcContract {
   'media:start-transcode': { args: [filePath: string, options?: TranscodeOptions]; result: ApiResult<TranscodeSession> };
   'media:stop-transcode': { args: [sessionId: string]; result: ApiResult<boolean> };
   'metadata:test-keys': { args: [keys: MetadataApiKeys]; result: MetadataKeyTestResult[] };
+  'mpv:availability': { args: []; result: MpvAvailability };
+  'mpv:start': { args: [filePath: string, options?: MpvStartOptions]; result: { ok: boolean; sessionId?: string; error?: string } };
+  'mpv:command': { args: [sessionId: string, command: MpvCommand]; result: boolean };
+  'mpv:stop': { args: [sessionId: string]; result: boolean };
   'network:discover-peers': { args: [timeoutMs?: number]; result: LocalNetworkPeer[] };
   'network:remote-connect': { args: [baseUrl: string, code: string]; result: RemoteLibraryConnection };
   'network:remote-disconnect': { args: [revoke?: boolean]; result: boolean };
@@ -138,6 +146,7 @@ export interface IpcEventContract {
   'profile:active-changed': { args: [state: ActiveProfileState] };
   'profiles:changed': { args: [event: import('./desktopProtocol.ts').ProfilesChangedEvent] };
   'updates:state': { args: [state: UpdateState] };
+  'mpv:state': { args: [state: MpvPlaybackState] };
 }
 
 export type IpcEventChannel = keyof IpcEventContract;

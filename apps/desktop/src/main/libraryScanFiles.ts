@@ -75,6 +75,63 @@ export function getLibraryFolderSignature(folderPath: string): { signature: stri
   return { signature: `${fileCount}:${hash.digest('hex')}`, fileCount };
 }
 
+/**
+ * Startup scans run in Electron's main process, so the recursive filesystem
+ * walk must yield while the OS reads each directory and file. The synchronous
+ * variant remains available for small, deterministic callers and tests.
+ */
+export async function getLibraryFolderSignatureAsync(
+  folderPath: string,
+): Promise<{ signature: string; fileCount: number } | null> {
+  try {
+    const root = await fs.promises.stat(folderPath);
+    if (!root.isDirectory()) return null;
+  } catch {
+    return null;
+  }
+
+  const hash = createHash('sha256');
+  const stack = [folderPath];
+  let fileCount = 0;
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined) break;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = (await fs.promises.readdir(current, { withFileTypes: true }))
+        .sort((left, right) => left.name.localeCompare(right.name));
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (isMacSidecarFile(entry.name)) continue;
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (!isVideoFileName(entry.name) && !isSubtitleFileName(entry.name) && !isImageFileName(entry.name)) continue;
+      try {
+        const stats = await fs.promises.stat(fullPath);
+        hash.update(path.relative(folderPath, fullPath));
+        hash.update('\0');
+        hash.update(String(stats.size));
+        hash.update('\0');
+        hash.update(String(Math.round(stats.mtimeMs)));
+        hash.update('\0');
+        fileCount += 1;
+      } catch {
+        // A later scan will pick up files that disappear during traversal.
+      }
+    }
+  }
+
+  return { signature: `${fileCount}:${hash.digest('hex')}`, fileCount };
+}
+
 function seasonFromRelativePath(root: string, directory: string): number | null {
   const relativeParts = path.relative(root, directory).split(path.sep).filter(Boolean).reverse();
   for (const part of relativeParts) {

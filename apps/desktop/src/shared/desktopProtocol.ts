@@ -62,9 +62,89 @@ export interface WireEpisodeFile {
   title?: string;
   thumbnail?: string;
   still?: string;
-  subtitles?: { lang: string; label: string; url: string }[];
+  subtitles?: WireSubtitleRecord[];
   localMetadata?: WireLocalMediaDetails;
 }
+
+export type WireSubtitleRecord = {
+  lang: string;
+  label: string;
+  url: string;
+  source?: 'sidecar' | 'opensubtitles';
+  format?: string;
+};
+
+export type MpvPlaybackTrack = {
+  id: number;
+  type: 'video' | 'audio' | 'subtitle';
+  codec?: string;
+  language?: string;
+  title?: string;
+  channels?: number;
+  default?: boolean;
+  forced?: boolean;
+  selected?: boolean;
+  external?: boolean;
+  source: 'embedded' | 'sidecar' | 'opensubtitles';
+};
+
+export type MpvPlaybackState = {
+  sessionId: string;
+  status: 'starting' | 'loading' | 'ready' | 'ended' | 'error' | 'closed';
+  position?: number;
+  duration?: number;
+  paused?: boolean;
+  volume?: number;
+  muted?: boolean;
+  speed?: number;
+  tracks?: MpvPlaybackTrack[];
+  videoWidth?: number;
+  videoHeight?: number;
+  error?: string;
+};
+
+export type MpvAvailability = {
+  available: boolean;
+  executablePath?: string;
+  runtimeSource?: 'configured' | 'bundled' | 'system';
+  version?: string;
+  reason?: string;
+};
+
+export type MpvStartOptions = {
+  startSeconds?: number;
+  volume?: number;
+  muted?: boolean;
+  speed?: number;
+  audioDelay?: number;
+  subtitleDelay?: number;
+  subtitleStyle?: {
+    fontSize: number;
+    color: string;
+    borderColor: string;
+    borderWidth: number;
+    backgroundColor: string;
+    position: number;
+  };
+  subtitleFiles?: Array<{ path: string; source: 'sidecar' | 'opensubtitles' }>;
+};
+
+export type MpvCommand =
+  | { type: 'set-paused'; paused: boolean }
+  | { type: 'seek'; position: number }
+  | { type: 'set-volume'; volume: number }
+  | { type: 'set-muted'; muted: boolean }
+  | { type: 'set-speed'; speed: number }
+  | { type: 'set-video-track'; trackId: number | null }
+  | { type: 'set-audio-track'; trackId: number | null }
+  | { type: 'set-subtitle-track'; trackId: number | null }
+  | { type: 'set-secondary-subtitle-track'; trackId: number | null }
+  | { type: 'set-subtitle-delay'; seconds: number }
+  | { type: 'set-audio-delay'; seconds: number }
+  | { type: 'set-subtitle-style'; fontSize: number; color: string; borderColor: string; borderWidth: number; backgroundColor: string; position: number }
+  | { type: 'set-video-aspect'; aspect: string | null }
+  | { type: 'set-video-crop'; crop: string | null }
+  | { type: 'set-video-rotation'; degrees: number };
 
 export interface WireMediaItem {
   id: string;
@@ -87,7 +167,7 @@ export interface WireMediaItem {
   seasons?: { number: number; title: string; episodeCount: number }[];
   episodes?: WireEpisodeMeta[];
   episodeFiles?: WireEpisodeFile[];
-  subtitles?: { lang: string; label: string; url: string }[];
+  subtitles?: WireSubtitleRecord[];
   localMetadata?: WireLocalMediaDetails;
   providerIds?: {
     tmdbId?: string;

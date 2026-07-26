@@ -16,12 +16,16 @@ export function isTVPattern(folderName: string, files: string[]): boolean {
 
 export function createSubtitleRecords(basePath: string, subtitleFiles: string[]) {
   return subtitleFiles.map((f) => {
-    const lm = f.match(/\[(\w{2,3})\]|\.(\w{2,3})\./i);
+    const openSubtitlesMatch = f.match(/\.opensubtitles\.([a-z]{2,3})\./i);
+    const lm = openSubtitlesMatch || f.match(/\[(\w{2,3})\]|\.([a-z]{2,3})\./i);
     const lang = lm ? (lm[1] || lm[2] || 'en') : 'en';
+    const source = openSubtitlesMatch ? 'opensubtitles' as const : 'sidecar' as const;
     return {
       lang: lang.toLowerCase(),
       label: lang.toUpperCase(),
       url: `/subtitle?path=${encodeURIComponent(path.join(basePath, f))}`,
+      source,
+      format: path.extname(f).slice(1).toLowerCase(),
     };
   });
 }

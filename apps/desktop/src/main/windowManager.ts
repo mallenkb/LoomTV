@@ -57,8 +57,13 @@ export function createWindow(): void {
     minWidth: 960,
     minHeight: 540,
     title: 'LoomTV',
+    show: false,
     ...windowChromeOptions(process.platform),
-    backgroundColor: '#1a1a1a',
+    // Native mpv renders in a borderless window behind LoomTV. Normal app
+    // screens remain opaque; only the player becomes transparent while the
+    // existing React controls remain above the video.
+    transparent: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

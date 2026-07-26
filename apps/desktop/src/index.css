@@ -167,6 +167,20 @@ body {
   width: 100vw;
 }
 
+/* mpv renders in its own borderless window directly behind Electron. During
+   native playback, LoomTV becomes the transparent control/overlay layer while
+   the library screen underneath the player is hidden. */
+html.loom-mpv-active,
+html.loom-mpv-active body,
+html.loom-mpv-active #root,
+html.loom-mpv-active .loom-app-shell {
+  background: transparent !important;
+}
+
+html.loom-mpv-active .loom-app-underlay {
+  visibility: hidden;
+}
+
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

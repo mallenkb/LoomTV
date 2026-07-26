@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { MotionConfig } from 'motion/react';
-import { LibraryProvider } from './contexts/LibraryContext';
+import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';
 import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
 import ProfileGate from './components/profiles/ProfileGate';
@@ -19,6 +19,7 @@ import { ConfirmProvider } from './components/ConfirmProvider';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
+import LoomLogo from './components/LoomLogo';
 import DesktopOnboarding from './components/DesktopOnboarding';
 import { desktopApi } from './lib/desktopApi';
 import {
@@ -51,16 +52,109 @@ interface NowPlaying {
   startPosition?: number;
 }
 
-export default function App() {
+const StartupReadyContext = createContext<() => void>(() => undefined);
+const StartupVisibilityContext = createContext(false);
+
+function StartupSplash() {
   return (
-    // `reducedMotion="user"` makes every motion/react component in the app drop
-    // transform and layout animations when the OS asks for reduced motion,
-    // keeping only opacity. CSS transitions are handled separately in index.css.
-    <MotionConfig reducedMotion="user">
-      <HashRouter>
-        <DesktopBootstrap />
-      </HashRouter>
-    </MotionConfig>
+    <div
+      className="fixed inset-0 z-[10000] grid select-none place-items-center bg-black text-white"
+      role="status"
+      aria-live="polite"
+      aria-label="LoomTV is preparing your library"
+    >
+      <div className="grid justify-items-center gap-7">
+        <div style={{ '--loom-logo-word': '#f5f5f5' } as React.CSSProperties}>
+          <LoomLogo className="h-auto w-64" accent="#1680ff" />
+        </div>
+        <p className="text-sm tracking-wide text-[#999]">Preparing your library</p>
+        <div className="flex h-2 gap-2" aria-hidden="true">
+          {[0, 160, 320].map((delay) => (
+            <span
+              key={delay}
+              className="h-2 w-2 animate-pulse rounded-full bg-[#1680ff] motion-reduce:animate-none"
+              style={{ animationDelay: `${delay}ms` }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StartupReadySignal({
+  ready = true,
+  onReady,
+}: {
+  ready?: boolean;
+  onReady?: () => void;
+}) {
+  const markAppReady = useContext(StartupReadyContext);
+  const markReady = onReady || markAppReady;
+  const signalledRef = useRef(false);
+  useEffect(() => {
+    if (!ready || signalledRef.current) return undefined;
+    let cancelled = false;
+
+    const nextPaint = () => new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
+    const settleInitialAssets = async () => {
+      await nextPaint();
+      await nextPaint();
+      await document.fonts?.ready.catch(() => undefined);
+
+      // Artwork can advance through several fallback candidates. Re-sample the
+      // priority hero after each decode pass so a failed first URL cannot make
+      // the splash disappear while its replacement is still loading. Rail
+      // artwork is deliberately lazy and must never extend startup.
+      for (let pass = 0; pass < 4; pass += 1) {
+        const priorityImages = [...document.querySelectorAll<HTMLImageElement>('img[fetchpriority="high"]')];
+        const sourcesBeforeDecode = priorityImages.map((image) => image.currentSrc || image.src);
+        await Promise.all(priorityImages.map(async (image) => {
+          try {
+            await image.decode();
+          } catch {
+            // The artwork component advances to its next candidate on error.
+          }
+        }));
+        await nextPaint();
+        const sourceChanged = priorityImages.some(
+          (image, index) => (image.currentSrc || image.src) !== sourcesBeforeDecode[index],
+        );
+        if (!sourceChanged) break;
+      }
+      await nextPaint();
+
+      if (!cancelled && !signalledRef.current) {
+        signalledRef.current = true;
+        markReady();
+      }
+    };
+    void settleInitialAssets();
+    return () => { cancelled = true; };
+  }, [markReady, ready]);
+  return null;
+}
+
+export default function App() {
+  const [startupReady, setStartupReady] = useState(false);
+  const markStartupReady = useCallback(() => setStartupReady(true), []);
+
+  return (
+    <StartupReadyContext.Provider value={markStartupReady}>
+      <StartupVisibilityContext.Provider value={startupReady}>
+        {/* `reducedMotion="user"` makes every motion/react component in the app drop
+            transform and layout animations when the OS asks for reduced motion,
+            keeping only opacity. CSS transitions are handled separately in index.css. */}
+        <MotionConfig reducedMotion="user">
+          <HashRouter>
+            <DesktopBootstrap />
+          </HashRouter>
+        </MotionConfig>
+        {!startupReady && <StartupSplash />}
+      </StartupVisibilityContext.Provider>
+    </StartupReadyContext.Provider>
   );
 }
 
@@ -153,22 +247,28 @@ function DesktopBootstrap() {
 
   if (onboardingPreview) {
     return (
-      <DesktopOnboarding
-        onHostReady={() => undefined}
-        onRemoteReady={() => undefined}
-        initialStep="connect"
-      />
+      <>
+        <StartupReadySignal />
+        <DesktopOnboarding
+          onHostReady={() => undefined}
+          onRemoteReady={() => undefined}
+          initialStep="connect"
+        />
+      </>
     );
   }
 
   if (mode === 'loading') return <div className="h-screen bg-[var(--loom-bg)]" />;
   if (!mode) {
     return (
-      <DesktopOnboarding
-        onHostReady={() => { setInitialSetup('host'); setMode('host'); }}
-        onRemoteReady={() => { setInitialSetup('remote'); setMode('remote'); }}
-        initialMessage={setupMessage}
-      />
+      <>
+        <StartupReadySignal />
+        <DesktopOnboarding
+          onHostReady={() => { setInitialSetup('host'); setMode('host'); }}
+          onRemoteReady={() => { setInitialSetup('remote'); setMode('remote'); }}
+          initialMessage={setupMessage}
+        />
+      </>
     );
   }
 
@@ -202,7 +302,9 @@ function DesktopBootstrap() {
 function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode | null }) {
   const { activeProfile, gateOpen, generation, isLoading } = useProfiles();
   if (isLoading) return <div className="h-screen bg-[var(--loom-bg)]" />;
-  if (!activeProfile) return <ProfileGate initialSetup={initialSetup} />;
+  if (!activeProfile) {
+    return <><StartupReadySignal /><ProfileGate initialSetup={initialSetup} /></>;
+  }
   return (
     <>
       <LibraryProvider key={generation}>
@@ -214,6 +316,10 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 }
 
 function AppShell() {
+  const { state: libraryState } = useLibrary();
+  const markAppReady = useContext(StartupReadyContext);
+  const appStartupReady = useContext(StartupVisibilityContext);
+  const [homeReady, setHomeReady] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const location = useLocation();
   const isSettingsRoute =
@@ -222,6 +328,10 @@ function AppShell() {
     || location.hash.includes('/settings');
   const hideContinueBar = Boolean(nowPlaying) || isSettingsRoute;
   const reserveContinueBarSpace = !hideContinueBar;
+  const markHomeReady = useCallback(() => {
+    setHomeReady(true);
+    markAppReady();
+  }, [markAppReady]);
 
   const handlePlayMedia = useCallback((
     filePath: string,
@@ -277,6 +387,9 @@ function AppShell() {
 
   return (
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
+      <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
+      {appStartupReady && !homeReady && <StartupSplash />}
+      <div className="loom-app-underlay contents">
       <Sidebar />
       <div
         className={`loom-main-drag-region${isSettingsRoute ? ' loom-main-drag-region-settings' : ''}`}
@@ -307,6 +420,7 @@ function AppShell() {
           </Routes>
         </ErrorBoundary>
       </main>
+      </div>
       {nowPlaying && (
         <ErrorBoundary
           title="Playback stopped unexpectedly"
@@ -332,7 +446,9 @@ function AppShell() {
           />
         </ErrorBoundary>
       )}
-      <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
+      <div className="loom-app-underlay contents">
+        <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
+      </div>
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
   type ManagedMediaSegment,
   type MediaSegment,
   type MediaSegmentType,
+  type MpvPlaybackState,
 } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
@@ -111,6 +112,7 @@ import {
 } from './VideoPlayer/playerControls';
 import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
+import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
@@ -179,6 +181,7 @@ export default function VideoPlayer({
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
   const subtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
+  const audioDelayRef = useRef(0);
   const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
   const nextEpisodeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastPositionUiUpdateRef = useRef(0);
@@ -189,6 +192,7 @@ export default function VideoPlayer({
   const loadedFilePathRef = useRef('');
   const isScrubbingRef = useRef(false);
   const scrubPreviewRafRef = useRef<number | null>(null);
+  const scrubListenerCleanupRef = useRef<(() => void) | null>(null);
   const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTranscodeSeekRef = useRef<number | null>(null);
   const transcodeSeekActiveRef = useRef(false);
@@ -198,12 +202,10 @@ export default function VideoPlayer({
   // True when the active transcoded stream is a full-duration seekable VOD,
   // so seeking is a native currentTime change instead of an encoder restart.
   const streamIsSeekableRef = useRef(false);
-  // A progressive remux copies compatible source video and can restart near a
-  // requested timestamp much faster than rebuilding a seekable HLS window.
+  // Remux/direct-stream playback copies the original video whenever Chromium
+  // can decode it. Seeking restarts that lightweight stream at the requested
+  // timestamp instead of falling back to a full HLS video transcode.
   const streamUsesBrowserPipelineRef = useRef(false);
-  // Bitmap subtitles require video burn-in. Let the lightweight remux become
-  // visible first, then prepare and swap to the subtitle-enabled HLS stream.
-  const pendingBitmapSubtitleWarmupRef = useRef(false);
   const subtitleStyleApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nativeSubtitleFallbackRef = useRef(false);
   const nativeSubtitleStyleRefreshRafRef = useRef<number | null>(null);
@@ -214,6 +216,8 @@ export default function VideoPlayer({
   // intent across the final seek so an ended event advances instead of being
   // treated as an interrupted transcode that should restart this file.
   const pendingCreditsCompletionRef = useRef(false);
+  const mpvEngineRef = useRef<MpvPlaybackEngine | null>(null);
+  const mpvInitialTracksAppliedRef = useRef(false);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
@@ -221,6 +225,7 @@ export default function VideoPlayer({
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [mpvActive, setMpvActive] = useState(false);
 
   const libraryDurationHint = useMemo(() => {
     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
@@ -251,7 +256,9 @@ export default function VideoPlayer({
   const [selectedVideoTrackIndex, setSelectedVideoTrackIndex] = useState(-1);
   const [selectedAudioTrackIndex, setSelectedAudioTrackIndex] = useState(-1);
   const [selectedSubtitleTrackIndex, setSelectedSubtitleTrackIndex] = useState(-1);
+  const [selectedSecondarySubtitleTrackIndex, setSelectedSecondarySubtitleTrackIndex] = useState(-1);
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
+  const [openSubtitlesEnabled, setOpenSubtitlesEnabled] = useState(false);
   const autoplayNextEnabled = true;
   const [nextCountdown, setNextCountdown] = useState<number | null>(null);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
@@ -260,6 +267,7 @@ export default function VideoPlayer({
   const [cropMode, setCropMode] = useState<CropMode>('none');
   const [rotation, setRotation] = useState<RotationMode>(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [audioDelay, setAudioDelay] = useState(0);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
   const [skipPromptTypes, setSkipPromptTypes] = useState<Record<MediaSegmentType, boolean>>({ intro: true, recap: true, outro: true, credits: true, preview: true });
@@ -475,6 +483,7 @@ export default function VideoPlayer({
             : DEFAULT_SKIP_FORWARD_SECONDS,
         );
         if (settings.skipAnalysis?.promptTypes) setSkipPromptTypes(settings.skipAnalysis.promptTypes);
+        setOpenSubtitlesEnabled(Boolean(settings.openSubtitlesAutoDownload));
       })
       .catch(() => {
         if (cancelled) return;
@@ -489,17 +498,22 @@ export default function VideoPlayer({
   const hasEpisodes = episodes.length > 0 && episodeFiles.length > 0;
   const videoTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'video'), [mediaTracks]);
   const audioTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'audio'), [mediaTracks]);
+  const visibleSubtitles = useMemo(
+    () => subtitles.filter((subtitle) => subtitle.source !== 'opensubtitles' || openSubtitlesEnabled),
+    [openSubtitlesEnabled, subtitles],
+  );
   const externalSubtitleTracks = useMemo<MediaTrack[]>(
-    () => subtitles.map((subtitle, index) => ({
+    () => visibleSubtitles.map((subtitle, index) => ({
       index: -1000 - index,
       type: 'subtitle',
-      codec: 'external',
+      codec: subtitle.format || 'external',
       language: subtitle.lang,
       title: subtitle.label,
       default: false,
       forced: false,
+      source: subtitle.source || 'sidecar',
     })),
-    [subtitles],
+    [visibleSubtitles],
   );
   const subtitleTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'subtitle'), [mediaTracks]);
 
@@ -582,10 +596,11 @@ export default function VideoPlayer({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     const index = selectedSubtitleTrackIndex;
     const resolveSubtitleUrl = async (): Promise<string> => {
       if (index <= -1000) {
-        const external = subtitles[-1000 - index];
+        const external = visibleSubtitles[-1000 - index];
         return external ? subtitleSource(external.url, serverBase) : '';
       }
       if (index >= 0) {
@@ -603,7 +618,7 @@ export default function VideoPlayer({
       try {
         const url = await resolveSubtitleUrl();
         if (cancelled || !url) return;
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: controller.signal });
         const text = response.ok ? await response.text() : '';
         if (!cancelled) setSubtitleCues(parseVttCues(text));
       } catch {
@@ -613,8 +628,9 @@ export default function VideoPlayer({
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [filePath, mediaTracks, selectedSubtitleTrackIndex, serverBase, subtitles]);
+  }, [filePath, mediaTracks, selectedSubtitleTrackIndex, serverBase, visibleSubtitles]);
 
   const clearHls = useCallback(() => {
     const hls = hlsRef.current;
@@ -682,7 +698,10 @@ export default function VideoPlayer({
     preferencesOverride?: PlaybackTrackPreferences,
   ) => {
     const nextDuration = probeDurationSeconds(data);
-    const nextTracks = [...probeTracks(data), ...externalSubtitleTracks];
+    const nextTracks = [
+      ...probeTracks(data).map((track) => ({ ...track, source: 'embedded' as const })),
+      ...externalSubtitleTracks,
+    ];
     const preferences = preferencesOverride ?? sharedTrackPreferencesRef.current;
     const hasSubtitlePreference = preferences.subtitle !== undefined;
     const firstVideo = firstTrackIndex(nextTracks, 'video');
@@ -729,6 +748,7 @@ export default function VideoPlayer({
     userPausedRef.current = false;
     suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
     const video = videoRef.current;
+    if (mpvEngineRef.current) void mpvEngineRef.current.pause();
     if (video) {
       video.autoplay = false;
       video.pause();
@@ -823,8 +843,7 @@ export default function VideoPlayer({
   ) => {
     if (!playerActiveRef.current) return;
     if (didTryTranscodeRef.current && !options.force) return;
-    if (!options.deferStopCurrent) streamUsesBrowserPipelineRef.current = false;
-    pendingBitmapSubtitleWarmupRef.current = false;
+    streamUsesBrowserPipelineRef.current = false;
     didTryTranscodeRef.current = true;
     const token = loadTokenRef.current;
     const durationHint = probedDurationRef.current || getStoredDuration(filePath);
@@ -927,7 +946,6 @@ export default function VideoPlayer({
         streamIsSeekableRef.current = nextSeekable;
         transcodeStartSecondsRef.current = nextTranscodeStartSeconds;
       }
-      streamUsesBrowserPipelineRef.current = false;
       setStreamIsTranscoded(true);
       setStreamUrl(transcodeResult.data.playlistUrl);
       if (!keepReady) {
@@ -969,7 +987,6 @@ export default function VideoPlayer({
     const bitmapSubtitle = selectedSubtitle && isBitmapSubtitleCodec(selectedSubtitle.track.codec)
       ? selectedSubtitle
       : null;
-    const deferBitmapBurnIn = Boolean(bitmapSubtitle && options.trackChangeGeneration === undefined);
     const videoTrackCount = probeTracksRef.current.filter((track) => track.type === 'video').length;
     const audioTrackCount = probeTracksRef.current.filter((track) => track.type === 'audio').length;
 
@@ -988,7 +1005,7 @@ export default function VideoPlayer({
         ...(audioTrackCount > 1 && typeof selectedAudioTrackIndexRef.current === 'number'
           ? { audioTrackIndex: selectedAudioTrackIndexRef.current }
           : {}),
-        ...(bitmapSubtitle && !deferBitmapBurnIn ? {
+        ...(bitmapSubtitle ? {
           subtitleTrackIndex: selectedSubtitleTrackIndexRef.current,
           subtitleStreamOrdinal: bitmapSubtitle.ordinal,
           subtitleCodec: bitmapSubtitle.track.codec,
@@ -1008,7 +1025,6 @@ export default function VideoPlayer({
 
       if (stream.playbackMode === 'transcode') {
         streamUsesBrowserPipelineRef.current = false;
-        pendingBitmapSubtitleWarmupRef.current = false;
         const isTrackChange = options.trackChangeGeneration !== undefined;
         await startTranscodedFallback(safeStartSeconds, {
           force: true,
@@ -1032,7 +1048,6 @@ export default function VideoPlayer({
 
       const requiresSeekRestart = Boolean(stream.isTranscoded);
       streamUsesBrowserPipelineRef.current = requiresSeekRestart;
-      pendingBitmapSubtitleWarmupRef.current = deferBitmapBurnIn;
       streamIsSeekableRef.current = false;
       transcodeStartSecondsRef.current = initialStreamOffset(safeStartSeconds, requiresSeekRestart);
       suppressPauseIntentUntilMsRef.current = performance.now() + 1500;
@@ -1046,11 +1061,130 @@ export default function VideoPlayer({
     }
   }, [clearHls, filePath, startTranscodedFallback, stopTranscodeSession]);
 
+  const handleMpvState = useCallback((state: MpvPlaybackState) => {
+    if (!playerActiveRef.current) return;
+
+    if (typeof state.duration === 'number' || typeof state.position === 'number') {
+      const nextDuration = state.duration ?? playbackDurationRef.current ?? probedDurationRef.current;
+      const nextPosition = state.position ?? playbackPositionRef.current;
+      if (!isScrubbingRef.current) {
+        updatePlaybackSnapshot(nextPosition, nextDuration, {
+          forceReact: state.status === 'ended',
+        });
+      }
+      const now = Date.now();
+      if (nextPosition > 10 && nextDuration > 0 && now - lastProgressSaveRef.current >= PROGRESS_SAVE_INTERVAL_MS) {
+        lastProgressSaveRef.current = now;
+        void savePlaybackProgress(filePath, nextPosition, nextDuration);
+      }
+    }
+
+    if (typeof state.paused === 'boolean') {
+      setPaused(state.paused);
+      if (state.paused && playbackPositionRef.current > 10 && playbackDurationRef.current > 0) {
+        void savePlaybackProgress(filePath, playbackPositionRef.current, playbackDurationRef.current);
+      }
+    }
+    if (typeof state.volume === 'number') setVolume(Math.max(0, Math.min(1, state.volume)));
+    if (typeof state.muted === 'boolean') setMuted(state.muted);
+    if (typeof state.speed === 'number') setPlaybackRate(state.speed);
+
+    if (state.tracks) {
+      const nextTracks: MediaTrack[] = state.tracks.map((track) => ({
+        index: track.id,
+        type: track.type,
+        codec: track.codec,
+        language: track.language,
+        title: track.title,
+        channels: track.channels,
+        default: track.default,
+        forced: track.forced,
+        source: track.source,
+      }));
+      probeTracksRef.current = nextTracks;
+      setMediaTracks(nextTracks);
+
+      if (!mpvInitialTracksAppliedRef.current) {
+        mpvInitialTracksAppliedRef.current = true;
+        const preferences = sharedTrackPreferencesRef.current;
+        const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id
+          ?? firstTrackIndex(nextTracks, 'video');
+        const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
+        const selectedAudio = preferredAudio ?? state.tracks.find((track) => track.type === 'audio' && track.selected)?.id
+          ?? firstTrackIndex(nextTracks, 'audio');
+        const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
+        const selectedSubtitle = preferredSubtitle
+          ?? (subtitlesDefaultEnabledRef.current
+            ? state.tracks.find((track) => track.type === 'subtitle' && track.selected)?.id
+              ?? firstSubtitleTrackIndex(nextTracks)
+            : -1);
+
+        selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
+        selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
+        selectedSubtitleTrackIndexRef.current = selectedSubtitle;
+        setSelectedVideoTrackIndex(selectedVideo);
+        setSelectedAudioTrackIndex(selectedAudio);
+        setSelectedSubtitleTrackIndex(selectedSubtitle);
+        void mpvEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
+        void mpvEngineRef.current?.selectAudio(selectedAudio >= 0 ? selectedAudio : null);
+        void mpvEngineRef.current?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
+      } else {
+        const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id ?? -1;
+        const selectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id ?? -1;
+        const selectedSubtitle = state.tracks.find((track) => track.type === 'subtitle' && track.selected)?.id ?? -1;
+        selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
+        selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
+        selectedSubtitleTrackIndexRef.current = selectedSubtitle;
+        setSelectedVideoTrackIndex(selectedVideo);
+        setSelectedAudioTrackIndex(selectedAudio);
+        setSelectedSubtitleTrackIndex(selectedSubtitle);
+      }
+    }
+
+    if (state.status === 'starting' || state.status === 'loading') {
+      setPlayerState('loading');
+      setStatusMessage('Opening with mpv...');
+      setPaused(true);
+    } else if (state.status === 'ready') {
+      setPlayerState('ready');
+      setStatusMessage('');
+      setErrorMessage(null);
+      // A transient pause property while mpv opens is engine state, not user
+      // intent. Every explicit Play/Resume action enters with this ref false,
+      // so reaffirm autoplay once the native file is actually ready.
+      if (!userPausedRef.current) void mpvEngineRef.current?.play();
+    } else if (state.status === 'ended') {
+      const totalDuration = state.duration || playbackDurationRef.current || probedDurationRef.current;
+      if (totalDuration > 0) {
+        updatePlaybackSnapshot(totalDuration, totalDuration, { forceReact: true });
+        latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
+      }
+      setPaused(true);
+      if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
+        latestEpisodePlaybackRef.current.scheduleNextEpisode();
+      }
+    } else if (state.status === 'error') {
+      const fallbackPosition = playbackPositionRef.current;
+      const engine = mpvEngineRef.current;
+      mpvEngineRef.current = null;
+      void engine?.destroy();
+      setMpvActive(false);
+      document.documentElement.classList.remove('loom-mpv-active');
+      setStatusMessage('Falling back to the compatible player...');
+      setErrorMessage(state.error || null);
+      void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
+    }
+  }, [filePath, startBrowserStreamAt, updatePlaybackSnapshot]);
+
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
     hlsRecoveryAttemptsRef.current = 0;
     hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
+    setMpvActive(false);
+    setSelectedSecondarySubtitleTrackIndex(-1);
+    mpvInitialTracksAppliedRef.current = false;
+    document.documentElement.classList.remove('loom-mpv-active');
     setPlayerState('loading');
     setStatusMessage('Retrying playback...');
     setErrorMessage(null);
@@ -1132,6 +1266,63 @@ export default function VideoPlayer({
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data, preferences);
 
+        const canUseLocalMpv = !/^(?:https?|plexserver):/i.test(filePath)
+          && await MpvPlaybackEngine.available();
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+        if (canUseLocalMpv) {
+          const subtitleFiles = visibleSubtitles.flatMap((subtitle) => {
+            try {
+              const parsed = new URL(subtitle.url, 'http://127.0.0.1');
+              const subtitlePath = parsed.searchParams.get('path');
+              return subtitlePath ? [{
+                path: subtitlePath,
+                source: subtitle.source || 'sidecar' as const,
+              }] : [];
+            } catch {
+              return [];
+            }
+          });
+          const engine = new MpvPlaybackEngine(handleMpvState);
+          mpvEngineRef.current = engine;
+          const initialSubtitleStyle = subtitleStyleRef.current;
+          let loaded = false;
+          try {
+            loaded = await engine.load(filePath, {
+              startSeconds: requestedStartPosition,
+              audioDelay: audioDelayRef.current,
+              subtitleDelay: initialSubtitleStyle.delaySeconds,
+              subtitleStyle: {
+                fontSize: Math.round(initialSubtitleStyle.fontSize * initialSubtitleStyle.scale),
+                color: initialSubtitleStyle.fontColor,
+                borderColor: initialSubtitleStyle.borderColor,
+                borderWidth: initialSubtitleStyle.borderEnabled ? initialSubtitleStyle.borderWidth : 0,
+                backgroundColor: initialSubtitleStyle.backgroundEnabled
+                  ? initialSubtitleStyle.backgroundColor
+                  : '#00000000',
+                position: initialSubtitleStyle.position,
+              },
+              subtitleFiles,
+            });
+          } catch (error) {
+            console.warn('[player] Native mpv startup failed; using browser fallback.', error);
+          }
+          if (!playerActiveRef.current || loadToken !== loadTokenRef.current) {
+            await engine.destroy();
+            return;
+          }
+          if (loaded) {
+            setMpvActive(true);
+            setStreamUrl('');
+            document.documentElement.classList.add('loom-mpv-active');
+            setStatusMessage('Opening with mpv...');
+            return;
+          }
+          mpvEngineRef.current = null;
+          await engine.destroy();
+        }
+
+        setMpvActive(false);
+        document.documentElement.classList.remove('loom-mpv-active');
         await startBrowserStreamAt(requestedStartPosition);
       } catch (error) {
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
@@ -1145,9 +1336,23 @@ export default function VideoPlayer({
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
       browserStreamGenerationRef.current += 1;
+      const engine = mpvEngineRef.current;
+      mpvEngineRef.current = null;
+      void engine?.destroy();
+      document.documentElement.classList.remove('loom-mpv-active');
       void stopTranscodeSession();
     };
-  }, [applyProbeData, filePath, reloadToken, startBrowserStreamAt, startPosition, stopTranscodeSession, updatePlaybackSnapshot]);
+  }, [
+    applyProbeData,
+    filePath,
+    handleMpvState,
+    reloadToken,
+    startBrowserStreamAt,
+    startPosition,
+    stopTranscodeSession,
+    updatePlaybackSnapshot,
+    visibleSubtitles,
+  ]);
 
   // ─── Player binding, events, and fallback ────────────────────────────────
   useEffect(() => {
@@ -1431,22 +1636,6 @@ export default function VideoPlayer({
       }
     };
 
-    const warmBitmapSubtitleStream = () => {
-      if (
-        !pendingBitmapSubtitleWarmupRef.current
-        || pendingSwap
-        || !streamUsesBrowserPipelineRef.current
-      ) return;
-      pendingBitmapSubtitleWarmupRef.current = false;
-      void startTranscodedFallback(playbackPositionRef.current, {
-        force: true,
-        allowNearEnd: true,
-        keepReadyDuringRestart: true,
-        deferStopCurrent: true,
-        seekGeneration: transcodeSeekGenerationRef.current,
-      });
-    };
-
     const onPlayable = () => {
       if (sourceToken !== sourceLoadTokenRef.current) return;
       hlsRecoveryAttemptsRef.current = 0;
@@ -1457,7 +1646,6 @@ export default function VideoPlayer({
       completePendingSwap();
       applyInitialResume();
       playIfAllowed();
-      warmBitmapSubtitleStream();
     };
 
     const onPlaying = () => {
@@ -1471,7 +1659,6 @@ export default function VideoPlayer({
       userPausedRef.current = false;
       setPaused(false);
       completePendingSwap();
-      warmBitmapSubtitleStream();
     };
 
     const onEnded = () => {
@@ -1612,6 +1799,8 @@ export default function VideoPlayer({
       cancelAnimationFrame(scrubPreviewRafRef.current);
       scrubPreviewRafRef.current = null;
     }
+    scrubListenerCleanupRef.current?.();
+    scrubListenerCleanupRef.current = null;
     if (transcodeSeekTimerRef.current) {
       clearTimeout(transcodeSeekTimerRef.current);
       transcodeSeekTimerRef.current = null;
@@ -1641,6 +1830,11 @@ export default function VideoPlayer({
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
+    if (mpvEngineRef.current) {
+      userPausedRef.current = !paused;
+      void (paused ? mpvEngineRef.current.play() : mpvEngineRef.current.pause());
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -1652,9 +1846,17 @@ export default function VideoPlayer({
     userPausedRef.current = true;
     video.autoplay = false;
     video.pause();
-  }, [playerState]);
+  }, [paused, playerState]);
 
   const persistFinalPlaybackProgress = useCallback(async () => {
+    if (mpvEngineRef.current) {
+      const snapshotPosition = playbackPositionRef.current;
+      const snapshotDuration = playbackDurationRef.current || probedDurationRef.current;
+      if (snapshotPosition > 10 && snapshotDuration > 0) {
+        await savePlaybackProgress(filePath, snapshotPosition, snapshotDuration);
+      }
+      return;
+    }
     const video = videoRef.current;
     const snapshot = playbackProgressForExit({
       videoPosition: video?.currentTime ?? 0,
@@ -1678,13 +1880,18 @@ export default function VideoPlayer({
     sourceLoadTokenRef.current += 1;
     clearNextEpisodeCountdown();
     clearHls();
+    const engine = mpvEngineRef.current;
+    mpvEngineRef.current = null;
+    await engine?.destroy();
+    setMpvActive(false);
+    document.documentElement.classList.remove('loom-mpv-active');
     const video = videoRef.current;
     if (video) {
       video.autoplay = false;
-      video.pause();
+      clearVideoElement(video);
     }
     await stopTranscodeSession();
-  }, [clearHls, clearNextEpisodeCountdown, persistFinalPlaybackProgress, stopTranscodeSession]);
+  }, [clearHls, clearNextEpisodeCountdown, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
 
   useEffect(() => registerPlaybackShutdown(async () => {
     await shutdownPlayback();
@@ -1736,11 +1943,46 @@ export default function VideoPlayer({
   }, [showMediaPanel, mediaPanelTab]);
 
   useEffect(() => {
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.setSpeed(playbackRate);
+      return;
+    }
     const video = videoRef.current;
     if (video) {
       video.playbackRate = playbackRate;
     }
-  }, [playbackRate, streamUrl]);
+  }, [mpvActive, playbackRate, streamUrl]);
+
+  useEffect(() => {
+    if (!mpvActive || !mpvEngineRef.current) return;
+    const normalizeRatio = (value: string) => value.replace(/\s*\/\s*/, ':');
+    void mpvEngineRef.current.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode));
+  }, [aspectMode, mpvActive]);
+
+  useEffect(() => {
+    if (!mpvActive || !mpvEngineRef.current) return;
+    const crop = cropMode === 'none' || cropMode === 'custom' ? null : cropMode.replace(/\s*\/\s*/, ':');
+    void mpvEngineRef.current.setVideoCrop(crop);
+  }, [cropMode, mpvActive]);
+
+  useEffect(() => {
+    if (mpvActive) void mpvEngineRef.current?.setVideoRotation(rotation);
+  }, [mpvActive, rotation]);
+
+  useEffect(() => {
+    if (!mpvActive || !mpvEngineRef.current) return;
+    const style = subtitleStyleRef.current;
+    void mpvEngineRef.current.setSubtitleDelay(style.delaySeconds);
+    void mpvEngineRef.current.setAudioDelay(audioDelay);
+    void mpvEngineRef.current.setSubtitleStyle({
+      fontSize: Math.round(style.fontSize * style.scale),
+      color: style.fontColor,
+      borderColor: style.borderColor,
+      borderWidth: style.borderEnabled ? style.borderWidth : 0,
+      backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+      position: style.position,
+    });
+  }, [audioDelay, mpvActive]);
 
   useEffect(() => {
     applyNativeTextTrackVisibility();
@@ -1750,6 +1992,11 @@ export default function VideoPlayer({
     const nextPosition = clampSeconds(targetSeconds, duration || undefined);
     if (options.updateSnapshot !== false) {
       updatePlaybackSnapshot(nextPosition, duration || playbackDurationRef.current, { forceReact: true });
+    }
+
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.seek(nextPosition);
+      return;
     }
 
     const video = videoRef.current;
@@ -1918,6 +2165,7 @@ export default function VideoPlayer({
     };
     previewFromClientX(event.clientX);
     const handleMove = (moveEvent: PointerEvent) => previewFromClientX(moveEvent.clientX);
+    let removeScrubListeners = () => undefined;
     const handleUp = (upEvent: PointerEvent) => {
       previewFromClientX(upEvent.clientX);
       if (scrubPreviewRafRef.current !== null) {
@@ -1927,11 +2175,17 @@ export default function VideoPlayer({
       updatePlaybackSnapshot(pendingPosition, duration, { forceReact: true });
       seekTo(pendingPosition);
       isScrubbingRef.current = false;
-      bar.releasePointerCapture(upEvent.pointerId);
+      if (bar.hasPointerCapture(upEvent.pointerId)) bar.releasePointerCapture(upEvent.pointerId);
+      removeScrubListeners();
+    };
+    removeScrubListeners = () => {
       bar.removeEventListener('pointermove', handleMove);
       bar.removeEventListener('pointerup', handleUp);
       bar.removeEventListener('pointercancel', handleUp);
+      if (scrubListenerCleanupRef.current === removeScrubListeners) scrubListenerCleanupRef.current = null;
     };
+    scrubListenerCleanupRef.current?.();
+    scrubListenerCleanupRef.current = removeScrubListeners;
     bar.addEventListener('pointermove', handleMove);
     bar.addEventListener('pointerup', handleUp);
     bar.addEventListener('pointercancel', handleUp);
@@ -1960,6 +2214,11 @@ export default function VideoPlayer({
     const v = parseFloat(e.target.value);
     setVolume(v);
     setMuted(v === 0);
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.setVolume(v);
+      void mpvEngineRef.current.setMuted(v === 0);
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.volume = v;
@@ -1967,11 +2226,16 @@ export default function VideoPlayer({
   }, []);
 
   const toggleMute = useCallback(() => {
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.setMuted(!muted);
+      return;
+    }
     const video = videoRef.current;
     if (video) video.muted = !video.muted;
-  }, []);
+  }, [muted]);
 
   const restartForTrackChange = useCallback(() => {
+    if (mpvEngineRef.current) return;
     if (!streamUrl) return;
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
@@ -1992,6 +2256,19 @@ export default function VideoPlayer({
       clearTimeout(subtitleStyleApplyTimerRef.current);
       subtitleStyleApplyTimerRef.current = null;
     }
+    if (mpvEngineRef.current) {
+      const style = subtitleStyleRef.current;
+      void mpvEngineRef.current.setSubtitleDelay(style.delaySeconds);
+      void mpvEngineRef.current.setSubtitleStyle({
+        fontSize: Math.round(style.fontSize * style.scale),
+        color: style.fontColor,
+        borderColor: style.borderColor,
+        borderWidth: style.borderEnabled ? style.borderWidth : 0,
+        backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+        position: style.position,
+      });
+      return;
+    }
     applyNativeTextTrackVisibility();
     if (shouldRestartTranscodedSubtitleStyle({
       subtitleIsBurnedIn: selectedSubtitleIsBurnedIn(),
@@ -2007,6 +2284,10 @@ export default function VideoPlayer({
   }, [applyNativeTextTrackVisibility, selectedSubtitleIsBurnedIn, startTranscodedFallback]);
 
   const scheduleSubtitleStyleToStream = useCallback(() => {
+    if (mpvEngineRef.current) {
+      applySubtitleStyleToStream();
+      return;
+    }
     applyNativeTextTrackVisibility();
     if (!shouldRestartTranscodedSubtitleStyle({
       subtitleIsBurnedIn: selectedSubtitleIsBurnedIn(),
@@ -2048,10 +2329,21 @@ export default function VideoPlayer({
     }));
   }, [setLiveSubtitleStyle]);
 
+  const updateAudioDelay = useCallback((seconds: number) => {
+    const nextDelay = Math.max(-60, Math.min(60, seconds));
+    audioDelayRef.current = nextDelay;
+    setAudioDelay(nextDelay);
+    void mpvEngineRef.current?.setAudioDelay(nextDelay);
+  }, []);
+
   const selectVideoTrack = useCallback((trackIndex: number) => {
     if (selectedVideoTrackIndexRef.current === trackIndex) return;
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.selectVideo(trackIndex >= 0 ? trackIndex : null);
+      return;
+    }
     restartForTrackChange();
   }, [restartForTrackChange]);
 
@@ -2063,6 +2355,10 @@ export default function VideoPlayer({
     sharedTrackPreferencesRef.current = nextPreferences;
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
+      return;
+    }
     restartForTrackChange();
   }, [restartForTrackChange, trackPreferenceScopeKey]);
 
@@ -2083,6 +2379,10 @@ export default function VideoPlayer({
     saveSubtitlesDefaultEnabled(enabled);
     selectedSubtitleTrackIndexRef.current = trackIndex;
     setSelectedSubtitleTrackIndex(trackIndex);
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.selectSubtitle(enabled ? trackIndex : null);
+      return;
+    }
     if (playbackAction === 'burn-in') {
       restartForTrackChange();
       return;
@@ -2103,11 +2403,23 @@ export default function VideoPlayer({
     trackPreferenceScopeKey,
   ]);
 
+  const selectSecondarySubtitleTrack = useCallback((trackIndex: number) => {
+    if (!mpvEngineRef.current) return;
+    setSelectedSecondarySubtitleTrackIndex(trackIndex);
+    void mpvEngineRef.current.selectSecondarySubtitle(trackIndex >= 0 ? trackIndex : null);
+  }, []);
+
   const changeVolume = useCallback((delta: number) => {
-    const currentVolume = videoRef.current?.volume ?? volume;
+    const currentVolume = mpvEngineRef.current ? volume : videoRef.current?.volume ?? volume;
     const nextVolume = Math.min(1, Math.max(0, currentVolume + delta));
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
+
+    if (mpvEngineRef.current) {
+      void mpvEngineRef.current.setVolume(nextVolume);
+      void mpvEngineRef.current.setMuted(nextVolume === 0);
+      return;
+    }
 
     const video = videoRef.current;
     if (!video) return;
@@ -2470,7 +2782,7 @@ export default function VideoPlayer({
   };
   return (
     <div
-      className={`loom-player-root fixed inset-0 z-50 flex bg-black ${isModern ? 'loom-player-modern' : ''}`}
+      className={`loom-player-root fixed inset-0 z-50 flex ${mpvActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
       ref={containerRef}
     >
       <style>
@@ -2482,7 +2794,7 @@ export default function VideoPlayer({
         }`}
       </style>
       <div
-        className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden bg-black ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
+        className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : 'bg-black'} ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
         onPointerMove={handlePointerMove}
         onClick={handleSurfaceClick}
         onDoubleClickCapture={handleSurfaceDoubleClickCapture}
@@ -2497,34 +2809,37 @@ export default function VideoPlayer({
         />
 
         <div
-          className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
+          className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : ''} ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
           style={videoFrameStyle}
         >
-          <video
-            ref={videoRef}
-            className="h-full w-full"
-            style={videoStyle}
-            preload="auto"
-          >
-            {subtitles.map((subtitle, index) => {
-              const trackIndex = -1000 - index;
-              return (
-                <track
-                  key={`${subtitle.url}-${index}`}
-                  kind="subtitles"
-                  src={subtitleSource(subtitle.url, serverBase)}
-                  srcLang={subtitle.lang || 'en'}
-                  label={subtitle.label || subtitle.lang || `Subtitle ${index + 1}`}
-                  default={subtitlesDefaultEnabled && selectedSubtitleTrackIndex === trackIndex}
-                />
-              );
-            })}
-          </video>
+          {!mpvActive && (
+            <video
+              ref={videoRef}
+              className="h-full w-full"
+              style={videoStyle}
+              preload="auto"
+            >
+              {visibleSubtitles.map((subtitle, index) => {
+                const trackIndex = -1000 - index;
+                return (
+                  <track
+                    key={`${subtitle.url}-${index}`}
+                    kind="subtitles"
+                    src={subtitleSource(subtitle.url, serverBase)}
+                    srcLang={subtitle.lang || 'en'}
+                    label={subtitle.label || subtitle.lang || `Subtitle ${index + 1}`}
+                    default={subtitlesDefaultEnabled && selectedSubtitleTrackIndex === trackIndex}
+                  />
+                );
+              })}
+            </video>
+          )}
 
           <SubtitleOverlay
             cues={subtitleCues}
             videoRef={videoRef}
             transcodeStartSecondsRef={transcodeStartSecondsRef}
+            streamIsSeekableRef={streamIsSeekableRef}
             streamIsTranscoded={streamIsTranscoded}
             style={subtitleStyle}
             visible={showSubtitleOverlay}
@@ -2695,10 +3010,16 @@ export default function VideoPlayer({
           audioTracks={audioTracks}
           selectedAudioTrackIndex={selectedAudioTrackIndex}
           selectAudioTrack={selectAudioTrack}
+          audioDelay={audioDelay}
+          updateAudioDelay={updateAudioDelay}
+          audioDelayAvailable={mpvActive}
           subtitlesDefaultEnabled={subtitlesDefaultEnabled}
           subtitleTracks={subtitleTracks}
           selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
           selectSubtitleTrack={selectSubtitleTrack}
+          secondarySubtitlesAvailable={mpvActive}
+          selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
+          selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
           subtitleStyle={subtitleStyle}
           subtitleCueFontSize={subtitleCueFontSize}
           updateSubtitleStyle={updateSubtitleStyle}

@@ -20,6 +20,10 @@ import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
   LocalSegmentAnalysisStatus,
+  MpvAvailability,
+  MpvCommand,
+  MpvPlaybackState,
+  MpvStartOptions,
   ManualMediaSegmentInput,
   ManagedMediaSegment,
   MediaSegmentRequest,
@@ -76,6 +80,10 @@ export type {
   MediaSegmentType,
   MetadataApiKeys,
   MetadataKeyTestResult,
+  MpvAvailability,
+  MpvCommand,
+  MpvPlaybackState,
+  MpvStartOptions,
   OfficialArtworkResult,
   OfficialArtworkRefreshTarget,
   OfficialMetadataApplyTarget,
@@ -104,6 +112,7 @@ export type {
   TranscodeSession,
   UpdateState,
 } from '../shared/desktopProtocol.ts';
+export type { MpvPlaybackTrack } from '../shared/desktopProtocol.ts';
 export type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
 declare const __APP_VERSION__: string | undefined;
 
@@ -194,6 +203,13 @@ export type DesktopBridgeApi = {
       checkForUpdates?: () => Promise<UpdateState>;
       installUpdate?: () => Promise<UpdateState>;
       onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
+      mpv?: {
+        availability: () => Promise<MpvAvailability>;
+        start: (filePath: string, options?: MpvStartOptions) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
+        command: (sessionId: string, command: MpvCommand) => Promise<boolean>;
+        stop: (sessionId: string) => Promise<boolean>;
+        onState: (callback: (state: MpvPlaybackState) => void) => () => void;
+      };
       media?: {
         probe: (filePath: string) => Promise<ApiResult<unknown>>;
         canDirectPlay: (filePath: string, backend?: 'html5' | 'hls') => Promise<ApiResult<boolean>>;
@@ -1279,6 +1295,34 @@ export const desktopApi = {
       body: JSON.stringify({ filePath }),
     });
     return response.ok;
+  },
+
+  mpv: {
+    async availability(): Promise<MpvAvailability> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
+        return { available: false, reason: 'mpv playback is available for local files in the desktop app.' };
+      }
+      return window.desktopApi.mpv.availability();
+    },
+
+    async start(filePath: string, options?: MpvStartOptions): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
+        return { ok: false, error: 'mpv playback is unavailable for this media source.' };
+      }
+      return window.desktopApi.mpv.start(filePath, options);
+    },
+
+    async command(sessionId: string, command: MpvCommand): Promise<boolean> {
+      return window.desktopApi?.mpv?.command(sessionId, command) ?? false;
+    },
+
+    async stop(sessionId: string): Promise<boolean> {
+      return window.desktopApi?.mpv?.stop(sessionId) ?? false;
+    },
+
+    onState(callback: (state: MpvPlaybackState) => void): () => void {
+      return window.desktopApi?.mpv?.onState(callback) || (() => undefined);
+    },
   },
 
   media: {
