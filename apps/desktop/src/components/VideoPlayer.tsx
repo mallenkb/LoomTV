@@ -344,13 +344,11 @@ export default function VideoPlayer({
   }, [syncPlaybackUi]);
 
   const trackPreferenceScopeKey = useMemo(() => trackPreferenceScope(mediaId, filePath), [filePath, mediaId]);
-  const [sharedTrackPreferences, setSharedTrackPreferences] = useState<PlaybackTrackPreferences>({});
   const sharedTrackPreferencesRef = useRef<PlaybackTrackPreferences>({});
   const trackPreferencesLoadRef = useRef<Promise<PlaybackTrackPreferences>>(Promise.resolve({}));
   useEffect(() => {
     let cancelled = false;
     sharedTrackPreferencesRef.current = {};
-    setSharedTrackPreferences({});
     const loadPreferences = loadSharedTrackPreferences(trackPreferenceScopeKey).then((preferences) => {
       const currentPreferences = sharedTrackPreferencesRef.current;
       return {
@@ -366,7 +364,6 @@ export default function VideoPlayer({
         // still loading. Keep that newer in-session choice when the request
         // completes instead of overwriting it with the older stored value.
         sharedTrackPreferencesRef.current = mergedPreferences;
-        setSharedTrackPreferences(mergedPreferences);
       }
     });
     return () => {
@@ -686,7 +683,9 @@ export default function VideoPlayer({
     const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
     const firstAudio = preferredAudio ?? firstTrackIndex(nextTracks, 'audio');
     const firstSubtitle = preferredSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(nextTracks) : -1);
-    const subtitlesEnabled = hasSubtitlePreference ? firstSubtitle >= 0 : subtitlesDefaultEnabledRef.current;
+    const subtitlesEnabled = hasSubtitlePreference
+      ? firstSubtitle !== -1
+      : subtitlesDefaultEnabledRef.current;
 
     probedDurationRef.current = nextDuration;
     probeTracksRef.current = nextTracks;
@@ -957,10 +956,12 @@ export default function VideoPlayer({
     probedDurationRef.current = libraryDurationHint;
     probeTracksRef.current = externalSubtitleTracks;
     setMediaTracks(externalSubtitleTracks);
-    const preferences = sharedTrackPreferences;
+    const preferences = sharedTrackPreferencesRef.current;
     const preferredExternalSubtitle = preferredTrackIndex(externalSubtitleTracks, 'subtitle', preferences.subtitle);
     const firstExternalSubtitle = preferredExternalSubtitle ?? (subtitlesDefaultEnabledRef.current ? firstSubtitleTrackIndex(externalSubtitleTracks) : -1);
-    const externalSubtitlesEnabled = preferences.subtitle !== undefined ? firstExternalSubtitle >= 0 : subtitlesDefaultEnabledRef.current;
+    const externalSubtitlesEnabled = preferences.subtitle !== undefined
+      ? firstExternalSubtitle !== -1
+      : subtitlesDefaultEnabledRef.current;
     subtitlesDefaultEnabledRef.current = externalSubtitlesEnabled;
     selectedSubtitleTrackIndexRef.current = firstExternalSubtitle;
     setSelectedSubtitleTrackIndex(firstExternalSubtitle);
@@ -980,7 +981,7 @@ export default function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [applyProbeData, externalSubtitleTracks, filePath, libraryDurationHint, sharedTrackPreferences, updatePlaybackSnapshot]);
+  }, [applyProbeData, externalSubtitleTracks, filePath, libraryDurationHint, updatePlaybackSnapshot]);
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
@@ -1033,7 +1034,6 @@ export default function VideoPlayer({
         const preferences = await trackPreferencesLoadRef.current;
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         sharedTrackPreferencesRef.current = preferences;
-        setSharedTrackPreferences(preferences);
         const probeResult = await desktopApi.media.probe(filePath);
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data, preferences);
@@ -1966,7 +1966,6 @@ export default function VideoPlayer({
     const preference = saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
     const nextPreferences = { ...sharedTrackPreferencesRef.current, audio: preference };
     sharedTrackPreferencesRef.current = nextPreferences;
-    setSharedTrackPreferences(nextPreferences);
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
     restartForTrackChange();
@@ -1984,7 +1983,6 @@ export default function VideoPlayer({
     const preference = saveTrackPreference(trackPreferenceScopeKey, 'subtitle', selectedTrack, enabled);
     const nextPreferences = { ...sharedTrackPreferencesRef.current, subtitle: preference };
     sharedTrackPreferencesRef.current = nextPreferences;
-    setSharedTrackPreferences(nextPreferences);
     subtitlesDefaultEnabledRef.current = enabled;
     setSubtitlesDefaultEnabled(enabled);
     saveSubtitlesDefaultEnabled(enabled);
