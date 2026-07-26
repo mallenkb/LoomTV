@@ -49,9 +49,17 @@ export interface EpisodeFile {
   title?: string;
   thumbnail?: string;
   still?: string;
-  subtitles?: { lang: string; label: string; url: string }[];
+  subtitles?: SubtitleRecord[];
   localMetadata?: LocalMediaDetails;
 }
+
+export type SubtitleRecord = {
+  lang: string;
+  label: string;
+  url: string;
+  source?: 'sidecar' | 'opensubtitles';
+  format?: string;
+};
 
 export interface ContentRating {
   code: string;
@@ -81,7 +89,7 @@ export interface MediaItem {
   seasons?: { number: number; title: string; episodeCount: number }[];
   episodes?: EpisodeMeta[];
   episodeFiles?: EpisodeFile[];
-  subtitles?: { lang: string; label: string; url: string }[];
+  subtitles?: SubtitleRecord[];
   localMetadata?: LocalMediaDetails;
   providerIds?: {
     tmdbId?: string;

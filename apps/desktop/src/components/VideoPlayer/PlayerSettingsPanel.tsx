@@ -91,10 +91,16 @@ interface PlayerSettingsPanelProps {
   audioTracks: MediaTrack[];
   selectedAudioTrackIndex: number;
   selectAudioTrack: (trackIndex: number) => void;
+  audioDelay: number;
+  updateAudioDelay: (seconds: number) => void;
+  audioDelayAvailable: boolean;
   subtitlesDefaultEnabled: boolean;
   subtitleTracks: MediaTrack[];
   selectedSubtitleTrackIndex: number;
   selectSubtitleTrack: (trackIndex: number) => void;
+  secondarySubtitlesAvailable: boolean;
+  selectedSecondarySubtitleTrackIndex: number;
+  selectSecondarySubtitleTrack: (trackIndex: number) => void;
   subtitleStyle: SubtitleStyleSettings;
   subtitleCueFontSize: number;
   updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string) => void;
@@ -123,16 +129,40 @@ export default function PlayerSettingsPanel({
   audioTracks,
   selectedAudioTrackIndex,
   selectAudioTrack,
+  audioDelay,
+  updateAudioDelay,
+  audioDelayAvailable,
   subtitlesDefaultEnabled,
   subtitleTracks,
   selectedSubtitleTrackIndex,
   selectSubtitleTrack,
+  secondarySubtitlesAvailable,
+  selectedSecondarySubtitleTrackIndex,
+  selectSecondarySubtitleTrack,
   subtitleStyle,
   subtitleCueFontSize,
   updateSubtitleStyle,
   applySubtitleStyleToStream,
   onCorrectSkipTiming,
 }: PlayerSettingsPanelProps) {
+  const subtitleGroups = [
+    {
+      key: 'embedded',
+      label: 'Embedded in video',
+      tracks: subtitleTracks.filter((track) => !track.source || track.source === 'embedded'),
+    },
+    {
+      key: 'sidecar',
+      label: 'Added subtitle files',
+      tracks: subtitleTracks.filter((track) => track.source === 'sidecar'),
+    },
+    {
+      key: 'opensubtitles',
+      label: 'OpenSubtitles',
+      tracks: subtitleTracks.filter((track) => track.source === 'opensubtitles'),
+    },
+  ].filter((group) => group.tracks.length > 0);
+
   return (
     <aside
       className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col border-l border-white/10 bg-[#111] shadow-2xl"
@@ -273,9 +303,34 @@ export default function PlayerSettingsPanel({
 
               <div>
                 <p className="mb-2 text-xs font-semibold text-white">Audio delay</p>
-                <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/55">
-                  Delay controls are not available for in-app playback yet; track switching is available here.
-                </p>
+                {audioDelayAvailable ? (
+                  <div className="rounded-lg bg-white/10 px-3 py-3">
+                    <div className="mb-2 flex items-center justify-between text-xs text-white/65">
+                      <span>Sync</span>
+                      <span className="text-[var(--loom-accent)]">{audioDelay.toFixed(2)}s</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-5}
+                      max={5}
+                      step={0.05}
+                      value={audioDelay}
+                      onChange={(event) => updateAudioDelay(Number(event.target.value))}
+                      className="w-full accent-[var(--loom-accent)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateAudioDelay(0)}
+                      className="mt-2 text-xs text-white/55 hover:text-white"
+                    >
+                      Reset delay
+                    </button>
+                  </div>
+                ) : (
+                  <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/55">
+                    Delay controls are available with native mpv playback.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -298,18 +353,56 @@ export default function PlayerSettingsPanel({
                     <span>Off</span>
                   </button>
                   {subtitleTracks.length === 0 && <p className="px-3 py-2 text-xs text-white/50">No subtitle tracks found</p>}
-                  {subtitleTracks.map((track, index) => (
-                    <button
-                      key={track.index}
-                      onClick={() => selectSubtitleTrack(track.index)}
-                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
-                    >
-                      <span className={`h-2.5 w-2.5 rounded-full ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
-                      <span className="truncate">{trackLabel(track, index)}</span>
-                    </button>
+                  {subtitleGroups.map((group) => (
+                    <div key={group.key} className="border-t border-white/10 first:border-t-0">
+                      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/45">
+                        {group.label}
+                      </p>
+                      {group.tracks.map((track) => {
+                        const ordinal = subtitleTracks.findIndex((candidate) => candidate.index === track.index);
+                        return (
+                          <button
+                            key={track.index}
+                            onClick={() => selectSubtitleTrack(track.index)}
+                            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
+                          >
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
+                            <span className="truncate">{trackLabel(track, ordinal)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   ))}
                 </div>
               </div>
+
+              {secondarySubtitlesAvailable && subtitleTracks.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-xs font-semibold text-white">Secondary subtitle</p>
+                    <p className="text-[10px] uppercase tracking-wide text-white/45">mpv</p>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto rounded-lg bg-white/10">
+                    <button
+                      onClick={() => selectSecondarySubtitleTrack(-1)}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSecondarySubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
+                    >
+                      <span className={`h-2.5 w-2.5 rounded-full ${selectedSecondarySubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
+                      <span>Off</span>
+                    </button>
+                    {subtitleTracks.map((track, index) => (
+                      <button
+                        key={`secondary-${track.index}`}
+                        onClick={() => selectSecondarySubtitleTrack(track.index)}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSecondarySubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
+                      >
+                        <span className={`h-2.5 w-2.5 rounded-full ${selectedSecondarySubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
+                        <span className="truncate">{trackLabel(track, index)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
                 <div>

@@ -58,6 +58,7 @@ import {
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
+import { stopAllMpvPlayback } from './main/mpvPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
@@ -1450,8 +1451,8 @@ registerIpcHandlers<LibraryData, AppSettings>({
   },
 });
 
-// ── VideoPlayer uses HTML5 <video> + the HTTP media server directly.
-// No player:* IPC handlers needed.
+// VideoPlayer keeps Chromium/HLS as its compatibility backend. Local desktop
+// playback can additionally use the typed mpv handlers registered above.
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
@@ -1527,6 +1528,7 @@ async function startBackgroundServices(): Promise<void> {
   }
   initAutoUpdater({
     getMainWindow,
+    stopNativePlayback: stopAllMpvPlayback,
     closeMediaServer: async () => {
       const serverToClose = getMediaServer();
       setMediaServer(null);
@@ -1617,6 +1619,7 @@ app.on('before-quit', () => {
   clearUpdateQuitFallback();
   destroyServerTray();
   destroyLanDiscovery();
+  stopAllMpvPlayback();
   // Skip if quitAndInstall already drained these — re-running close() on a
   // null server can throw and abort the install path.
   if (!isUpdateInstalling()) {

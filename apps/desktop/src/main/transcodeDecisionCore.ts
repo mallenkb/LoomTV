@@ -124,6 +124,28 @@ function makePlan(
   };
 }
 
+function requireAccurateSeek(
+  plan: BrowserPlaybackPlan,
+  options: TranscodeOptions,
+): BrowserPlaybackPlan {
+  const startSeconds = Number(options.startSeconds);
+  if (!(startSeconds > 0) || !plan.requiresFfmpeg) return plan;
+
+  // Input seeking followed by stream copy begins at the preceding keyframe.
+  // The browser timeline is then reset to zero while text subtitle cues remain
+  // on the requested absolute timeline, producing a stable (and seek-dependent)
+  // subtitle offset. Decode both A/V streams for resumed FFmpeg playback so the
+  // first rendered frame and sample correspond to startSeconds exactly.
+  return {
+    ...plan,
+    mode: 'transcode',
+    reason: `${plan.reason}; accurate resume timing requires decoding from the requested position`,
+    contentType: outputContentType(plan.container, 'transcode'),
+    copyVideo: false,
+    copyAudio: false,
+  };
+}
+
 export function browserPlaybackPlanForMetadata(
   filePath: string,
   metadata?: LocalMediaDetails,
@@ -136,7 +158,10 @@ export function browserPlaybackPlanForMetadata(
   const audioPresent = hasAudio(metadata) && options.audioTrackIndex !== -1;
 
   if (options.forceTranscode) {
-    return makePlan('transcode', 'forced transcode requested', container, metadata, false, false);
+    return requireAccurateSeek(
+      makePlan('transcode', 'forced transcode requested', container, metadata, false, false),
+      options,
+    );
   }
 
   if (
@@ -145,14 +170,20 @@ export function browserPlaybackPlanForMetadata(
     || options.subtitleFilePath
     || options.secondarySubtitleFilePath
   ) {
-    return makePlan('transcode', 'selected subtitles must be burned into the video stream', container, metadata, false, audioPresent && isBrowserSafeAudio('mp4', metadata));
+    return requireAccurateSeek(
+      makePlan('transcode', 'selected subtitles must be burned into the video stream', container, metadata, false, audioPresent && isBrowserSafeAudio('mp4', metadata)),
+      options,
+    );
   }
 
   if (!metadata || !videoCodec) {
     if (isBrowserSafeContainer(container)) {
       return makePlan('direct', 'metadata unavailable; trying browser-safe container directly', container, metadata, false, false);
     }
-    return makePlan('transcode', 'metadata unavailable for a browser-unsafe container', container, metadata, false, false);
+    return requireAccurateSeek(
+      makePlan('transcode', 'metadata unavailable for a browser-unsafe container', container, metadata, false, false),
+      options,
+    );
   }
 
   const safeContainer = isBrowserSafeContainer(container);
@@ -171,12 +202,21 @@ export function browserPlaybackPlanForMetadata(
     const reason = hasSelectedTracks
       ? 'selected tracks require repackaging while streams remain browser-safe'
       : 'container is not browser-safe but video and audio can be stream-copied';
-    return makePlan('remux', reason, container, metadata, true, copyAudioToMp4);
+    return requireAccurateSeek(
+      makePlan('remux', reason, container, metadata, true, copyAudioToMp4),
+      options,
+    );
   }
 
   if (copyVideoToMp4) {
-    return makePlan('direct-stream', 'video can be copied but audio must be converted for the browser', container, metadata, true, false);
+    return requireAccurateSeek(
+      makePlan('direct-stream', 'video can be copied but audio must be converted for the browser', container, metadata, true, false),
+      options,
+    );
   }
 
-  return makePlan('transcode', 'video codec, profile, or pixel format is outside the browser playback profile', container, metadata, false, audioPresent && ['aac', 'mp3'].includes(audioCodec));
+  return requireAccurateSeek(
+    makePlan('transcode', 'video codec, profile, or pixel format is outside the browser playback profile', container, metadata, false, audioPresent && ['aac', 'mp3'].includes(audioCodec)),
+    options,
+  );
 }

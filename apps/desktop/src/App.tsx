@@ -277,6 +277,7 @@ function AppShell() {
 
   return (
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
+      <div className="loom-app-underlay contents">
       <Sidebar />
       <div
         className={`loom-main-drag-region${isSettingsRoute ? ' loom-main-drag-region-settings' : ''}`}
@@ -307,6 +308,7 @@ function AppShell() {
           </Routes>
         </ErrorBoundary>
       </main>
+      </div>
       {nowPlaying && (
         <ErrorBoundary
           title="Playback stopped unexpectedly"
@@ -332,7 +334,9 @@ function AppShell() {
           />
         </ErrorBoundary>
       )}
-      <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
+      <div className="loom-app-underlay contents">
+        <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
+      </div>
     </div>
   );
 }
