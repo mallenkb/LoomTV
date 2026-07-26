@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildBrowserStreamArgs } from '../src/main/streamTranscodePlan.ts';
 
-test('builds the unchanged direct-stream copy argument order', () => {
+test('preserves a shared timestamp origin for seeked direct-stream copies', () => {
   assert.deepEqual(buildBrowserStreamArgs({
     filePath: '/media/show.mkv',
     options: { startSeconds: 91.9, videoTrackIndex: 2, audioTrackIndex: 3 },
@@ -10,7 +10,7 @@ test('builds the unchanged direct-stream copy argument order', () => {
     copyAudio: true,
     hardwareEncoder: null,
   }), [
-    '-nostdin', '-ss', '91', '-i', '/media/show.mkv',
+    '-nostdin', '-ss', '91', '-copyts', '-start_at_zero', '-i', '/media/show.mkv',
     '-map', '0:2', '-map', '0:3?',
     '-sn', '-dn', '-map_chapters', '-1', '-map_metadata', '-1',
     '-c:v', 'copy', '-c:a', 'copy',
