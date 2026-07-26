@@ -1,21 +1,20 @@
-# Native mpv playback experiment
+# Native mpv playback
 
-This branch adds an optional local-desktop mpv backend without replacing the
+LoomTV uses a local-desktop mpv backend without replacing the
 LoomTV server, React player controls, or FFmpeg/HLS compatibility path.
 
-## Enable it
+## Runtime setup
 
 1. Install mpv for the current platform, or set `LOOMTV_MPV_PATH` to an mpv
    executable.
-2. Open **Settings → Playback**.
-3. Enable **Native mpv playback (experimental)** and save.
-4. Play a local library item.
+2. Play a local library item. LoomTV automatically uses mpv when it is
+   available.
 
 LoomTV checks packaged-runtime locations, common system locations, then `PATH`.
 Remote desktop items and missing/broken mpv installations automatically use the
 existing Chromium/HLS player.
 
-## What the spike covers
+## What the integration covers
 
 - Direct local-file playback without a LoomTV FFmpeg session.
 - Main-process ownership of the mpv process and JSON IPC socket/named pipe.
@@ -30,7 +29,7 @@ existing Chromium/HLS player.
 
 ## Deliberate limits
 
-- The experiment uses a user-installed mpv runtime. It does not copy the local
+- The current integration uses a user-installed mpv runtime. It does not copy the local
   Homebrew/system binary into release packages.
 - Remote mpv direct play is not enabled yet. The current remote `/stream` route
   is browser-oriented and may remux or transcode away embedded tracks.

@@ -9,9 +9,14 @@ import type {
   MpvAvailability,
   MpvCommand,
   MpvPlaybackState,
-  MpvPlaybackTrack,
   MpvStartOptions,
 } from '../shared/desktopProtocol.ts';
+import {
+  finiteNumber,
+  isLikelyNaturalMpvEof,
+  normalizeMpvTracks,
+  unexpectedMpvExitMessage,
+} from './mpvPlaybackHelpers.ts';
 
 type MpvJsonMessage = {
   event?: string;
@@ -19,6 +24,12 @@ type MpvJsonMessage = {
   data?: unknown;
   error?: string;
   reason?: string;
+  request_id?: number;
+};
+
+type MpvRuntime = {
+  executablePath: string;
+  source: 'configured' | 'bundled' | 'system';
 };
 
 const OBSERVED_PROPERTIES = [
@@ -59,13 +70,56 @@ function systemCandidates(): string[] {
   return ['/usr/bin/mpv', '/usr/local/bin/mpv', '/snap/bin/mpv'];
 }
 
-function resolveMpvExecutable(): string | null {
+// Discovery stats up to six paths, may shell out to `which`, and `mpv --version`
+// spawns a process — all synchronous. `mpvAvailability()` runs before every
+// playback start, so without this cache each play blocks the main process (and
+// therefore the media server serving any paired device). Keyed on
+// LOOMTV_MPV_PATH so pointing at a different binary re-resolves, and cleared by
+// invalidateMpvRuntimeCache() when a launch fails.
+type MpvRuntimeCache = {
+  key: string;
+  runtime: MpvRuntime | null;
+  version?: string;
+  resolvedAt: number;
+};
+let runtimeCache: MpvRuntimeCache | null = null;
+const MISSING_RUNTIME_CACHE_MS = 5000;
+
+function runtimeCacheKey(): string {
+  return process.env.LOOMTV_MPV_PATH?.trim() || '';
+}
+
+export function invalidateMpvRuntimeCache(): void {
+  runtimeCache = null;
+}
+
+function cachedMpvRuntime(): MpvRuntimeCache {
+  const key = runtimeCacheKey();
+  if (
+    runtimeCache
+    && runtimeCache.key === key
+    && (runtimeCache.runtime || Date.now() - runtimeCache.resolvedAt < MISSING_RUNTIME_CACHE_MS)
+  ) return runtimeCache;
+  const runtime = resolveMpvRuntime();
+  runtimeCache = {
+    key,
+    runtime,
+    version: runtime ? mpvVersion(runtime.executablePath) : undefined,
+    resolvedAt: Date.now(),
+  };
+  return runtimeCache;
+}
+
+function resolveMpvRuntime(): MpvRuntime | null {
   const configured = process.env.LOOMTV_MPV_PATH?.trim();
-  const directCandidates = [configured, ...packagedCandidates(), ...systemCandidates()]
-    .filter((candidate): candidate is string => Boolean(candidate));
+  const directCandidates = [
+    ...(configured ? [{ executablePath: configured, source: 'configured' as const }] : []),
+    ...packagedCandidates().map((executablePath) => ({ executablePath, source: 'bundled' as const })),
+    ...systemCandidates().map((executablePath) => ({ executablePath, source: 'system' as const })),
+  ];
   const directMatch = directCandidates.find((candidate) => {
     try {
-      return fs.statSync(candidate).isFile();
+      return fs.statSync(candidate.executablePath).isFile();
     } catch {
       return false;
     }
@@ -75,9 +129,23 @@ function resolveMpvExecutable(): string | null {
   try {
     const locator = process.platform === 'win32' ? 'where' : 'which';
     const output = execFileSync(locator, [executableName()], { encoding: 'utf8', windowsHide: true });
-    return output.split(/\r?\n/).map((value) => value.trim()).find(Boolean) || null;
+    const executablePath = output.split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+    return executablePath ? { executablePath, source: 'system' } : null;
   } catch {
     return null;
+  }
+}
+
+function mpvVersion(executablePath: string): string | undefined {
+  try {
+    const output = execFileSync(executablePath, ['--version'], {
+      encoding: 'utf8',
+      timeout: 3000,
+      windowsHide: true,
+    });
+    return output.split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+  } catch {
+    return undefined;
   }
 }
 
@@ -96,42 +164,6 @@ function mpvGeometry(window: BrowserWindow): string {
   return `${Math.max(1, bounds.width)}x${Math.max(1, bounds.height)}+${bounds.x}+${y}`;
 }
 
-function numeric(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function playbackTracks(
-  value: unknown,
-  subtitleSources: Map<string, 'sidecar' | 'opensubtitles'>,
-): MpvPlaybackTrack[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry): MpvPlaybackTrack[] => {
-    if (!entry || typeof entry !== 'object') return [];
-    const track = entry as Record<string, unknown>;
-    const type = track.type === 'video' || track.type === 'audio' || track.type === 'sub'
-      ? track.type
-      : null;
-    const id = numeric(track.id);
-    if (!type || id === undefined) return [];
-    const externalPath = typeof track['external-filename'] === 'string'
-      ? path.resolve(track['external-filename'])
-      : null;
-    return [{
-      id,
-      type: type === 'sub' ? 'subtitle' : type,
-      codec: typeof track.codec === 'string' ? track.codec : undefined,
-      language: typeof track.lang === 'string' ? track.lang : undefined,
-      title: typeof track.title === 'string' ? track.title : undefined,
-      channels: typeof track['demux-channel-count'] === 'number' ? track['demux-channel-count'] : undefined,
-      default: track.default === true,
-      forced: track.forced === true,
-      selected: track.selected === true,
-      external: track.external === true,
-      source: externalPath ? subtitleSources.get(externalPath) || 'sidecar' : 'embedded',
-    }];
-  });
-}
-
 class MpvPlaybackSession {
   readonly id = crypto.randomUUID();
   private readonly address = ipcAddress(this.id);
@@ -140,9 +172,15 @@ class MpvPlaybackSession {
   private buffer = '';
   private stopped = false;
   private ended = false;
+  private terminated = false;
+  private launchError = false;
   private connectAttempts = 0;
   private requestId = 1;
   private lastPositionEventAt = 0;
+  private lastStderr = '';
+  private geometryTimer: NodeJS.Timeout | null = null;
+  private exitGraceTimer: NodeJS.Timeout | null = null;
+  private readonly pendingRequests = new Map<number, string>();
   private readonly subtitleSources: Map<string, 'sidecar' | 'opensubtitles'>;
   private state: MpvPlaybackState;
   private readonly windowListeners: Array<() => void> = [];
@@ -154,6 +192,7 @@ class MpvPlaybackSession {
     filePath: string,
     options: MpvStartOptions,
     private readonly onTerminated: (session: MpvPlaybackSession) => void,
+    private readonly onLaunchFailed: () => void,
   ) {
     this.state = { sessionId: this.id, status: 'starting' };
     this.subtitleSources = new Map(
@@ -162,10 +201,12 @@ class MpvPlaybackSession {
     if (process.platform !== 'win32') fs.rmSync(this.address, { force: true });
     const args = [
       '--no-config',
+      '--load-scripts=no',
       '--no-border',
       '--force-window=immediate',
       '--keep-open=no',
       '--idle=no',
+      '--pause=no',
       '--osc=no',
       '--osd-level=0',
       '--input-default-bindings=no',
@@ -200,25 +241,51 @@ class MpvPlaybackSession {
     this.process.stderr?.setEncoding('utf8');
     this.process.stderr?.on('data', (chunk: string) => {
       const message = chunk.trim();
-      if (message) console.warn('[mpv]', message.slice(0, 1000));
-    });
-    this.process.once('error', (error) => this.fail(error.message));
-    this.process.once('exit', (code, signal) => {
-      this.cleanup();
-      if (!this.stopped && !this.ended) {
-        this.fail(`mpv exited unexpectedly (${signal || code || 'unknown'}).`);
+      if (message) {
+        this.lastStderr = message.slice(-1000);
+        console.warn('[mpv]', message.slice(0, 1000));
       }
-      this.emit({ status: 'closed' });
-      this.onTerminated(this);
+    });
+    this.process.once('error', (error) => {
+      this.launchError = true;
+      this.onLaunchFailed();
+      this.fail(`Could not start mpv: ${error.message}`);
+    });
+    this.process.once('close', (code, signal) => {
+      // mpv may close before its final IPC end-file event is delivered. Keep
+      // the socket alive briefly so normal EOF never becomes a false crash.
+      this.exitGraceTimer = setTimeout(() => {
+        if (!this.stopped && !this.ended && !this.launchError) {
+          if (isLikelyNaturalMpvEof({
+            code,
+            position: this.state.position,
+            duration: this.state.duration,
+          })) {
+            this.ended = true;
+            this.emit({ status: 'ended', paused: true });
+          } else {
+            this.fail(unexpectedMpvExitMessage({ code, signal, stderr: this.lastStderr }));
+          }
+        }
+        this.finishTermination();
+      }, 150);
+      this.exitGraceTimer.unref();
     });
 
-    const syncGeometry = () => this.send(['set_property', 'geometry', mpvGeometry(this.ownerWindow)]);
+    const syncGeometry = () => this.scheduleGeometrySync();
+    const syncVisibility = () => this.syncWindowVisibility();
     this.ownerWindow.on('move', syncGeometry);
     this.ownerWindow.on('resize', syncGeometry);
     this.ownerWindow.on('maximize', syncGeometry);
     this.ownerWindow.on('unmaximize', syncGeometry);
     this.ownerWindow.on('enter-full-screen', syncGeometry);
     this.ownerWindow.on('leave-full-screen', syncGeometry);
+    this.ownerWindow.on('minimize', syncVisibility);
+    this.ownerWindow.on('restore', syncVisibility);
+    this.ownerWindow.on('hide', syncVisibility);
+    this.ownerWindow.on('show', syncVisibility);
+    this.ownerWindow.on('focus', syncVisibility);
+    screen.on('display-metrics-changed', syncGeometry);
     this.windowListeners.push(() => {
       this.ownerWindow.removeListener('move', syncGeometry);
       this.ownerWindow.removeListener('resize', syncGeometry);
@@ -226,6 +293,12 @@ class MpvPlaybackSession {
       this.ownerWindow.removeListener('unmaximize', syncGeometry);
       this.ownerWindow.removeListener('enter-full-screen', syncGeometry);
       this.ownerWindow.removeListener('leave-full-screen', syncGeometry);
+      this.ownerWindow.removeListener('minimize', syncVisibility);
+      this.ownerWindow.removeListener('restore', syncVisibility);
+      this.ownerWindow.removeListener('hide', syncVisibility);
+      this.ownerWindow.removeListener('show', syncVisibility);
+      this.ownerWindow.removeListener('focus', syncVisibility);
+      screen.removeListener('display-metrics-changed', syncGeometry);
     });
     const stopForDestroyedOwner = () => this.stop();
     this.owner.once('destroyed', stopForDestroyedOwner);
@@ -247,10 +320,10 @@ class MpvPlaybackSession {
       socket.on('data', (chunk: string) => this.read(chunk));
       socket.on('close', () => { this.socket = null; });
       OBSERVED_PROPERTIES.forEach((property, index) => {
-        this.send(['observe_property', index + 1, property]);
+        this.send(['observe_property', index + 1, property], `observe ${property}`);
       });
-      this.ownerWindow.show();
-      this.ownerWindow.focus();
+      this.syncWindowVisibility();
+      this.scheduleGeometrySync();
       this.emit({ status: 'loading' });
     });
     socket.once('error', () => {
@@ -282,8 +355,19 @@ class MpvPlaybackSession {
   }
 
   private handleMessage(message: MpvJsonMessage): void {
+    if (message.request_id !== undefined) {
+      const context = this.pendingRequests.get(message.request_id);
+      this.pendingRequests.delete(message.request_id);
+      if (context && message.error && message.error !== 'success') {
+        console.warn(`[mpv] ${context} failed: ${message.error}`);
+      }
+    }
     if (message.event === 'file-loaded') {
-      this.emit({ status: 'ready' });
+      // LoomTV opens playback as an autoplay action. Make this explicit rather
+      // than relying on mpv's inherited/default pause state, which can report a
+      // paused property during startup on some runtimes.
+      this.send(['set_property', 'pause', false], 'autoplay');
+      this.emit({ status: 'ready', paused: false });
       return;
     }
     if (message.event === 'start-file') {
@@ -302,7 +386,7 @@ class MpvPlaybackSession {
     if (message.event !== 'property-change' || !message.name) return;
 
     if (message.name === 'time-pos') {
-      const position = numeric(message.data);
+      const position = finiteNumber(message.data);
       this.state = { ...this.state, position };
       const now = Date.now();
       if (now - this.lastPositionEventAt >= 250) {
@@ -310,15 +394,15 @@ class MpvPlaybackSession {
         this.emit({ position });
       }
     }
-    else if (message.name === 'duration') this.emit({ duration: numeric(message.data) });
+    else if (message.name === 'duration') this.emit({ duration: finiteNumber(message.data) });
     else if (message.name === 'pause') this.emit({ paused: message.data === true });
-    else if (message.name === 'volume') this.emit({ volume: numeric(message.data) === undefined ? undefined : Number(message.data) / 100 });
+    else if (message.name === 'volume') this.emit({ volume: finiteNumber(message.data) === undefined ? undefined : Number(message.data) / 100 });
     else if (message.name === 'mute') this.emit({ muted: message.data === true });
-    else if (message.name === 'speed') this.emit({ speed: numeric(message.data) });
-    else if (message.name === 'track-list') this.emit({ tracks: playbackTracks(message.data, this.subtitleSources) });
+    else if (message.name === 'speed') this.emit({ speed: finiteNumber(message.data) });
+    else if (message.name === 'track-list') this.emit({ tracks: normalizeMpvTracks(message.data, this.subtitleSources) });
     else if (message.name === 'video-params' && message.data && typeof message.data === 'object') {
       const params = message.data as Record<string, unknown>;
-      this.emit({ videoWidth: numeric(params.w), videoHeight: numeric(params.h) });
+      this.emit({ videoWidth: finiteNumber(params.w), videoHeight: finiteNumber(params.h) });
     }
   }
 
@@ -337,10 +421,29 @@ class MpvPlaybackSession {
     this.emit({ status: 'error', error, paused: true });
   }
 
-  private send(command: unknown[]): boolean {
+  private send(command: unknown[], context?: string): boolean {
     if (!this.socket || this.socket.destroyed) return false;
-    this.socket.write(`${JSON.stringify({ command, request_id: this.requestId++ })}\n`);
+    const requestId = this.requestId++;
+    if (context) this.pendingRequests.set(requestId, context);
+    this.socket.write(`${JSON.stringify({ command, request_id: requestId })}\n`);
     return true;
+  }
+
+  private scheduleGeometrySync(): void {
+    if (this.stopped || this.ownerWindow.isDestroyed()) return;
+    if (this.geometryTimer) clearTimeout(this.geometryTimer);
+    this.geometryTimer = setTimeout(() => {
+      this.geometryTimer = null;
+      if (this.stopped || this.ownerWindow.isDestroyed()) return;
+      this.send(['set_property', 'geometry', mpvGeometry(this.ownerWindow)], 'window geometry');
+    }, 16);
+  }
+
+  private syncWindowVisibility(): void {
+    if (this.stopped || this.ownerWindow.isDestroyed()) return;
+    const minimized = this.ownerWindow.isMinimized() || !this.ownerWindow.isVisible();
+    this.send(['set_property', 'window-minimized', minimized], 'window visibility');
+    if (!minimized) this.scheduleGeometrySync();
   }
 
   command(command: MpvCommand): boolean {
@@ -385,23 +488,62 @@ class MpvPlaybackSession {
   }
 
   private cleanup(): void {
+    if (this.geometryTimer) clearTimeout(this.geometryTimer);
+    this.geometryTimer = null;
+    if (this.exitGraceTimer) clearTimeout(this.exitGraceTimer);
+    this.exitGraceTimer = null;
     this.socket?.destroy();
     this.socket = null;
+    this.pendingRequests.clear();
     this.windowListeners.splice(0).forEach((remove) => remove());
     if (process.platform !== 'win32') fs.rmSync(this.address, { force: true });
+  }
+
+  private finishTermination(): void {
+    if (this.terminated) return;
+    this.terminated = true;
+    this.cleanup();
+    this.emit({ status: 'closed' });
+    this.onTerminated(this);
   }
 }
 
 let currentSession: MpvPlaybackSession | null = null;
 
+// Developer/rollout escape hatch. Native playback is not a user preference, so
+// this is the supported way to force the Chromium/FFmpeg path for a run.
+function mpvDisabledByEnvironment(): boolean {
+  const value = process.env.LOOMTV_DISABLE_MPV?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
 export function mpvAvailability(): MpvAvailability {
-  const executablePath = resolveMpvExecutable();
-  return executablePath
-    ? { available: true, executablePath }
+  if (mpvDisabledByEnvironment()) {
+    return {
+      available: false,
+      reason: 'Native mpv playback is disabled by LOOMTV_DISABLE_MPV. LoomTV is using compatible fallback playback.',
+    };
+  }
+  const { runtime, version } = cachedMpvRuntime();
+  return runtime
+    ? {
+      available: true,
+      executablePath: runtime.executablePath,
+      runtimeSource: runtime.source,
+      version,
+    }
     : {
       available: false,
-      reason: 'Install mpv or set LOOMTV_MPV_PATH to try the experimental desktop playback backend.',
+      reason: 'Install mpv or set LOOMTV_MPV_PATH to enable native desktop playback. LoomTV will use compatible fallback playback until mpv is available.',
     };
+}
+
+/** One line describing the resolved playback runtime, for startup diagnostics. */
+export function mpvRuntimeSummary(): string {
+  const availability = mpvAvailability();
+  return availability.available
+    ? `[playback] native mpv ready — ${availability.version || 'unknown version'} (${availability.runtimeSource}: ${availability.executablePath})`
+    : `[playback] native mpv unavailable — ${availability.reason}`;
 }
 
 export function startMpvPlayback(
@@ -409,14 +551,27 @@ export function startMpvPlayback(
   filePath: string,
   options: MpvStartOptions = {},
 ): { ok: boolean; sessionId?: string; error?: string } {
-  const executable = resolveMpvExecutable();
+  if (mpvDisabledByEnvironment()) return { ok: false, error: mpvAvailability().reason };
+  const { runtime } = cachedMpvRuntime();
   const ownerWindow = BrowserWindow.fromWebContents(owner);
-  if (!executable) return { ok: false, error: mpvAvailability().reason };
+  if (!runtime) {
+    // A cached path can go stale if mpv is uninstalled mid-session.
+    invalidateMpvRuntimeCache();
+    return { ok: false, error: mpvAvailability().reason };
+  }
   if (!ownerWindow || ownerWindow.isDestroyed()) return { ok: false, error: 'The LoomTV window is unavailable.' };
   currentSession?.stop();
-  const session = new MpvPlaybackSession(executable, owner, ownerWindow, filePath, options, (terminated) => {
-    if (currentSession === terminated) currentSession = null;
-  });
+  const session = new MpvPlaybackSession(
+    runtime.executablePath,
+    owner,
+    ownerWindow,
+    filePath,
+    options,
+    (terminated) => {
+      if (currentSession === terminated) currentSession = null;
+    },
+    invalidateMpvRuntimeCache,
+  );
   currentSession = session;
   return { ok: true, sessionId: session.id };
 }

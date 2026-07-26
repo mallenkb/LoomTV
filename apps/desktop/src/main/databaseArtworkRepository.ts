@@ -26,6 +26,8 @@ export function createDatabaseArtworkRepository(
   database: BetterSqlite3.Database,
   deps: ArtworkRepositoryDependencies,
 ) {
+  const pendingArtwork = new Map<string, Promise<CachedArtwork | null>>();
+
   function saveCustomArtwork(mediaId: string, target: string, dataUrl: string): void {
     database.prepare(`
       INSERT OR REPLACE INTO custom_artwork (media_id, target, data_url, updated_at)
@@ -90,23 +92,31 @@ export function createDatabaseArtworkRepository(
   async function cacheArtworkSource(sourceUrl: string): Promise<CachedArtwork | null> {
     const existing = getCachedArtwork(sourceUrl);
     if (existing) return existing;
+    const pending = pendingArtwork.get(sourceUrl);
+    if (pending) return pending;
 
-    const cached = await deps.fetchArtworkBytes(sourceUrl);
-    if (!cached) return null;
+    const request = (async () => {
+      const cached = await deps.fetchArtworkBytes(sourceUrl);
+      if (!cached) return null;
 
-    const cachePath = path.join(deps.cacheDirectory, artworkCacheFileName(sourceUrl, cached.mimeType));
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, cached.bytes);
-    database.prepare(`
-      INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(sourceUrl, '', cachePath, cached.mimeType, cached.byteLength, Date.now());
+      const cachePath = path.join(deps.cacheDirectory, artworkCacheFileName(sourceUrl, cached.mimeType));
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      fs.writeFileSync(cachePath, cached.bytes);
+      database.prepare(`
+        INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(sourceUrl, '', cachePath, cached.mimeType, cached.byteLength, Date.now());
 
-    return {
-      cachePath,
-      mimeType: cached.mimeType,
-      byteLength: cached.byteLength,
-    };
+      return {
+        cachePath,
+        mimeType: cached.mimeType,
+        byteLength: cached.byteLength,
+      };
+    })().finally(() => {
+      pendingArtwork.delete(sourceUrl);
+    });
+    pendingArtwork.set(sourceUrl, request);
+    return request;
   }
 
   async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
@@ -137,21 +147,11 @@ export function createDatabaseArtworkRepository(
 
     const existing = new Set(rows.map((row) => row.source_url).filter((source) => sourceSet.has(source)));
     const pending = sources.filter((source) => !existing.has(source));
-    const insert = database.prepare(`
-      INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
     let index = 0;
     const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
       while (index < pending.length) {
         const source = pending[index++];
-        const cached = await deps.fetchArtworkBytes(source);
-        if (cached) {
-          const cachePath = path.join(cacheDir, artworkCacheFileName(source, cached.mimeType));
-          fs.writeFileSync(cachePath, cached.bytes);
-          insert.run(source, '', cachePath, cached.mimeType, cached.byteLength, Date.now());
-        }
+        await cacheArtworkSource(source);
       }
     });
     await Promise.all(workers);

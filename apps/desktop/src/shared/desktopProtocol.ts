@@ -106,6 +106,8 @@ export type MpvPlaybackState = {
 export type MpvAvailability = {
   available: boolean;
   executablePath?: string;
+  runtimeSource?: 'configured' | 'bundled' | 'system';
+  version?: string;
   reason?: string;
 };
 
@@ -202,7 +204,6 @@ export interface SettingsPayload {
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
-  nativeMpvPlaybackEnabled?: boolean;
   localSkipAnalysisEnabled?: boolean;
   skipAnalysis?: SkipAnalysisSettings;
   sidebarNavOrder?: string[];

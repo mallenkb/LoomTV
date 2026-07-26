@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import type { LocalSegmentAnalysisStatus, MpvAvailability, SkipAnalysisSettings } from '@/lib/desktopApi';
+import type { LocalSegmentAnalysisStatus, SkipAnalysisSettings } from '@/lib/desktopApi';
 import SkipTimestampManager from './SkipTimestampManager';
 
 type PlaybackSettingsSectionProps = {
@@ -11,9 +11,7 @@ type PlaybackSettingsSectionProps = {
   skipForwardSeconds: number;
   onSkipBackChange: (value: number) => void;
   onSkipForwardChange: (value: number) => void;
-  nativeMpvPlaybackEnabled: boolean;
-  onNativeMpvPlaybackChange: (enabled: boolean) => void;
-  mpvAvailability: MpvAvailability | null;
+  playbackSettingsDirty: boolean;
   skipAnalysis: SkipAnalysisSettings;
   onSkipAnalysisChange: (value: SkipAnalysisSettings) => void;
   analysisStatus: LocalSegmentAnalysisStatus | null;
@@ -43,9 +41,7 @@ export default function PlaybackSettingsSection({
   skipForwardSeconds,
   onSkipBackChange,
   onSkipForwardChange,
-  nativeMpvPlaybackEnabled,
-  onNativeMpvPlaybackChange,
-  mpvAvailability,
+  playbackSettingsDirty,
   skipAnalysis,
   onSkipAnalysisChange,
   analysisStatus,
@@ -124,30 +120,6 @@ export default function PlaybackSettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {showServerControls && (
-            <label className="mb-5 flex items-start gap-3 rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4">
-              <span className="relative mt-0.5 grid h-5 w-5 shrink-0 place-items-center">
-                <input
-                  type="checkbox"
-                  checked={nativeMpvPlaybackEnabled}
-                  disabled={!mpvAvailability?.available}
-                  onChange={(event) => onNativeMpvPlaybackChange(event.target.checked)}
-                  className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-[var(--loom-control-border)] bg-[var(--loom-bg)] transition-colors checked:border-[var(--loom-accent)] checked:bg-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-45"
-                />
-                <Check className="pointer-events-none absolute h-3.5 w-3.5 text-[var(--loom-accent-foreground)] opacity-0 transition-opacity peer-checked:opacity-100" strokeWidth={3} />
-              </span>
-              <span>
-                <span className="block text-sm font-medium text-white">Native mpv playback (experimental)</span>
-                <span className="mt-1 block text-xs text-[var(--loom-muted)]">
-                  {mpvAvailability === null
-                    ? 'Checking for a local mpv runtime…'
-                    : mpvAvailability.available
-                      ? 'Uses mpv for local desktop files while keeping LoomTV controls. Remote and fallback playback are unchanged.'
-                      : mpvAvailability.reason || 'Install mpv to enable the native playback experiment.'}
-                </span>
-              </span>
-            </label>
-          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="space-y-2">
               <span className="text-sm font-medium text-white">Back skip seconds</span>
@@ -159,7 +131,7 @@ export default function PlaybackSettingsSection({
             </label>
           </div>
           <div className="mt-4 flex justify-end">
-            <Button type="button" onClick={onSave}>Save playback settings</Button>
+            <Button type="button" disabled={!playbackSettingsDirty} onClick={onSave}>Save playback settings</Button>
           </div>
         </CardContent>
       </Card>

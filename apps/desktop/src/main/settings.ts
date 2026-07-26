@@ -175,7 +175,6 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     playbackSkipForwardSeconds: Number.isFinite(Number(raw.playbackSkipForwardSeconds)) && Number(raw.playbackSkipForwardSeconds) > 0
       ? Number(raw.playbackSkipForwardSeconds)
       : 15,
-    nativeMpvPlaybackEnabled: Boolean(raw.nativeMpvPlaybackEnabled),
     localSkipAnalysisEnabled: skipAnalysis.enabled,
     skipAnalysis,
     sidebarNavOrder,

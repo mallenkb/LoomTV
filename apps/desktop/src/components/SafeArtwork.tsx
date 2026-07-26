@@ -7,6 +7,7 @@ interface SafeArtworkProps {
   imgClassName?: string;
   fallback?: React.ReactNode;
   onError?: () => void;
+  priority?: boolean;
 }
 
 function normalizeSources(src: string | string[]): string[] {
@@ -21,6 +22,7 @@ export default function SafeArtwork({
   imgClassName = 'object-cover',
   fallback,
   onError,
+  priority = false,
 }: SafeArtworkProps) {
   const [sourceIndex, setSourceIndex] = useState(0);
   const failedSourcesRef = useRef<Set<string>>(new Set());
@@ -40,7 +42,8 @@ export default function SafeArtwork({
         <img
           src={currentSource}
           alt={alt}
-          loading="eager"
+          loading={priority ? 'eager' : 'lazy'}
+          fetchPriority={priority ? 'high' : 'auto'}
           decoding="async"
           className={`absolute inset-0 h-full w-full ${imgClassName}`}
           onError={() => {

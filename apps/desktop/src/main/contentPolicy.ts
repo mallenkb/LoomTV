@@ -13,6 +13,27 @@ function isWithin(root: string, candidate: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function sameLocalPath(left: string, right: string): boolean {
+  if (!left || !right || /^[a-z]+:\/\//i.test(left) || /^[a-z]+:\/\//i.test(right)) return false;
+  return canonical(left) === canonical(right);
+}
+
+function subtitlePath(source: string): string | null {
+  if (!source) return null;
+  try {
+    const parsed = new URL(source, 'http://127.0.0.1');
+    if (parsed.pathname === '/subtitle') return parsed.searchParams.get('path');
+  } catch {
+    // A plain filesystem path is handled below.
+  }
+  return /^[a-z]+:\/\//i.test(source) ? null : source;
+}
+
+function subtitleMatchesPath(source: string, candidate: string): boolean {
+  const resolved = subtitlePath(source);
+  return Boolean(resolved && sameLocalPath(resolved, candidate));
+}
+
 export function profileCanAccessMedia(profileId: string, item: MediaItem): boolean {
   const profile = getProfile(profileId);
   if (!profile) return false;
@@ -43,10 +64,11 @@ export function filterLibraryForProfile(library: LibraryData, profileId: string)
 
 export function mediaItemForPath(library: LibraryData, filePath: string): MediaItem | null {
   return [...library.movies, ...library.tvShows, ...library.animeShows].find((item) =>
-    item.filePath === filePath
-    || item.subtitles?.some((subtitle) => subtitle.url === filePath)
+    sameLocalPath(item.filePath, filePath)
+    || item.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, filePath))
     || item.episodeFiles?.some((episode) =>
-      episode.filePath === filePath || episode.subtitles?.some((subtitle) => subtitle.url === filePath),
+      sameLocalPath(episode.filePath, filePath)
+      || episode.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, filePath)),
     ),
   ) || null;
 }

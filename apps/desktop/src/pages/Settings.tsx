@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
-import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type MpvAvailability, type SkipAnalysisSettings } from '@/lib/desktopApi';
+import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useTheme } from '@/components/ThemeProvider';
 import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
@@ -50,6 +50,11 @@ const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
   analyzeSpecials: false,
   exclusions: { seriesIds: [], movieIds: [], seasons: [], paths: [] },
   seasonOverrides: {},
+};
+
+type SavedPlaybackSettings = {
+  skipBackSeconds: number;
+  skipForwardSeconds: number;
 };
 
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
@@ -163,8 +168,7 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
-  const [nativeMpvPlaybackEnabled, setNativeMpvPlaybackEnabled] = useState(false);
-  const [mpvAvailability, setMpvAvailability] = useState<MpvAvailability | null>(null);
+  const [savedPlaybackSettings, setSavedPlaybackSettings] = useState<SavedPlaybackSettings | null>(null);
   const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
   const [draggedSidebarItem, setDraggedSidebarItem] = useState<SidebarNavItemId | null>(null);
@@ -249,14 +253,18 @@ export default function Settings() {
       setCustomFolderNames(s.customFolderNames || {});
       const skipBack = profilePreferences.playbackSkipBackSeconds ?? s.playbackSkipBackSeconds;
       const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
-      setPlaybackSkipBackSeconds(Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10);
-      setPlaybackSkipForwardSeconds(Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15);
-      setNativeMpvPlaybackEnabled(Boolean(s.nativeMpvPlaybackEnabled));
+      const loadedSkipBack = Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10;
+      const loadedSkipForward = Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15;
+      setPlaybackSkipBackSeconds(loadedSkipBack);
+      setPlaybackSkipForwardSeconds(loadedSkipForward);
+      setSavedPlaybackSettings({
+        skipBackSeconds: loadedSkipBack,
+        skipForwardSeconds: loadedSkipForward,
+      });
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
     if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
       void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
-      void desktopApi.mpv.availability().then(setMpvAvailability);
     }
     try {
       const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
@@ -406,12 +414,20 @@ export default function Settings() {
       if (!await persistSettings({
         localSkipAnalysisEnabled: skipAnalysis.enabled,
         skipAnalysis,
-        nativeMpvPlaybackEnabled,
       })) return false;
       setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
     }
+    setSavedPlaybackSettings({
+      skipBackSeconds: normalizedBack,
+      skipForwardSeconds: normalizedForward,
+    });
     return true;
   };
+
+  const playbackSettingsDirty = savedPlaybackSettings !== null && (
+    playbackSkipBackSeconds !== savedPlaybackSettings.skipBackSeconds
+    || playbackSkipForwardSeconds !== savedPlaybackSettings.skipForwardSeconds
+  );
 
   const handleAnalysisAction = async (
     action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
@@ -819,9 +835,7 @@ export default function Settings() {
                   skipForwardSeconds={playbackSkipForwardSeconds}
                   onSkipBackChange={setPlaybackSkipBackSeconds}
                   onSkipForwardChange={setPlaybackSkipForwardSeconds}
-                  nativeMpvPlaybackEnabled={nativeMpvPlaybackEnabled}
-                  onNativeMpvPlaybackChange={setNativeMpvPlaybackEnabled}
-                  mpvAvailability={mpvAvailability}
+                  playbackSettingsDirty={playbackSettingsDirty}
                   skipAnalysis={skipAnalysis}
                   onSkipAnalysisChange={setSkipAnalysis}
                   analysisStatus={localAnalysisStatus}

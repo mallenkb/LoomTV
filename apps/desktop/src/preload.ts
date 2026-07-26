@@ -97,7 +97,6 @@ const desktopApi = {
     autoSyncIntervalHours?: number;
     playbackSkipBackSeconds?: number;
     playbackSkipForwardSeconds?: number;
-    nativeMpvPlaybackEnabled?: boolean;
     localSkipAnalysisEnabled?: boolean;
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';

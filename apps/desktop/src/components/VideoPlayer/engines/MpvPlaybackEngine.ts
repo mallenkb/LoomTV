@@ -23,7 +23,9 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   async load(filePath: string, options?: MpvStartOptions): Promise<boolean> {
     const result = await desktopApi.mpv.start(filePath, options);
-    if (!result.ok || !result.sessionId) return false;
+    if (!result.ok || !result.sessionId) {
+      throw new Error(result.error || 'Native mpv playback could not be started.');
+    }
     this.sessionId = result.sessionId;
     this.pendingStates.splice(0).forEach((state) => {
       if (state.sessionId === this.sessionId) this.listener(state);
@@ -58,6 +60,7 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
 
   async destroy(): Promise<void> {
     this.unsubscribe();
+    this.pendingStates.length = 0;
     const sessionId = this.sessionId;
     this.sessionId = null;
     if (sessionId) await desktopApi.mpv.stop(sessionId);

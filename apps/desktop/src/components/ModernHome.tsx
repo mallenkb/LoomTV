@@ -267,7 +267,13 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
             exit={{ opacity: 0 }}
             transition={artworkTransition}
           >
-            <SafeArtwork src={backdropSources(item)} alt="" className="h-full w-full" imgClassName="object-cover object-center" />
+            <SafeArtwork
+              src={backdropSources(item)}
+              alt=""
+              className="h-full w-full"
+              imgClassName="object-cover object-center"
+              priority
+            />
           </motion.div>
         </AnimatePresence>
         <div className="loom-modern-hero-vignette absolute inset-0" />

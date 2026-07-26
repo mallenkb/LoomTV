@@ -11,6 +11,8 @@ export interface MediaTrack {
   height?: number;
   profile?: string;
   pixelFormat?: string;
+  /** Frames per second, resolved from ffprobe's rational frame rate. */
+  frameRate?: number;
   default?: boolean;
   forced?: boolean;
 }

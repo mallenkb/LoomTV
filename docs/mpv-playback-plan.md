@@ -639,8 +639,8 @@ HLS and transcoding. Normalize track labels and preference behavior across clien
 ### Phase 8 — Packaging and release
 
 Signed builds per OS and arch. Verify updates preserve mpv and preferences. Runtime
-checks and fallback. Ship behind a "Native mpv playback" beta toggle; default it on
-once stability data supports it.
+checks and fallback. Local desktop playback automatically uses mpv with
+Chromium/FFmpeg fallback when the runtime or media source requires it.
 
 ---
 

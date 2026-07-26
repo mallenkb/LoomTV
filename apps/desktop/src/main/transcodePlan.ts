@@ -41,6 +41,36 @@ export interface HlsMediaInfo {
   videoProfile?: string;
   pixelFormat?: string;
   audioCodec?: string;
+  frameRate?: number;
+}
+
+/**
+ * Snap a nominal segment length to a whole number of frames.
+ *
+ * `-hls_time N` cannot split mid-frame, so the encoder emits the first frame at
+ * or after N — 2s of 24000/1001fps content becomes 48 frames, i.e. 2.002s. The
+ * synthesized VOD playlist and the window seek math both used the nominal 2s, so
+ * a segment's declared start drifted from its real content by
+ * `segmentIndexWithinWindow * 0.002`. Over a 45-segment window that reaches
+ * ~90ms, and because segments are cached across windows two neighbours could
+ * carry different accumulated error, putting a step discontinuity mid-playback.
+ * Quantizing here makes the playlist, the input seek, the timestamp offset and
+ * the forced-keyframe expression agree exactly.
+ */
+export function frameAlignedSegmentSeconds(segmentSeconds: number, frameRate?: number): number {
+  if (!(segmentSeconds > 0)) return HLS_SEGMENT_SECONDS;
+  if (!frameRate || !Number.isFinite(frameRate) || frameRate <= 0) return segmentSeconds;
+  const framesPerSegment = Math.round(segmentSeconds * frameRate);
+  if (!(framesPerSegment > 0)) return segmentSeconds;
+  return framesPerSegment / frameRate;
+}
+
+/**
+ * Seconds for an FFmpeg time argument. Truncating to whole seconds would defeat
+ * {@link frameAlignedSegmentSeconds}, whose grid is fractional.
+ */
+function ffmpegSeconds(value: number): string {
+  return Math.max(0, Number.isFinite(value) ? value : 0).toFixed(6);
 }
 
 interface BuildHlsArgsInput {
@@ -202,7 +232,7 @@ export function buildHlsArgs({
   const segSeconds = segmentSeconds > 0 ? segmentSeconds : HLS_SEGMENT_SECONDS;
 
   if (typeof options.startSeconds === 'number' && options.startSeconds > 0) {
-    args.push('-ss', String(Math.floor(options.startSeconds)));
+    args.push('-ss', ffmpegSeconds(options.startSeconds));
   }
 
   if (!copyVideo && preset === 'nvenc') {
@@ -214,7 +244,10 @@ export function buildHlsArgs({
   args.push('-i', filePath);
 
   if (seekable && windowSegments > 0) {
-    args.push('-t', String(Math.ceil(segSeconds * windowSegments)));
+    // Keep the encoder window on the same precise grid as the synthetic
+    // playlist. Rounding up would create one trailing partial segment that
+    // could later be mistaken for a complete cached segment.
+    args.push('-t', ffmpegSeconds(segSeconds * windowSegments));
   }
 
   if (bitmapSubtitle) {
@@ -298,7 +331,7 @@ export function buildHlsArgs({
     // segments across repositions without playlist discontinuities.
     args.push(
       '-avoid_negative_ts', 'disabled',
-      '-output_ts_offset', String(Math.max(0, Math.floor(options.startSeconds || 0))),
+      '-output_ts_offset', ffmpegSeconds(options.startSeconds || 0),
     );
   } else {
     args.push('-avoid_negative_ts', 'make_zero');

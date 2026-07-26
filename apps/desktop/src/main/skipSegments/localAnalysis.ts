@@ -91,6 +91,7 @@ function lowerPriority(proc: ChildProcess): void {
 function collectOutput(proc: ChildProcess, maxBytes = MAX_OUTPUT_BYTES, label = 'Analysis helper'): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
+    const errorChunks: Buffer[] = [];
     let bytes = 0;
     proc.stdout?.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
@@ -101,10 +102,16 @@ function collectOutput(proc: ChildProcess, maxBytes = MAX_OUTPUT_BYTES, label = 
       }
       chunks.push(chunk);
     });
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      if (errorChunks.reduce((total, value) => total + value.length, 0) < 16 * 1024) errorChunks.push(chunk);
+    });
     proc.once('error', reject);
     proc.once('exit', (code, signal) => {
       if (code === 0) resolve(Buffer.concat(chunks));
-      else reject(new Error(`Fingerprint helper stopped (${signal || code || 'unknown'}).`));
+      else {
+        const detail = Buffer.concat(errorChunks).toString('utf8').trim().split('\n').pop();
+        reject(new Error(`${label} stopped (${signal || code || 'unknown'})${detail ? `: ${detail}` : ''}.`));
+      }
     });
   });
 }
@@ -175,8 +182,7 @@ async function generateFingerprint(
   if (!ffmpeg.stdout || !fpcalc.stdin) throw new Error('Unable to connect media analysis processes.');
   ffmpeg.stdout.pipe(fpcalc.stdin);
   ffmpeg.stderr?.resume();
-  fpcalc.stderr?.resume();
-  const output = await collectOutput(fpcalc);
+  const output = await collectOutput(fpcalc, MAX_OUTPUT_BYTES, 'Fingerprint helper');
   const parsed = JSON.parse(output.toString('utf8')) as { fingerprint?: number[]; duration?: number };
   if (!Array.isArray(parsed.fingerprint) || parsed.fingerprint.length === 0) throw new Error('fpcalc returned no raw fingerprint frames.');
   const value: FingerprintWindow = {
@@ -343,6 +349,14 @@ export function createLocalSegmentAnalysis(deps: {
     return value.exclusions.paths.some((entry) => resolved === path.resolve(entry) || resolved.startsWith(`${path.resolve(entry)}${path.sep}`));
   }
 
+  function analysisFile(file: EpisodeFile): EpisodeFile {
+    const metadata = file.localMetadata;
+    const hasAudioTrack = metadata?.tracks?.some((track) => track.type === 'audio');
+    if (metadata?.durationSeconds && hasAudioTrack) return file;
+    const probedMetadata = deps.probeMediaFile(file.filePath).localMetadata;
+    return probedMetadata ? { ...file, localMetadata: probedMetadata } : file;
+  }
+
   function contexts(mediaId: string, season: number): AnalysisContext[] {
     const item = [...(deps.loadLibrary().tvShows || []), ...(deps.loadLibrary().animeShows || [])]
       .find((candidate) => candidate.id === mediaId);
@@ -351,13 +365,14 @@ export function createLocalSegmentAnalysis(deps: {
       .filter((file) => file.season === season && fs.existsSync(file.filePath) && !excluded(item, season, file.filePath))
       .sort((a, b) => a.episode - b.episode)
       .flatMap((file) => {
-        const probe = file.localMetadata?.durationSeconds ? null : deps.probeMediaFile(file.filePath);
-        const durationMs = Math.round((file.localMetadata?.durationSeconds || probe?.localMetadata?.durationSeconds || 0) * 1000);
+        const analyzedFile = analysisFile(file);
+        const durationMs = Math.round((analyzedFile.localMetadata?.durationSeconds || 0) * 1000);
         if (!durationMs) return [];
-        const audio = audioIdentity(file);
+        const audio = audioIdentity(analyzedFile);
+        if (!analyzedFile.localMetadata?.tracks?.some((track) => track.type === 'audio')) return [];
         return [{
           item,
-          file,
+          file: analyzedFile,
           durationMs,
           audioTrack: audio.index,
           audioLanguage: audio.language,
@@ -369,16 +384,15 @@ export function createLocalSegmentAnalysis(deps: {
   function movieContext(mediaId: string): AnalysisContext | null {
     const item = (deps.loadLibrary().movies || []).find((candidate) => candidate.id === mediaId);
     if (!item || item.type !== 'movie' || !item.filePath || !fs.existsSync(item.filePath) || excluded(item, 0, item.filePath)) return null;
-    const probe = item.localMetadata ? { localMetadata: item.localMetadata } : deps.probeMediaFile(item.filePath);
-    const durationMs = Math.round((item.localMetadata?.durationSeconds || probe.localMetadata?.durationSeconds || 0) * 1000);
-    if (!durationMs) return null;
-    const file: EpisodeFile = {
+    const file = analysisFile({
       season: 0,
       episode: 0,
       filePath: item.filePath,
       subtitles: item.subtitles,
-      localMetadata: item.localMetadata || probe.localMetadata,
-    };
+      localMetadata: item.localMetadata,
+    });
+    const durationMs = Math.round((file.localMetadata?.durationSeconds || 0) * 1000);
+    if (!durationMs || !file.localMetadata?.tracks?.some((track) => track.type === 'audio')) return null;
     const audio = audioIdentity(file);
     return {
       item,

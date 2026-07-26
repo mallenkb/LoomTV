@@ -58,7 +58,7 @@ import {
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
-import { stopAllMpvPlayback } from './main/mpvPlayback';
+import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
@@ -203,7 +203,7 @@ import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinat
 import { setPlaybackActivityLease } from './main/ffmpegGovernor';
 import {
   createLibraryScanFiles,
-  getLibraryFolderSignature,
+  getLibraryFolderSignatureAsync,
 } from './main/libraryScanFiles';
 import {
   createLibraryScanner,
@@ -705,7 +705,7 @@ async function scanLibrary(
         continue;
       }
 
-      const folderSignature = getLibraryFolderSignature(folder);
+      const folderSignature = await getLibraryFolderSignatureAsync(folder);
       const cachedEntry = previousScanCache[folder];
 
       if (
@@ -1468,6 +1468,8 @@ export const mediaServerDeps = {
   getLanServerBase,
   getLibraryRevision: () => libraryMutationVersion,
   getMediaSegments: skipSegmentService.getSegments,
+  getWebRendererDevServerUrl: () => MAIN_WINDOW_DEV_SERVER_URL || null,
+  getWebRendererRoot: () => path.join(__dirname, '../renderer/main_window'),
   handleLanPairRequest,
   handleLanRefreshRequest,
   isExternalArtworkUrl,
@@ -1510,13 +1512,11 @@ async function startBackgroundServices(): Promise<void> {
         createWindow();
       },
       onOpenWeb: () => {
-        const rendererUrl = getLanRendererUrl();
-        if (rendererUrl) ALLOWED_CORS_ORIGINS.add(new URL(rendererUrl).origin);
-        const webUrl = rendererUrl || getLanServerBase();
-        if (!webUrl) {
+        const webUrl = `http://127.0.0.1:${getMediaServerPort()}/app/`;
+        if (!MAIN_WINDOW_DEV_SERVER_URL && !fs.existsSync(path.join(__dirname, '../renderer/main_window/index.html'))) {
           dialog.showErrorBox(
             'LoomTV Web is unavailable',
-            'Connect this computer to a local network, then try again.',
+            'The local web client could not be found. Reinstall LoomTV, then try again.',
           );
           return;
         }
@@ -1526,6 +1526,9 @@ async function startBackgroundServices(): Promise<void> {
       port: getMediaServerPort(),
     });
   }
+  // Playback engine selection is not a user setting, so the resolved runtime is
+  // reported here instead: it is the first thing needed to triage a playback bug.
+  console.log(mpvRuntimeSummary());
   initAutoUpdater({
     getMainWindow,
     stopNativePlayback: stopAllMpvPlayback,
