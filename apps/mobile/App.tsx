@@ -100,7 +100,6 @@ import {
   mobileLibraryFromIndex,
   mobileReconnectDelayMs,
   normalizeCertFingerprint,
-  rebuildMobileDetailItemCache,
   rememberMobileDetailItem,
 } from './mobileDomain';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';

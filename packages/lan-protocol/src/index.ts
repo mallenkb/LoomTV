@@ -48,7 +48,6 @@ export type LanLibraryItemDetailsPayload<TMediaItem> = {
 
 export type LanPairResponse<TLibrary> = {
   deviceId: string;
-  certFingerprint: string;
   accessToken: string;
   accessTokenExpiresAt: number;
   refreshToken: string;
