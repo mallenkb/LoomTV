@@ -103,6 +103,7 @@ import {
   rememberMobileDetailItem,
 } from './mobileDomain';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
+import { MobileReducedMotionProvider, useMobileReducedMotion } from './mobileReducedMotion';
 import {
   MOBILE_THEME_COLOR_OPTIONS,
   mobileThemeFromSettings,
@@ -724,10 +725,16 @@ function FallbackImage({
 
 const ShimmerOverlay = memo(function ShimmerOverlay() {
   const { styles } = useMobileTheme();
+  const reduceMotion = useMobileReducedMotion();
   const progress = useRef(new Animated.Value(0)).current;
   const [width, setWidth] = useState(0);
 
   useEffect(() => {
+    progress.stopAnimation();
+    if (reduceMotion) {
+      progress.setValue(0);
+      return;
+    }
     const loop = Animated.loop(
       Animated.timing(progress, {
         toValue: 1,
@@ -738,7 +745,7 @@ const ShimmerOverlay = memo(function ShimmerOverlay() {
     );
     loop.start();
     return () => loop.stop();
-  }, [progress]);
+  }, [progress, reduceMotion]);
 
   // A soft, transparent-edged sheen sized to the frame, swept from fully off the
   // left to fully off the right at a constant speed. Because both ends of the
@@ -758,7 +765,7 @@ const ShimmerOverlay = memo(function ShimmerOverlay() {
       style={styles.shimmerBase}
       onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
     >
-      {width > 0 ? (
+      {!reduceMotion && width > 0 ? (
         <Animated.View
           style={[styles.shimmerBand, { width: bandWidth, transform: [{ translateX }, { skewX: '-18deg' }] }]}
         >
@@ -802,14 +809,26 @@ function PressableScale({
   scaleTo?: number;
   style?: StyleProp<ViewStyle>;
 }) {
+  const reduceMotion = useMobileReducedMotion();
   const scale = useRef(new Animated.Value(1)).current;
-  const springTo = (toValue: number) =>
+  useEffect(() => {
+    if (!reduceMotion) return;
+    scale.stopAnimation();
+    scale.setValue(1);
+  }, [reduceMotion, scale]);
+  const springTo = (toValue: number) => {
+    if (reduceMotion) {
+      scale.stopAnimation();
+      scale.setValue(1);
+      return;
+    }
     Animated.spring(scale, {
       toValue,
       useNativeDriver: true,
       speed: 45,
       bounciness: toValue < 1 ? 0 : 7,
     }).start();
+  };
   return (
     <AnimatedPressable
       accessibilityLabel={accessibilityLabel}
@@ -906,15 +925,26 @@ function FadeInImage({
 
 // One-shot mount entrance for full-screen overlays: fade, with an optional rise.
 function useEntrance(translateY = 0) {
-  const progress = useRef(new Animated.Value(0)).current;
+  const reduceMotion = useMobileReducedMotion();
+  const progress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const hasEntered = useRef(false);
   useEffect(() => {
-    Animated.timing(progress, {
+    progress.stopAnimation();
+    if (reduceMotion || hasEntered.current) {
+      progress.setValue(1);
+      hasEntered.current = true;
+      return;
+    }
+    hasEntered.current = true;
+    const animation = Animated.timing(progress, {
       toValue: 1,
       duration: 300,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start();
-  }, [progress]);
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [progress, reduceMotion]);
   return {
     opacity: progress,
     transform: translateY
@@ -1074,7 +1104,9 @@ const mobileSplashStyles = StyleSheet.create({
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AppRoot />
+      <MobileReducedMotionProvider>
+        <AppRoot />
+      </MobileReducedMotionProvider>
     </SafeAreaProvider>
   );
 }
