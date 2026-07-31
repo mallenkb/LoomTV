@@ -84,7 +84,7 @@ export interface IpcContract {
   'mpv:command': { args: [sessionId: string, command: MpvCommand]; result: boolean };
   'mpv:stop': { args: [sessionId: string]; result: boolean };
   'network:discover-peers': { args: [timeoutMs?: number]; result: LocalNetworkPeer[] };
-  'network:remote-connect': { args: [baseUrl: string, code: string]; result: RemoteLibraryConnection };
+  'network:remote-connect': { args: [baseUrl: string, code: string, certFingerprint?: string]; result: RemoteLibraryConnection };
   'network:remote-disconnect': { args: [revoke?: boolean]; result: boolean };
   'network:remote-request': { args: [pathname: string, request?: RemoteLibraryRequest]; result: RemoteLibraryResponse };
   'network:remote-session': { args: []; result: RemoteLibrarySessionState };

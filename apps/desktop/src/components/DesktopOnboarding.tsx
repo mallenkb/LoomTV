@@ -72,7 +72,12 @@ export default function DesktopOnboarding({
     setIsConnecting(true);
     setMessage('');
     try {
-      const connection = await desktopApi.connectToLocalNetworkLibrary(address, pin);
+      const selectedPeer = peers.find((peer) => `https://${peer.host}:${peer.port}` === address.trim());
+      const connection = await desktopApi.connectToLocalNetworkLibrary(
+        address,
+        pin,
+        selectedPeer?.certFingerprint,
+      );
       desktopApi.activateRemoteLibrary(connection);
       onRemoteReady();
     } catch (error) {
@@ -200,7 +205,7 @@ export default function DesktopOnboarding({
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Looking for LoomTV hosts…
                   </div>
                 ) : peers.length ? peers.map((peer) => {
-                  const peerAddress = `http://${peer.host}:${peer.port}`;
+                  const peerAddress = `https://${peer.host}:${peer.port}`;
                   const selected = address === peerAddress;
                   return (
                     <div key={peer.deviceId}>
@@ -249,13 +254,13 @@ export default function DesktopOnboarding({
                       <input
                         value={address}
                         onChange={(event) => setAddress(event.target.value)}
-                        placeholder="192.168.1.50:3847"
+                        placeholder="192.168.1.50:3848"
                         autoCapitalize="none"
                         spellCheck={false}
                         className="h-12 w-full min-w-0 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] px-4 text-sm text-[var(--loom-text)] outline-none transition placeholder:text-[var(--loom-muted)]/60 focus:border-[var(--loom-accent)] focus:ring-1 focus:ring-[var(--loom-accent)]"
                       />
                     </label>
-                    {address.trim() && !peers.some((peer) => `http://${peer.host}:${peer.port}` === address) && (
+                    {address.trim() && !peers.some((peer) => `https://${peer.host}:${peer.port}` === address.trim()) && (
                       <PairBar
                         hostLabel={address}
                         pin={pin}

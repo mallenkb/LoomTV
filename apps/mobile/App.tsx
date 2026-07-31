@@ -91,6 +91,11 @@ import {
 } from './mobileStyles';
 import { createMobileLanClient } from './mobileLanClient';
 import {
+  configureSecureLanTransport,
+  probeLanCertificate,
+  secureLanUrl,
+} from './mobileSecureTransport';
+import {
   mobileReconnectDelayMs,
   rebuildMobileDetailItemCache,
   rememberMobileDetailItem,
@@ -295,9 +300,9 @@ const MOBILE_OPEN_SOURCE_NOTICES = [
 function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
   if (!trimmed) throw new Error('Enter the desktop app address.');
-  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const parsed = new URL(normalized);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Enter a valid HTTP or HTTPS desktop address.');
+  if (parsed.protocol !== 'https:') throw new Error('Enter a secure HTTPS desktop address.');
   return parsed.origin;
 }
 
@@ -308,7 +313,7 @@ function discoveredHostFromService(service: ZeroconfService): DiscoveredHost | n
   const deviceName = String(service.name || '').trim();
   const certFingerprint = String(txt.certFingerprint || '').trim();
   const port = Number(service.port || 0);
-  if (!deviceId || !Number.isInteger(port) || port <= 0) return null;
+  if (!deviceId || !Number.isInteger(port) || port <= 0 || !/^[0-9a-f]{64}$/i.test(certFingerprint)) return null;
 
   const serviceName = String(service.name || '').trim();
   const addresses = service.addresses || [];
@@ -323,7 +328,7 @@ function discoveredHostFromService(service: ZeroconfService): DiscoveredHost | n
     deviceId,
     deviceName: deviceName || resolvedHost,
     serviceName,
-    baseUrl: `http://${resolvedHost}:${port}`,
+    baseUrl: `https://${resolvedHost}:${port}`,
     certFingerprint,
   };
 }
@@ -393,7 +398,7 @@ function isHlsPlaybackUrl(playbackUrl: string): boolean {
 
 function videoSourceFor(playbackUrl: string, target?: PlayTarget | null, deviceToken?: string): VideoSource {
   return {
-    uri: playbackUrl,
+    uri: secureLanUrl(playbackUrl),
     contentType: isHlsPlaybackUrl(playbackUrl) ? 'hls' : 'auto',
     headers: deviceToken ? { Authorization: `Bearer ${deviceToken}` } : undefined,
     metadata: target ? {
@@ -605,7 +610,7 @@ function imageUrlFor(baseUrl: string, source?: string, cacheBust?: string): stri
   if (!source) return '';
   if (/^(file:|data:|blob:)/i.test(source)) return source;
   const url = /^https?:/i.test(source) ? source : `${baseUrl}${source.startsWith('/') ? '' : '/'}${source}`;
-  return appendImageCacheBust(url, cacheBust);
+  return secureLanUrl(appendImageCacheBust(url, cacheBust));
 }
 
 function imageUrlsFor(baseUrl: string, sources: Array<string | undefined>, cacheBust?: string): string[] {
@@ -2121,6 +2126,8 @@ function AppRoot() {
     reconnectingSavedConnectionRef.current = true;
     setIsServerOffline(false);
     try {
+      const certFingerprint = String((saved as SavedConnection & { certFingerprint?: string }).certFingerprint || '');
+      await configureSecureLanTransport(saved.baseUrl, certFingerprint);
       const activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
         || saved.clientDeviceName !== mobileDeviceName()
         ? await refreshSavedCredentials(saved)
@@ -2171,6 +2178,10 @@ function AppRoot() {
       const nextBaseUrl = normalizeBaseUrl(host?.baseUrl || baseUrl);
       const code = shareCode.trim();
       if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit pairing PIN from the desktop app.');
+      const observedFingerprint = host?.certFingerprint
+        ? host.certFingerprint.replace(/[^0-9a-f]/gi, '').toLowerCase()
+        : await probeLanCertificate(nextBaseUrl);
+      await configureSecureLanTransport(nextBaseUrl, observedFingerprint);
 
       const response = await mobileLanClient.pair(nextBaseUrl, {
           code,
@@ -2188,8 +2199,14 @@ function AppRoot() {
       }
 
       const payload = (await response.json()) as PairResponse;
+      const pairedFingerprint = String((payload as PairResponse & { certFingerprint?: string }).certFingerprint || '')
+        .replace(/[^0-9a-f]/gi, '').toLowerCase();
+      if (pairedFingerprint !== observedFingerprint) {
+        throw new Error('The desktop TLS identity changed during pairing. Refresh discovery and try again.');
+      }
       const nextConnection = {
         baseUrl: nextBaseUrl,
+        certFingerprint: pairedFingerprint,
         deviceId: payload.deviceId,
         deviceToken: payload.accessToken,
         accessTokenExpiresAt: payload.accessTokenExpiresAt,
@@ -2200,9 +2217,10 @@ function AppRoot() {
         clientDeviceName: mobileDeviceName(),
         library: payload.library || {},
         libraryEtag: payload.libraryEtag,
-      };
-      const nextSavedConnection: SavedConnection = {
+      } as Connection & { certFingerprint: string };
+      const nextSavedConnection = {
         baseUrl: nextConnection.baseUrl,
+        certFingerprint: nextConnection.certFingerprint,
         deviceId: nextConnection.deviceId,
         deviceToken: nextConnection.deviceToken,
         accessTokenExpiresAt: nextConnection.accessTokenExpiresAt,
@@ -2211,7 +2229,7 @@ function AppRoot() {
         hostDeviceId: nextConnection.hostDeviceId,
         hostDeviceName: nextConnection.hostDeviceName,
         clientDeviceName: nextConnection.clientDeviceName,
-      };
+      } as SavedConnection & { certFingerprint: string };
       mobileDeviceIdRef.current = nextConnection.deviceId;
       await SecureStore.setItemAsync(MOBILE_DEVICE_ID_KEY, nextConnection.deviceId);
       await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection));
@@ -2923,7 +2941,7 @@ function PairingScreen({
                 keyboardType="url"
                 onChangeText={setBaseUrl}
                 onSubmitEditing={canPair ? () => onPair() : undefined}
-                placeholder="192.168.1.25:3847"
+                placeholder="https://192.168.1.25:3848"
                 placeholderTextColor={faint}
                 returnKeyType="next"
                 style={styles.input}

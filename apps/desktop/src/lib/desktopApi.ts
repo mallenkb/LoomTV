@@ -138,7 +138,7 @@ export type DesktopBridgeApi = {
       testMetadataKeys?: (keys: MetadataApiKeys) => Promise<MetadataKeyTestResult[]>;
       getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
       discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
-      connectRemoteLibrary?: (baseUrl: string, code: string) => Promise<RemoteLibraryConnection>;
+      connectRemoteLibrary?: (baseUrl: string, code: string, certFingerprint?: string) => Promise<RemoteLibraryConnection>;
       remoteLibraryRequest?: (pathname: string, request?: RemoteLibraryRequest) => Promise<RemoteLibraryResponse>;
       getRemoteLibrarySession?: () => Promise<RemoteLibrarySessionState>;
       disconnectRemoteLibrary?: (revoke?: boolean) => Promise<boolean>;
@@ -299,10 +299,10 @@ async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
 function normalizeLocalNetworkBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
   if (!trimmed) throw new Error('Enter the other device address.');
-  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const parsed = new URL(withProtocol);
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Enter a valid HTTP or HTTPS address.');
-  if (!parsed.port) parsed.port = String(DEFAULT_MEDIA_PORT);
+  if (parsed.protocol !== 'https:') throw new Error('Enter a secure HTTPS address.');
+  if (!parsed.port) throw new Error('Include the secure port shown by the LoomTV host.');
   return parsed.origin;
 }
 
@@ -405,7 +405,7 @@ async function discoverLocalNetworkLibraryBaseUrl(): Promise<string> {
     try {
       const peers = await window.desktopApi.discoverLocalNetworkPeers(2500);
       const peer = peers.find((candidate) => candidate.host && candidate.port);
-      if (peer) return `http://${peer.host}:${peer.port}`;
+      if (peer) return `https://${peer.host}:${peer.port}`;
     } catch {
       // Fall through to subnet scan if the mDNS browse failed.
     }
@@ -424,20 +424,20 @@ function bearerHeaders(token: string, init?: RequestInit): RequestInit {
   };
 }
 
-function remoteMediaSource(url: string): string {
+function remoteMediaSource(url: string, remoteBaseUrl?: string): string {
   if (!window.desktopApi?.remoteLibraryRequest) return url;
   try {
     const parsed = new URL(url);
-    const session = getRemoteDesktopSession();
-    if (!session || parsed.origin !== new URL(session.baseUrl).origin) return url;
+    const baseUrl = remoteBaseUrl || getRemoteDesktopSession()?.baseUrl;
+    if (!baseUrl || parsed.origin !== new URL(baseUrl).origin) return url;
     return `plexserver://remote${parsed.pathname}${parsed.search}`;
   } catch {
     return url;
   }
 }
 
-function remoteLibrarySources(library: LibraryPayload): LibraryPayload {
-  const rewrite = (value?: string | null): string => value ? remoteMediaSource(value) : '';
+function remoteLibrarySources(library: LibraryPayload, remoteBaseUrl?: string): LibraryPayload {
+  const rewrite = (value?: string | null): string => value ? remoteMediaSource(value, remoteBaseUrl) : '';
   const rewriteItem = (item: NonNullable<LibraryPayload['movies']>[number]) => ({
     ...item,
     poster: rewrite(item.poster),
@@ -582,7 +582,7 @@ export const desktopApi = {
     return name;
   },
 
-  async connectToLocalNetworkLibrary(baseUrl: string, code: string): Promise<RemoteLibraryConnection> {
+  async connectToLocalNetworkLibrary(baseUrl: string, code: string, certFingerprint?: string): Promise<RemoteLibraryConnection> {
     const normalizedCode = code.trim();
     if (!/^\d{6}$/.test(normalizedCode)) {
       throw new Error('Enter the 6-digit pairing PIN.');
@@ -593,57 +593,15 @@ export const desktopApi = {
       : await discoverLocalNetworkLibraryBaseUrl();
 
     if (window.desktopApi?.connectRemoteLibrary) {
-      return window.desktopApi.connectRemoteLibrary(normalizedBaseUrl, normalizedCode);
+      const connection = await window.desktopApi.connectRemoteLibrary(
+        normalizedBaseUrl,
+        normalizedCode,
+        certFingerprint,
+      );
+      return { ...connection, library: remoteLibrarySources(connection.library, connection.baseUrl) };
     }
 
-    const status = await desktopApi.getLocalNetworkStatus().catch(() => null);
-    const deviceId = status?.deviceId || '';
-    const deviceName = status?.deviceName || 'LoomTV device';
-
-    let response: Response;
-    try {
-      response = await fetchRequestWithTimeout(`${normalizedBaseUrl}/api/v2/pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...REMOTE_PROFILE_API_HEADER },
-        body: JSON.stringify({ code: normalizedCode, deviceId, deviceName }),
-      }, REMOTE_REQUEST_TIMEOUT_MS);
-    } catch (error) {
-      if ((error as Error)?.name === 'AbortError') {
-        throw new Error('The host did not respond within 10 seconds. Check the IP address, port, firewall, and Local Network Sharing.', { cause: error });
-      }
-      throw new Error('Could not reach that LoomTV host. Check that both computers are on the same network.', { cause: error });
-    }
-
-    if (!response.ok) {
-      if (response.status === 401) throw new Error('The sharing code was not accepted.');
-      if (response.status === 429) throw new Error('Too many failed pairing attempts. Try again in a few minutes.');
-      throw new Error('Could not connect to that LoomTV library.');
-    }
-
-    const payload = await response.json() as {
-      deviceId: string;
-      accessToken: string;
-      accessTokenExpiresAt: number;
-      refreshToken: string;
-      refreshTokenExpiresAt: number;
-      hostDeviceId?: string;
-      hostDeviceName?: string;
-      library: LibraryPayload;
-      libraryEtag: string;
-    };
-
-    return {
-      baseUrl: normalizedBaseUrl,
-      deviceId: payload.deviceId,
-      deviceToken: payload.accessToken,
-      accessTokenExpiresAt: payload.accessTokenExpiresAt,
-      refreshToken: payload.refreshToken,
-      refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
-      hostDeviceId: payload.hostDeviceId,
-      hostDeviceName: payload.hostDeviceName,
-      library: payload.library,
-      libraryEtag: payload.libraryEtag,
-    };
+    throw new Error('Secure host pairing is available in the installed LoomTV desktop app.');
   },
 
   activateRemoteLibrary(connection: RemoteLibraryConnection): void {

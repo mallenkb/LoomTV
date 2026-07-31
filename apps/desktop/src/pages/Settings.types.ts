@@ -37,6 +37,7 @@ export type LocalNetworkPeer = {
   port: number;
   addresses: string[];
   appVersion: string;
+  certFingerprint: string;
 };
 
 export type SharedLibrarySnapshot = {

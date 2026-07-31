@@ -30,6 +30,8 @@ corepack pnpm mobile:android
 corepack pnpm mobile:web
 ```
 
+LAN pairing and playback use the app-local `loomtv-secure-transport` Expo module. Use an iOS/Android development or store build after native changes; Expo Go and the web target do not contain the pinned native transport.
+
 ## Pairing Flow
 
 1. Start Loom Media Player desktop.
@@ -43,6 +45,8 @@ corepack pnpm mobile:web
 
 - Same-LAN playback should remain opt-in from the desktop app.
 - Pairing codes and device tokens should be treated as credentials.
+- LAN API, artwork, and media traffic is sent to the desktop TLS listener through a native certificate-pinned loopback proxy. The proxy streams bytes natively and reuses TLS connections; it does not copy media through the JavaScript bridge.
+- Saved connections without a certificate fingerprint are intentionally incompatible and must be paired again once.
 - Do not expose the desktop LAN server directly to the public Internet.
 - Remote Internet streaming requires a separate design for authentication, authorization, transport security, rate limiting, and abuse prevention.
 

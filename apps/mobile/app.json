@@ -19,11 +19,15 @@
         "NSBonjourServices": [
           "_loomtv._tcp"
         ],
-        "NSLocalNetworkUsageDescription": "LoomTV uses your local network to find and connect to LoomTV desktop libraries."
+        "NSLocalNetworkUsageDescription": "LoomTV uses your local network to find and connect to LoomTV desktop libraries.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
-      "usesCleartextTraffic": true,
+      "usesCleartextTraffic": false,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
@@ -53,13 +57,14 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": false
           },
           "ios": {
             "deploymentTarget": "15.1"
           }
         }
-      ]
+      ],
+      "./plugins/withLoomTvLoopbackTransport.cjs"
     ]
   }
 }

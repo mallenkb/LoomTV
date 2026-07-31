@@ -23,7 +23,7 @@ export function buildNetworkStatus<TPairedDevice>(deps: NetworkStatusDependencie
     deviceId: settings.localNetworkDeviceId,
     deviceName: settings.localNetworkDeviceName,
     networkName: deps.getLocalNetworkNameFast(),
-    port: deps.getMediaServerPort(),
+    port: baseUrl ? Number(new URL(baseUrl).port) : deps.getMediaServerPort(),
     addresses: deps.getLocalNetworkAddresses(),
     baseUrl,
     libraryUrl: baseUrl ? `${baseUrl}/api/v2/library` : null,

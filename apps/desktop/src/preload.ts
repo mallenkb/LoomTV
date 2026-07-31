@@ -118,7 +118,8 @@ const desktopApi = {
   testMetadataKeys: (keys: Record<string, string>) => ipcRenderer.invoke('metadata:test-keys', keys),
   getLocalNetworkStatus: () => ipcRenderer.invoke('network:status'),
   discoverLocalNetworkPeers: (timeoutMs?: number) => ipcRenderer.invoke('network:discover-peers', timeoutMs),
-  connectRemoteLibrary: (baseUrl: string, code: string) => ipcRenderer.invoke('network:remote-connect', baseUrl, code),
+  connectRemoteLibrary: (baseUrl: string, code: string, certFingerprint?: string) =>
+    ipcRenderer.invoke('network:remote-connect', baseUrl, code, certFingerprint),
   remoteLibraryRequest: (pathname: string, request?: RemoteLibraryRequest) => ipcRenderer.invoke('network:remote-request', pathname, request),
   getRemoteLibrarySession: () => ipcRenderer.invoke('network:remote-session'),
   disconnectRemoteLibrary: (revoke?: boolean) => ipcRenderer.invoke('network:remote-disconnect', revoke),

@@ -180,6 +180,7 @@ export default function Settings() {
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
   const [isTogglingNetworkSharing, setIsTogglingNetworkSharing] = useState(false);
   const [remoteLibraryAddress, setRemoteLibraryAddress] = useState('');
+  const [remoteLibraryFingerprint, setRemoteLibraryFingerprint] = useState('');
   const [remoteShareCode, setRemoteShareCode] = useState('');
   const [isConnectingRemoteLibrary, setIsConnectingRemoteLibrary] = useState(false);
   const [remoteLibraryStatus, setRemoteLibraryStatus] = useState('');
@@ -549,7 +550,11 @@ export default function Settings() {
     setIsConnectingRemoteLibrary(true);
     setRemoteLibraryStatus('');
     try {
-      const connection = await desktopApi.connectToLocalNetworkLibrary(showManualNetworkAddress ? remoteLibraryAddress : '', remoteShareCode);
+      const connection = await desktopApi.connectToLocalNetworkLibrary(
+        showManualNetworkAddress ? remoteLibraryAddress : '',
+        remoteShareCode,
+        remoteLibraryFingerprint || undefined,
+      );
       const itemCount = (connection.library.movies?.length || 0)
         + (connection.library.tvShows?.length || 0)
         + (connection.library.animeShows?.length || 0);
@@ -907,6 +912,7 @@ export default function Settings() {
             scanForPeers={() => void scanForPeers()}
             remoteLibraryAddress={remoteLibraryAddress}
             setRemoteLibraryAddress={setRemoteLibraryAddress}
+            setRemoteLibraryFingerprint={setRemoteLibraryFingerprint}
             remoteShareCode={remoteShareCode}
             setRemoteShareCode={setRemoteShareCode}
             showManualNetworkAddress={showManualNetworkAddress}

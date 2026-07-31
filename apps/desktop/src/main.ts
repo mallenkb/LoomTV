@@ -62,13 +62,17 @@ import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
+  getLanMediaServer,
+  getLanMediaServerSockets,
   getMediaServer,
   getMediaServerPort,
   getMediaServerSockets,
+  setLanMediaServer,
   setMediaServer,
   startMediaServer,
   type MediaServerDependencies,
 } from './main/mediaServer';
+import { loadOrCreateLanTlsIdentity } from './main/lanTlsIdentity';
 import {
   buildUpdateMenu,
   checkForUpdates,
@@ -1203,7 +1207,6 @@ function configureRendererSecurityPolicy(): void {
     'http://127.0.0.1:*',
     'http://localhost:*',
     'http://[::1]:*',
-    'http://*:*',
     'https:',
     'plexserver:',
   ];
@@ -1215,8 +1218,8 @@ function configureRendererSecurityPolicy(): void {
     "default-src 'self' file: data: blob:",
     `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' file: 'unsafe-inline'",
-    "img-src 'self' file: data: blob: http: https: plexserver:",
-    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* http://*:* https: plexserver:",
+    "img-src 'self' file: data: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:",
+    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:",
     `connect-src ${connectSrc.join(' ')}`,
     "font-src 'self' file: data:",
     "object-src 'none'",
@@ -1562,6 +1565,12 @@ export const mediaServerDeps = {
   isLanSharingEnabled,
   isLoopbackRequest,
   isSignedLanRequestValid,
+  // Load only when the server actually starts. A losing second-instance
+  // process exits before this getter is read, so it cannot rotate the first
+  // installation identity during a simultaneous launch.
+  get lanTlsIdentity() {
+    return loadOrCreateLanTlsIdentity(app.getPath('userData'));
+  },
   libraryEtagFor,
   compactLibraryIndexForLocalNetwork,
   compactLibraryItemForLocalNetwork,
@@ -1623,9 +1632,14 @@ async function startBackgroundServices(): Promise<void> {
     getMainWindow,
     stopNativePlayback: stopAllMpvPlayback,
     closeMediaServer: async () => {
-      const serverToClose = getMediaServer();
+      const localServerToClose = getMediaServer();
+      const lanServerToClose = getLanMediaServer();
       setMediaServer(null);
-      await closeServerForUpdateInstall(serverToClose, getMediaServerSockets());
+      setLanMediaServer(null);
+      await Promise.all([
+        closeServerForUpdateInstall(localServerToClose, getMediaServerSockets()),
+        closeServerForUpdateInstall(lanServerToClose, getLanMediaServerSockets()),
+      ]);
     },
   });
   buildUpdateMenu();
@@ -1649,20 +1663,16 @@ app.whenReady().then(async () => {
   protocol.handle('plexserver', async (request: Request) => {
     try {
       const parsed = new URL(request.url);
-      const targetUrl = parsed.hostname === 'remote'
-        ? remoteLibraryClient.resolveMediaUrl(`${parsed.pathname}${parsed.search}`)
-        : (() => {
-            parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-            return `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
-          })();
-
       // Forward Range header so video seeking works correctly
       const headers: Record<string, string> = {};
       const range = request.headers.get('Range');
       if (range) headers['Range'] = range;
-
-      const response = await net.fetch(targetUrl, { headers, redirect: 'error' });
-      return response;
+      if (parsed.hostname === 'remote') {
+        return remoteLibraryClient.fetchMedia(`${parsed.pathname}${parsed.search}`, headers);
+      }
+      parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
+      const targetUrl = `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
+      return net.fetch(targetUrl, { headers, redirect: 'error' });
     } catch (err) {
       console.error('[plexserver protocol] fetch error:', err);
       return new Response('Internal Server Error', { status: 500 });
@@ -1719,13 +1729,17 @@ app.on('before-quit', () => {
     stopAllTranscodes();
   }
   stopUpdateCheckTimer();
-  const serverToClose = getMediaServer();
-  if (serverToClose) {
+  const serversToClose = [
+    { server: getMediaServer(), clear: () => setMediaServer(null) },
+    { server: getLanMediaServer(), clear: () => setLanMediaServer(null) },
+  ];
+  for (const { server, clear } of serversToClose) {
+    if (!server) continue;
     try {
-      serverToClose.close();
+      server.close();
     } catch {
       // Ignore close errors during quit.
     }
-    setMediaServer(null);
+    clear();
   }
 });
