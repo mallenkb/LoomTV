@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { Bookmark, Play, Star, Clock, ArrowLeft } from 'lucide-react';
 import { useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';

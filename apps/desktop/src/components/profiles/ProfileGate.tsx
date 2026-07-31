@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, ImagePlus, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { cn } from '@/lib/utils';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, type ProfileSummary } from '@/lib/desktopApi';

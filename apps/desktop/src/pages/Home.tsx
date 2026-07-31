@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 import { Film, FolderPlus, Tv } from 'lucide-react';
 import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
