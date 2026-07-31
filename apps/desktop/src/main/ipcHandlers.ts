@@ -14,6 +14,7 @@ import type { IpcInvokeChannel } from '../shared/ipcChannels';
 import type { IpcContract } from '../shared/ipcContract';
 import type { StoredProgress } from '../shared/desktopProtocol.ts';
 import { buildNetworkStatus, ffmpegAvailability } from './ipcHandlerPolicy.ts';
+import { sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import {
   commandMpvPlayback,
   mpvAvailability,
@@ -404,7 +405,10 @@ export function registerIpcHandlers<
 
   handle('settings:save', (_event, settings) => {
     deps.authorizeSettingsWrite();
-    deps.saveSettings({ ...deps.loadSettings(), ...settings });
+    deps.saveSettings({
+      ...deps.loadSettings(),
+      ...sanitizeRendererSettingsPatch(settings as Record<string, unknown>),
+    });
     deps.onSettingsSaved?.();
     deps.syncLanAdvertisement();
     return true;

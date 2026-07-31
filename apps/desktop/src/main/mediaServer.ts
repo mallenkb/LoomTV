@@ -64,6 +64,10 @@ import {
 } from './lanRoutePolicy';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 import type { LanTlsIdentity } from './lanTlsIdentity.ts';
+import {
+  sanitizeRendererSettingsPatch,
+  settingsForRenderer,
+} from './rendererSettings.ts';
 import { buildBrowserStreamArgs } from './streamTranscodePlan.ts';
 import type {
   LibraryIndexPayload,
@@ -366,6 +370,45 @@ function listenWithPortRetries(
   });
 }
 
+function rendererRequestOrigin(req: http.IncomingMessage): string | null {
+  const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
+  if (origin) return origin;
+
+  // Same-origin GET requests may omit Origin. Accept the referrer only when
+  // Chromium also identifies the request as same-origin; this keeps ordinary
+  // originless localhost clients outside the renderer compatibility surface.
+  if (req.headers['sec-fetch-site'] !== 'same-origin') return null;
+  const referer = Array.isArray(req.headers.referer) ? req.headers.referer[0] : req.headers.referer;
+  if (!referer) return null;
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isTrustedRendererHttpOrigin(
+  req: http.IncomingMessage,
+  deps: MediaServerDependencies,
+): boolean {
+  const origin = rendererRequestOrigin(req);
+  if (!origin) return false;
+  if (deps.allowedCorsOrigin(origin, deps.ALLOWED_CORS_ORIGINS)) return true;
+
+  // The optional /app/ browser renderer is served by this process. Its port is
+  // selected at runtime, so admit only the exact loopback media-server origin.
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.toLowerCase();
+    const isLoopbackHost = host === '127.0.0.1' || host === 'localhost' || host === '[::1]';
+    return parsed.protocol === 'http:'
+      && isLoopbackHost
+      && parsed.port === String(mediaServerPort);
+  } catch {
+    return false;
+  }
+}
+
 export async function startMediaServer(deps: MediaServerDependencies): Promise<number> {
   const {
     LOCAL_ACCESS_TOKEN,
@@ -616,17 +659,24 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         return;
       }
 
-      if (reqUrl.pathname === '/api/ping') {
+      if (reqUrl.pathname === '/api/ping' && req.method === 'GET') {
+        res.setHeader('Cache-Control', 'no-store');
         writeJson(res, 200, {
           ok: true,
           port: loopbackRequest ? mediaServerPort : lanMediaServerPort,
           transport: loopbackRequest ? 'loopback-http' : 'tls',
           ...(!loopbackRequest ? { certFingerprint: lanCertificateFingerprint } : {}),
-          // Only the configured local renderer origin may bootstrap its
-          // short-lived desktop access token. Other loopback callers receive
-          // the health response without credentials.
-          ...(corsAllowed && loopbackRequest ? { localAccessToken: LOCAL_ACCESS_TOKEN } : {}),
         });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/session' && req.method === 'POST') {
+        if (!loopbackRequest || !isTrustedRendererHttpOrigin(req, deps)) {
+          writeJson(res, 403, { error: 'A trusted renderer origin is required.' });
+          return;
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        writeJson(res, 200, { localAccessToken: LOCAL_ACCESS_TOKEN });
         return;
       }
 
@@ -870,6 +920,11 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       // bridge. Keep their read/write surface narrowly scoped, authenticated,
       // and local-only so they render the same library and preferences as the
       // desktop window without exposing IPC administration routes.
+      if (reqUrl.pathname.startsWith('/api/renderer/') && !isTrustedRendererHttpOrigin(req, deps)) {
+        writeJson(res, 403, { error: 'A trusted renderer origin is required.' });
+        return;
+      }
+
       if (reqUrl.pathname === '/api/renderer/library/index' && req.method === 'GET') {
         const revision = getLibraryRevision();
         const etag = catalogEtag('index', revision, getRendererCatalogIdentity());
@@ -901,7 +956,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/renderer/settings') {
         if (req.method === 'GET') {
-          writeJson(res, 200, loadSettings());
+          try {
+            requireOwner();
+          } catch (error) {
+            writeProfileError(error);
+            return;
+          }
+          res.setHeader('Cache-Control', 'no-store');
+          writeJson(res, 200, settingsForRenderer(loadSettings()));
           return;
         }
         if (req.method === 'POST') {
@@ -913,7 +975,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           }
           readJsonBody(req)
             .then((patch) => {
-              saveSettings({ ...loadSettings(), ...patch });
+              saveSettings({
+                ...loadSettings(),
+                ...sanitizeRendererSettingsPatch(patch),
+              });
               writeJson(res, 200, { ok: true });
             })
             .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid settings payload.' }));

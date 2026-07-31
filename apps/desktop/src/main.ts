@@ -62,6 +62,10 @@ import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
+  settingsForRenderer,
+  settingsPreferencesForRenderer,
+} from './main/rendererSettings';
+import {
   getLanMediaServer,
   getLanMediaServerSockets,
   getMediaServer,
@@ -1292,16 +1296,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
     const settings = loadSettings();
     try {
       requireOwner();
-      return settings;
+      return settingsForRenderer(settings);
     } catch {
-      return {
-        appThemeMode: settings.appThemeMode,
-        appThemeColor: settings.appThemeColor,
-        appDarkTheme: settings.appDarkTheme,
-        appLoaderStyle: settings.appLoaderStyle,
-        playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
-        playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
-      };
+      return settingsPreferencesForRenderer(settings);
     }
   },
   authorizeSettingsWrite: () => { requireOwner(); },
