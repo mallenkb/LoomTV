@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { FilterFunnelIcon } from '@/components/LoomIcons';
 import SharedListHighlight from '@/components/SharedListHighlight';
+import { useLibraryFilterVisibility } from '@/contexts/LibraryFilterVisibilityContext';
 import {
   libraryFilterOptions,
   issueLibraryFilterOptions,
@@ -16,11 +17,16 @@ interface LibraryFilterBarProps {
 }
 
 export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilterBarProps) {
+  const isVisible = useLibraryFilterVisibility();
   const [filterOpen, setFilterOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const activeOption = libraryFilterOptions.find((option) => option.id === activeFilter);
 
   useEffect(() => {
+    if (!isVisible) {
+      if (filterOpen) setFilterOpen(false);
+      return undefined;
+    }
     if (!filterOpen) return;
 
     const closeOnOutsideClick = (event: MouseEvent) => {
@@ -38,12 +44,14 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
       document.removeEventListener('mousedown', closeOnOutsideClick);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [filterOpen]);
+  }, [filterOpen, isVisible]);
 
   const chooseFilter = (filter: LibraryFilter) => {
     onChange(filter);
     setFilterOpen(false);
   };
+
+  if (!isVisible) return null;
 
   return (
     <div ref={menuRef} className="loom-library-filter relative z-10 shrink-0 pointer-events-auto">
