@@ -21,6 +21,10 @@ import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
 import LoomLogo from './components/LoomLogo';
 import DesktopOnboarding from './components/DesktopOnboarding';
+import {
+  isLibraryFilterPath,
+  LibraryFilterVisibilityContext,
+} from './contexts/LibraryFilterVisibilityContext';
 import { desktopApi } from './lib/desktopApi';
 import {
   clearDesktopLibraryMode,
@@ -326,6 +330,7 @@ function AppShell() {
     location.pathname === '/settings'
     || location.pathname.startsWith('/settings/')
     || location.hash.includes('/settings');
+  const showLibraryFilter = !nowPlaying && isLibraryFilterPath(location.pathname);
   const hideContinueBar = Boolean(nowPlaying) || isSettingsRoute;
   const reserveContinueBarSpace = !hideContinueBar;
   const markHomeReady = useCallback(() => {
@@ -386,6 +391,7 @@ function AppShell() {
   }, []);
 
   return (
+    <LibraryFilterVisibilityContext.Provider value={showLibraryFilter}>
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
       {appStartupReady && !homeReady && <StartupSplash />}
@@ -453,5 +459,6 @@ function AppShell() {
         <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
       </div>
     </div>
+    </LibraryFilterVisibilityContext.Provider>
   );
 }
