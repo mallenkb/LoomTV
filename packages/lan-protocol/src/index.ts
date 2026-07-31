@@ -53,6 +53,8 @@ export type LanPairResponse<TLibrary> = {
   accessTokenExpiresAt: number;
   refreshToken: string;
   refreshTokenExpiresAt: number;
+  /** SHA-256 of the desktop LAN leaf certificate, lowercase hex without separators. */
+  certFingerprint: string;
   hostDeviceId?: string;
   hostDeviceName?: string;
   library: TLibrary;

@@ -113,6 +113,13 @@ export function rebuildMobileDetailItemCache(
 export type LibraryPayload = LanLibraryPayload<MediaItem>;
 export type PairResponse = LanPairResponse<LibraryPayload>;
 
+export function normalizeCertFingerprint(value: unknown): string {
+  const normalized = typeof value === 'string'
+    ? value.trim().toLowerCase().replace(/:/g, '')
+    : '';
+  return /^[0-9a-f]{64}$/.test(normalized) ? normalized : '';
+}
+
 export type Connection = {
   baseUrl: string;
   deviceId: string;
@@ -120,6 +127,8 @@ export type Connection = {
   accessTokenExpiresAt: number;
   refreshToken: string;
   refreshTokenExpiresAt: number;
+  /** Pinned SHA-256 leaf-certificate fingerprint for the paired desktop. */
+  certFingerprint: string;
   hostDeviceId: string;
   hostDeviceName: string;
   clientDeviceName: string;
@@ -130,7 +139,7 @@ export type Connection = {
 
 export type SavedConnection = Pick<Connection,
   'baseUrl' | 'deviceId' | 'deviceToken' | 'accessTokenExpiresAt' | 'refreshToken' |
-  'refreshTokenExpiresAt' | 'hostDeviceId' | 'hostDeviceName' | 'clientDeviceName'>;
+  'refreshTokenExpiresAt' | 'certFingerprint' | 'hostDeviceId' | 'hostDeviceName' | 'clientDeviceName'>;
 
 export type DiscoveredHost = {
   deviceId: string;
