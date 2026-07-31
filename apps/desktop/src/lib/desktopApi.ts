@@ -238,12 +238,21 @@ async function discoverServerBase(): Promise<string> {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/ping`);
       if (response.ok) {
-        const ping = await response.json().catch(() => null) as { localAccessToken?: string } | null;
-        // A browser renderer must not bind to an older/stale LoomTV process
-        // that answers ping but cannot authenticate the shared renderer API.
-        if (!window.desktopApi && typeof ping?.localAccessToken !== 'string') continue;
+        let localAccessToken: string | null = null;
+        if (!window.desktopApi) {
+          // Browser-only development sessions obtain renderer authority from
+          // an origin-checked endpoint. Generic health discovery never returns
+          // credentials to originless localhost callers.
+          const sessionResponse = await fetch(`http://127.0.0.1:${port}/api/renderer/session`, {
+            method: 'POST',
+          });
+          if (!sessionResponse.ok) continue;
+          const session = await sessionResponse.json().catch(() => null) as { localAccessToken?: string } | null;
+          if (typeof session?.localAccessToken !== 'string') continue;
+          localAccessToken = session.localAccessToken;
+        }
         resolvedServerBase = `http://127.0.0.1:${port}`;
-        resolvedLocalAccessToken = typeof ping?.localAccessToken === 'string' ? ping.localAccessToken : null;
+        resolvedLocalAccessToken = localAccessToken;
         return resolvedServerBase;
       }
     } catch {

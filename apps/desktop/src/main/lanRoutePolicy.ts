@@ -82,6 +82,9 @@ export function mediaServerRouteAccess(pathname: string, method = 'GET'): MediaS
   if (method === 'GET' && (pathname === '/' || pathname === '/pair' || pathname === '/api/ping' || pathname === '/api/lan/info')) {
     return { kind: 'public' };
   }
+  if (method === 'POST' && pathname === '/api/renderer/session') {
+    return { kind: 'public' };
+  }
   if (isLegacyLanRoute(pathname)) return { kind: 'legacy' };
   if (method === 'POST' && (pathname === '/api/v2/pair' || pathname === '/api/v2/auth/refresh')) {
     return { kind: 'pairing' };
