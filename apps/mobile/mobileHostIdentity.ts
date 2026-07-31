@@ -1,4 +1,4 @@
-import { normalizeCertFingerprint, type DiscoveredHost, type SavedConnection } from './mobileDomain';
+import { normalizeCertFingerprint, type DiscoveredHost, type SavedConnection } from './mobileDomain.ts';
 
 export type SavedHostReconciliation =
   | { kind: 'unchanged'; connection: SavedConnection }

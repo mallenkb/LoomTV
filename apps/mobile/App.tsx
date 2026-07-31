@@ -211,7 +211,7 @@ const MOBILE_SUBTITLE_SIZE_OPTIONS = [
   { value: 80, label: '250%' },
   { value: 96, label: '300%' },
 ];
-const mobileLanClient = createMobileLanClient();
+const mobileLanClient = createMobileLanClient((input, init) => fetch(secureLanUrl(input), init));
 const PROFILE_COLOR_HEX: Record<string, string> = {
   ember: 'f97316',
   gold: 'f59e0b',

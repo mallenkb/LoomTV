@@ -1,10 +1,9 @@
-import type { OfficialMetadataCandidate, PlaybackTrackPreferences, StreamOptions } from './mobileDomain';
+import type { OfficialMetadataCandidate, PlaybackTrackPreferences, StreamOptions } from './mobileDomain.ts';
 import type {
   LanProfileListKind,
   LanProfilePreferences,
   LanProfileSelectionRequest,
 } from '@loom-media-server/lan-protocol';
-import { secureLanUrl } from './mobileSecureTransport';
 
 export type FetchImplementation = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -13,7 +12,7 @@ function bearerHeaders(token: string, headers: Record<string, string> = {}): Rec
 }
 
 export function createMobileLanClient(
-  fetchImpl: FetchImplementation = (input, init) => fetch(secureLanUrl(input), init),
+  fetchImpl: FetchImplementation = (input, init) => fetch(input, init),
 ) {
   return {
     getClientConfig(baseUrl: string, token: string) {

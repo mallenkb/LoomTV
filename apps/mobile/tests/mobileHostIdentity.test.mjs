@@ -5,16 +5,17 @@ import { normalizeCertFingerprint } from '../mobileDomain.ts';
 import { reconcileSavedHost } from '../mobileHostIdentity.ts';
 
 const appSource = fs.readFileSync(new URL('../App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const connectionSource = fs.readFileSync(new URL('../mobileConnection.ts', import.meta.url), 'utf8');
 const appConfig = JSON.parse(fs.readFileSync(new URL('../app.json', import.meta.url), 'utf8'));
 const lanClientSource = fs.readFileSync(new URL('../mobileLanClient.ts', import.meta.url), 'utf8');
 const secureTransportSource = fs.readFileSync(new URL('../mobileSecureTransport.ts', import.meta.url), 'utf8');
 
-function sourceSection(startMarker, endMarker) {
-  const start = appSource.indexOf(startMarker);
-  assert.notEqual(start, -1, `Expected App.tsx marker: ${startMarker}`);
-  const end = appSource.indexOf(endMarker, start + startMarker.length);
-  assert.notEqual(end, -1, `Expected App.tsx marker after ${startMarker}: ${endMarker}`);
-  return appSource.slice(start, end);
+function sourceSection(source, sourceName, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `Expected ${sourceName} marker: ${startMarker}`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `Expected ${sourceName} marker after ${startMarker}: ${endMarker}`);
+  return source.slice(start, end);
 }
 
 test('certificate fingerprints normalize to one strict SHA-256 representation', () => {
@@ -29,13 +30,13 @@ test('certificate fingerprints normalize to one strict SHA-256 representation', 
 });
 
 test('mobile LAN traffic rejects cleartext and routes through the pinned native transport', () => {
-  const normalizeBaseUrl = sourceSection(
+  const normalizeBaseUrl = sourceSection(connectionSource, 'mobileConnection.ts',
     'function normalizeBaseUrl(value: string)',
     'function discoveredHostFromService',
   );
-  const discovery = sourceSection(
+  const discovery = sourceSection(connectionSource, 'mobileConnection.ts',
     'function discoveredHostFromService',
-    'function compactErrorMessage',
+    'function isLikelyServerOfflineError',
   );
 
   assert.equal(appConfig.expo.android.usesCleartextTraffic, false);
@@ -43,8 +44,8 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
   assert.match(normalizeBaseUrl, /parsed\.protocol\s*!==\s*'https:'/);
   assert.match(discovery, /\^\[0-9a-f\]\{64\}\$/i);
   assert.match(discovery, /baseUrl:\s*`https:\/\//);
-  assert.match(lanClientSource, /import \{ secureLanUrl \} from '\.\/mobileSecureTransport'/);
-  assert.match(lanClientSource, /fetch\(secureLanUrl\(input\), init\)/);
+  assert.match(appSource, /createMobileLanClient\(\(input, init\) => fetch\(secureLanUrl\(input\), init\)\)/);
+  assert.match(lanClientSource, /fetch\(input, init\)/);
   assert.match(secureTransportSource, /parsed\.protocol\s*!==\s*'https:'/);
   assert.match(secureTransportSource, /transport\.start\(remoteOrigin, fingerprint\)/);
   assert.match(secureTransportSource, /proxy\.protocol\s*!==\s*'http:'/);
@@ -52,7 +53,7 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
 });
 
 test('saved sessions require a pinned fingerprint before restore', () => {
-  const restore = sourceSection(
+  const restore = sourceSection(appSource, 'App.tsx',
     'const saved = JSON.parse(stored) as SavedConnection;',
     '.finally(() => {',
   );
@@ -97,7 +98,7 @@ test('mDNS can update a saved address only when host ID and certificate pin both
 });
 
 test('pairing binds the response identity to discovery before credentials are persisted', () => {
-  const pairing = sourceSection(
+  const pairing = sourceSection(appSource, 'App.tsx',
     'const payload = (await response.json()) as PairResponse;',
     'await initializeProfiles(nextConnection)',
   );
