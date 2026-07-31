@@ -171,7 +171,14 @@ export function useProgressRefreshRevision(): number {
 
 export function getProgressState(filePath: string | null, durationHint = 0) {
   if (!filePath) return { position: 0, duration: 0, fraction: 0, watched: false, inProgress: false, updatedAt: 0 };
-  const stored = progressCache[filePath];
+  let resourceKey = filePath;
+  try {
+    const parsed = new URL(filePath);
+    resourceKey = parsed.searchParams.get('resourceId') || parsed.searchParams.get('mediaId') || filePath;
+  } catch {
+    // Local paths and compact resource IDs are already valid progress keys.
+  }
+  const stored = progressCache[filePath] || progressCache[resourceKey];
   const position = stored?.position ?? 0;
   const storedDuration = stored?.duration ?? 0;
   const duration = durationHint > 0 ? durationHint : storedDuration;

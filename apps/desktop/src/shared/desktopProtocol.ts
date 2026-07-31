@@ -184,7 +184,13 @@ export interface WireMediaItem {
 
 export type LibraryCard = LanLibraryCard;
 export type LibraryPlaybackReference = LanLibraryPlaybackReference;
-export type LibraryIndexPayload = LanLibraryIndexPayload<LibraryCard>;
+export interface LibraryIndexPayload extends LanLibraryIndexPayload<LibraryCard> {
+  // Renderer-only configuration data. LAN projections deliberately omit host
+  // paths while the local renderer keeps Settings and scan scheduling intact.
+  libraryFolders?: string[];
+  libraryFolderGroups?: LibraryFolderGroups;
+  libraryFolderStatuses?: LibraryFolderStatus[];
+}
 export type LibraryItemDetailsPayload = LanLibraryItemDetailsPayload<WireMediaItem>;
 
 export interface LibraryPayload extends LanLibraryPayload<WireMediaItem> {

@@ -61,7 +61,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { state, refreshLibrary } = useLibrary();
+  const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
   const { canManageProfiles, lists, setListEntry } = useProfiles();
   const { theme } = useTheme();
   const [show, setShow] = useState<TVShow | null>(null);
@@ -75,6 +75,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('episodes');
 
   useEffect(() => {
+    let cancelled = false;
     const pageKey = `${kind}:${id || ''}`;
     if (accordionPageKeyRef.current !== pageKey) {
       accordionPageKeyRef.current = pageKey;
@@ -84,6 +85,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const collection = kind === 'anime' ? state.animeShows : state.tvShows;
     const found = collection.find((s) => s.id === id);
     setShow(found || null);
+    if (found?.catalogRevision !== undefined) {
+      void hydrateLibraryItem(found.id)
+        .then((details) => {
+          if (!cancelled && details) setShow(details as TVShow);
+        })
+        .catch((error) => console.warn('Could not hydrate series details:', error));
+    }
     if (found && !accordionWasToggledRef.current) {
       const firstVisibleSeason = (found.seasons || []).find((season) =>
         (found.episodeFiles?.some((ef) => ef.season === season.number) || false)
@@ -97,7 +105,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       );
       setExpandedSeason(resumeEpisode?.season ?? nextEpisode?.season ?? firstVisibleSeason?.number ?? null);
     }
-  }, [id, kind, progressTick, state.animeShows, state.tvShows]);
+    return () => { cancelled = true; };
+  }, [hydrateLibraryItem, id, kind, progressTick, state.animeShows, state.catalogRevision, state.tvShows]);
 
   const toggleSeason = (seasonNumber: number) => {
     accordionWasToggledRef.current = true;

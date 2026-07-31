@@ -95,6 +95,16 @@ export function createMobileLanClient(
         headers: bearerHeaders(token, etag ? { 'If-None-Match': etag } : {}),
       });
     },
+    getLibraryIndex(baseUrl: string, token: string, etag?: string) {
+      return fetchImpl(`${baseUrl}/api/v2/library/index`, {
+        headers: bearerHeaders(token, etag ? { 'If-None-Match': etag } : {}),
+      });
+    },
+    getLibraryItem(baseUrl: string, token: string, mediaId: string) {
+      return fetchImpl(`${baseUrl}/api/v2/library/items/${encodeURIComponent(mediaId)}`, {
+        headers: bearerHeaders(token),
+      });
+    },
     pair(baseUrl: string, body: { code: string; deviceName: string }) {
       return fetchImpl(`${baseUrl}/api/v2/pair`, {
         method: 'POST',

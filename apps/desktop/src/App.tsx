@@ -215,7 +215,8 @@ function DesktopBootstrap() {
         return;
       }
       try {
-        const library = await desktopApi.getLibrary();
+        const index = await desktopApi.getLibraryIndex();
+        const library = index || await desktopApi.getLibrary();
         const hasExistingSetup = Boolean(
           library.movies?.length
           || library.tvShows?.length
@@ -320,7 +321,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 }
 
 function AppShell() {
-  const { state: libraryState } = useLibrary();
+  const { state: libraryState, hydrateLibraryItem } = useLibrary();
   const markAppReady = useContext(StartupReadyContext);
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
@@ -350,19 +351,36 @@ function AppShell() {
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
   ) => {
-    setNowPlaying({
-      mediaId,
-      filePath,
-      title,
-      artwork,
-      subtitles,
-      episodes,
-      episodeFiles,
-      currentSeason,
-      currentEpisode,
-      startPosition,
-    });
-  }, []);
+    const openPlayer = (details?: MediaItem | null) => {
+      const resolvedEpisode = details && typeof currentSeason === 'number' && typeof currentEpisode === 'number'
+        ? details.episodeFiles?.find((candidate) => (
+            candidate.season === currentSeason && candidate.episode === currentEpisode
+          ))
+        : undefined;
+      setNowPlaying({
+        mediaId,
+        filePath: resolvedEpisode?.filePath || details?.filePath || filePath,
+        title,
+        artwork,
+        subtitles: resolvedEpisode?.subtitles || details?.subtitles || subtitles,
+        episodes: details?.episodes || episodes,
+        episodeFiles: details?.episodeFiles || episodeFiles,
+        currentSeason,
+        currentEpisode,
+        startPosition,
+      });
+    };
+    if (!mediaId) {
+      openPlayer();
+      return;
+    }
+    void hydrateLibraryItem(mediaId)
+      .then(openPlayer)
+      .catch((error) => {
+        console.warn('Could not hydrate playback details:', error);
+        openPlayer();
+      });
+  }, [hydrateLibraryItem]);
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {
