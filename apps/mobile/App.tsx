@@ -103,6 +103,7 @@ import {
   rememberMobileDetailItem,
 } from './mobileDomain';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
+import { reconcileSavedHost } from './mobileHostIdentity';
 import {
   MOBILE_THEME_COLOR_OPTIONS,
   mobileThemeFromSettings,
@@ -1428,18 +1429,14 @@ function AppRoot() {
     if (!savedConnection || connection) return;
     const discoveredSavedHost = discoveredHosts.find((host) => host.deviceId === savedConnection.hostDeviceId);
     if (discoveredSavedHost) {
-      const discoveredFingerprint = normalizeCertFingerprint(discoveredSavedHost.certFingerprint);
-      if (!discoveredFingerprint || discoveredFingerprint !== savedConnection.certFingerprint) {
+      const reconciliation = reconcileSavedHost(savedConnection, discoveredSavedHost);
+      if (reconciliation.kind === 'identity-mismatch') {
         setIsServerOffline(true);
         setError('A desktop claiming this saved identity was discovered, but its security fingerprint does not match. Re-pair with the current 6-digit PIN before connecting.');
         return;
       }
-      if (discoveredSavedHost.baseUrl === savedConnection.baseUrl) return;
-      const updated = {
-        ...savedConnection,
-        baseUrl: discoveredSavedHost.baseUrl,
-        certFingerprint: discoveredFingerprint,
-      };
+      if (reconciliation.kind === 'unchanged') return;
+      const updated = reconciliation.connection;
       setSavedConnection(updated);
       setBaseUrl(updated.baseUrl);
       void SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
