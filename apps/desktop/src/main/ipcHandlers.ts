@@ -94,6 +94,7 @@ export interface IpcHandlerDependencies<
     baseUrl: string,
     code: string,
     device: { id?: string; name: string },
+    certFingerprint?: string,
   ) => Promise<IpcResult<'network:remote-connect'>>;
   requestRemoteLibrary: (
     pathname: string,
@@ -445,12 +446,12 @@ export function registerIpcHandlers<
     }
   });
 
-  handle('network:remote-connect', (_event, baseUrl, code) => {
+  handle('network:remote-connect', (_event, baseUrl, code, certFingerprint) => {
     const settings = deps.loadSettings();
     return deps.connectRemoteLibrary(String(baseUrl || ''), String(code || ''), {
       id: settings.localNetworkDeviceId,
       name: settings.localNetworkDeviceName || os.hostname(),
-    });
+    }, String(certFingerprint || ''));
   });
 
   handle('network:remote-request', (_event, pathname, request) =>

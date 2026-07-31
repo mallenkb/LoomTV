@@ -9,7 +9,10 @@ import {
   requestLanToken,
   timingSafeStringEqual,
 } from './serverSecurity';
-import { getMediaServerPort } from './mediaServer';
+import {
+  getLanCertificateFingerprint,
+  getLanMediaServerPort,
+} from './mediaServer';
 import { getPrimaryLocalNetworkAddress } from './networkInfo';
 import { checkPairRateLimit, recordPairFailure, recordPairSuccess, resetPairRateLimits } from './pairRateLimit';
 import { HttpBodyError, readJsonBody, writeJson } from './httpResponses';
@@ -48,7 +51,8 @@ export function createLanSecurity(deps: LanSecurityDeps) {
 
   function getLanServerBase(): string | null {
     const address = getPrimaryLocalNetworkAddress();
-    return address ? `http://${address}:${getMediaServerPort()}` : null;
+    const port = getLanMediaServerPort();
+    return address && port ? `https://${address}:${port}` : null;
   }
 
   function isLanSharingEnabled(): boolean {
@@ -294,6 +298,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       scopes: updated.scopes,
       hostDeviceId: settings.localNetworkDeviceId,
       hostDeviceName: settings.localNetworkDeviceName || os.hostname(),
+      certFingerprint: getLanCertificateFingerprint(),
       library: payload,
       libraryEtag: libraryEtagFor(payload),
     });
@@ -362,15 +367,18 @@ export function createLanSecurity(deps: LanSecurityDeps) {
 
   function syncLanAdvertisement(): void {
     const settings = loadSettings();
-    if (!settings.localNetworkSharingEnabled || !getMediaServerPort()) {
+    const port = getLanMediaServerPort();
+    const certFingerprint = getLanCertificateFingerprint();
+    if (!settings.localNetworkSharingEnabled || !port || !certFingerprint) {
       unadvertiseLanService();
       return;
     }
     advertiseLanService({
-      port: getMediaServerPort(),
+      port,
       instanceId: settings.localNetworkDeviceId || randomUUID(),
       deviceName: settings.localNetworkDeviceName || os.hostname(),
       protocolVersion: '2',
+      certFingerprint,
     });
   }
 

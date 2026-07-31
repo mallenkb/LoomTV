@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; media-src 'self' http: https: blob: plexserver:; connect-src 'self' http: https: plexserver:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:; media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:; connect-src 'self' file: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:; font-src 'self' file: data:; object-src 'none'; base-uri 'none'; frame-src 'none';" />
     <title>LoomTV</title>
   </head>
   <body>

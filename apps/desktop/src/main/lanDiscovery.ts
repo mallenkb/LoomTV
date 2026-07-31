@@ -24,6 +24,7 @@ export type LanPeer = {
   port: number;
   addresses: string[];
   appVersion: string;
+  certFingerprint: string;
 };
 
 let bonjour: Bonjour | null = null;
@@ -189,7 +190,12 @@ export function discoverLanPeers(timeoutMs: number, excludeDeviceId?: string): P
       const deviceId = String(txt.instanceId || '').trim();
       const deviceName = String(service.name || '').trim();
       const appVersion = 'protocol-v2';
-      if (!deviceId || (excludeDeviceId && deviceId === excludeDeviceId)) return;
+      const certFingerprint = String(txt.certFingerprint || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
+      if (
+        !deviceId
+        || !/^[0-9a-f]{64}$/.test(certFingerprint)
+        || (excludeDeviceId && deviceId === excludeDeviceId)
+      ) return;
 
       const addresses = (service.addresses || []).filter((address) => /^[0-9.]+$/.test(address));
       const host = addresses[0] || service.host;
@@ -202,6 +208,7 @@ export function discoverLanPeers(timeoutMs: number, excludeDeviceId?: string): P
         port: service.port,
         addresses,
         appVersion,
+        certFingerprint,
       });
     };
 

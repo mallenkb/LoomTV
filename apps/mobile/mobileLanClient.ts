@@ -4,6 +4,7 @@ import type {
   LanProfilePreferences,
   LanProfileSelectionRequest,
 } from '@loom-media-server/lan-protocol';
+import { secureLanUrl } from './mobileSecureTransport';
 
 export type FetchImplementation = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -11,7 +12,9 @@ function bearerHeaders(token: string, headers: Record<string, string> = {}): Rec
   return { Authorization: `Bearer ${token}`, 'X-Loom-Profile-Api-Version': '1', ...headers };
 }
 
-export function createMobileLanClient(fetchImpl: FetchImplementation = fetch) {
+export function createMobileLanClient(
+  fetchImpl: FetchImplementation = (input, init) => fetch(secureLanUrl(input), init),
+) {
   return {
     getClientConfig(baseUrl: string, token: string) {
       return fetchImpl(`${baseUrl}/api/v2/client-config`, { headers: bearerHeaders(token) });

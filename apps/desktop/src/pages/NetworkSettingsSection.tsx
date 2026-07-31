@@ -26,6 +26,7 @@ type NetworkSettingsSectionProps = {
   scanForPeers: () => void;
   remoteLibraryAddress: string;
   setRemoteLibraryAddress: (value: string) => void;
+  setRemoteLibraryFingerprint: (value: string) => void;
   remoteShareCode: string;
   setRemoteShareCode: (value: string) => void;
   showManualNetworkAddress: boolean;
@@ -52,6 +53,7 @@ export default function NetworkSettingsSection({
   scanForPeers,
   remoteLibraryAddress,
   setRemoteLibraryAddress,
+  setRemoteLibraryFingerprint,
   remoteShareCode,
   setRemoteShareCode,
   showManualNetworkAddress,
@@ -281,7 +283,7 @@ export default function NetworkSettingsSection({
             ) : (
               <SharedListHighlight activeId={remoteLibraryAddress} className="loom-shared-highlight-list space-y-1">
                 {discoveredPeers.map((peer) => {
-                  const peerBaseUrl = `http://${peer.host}:${peer.port}`;
+                  const peerBaseUrl = `https://${peer.host}:${peer.port}`;
                   const isSelected = remoteLibraryAddress === peerBaseUrl;
                   return (
                     <button
@@ -290,6 +292,7 @@ export default function NetworkSettingsSection({
                       aria-pressed={isSelected}
                       onClick={() => {
                         setRemoteLibraryAddress(peerBaseUrl);
+                        setRemoteLibraryFingerprint(peer.certFingerprint);
                         setShowManualNetworkAddress(true);
                       }}
                       data-shared-highlight-item
@@ -339,8 +342,11 @@ export default function NetworkSettingsSection({
             <input
               type="text"
               value={remoteLibraryAddress}
-              onChange={(event) => setRemoteLibraryAddress(event.target.value)}
-              placeholder="192.168.1.50:3847"
+              onChange={(event) => {
+                setRemoteLibraryAddress(event.target.value);
+                setRemoteLibraryFingerprint('');
+              }}
+              placeholder="https://192.168.1.50:3848"
               className="h-10 w-full min-w-0 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-sm text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
             />
           )}

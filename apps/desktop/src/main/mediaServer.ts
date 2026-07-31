@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -62,6 +63,7 @@ import {
   type LanRouteScope,
 } from './lanRoutePolicy';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
+import type { LanTlsIdentity } from './lanTlsIdentity.ts';
 import { buildBrowserStreamArgs } from './streamTranscodePlan.ts';
 import type {
   LibraryIndexPayload,
@@ -91,6 +93,7 @@ export interface MediaServerDependencies {
   isLanSharingEnabled: () => boolean;
   isLoopbackRequest: (req: http.IncomingMessage) => boolean;
   isSignedLanRequestValid: (reqUrl: URL) => boolean;
+  lanTlsIdentity: LanTlsIdentity;
   libraryEtagFor: (payload: unknown) => string;
   compactLibraryIndexForLocalNetwork: (profileId: string, deviceId: string | undefined, revision: number) => LibraryIndexPayload;
   compactLibraryItemForLocalNetwork: (mediaId: string, profileId: string, deviceId: string | undefined, revision: number) => LibraryItemDetailsPayload | null;
@@ -113,8 +116,12 @@ export interface MediaServerDependencies {
 }
 
 let mediaServer: http.Server | null = null;
+let lanMediaServer: https.Server | null = null;
 let mediaServerPort = 3847;
+let lanMediaServerPort = 0;
+let lanCertificateFingerprint = '';
 const mediaServerSockets = new Set<NodeSocket>();
+const lanMediaServerSockets = new Set<NodeSocket>();
 const LAN_IMAGE_CACHE_QUERY_PARAM = 'loomtvImageCache';
 const LAN_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
 const THUMBNAIL_SCALE_FILTER = "scale='min(640,iw)':-2";
@@ -137,9 +144,14 @@ function libraryItemIdFromPath(pathname: string, prefix: string): string | null 
 }
 
 export function getMediaServer(): http.Server | null { return mediaServer; }
+export function getLanMediaServer(): https.Server | null { return lanMediaServer; }
 export function getMediaServerPort(): number { return mediaServerPort; }
+export function getLanMediaServerPort(): number { return lanMediaServerPort; }
+export function getLanCertificateFingerprint(): string { return lanCertificateFingerprint; }
 export function getMediaServerSockets(): Set<NodeSocket> { return mediaServerSockets; }
+export function getLanMediaServerSockets(): Set<NodeSocket> { return lanMediaServerSockets; }
 export function setMediaServer(server: http.Server | null): void { mediaServer = server; }
+export function setLanMediaServer(server: https.Server | null): void { lanMediaServer = server; }
 
 function htmlEscape(value: string): string {
   return value
@@ -318,7 +330,43 @@ function applyCorsHeaders(req: http.IncomingMessage, res: http.ServerResponse, d
   return true;
 }
 
-export function startMediaServer(deps: MediaServerDependencies): Promise<number> {
+function listenWithPortRetries(
+  server: http.Server | https.Server,
+  initialPort: number,
+  host: string,
+  label: string,
+): Promise<number> {
+  const maxAttempts = 20;
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const attempt = (port: number) => {
+      attempts += 1;
+      const onError = (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRINUSE' && attempts < maxAttempts && port < 65_535) {
+          attempt(port + 1);
+          return;
+        }
+        reject(error.code === 'EADDRINUSE'
+          ? new Error(`${label} could not bind after ${attempts} ports from ${initialPort}.`, { cause: error })
+          : error);
+      };
+      server.once('error', onError);
+      try {
+        server.listen(port, host, () => {
+          server.off('error', onError);
+          server.on('error', (error) => console.error(`[media-server] ${label} error:`, error));
+          resolve(port);
+        });
+      } catch (error) {
+        server.off('error', onError);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+    attempt(initialPort);
+  });
+}
+
+export async function startMediaServer(deps: MediaServerDependencies): Promise<number> {
   const {
     LOCAL_ACCESS_TOKEN,
     authorizeLanRequest,
@@ -337,6 +385,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     isLanSharingEnabled,
     isLoopbackRequest,
     isSignedLanRequestValid,
+    lanTlsIdentity,
     libraryEtagFor,
     compactLibraryIndexForLocalNetwork,
     compactLibraryItemForLocalNetwork,
@@ -357,11 +406,16 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     saveSettings,
     writeJson,
   } = deps;
-  return new Promise((resolve, reject) => {
-    const requestHandler = (req: http.IncomingMessage, res: http.ServerResponse) => {
+  const createRequestHandler = (listenerScope: 'loopback' | 'lan') => (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ) => {
       handleResponseErrors(res);
       const corsAllowed = applyCorsHeaders(req, res, deps);
-      const loopbackRequest = isLoopbackRequest(req);
+      // Listener identity, not a request-controlled address, defines the trust
+      // boundary. Calls to the TLS listener remain LAN-scoped even if a local
+      // process reaches it through 127.0.0.1.
+      const loopbackRequest = listenerScope === 'loopback' && isLoopbackRequest(req);
 
       if (req.method === 'OPTIONS') {
         res.writeHead(corsAllowed ? 204 : 403);
@@ -565,7 +619,9 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       if (reqUrl.pathname === '/api/ping') {
         writeJson(res, 200, {
           ok: true,
-          port: mediaServerPort,
+          port: loopbackRequest ? mediaServerPort : lanMediaServerPort,
+          transport: loopbackRequest ? 'loopback-http' : 'tls',
+          ...(!loopbackRequest ? { certFingerprint: lanCertificateFingerprint } : {}),
           // Only the configured local renderer origin may bootstrap its
           // short-lived desktop access token. Other loopback callers receive
           // the health response without credentials.
@@ -583,7 +639,9 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           deviceName: settings.localNetworkDeviceName || os.hostname(),
           sharingEnabled: Boolean(settings.localNetworkSharingEnabled),
           networkName: getLocalNetworkName(),
-          port: mediaServerPort,
+          port: loopbackRequest ? mediaServerPort : lanMediaServerPort,
+          transport: loopbackRequest ? 'loopback-http' : 'tls',
+          ...(!loopbackRequest ? { certFingerprint: lanCertificateFingerprint } : {}),
           addresses: getLocalNetworkAddresses(),
         });
         return;
@@ -1602,52 +1660,40 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       }
     };
 
-    const server = http.createServer(requestHandler);
-    mediaServer = server;
-    trackServerConnections(server, mediaServerSockets);
+  const localServer = http.createServer(createRequestHandler('loopback'));
+  mediaServer = localServer;
+  trackServerConnections(localServer, mediaServerSockets);
+  try {
+    mediaServerPort = await listenWithPortRetries(localServer, mediaServerPort, '127.0.0.1', 'Loopback media server');
+  } catch (error) {
+    if (mediaServer === localServer) mediaServer = null;
+    throw error;
+  }
 
-    const MAX_PORT_ATTEMPTS = 20;
-    let attemptedPort = mediaServerPort;
-    let listenAttempts = 0;
-    let listenSettled = false;
+  const secureServer = https.createServer({
+    key: lanTlsIdentity.privateKeyPem,
+    cert: lanTlsIdentity.certificatePem,
+    minVersion: 'TLSv1.2',
+  }, createRequestHandler('lan'));
+  lanMediaServer = secureServer;
+  lanCertificateFingerprint = lanTlsIdentity.certFingerprint;
+  trackServerConnections(secureServer, lanMediaServerSockets);
+  try {
+    lanMediaServerPort = await listenWithPortRetries(
+      secureServer,
+      Math.min(mediaServerPort + 1, 65_535),
+      '0.0.0.0',
+      'TLS LAN media server',
+    );
+  } catch (error) {
+    if (lanMediaServer === secureServer) lanMediaServer = null;
+    lanCertificateFingerprint = '';
+    try { localServer.close(); } catch { /* The startup error below is authoritative. */ }
+    if (mediaServer === localServer) mediaServer = null;
+    throw error;
+  }
 
-    const rejectListen = (error: Error) => {
-      if (listenSettled) return;
-      listenSettled = true;
-      if (mediaServer === server) mediaServer = null;
-      reject(error);
-    };
-
-    const tryListen = (port: number) => {
-      attemptedPort = port;
-      listenAttempts++;
-      try {
-        server.listen(port, '0.0.0.0', () => {
-          if (listenSettled) return;
-          listenSettled = true;
-          mediaServerPort = port;
-          console.log(`Media server on port ${port}`);
-          resolve(port);
-        });
-      } catch (error) {
-        rejectListen(error instanceof Error ? error : new Error(String(error)));
-      }
-    };
-
-    server.on('error', (err: NodeJS.ErrnoException) => {
-      if (listenSettled) return;
-      if (err.code === 'EADDRINUSE' && listenAttempts < MAX_PORT_ATTEMPTS && attemptedPort < 65_535) {
-        tryListen(attemptedPort + 1);
-      } else if (err.code === 'EADDRINUSE') {
-        rejectListen(new Error(
-          `Unable to start the media server after trying ${listenAttempts} ports from ${mediaServerPort}.`,
-          { cause: err },
-        ));
-      } else {
-        rejectListen(err);
-      }
-    });
-
-    tryListen(mediaServerPort);
-  });
+  console.log(`Loopback media server on http://127.0.0.1:${mediaServerPort}`);
+  console.log(`TLS LAN media server on port ${lanMediaServerPort}`);
+  return mediaServerPort;
 }
