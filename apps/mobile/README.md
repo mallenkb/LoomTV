@@ -32,6 +32,12 @@ corepack pnpm mobile:web
 
 LAN pairing and playback use the app-local `loomtv-secure-transport` Expo module. Use an iOS/Android development or store build after native changes; Expo Go and the web target do not contain the pinned native transport.
 
+Android native projects are generated from the tracked Expo configuration. Run
+`corepack pnpm mobile:verify-android-config` from the repository root to validate
+the tracked policy; when `apps/mobile/android` exists, the same command also
+checks its application ID, version, cleartext/network policy, and Gradle wrapper
+checksum. CI performs a clean Expo prebuild and requires the generated checks.
+
 ## Pairing Flow
 
 1. Start Loom Media Player desktop.
