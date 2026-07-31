@@ -16,6 +16,7 @@ export default function SettingsTabs({ activeSection, onSelect, sections = SETTI
         <div className="loom-settings-tabs-frame mx-auto max-w-5xl">
           <SharedListHighlight
             activeId={activeSection}
+            preserveActiveOnHover
             className="loom-settings-tabs loom-shared-highlight-tabs loom-no-drag pointer-events-auto inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
           >
             {sections.map((section) => {

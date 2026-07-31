@@ -434,6 +434,7 @@ export default function Sidebar() {
           <nav className="mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
             <SharedListHighlight
               activeId={activeNavItemId}
+              preserveActiveOnHover
               className="loom-shared-highlight-sidebar-modern flex flex-col items-center gap-3"
             >
               <button

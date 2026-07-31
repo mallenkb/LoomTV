@@ -345,6 +345,31 @@ html.loom-mpv-active .loom-app-underlay {
   will-change: transform, width, height;
 }
 
+.loom-shared-highlight-preserve-active::after {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: var(--shared-highlight-hover-width, 0);
+  height: var(--shared-highlight-hover-height, 0);
+  border-radius: 0.5rem;
+  background: var(--loom-shared-highlight-hover-background, var(--loom-shared-highlight-background));
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(var(--shared-highlight-hover-x, 0), var(--shared-highlight-hover-y, 0), 0);
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 90ms ease-out;
+  will-change: transform, width, height;
+}
+
+.loom-shared-highlight-hover-visible::after {
+  opacity: 1;
+}
+
 .loom-shared-highlight-visible::before {
   opacity: 1;
 }
@@ -356,6 +381,12 @@ html.loom-mpv-active .loom-app-underlay {
 
 .loom-shared-highlight-sidebar-modern::before {
   border-radius: 9999px;
+  transition: none;
+}
+
+.loom-shared-highlight-sidebar-modern::after {
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--loom-sidebar-active-bg) 70%, white);
 }
 
 .loom-shared-highlight-category {
@@ -385,6 +416,11 @@ html.loom-mpv-active .loom-app-underlay {
 .loom-shared-highlight-tabs::before,
 .loom-shared-highlight-season-pills::before {
   border-radius: 9999px;
+}
+
+.loom-shared-highlight-tabs::after {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--loom-active-bg) 70%, white);
 }
 
 .loom-shared-highlight-player-tabs,
