@@ -7,19 +7,44 @@ export type LocalResourceKind = 'media' | 'subtitle' | 'image' | 'external-artwo
 type RegisteredResource = {
   kind: LocalResourceKind;
   value: string;
+  scopePath?: string;
 };
 
 const resources = new Map<string, RegisteredResource>();
 const MAX_REGISTERED_RESOURCES = 100_000;
 
-export function registerResource(secret: string, kind: LocalResourceKind, value: string): string {
+function normalizedScopePath(scopePath: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(scopePath)) {
+    throw new Error('Local resource scopes must use filesystem paths.');
+  }
+  return path.resolve(scopePath);
+}
+
+function canonicalExistingPath(filePath: string): string {
+  try {
+    return fs.realpathSync.native(filePath);
+  } catch {
+    return path.resolve(filePath);
+  }
+}
+
+export function registerResource(
+  secret: string,
+  kind: LocalResourceKind,
+  value: string,
+  scopePath?: string,
+): string {
   const normalized = kind === 'external-artwork' ? value.trim() : path.resolve(value);
-  const id = createHmac('sha256', secret).update(`${kind}\0${normalized}`).digest('base64url');
+  const normalizedResourceScope = scopePath ? normalizedScopePath(scopePath) : undefined;
+  const identity = normalizedResourceScope
+    ? `${kind}\0${normalized}\0scope\0${normalizedResourceScope}`
+    : `${kind}\0${normalized}`;
+  const id = createHmac('sha256', secret).update(identity).digest('base64url');
   if (resources.size >= MAX_REGISTERED_RESOURCES && !resources.has(id)) {
     const oldest = resources.keys().next().value;
     if (oldest) resources.delete(oldest);
   }
-  resources.set(id, { kind, value: normalized });
+  resources.set(id, { kind, value: normalized, scopePath: normalizedResourceScope });
   return id;
 }
 
@@ -32,10 +57,20 @@ export function resolveLocalResource(
   id: string,
   allowedKinds: ReadonlySet<LocalResourceKind>,
   libraryRoots: readonly string[],
+  expectedScopePath?: string,
 ): string {
   const resource = resources.get(id);
   if (!resource || !allowedKinds.has(resource.kind) || resource.kind === 'external-artwork') {
     throw new Error('Unknown local resource. Refresh the paired library and try again.');
+  }
+  if (
+    expectedScopePath
+    && (
+      !resource.scopePath
+      || canonicalExistingPath(resource.scopePath) !== canonicalExistingPath(normalizedScopePath(expectedScopePath))
+    )
+  ) {
+    throw new Error('The requested resource does not belong to this media item.');
   }
   const candidate = fs.realpathSync.native(resource.value);
   const contained = libraryRoots.some((root) => {

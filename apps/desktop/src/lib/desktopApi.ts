@@ -529,11 +529,27 @@ export const desktopApi = {
     if (typeof options.subtitleTrackIndex === 'number') params.set('subtitle', String(options.subtitleTrackIndex));
     if (typeof options.subtitleStreamOrdinal === 'number') params.set('subtitleOrdinal', String(options.subtitleStreamOrdinal));
     if (options.subtitleCodec) params.set('subtitleCodec', options.subtitleCodec);
-    if (options.subtitleFilePath) params.set('subtitleFile', options.subtitleFilePath);
+    const [subtitleResource, secondarySubtitleResource] = await Promise.all([
+      options.subtitleFilePath
+        ? fetchJson<{ resourceId: string }>('/api/renderer/media/subtitle-resource', {
+          method: 'POST',
+          body: JSON.stringify({ mediaFilePath: filePath, subtitleFilePath: options.subtitleFilePath }),
+        })
+        : null,
+      options.secondarySubtitleFilePath
+        ? fetchJson<{ resourceId: string }>('/api/renderer/media/subtitle-resource', {
+          method: 'POST',
+          body: JSON.stringify({ mediaFilePath: filePath, subtitleFilePath: options.secondarySubtitleFilePath }),
+        })
+        : null,
+    ]);
+    if (subtitleResource?.resourceId) params.set('subtitleResourceId', subtitleResource.resourceId);
     if (typeof options.secondarySubtitleTrackIndex === 'number') params.set('secondarySubtitle', String(options.secondarySubtitleTrackIndex));
     if (typeof options.secondarySubtitleStreamOrdinal === 'number') params.set('secondarySubtitleOrdinal', String(options.secondarySubtitleStreamOrdinal));
     if (options.secondarySubtitleCodec) params.set('secondarySubtitleCodec', options.secondarySubtitleCodec);
-    if (options.secondarySubtitleFilePath) params.set('secondarySubtitleFile', options.secondarySubtitleFilePath);
+    if (secondarySubtitleResource?.resourceId) {
+      params.set('secondarySubtitleResourceId', secondarySubtitleResource.resourceId);
+    }
     if (options.subtitleStyle) params.set('subtitleStyle', JSON.stringify(options.subtitleStyle));
     if (options.forceTranscode) params.set('forceTranscode', '1');
     const playbackMode: PlaybackMode = options.forceTranscode

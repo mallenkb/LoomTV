@@ -84,6 +84,7 @@ export interface MediaServerDependencies {
   authorizeLanRequest: (reqUrl: URL, req: http.IncomingMessage) => { ok: boolean; device?: LanPairedDevice };
   authorizeLocalRequest: (reqUrl: URL, req: http.IncomingMessage) => boolean;
   assertProfileCanAccessPath: (profileId: string, filePath: string) => void;
+  assertSubtitleCanAccessMediaPath: (profileId: string, mediaFilePath: string, subtitleFilePath: string) => void;
   decodeDataUrl: (dataUrl: string) => { buffer: Buffer; mimeType: string } | null;
   getLanServerBase: () => string | null;
   getLibraryRevision: () => number;
@@ -132,6 +133,7 @@ const THUMBNAIL_SCALE_FILTER = "scale='min(640,iw)':-2";
 const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
+const OPAQUE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const hlsProfileBindings = new Map<string, { deviceId: string; profileId: string; selectionRevision: number; filePath: string }>();
 const V2_LIBRARY_ITEM_PREFIX = '/api/v2/library/items/';
 const RENDERER_LIBRARY_ITEM_PREFIX = '/api/renderer/library/items/';
@@ -415,6 +417,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     authorizeLanRequest,
     authorizeLocalRequest,
     assertProfileCanAccessPath,
+    assertSubtitleCanAccessMediaPath,
     decodeDataUrl,
     getLanServerBase,
     getLibraryRevision,
@@ -863,18 +866,23 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               const subtitleResourceId = options[field];
               if (!subtitleResourceId) continue;
               try {
+                if (!OPAQUE_RESOURCE_ID_PATTERN.test(subtitleResourceId)) {
+                  throw new Error('Invalid subtitle resource identifier.');
+                }
                 const subtitleFilePath = resolveLocalResource(
                   subtitleResourceId,
                   SUBTITLE_RESOURCE_KIND,
                   getLibraryRoots(),
+                  filePath,
                 );
                 if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
+                assertProfileCanAccessPath(identity.profileId, subtitleFilePath);
                 options[field] = subtitleFilePath;
               } catch {
                 writeJson(res, 404, {
                   ok: false,
                   code: 'SUBTITLE_NOT_FOUND',
-                  error: 'The selected subtitle file is unavailable. Reconnect its NAS or storage location, then retry.',
+                  error: 'The selected subtitle is unavailable for this media item. Refresh the shared library, then retry.',
                   retryable: true,
                 });
                 return;
@@ -1019,6 +1027,35 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             }
           })
           .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid media probe payload.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/media/subtitle-resource' && req.method === 'POST') {
+        readJsonBody(req)
+          .then((body) => {
+            try {
+              const mediaFilePath = String(body.mediaFilePath || '');
+              const subtitleFilePath = String(body.subtitleFilePath || '');
+              const profileId = requireDesktopProfileId();
+              assertProfileCanAccessPath(profileId, mediaFilePath);
+              assertSubtitleCanAccessMediaPath(profileId, mediaFilePath, subtitleFilePath);
+              if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
+              const resourceId = registerResource(
+                loadSettings().localNetworkHmacSecret || '',
+                'subtitle',
+                subtitleFilePath,
+                mediaFilePath,
+              );
+              // Resolve immediately so protocol-shaped paths, missing files,
+              // non-regular files, and paths outside a configured root never
+              // become usable stream capabilities.
+              resolveLocalResource(resourceId, SUBTITLE_RESOURCE_KIND, getLibraryRoots(), mediaFilePath);
+              writeJson(res, 200, { resourceId });
+            } catch {
+              writeJson(res, 404, { error: 'subtitle_not_found' });
+            }
+          })
+          .catch(() => writeJson(res, 400, { error: 'invalid_subtitle_resource_payload' }));
         return;
       }
 
@@ -1609,7 +1646,46 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         res.end('Not found');
         return;
       }
-      if (!requireProfileMediaAccess(filePath)) return;
+      const streamIdentity = requireProfileMediaAccess(filePath);
+      if (!streamIdentity) return;
+
+      if (reqUrl.searchParams.has('subtitleFile') || reqUrl.searchParams.has('secondarySubtitleFile')) {
+        writeJson(res, 400, {
+          error: 'subtitle_resource_required',
+          message: 'Refresh the library and request subtitles with opaque resource identifiers.',
+        });
+        return;
+      }
+
+      const resolveStreamSubtitle = (parameter: 'subtitleResourceId' | 'secondarySubtitleResourceId'): string | undefined => {
+        const subtitleResourceId = reqUrl.searchParams.get(parameter);
+        if (!subtitleResourceId) return undefined;
+        if (!OPAQUE_RESOURCE_ID_PATTERN.test(subtitleResourceId)) {
+          throw new Error('Invalid subtitle resource identifier.');
+        }
+        const subtitleFilePath = resolveLocalResource(
+          subtitleResourceId,
+          SUBTITLE_RESOURCE_KIND,
+          getLibraryRoots(),
+          filePath,
+        );
+        if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
+        assertProfileCanAccessPath(streamIdentity.profileId, subtitleFilePath);
+        return subtitleFilePath;
+      };
+
+      let subtitleFilePath: string | undefined;
+      let secondarySubtitleFilePath: string | undefined;
+      try {
+        subtitleFilePath = resolveStreamSubtitle('subtitleResourceId');
+        secondarySubtitleFilePath = resolveStreamSubtitle('secondarySubtitleResourceId');
+      } catch {
+        writeJson(res, 404, {
+          error: 'subtitle_not_found',
+          message: 'The selected subtitle is unavailable for this media item. Refresh the library, then retry.',
+        });
+        return;
+      }
 
       const releaseStreamLease = acquirePlaybackActivityLease(
         `http-stream:${Date.now()}:${Math.random().toString(36).slice(2)}`,
@@ -1626,11 +1702,11 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         subtitleTrackIndex: queryNumber(reqUrl.searchParams.get('subtitle')),
         subtitleStreamOrdinal: queryNumber(reqUrl.searchParams.get('subtitleOrdinal')),
         subtitleCodec: reqUrl.searchParams.get('subtitleCodec') || undefined,
-        subtitleFilePath: reqUrl.searchParams.get('subtitleFile') || undefined,
+        subtitleFilePath,
         secondarySubtitleTrackIndex: queryNumber(reqUrl.searchParams.get('secondarySubtitle')),
         secondarySubtitleStreamOrdinal: queryNumber(reqUrl.searchParams.get('secondarySubtitleOrdinal')),
         secondarySubtitleCodec: reqUrl.searchParams.get('secondarySubtitleCodec') || undefined,
-        secondarySubtitleFilePath: reqUrl.searchParams.get('secondarySubtitleFile') || undefined,
+        secondarySubtitleFilePath,
         subtitleStyle: parseSubtitleStyle(reqUrl.searchParams.get('subtitleStyle')),
         forceTranscode: reqUrl.searchParams.get('forceTranscode') === '1',
       };

@@ -43,7 +43,7 @@ import { createLanSecurity } from './main/lanSecurity';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { createArtworkUrls } from './main/artworkUrls';
 import { registerResource } from './main/resourceRegistry';
-import { isImageFileName, isMacSidecarFile, isVideoFileName } from './main/fileClassification';
+import { isImageFileName, isMacSidecarFile, isSubtitleFileName, isVideoFileName } from './main/fileClassification';
 import { createArtworkFinders } from './main/artworkFinders';
 import {
   defaultLibraryFolderGroups,
@@ -179,6 +179,7 @@ import {
 } from './main/profileService';
 import {
   assertProfileCanAccessPath,
+  assertSubtitleCanAccessMediaPath,
   filterLibraryForProfile,
   profileRestrictionIdentity,
 } from './main/contentPolicy.ts';
@@ -355,7 +356,12 @@ const {
 } = createArtworkUrls({
   localAccessToken: LOCAL_ACCESS_TOKEN,
   buildSignedLanUrl,
-  registerRemoteResource: (kind, value) => registerResource(loadSettings().localNetworkHmacSecret || '', kind, value),
+  registerRemoteResource: (kind, value, scopePath) => registerResource(
+    loadSettings().localNetworkHmacSecret || '',
+    kind,
+    value,
+    scopePath,
+  ),
 });
 
 const {
@@ -1290,6 +1296,22 @@ registerIpcHandlers<LibraryData, AppSettings>({
   saveLibraryMutation,
   assertLocalMediaPath,
   authorizeMediaPath: (filePath) => assertProfileCanAccessPath(loadLibrary(), requireDesktopProfileId(), filePath),
+  registerSubtitleResource: (mediaFilePath, subtitleFilePath) => {
+    assertLocalMediaPath(subtitleFilePath);
+    if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
+    assertSubtitleCanAccessMediaPath(
+      loadLibrary(),
+      requireDesktopProfileId(),
+      mediaFilePath,
+      subtitleFilePath,
+    );
+    return registerResource(
+      loadSettings().localNetworkHmacSecret || '',
+      'subtitle',
+      subtitleFilePath,
+      mediaFilePath,
+    );
+  },
   needsBrowserTranscoding,
   browserPlaybackPlan,
   loadSettings,
@@ -1551,6 +1573,8 @@ export const mediaServerDeps = {
   authorizeLanRequest,
   authorizeLocalRequest,
   assertProfileCanAccessPath: (profileId: string, filePath: string) => assertProfileCanAccessPath(loadLibrary(), profileId, filePath),
+  assertSubtitleCanAccessMediaPath: (profileId: string, mediaFilePath: string, subtitleFilePath: string) =>
+    assertSubtitleCanAccessMediaPath(loadLibrary(), profileId, mediaFilePath, subtitleFilePath),
   decodeDataUrl,
   getLanServerBase,
   getLibraryRevision: () => libraryMutationVersion,
