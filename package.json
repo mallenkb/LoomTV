@@ -10,6 +10,7 @@
   },
   "scripts": {
     "audit:prod": "node scripts/audit-production.cjs",
+    "mobile:verify-android-config": "node scripts/verify-mobile-android-config.cjs",
     "sbom": "node scripts/generate-sbom.cjs",
     "dev": "pnpm desktop:start",
     "start": "pnpm desktop:start",

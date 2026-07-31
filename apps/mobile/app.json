@@ -2,7 +2,7 @@
   "expo": {
     "name": "LoomTV Mobile",
     "slug": "loomtv-mobile",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -27,6 +27,7 @@
       }
     },
     "android": {
+      "versionCode": 1,
       "usesCleartextTraffic": false,
       "permissions": [
         "android.permission.INTERNET",

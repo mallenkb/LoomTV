@@ -5,23 +5,27 @@ const {
   withDangerousMod,
   withInfoPlist,
 } = require('@expo/config-plugins');
-
-const NETWORK_SECURITY_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-  <base-config cleartextTrafficPermitted="false" />
-  <domain-config cleartextTrafficPermitted="true">
-    <domain includeSubdomains="false">localhost</domain>
-    <domain includeSubdomains="false">127.0.0.1</domain>
-  </domain-config>
-</network-security-config>
-`;
+const ANDROID_BUILD_POLICY = require('../android-build-policy.cjs');
 
 module.exports = function withLoomTvLoopbackTransport(config) {
+  if (config.android?.package !== ANDROID_BUILD_POLICY.applicationId) {
+    throw new Error(`Android package must be ${ANDROID_BUILD_POLICY.applicationId}.`);
+  }
+  if (config.version !== ANDROID_BUILD_POLICY.version) {
+    throw new Error(`Android version must be ${ANDROID_BUILD_POLICY.version}.`);
+  }
+  if (config.android?.versionCode !== ANDROID_BUILD_POLICY.versionCode) {
+    throw new Error(`Android versionCode must be ${ANDROID_BUILD_POLICY.versionCode}.`);
+  }
+  if (config.android?.usesCleartextTraffic !== false) {
+    throw new Error('Android cleartext traffic must remain disabled.');
+  }
+
   config = withAndroidManifest(config, (androidConfig) => {
     const application = androidConfig.modResults.manifest.application?.[0];
     if (!application) throw new Error('Android application manifest is unavailable.');
     application.$['android:usesCleartextTraffic'] = 'false';
-    application.$['android:networkSecurityConfig'] = '@xml/loomtv_network_security_config';
+    application.$['android:networkSecurityConfig'] = ANDROID_BUILD_POLICY.networkSecurityConfigResource;
     return androidConfig;
   });
 
@@ -36,7 +40,7 @@ module.exports = function withLoomTvLoopbackTransport(config) {
       'loomtv_network_security_config.xml',
     );
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, NETWORK_SECURITY_CONFIG, 'utf8');
+    fs.writeFileSync(target, ANDROID_BUILD_POLICY.networkSecurityConfig, 'utf8');
     return androidConfig;
   }]);
 
