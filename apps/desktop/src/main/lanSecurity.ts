@@ -25,6 +25,7 @@ const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PAIRING_SESSION_TTL_MS = 5 * 60 * 1000;
 const MAX_PAIRED_DEVICES = 64;
+const PAIRED_DEVICE_TOUCH_FLUSH_MS = 30 * 1000;
 const DEVICE_SCOPES: LanPairedDevice['scopes'] = ['catalog:read', 'media:stream', 'playback:write'];
 
 type SignedLanUrlOptions = {
@@ -42,6 +43,8 @@ export function createLanSecurity(deps: LanSecurityDeps) {
   const { loadSettings, saveSettings, localAccessToken, libraryForLocalNetwork } = deps;
   let pairingSecretExpiresAt = 0;
   const requestAuthorizations = new WeakMap<IncomingMessage, { ok: boolean; device?: LanPairedDevice }>();
+  const pendingPairedDeviceTouches = new Map<string, { lastSeenAt: number; lastAddress: string }>();
+  let pairedDeviceTouchTimer: ReturnType<typeof setTimeout> | null = null;
 
   function getRequestRemoteAddress(req: IncomingMessage): string {
     return normalizeRemoteAddress(req.socket.remoteAddress);
@@ -104,16 +107,43 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     return null;
   }
 
-  function touchPairedDevice(deviceId: string, address: string): void {
+  function schedulePairedDeviceTouchFlush(): void {
+    if (pairedDeviceTouchTimer || pendingPairedDeviceTouches.size === 0) return;
+    pairedDeviceTouchTimer = setTimeout(flushPairedDeviceTouches, PAIRED_DEVICE_TOUCH_FLUSH_MS);
+    pairedDeviceTouchTimer.unref?.();
+  }
+
+  function flushPairedDeviceTouches(): void {
+    if (pairedDeviceTouchTimer) {
+      clearTimeout(pairedDeviceTouchTimer);
+      pairedDeviceTouchTimer = null;
+    }
+    if (pendingPairedDeviceTouches.size === 0) return;
+
     const settings = loadSettings();
     const devices = settings.localNetworkPairedDevices || [];
     let changed = false;
     const updated = devices.map((device) => {
-      if (device.id !== deviceId) return device;
+      const touch = pendingPairedDeviceTouches.get(device.id);
+      if (!touch || touch.lastSeenAt <= device.lastSeenAt) return device;
       changed = true;
-      return { ...device, lastSeenAt: Date.now(), lastAddress: address };
+      return { ...device, lastSeenAt: touch.lastSeenAt, lastAddress: touch.lastAddress };
     });
-    if (changed) saveSettings({ ...settings, localNetworkPairedDevices: updated });
+    try {
+      if (changed) saveSettings({ ...settings, localNetworkPairedDevices: updated });
+      pendingPairedDeviceTouches.clear();
+    } catch (error) {
+      console.warn('[lan] Could not persist paired-device activity; retrying later.', error);
+      schedulePairedDeviceTouchFlush();
+    }
+  }
+
+  function touchPairedDevice(deviceId: string, address: string): void {
+    pendingPairedDeviceTouches.set(deviceId, {
+      lastSeenAt: Date.now(),
+      lastAddress: address,
+    });
+    schedulePairedDeviceTouchFlush();
   }
 
   function signLanPayload(payload: string): string {
@@ -406,6 +436,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     requestToken,
     findPairedDeviceByToken,
     touchPairedDevice,
+    flushPairedDeviceTouches,
     signLanPayload,
     buildSignedLanUrl,
     isSignedLanRequestValid,

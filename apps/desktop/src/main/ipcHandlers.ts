@@ -169,7 +169,6 @@ export interface IpcHandlerDependencies<
   probeMedia: (filePath: string) => Promise<ProbeResult>;
   canDirectPlay: (filePath: string, probe: ProbeResult, backend: 'html5' | 'hls') => boolean;
   startTranscode: (filePath: string, options: TranscodeOptions, serverBase: string) => Promise<TranscodeSession>;
-  appendLocalAccessTokenToUrl: (url: string) => string;
   stopTranscode: (sessionId: string) => boolean;
   isTrustedSender: (event: IpcMainInvokeEvent) => boolean;
 }
@@ -680,8 +679,7 @@ export function registerIpcHandlers<
   handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
     deps.safeResult(async () => {
       deps.authorizeMediaPath(filePath);
-      const session = await deps.startTranscode(filePath, options || {}, `http://127.0.0.1:${deps.getMediaServerPort()}`);
-      return { ...session, playlistUrl: deps.appendLocalAccessTokenToUrl(session.playlistUrl) };
+      return deps.startTranscode(filePath, options || {}, `http://127.0.0.1:${deps.getMediaServerPort()}`);
     }),
   );
   handle('media:stop-transcode', (_event, sessionId: string) => deps.safeResult(() => deps.stopTranscode(sessionId)));
