@@ -401,6 +401,7 @@ function ProfilePinPad({
 
   const append = useCallback((digit: string) => {
     const next = `${pin}${digit}`.slice(0, 4);
+    setError(null);
     setPin(next);
     if (next.length === 4) void submit(next);
   }, [pin, submit]);
@@ -415,6 +416,7 @@ function ProfilePinPad({
         append(event.key);
       } else if (event.key === 'Backspace') {
         event.preventDefault();
+        setError(null);
         setPin((value) => value.slice(0, -1));
       }
     };
@@ -440,9 +442,22 @@ function ProfilePinPad({
         ))}
         <button type="button" onClick={onBack} className="h-14 w-14 rounded-full text-xs text-[var(--loom-muted)]">Back</button>
         <button type="button" onClick={() => append('0')} disabled={busy} className="h-14 w-14 rounded-full bg-[var(--loom-surface-2)] text-xl font-semibold hover:bg-[var(--loom-surface-3)] focus-visible:ring-4 focus-visible:ring-[var(--loom-accent)]">0</button>
-        <button type="button" onClick={() => setPin((value) => value.slice(0, -1))} className="h-14 w-14 rounded-full text-xs text-[var(--loom-muted)]">Delete</button>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            setPin((value) => value.slice(0, -1));
+          }}
+          className="h-14 w-14 rounded-full text-xs text-[var(--loom-muted)]"
+        >
+          Delete
+        </button>
       </div>
-      {error && <p className="mt-5 text-sm text-red-400">{error}</p>}
+      {error && (
+        <p role="alert" aria-live="assertive" aria-atomic="true" className="mt-5 text-sm text-red-400">
+          {error}
+        </p>
+      )}
       {onResetOwner && (
         <div className="mt-6 flex max-w-sm flex-col items-center gap-2 text-center">
           <button type="button" onClick={() => setShowReset((value) => !value)} className="text-xs text-[var(--loom-muted)] hover:text-[var(--loom-text)]">Forgot Owner PIN?</button>
