@@ -2880,13 +2880,15 @@ function PairingScreen({
                     }}
                     style={({ pressed }) => [styles.hostCard, pressed && styles.pressed]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Connect to ${host.deviceName}`}
+                    accessibilityLabel={`Use ${host.deviceName}`}
+                    accessibilityHint="Fills the desktop address so you can enter its pairing PIN"
+                    accessibilityState={{ disabled: isPairing }}
                   >
                     <View style={styles.hostCardCopy}>
                       <Text selectable numberOfLines={1} style={styles.hostName}>{host.deviceName}</Text>
                       <Text selectable numberOfLines={1} style={styles.hostAddress}>{host.baseUrl}</Text>
                     </View>
-                    <Text style={styles.hostConnectLabel}>{isPairing ? 'Connecting…' : 'Connect'}</Text>
+                    <Text style={styles.hostConnectLabel}>Use this desktop</Text>
                   </Pressable>
               ))}
               {!discoveredHosts.length ? (
@@ -2917,18 +2919,23 @@ function PairingScreen({
                   <View style={styles.manualDividerLine} />
                 </View>
               ) : null}
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                onChangeText={setBaseUrl}
-                onSubmitEditing={canPair ? () => onPair() : undefined}
-                placeholder="192.168.1.25:3847"
-                placeholderTextColor={faint}
-                returnKeyType="next"
-                style={styles.input}
-                value={baseUrl}
-              />
+              <View style={styles.inputField}>
+                <Text nativeID="desktop-address-label" style={styles.inputLabel}>Desktop address</Text>
+                <TextInput
+                  accessibilityLabel="Desktop address"
+                  accessibilityLabelledBy="desktop-address-label"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="url"
+                  onChangeText={setBaseUrl}
+                  onSubmitEditing={canPair ? () => onPair() : undefined}
+                  placeholder="192.168.1.25:3847"
+                  placeholderTextColor={faint}
+                  returnKeyType="next"
+                  style={styles.input}
+                  value={baseUrl}
+                />
+              </View>
               <TextInput
                 accessibilityLabel="One-time pairing PIN"
                 autoCapitalize="none"
@@ -2946,7 +2953,14 @@ function PairingScreen({
           ) : null}
           {error ? (
             <View style={styles.errorCard}>
-              <Text selectable style={styles.errorText}>{error}</Text>
+              <Text
+                accessibilityLiveRegion="assertive"
+                accessibilityRole="alert"
+                selectable
+                style={styles.errorText}
+              >
+                {error}
+              </Text>
             </View>
           ) : null}
           {manualVisible ? (

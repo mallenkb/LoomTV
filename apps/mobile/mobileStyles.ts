@@ -192,6 +192,14 @@ export function createStyles(theme: MobileThemeColors) {
   manualForm: {
     gap: 11,
   },
+  inputField: {
+    gap: 6,
+  },
+  inputLabel: {
+    color: muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   manualDivider: {
     alignItems: 'center',
     flexDirection: 'row',

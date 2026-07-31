@@ -147,6 +147,8 @@ export default function VideoPlayer({
   const progressThumbRef = useRef<HTMLDivElement>(null);
   const currentTimeTextRef = useRef<HTMLSpanElement>(null);
   const durationTimeTextRef = useRef<HTMLSpanElement>(null);
+  const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
+  const errorCloseButtonRef = useRef<HTMLButtonElement>(null);
   const showRemainingTimeRef = useRef(false);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -294,6 +296,10 @@ export default function VideoPlayer({
 
   useEffect(() => {
     playerStateRef.current = playerState;
+  }, [playerState]);
+
+  useEffect(() => {
+    if (playerState === 'error') errorRetryButtonRef.current?.focus();
   }, [playerState]);
 
   useEffect(() => {
@@ -2469,6 +2475,19 @@ export default function VideoPlayer({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableShortcutTarget(e.target)) return;
+      if (playerStateRef.current === 'error') {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          handleClose();
+        }
+        return;
+      }
+      if (
+        isPlayerControlTarget(e.target)
+        && [' ', 'Spacebar', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)
+      ) {
+        return;
+      }
       const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
 
       switch (e.key) {
@@ -2566,6 +2585,7 @@ export default function VideoPlayer({
     changeVolume,
     duration,
     handleBack,
+    handleClose,
     resetPlaybackRate,
     adjustSubtitleDelay,
     resetSubtitleDelay,
@@ -2802,7 +2822,7 @@ export default function VideoPlayer({
         <div className="loom-player-drag-region" aria-hidden="true" />
 
         <TopPlayerControls
-          visible={showTopControls}
+          visible={showTopControls && playerState !== 'error'}
           label={currentEpLabel ?? title}
           onBack={handleBack}
           onClose={handleClose}
@@ -2858,7 +2878,13 @@ export default function VideoPlayer({
         />
 
         {playerState === 'loading' && (
-          <div className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center">
+          <div
+            role="status"
+            aria-atomic="true"
+            aria-busy="true"
+            aria-live="polite"
+            className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center"
+          >
             <LoomLoader
               style={theme.loaderStyle}
               className="grid h-16 w-16 place-items-center rounded-full bg-white/10 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur-md"
@@ -2870,19 +2896,47 @@ export default function VideoPlayer({
         )}
 
         {playerState === 'error' && (
-          <div className="absolute inset-0 z-20 bg-black/70 flex flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="text-sm text-white/90">Playback failed</p>
-            <p className="text-xs text-white/70 max-w-xl">{errorMessage || 'Unable to play this file.'}</p>
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="loom-player-error-title"
+            aria-describedby="loom-player-error-description"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                handleClose();
+                return;
+              }
+              if (event.key !== 'Tab') return;
+              const firstButton = errorRetryButtonRef.current;
+              const lastButton = errorCloseButtonRef.current;
+              if (event.shiftKey && document.activeElement === firstButton) {
+                event.preventDefault();
+                lastButton?.focus();
+              } else if (!event.shiftKey && document.activeElement === lastButton) {
+                event.preventDefault();
+                firstButton?.focus();
+              }
+            }}
+            className="absolute inset-0 z-20 bg-black/70 flex flex-col items-center justify-center gap-3 px-6 text-center"
+          >
+            <p id="loom-player-error-title" className="text-sm text-white/90">Playback failed</p>
+            <p id="loom-player-error-description" className="text-xs text-white/70 max-w-xl">{errorMessage || 'Unable to play this file.'}</p>
             <div className="flex gap-3">
               <button
+                ref={errorRetryButtonRef}
+                type="button"
                 onClick={handleRetry}
-                className="px-3 py-1.5 rounded bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] text-sm hover:bg-[var(--loom-accent-hover)]"
+                className="px-3 py-1.5 rounded bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] text-sm hover:bg-[var(--loom-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 Retry
               </button>
               <button
+                ref={errorCloseButtonRef}
+                type="button"
                 onClick={handleClose}
-                className="px-3 py-1.5 rounded border border-white/30 text-white text-sm hover:bg-white/10"
+                className="px-3 py-1.5 rounded border border-white/30 text-white text-sm hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
               >
                 Close
               </button>
@@ -2951,7 +3005,7 @@ export default function VideoPlayer({
 
         {/* Controls overlay */}
         <PlayerControlBar
-          showControls={showControls}
+          showControls={showControls && playerState !== 'error'}
           seekSliderRef={seekSliderRef}
           progressFillRef={progressFillRef}
           progressThumbRef={progressThumbRef}
