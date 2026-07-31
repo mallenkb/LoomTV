@@ -597,7 +597,6 @@ export const desktopApi = {
     }
 
     const status = await desktopApi.getLocalNetworkStatus().catch(() => null);
-    const deviceId = status?.deviceId || '';
     const deviceName = status?.deviceName || 'LoomTV device';
 
     let response: Response;
@@ -605,7 +604,7 @@ export const desktopApi = {
       response = await fetchRequestWithTimeout(`${normalizedBaseUrl}/api/v2/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...REMOTE_PROFILE_API_HEADER },
-        body: JSON.stringify({ code: normalizedCode, deviceId, deviceName }),
+        body: JSON.stringify({ code: normalizedCode, deviceName }),
       }, REMOTE_REQUEST_TIMEOUT_MS);
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
@@ -749,15 +748,13 @@ export const desktopApi = {
     };
   },
 
-  async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string, deviceId: string): Promise<void> {
+  async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string): Promise<void> {
     if (window.desktopApi?.disconnectRemoteLibrary) {
       await window.desktopApi.disconnectRemoteLibrary(true);
       return;
     }
     await fetch(`${baseUrl}/api/v2/unpair`, bearerHeaders(deviceToken, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId }),
     })).catch(() => undefined);
   },
 

@@ -183,7 +183,6 @@ const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
 ];
 
 const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v2';
-const MOBILE_DEVICE_ID_KEY = 'loomtv.mobile-device-id.v1';
 const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
 const MOBILE_THEME_COLOR_KEY = 'loomtv.mobile-theme-color.v1';
 const MOBILE_SUBTITLE_FONT_SIZE_KEY = 'loomtv.mobile-subtitle-font-size.v1';
@@ -1207,7 +1206,6 @@ function AppRoot() {
   });
   const reconnectingSavedConnectionRef = useRef(false);
   const connectionHealthCheckRef = useRef(false);
-  const mobileDeviceIdRef = useRef('');
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const themedStyles = useMemo(() => createStyles(mobileTheme), [mobileTheme]);
@@ -1325,9 +1323,6 @@ function AppRoot() {
 
   useEffect(() => {
     let cancelled = false;
-    void SecureStore.getItemAsync(MOBILE_DEVICE_ID_KEY)
-      .then((deviceId) => { if (!cancelled && deviceId) mobileDeviceIdRef.current = deviceId; })
-      .catch(() => {});
     void SecureStore.getItemAsync(MOBILE_THEME_MODE_KEY)
       .then((mode) => {
         if (!cancelled && (mode === 'auto' || mode === 'light' || mode === 'dark')) setMobileThemeMode(mode);
@@ -2174,7 +2169,6 @@ function AppRoot() {
 
       const response = await mobileLanClient.pair(nextBaseUrl, {
           code,
-          deviceId: mobileDeviceIdRef.current || undefined,
           deviceName: mobileDeviceName(),
       });
       if (!response.ok) {
@@ -2212,8 +2206,6 @@ function AppRoot() {
         hostDeviceName: nextConnection.hostDeviceName,
         clientDeviceName: nextConnection.clientDeviceName,
       };
-      mobileDeviceIdRef.current = nextConnection.deviceId;
-      await SecureStore.setItemAsync(MOBILE_DEVICE_ID_KEY, nextConnection.deviceId);
       await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection));
       setSavedConnection(nextSavedConnection);
       setShareCode('');

@@ -205,6 +205,19 @@ export function lockProfile(deviceId: string): ActiveProfileState {
   return getActiveProfileState(deviceId);
 }
 
+/** Remove every profile capability associated with a revoked paired device. */
+export function revokeDeviceProfileAccess(deviceId: string): void {
+  const prefix = `${deviceId}:`;
+  for (const key of unlockedUntil.keys()) {
+    if (key.startsWith(prefix)) unlockedUntil.delete(key);
+  }
+  for (const key of failures.keys()) {
+    if (key.startsWith(prefix)) failures.delete(key);
+  }
+  clearDeviceProfileSelection(deviceId);
+  broadcastActiveProfileChanged(deviceId);
+}
+
 export function requireDesktopProfileId(expectedProfileId?: string): string {
   const profileId = getDesktopActiveProfileId();
   if (!profileId) throw new ProfileError('profile_required', 'No profile is selected on this device.');

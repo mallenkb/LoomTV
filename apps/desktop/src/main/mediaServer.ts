@@ -42,7 +42,6 @@ import { registerResource, resolveExternalArtworkResource, resolveLocalResource 
 import {
   createAndSelectGuest,
   broadcastProfilesChanged,
-  clearGuestSelection,
   DESKTOP_DEVICE_ID,
   getActiveProfileState,
   lockProfile,
@@ -50,6 +49,7 @@ import {
   profileSummaries,
   requireDesktopProfileId,
   requireOwner,
+  revokeDeviceProfileAccess,
   resolveLanProfileId,
   selectProfile,
   setAutomaticSignIn,
@@ -378,13 +378,18 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       // The paired device behind this request, when LAN-authorized. Local
       // desktop requests keep null and resolve to the desktop's profile.
       let lanDeviceId: string | null = null;
+      let lanAuthorization: { ok: boolean; device?: LanPairedDevice } | undefined;
+      const getLanAuthorization = (): { ok: boolean; device?: LanPairedDevice } => {
+        lanAuthorization ??= authorizeLanRequest(reqUrl, req);
+        return lanAuthorization;
+      };
       const requireV2Scope = (requiredScope: LanRouteScope): boolean => {
         if (authorizeLocalRequest(reqUrl, req)) return true;
         if (loopbackRequest) {
           writeJson(res, 401, { error: 'Authenticated desktop access is required.' });
           return false;
         }
-        const authorization = authorizeLanRequest(reqUrl, req);
+        const authorization = getLanAuthorization();
         const device = authorization.device;
         lanDeviceId = device?.id ?? null;
         const authorized = Boolean(device && deviceHasLanScope(device.scopes, requiredScope));
@@ -468,7 +473,12 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         const boundDeviceId = reqUrl.searchParams.get('deviceId') || '';
         const boundProfileId = reqUrl.searchParams.get('profileId') || '';
         const boundRevision = Number(reqUrl.searchParams.get('selectionRevision'));
-        const authorizedDeviceId = boundDeviceId || authorizeLanRequest(reqUrl, req).device?.id || lanDeviceId || '';
+        const credentialDeviceId = authorizeLocalRequest(reqUrl, req)
+          ? DESKTOP_DEVICE_ID
+          : getLanAuthorization().device?.id || lanDeviceId || '';
+        if (credentialDeviceId && boundDeviceId && credentialDeviceId !== boundDeviceId) return null;
+        const signedDeviceId = !credentialDeviceId && isSignedLanRequestValid(reqUrl) ? boundDeviceId : '';
+        const authorizedDeviceId = credentialDeviceId || signedDeviceId;
         if (authorizedDeviceId) {
           const active = getActiveProfileState(authorizedDeviceId);
           const profileId = boundProfileId || active.profileId;
@@ -615,23 +625,27 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/unpair' && req.method === 'POST') {
         if (!requireV2Scope('device:self')) return;
-        const authResult = authorizeLanRequest(reqUrl, req);
-        // Devices may self-revoke; loopback can revoke any device.
+        const authenticatedDevice = getLanAuthorization().device;
+        if (!authenticatedDevice) {
+          writeJson(res, 401, { error: 'A paired-device credential is required to revoke this device.' });
+          return;
+        }
         readJsonBody(req)
-          .catch((): Record<string, unknown> => ({}))
           .then((body) => {
+            if (Object.prototype.hasOwnProperty.call(body, 'deviceId')) {
+              writeJson(res, 409, {
+                error: 'device_identity_is_credential_bound',
+                message: 'Update LoomTV and retry without a caller-supplied deviceId.',
+              });
+              return;
+            }
             const settings = loadSettings();
-            const requestedId = String(body?.deviceId || authResult.device?.id || '');
-            if (!requestedId) {
-              writeJson(res, 400, { error: 'deviceId required' });
+            if (!(settings.localNetworkPairedDevices || []).some((device) => device.id === authenticatedDevice.id)) {
+              writeJson(res, 401, { error: 'The paired-device credential has already been revoked.' });
               return;
             }
-            if (!loopbackRequest && authResult.device && authResult.device.id !== requestedId) {
-              writeJson(res, 403, { error: 'Cannot revoke other devices' });
-              return;
-            }
-            const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== requestedId);
-            clearGuestSelection(requestedId);
+            const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== authenticatedDevice.id);
+            revokeDeviceProfileAccess(authenticatedDevice.id);
             saveSettings({ ...settings, localNetworkPairedDevices: remaining });
             writeJson(res, 200, { ok: true });
           })
@@ -972,8 +986,14 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/profiles' && req.method === 'POST') {
         if (!requireV2Scope('playback:write')) return;
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
         readJsonBody(req)
           .then((body) => {
+            requireOwner(profileDeviceId);
             const created = createProfile({
               name: String(body.name || ''),
               avatarKey: typeof body.avatarKey === 'string' ? body.avatarKey : undefined,
@@ -983,9 +1003,11 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
             broadcastProfilesChanged();
             writeJson(res, 201, { profile: created, profiles: profileSummaries() });
           })
-          .catch((error) => writeJson(res, 400, {
-            error: error instanceof Error ? error.message : 'The profile could not be created.',
-          }));
+          .catch((error) => error instanceof ProfileError
+            ? writeProfileError(error)
+            : writeJson(res, 400, {
+                error: error instanceof Error ? error.message : 'The profile could not be created.',
+              }));
         return;
       }
 

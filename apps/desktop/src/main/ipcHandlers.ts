@@ -93,7 +93,7 @@ export interface IpcHandlerDependencies<
   connectRemoteLibrary: (
     baseUrl: string,
     code: string,
-    device: { id?: string; name: string },
+    device: { name: string },
   ) => Promise<IpcResult<'network:remote-connect'>>;
   requestRemoteLibrary: (
     pathname: string,
@@ -101,6 +101,7 @@ export interface IpcHandlerDependencies<
   ) => Promise<IpcResult<'network:remote-request'>>;
   getRemoteLibrarySession: () => IpcResult<'network:remote-session'>;
   disconnectRemoteLibrary: (revoke?: boolean) => Promise<boolean>;
+  revokeDeviceProfileAccess: (deviceId: string) => void;
   getProgress: (filePath: string) => StoredProgress | null;
   getAllProgress: () => Record<string, StoredProgress>;
   saveProgress: (filePath: string, position: number, duration: number, expectedProfileId?: string) => IpcResult<'progress:save'>;
@@ -448,7 +449,6 @@ export function registerIpcHandlers<
   handle('network:remote-connect', (_event, baseUrl, code) => {
     const settings = deps.loadSettings();
     return deps.connectRemoteLibrary(String(baseUrl || ''), String(code || ''), {
-      id: settings.localNetworkDeviceId,
       name: settings.localNetworkDeviceName || os.hostname(),
     });
   });
@@ -464,7 +464,11 @@ export function registerIpcHandlers<
   handle('network:revoke-paired-device', (_event, deviceId: string) => {
     deps.authorizeSettingsWrite();
     const settings = deps.loadSettings();
-    const remaining = (settings.localNetworkPairedDevices || []).filter((device) => device.id !== deviceId);
+    const pairedDevices = settings.localNetworkPairedDevices || [];
+    const revoked = pairedDevices.find((device) => device.id === deviceId);
+    if (!revoked) return pairedDevices;
+    const remaining = pairedDevices.filter((device) => device.id !== revoked.id);
+    deps.revokeDeviceProfileAccess(revoked.id);
     deps.saveSettings({ ...settings, localNetworkPairedDevices: remaining });
     return remaining;
   });

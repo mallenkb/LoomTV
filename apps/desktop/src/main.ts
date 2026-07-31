@@ -163,6 +163,7 @@ import {
   profileSummaries,
   requireDesktopProfileId,
   requireOwner,
+  revokeDeviceProfileAccess,
   resolveLanProfileId,
   resetOwnerProfile,
   setDesktopAutomaticSignIn,
@@ -1316,6 +1317,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   requestRemoteLibrary: remoteLibraryClient.request,
   getRemoteLibrarySession: remoteLibraryClient.getSession,
   disconnectRemoteLibrary: remoteLibraryClient.disconnect,
+  revokeDeviceProfileAccess,
   // Viewer state resolves the active desktop profile in the main process; the
   // renderer never chooses a profile ID for progress calls.
   getProgress: (filePath) => {
