@@ -64,7 +64,8 @@
           }
         }
       ],
-      "./plugins/withLoomTvLoopbackTransport.cjs"
+      "./plugins/withLoomTvLoopbackTransport.cjs",
+      "./plugins/with-gradle-distribution-checksum.cjs"
     ]
   }
 }
