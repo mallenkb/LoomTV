@@ -4,14 +4,13 @@ import { FolderPlus } from 'lucide-react';
 import { useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { useProgressSnapshot } from '@/lib/progress';
 import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
-import LibraryFilterBar from '@/components/LibraryFilterBar';
+import LibraryPageLayout from '@/components/LibraryPageLayout';
 
 export default function Others() {
   const { state, addLibraryFolder } = useLibrary();
@@ -35,15 +34,17 @@ export default function Others() {
   );
 
   return (
-    <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch
-        value={query}
-        onChange={setQuery}
-        placeholder="Search mixed folders"
-        showModernSearchTrigger={false}
-        rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
-      />
-      <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">
+    <LibraryPageLayout
+      title="Others"
+      subtitle={othersFolders.length > 0
+        ? `${othersFolders.length} custom ${othersFolders.length === 1 ? 'folder' : 'folders'}`
+        : undefined}
+      query={query}
+      onQueryChange={setQuery}
+      placeholder="Search custom folders"
+      activeFilter={activeFilter}
+      onFilterChange={setActiveFilter}
+    >
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -72,8 +73,7 @@ export default function Others() {
             )}
           </>
         )}
-      </div>
-    </div>
+    </LibraryPageLayout>
   );
 }
 

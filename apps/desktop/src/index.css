@@ -662,8 +662,10 @@ html.loom-mpv-active .loom-app-underlay {
   max-width: none;
   margin-right: var(--loom-frame-end);
   margin-left: var(--loom-frame-start);
-  padding-right: 2rem;
-  padding-left: 2rem;
+  /* Match Modern Home's responsive content inset instead of giving library
+     grids a separate fixed gutter. */
+  padding-right: var(--loom-frame-inset);
+  padding-left: var(--loom-frame-inset);
 }
 
 :root[data-theme="dark"][data-home-style="modern"] .loom-poster-frame {
@@ -707,8 +709,19 @@ html.loom-mpv-active .loom-app-underlay {
 }
 
 :root[data-home-style="modern"] .loom-continue-watching-shell {
-  left: 5rem;
-  right: 5rem;
+  /* Resolve the fixed playback surface from the same content frame as Home.
+     This keeps its edges aligned with the poster rails instead of centring it
+     against the full window. */
+  left: var(--loom-frame-start);
+  right: var(--loom-frame-end);
+  padding-right: var(--loom-frame-inset);
+  padding-left: var(--loom-frame-inset);
+}
+
+:root[data-home-style="modern"] .loom-continue-watching {
+  /* The shell already owns the Home frame width; do not reintroduce a second
+     max-width that would pull the bar back toward the full-window centre. */
+  max-width: none;
 }
 
 :root[data-theme="dark"][data-home-style="modern"] .loom-continue-watching {
@@ -2346,6 +2359,8 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   :root[data-home-style="modern"] .loom-continue-watching-shell {
     right: 0;
     left: 0;
+    padding-right: var(--loom-frame-inset);
+    padding-left: var(--loom-frame-inset);
   }
 }
 

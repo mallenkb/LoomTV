@@ -4,12 +4,11 @@ import { FolderPlus, Tv } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { useProgressSnapshot } from '@/lib/progress';
 import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
-import LibraryFilterBar from '@/components/LibraryFilterBar';
+import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { availableSeasonCount } from '@/components/MediaPosterCard.helpers';
 
@@ -21,7 +20,7 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const { state, addLibraryFolder } = useLibrary();
   const { isLoading, isScanning } = state;
   const tvShows = kind === 'anime' ? state.animeShows : state.tvShows;
-  const title = kind === 'anime' ? 'anime' : 'TV shows';
+  const title = kind === 'anime' ? 'Anime' : 'TV Shows';
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
@@ -33,15 +32,14 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
     .filter((item) => matchesLibraryFilter(item, activeFilter, progress)), [activeFilter, normalizedQuery, progress, tvShows]);
 
   return (
-    <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch
-        value={query}
-        onChange={setQuery}
-        placeholder={kind === 'anime' ? 'Search anime' : 'Search tv shows'}
-        showModernSearchTrigger={false}
-        rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
-      />
-      <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">
+    <LibraryPageLayout
+      title={title}
+      query={query}
+      onQueryChange={setQuery}
+      placeholder={kind === 'anime' ? 'Search anime' : 'Search TV shows'}
+      activeFilter={activeFilter}
+      onFilterChange={setActiveFilter}
+    >
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -70,8 +68,7 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
             {activeFilter === 'all' ? 'No local matches found' : `No ${title.toLowerCase()} match this filter`}
           </div>
         )}
-      </div>
-    </div>
+    </LibraryPageLayout>
   );
 }
 

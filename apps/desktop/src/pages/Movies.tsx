@@ -4,12 +4,11 @@ import { Film } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { useProgressSnapshot } from '@/lib/progress';
 import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
-import LibraryFilterBar from '@/components/LibraryFilterBar';
+import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 
 export default function Movies() {
@@ -26,15 +25,14 @@ export default function Movies() {
     .filter((item) => matchesLibraryFilter(item, activeFilter, progress)), [activeFilter, movies, normalizedQuery, progress]);
 
   return (
-    <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch
-        value={query}
-        onChange={setQuery}
-        placeholder="Search movies"
-        showModernSearchTrigger={false}
-        rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
-      />
-      <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">
+    <LibraryPageLayout
+      title="Movies"
+      query={query}
+      onQueryChange={setQuery}
+      placeholder="Search movies"
+      activeFilter={activeFilter}
+      onFilterChange={setActiveFilter}
+    >
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
             {Array.from({ length: 12 }).map((_, i) => (
@@ -62,8 +60,7 @@ export default function Movies() {
             {activeFilter === 'all' ? 'No local matches found' : 'No movies match this filter'}
           </div>
         )}
-      </div>
-    </div>
+    </LibraryPageLayout>
   );
 }
 

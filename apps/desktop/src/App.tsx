@@ -397,7 +397,10 @@ function AppShell() {
       />
       <main
         className="flex-1 overflow-hidden"
-        style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '8rem' : '0px' } as React.CSSProperties}
+        // The now-playing bar is 93px tall before its shell padding. Keep a
+        // full breathing band below every library grid so its final row can be
+        // scrolled clear of the fixed bar.
+        style={{ '--loom-page-bottom-safe': reserveContinueBarSpace ? '11rem' : '0px' } as React.CSSProperties}
       >
         {/* Keyed on the route so navigating with the sidebar clears a failed
             page instead of stranding the user on the error panel. */}
