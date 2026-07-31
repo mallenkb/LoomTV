@@ -1,0 +1,44 @@
+diff --git a/dist/commonjs/index.d.ts b/dist/commonjs/index.d.ts
+index f3e2de9d87e1ce462517e49f35733bed8bdf85af..6c84d87835182d0670981dc15f488c2a7d061c98 100644
+--- a/dist/commonjs/index.d.ts
++++ b/dist/commonjs/index.d.ts
+@@ -5,4 +5,5 @@ export type BraceExpansionOptions = {
+     maxLength?: number;
+ };
+ export declare function expand(str: string, options?: BraceExpansionOptions): string[];
++export default expand;
+ //# sourceMappingURL=index.d.ts.map
+diff --git a/dist/commonjs/index.js b/dist/commonjs/index.js
+index be9df86be09c7655787a65c55ae6da01858894c3..95d3f6f8629a5a49d25b062760b5603365d1d2ca 100644
+--- a/dist/commonjs/index.js
++++ b/dist/commonjs/index.js
+@@ -260,4 +260,8 @@ function expand_(str, max, maxLength, isTop) {
+     }
+     return acc;
+ }
++// Older minimatch releases call the CommonJS export directly. Keep the secure
++// v5 implementation while preserving that legacy callable shape for Expo and
++// packaging tools that have not yet moved to the named `expand` export.
++module.exports = Object.assign(expand, module.exports);
+ //# sourceMappingURL=index.js.map
+diff --git a/dist/esm/index.d.ts b/dist/esm/index.d.ts
+index f3e2de9d87e1ce462517e49f35733bed8bdf85af..6c84d87835182d0670981dc15f488c2a7d061c98 100644
+--- a/dist/esm/index.d.ts
++++ b/dist/esm/index.d.ts
+@@ -5,4 +5,5 @@ export type BraceExpansionOptions = {
+     maxLength?: number;
+ };
+ export declare function expand(str: string, options?: BraceExpansionOptions): string[];
++export default expand;
+ //# sourceMappingURL=index.d.ts.map
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+index 6dc0392fc0feedb811e63d70a30be2736af17a3a..853715fd4812a9ee05ac28c5d45215996bf19f93 100644
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -256,4 +256,6 @@ function expand_(str, max, maxLength, isTop) {
+     }
+     return acc;
+ }
++// Preserve the default export consumed by pre-v10 minimatch ESM bundles.
++export default expand;
+ //# sourceMappingURL=index.js.map

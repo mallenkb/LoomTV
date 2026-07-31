@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router';
 import { MotionConfig } from 'motion/react';
 import { LibraryProvider, useLibrary } from './contexts/LibraryContext';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryContext';

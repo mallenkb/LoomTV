@@ -1,38 +1,3 @@
 {
-  "advisories": {
-    "GHSA-mh99-v99m-4gvg": {
-      "module": "brace-expansion",
-      "expires": "2026-09-30",
-      "reference": "https://github.com/advisories/GHSA-mh99-v99m-4gvg",
-      "allowedPathPrefixes": [
-        "apps__mobile>"
-      ],
-      "requiredPathMarkers": [
-        ">@expo/cli>",
-        ">@expo/devtools>",
-        ">@react-native/codegen>",
-        ">@react-native/community-cli-plugin>",
-        ">babel-jest>",
-        ">react-native>glob>minimatch>brace-expansion"
-      ],
-      "reason": "The remaining Expo SDK 54 paths are Node-only CLI, dev-server, code-generation, test, or build glob tooling and are not bundled into the shipped mobile runtime. Patched brace-expansion 5 changes the CommonJS API expected by these older minimatch versions, so this exception expires pending a compatible Expo/React Native toolchain update."
-    },
-    "GHSA-qwww-vcr4-c8h2": {
-      "module": "react-router",
-      "expires": "2026-10-31",
-      "reference": "https://github.com/advisories/GHSA-qwww-vcr4-c8h2",
-      "allowedPathPrefixes": [
-        "apps__desktop>react-router-dom>react-router"
-      ],
-      "sourceRoot": "apps/desktop/src",
-      "sourceAbsenceMarkers": [
-        "routeRSCServerRequest",
-        "unstable_RSC",
-        "createCallServer",
-        "react-router/dom/server",
-        "react-server-dom"
-      ],
-      "reason": "GHSA-qwww-vcr4-c8h2 only affects unstable React Server Components APIs; LoomTV is an Electron HashRouter client and does not contain an RSC server or action endpoint."
-    }
-  }
+  "advisories": {}
 }
