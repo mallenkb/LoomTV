@@ -59,7 +59,8 @@
             "deploymentTarget": "15.1"
           }
         }
-      ]
+      ],
+      "./plugins/with-gradle-distribution-checksum.cjs"
     ]
   }
 }

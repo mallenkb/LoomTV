@@ -14,8 +14,51 @@ permissions:
   contents: write
 
 jobs:
+  supply-chain:
+    name: Audit dependencies and generate SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.17.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies
+        run: corepack pnpm run audit:prod
+
+      - name: Generate deterministic dependency SBOM
+        run: corepack pnpm run sbom
+
+      - name: Upload dependency SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: loomtv-dependency-sbom
+          path: artifacts/loomtv-sbom.cdx.json
+          if-no-files-found: error
+
   make:
     name: Make ${{ matrix.platform }}
+    needs: supply-chain
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,16 +76,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 11.17.0
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -59,10 +102,6 @@ jobs:
 
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
-
-      - name: Audit production dependencies
-        if: runner.os == 'Linux'
-        run: corepack pnpm --filter loom-media-server-desktop run audit:prod
 
       - name: Lint
         run: corepack pnpm lint
@@ -118,7 +157,7 @@ jobs:
         run: corepack pnpm --filter loom-media-server-desktop run verify:runtime
 
       - name: Upload installers
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ matrix.artifact }}
           path: |

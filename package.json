@@ -9,6 +9,8 @@
     "wrap-ansi@7.0.0>string-width": "4.2.3"
   },
   "scripts": {
+    "audit:prod": "node scripts/audit-production.cjs",
+    "sbom": "node scripts/generate-sbom.cjs",
     "dev": "pnpm desktop:start",
     "start": "pnpm desktop:start",
     "desktop": "pnpm --filter loom-media-server-desktop",
@@ -24,5 +26,8 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "yaml": "2.9.0"
   }
 }
