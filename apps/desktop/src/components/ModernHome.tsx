@@ -299,8 +299,8 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
               {metadata && <span>{metadata}</span>}
             </div>
             <div className="mt-7 flex items-center gap-[6px]">
-              <Link to={mediaLink(item)} state={{ from, artwork: routeArtworkState(item, posterSources(item)) }} className="inline-flex h-14 items-center gap-2 rounded-full bg-white px-7 text-sm font-bold text-black transition-transform hover:scale-[1.02]">
-                <Play className="h-5 w-5 fill-current" /> View details
+              <Link to={mediaLink(item)} state={{ from, artwork: routeArtworkState(item, posterSources(item)) }} className="inline-flex h-14 items-center rounded-full bg-white px-7 text-sm font-bold text-black transition-transform hover:scale-[1.02]">
+                View details
               </Link>
               <button type="button" onClick={onToggleWatchlist} aria-label={inWatchlist ? `Remove ${item.title} from My List` : `Add ${item.title} to My List`} className="grid h-14 w-14 place-items-center rounded-full border border-[var(--loom-media-hairline-strong)] bg-[var(--loom-media-scrim)] backdrop-blur-xl transition-colors hover:bg-[var(--loom-media-veil-hover)]">
                 {inWatchlist ? <Check className="h-6 w-6" /> : <Plus className="h-6 w-6" />}

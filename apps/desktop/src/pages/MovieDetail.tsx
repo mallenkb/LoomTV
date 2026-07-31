@@ -317,7 +317,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               />
             )}
             <span className="relative z-10 flex items-center gap-3">
-              <Play className="h-7 w-7" />
+              <Play className="h-7 w-7 fill-current" />
               <span className="flex min-w-28 flex-col items-start leading-tight">
                 <span>{hasResumeProgress ? 'Resume' : 'Play'}</span>
                 {hasResumeProgress && progressCopy && (
