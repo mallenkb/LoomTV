@@ -21,7 +21,12 @@ export type LibraryProjectionDependencies = {
   artworkDeliveryUrls: (sources?: string[]) => string[];
   remoteArtworkDeliveryUrl: (source: string, base: string, identity?: RemoteProfileIdentity) => string;
   subtitleRecordsForRenderer: (subtitles?: SubtitleRecord[]) => SubtitleRecord[] | undefined;
-  subtitleRecordsForLocalNetwork: (subtitles: SubtitleRecord[] | undefined, base: string, identity?: RemoteProfileIdentity) => SubtitleRecord[] | undefined;
+  subtitleRecordsForLocalNetwork: (
+    subtitles: SubtitleRecord[] | undefined,
+    base: string,
+    identity?: RemoteProfileIdentity,
+    mediaScopePath?: string,
+  ) => SubtitleRecord[] | undefined;
   getRemoteThumbnailUrl: (filePath: string, base: string, time?: string, identity?: RemoteProfileIdentity) => string;
   signedStreamUrlForRemote: (base: string, filePath: string, identity?: RemoteProfileIdentity) => string;
   localMetadataWithTracks: (filePath: string, metadata: MediaItem['localMetadata']) => MediaItem['localMetadata'];
@@ -247,7 +252,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       backdropCandidates,
       logoCandidates,
       localMetadata: localMetadataWithTracks(item.filePath, item.localMetadata),
-      subtitles: subtitleRecordsForLocalNetwork(item.subtitles, base, identity),
+      subtitles: subtitleRecordsForLocalNetwork(item.subtitles, base, identity, item.filePath),
       episodes: item.episodes?.map((episode) => ({
         ...episode,
         still: remoteArtworkDeliveryUrl(artworkDeliveryUrl(episode.still), base, identity),
@@ -258,7 +263,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
         still: stillByEpisode.get(`${episodeFile.season}-${episodeFile.episode}`) || '',
         thumbnail: getRemoteThumbnailUrl(episodeFile.filePath, base, undefined, identity),
         localMetadata: localMetadataWithTracks(episodeFile.filePath, episodeFile.localMetadata),
-        subtitles: subtitleRecordsForLocalNetwork(episodeFile.subtitles, base, identity),
+        subtitles: subtitleRecordsForLocalNetwork(episodeFile.subtitles, base, identity, episodeFile.filePath),
       })),
     };
   };

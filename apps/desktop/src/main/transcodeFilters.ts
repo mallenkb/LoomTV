@@ -246,7 +246,16 @@ export function parseSubtitleStyle(value: string | null): SubtitleStyleOptions |
   }
 }
 
-export function appendStreamOptionParams(params: URLSearchParams, options?: TranscodeOptions): void {
+export type StreamSubtitleResourceIds = {
+  subtitleResourceId?: string;
+  secondarySubtitleResourceId?: string;
+};
+
+export function appendStreamOptionParams(
+  params: URLSearchParams,
+  options?: TranscodeOptions,
+  subtitleResources: StreamSubtitleResourceIds = {},
+): void {
   if (!options) return;
   if (typeof options.startSeconds === 'number' && options.startSeconds > 0) params.set('t', String(Math.floor(options.startSeconds)));
   if (typeof options.videoTrackIndex === 'number') params.set('video', String(options.videoTrackIndex));
@@ -254,9 +263,13 @@ export function appendStreamOptionParams(params: URLSearchParams, options?: Tran
   if (typeof options.subtitleTrackIndex === 'number') params.set('subtitle', String(options.subtitleTrackIndex));
   if (typeof options.subtitleStreamOrdinal === 'number') params.set('subtitleOrdinal', String(options.subtitleStreamOrdinal));
   if (options.subtitleCodec) params.set('subtitleCodec', options.subtitleCodec);
+  if (subtitleResources.subtitleResourceId) params.set('subtitleResourceId', subtitleResources.subtitleResourceId);
   if (typeof options.secondarySubtitleTrackIndex === 'number') params.set('secondarySubtitle', String(options.secondarySubtitleTrackIndex));
   if (typeof options.secondarySubtitleStreamOrdinal === 'number') params.set('secondarySubtitleOrdinal', String(options.secondarySubtitleStreamOrdinal));
   if (options.secondarySubtitleCodec) params.set('secondarySubtitleCodec', options.secondarySubtitleCodec);
+  if (subtitleResources.secondarySubtitleResourceId) {
+    params.set('secondarySubtitleResourceId', subtitleResources.secondarySubtitleResourceId);
+  }
   if (options.subtitleStyle) params.set('subtitleStyle', JSON.stringify(options.subtitleStyle));
   if (options.forceTranscode) params.set('forceTranscode', '1');
 }

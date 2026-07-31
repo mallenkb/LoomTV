@@ -21,7 +21,7 @@ export interface ArtworkUrlsDeps {
     ttlSeconds?: number,
     options?: { stable?: boolean },
   ) => string;
-  registerRemoteResource: (kind: LocalResourceKind, value: string) => string;
+  registerRemoteResource: (kind: LocalResourceKind, value: string, scopePath?: string) => string;
 }
 
 export function createArtworkUrls(deps: ArtworkUrlsDeps) {
@@ -212,7 +212,12 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     }
   }
 
-  function signedSubtitleUrlForRemote(base: string, source: string, identity?: RemoteProfileIdentity): string {
+  function signedSubtitleUrlForRemote(
+    base: string,
+    source: string,
+    identity?: RemoteProfileIdentity,
+    mediaScopePath?: string,
+  ): string {
     const trimmed = source.trim();
     if (!trimmed) return trimmed;
 
@@ -227,7 +232,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       const filePath = params.get('path');
       if (filePath) {
         params.delete('path');
-        params.set('resourceId', registerRemoteResource('subtitle', filePath));
+        params.set('resourceId', registerRemoteResource('subtitle', filePath, mediaScopePath));
       }
       return buildSignedLanUrl(base, parsed.pathname, bindProfile(params, identity));
     } catch {
@@ -242,10 +247,15 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     }));
   }
 
-  function subtitleRecordsForLocalNetwork(subtitles: MediaItem['subtitles'] | undefined, base: string, identity?: RemoteProfileIdentity): MediaItem['subtitles'] {
+  function subtitleRecordsForLocalNetwork(
+    subtitles: MediaItem['subtitles'] | undefined,
+    base: string,
+    identity?: RemoteProfileIdentity,
+    mediaScopePath?: string,
+  ): MediaItem['subtitles'] {
     return subtitles?.map((subtitle) => ({
       ...subtitle,
-      url: signedSubtitleUrlForRemote(base, subtitle.url, identity),
+      url: signedSubtitleUrlForRemote(base, subtitle.url, identity, mediaScopePath),
     }));
   }
 

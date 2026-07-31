@@ -73,6 +73,41 @@ export function mediaItemForPath(library: LibraryData, filePath: string): MediaI
   ) || null;
 }
 
+function mediaScopePath(item: MediaItem, candidatePath: string): string | null {
+  if (
+    sameLocalPath(item.filePath, candidatePath)
+    || item.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, candidatePath))
+  ) return canonical(item.filePath);
+
+  for (const episode of item.episodeFiles || []) {
+    if (
+      sameLocalPath(episode.filePath, candidatePath)
+      || episode.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, candidatePath))
+    ) return canonical(episode.filePath);
+  }
+  return null;
+}
+
+export function assertSubtitleCanAccessMediaPath(
+  library: LibraryData,
+  profileId: string,
+  mediaFilePath: string,
+  subtitleFilePath: string,
+): void {
+  const item = mediaItemForPath(library, mediaFilePath);
+  const mediaScope = item ? mediaScopePath(item, mediaFilePath) : null;
+  const subtitleScope = item ? mediaScopePath(item, subtitleFilePath) : null;
+  if (
+    !item
+    || !profileCanAccessMedia(profileId, item)
+    || !mediaScope
+    || !subtitleScope
+    || mediaScope !== subtitleScope
+  ) {
+    throw new ProfileError('content_restricted', 'This subtitle is unavailable for the selected media.');
+  }
+}
+
 export function assertProfileCanAccessPath(library: LibraryData, profileId: string, filePath: string): void {
   const item = mediaItemForPath(library, filePath);
   if (!item || !profileCanAccessMedia(profileId, item)) {

@@ -75,6 +75,7 @@ export interface IpcHandlerDependencies<
   saveLibraryMutation: (library: TLibraryData) => void;
   assertLocalMediaPath: (filePath: string) => void;
   authorizeMediaPath: (filePath: string) => void;
+  registerSubtitleResource: (mediaFilePath: string, subtitleFilePath: string) => string;
   needsBrowserTranscoding: (filePath: string) => boolean;
   browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
   loadSettings: () => TSettings;
@@ -358,7 +359,15 @@ export function registerIpcHandlers<
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
-    appendStreamOptionParams(params, options);
+    const subtitleResources = {
+      ...(options?.subtitleFilePath
+        ? { subtitleResourceId: deps.registerSubtitleResource(filePath, options.subtitleFilePath) }
+        : {}),
+      ...(options?.secondarySubtitleFilePath
+        ? { secondarySubtitleResourceId: deps.registerSubtitleResource(filePath, options.secondarySubtitleFilePath) }
+        : {}),
+    };
+    appendStreamOptionParams(params, options, subtitleResources);
     const playbackPlan = deps.browserPlaybackPlan(filePath, options || {});
     const url = `http://127.0.0.1:${deps.getMediaServerPort()}/stream?${params.toString()}`;
     return {
