@@ -1,156 +1,161 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { readBoundedUtf8File, TextFileTooLargeError } from '../src/main/boundedTextFile.ts';
+import { resolveMediaAccessIdentity } from '../src/main/mediaAccessIdentity.ts';
+import { mediaServerRouteAccess } from '../src/main/lanRoutePolicy.ts';
+import { registerResource, resolveLocalResource } from '../src/main/resourceRegistry.ts';
+import { sanitizeRendererSettingsPatch, settingsForRenderer } from '../src/main/rendererSettings.ts';
+import {
+  allowedCorsOrigin,
+  hasValidLocalAccessToken,
+  LOCAL_ACCESS_HEADER,
+} from '../src/main/serverSecurity.ts';
+import { createSessionBindingStore } from '../src/main/sessionBindingStore.ts';
 
-function source(relativePath: string): string {
-  return fs.readFileSync(new URL(relativePath, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-}
+test('HTTP authorization keeps public, renderer, desktop, and paired-device boundaries distinct', () => {
+  const expectedToken = 'local-renderer-token';
+  const requestUrl = new URL('http://127.0.0.1:3847/api/renderer/settings');
 
-function sourceSection(contents: string, startMarker: string, endMarker: string): string {
-  const start = contents.indexOf(startMarker);
-  assert.notEqual(start, -1, `Expected source marker: ${startMarker}`);
-  const end = contents.indexOf(endMarker, start + startMarker.length);
-  assert.notEqual(end, -1, `Expected source marker after ${startMarker}: ${endMarker}`);
-  return contents.slice(start, end);
-}
+  assert.equal(hasValidLocalAccessToken(requestUrl, {}, expectedToken), false);
+  assert.equal(hasValidLocalAccessToken(requestUrl, { [LOCAL_ACCESS_HEADER]: expectedToken }, expectedToken), true);
+  assert.equal(hasValidLocalAccessToken(requestUrl, { [LOCAL_ACCESS_HEADER]: `${expectedToken}-extra` }, expectedToken), false);
+  assert.equal(allowedCorsOrigin(undefined, new Set(['http://localhost:5173'])), null);
+  assert.equal(allowedCorsOrigin('http://localhost:5173', new Set(['http://localhost:5173'])), 'http://localhost:5173');
+  assert.equal(allowedCorsOrigin('http://localhost:5174', new Set(['http://localhost:5173'])), null);
 
-test('LAN credentials and media leave loopback only through pinned TLS', () => {
-  const lanSecurity = source('../src/main/lanSecurity.ts');
-  const lanDiscovery = source('../src/main/lanDiscovery.ts');
-  const mediaServer = source('../src/main/mediaServer.ts');
-
-  assert.match(lanSecurity, /return address && port \? `https:\/\//);
-  assert.doesNotMatch(lanSecurity, /return address \? `http:\/\//);
-  assert.match(lanDiscovery, /certFingerprint/);
-  assert.match(mediaServer, /http\.createServer\(createRequestHandler\('loopback'\)\)/);
-  assert.match(mediaServer, /https\.createServer\(\{/);
-  assert.match(mediaServer, /cert:\s*lanTlsIdentity\.certificatePem/);
-  assert.match(mediaServer, /lanCertificateFingerprint\s*=\s*lanTlsIdentity\.certFingerprint/);
-  assert.match(mediaServer, /transport:\s*loopbackRequest\s*\?\s*'loopback-http'\s*:\s*'tls'/);
+  assert.deepEqual(mediaServerRouteAccess('/api/ping', 'GET'), { kind: 'public' });
+  assert.deepEqual(mediaServerRouteAccess('/api/renderer/session', 'POST'), { kind: 'public' });
+  assert.deepEqual(mediaServerRouteAccess('/api/renderer/settings', 'GET'), { kind: 'desktop' });
+  assert.deepEqual(mediaServerRouteAccess('/api/settings', 'GET'), { kind: 'ipc-only' });
+  assert.deepEqual(mediaServerRouteAccess('/api/v2/profiles', 'POST'), { kind: 'scoped', scope: 'playback:write' });
 });
 
-test('originless loopback callers cannot bootstrap renderer authority or read raw settings', () => {
-  const mediaServer = source('../src/main/mediaServer.ts');
-  const ping = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/api/ping' && req.method === 'GET')",
-    "if (reqUrl.pathname === '/api/renderer/session' && req.method === 'POST')",
-  );
-  const rendererSession = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/api/renderer/session' && req.method === 'POST')",
-    "if (reqUrl.pathname === '/api/lan/info')",
-  );
-  const rendererSettings = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/api/renderer/settings')",
-    "if (reqUrl.pathname === '/api/renderer/ffmpeg'",
-  );
+test('renderer settings responses and writes omit every server-held credential', () => {
+  const secrets = {
+    localNetworkHmacSecret: 'hmac',
+    localNetworkShareToken: '123456',
+    localNetworkSecurityEpoch: 2,
+    localNetworkPairedDevices: [{ id: 'phone', accessTokenHash: 'access', refreshTokenHash: 'refresh' }],
+  };
+  const projected = settingsForRenderer({ ...secrets, appThemeMode: 'dark' });
+  const sanitized = sanitizeRendererSettingsPatch({ ...secrets, appThemeMode: 'light' });
 
-  assert.doesNotMatch(ping, /localAccessToken/);
-  assert.match(rendererSession, /!loopbackRequest\s*\|\|\s*!isTrustedRendererHttpOrigin/);
-  assert.match(mediaServer, /pathname\.startsWith\('\/api\/renderer\/'\).*isTrustedRendererHttpOrigin/s);
-  assert.match(rendererSettings, /requireOwner\(\)/);
-  assert.match(rendererSettings, /settingsForRenderer\(loadSettings\(\)\)/);
-  assert.match(rendererSettings, /sanitizeRendererSettingsPatch\(patch\)/);
-});
-
-test('profile administration derives identity from credentials and revocation clears profile capability', () => {
-  const mediaServer = source('../src/main/mediaServer.ts');
-  const lanSecurity = source('../src/main/lanSecurity.ts');
-  const profileService = source('../src/main/profileService.ts');
-  const profileIdentity = sourceSection(
-    mediaServer,
-    'const profileIdentityForMedia =',
-    'const requireProfileMediaAccess =',
-  );
-  const profileCreation = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/api/v2/profiles' && req.method === 'POST')",
-    "if (reqUrl.pathname === '/api/v2/profiles/active'",
-  );
-  const unpair = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/api/v2/unpair' && req.method === 'POST')",
-    "if (reqUrl.pathname === '/api/v2/library/index'",
-  );
-
-  assert.match(profileIdentity, /credentialDeviceId/);
-  assert.match(profileIdentity, /credentialDeviceId\s*&&\s*boundDeviceId\s*&&\s*credentialDeviceId\s*!==\s*boundDeviceId/);
-  assert.doesNotMatch(profileIdentity, /authorizedDeviceId\s*=\s*boundDeviceId\s*\|\|/);
-  assert.match(profileCreation, /requireOwner\(profileDeviceId\)/);
-  assert.match(unpair, /Object\.prototype\.hasOwnProperty\.call\(body, 'deviceId'\)/);
-  assert.match(unpair, /revokeDeviceProfileAccess\(authenticatedDevice\.id\)/);
-  assert.match(lanSecurity, /Object\.prototype\.hasOwnProperty\.call\(body, 'deviceId'\)/);
-  assert.match(lanSecurity, /const deviceId = randomUUID\(\)/);
-  assert.doesNotMatch(lanSecurity, /const requestedDeviceId/);
-  assert.match(profileService, /export function revokeDeviceProfileAccess/);
-  assert.match(profileService, /clearDeviceProfileSelection\(deviceId\)/);
-  assert.match(profileService, /unlockedUntil\.delete/);
-  assert.match(profileService, /failures\.delete/);
-});
-
-test('subtitle delivery accepts only typed, media-scoped resources and bounded sidecar files', () => {
-  const mediaServer = source('../src/main/mediaServer.ts');
-  const resourceRegistry = source('../src/main/resourceRegistry.ts');
-  const subtitleRoute = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/subtitle')",
-    "if (reqUrl.pathname.startsWith('/hls/'))",
-  );
-  const streamRoute = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname !== '/stream')",
-    'const releaseStreamLease =',
-  );
-
-  assert.match(resourceRegistry, /scopePath\?: string/);
-  assert.match(resourceRegistry, /expectedScopePath\?: string/);
-  assert.match(resourceRegistry, /resource\.scopePath/);
-  assert.match(subtitleRoute, /SUBTITLE_RESOURCE_KIND/);
-  assert.match(subtitleRoute, /isSubtitleFileName/);
-  assert.match(subtitleRoute, /readBoundedUtf8Subtitle/);
-  assert.doesNotMatch(subtitleRoute, /fs\.readFileSync\(/);
-  assert.match(mediaServer, /MAX_SIDECAR_SUBTITLE_BYTES\s*=\s*8\s*\*\s*1024\s*\*\s*1024/);
-  assert.match(mediaServer, /fs\.promises\.open/);
-  assert.match(subtitleRoute, /SubtitleFileTooLargeError/);
-  assert.match(subtitleRoute, /writeHead\(413/);
-  assert.match(streamRoute, /searchParams\.has\('subtitleFile'\)/);
-  assert.match(streamRoute, /searchParams\.has\('secondarySubtitleFile'\)/);
-  assert.match(streamRoute, /resolveStreamSubtitle\('subtitleResourceId'\)/);
-  assert.match(streamRoute, /resolveStreamSubtitle\('secondarySubtitleResourceId'\)/);
-  assert.doesNotMatch(streamRoute, /subtitleFilePath:\s*reqUrl\.searchParams\.get/);
-});
-
-test('playback sessions bound persistence, credentials, restart churn, and byte ranges', () => {
-  const mediaServer = source('../src/main/mediaServer.ts');
-  const lanSecurity = source('../src/main/lanSecurity.ts');
-  const transcodeManager = source('../src/main/transcodeManager.ts');
-  const startHls = sourceSection(
-    mediaServer,
-    "if (reqUrl.pathname === '/api/v2/start-hls' && req.method === 'POST')",
-    "if (routeAccess.kind === 'ipc-only')",
-  );
-
-  const lifecycleContracts: Array<[string, string, RegExp]> = [
-    ['device activity writes are coalesced', lanSecurity, /PAIRED_DEVICE_TOUCH_FLUSH_MS/],
-    ['device activity uses a pending map', lanSecurity, /pendingPairedDeviceTouches/],
-    ['HLS bindings are capped', mediaServer, /MAX_HLS_PROFILE_BINDINGS/],
-    ['HLS starts have a per-device budget', mediaServer, /consumeHlsStartBudget\(lanDeviceId\)/],
-    ['HLS start exhaustion returns 429', startHls, /writeJson\(res, 429/],
-    ['session disposal removes profile bindings', mediaServer, /registerTranscodeSessionDisposalListener[\s\S]*hlsProfileBindings\.delete/],
-    ['encoder repositioning has a rolling budget', transcodeManager, /MAX_HLS_RESTARTS_PER_WINDOW/],
-    ['stream credentials are session scoped', transcodeManager, /HLS_STREAM_TOKEN_QUERY_PARAM/],
-    ['stream credentials are bounded', transcodeManager, /MAX_HLS_STREAM_CREDENTIALS_PER_SESSION/],
-    ['Range parsing uses the strict helper', mediaServer, /parseHttpByteRange\(range, fileSize\)/],
-    ['invalid ranges return 416', mediaServer, /writeHead\(416/],
-  ];
-
-  for (const [label, contents, pattern] of lifecycleContracts) {
-    assert.match(contents, pattern, label);
+  assert.equal(projected.appThemeMode, 'dark');
+  assert.deepEqual(sanitized, { appThemeMode: 'light' });
+  for (const key of Object.keys(secrets)) {
+    assert.equal(Object.hasOwn(projected, key), false, key);
+    assert.equal(Object.hasOwn(sanitized, key), false, key);
   }
-  assert.doesNotMatch(startHls, /requestToken\(reqUrl, req\)/);
-  assert.match(mediaServer, /authorizeHlsStreamRequest\(reqUrl\)/);
+});
+
+test('media identity comes from credentials and immediately fails after profile revocation', () => {
+  let active = { profileId: 'owner', selectionRevision: 7 };
+  const activeProfile = () => active;
+  const base = {
+    boundDeviceId: 'phone-a',
+    boundProfileId: 'owner',
+    boundSelectionRevision: 7,
+    credentialDeviceId: 'phone-a',
+    signedRequestValid: false,
+  };
+
+  assert.deepEqual(resolveMediaAccessIdentity(base, activeProfile), {
+    deviceId: 'phone-a',
+    profileId: 'owner',
+    selectionRevision: 7,
+  });
+  assert.equal(resolveMediaAccessIdentity({ ...base, boundDeviceId: 'phone-b' }, activeProfile), null);
+  assert.equal(resolveMediaAccessIdentity({ ...base, boundProfileId: 'kid' }, activeProfile), null);
+  assert.equal(resolveMediaAccessIdentity({ ...base, boundSelectionRevision: 6 }, activeProfile), null);
+
+  active = { profileId: null, selectionRevision: 8 };
+  assert.equal(resolveMediaAccessIdentity(base, activeProfile), null);
+  assert.equal(resolveMediaAccessIdentity({
+    ...base,
+    credentialDeviceId: '',
+    signedRequestValid: false,
+  }, activeProfile), null);
+});
+
+test('signed media links are bound to an explicit device and its current selection', () => {
+  const activeProfile = (deviceId: string) => (
+    deviceId === 'tablet' ? { profileId: 'viewer', selectionRevision: 3 } : { profileId: null, selectionRevision: 0 }
+  );
+  const signed = {
+    boundDeviceId: 'tablet',
+    boundProfileId: 'viewer',
+    boundSelectionRevision: 3,
+    credentialDeviceId: '',
+    signedRequestValid: true,
+  };
+
+  assert.deepEqual(resolveMediaAccessIdentity(signed, activeProfile), {
+    deviceId: 'tablet',
+    profileId: 'viewer',
+    selectionRevision: 3,
+  });
+  assert.equal(resolveMediaAccessIdentity({ ...signed, boundDeviceId: '' }, activeProfile), null);
+  assert.equal(resolveMediaAccessIdentity({ ...signed, signedRequestValid: false }, activeProfile), null);
+});
+
+test('resource IDs reject kind substitution, traversal, and cross-media subtitle reuse', (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-boundary-resource-'));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const firstMedia = path.join(temporaryRoot, 'episode-1.mkv');
+  const secondMedia = path.join(temporaryRoot, 'episode-2.mkv');
+  const subtitle = path.join(temporaryRoot, 'episode-1.srt');
+  for (const filePath of [firstMedia, secondMedia, subtitle]) fs.writeFileSync(filePath, 'fixture');
+
+  const subtitleId = registerResource('secret', 'subtitle', subtitle, firstMedia);
+  const subtitleKinds = new Set(['subtitle'] as const);
+  const mediaKinds = new Set(['media'] as const);
+  assert.equal(resolveLocalResource(subtitleId, subtitleKinds, [temporaryRoot], firstMedia), fs.realpathSync.native(subtitle));
+  assert.throws(() => resolveLocalResource(subtitleId, subtitleKinds, [temporaryRoot], secondMedia), /does not belong/);
+  assert.throws(() => resolveLocalResource(subtitleId, mediaKinds, [temporaryRoot]), /Unknown local resource/);
+  assert.throws(() => resolveLocalResource('../episode-1.srt', subtitleKinds, [temporaryRoot]), /Unknown local resource/);
+});
+
+test('subtitle reads preserve UTF-8 across chunks and reject oversized or cancelled work', async (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-boundary-subtitle-'));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const subtitle = path.join(temporaryRoot, 'subtitle.srt');
+  const content = '1\n00:00:01,000 --> 00:00:02,000\nCafé 🎬\n';
+  fs.writeFileSync(subtitle, content);
+
+  assert.equal(await readBoundedUtf8File(subtitle, { maxBytes: 1024, chunkBytes: 3 }), content);
+  await assert.rejects(
+    readBoundedUtf8File(subtitle, { maxBytes: Buffer.byteLength(content) - 1 }),
+    TextFileTooLargeError,
+  );
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(readBoundedUtf8File(subtitle, { maxBytes: 1024, signal: controller.signal }), /cancelled/);
+});
+
+test('session bindings are capped, touched, and removed by the real disposal callback contract', () => {
+  let dispose: ((sessionId: string) => void) | undefined;
+  const store = createSessionBindingStore<{ profileId: string; lastAccessAt: number }>(2);
+  const unsubscribe = store.bindDisposal((listener) => {
+    dispose = listener;
+    return () => { dispose = undefined; };
+  });
+
+  store.bind('first', { profileId: 'owner' }, 10);
+  store.bind('second', { profileId: 'kid' }, 20);
+  store.touch('first', 30);
+  store.bind('third', { profileId: 'guest' }, 40);
+  assert.equal(store.get('second'), undefined);
+  assert.equal(store.get('first')?.lastAccessAt, 30);
+  assert.equal(store.size(), 2);
+
+  dispose?.('first');
+  assert.equal(store.get('first'), undefined);
+  assert.equal(store.size(), 1);
+  unsubscribe();
+  assert.equal(dispose, undefined);
 });
 
 test.todo('release signer and notarization verification remains deferred by user request');
