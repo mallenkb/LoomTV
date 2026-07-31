@@ -17,7 +17,6 @@ import {
   LOCAL_ACCESS_QUERY_PARAM,
   allowedCorsOrigin,
   createLocalAccessToken,
-  localAccessQuery,
 } from './main/serverSecurity';
 import {
   destroyLanDiscovery,
@@ -318,7 +317,7 @@ const {
   authorizeLocalRequest,
   requireLocalOrLanAccess,
   requireStreamAccess,
-  requestToken,
+  flushPairedDeviceTouches,
   handleLanPairRequest,
   handleLanRefreshRequest,
   libraryEtagFor,
@@ -955,12 +954,6 @@ function getRendererCatalogIdentity(): string {
   return `${profileIdentity}:${deliveryIdentity}`;
 }
 
-function appendLocalAccessTokenToUrl(url: string): string {
-  const parsed = new URL(url);
-  parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
-  return parsed.toString();
-}
-
 function signedStreamUrlForRemote(
   base: string,
   filePath: string,
@@ -1516,7 +1509,6 @@ registerIpcHandlers<LibraryData, AppSettings>({
   probeMedia,
   canDirectPlay,
   startTranscode,
-  appendLocalAccessTokenToUrl,
   stopTranscode,
   isTrustedSender: (event) => {
     const window = getMainWindow();
@@ -1573,11 +1565,9 @@ export const mediaServerDeps = {
   loadLibrary,
   loadSettings,
   profileRestrictionIdentity,
-  localAccessQuery,
   readJsonBody,
   requireLocalOrLanAccess,
   requireStreamAccess,
-  requestToken,
   safeEndResponse,
   saveSettings,
   writeJson,
@@ -1708,6 +1698,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   isAppShuttingDown = true;
+  flushPairedDeviceTouches();
   clearAllGuestProfiles();
   clearUpdateQuitFallback();
   destroyServerTray();

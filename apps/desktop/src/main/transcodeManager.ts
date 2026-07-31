@@ -5,7 +5,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { execFileSync, spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendQueryToHlsPlaylist } from './hlsPlaylist';
 import { killAllManagedFfmpeg, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { findFFmpeg } from './mediaBinaries';
@@ -45,6 +45,8 @@ interface ActiveSession {
   lastRequestedIndex: number;
   lastActivityAt: number;
   lastPrunedAt: number;
+  restartTimestamps: number[];
+  streamCredentials: Array<{ hash: Buffer; issuedAt: number; lastUsedAt: number }>;
   encoderIdleTimer: ReturnType<typeof setTimeout> | null;
   sessionIdleTimer: ReturnType<typeof setTimeout> | null;
   stopped: boolean;
@@ -69,7 +71,17 @@ const TRANSCODE_READY_POLL_MS = 80;
 // request waits for the running encoder to catch up. Both bounded here.
 const HLS_PENDING_SEGMENT_TIMEOUT_MS = 30000;
 const HLS_PENDING_SEGMENT_POLL_MS = 80;
+const HLS_RESTART_BUDGET_WINDOW_MS = 30 * 1000;
+const MAX_HLS_RESTARTS_PER_WINDOW = 16;
+const MAX_HLS_STREAM_CREDENTIALS_PER_SESSION = 4;
+export const HLS_STREAM_TOKEN_QUERY_PARAM = 'streamToken';
 const encoderSupport = new Map<string, boolean>();
+const transcodeSessionDisposalListeners = new Set<(sessionId: string) => void>();
+
+export function registerTranscodeSessionDisposalListener(listener: (sessionId: string) => void): () => void {
+  transcodeSessionDisposalListeners.add(listener);
+  return () => transcodeSessionDisposalListeners.delete(listener);
+}
 
 function transcodeRoot(): string {
   return path.join(app.getPath('userData'), 'transcodes');
@@ -264,6 +276,14 @@ function stopSession(session: ActiveSession, deleteOutput = true): boolean {
   clearSessionTimers(session);
   killWindow(session);
   sessions.delete(session.sessionId);
+  session.streamCredentials.length = 0;
+  for (const listener of transcodeSessionDisposalListeners) {
+    try {
+      listener(session.sessionId);
+    } catch {
+      // Session cleanup must continue even if an observer has already shut down.
+    }
+  }
   if (deleteOutput) {
     try {
       fs.rmSync(session.outputDir, { recursive: true, force: true });
@@ -276,25 +296,36 @@ function stopSession(session: ActiveSession, deleteOutput = true): boolean {
 
 function scheduleSessionTimers(session: ActiveSession): void {
   if (session.stopped) return;
-  clearSessionTimers(session);
 
-  if (!session.readyPromise) {
+  if (!session.readyPromise && !session.encoderIdleTimer) {
+    const encoderIdleFor = Date.now() - session.lastActivityAt;
+    const encoderDelay = Math.max(1, ENCODER_IDLE_TIMEOUT_MS - encoderIdleFor);
     session.encoderIdleTimer = setTimeout(() => {
+      session.encoderIdleTimer = null;
+      if (session.stopped) return;
       const idleFor = Date.now() - session.lastActivityAt;
-      if (idleFor >= ENCODER_IDLE_TIMEOUT_MS) killWindow(session);
+      if (idleFor >= ENCODER_IDLE_TIMEOUT_MS) {
+        killWindow(session);
+        return;
+      }
       scheduleSessionTimers(session);
-    }, ENCODER_IDLE_TIMEOUT_MS);
+    }, encoderDelay);
     session.encoderIdleTimer.unref?.();
   }
 
+  if (session.sessionIdleTimer) return;
+  const sessionIdleFor = Date.now() - session.lastActivityAt;
+  const sessionDelay = Math.max(1, SESSION_IDLE_TIMEOUT_MS - sessionIdleFor);
   session.sessionIdleTimer = setTimeout(() => {
+    session.sessionIdleTimer = null;
+    if (session.stopped) return;
     const idleFor = Date.now() - session.lastActivityAt;
     if (idleFor >= SESSION_IDLE_TIMEOUT_MS) {
       stopSession(session);
       return;
     }
     scheduleSessionTimers(session);
-  }, SESSION_IDLE_TIMEOUT_MS);
+  }, sessionDelay);
   session.sessionIdleTimer.unref?.();
 }
 
@@ -453,6 +484,15 @@ async function startInitialWindow(ffmpeg: string, session: ActiveSession, startI
 }
 
 /** Ensure an encoder is producing (or about to produce) the requested segment. */
+function consumeRestartBudget(session: ActiveSession): boolean {
+  const now = Date.now();
+  const cutoff = now - HLS_RESTART_BUDGET_WINDOW_MS;
+  session.restartTimestamps = session.restartTimestamps.filter((timestamp) => timestamp > cutoff);
+  if (session.restartTimestamps.length >= MAX_HLS_RESTARTS_PER_WINDOW) return false;
+  session.restartTimestamps.push(now);
+  return true;
+}
+
 function ensureWindowForSegment(ffmpeg: string, session: ActiveSession, index: number): void {
   const onDisk = segmentReady(segmentPath(session, index));
   if (shouldRepositionEncoder({
@@ -463,6 +503,7 @@ function ensureWindowForSegment(ffmpeg: string, session: ActiveSession, index: n
     processAlive: processAlive(session),
     contiguityTolerance: SEGMENT_REQUEST_CONTIGUITY,
   })) {
+    if (!consumeRestartBudget(session)) return;
     killWindow(session);
     spawnWindow(ffmpeg, session, index);
     session.lastRequestedIndex = index;
@@ -475,13 +516,52 @@ function playlistUrlFor(serverBase: string, sessionId: string): string {
   return `${serverBase}/hls/${sessionId}/index.m3u8`;
 }
 
+function hashHlsStreamToken(token: string): Buffer {
+  return createHash('sha256').update(token).digest();
+}
+
+export function issueHlsStreamCredential(sessionId: string): string | null {
+  const session = sessions.get(sessionId);
+  if (!session || session.stopped) return null;
+
+  const token = randomBytes(24).toString('base64url');
+  const now = Date.now();
+  session.streamCredentials.push({ hash: hashHlsStreamToken(token), issuedAt: now, lastUsedAt: now });
+  session.streamCredentials.sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+  session.streamCredentials.length = Math.min(
+    session.streamCredentials.length,
+    MAX_HLS_STREAM_CREDENTIALS_PER_SESSION,
+  );
+  return token;
+}
+
+export function authorizeHlsStreamRequest(reqUrl: URL): boolean {
+  const match = reqUrl.pathname.match(/^\/hls\/([^/]+)\//);
+  const token = reqUrl.searchParams.get(HLS_STREAM_TOKEN_QUERY_PARAM) || '';
+  if (!match || !token) return false;
+
+  const session = sessions.get(match[1]);
+  if (!session || session.stopped) return false;
+  const candidateHash = hashHlsStreamToken(token);
+  const credential = session.streamCredentials.find((entry) => (
+    entry.hash.length === candidateHash.length && timingSafeEqual(entry.hash, candidateHash)
+  ));
+  if (!credential) return false;
+  credential.lastUsedAt = Date.now();
+  return true;
+}
+
 function transcodeSessionResult(session: ActiveSession, serverBase: string): TranscodeSession {
   session.playlistUrl = playlistUrlFor(serverBase, session.sessionId);
+  const streamToken = issueHlsStreamCredential(session.sessionId);
+  const playlistUrl = streamToken
+    ? `${session.playlistUrl}?${HLS_STREAM_TOKEN_QUERY_PARAM}=${encodeURIComponent(streamToken)}`
+    : session.playlistUrl;
   return {
     sessionId: session.sessionId,
     filePath: session.filePath,
     outputDir: session.outputDir,
-    playlistUrl: session.playlistUrl,
+    playlistUrl,
     seekable: session.seekable,
     startSeconds: session.seekable ? 0 : session.windowStartIndex * session.segmentSeconds,
   };
@@ -551,11 +631,16 @@ async function ensureSessionReadyAt(ffmpeg: string, session: ActiveSession, star
   touchSession(session);
 }
 
-export async function startTranscode(filePath: string, options: TranscodeOptions, serverBase: string): Promise<TranscodeSession> {
+export async function startTranscode(
+  filePath: string,
+  options: TranscodeOptions,
+  serverBase: string,
+  sessionScope = 'local',
+): Promise<TranscodeSession> {
   assertLocalMediaPath(filePath);
   const ffmpeg = findFFmpeg();
   if (!ffmpeg) throw new Error('FFmpeg is not available.');
-  const sessionKey = transcodeSessionKey(filePath, options);
+  const sessionKey = `${sessionScope}\0${transcodeSessionKey(filePath, options)}`;
 
   const existingSession = reusableSession(sessionKey);
   if (existingSession) {
@@ -607,6 +692,8 @@ export async function startTranscode(filePath: string, options: TranscodeOptions
     lastRequestedIndex: startIndex,
     lastActivityAt: Date.now(),
     lastPrunedAt: 0,
+    restartTimestamps: [],
+    streamCredentials: [],
     encoderIdleTimer: null,
     sessionIdleTimer: null,
     stopped: false,

@@ -13,7 +13,15 @@ import {
 } from './transcodeFilters';
 import { parseIntegerTag } from './mediaTags';
 import { srtToVtt } from './libraryItemHelpers';
-import { serveHls, startTranscode, stopTranscode } from './transcodeManager';
+import {
+  authorizeHlsStreamRequest,
+  HLS_STREAM_TOKEN_QUERY_PARAM,
+  issueHlsStreamCredential,
+  registerTranscodeSessionDisposalListener,
+  serveHls,
+  startTranscode,
+  stopTranscode,
+} from './transcodeManager';
 import { acquireFfmpegToolSlot, acquirePlaybackActivityLease, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { buildEmbeddedSubtitleVttArgs } from './transcodePlan';
 import { cachedArtworkResponseHeaders } from './artworkCache';
@@ -38,6 +46,7 @@ import { browserPlaybackPlan } from './transcodeDecision';
 import { probeMedia } from './mediaProbe';
 import { isSubtitleFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
+import { parseHttpByteRange } from './httpByteRange';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
 import {
   createAndSelectGuest,
@@ -102,11 +111,9 @@ export interface MediaServerDependencies {
   libraryForRenderer: () => LibraryPayload;
   loadLibrary: () => { libraryFolders: string[] };
   loadSettings: () => AppSettings;
-  localAccessQuery: (token: string) => string;
   readJsonBody: (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
   requireLocalOrLanAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
   requireStreamAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
-  requestToken: (reqUrl: URL, req: http.IncomingMessage) => string;
   safeEndResponse: (res: http.ServerResponse) => void;
   saveSettings: (settings: AppSettings) => void;
   writeJson: (res: http.ServerResponse, status: number, payload: unknown) => void;
@@ -121,9 +128,64 @@ const THUMBNAIL_SCALE_FILTER = "scale='min(640,iw)':-2";
 const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
-const hlsProfileBindings = new Map<string, { deviceId: string; profileId: string; selectionRevision: number; filePath: string }>();
+type HlsProfileBinding = {
+  deviceId: string;
+  profileId: string;
+  selectionRevision: number;
+  filePath: string;
+  lastAccessAt: number;
+};
+const hlsProfileBindings = new Map<string, HlsProfileBinding>();
+const hlsStartsByDevice = new Map<string, number[]>();
+const MAX_HLS_PROFILE_BINDINGS = 8;
+const HLS_START_BUDGET_WINDOW_MS = 60 * 1000;
+const MAX_HLS_STARTS_PER_DEVICE_PER_WINDOW = 30;
+const MAX_TRACKED_HLS_START_DEVICES = 128;
 const V2_LIBRARY_ITEM_PREFIX = '/api/v2/library/items/';
 const RENDERER_LIBRARY_ITEM_PREFIX = '/api/renderer/library/items/';
+
+registerTranscodeSessionDisposalListener((sessionId) => {
+  hlsProfileBindings.delete(sessionId);
+});
+
+function bindHlsProfile(
+  sessionId: string,
+  identity: { deviceId: string; profileId: string; selectionRevision: number },
+  filePath: string,
+): void {
+  hlsProfileBindings.delete(sessionId);
+  while (hlsProfileBindings.size >= MAX_HLS_PROFILE_BINDINGS) {
+    const oldest = [...hlsProfileBindings.entries()]
+      .sort(([, left], [, right]) => left.lastAccessAt - right.lastAccessAt)[0];
+    if (!oldest) break;
+    hlsProfileBindings.delete(oldest[0]);
+  }
+  hlsProfileBindings.set(sessionId, { ...identity, filePath, lastAccessAt: Date.now() });
+}
+
+function consumeHlsStartBudget(deviceId: string): { allowed: boolean; retryAfterMs?: number } {
+  const now = Date.now();
+  const cutoff = now - HLS_START_BUDGET_WINDOW_MS;
+  if (hlsStartsByDevice.size >= MAX_TRACKED_HLS_START_DEVICES) {
+    for (const [trackedDeviceId, timestamps] of hlsStartsByDevice) {
+      if (!timestamps.some((timestamp) => timestamp > cutoff)) hlsStartsByDevice.delete(trackedDeviceId);
+    }
+    if (!hlsStartsByDevice.has(deviceId) && hlsStartsByDevice.size >= MAX_TRACKED_HLS_START_DEVICES) {
+      const oldestDevice = [...hlsStartsByDevice.entries()]
+        .sort(([, left], [, right]) => (left.at(-1) || 0) - (right.at(-1) || 0))[0];
+      if (oldestDevice) hlsStartsByDevice.delete(oldestDevice[0]);
+    }
+  }
+
+  const timestamps = (hlsStartsByDevice.get(deviceId) || []).filter((timestamp) => timestamp > cutoff);
+  if (timestamps.length >= MAX_HLS_STARTS_PER_DEVICE_PER_WINDOW) {
+    hlsStartsByDevice.set(deviceId, timestamps);
+    return { allowed: false, retryAfterMs: Math.max(1, timestamps[0] + HLS_START_BUDGET_WINDOW_MS - now) };
+  }
+  timestamps.push(now);
+  hlsStartsByDevice.set(deviceId, timestamps);
+  return { allowed: true };
+}
 
 function libraryItemIdFromPath(pathname: string, prefix: string): string | null {
   if (!pathname.startsWith(prefix)) return null;
@@ -348,11 +410,9 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     loadLibrary,
     loadSettings,
     profileRestrictionIdentity,
-    localAccessQuery,
     readJsonBody,
     requireLocalOrLanAccess,
     requireStreamAccess,
-    requestToken,
     safeEndResponse,
     saveSettings,
     writeJson,
@@ -702,10 +762,22 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
 
       if (reqUrl.pathname === '/api/v2/start-hls' && req.method === 'POST') {
         if (!requireV2Scope('media:stream')) return;
-        const token = requestToken(reqUrl, req);
         readJsonBody(req)
           .then(async (body) => {
             assertCurrentSelectionRevision(body);
+            if (lanDeviceId) {
+              const budget = consumeHlsStartBudget(lanDeviceId);
+              if (!budget.allowed) {
+                res.setHeader('Retry-After', String(Math.ceil((budget.retryAfterMs || 1) / 1000)));
+                writeJson(res, 429, {
+                  ok: false,
+                  code: 'PLAYBACK_START_RATE_LIMITED',
+                  error: 'Too many playback restarts. Wait briefly, then try again.',
+                  retryable: true,
+                });
+                return;
+              }
+            }
             const base = getLanServerBase();
             if (!base) {
               writeJson(res, 500, {
@@ -759,12 +831,14 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
               }
             }
 
-            const session = await startTranscode(filePath, options, base);
-            hlsProfileBindings.set(session.sessionId, { ...identity, filePath });
-            const playlistUrl = token
-              ? `${session.playlistUrl}${session.playlistUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`
-              : session.playlistUrl;
-            writeJson(res, 200, { ok: true, data: { ...session, playlistUrl } });
+            const session = await startTranscode(
+              filePath,
+              options,
+              base,
+              `lan:${identity.deviceId}:${identity.profileId}:${identity.selectionRevision}`,
+            );
+            bindHlsProfile(session.sessionId, identity, filePath);
+            writeJson(res, 200, { ok: true, data: session });
           })
           .catch((error) => {
             if (error instanceof ProfileError) {
@@ -896,13 +970,9 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
                 (body.options || {}) as TranscodeOptions,
                 `http://127.0.0.1:${mediaServerPort}`,
               );
-              const separator = session.playlistUrl.includes('?') ? '&' : '?';
               writeJson(res, 200, {
                 ok: true,
-                data: {
-                  ...session,
-                  playlistUrl: `${session.playlistUrl}${separator}${localAccessQuery(LOCAL_ACCESS_TOKEN)}`,
-                },
+                data: session,
               });
             } catch (error) {
               writeJson(res, 200, { ok: false, error: error instanceof Error ? error.message : 'Unable to start local stream.' });
@@ -1431,25 +1501,35 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       }
 
       if (reqUrl.pathname.startsWith('/hls/')) {
-        if (!requireStreamAccess(reqUrl, req, res)) return;
         const sessionId = reqUrl.pathname.split('/')[2] || '';
+        const hasSessionCredential = authorizeHlsStreamRequest(reqUrl);
+        if (!hasSessionCredential && !requireStreamAccess(reqUrl, req, res)) return;
         const binding = hlsProfileBindings.get(sessionId);
         if (binding) {
-          const active = getActiveProfileState(binding.deviceId);
-          if (
-            active.profileId !== binding.profileId
-            || active.selectionRevision !== binding.selectionRevision
-            || !requireProfileMediaAccess(binding.filePath)
-          ) return;
+          if (binding.deviceId) {
+            const active = getActiveProfileState(binding.deviceId);
+            if (active.profileId !== binding.profileId || active.selectionRevision !== binding.selectionRevision) {
+              writeJson(res, 409, { error: 'stale_profile_selection' });
+              return;
+            }
+          }
+          try {
+            assertProfileCanAccessPath(binding.profileId, binding.filePath);
+          } catch (error) {
+            writeProfileError(error);
+            return;
+          }
+          binding.lastAccessAt = Date.now();
         }
+        const requestStreamToken = reqUrl.searchParams.get(HLS_STREAM_TOKEN_QUERY_PARAM) || '';
+        const playlistStreamToken = hasSessionCredential
+          ? requestStreamToken
+          : issueHlsStreamCredential(sessionId);
+        const playlistQuery = playlistStreamToken
+          ? `${HLS_STREAM_TOKEN_QUERY_PARAM}=${encodeURIComponent(playlistStreamToken)}`
+          : '';
+        if (serveHls(reqUrl, res, playlistQuery)) return;
       }
-      if (serveHls(
-        reqUrl,
-        res,
-        reqUrl.searchParams.get('token')
-          ? `token=${encodeURIComponent(reqUrl.searchParams.get('token') || '')}`
-          : localAccessQuery(LOCAL_ACCESS_TOKEN),
-      )) return;
 
       if (reqUrl.pathname !== '/stream') {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -1575,9 +1655,17 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         const range = req.headers.range;
 
         if (range) {
-          const [startStr, endStr] = range.replace(/bytes=/, '').split('-');
-          const start = parseInt(startStr, 10);
-          const end = endStr ? parseInt(endStr, 10) : fileSize - 1;
+          const parsedRange = parseHttpByteRange(range, fileSize);
+          if (!parsedRange) {
+            res.writeHead(416, {
+              'Content-Range': `bytes */${fileSize}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': '0',
+            });
+            res.end();
+            return;
+          }
+          const { start, end } = parsedRange;
           const chunkSize = end - start + 1;
 
           res.writeHead(206, {
