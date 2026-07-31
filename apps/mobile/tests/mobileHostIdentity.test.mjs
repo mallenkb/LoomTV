@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { normalizeCertFingerprint } from '../mobileDomain.ts';
+import { reconcileSavedHost } from '../mobileHostIdentity.ts';
 
 const appSource = fs.readFileSync(new URL('../App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const appConfig = JSON.parse(fs.readFileSync(new URL('../app.json', import.meta.url), 'utf8'));
@@ -50,23 +51,49 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
   assert.match(secureTransportSource, /proxy\.hostname\s*!==\s*'localhost'/);
 });
 
-test('saved sessions require a pinned fingerprint and cannot rebind by name or device ID alone', () => {
+test('saved sessions require a pinned fingerprint before restore', () => {
   const restore = sourceSection(
     'const saved = JSON.parse(stored) as SavedConnection;',
     '.finally(() => {',
-  );
-  const rebind = sourceSection(
-    'const discoveredSavedHost = discoveredHosts.find',
-    '}, [connection, discoveredHosts, savedConnection]);',
   );
 
   assert.match(restore, /normalizeCertFingerprint\(saved\.certFingerprint\)/);
   assert.match(restore, /!certFingerprint\s*\|\|\s*!saved\.hostDeviceId/);
   assert.match(restore, /SecureStore\.deleteItemAsync\(SAVED_CONNECTION_KEY\)/);
-  assert.match(rebind, /host\.deviceId\s*===\s*savedConnection\.hostDeviceId/);
-  assert.doesNotMatch(rebind, /host\.deviceName\s*===\s*savedConnection\.hostDeviceName/);
-  assert.match(rebind, /discoveredFingerprint\s*!==\s*savedConnection\.certFingerprint/);
-  assert.match(rebind, /Re-pair/);
+});
+
+test('mDNS can update a saved address only when host ID and certificate pin both match', () => {
+  const fingerprint = 'ab'.repeat(32);
+  const saved = {
+    baseUrl: 'https://192.168.1.10:3848',
+    deviceId: 'phone',
+    deviceToken: 'access',
+    accessTokenExpiresAt: Date.now() + 1000,
+    refreshToken: 'refresh',
+    refreshTokenExpiresAt: Date.now() + 2000,
+    certFingerprint: fingerprint,
+    hostDeviceId: 'desktop-a',
+    hostDeviceName: 'Living Room',
+    clientDeviceName: 'Phone',
+  };
+  const discovered = {
+    deviceId: 'desktop-a',
+    deviceName: 'Renamed desktop',
+    serviceName: 'spoofable-label',
+    baseUrl: 'https://192.168.1.11:3848',
+    certFingerprint: fingerprint.toUpperCase(),
+  };
+
+  assert.deepEqual(reconcileSavedHost(saved, discovered), {
+    kind: 'updated',
+    connection: { ...saved, baseUrl: discovered.baseUrl },
+  });
+  assert.deepEqual(reconcileSavedHost(saved, { ...discovered, deviceId: 'desktop-b' }), { kind: 'identity-mismatch' });
+  assert.deepEqual(reconcileSavedHost(saved, { ...discovered, certFingerprint: 'cd'.repeat(32) }), { kind: 'identity-mismatch' });
+  assert.deepEqual(reconcileSavedHost(saved, { ...discovered, baseUrl: saved.baseUrl }), {
+    kind: 'unchanged',
+    connection: saved,
+  });
 });
 
 test('pairing binds the response identity to discovery before credentials are persisted', () => {

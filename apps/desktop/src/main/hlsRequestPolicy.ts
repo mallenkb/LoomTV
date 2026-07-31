@@ -1,3 +1,8 @@
+import {
+  createSessionBindingStore,
+  type SessionDisposalSubscription,
+} from './sessionBindingStore.ts';
+
 export interface HlsProfileBinding {
   deviceId: string;
   profileId: string;
@@ -11,15 +16,23 @@ const HLS_START_BUDGET_WINDOW_MS = 60 * 1000;
 const MAX_HLS_STARTS_PER_DEVICE_PER_WINDOW = 30;
 const MAX_TRACKED_HLS_START_DEVICES = 128;
 
-const hlsProfileBindings = new Map<string, HlsProfileBinding>();
+const hlsProfileBindings = createSessionBindingStore<HlsProfileBinding>(MAX_HLS_PROFILE_BINDINGS);
 const hlsStartsByDevice = new Map<string, number[]>();
 
 export function deleteHlsProfileBinding(sessionId: string): void {
-  hlsProfileBindings.delete(sessionId);
+  hlsProfileBindings.remove(sessionId);
+}
+
+export function bindHlsProfileDisposal(subscribe: SessionDisposalSubscription): () => void {
+  return hlsProfileBindings.bindDisposal(subscribe);
 }
 
 export function getHlsProfileBinding(sessionId: string): HlsProfileBinding | undefined {
   return hlsProfileBindings.get(sessionId);
+}
+
+export function touchHlsProfileBinding(sessionId: string): HlsProfileBinding | undefined {
+  return hlsProfileBindings.touch(sessionId);
 }
 
 export function bindHlsProfile(
@@ -27,14 +40,7 @@ export function bindHlsProfile(
   identity: { deviceId: string; profileId: string; selectionRevision: number },
   filePath: string,
 ): void {
-  hlsProfileBindings.delete(sessionId);
-  while (hlsProfileBindings.size >= MAX_HLS_PROFILE_BINDINGS) {
-    const oldest = [...hlsProfileBindings.entries()]
-      .sort(([, left], [, right]) => left.lastAccessAt - right.lastAccessAt)[0];
-    if (!oldest) break;
-    hlsProfileBindings.delete(oldest[0]);
-  }
-  hlsProfileBindings.set(sessionId, { ...identity, filePath, lastAccessAt: Date.now() });
+  hlsProfileBindings.bind(sessionId, { ...identity, filePath });
 }
 
 export function consumeHlsStartBudget(deviceId: string): { allowed: boolean; retryAfterMs?: number } {

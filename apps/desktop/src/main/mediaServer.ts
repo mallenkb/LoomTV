@@ -6,7 +6,6 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { Socket as NodeSocket } from 'node:net';
-import { StringDecoder } from 'node:string_decoder';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './mimeTypes';
 import { findFFmpeg, preferredH264HardwareEncoder } from './mediaBinaries';
 import {
@@ -51,9 +50,10 @@ import { streamStartFailure } from './streamStartErrors';
 import { parseHttpByteRange } from './httpByteRange';
 import {
   bindHlsProfile,
+  bindHlsProfileDisposal,
   consumeHlsStartBudget,
-  deleteHlsProfileBinding,
   getHlsProfileBinding,
+  touchHlsProfileBinding,
 } from './hlsRequestPolicy';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
 import {
@@ -85,6 +85,8 @@ import {
   settingsForRenderer,
 } from './rendererSettings.ts';
 import { buildBrowserStreamArgs } from './streamTranscodePlan.ts';
+import { readBoundedUtf8File, TextFileTooLargeError } from './boundedTextFile.ts';
+import { resolveMediaAccessIdentity } from './mediaAccessIdentity.ts';
 import type {
   LibraryIndexPayload,
   LibraryItemDetailsPayload,
@@ -149,13 +151,10 @@ const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
 const OPAQUE_RESOURCE_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const MAX_SIDECAR_SUBTITLE_BYTES = 8 * 1024 * 1024;
-const SUBTITLE_READ_CHUNK_BYTES = 64 * 1024;
 const V2_LIBRARY_ITEM_PREFIX = '/api/v2/library/items/';
 const RENDERER_LIBRARY_ITEM_PREFIX = '/api/renderer/library/items/';
 
-registerTranscodeSessionDisposalListener((sessionId) => {
-  deleteHlsProfileBinding(sessionId);
-});
+bindHlsProfileDisposal(registerTranscodeSessionDisposalListener);
 
 function libraryItemIdFromPath(pathname: string, prefix: string): string | null {
   if (!pathname.startsWith(prefix)) return null;
@@ -178,30 +177,8 @@ export function getLanMediaServerSockets(): Set<NodeSocket> { return lanMediaSer
 export function setMediaServer(server: http.Server | null): void { mediaServer = server; }
 export function setLanMediaServer(server: https.Server | null): void { lanMediaServer = server; }
 
-class SubtitleFileTooLargeError extends Error {}
-
 async function readBoundedUtf8Subtitle(filePath: string, signal: AbortSignal): Promise<string> {
-  const handle = await fs.promises.open(filePath, 'r');
-  try {
-    const stats = await handle.stat();
-    if (!stats.isFile()) throw new Error('Subtitle resource is not a regular file.');
-    if (stats.size > MAX_SIDECAR_SUBTITLE_BYTES) throw new SubtitleFileTooLargeError();
-
-    const decoder = new StringDecoder('utf8');
-    const chunk = Buffer.allocUnsafe(SUBTITLE_READ_CHUNK_BYTES);
-    let bytesReadTotal = 0;
-    const bodyChunks: string[] = [];
-    while (!signal.aborted) {
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
-      if (bytesRead === 0) return bodyChunks.join('') + decoder.end();
-      bytesReadTotal += bytesRead;
-      if (bytesReadTotal > MAX_SIDECAR_SUBTITLE_BYTES) throw new SubtitleFileTooLargeError();
-      bodyChunks.push(decoder.write(chunk.subarray(0, bytesRead)));
-    }
-    throw new Error('Subtitle request was cancelled.');
-  } finally {
-    await handle.close();
-  }
+  return readBoundedUtf8File(filePath, { maxBytes: MAX_SIDECAR_SUBTITLE_BYTES, signal });
 }
 
 function htmlEscape(value: string): string {
@@ -619,19 +596,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const credentialDeviceId = authorizeLocalRequest(reqUrl, req)
           ? DESKTOP_DEVICE_ID
           : getLanAuthorization().device?.id || lanDeviceId || '';
-        if (credentialDeviceId && boundDeviceId && credentialDeviceId !== boundDeviceId) return null;
-        const signedDeviceId = !credentialDeviceId && isSignedLanRequestValid(reqUrl) ? boundDeviceId : '';
-        const authorizedDeviceId = credentialDeviceId || signedDeviceId;
-        if (authorizedDeviceId) {
-          const active = getActiveProfileState(authorizedDeviceId);
-          const profileId = boundProfileId || active.profileId;
-          if (
-            !profileId
-            || (boundProfileId && active.profileId !== boundProfileId)
-            || (Number.isFinite(boundRevision) && boundRevision > 0 && active.selectionRevision !== boundRevision)
-          ) return null;
-          return { deviceId: authorizedDeviceId, profileId, selectionRevision: active.selectionRevision };
-        }
+        const verifiedIdentity = resolveMediaAccessIdentity({
+          boundDeviceId,
+          boundProfileId,
+          boundSelectionRevision: boundRevision,
+          credentialDeviceId,
+          signedRequestValid: isSignedLanRequestValid(reqUrl),
+        }, getActiveProfileState);
+        if (verifiedIdentity) return verifiedIdentity;
+        if (credentialDeviceId || boundDeviceId) return null;
         const profileId = profileIdForRequest();
         return profileId ? { deviceId: '', profileId, selectionRevision: 0 } : null;
       };
@@ -1695,7 +1668,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           })
           .catch((error) => {
             if (readController.signal.aborted || res.destroyed || res.writableEnded) return;
-            if (error instanceof SubtitleFileTooLargeError) {
+            if (error instanceof TextFileTooLargeError) {
               res.writeHead(413, { 'Content-Type': 'text/plain' });
               res.end('Subtitle file is too large');
               return;
@@ -1725,7 +1698,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             writeProfileError(error);
             return;
           }
-          binding.lastAccessAt = Date.now();
+          touchHlsProfileBinding(sessionId);
         }
         const requestStreamToken = reqUrl.searchParams.get(HLS_STREAM_TOKEN_QUERY_PARAM) || '';
         const playlistStreamToken = hasSessionCredential
