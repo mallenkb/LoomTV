@@ -5,6 +5,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { Socket as NodeSocket } from 'node:net';
+import { StringDecoder } from 'node:string_decoder';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './mimeTypes';
 import { findFFmpeg, preferredH264HardwareEncoder } from './mediaBinaries';
 import {
@@ -36,7 +37,7 @@ import { getLocalNetworkAddresses, getLocalNetworkName } from './networkInfo';
 import type { TranscodeOptions } from './mediaTypes';
 import { browserPlaybackPlan } from './transcodeDecision';
 import { probeMedia } from './mediaProbe';
-import { isSubtitleFileName } from './fileClassification';
+import { isSubtitleFileName, isVideoFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
 import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
 import {
@@ -121,6 +122,8 @@ const THUMBNAIL_SCALE_FILTER = "scale='min(640,iw)':-2";
 const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
+const MAX_SIDECAR_SUBTITLE_BYTES = 8 * 1024 * 1024;
+const SUBTITLE_READ_CHUNK_BYTES = 64 * 1024;
 const hlsProfileBindings = new Map<string, { deviceId: string; profileId: string; selectionRevision: number; filePath: string }>();
 const V2_LIBRARY_ITEM_PREFIX = '/api/v2/library/items/';
 const RENDERER_LIBRARY_ITEM_PREFIX = '/api/renderer/library/items/';
@@ -140,6 +143,32 @@ export function getMediaServer(): http.Server | null { return mediaServer; }
 export function getMediaServerPort(): number { return mediaServerPort; }
 export function getMediaServerSockets(): Set<NodeSocket> { return mediaServerSockets; }
 export function setMediaServer(server: http.Server | null): void { mediaServer = server; }
+
+class SubtitleFileTooLargeError extends Error {}
+
+async function readBoundedUtf8Subtitle(filePath: string, signal: AbortSignal): Promise<string> {
+  const handle = await fs.promises.open(filePath, 'r');
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error('Subtitle resource is not a regular file.');
+    if (stats.size > MAX_SIDECAR_SUBTITLE_BYTES) throw new SubtitleFileTooLargeError();
+
+    const decoder = new StringDecoder('utf8');
+    const chunk = Buffer.allocUnsafe(SUBTITLE_READ_CHUNK_BYTES);
+    let bytesReadTotal = 0;
+    const bodyChunks: string[] = [];
+    while (!signal.aborted) {
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (bytesRead === 0) return bodyChunks.join('') + decoder.end();
+      bytesReadTotal += bytesRead;
+      if (bytesReadTotal > MAX_SIDECAR_SUBTITLE_BYTES) throw new SubtitleFileTooLargeError();
+      bodyChunks.push(decoder.write(chunk.subarray(0, bytesRead)));
+    }
+    throw new Error('Subtitle request was cancelled.');
+  } finally {
+    await handle.close();
+  }
+}
 
 function htmlEscape(value: string): string {
   return value
@@ -1366,15 +1395,31 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       if (reqUrl.pathname === '/subtitle') {
         if (!requireStreamAccess(reqUrl, req, res)) return;
 
-        if (!filePath || !fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        let subtitleFilePath = requestedPath;
+        if (!loopbackRequest) {
+          try {
+            // Subtitle delivery uses its own resource kind. Do not inherit the
+            // broader media/image resolution used by other legacy routes.
+            subtitleFilePath = resolveLocalResource(resourceId, SUBTITLE_RESOURCE_KIND, getLibraryRoots());
+          } catch {
+            subtitleFilePath = '';
+          }
+        }
+
+        if (!subtitleFilePath || !fs.existsSync(subtitleFilePath) || !fs.statSync(subtitleFilePath).isFile()) {
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           res.end('Not found');
           return;
         }
-        if (!requireProfileMediaAccess(filePath)) return;
+        if (!requireProfileMediaAccess(subtitleFilePath)) return;
 
         const streamOrdinal = queryNumber(reqUrl.searchParams.get('streamOrdinal'));
         if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) {
+          if (!isVideoFileName(subtitleFilePath)) {
+            res.writeHead(415, { 'Content-Type': 'text/plain' });
+            res.end('Unsupported embedded subtitle source');
+            return;
+          }
           const ffmpegPath = findFFmpeg();
           if (!ffmpegPath) {
             res.writeHead(503, { 'Content-Type': 'text/plain' });
@@ -1393,7 +1438,7 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
                 return;
               }
               try {
-                const proc = spawn(ffmpegPath, buildEmbeddedSubtitleVttArgs(filePath, streamOrdinal), { stdio: ['ignore', 'pipe', 'pipe'] });
+                const proc = spawn(ffmpegPath, buildEmbeddedSubtitleVttArgs(subtitleFilePath, streamOrdinal), { stdio: ['ignore', 'pipe', 'pipe'] });
                 proc.once('exit', release);
                 if (proc.stdout) pipeResponse(proc.stdout, res);
                 proc.once('error', (error) => {
@@ -1415,18 +1460,34 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
           return;
         }
 
-        try {
-          const ext = path.extname(filePath).toLowerCase();
-          const body = fs.readFileSync(filePath, 'utf-8');
-          res.writeHead(200, {
-            'Content-Type': ext === '.srt' ? 'text/vtt; charset=utf-8' : getSubtitleMimeType(filePath),
-            'Cache-Control': 'no-store',
-          });
-          res.end(ext === '.srt' ? srtToVtt(body) : body);
-        } catch {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('Could not read subtitle');
+        if (!isSubtitleFileName(subtitleFilePath)) {
+          res.writeHead(415, { 'Content-Type': 'text/plain' });
+          res.end('Unsupported subtitle format');
+          return;
         }
+
+        const ext = path.extname(subtitleFilePath).toLowerCase();
+        const readController = new AbortController();
+        res.once('close', () => readController.abort());
+        readBoundedUtf8Subtitle(subtitleFilePath, readController.signal)
+          .then((body) => {
+            if (res.destroyed || res.writableEnded) return;
+            res.writeHead(200, {
+              'Content-Type': ext === '.srt' ? 'text/vtt; charset=utf-8' : getSubtitleMimeType(subtitleFilePath),
+              'Cache-Control': 'no-store',
+            });
+            res.end(ext === '.srt' ? srtToVtt(body) : body);
+          })
+          .catch((error) => {
+            if (readController.signal.aborted || res.destroyed || res.writableEnded) return;
+            if (error instanceof SubtitleFileTooLargeError) {
+              res.writeHead(413, { 'Content-Type': 'text/plain' });
+              res.end('Subtitle file is too large');
+              return;
+            }
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Could not read subtitle');
+          });
         return;
       }
 
