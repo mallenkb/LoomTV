@@ -264,7 +264,13 @@ function stopSession(session: ActiveSession, deleteOutput = true): boolean {
   clearSessionTimers(session);
   killWindow(session);
   sessions.delete(session.sessionId);
-  if (deleteOutput) fs.rmSync(session.outputDir, { recursive: true, force: true });
+  if (deleteOutput) {
+    try {
+      fs.rmSync(session.outputDir, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[transcode] Failed to remove output for session ${session.sessionId}:`, error);
+    }
+  }
   return true;
 }
 

@@ -36,7 +36,7 @@ import {
   stopAllTranscodes,
   stopTranscode,
 } from './main/transcodeManager';
-import { probeMediaFile } from './main/mediaProbeFile';
+import { probeMediaFile, probeMediaFileAsync } from './main/mediaProbeFile';
 import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/httpResponses';
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
 import { createLanSecurity } from './main/lanSecurity';
@@ -202,7 +202,7 @@ import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
 import { createAnalysisCoordinator } from './main/skipSegments/analysisCoordinator';
 import { setPlaybackActivityLease } from './main/ffmpegGovernor';
 import {
-  createLibraryScanFiles,
+  createLibraryScanFilesAsync,
   getLibraryFolderSignatureAsync,
 } from './main/libraryScanFiles';
 import {
@@ -236,7 +236,7 @@ type EpisodeMeta = MetadataEpisodeMeta;
 type EpisodeFile = MetadataEpisodeFile;
 type MediaItem = MetadataMediaItem;
 
-const { extractSeasons, scanEpisodeFiles } = createLibraryScanFiles(probeMediaFile);
+const { extractSeasons, scanEpisodeFiles } = createLibraryScanFilesAsync(probeMediaFileAsync);
 
 function ignoreBrokenConsolePipe(stream: NodeJS.WriteStream): void {
   stream.on('error', (error: NodeJS.ErrnoException) => {
@@ -359,6 +359,10 @@ const {
 });
 
 const {
+  libraryIndexForLocalNetwork: projectLibraryIndexForLocalNetwork,
+  libraryIndexForRenderer: projectLibraryIndexForRenderer,
+  libraryItemForLocalNetwork: projectLibraryItemForLocalNetwork,
+  libraryItemForRenderer: projectLibraryItemForRenderer,
   libraryForLocalNetwork: projectLibraryForLocalNetwork,
   libraryForRenderer: projectLibraryForRenderer,
 } = createLibraryDeliveryProjections({
@@ -369,6 +373,7 @@ const {
   libraryFolderStatusesFor,
   localMetadataWithTracks,
   normalizeLibraryFolderGroups,
+  progressKeyFor: (filePath) => registerResource(loadSettings().localNetworkHmacSecret || '', 'media', filePath),
   remoteArtworkDeliveryUrl,
   signedStreamUrlForRemote,
   subtitleRecordsForLocalNetwork,
@@ -400,14 +405,13 @@ function clearAppData(): LibraryData {
   return loadLibrary();
 }
 
-function shouldSplitContainerFolder(folderPath: string, folderName: string, subDirs: fs.Dirent[]): boolean {
-  const episodeBearingDirs = subDirs.filter((dir) => {
-    try {
-      return scanEpisodeFiles(path.join(folderPath, dir.name)).length > 0;
-    } catch {
-      return false;
+async function shouldSplitContainerFolder(folderPath: string, folderName: string, subDirs: fs.Dirent[]): Promise<boolean> {
+  const episodeBearingDirs: fs.Dirent[] = [];
+  for (const dir of subDirs) {
+    if ((await scanEpisodeFiles(path.join(folderPath, dir.name))).length > 0) {
+      episodeBearingDirs.push(dir);
     }
-  });
+  }
 
   if (episodeBearingDirs.length === 0) return false;
 
@@ -449,13 +453,13 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   getLocalThumbnailUrl,
   openSubtitlesIsConfigured,
   orderedArtworkCandidates,
-  probeMediaFile,
+  probeMediaFile: probeMediaFileAsync,
   scanEpisodeFiles,
 });
 const { scanDirectoryAsItem, scanFolder } = createLibraryScanner({
   buildMovieItemFromFile,
   buildTVItemFromFolder,
-  probeMediaFile,
+  probeMediaFile: probeMediaFileAsync,
   scanEpisodeFiles,
   shouldSplitContainerFolder,
 });
@@ -915,6 +919,42 @@ function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
   return projectLibraryForRenderer(scoped);
 }
 
+function findLibraryItem(data: LibraryData, mediaId: string): MediaItem | null {
+  for (const collection of [data.movies || [], data.tvShows || [], data.animeShows || []]) {
+    const item = collection.find((candidate) => candidate.id === mediaId);
+    if (item) return item;
+  }
+  return null;
+}
+
+function compactLibraryIndexForRenderer(revision = libraryMutationVersion) {
+  const profileId = getDesktopActiveProfileId();
+  const data = loadLibrary();
+  const scoped = profileId
+    ? filterLibraryForProfile(data, profileId)
+    : { ...data, movies: [], tvShows: [], animeShows: [] };
+  return projectLibraryIndexForRenderer(scoped, revision);
+}
+
+function compactLibraryItemForRenderer(mediaId: string, revision = libraryMutationVersion) {
+  const profileId = getDesktopActiveProfileId();
+  if (!profileId) return null;
+  const item = findLibraryItem(filterLibraryForProfile(loadLibrary(), profileId), mediaId);
+  return item ? projectLibraryItemForRenderer(item, revision) : null;
+}
+
+function getRendererCatalogIdentity(): string {
+  const state = getDesktopActiveProfileState();
+  const profileIdentity = state.profileId
+    ? `${profileRestrictionIdentity(state.profileId)}:${state.selectionRevision}`
+    : `profile:none:${state.selectionRevision}`;
+  const deliveryIdentity = libraryEtagFor({
+    localAccessToken: LOCAL_ACCESS_TOKEN,
+    serverPort: getMediaServerPort(),
+  });
+  return `${profileIdentity}:${deliveryIdentity}`;
+}
+
 function appendLocalAccessTokenToUrl(url: string): string {
   const parsed = new URL(url);
   parsed.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
@@ -965,6 +1005,47 @@ function libraryForLocalNetwork(profileId?: string, deviceId?: string): LibraryD
   );
 }
 
+function compactLibraryIndexForLocalNetwork(
+  profileId: string,
+  deviceId: string | undefined,
+  revision = libraryMutationVersion,
+) {
+  const base = getLanServerBase() || `http://127.0.0.1:${getMediaServerPort()}`;
+  const state = deviceId ? getActiveProfileState(deviceId) : null;
+  return projectLibraryIndexForLocalNetwork(
+    filterLibraryForProfile(loadLibrary(), profileId),
+    base,
+    revision,
+    deviceId ? {
+      deviceId,
+      profileId,
+      selectionRevision: state?.selectionRevision ?? 0,
+    } : undefined,
+  );
+}
+
+function compactLibraryItemForLocalNetwork(
+  mediaId: string,
+  profileId: string,
+  deviceId: string | undefined,
+  revision = libraryMutationVersion,
+) {
+  const item = findLibraryItem(filterLibraryForProfile(loadLibrary(), profileId), mediaId);
+  if (!item) return null;
+  const base = getLanServerBase() || `http://127.0.0.1:${getMediaServerPort()}`;
+  const state = deviceId ? getActiveProfileState(deviceId) : null;
+  return projectLibraryItemForLocalNetwork(
+    item,
+    base,
+    revision,
+    deviceId ? {
+      deviceId,
+      profileId,
+      selectionRevision: state?.selectionRevision ?? 0,
+    } : undefined,
+  );
+}
+
 let artworkCacheQueue: Promise<void> = Promise.resolve();
 
 async function cacheArtworkNow(data: LibraryData): Promise<void> {
@@ -1009,6 +1090,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
   const previous = loadLibrary();
   if (!saveLibrary(data)) return false;
+  libraryMutationVersion++;
   cleanupOrphanedAutomaticSegments();
   warmSkipSegmentsAfterScan(data);
   reconcileSkipAnalysisAfterScan(previous, data);
@@ -1189,6 +1271,8 @@ registerIpcHandlers<LibraryData, AppSettings>({
   showOpenFolderDialog,
   loadLibrary,
   libraryForRenderer,
+  libraryIndexForRenderer: compactLibraryIndexForRenderer,
+  libraryItemForRenderer: compactLibraryItemForRenderer,
   scanLibrary,
   saveLibraryFromScan,
   getLibraryMutationVersion: () => libraryMutationVersion,
@@ -1479,6 +1563,11 @@ export const mediaServerDeps = {
   isLoopbackRequest,
   isSignedLanRequestValid,
   libraryEtagFor,
+  compactLibraryIndexForLocalNetwork,
+  compactLibraryItemForLocalNetwork,
+  compactLibraryIndexForRenderer,
+  compactLibraryItemForRenderer,
+  getRendererCatalogIdentity,
   libraryForLocalNetwork,
   libraryForRenderer,
   loadLibrary,

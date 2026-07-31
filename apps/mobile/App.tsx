@@ -5,6 +5,8 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import {
   ActivityIndicator,
   Animated,
+  AppState,
+  type AppStateStatus,
   BackHandler,
   Easing,
   FlatList,
@@ -88,6 +90,11 @@ import {
   type MobileThemeColors,
 } from './mobileStyles';
 import { createMobileLanClient } from './mobileLanClient';
+import {
+  mobileReconnectDelayMs,
+  rebuildMobileDetailItemCache,
+  rememberMobileDetailItem,
+} from './mobileDomain';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
 import {
   MOBILE_THEME_COLOR_OPTIONS,
@@ -1201,6 +1208,8 @@ function AppRoot() {
   const reconnectingSavedConnectionRef = useRef(false);
   const connectionHealthCheckRef = useRef(false);
   const mobileDeviceIdRef = useRef('');
+  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const themedStyles = useMemo(() => createStyles(mobileTheme), [mobileTheme]);
   const themeContextValue = useMemo(() => ({ colors: mobileTheme, styles: themedStyles }), [mobileTheme, themedStyles]);
   const styles = themedStyles;
@@ -1305,6 +1314,14 @@ function AppRoot() {
     });
     return () => cancelAnimationFrame(frame);
   }, [activeKind, query]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      appStateRef.current = nextState;
+      setAppState(nextState);
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1412,20 +1429,38 @@ function AppRoot() {
   }, [connection, discoveredHosts, savedConnection]);
 
   useEffect(() => {
-    if (!savedConnection || connection) return;
-    const retry = setInterval(() => void reconnectSavedConnection(savedConnection), 5000);
-    return () => clearInterval(retry);
-    // Keep the retry interval stable while the saved session remains unchanged.
+    if (!savedConnection || connection || appState !== 'active') return;
+    let cancelled = false;
+    let failedAttempts = 0;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+
+    const schedule = (delayMs: number) => {
+      retry = setTimeout(() => { void tryReconnect(); }, delayMs);
+    };
+    const tryReconnect = async () => {
+      if (cancelled || appStateRef.current !== 'active') return;
+      const connected = await reconnectSavedConnection(savedConnection);
+      if (cancelled || connected || appStateRef.current !== 'active') return;
+      schedule(mobileReconnectDelayMs(failedAttempts));
+      failedAttempts += 1;
+    };
+
+    schedule(0);
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
+    // Keep the retry loop stable while the saved session remains unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, savedConnection]);
+  }, [appState, connection, savedConnection]);
 
   useEffect(() => {
-    if (!connection) return;
+    if (!connection || appState !== 'active') return;
     const healthCheck = setInterval(() => void checkDesktopConnection(), 10000);
     return () => clearInterval(healthCheck);
     // These connection fields intentionally own the health-check lifecycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag]);
+  }, [appState, connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag]);
 
   useEffect(() => {
     if (!savedConnection || !connection) return undefined;
@@ -1466,25 +1501,34 @@ function AppRoot() {
   const library = useMemo(() => connection?.library || {}, [connection?.library]);
   const grouped = useMemo(() => collections(library), [library]);
   const everything = useMemo(() => allItems(library), [library]);
+  const itemsById = useMemo(() => new Map(everything.map((item) => [item.id, item])), [everything]);
   const filterSource = useMemo(() => {
     if (activeKind === 'settings') return EMPTY_ITEMS;
     return activeKind === 'home' ? everything : grouped[activeKind === 'others' ? 'others' : activeKind];
   }, [activeKind, everything, grouped]);
   const hasActiveFilters = libraryFilter !== 'all';
-  const continueWatching = useMemo(
-    () => everything
-      .map((item) => {
-        const paths = [streamPathFor(item), ...(item.episodeFiles || []).map((episode) => episode.filePath)];
-        return [item, Math.max(0, ...paths.map((filePath) => progress[filePath]?.updatedAt || 0))] as const;
-      })
-      .filter(([, updatedAt]) => updatedAt > 0)
-      .sort((a, b) => b[1] - a[1])
+  const progressOwnerByPath = useMemo(() => {
+    const owners = new Map<string, MediaItem>();
+    for (const item of everything) {
+      owners.set(streamPathFor(item), item);
+      for (const episode of item.episodeFiles || []) owners.set(episode.filePath, item);
+    }
+    return owners;
+  }, [everything]);
+  const continueWatching = useMemo(() => {
+    const latestByItemId = new Map<string, { item: MediaItem; updatedAt: number }>();
+    for (const [filePath, storedProgress] of Object.entries(progress)) {
+      const item = progressOwnerByPath.get(filePath);
+      const updatedAt = storedProgress?.updatedAt || 0;
+      if (!item || updatedAt <= (latestByItemId.get(item.id)?.updatedAt || 0)) continue;
+      latestByItemId.set(item.id, { item, updatedAt });
+    }
+    return [...latestByItemId.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 16)
-      .map(([item]) => item),
-    [everything, progress],
-  );
+      .map(({ item }) => item);
+  }, [progress, progressOwnerByPath]);
   const mobileMyListItems = useMemo(() => {
-    const byId = new Map(everything.map((item) => [item.id, item]));
     const seen = new Set<string>();
     return profileLists
       .filter((entry) => entry.kind === 'watchlist' || entry.kind === 'favorite')
@@ -1494,29 +1538,35 @@ function AppRoot() {
         seen.add(entry.mediaId);
         return true;
       })
-      .map((entry) => byId.get(entry.mediaId))
+      .map((entry) => itemsById.get(entry.mediaId))
       .filter((item): item is MediaItem => Boolean(item));
-  }, [everything, profileLists]);
-  const visibleItems = useMemo(() => {
+  }, [itemsById, profileLists]);
+  const queryMatchedItems = useMemo(() => {
     if (activeKind === 'settings') return [];
     const source = searchOpen ? everything : filterSource;
-    const filtered = source.filter((item) => (
+    return source.filter((item) => (
       matchesQuery(item, query)
       && (!searchOpen || matchesMobileSearchScope(item, searchScope))
-      && (searchOpen || matchesMobileLibraryFilter(item, libraryFilter, progress))
     ));
-    return filtered;
-  }, [activeKind, everything, filterSource, libraryFilter, progress, query, searchOpen, searchScope]);
+  }, [activeKind, everything, filterSource, query, searchOpen, searchScope]);
+  const visibleItems = useMemo(() => {
+    if (searchOpen || libraryFilter === 'all') return queryMatchedItems;
+    return queryMatchedItems.filter((item) => matchesMobileLibraryFilter(item, libraryFilter, progress));
+  }, [libraryFilter, progress, queryMatchedItems, searchOpen]);
 
   useEffect(() => {
-    for (const item of everything) {
-      detailItemCacheRef.current.set(item.id, item);
+    detailItemCacheRef.current = rebuildMobileDetailItemCache(detailItemCacheRef.current, itemsById);
+    const currentDetails = new Map<LibraryKind, MediaItem>();
+    for (const [kind, item] of lastDetailByKindRef.current) {
+      const currentItem = itemsById.get(item.id);
+      if (currentItem) currentDetails.set(kind, currentItem);
     }
-  }, [everything]);
+    lastDetailByKindRef.current = currentDetails;
+  }, [itemsById]);
 
   const openDetailItem = useCallback((item: MediaItem) => {
     const cached = detailItemCacheRef.current.get(item.id) || item;
-    detailItemCacheRef.current.set(cached.id, cached);
+    rememberMobileDetailItem(detailItemCacheRef.current, cached);
     lastDetailByKindRef.current.set(activeKind, cached);
     setFilterOpen(false);
     setDetailItem(cached);
@@ -1892,8 +1942,7 @@ function AppRoot() {
       }
       playerReturnItemRef.current = null;
       if (returnItemId && detailItem?.id !== returnItemId) {
-        const cachedReturnItem = detailItemCacheRef.current.get(returnItemId)
-          || allItems(connection?.library || {}).find((item) => item.id === returnItemId);
+        const cachedReturnItem = detailItemCacheRef.current.get(returnItemId) || itemsById.get(returnItemId);
         if (cachedReturnItem) {
           lastDetailByKindRef.current.set(activeKind, cachedReturnItem);
           setDetailItem(cachedReturnItem);
@@ -1904,7 +1953,7 @@ function AppRoot() {
     }
     // closePlayer intentionally keeps its current player-session callback stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKind, connection?.library, detailItem?.id, playTarget, playbackFailure, player]);
+  }, [activeKind, detailItem?.id, itemsById, playTarget, playbackFailure, player]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -2067,8 +2116,8 @@ function AppRoot() {
     }
   }
 
-  async function reconnectSavedConnection(saved: SavedConnection) {
-    if (reconnectingSavedConnectionRef.current) return;
+  async function reconnectSavedConnection(saved: SavedConnection): Promise<boolean> {
+    if (appStateRef.current !== 'active' || reconnectingSavedConnectionRef.current) return false;
     reconnectingSavedConnectionRef.current = true;
     setIsServerOffline(false);
     try {
@@ -2082,14 +2131,14 @@ function AppRoot() {
         setBaseUrl(baseConnection.baseUrl);
         setError('');
         setIsServerOffline(false);
-        return;
+        return true;
       }
       const response = await mobileLanClient.getLibrary(activeSaved.baseUrl, activeSaved.deviceToken);
       if (response.status === 401) {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
         setError('This device is no longer authorized. Select the desktop and enter its current 6-digit pairing PIN.');
-        return;
+        return true;
       }
       if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
       const nextConnection: Connection = {
@@ -2102,9 +2151,11 @@ function AppRoot() {
       setError('');
       setIsServerOffline(false);
       void hydrateProgress(nextConnection);
+      return true;
     } catch {
       setIsServerOffline(true);
       setError('');
+      return false;
     } finally {
       reconnectingSavedConnectionRef.current = false;
       setIsRestoringConnection(false);
@@ -2180,7 +2231,7 @@ function AppRoot() {
     }
   }
 
-  async function applyLibraryInSections(nextLibrary: LibraryPayload, libraryEtag = '') {
+  async function applyLibraryInSections(nextLibrary: LibraryPayload, libraryEtag = ''): Promise<Map<string, MediaItem>> {
     const sections: Array<keyof LibraryPayload> = ['movies', 'tvShows', 'animeShows'];
     for (const section of sections) {
       await wait(LIBRARY_SECTION_APPLY_DELAY_MS);
@@ -2204,14 +2255,14 @@ function AppRoot() {
       : current);
 
     const nextItems = allItems(nextLibrary);
-    for (const item of nextItems) {
-      detailItemCacheRef.current.set(item.id, item);
-    }
-    setDetailItem((current) => current ? nextItems.find((item) => item.id === current.id) || null : null);
+    const nextItemsById = new Map(nextItems.map((item) => [item.id, item]));
+    detailItemCacheRef.current = rebuildMobileDetailItemCache(detailItemCacheRef.current, nextItemsById);
+    setDetailItem((current) => current ? nextItemsById.get(current.id) || null : null);
     const returnItem = playerReturnItemRef.current;
-    if (returnItem && !nextItems.some((item) => item.id === returnItem.id)) {
+    if (returnItem && !nextItemsById.has(returnItem.id)) {
       playerReturnItemRef.current = null;
     }
+    return nextItemsById;
   }
 
   async function refreshLibrary() {
@@ -2293,12 +2344,12 @@ function AppRoot() {
       `Poster updated, but mobile sync failed (${libraryResponse.status}).`,
     );
     const libraryEtag = libraryResponse.headers.get('ETag') || '';
-    await applyLibraryInSections(nextLibrary, libraryEtag);
+    const nextItemsById = await applyLibraryInSections(nextLibrary, libraryEtag);
     setArtworkCacheBusters((current) => ({ ...current, [itemId]: String(Date.now()) }));
-    const refreshedItem = allItems(nextLibrary).find((candidate) => candidate.id === itemId);
+    const refreshedItem = nextItemsById.get(itemId);
     if (refreshedItem) {
       const nextItem = appliedCandidate ? mergeCandidateArtwork(refreshedItem, appliedCandidate) : refreshedItem;
-      detailItemCacheRef.current.set(nextItem.id, nextItem);
+      rememberMobileDetailItem(detailItemCacheRef.current, nextItem);
       setDetailItem(nextItem);
     }
   }
@@ -2479,6 +2530,7 @@ function AppRoot() {
                     setBaseUrl('');
                     setShareCode('');
                     setDetailItem(null);
+                    detailItemCacheRef.current.clear();
                     lastDetailByKindRef.current.clear();
                     setPlayTarget(null);
                     setMiniPlayerTarget(null);

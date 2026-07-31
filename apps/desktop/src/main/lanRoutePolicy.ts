@@ -11,6 +11,8 @@ export type MediaServerRouteAccess =
 
 export function lanRouteScope(pathname: string, method = 'GET'): LanRouteScope | null {
   if (pathname === '/api/v2/library' && method === 'GET') return 'catalog:read';
+  if (pathname === '/api/v2/library/index' && method === 'GET') return 'catalog:read';
+  if (pathname.startsWith('/api/v2/library/items/') && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/client-config' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/profiles' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/profiles' && method === 'POST') return 'playback:write';

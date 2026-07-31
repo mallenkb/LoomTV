@@ -190,7 +190,7 @@ export default function MediaRail({ title, action, variant = 'classic', classNam
   const scrollable = canScrollLeft || canScrollRight;
 
   return (
-    <section className={className} aria-labelledby={headingId}>
+    <section className={`min-w-0 w-full ${className}`} aria-labelledby={headingId}>
       <div className="mb-2 flex items-center justify-between gap-4">
         <h2 id={headingId} className={TITLE_CLASS[variant]}>{title}</h2>
         <div className="flex items-center gap-1">
@@ -208,7 +208,7 @@ export default function MediaRail({ title, action, variant = 'classic', classNam
       <div
         ref={railRef}
         {...railHandlers}
-        className={`flex select-none overflow-x-auto overflow-y-hidden scroll-smooth [scrollbar-gutter:stable] [touch-action:pan-y] ${GAP_CLASS[variant]} ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`flex w-full min-w-0 select-none overflow-x-auto overflow-y-hidden scroll-smooth [scrollbar-gutter:stable] [touch-action:pan-y] ${GAP_CLASS[variant]} ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       >
         {children}
       </div>

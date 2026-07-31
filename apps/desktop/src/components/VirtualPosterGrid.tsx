@@ -34,7 +34,7 @@ function scrollMetrics(parent: HTMLElement | Window, element: HTMLElement) {
 export default function VirtualPosterGrid<T extends { id: string }>({
   items,
   renderItem,
-  minColumnWidth = 200,
+  minColumnWidth = 176,
   maxColumnWidth = 200,
   rowHeight = 340,
   gap = 24,

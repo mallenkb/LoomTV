@@ -79,6 +79,37 @@ export type MediaItem = {
   episodeFiles?: EpisodeFile[];
 };
 
+const MOBILE_RECONNECT_BASE_DELAY_MS = 1_000;
+const MOBILE_RECONNECT_MAX_DELAY_MS = 30_000;
+export const MOBILE_DETAIL_ITEM_CACHE_LIMIT = 24;
+
+export function mobileReconnectDelayMs(failedAttempts: number): number {
+  const exponent = Math.max(0, Math.min(10, Math.floor(failedAttempts)));
+  return Math.min(MOBILE_RECONNECT_MAX_DELAY_MS, MOBILE_RECONNECT_BASE_DELAY_MS * (2 ** exponent));
+}
+
+export function rememberMobileDetailItem(cache: Map<string, MediaItem>, item: MediaItem): void {
+  cache.delete(item.id);
+  cache.set(item.id, item);
+  while (cache.size > MOBILE_DETAIL_ITEM_CACHE_LIMIT) {
+    const oldestId = cache.keys().next().value;
+    if (typeof oldestId !== 'string') break;
+    cache.delete(oldestId);
+  }
+}
+
+export function rebuildMobileDetailItemCache(
+  cache: ReadonlyMap<string, MediaItem>,
+  itemsById: ReadonlyMap<string, MediaItem>,
+): Map<string, MediaItem> {
+  const rebuilt = new Map<string, MediaItem>();
+  for (const id of cache.keys()) {
+    const currentItem = itemsById.get(id);
+    if (currentItem) rememberMobileDetailItem(rebuilt, currentItem);
+  }
+  return rebuilt;
+}
+
 export type LibraryPayload = LanLibraryPayload<MediaItem>;
 export type PairResponse = LanPairResponse<LibraryPayload>;
 

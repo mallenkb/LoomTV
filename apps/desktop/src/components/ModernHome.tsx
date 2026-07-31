@@ -110,7 +110,7 @@ export default function ModernHome() {
   }, [searchOpen]);
 
   return (
-    <div className="loom-modern-home relative h-full overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
+    <div className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       <AnimatePresence>
         {searchOpen && (
           <motion.div
@@ -257,7 +257,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHoverChange(false);
       }}
     >
-      <div className="loom-modern-hero-artwork absolute inset-y-0 left-1/2 -translate-x-1/2">
+      <div className="loom-modern-hero-artwork absolute inset-y-0 inset-x-0 mx-auto">
         <AnimatePresence initial={false} mode="sync">
           <motion.div
             key={`hero-artwork-${item.id}`}
@@ -496,7 +496,7 @@ function SearchResults({ items, query, from, isLoading, overlay = false, gridRef
     <main className={overlay ? 'w-full pb-10 pt-10' : 'loom-modern-content-frame page-bottom-safe px-[var(--loom-frame-inset)] pb-10 pt-28'}>
       <h1 className={overlay ? 'text-2xl font-bold tracking-tight' : 'text-3xl font-bold tracking-tight'}>Search results</h1>
       <p className="mt-2 text-sm text-[var(--loom-muted)]" aria-live="polite">{items.length} {items.length === 1 ? 'title' : 'titles'} matching “{query}”</p>
-      <div ref={grid} onKeyDown={moveFocus} className="mt-8 grid grid-cols-[repeat(auto-fill,minmax(180px,200px))] gap-5">
+      <div ref={grid} onKeyDown={moveFocus} className="mt-8 grid grid-cols-[repeat(auto-fill,minmax(180px,200px))] justify-between gap-5">
         {items.map((item) => (
           <MediaPosterCard
             key={item.id}

@@ -4,6 +4,12 @@ import { isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
 import { detectLibraryFolderKind } from './libraryFolders.ts';
 import { createMediaItemId } from './libraryItemHelpers.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
+import {
+  getBoundedLibraryProbe,
+  LIBRARY_ITEM_CONCURRENCY,
+  processWithConcurrencyInOrder,
+  runBoundedLibraryItemTask,
+} from './libraryScanConcurrency.ts';
 import { cleanMediaTitle } from './metadata/helpers.ts';
 import type { EpisodeFile, MediaItem } from './metadata/types.ts';
 import {
@@ -62,50 +68,48 @@ type BuildMovieItem = (request: BuildMovieItemRequest) => Promise<MediaItem>;
 export type LibraryScannerDependencies = {
   buildMovieItemFromFile: BuildMovieItem;
   buildTVItemFromFolder: BuildTVItem;
-  probeMediaFile: (filePath: string) => ProbeMediaFileResult;
-  scanEpisodeFiles: (folderPath: string) => EpisodeFile[];
-  shouldSplitContainerFolder: (folderPath: string, folderName: string, subDirectories: fs.Dirent[]) => boolean;
+  probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
+  scanEpisodeFiles: (folderPath: string) => Promise<EpisodeFile[]>;
+  shouldSplitContainerFolder: (folderPath: string, folderName: string, subDirectories: fs.Dirent[]) => Promise<boolean>;
 };
 
 export function createLibraryScanner(deps: LibraryScannerDependencies) {
   const {
-    buildMovieItemFromFile,
-    buildTVItemFromFolder,
-    probeMediaFile,
+    buildMovieItemFromFile: unboundedBuildMovieItemFromFile,
+    buildTVItemFromFolder: unboundedBuildTVItemFromFolder,
+    probeMediaFile: unboundedProbeMediaFile,
     scanEpisodeFiles,
     shouldSplitContainerFolder,
   } = deps;
+  const probeMediaFile = getBoundedLibraryProbe(unboundedProbeMediaFile);
+  const buildMovieItemFromFile: BuildMovieItem = (request) => (
+    runBoundedLibraryItemTask(() => unboundedBuildMovieItemFromFile(request))
+  );
+  const buildTVItemFromFolder: BuildTVItem = (request) => (
+    runBoundedLibraryItemTask(() => unboundedBuildTVItemFromFolder(request))
+  );
 
-function subtitleFilesInDirectory(folderPath: string): string[] {
-  try {
-    return fs.readdirSync(folderPath, { withFileTypes: true })
+  async function subtitleFilesInDirectory(folderPath: string): Promise<string[]> {
+    return (await fs.promises.readdir(folderPath, { withFileTypes: true }))
       .filter((entry) => !entry.isDirectory())
       .map((entry) => entry.name)
       .filter(isSubtitleFileName);
-  } catch {
-    return [];
   }
-}
 
-async function downloadOpenSubtitlesForVideos(folderPath: string, videoFiles: string[], ctx: ScanContext): Promise<void> {
-  if (!openSubtitlesIsConfigured(ctx.openSubtitles) || videoFiles.length === 0) return;
+  async function downloadOpenSubtitlesForVideos(folderPath: string, videoFiles: string[], ctx: ScanContext): Promise<void> {
+    if (!openSubtitlesIsConfigured(ctx.openSubtitles) || videoFiles.length === 0) return;
 
-  for (const videoFile of videoFiles) {
-    const videoPath = path.join(folderPath, videoFile);
-    const results = await downloadMissingOpenSubtitlesForVideo(videoPath, ctx.openSubtitles);
-    results
-      .filter((result) => result.status === 'error')
-      .forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
+    for (const videoFile of videoFiles) {
+      const videoPath = path.join(folderPath, videoFile);
+      const results = await downloadMissingOpenSubtitlesForVideo(videoPath, ctx.openSubtitles);
+      results
+        .filter((result) => result.status === 'error')
+        .forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
+    }
   }
-}
 
 async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promise<MediaItem | null> {
-  let dirEntries: fs.Dirent[];
-  try {
-    dirEntries = fs.readdirSync(folderPath, { withFileTypes: true });
-  } catch {
-    return null;
-  }
+  const dirEntries = await fs.promises.readdir(folderPath, { withFileTypes: true });
 
   const folderName = path.basename(folderPath);
   const videoFiles = dirEntries
@@ -113,10 +117,10 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
     .map((entry) => entry.name)
     .filter(isVideoFileName);
   await downloadOpenSubtitlesForVideos(folderPath, videoFiles, ctx);
-  const subtitleFiles = subtitleFilesInDirectory(folderPath);
+  const subtitleFiles = await subtitleFilesInDirectory(folderPath);
   const subDirs = dirEntries.filter((entry) => entry.isDirectory());
   const hasSeasonDirs = subDirs.some((entry) => /season|series/i.test(entry.name));
-  const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? scanEpisodeFiles(folderPath) : [];
+  const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? await scanEpisodeFiles(folderPath) : [];
   const detectedFolderKind = detectLibraryFolderKind(folderPath);
 
   if (ctx.folderKind && detectedFolderKind) return null;
@@ -127,11 +131,11 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
   const parsedFolder = cleanMediaTitle(folderName);
   const subtitles = createSubtitleRecords(folderPath, subtitleFiles);
   const id = createMediaItemId(folderPath);
-  const representativeProbe = videoFiles[0] ? probeMediaFile(path.join(folderPath, videoFiles[0])) : undefined;
+  const representativeProbe = videoFiles[0] ? await probeMediaFile(path.join(folderPath, videoFiles[0])) : undefined;
   const isTV = nestedEpisodeFiles.length > 0
     || shouldTreatAsTV(folderName, videoFiles, hasSeasonDirs, representativeProbe);
 
-  if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length > 0 && shouldSplitContainerFolder(folderPath, folderName, subDirs)) {
+  if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length > 0 && await shouldSplitContainerFolder(folderPath, folderName, subDirs)) {
     return null;
   }
 
@@ -199,7 +203,6 @@ async function scanFolder(
   onItems?: (items: MediaItem[]) => void | Promise<void>,
 ): Promise<MediaItem[]> {
   const items: MediaItem[] = [];
-  if (!fs.existsSync(folderPath)) return items;
 
   const addItems = async (nextItems: MediaItem[]) => {
     items.push(...nextItems);
@@ -207,77 +210,106 @@ async function scanFolder(
   };
 
   try {
-    const rootEntries = fs.readdirSync(folderPath, { withFileTypes: true });
+    const rootEntries = await fs.promises.readdir(folderPath, { withFileTypes: true });
 
     const rootVideoFiles = rootEntries
       .filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name))
       .map((entry) => entry.name);
     await downloadOpenSubtitlesForVideos(folderPath, rootVideoFiles, ctx);
-    const rootSubtitleFiles = subtitleFilesInDirectory(folderPath);
+    const rootSubtitleFiles = await subtitleFilesInDirectory(folderPath);
 
-    for (const videoFile of rootVideoFiles) {
-      const fullVideoPath = path.join(folderPath, videoFile);
-      const probe = probeMediaFile(fullVideoPath);
-      const isTVFile = shouldTreatAsTV(videoFile, [videoFile], false, probe);
-      if (ctx.folderKind !== 'movies' && isTVFile) continue; // belongs to a show folder, not a standalone movie
+    await processWithConcurrencyInOrder(
+        rootVideoFiles,
+        LIBRARY_ITEM_CONCURRENCY,
+        async (videoFile): Promise<MediaItem | null> => {
+          const fullVideoPath = path.join(folderPath, videoFile);
+          const probe = await probeMediaFile(fullVideoPath);
+          const isTVFile = shouldTreatAsTV(videoFile, [videoFile], false, probe);
+          if (ctx.folderKind !== 'movies' && isTVFile) return null;
 
-      const baseName = path.basename(videoFile, path.extname(videoFile));
-      const matchingSubtitles = rootSubtitleFiles.filter((subtitle) =>
-        path.basename(subtitle, path.extname(subtitle)).startsWith(baseName),
-      );
-      const forcedMovieType = ctx.folderKind === 'movies'
-        ? 'movie'
-        : ctx.folderKind === 'anime'
-          ? 'anime'
-          : ctx.folderKind === 'tv'
-            ? 'tv'
-            : undefined;
-      const parsedVideo = cleanMediaTitle(videoFile);
-      await addItems([await buildMovieItemFromFile({
-        fullPath: fullVideoPath,
-        fileName: videoFile,
-        titleFallback: parsedVideo.title,
-        subtitles: createSubtitleRecords(folderPath, matchingSubtitles),
-        year: parsedVideo.year,
-        omdbApiKey: ctx.omdbApiKey,
-        tmdbApiKey: ctx.tmdbApiKey,
-        fanartApiKey: ctx.fanartApiKey,
-        forcedType: forcedMovieType,
-      })]);
-    }
+          const baseName = path.basename(videoFile, path.extname(videoFile));
+          const matchingSubtitles = rootSubtitleFiles.filter((subtitle) =>
+            path.basename(subtitle, path.extname(subtitle)).startsWith(baseName),
+          );
+          const forcedMovieType = ctx.folderKind === 'movies'
+            ? 'movie'
+            : ctx.folderKind === 'anime'
+              ? 'anime'
+              : ctx.folderKind === 'tv'
+                ? 'tv'
+                : undefined;
+          const parsedVideo = cleanMediaTitle(videoFile);
+          return buildMovieItemFromFile({
+            fullPath: fullVideoPath,
+            fileName: videoFile,
+            titleFallback: parsedVideo.title,
+            subtitles: createSubtitleRecords(folderPath, matchingSubtitles),
+            year: parsedVideo.year,
+            omdbApiKey: ctx.omdbApiKey,
+            tmdbApiKey: ctx.tmdbApiKey,
+            fanartApiKey: ctx.fanartApiKey,
+            forcedType: forcedMovieType,
+          });
+        },
+        async (item) => {
+          if (item) await addItems([item]);
+        },
+    );
 
-    for (const entry of rootEntries) {
-      if (!entry.isDirectory()) continue;
+    const rootDirectories = rootEntries.filter((entry) => entry.isDirectory());
+    await processWithConcurrencyInOrder(
+        rootDirectories,
+        LIBRARY_ITEM_CONCURRENCY,
+        async (entry): Promise<MediaItem[]> => {
+          const fullPath = path.join(folderPath, entry.name);
+          const dirEntries = await fs.promises.readdir(fullPath, { withFileTypes: true });
+          const videoFiles = dirEntries
+            .filter((directoryEntry) => !directoryEntry.isDirectory())
+            .map((directoryEntry) => directoryEntry.name)
+            .filter(isVideoFileName);
 
-      const fullPath = path.join(folderPath, entry.name);
+          await downloadOpenSubtitlesForVideos(fullPath, videoFiles, ctx);
+          const subtitleFiles = await subtitleFilesInDirectory(fullPath);
+          const subDirs = dirEntries.filter((directoryEntry) => directoryEntry.isDirectory());
+          const hasSeasonDirs = subDirs.some((directoryEntry) => /season|series/i.test(directoryEntry.name));
 
-      let dirEntries: fs.Dirent[];
-      try { dirEntries = fs.readdirSync(fullPath, { withFileTypes: true }); }
-      catch { continue; }
+          // Container folder (e.g. "TV Shows/", "Anime/") - recurse.
+          if (videoFiles.length === 0 && subDirs.length > 0 && !hasSeasonDirs) {
+            const nestedEpisodeFiles = await scanEpisodeFiles(fullPath);
+            if (ctx.folderKind !== 'movies' && nestedEpisodeFiles.length > 0) {
+              const parsedFolder = cleanMediaTitle(entry.name);
+              const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
+              if (!await shouldSplitContainerFolder(fullPath, entry.name, subDirs)) {
+                const tvItem = await buildTVItemFromFolder({
+                  fullPath,
+                  entryName: entry.name,
+                  id: createMediaItemId(fullPath),
+                  subtitles,
+                  year: parsedFolder.year,
+                  cleanTitle: parsedFolder.title,
+                  omdbApiKey: ctx.omdbApiKey,
+                  itemType: ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
+                  tmdbApiKey: ctx.tmdbApiKey,
+                  fanartApiKey: ctx.fanartApiKey,
+                  openSubtitles: ctx.openSubtitles,
+                });
+                return tvItem ? [tvItem] : [];
+              }
+            }
+            return scanFolder(fullPath, ctx);
+          }
 
-      const videoFiles = dirEntries
-        .filter((d) => !d.isDirectory())
-        .map((d) => d.name)
-        .filter(isVideoFileName);
-
-      await downloadOpenSubtitlesForVideos(fullPath, videoFiles, ctx);
-      const subtitleFiles = subtitleFilesInDirectory(fullPath);
-
-      const subDirs = dirEntries.filter((d) => d.isDirectory());
-      const hasSeasonDirs = subDirs.some((d) => /season|series/i.test(d.name));
-
-      // Container folder (e.g. "TV Shows/", "Anime/") — recurse
-      if (videoFiles.length === 0 && subDirs.length > 0 && !hasSeasonDirs) {
-        const nestedEpisodeFiles = scanEpisodeFiles(fullPath);
-        if (ctx.folderKind !== 'movies' && nestedEpisodeFiles.length > 0) {
+          const isTV = ctx.folderKind === 'tv'
+            || ctx.folderKind === 'anime'
+            || (ctx.folderKind !== 'movies' && (hasSeasonDirs || isTVPattern(entry.name, videoFiles)));
           const parsedFolder = cleanMediaTitle(entry.name);
           const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
-          if (!shouldSplitContainerFolder(fullPath, entry.name, subDirs)) {
-            const id = createMediaItemId(fullPath);
+
+          if (isTV) {
             const tvItem = await buildTVItemFromFolder({
               fullPath,
               entryName: entry.name,
-              id,
+              id: createMediaItemId(fullPath),
               subtitles,
               year: parsedFolder.year,
               cleanTitle: parsedFolder.title,
@@ -287,53 +319,29 @@ async function scanFolder(
               fanartApiKey: ctx.fanartApiKey,
               openSubtitles: ctx.openSubtitles,
             });
-            if (tvItem) await addItems([tvItem]);
-            continue;
+            return tvItem ? [tvItem] : [];
           }
-        }
 
-        items.push(...await scanFolder(fullPath, ctx, onItems));
-        continue;
-      }
-
-      const isTV = ctx.folderKind === 'tv'
-        || ctx.folderKind === 'anime'
-        || (ctx.folderKind !== 'movies' && (hasSeasonDirs || isTVPattern(entry.name, videoFiles)));
-      const parsedFolder = cleanMediaTitle(entry.name);
-      const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
-      const id = createMediaItemId(fullPath);
-
-      if (isTV) {
-        const tvItem = await buildTVItemFromFolder({
-          fullPath,
-          entryName: entry.name,
-          id,
-          subtitles,
-          year: parsedFolder.year,
-          cleanTitle: parsedFolder.title,
-          omdbApiKey: ctx.omdbApiKey,
-          itemType: ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
-          tmdbApiKey: ctx.tmdbApiKey,
-          fanartApiKey: ctx.fanartApiKey,
-          openSubtitles: ctx.openSubtitles,
-        });
-        if (tvItem) await addItems([tvItem]);
-      } else if (videoFiles.length > 0) {
-        await addItems([await buildMovieItemFromFile({
-          fullPath: path.join(fullPath, videoFiles[0]),
-          fileName: videoFiles[0],
-          titleFallback: parsedFolder.title,
-          subtitles,
-          year: parsedFolder.year,
-          omdbApiKey: ctx.omdbApiKey,
-          tmdbApiKey: ctx.tmdbApiKey,
-          fanartApiKey: ctx.fanartApiKey,
-          forcedType: ctx.folderKind === 'movies' ? 'movie' : undefined,
-        })]);
-      }
-    }
+          if (videoFiles.length === 0) return [];
+          return [await buildMovieItemFromFile({
+            fullPath: path.join(fullPath, videoFiles[0]),
+            fileName: videoFiles[0],
+            titleFallback: parsedFolder.title,
+            subtitles,
+            year: parsedFolder.year,
+            omdbApiKey: ctx.omdbApiKey,
+            tmdbApiKey: ctx.tmdbApiKey,
+            fanartApiKey: ctx.fanartApiKey,
+            forcedType: ctx.folderKind === 'movies' ? 'movie' : undefined,
+          })];
+        },
+        async (nextItems) => {
+          for (const item of nextItems) await addItems([item]);
+        },
+    );
   } catch (error) {
-    console.error('scanFolder error:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to scan library folder "${folderPath}": ${message}`, { cause: error });
   }
 
   return items;

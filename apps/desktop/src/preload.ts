@@ -4,6 +4,8 @@ import type {
 } from './lib/desktopApi';
 import type {
   LibraryPayload,
+  LibraryIndexPayload,
+  LibraryItemDetailsPayload,
   LibraryScanMode,
   LibraryScanProgress,
   ManualMediaSegmentInput,
@@ -30,6 +32,11 @@ import type {
 import type { IpcEventChannel, IpcInvokeChannel } from './shared/ipcChannels';
 import type { IpcContract, IpcEventContract } from './shared/ipcContract';
 
+type CompactLibraryBridgeApi = {
+  getLibraryIndex: () => Promise<LibraryIndexPayload>;
+  getLibraryItem: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
+};
+
 const ipcRenderer = {
   invoke<C extends IpcInvokeChannel>(channel: C, ...args: IpcContract[C]['args']): Promise<IpcContract[C]['result']> {
     return electronIpcRenderer.invoke(channel, ...args) as Promise<IpcContract[C]['result']>;
@@ -52,6 +59,8 @@ const ipcRenderer = {
 
 const desktopApi = {
   getLibrary: () => ipcRenderer.invoke('library:get'),
+  getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
+  getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),
   scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
   onLibraryScanProgress: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => {
     const handler = (
@@ -222,6 +231,6 @@ const desktopApi = {
       ipcRenderer.invoke('media:start-transcode', filePath, options || {}),
     stopTranscode: (sessionId: string) => ipcRenderer.invoke('media:stop-transcode', sessionId),
   },
-} satisfies DesktopBridgeApi;
+} satisfies DesktopBridgeApi & CompactLibraryBridgeApi;
 
 contextBridge.exposeInMainWorld('desktopApi', desktopApi);

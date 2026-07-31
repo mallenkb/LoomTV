@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check } from 'lucide-react';
 import { FilterFunnelIcon } from '@/components/LoomIcons';
+import SharedListHighlight from '@/components/SharedListHighlight';
 import {
   libraryFilterOptions,
   primaryLibraryFilterOptions,
@@ -66,12 +67,14 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
           role="menu"
           className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-lg bg-[var(--loom-surface)] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
         >
-          <FilterMenuGroup
-            label="Watch status"
-            activeFilter={activeFilter}
-            options={primaryLibraryFilterOptions}
-            onChoose={chooseFilter}
-          />
+          <SharedListHighlight activeId={activeFilter} className="loom-shared-highlight-menu">
+            <FilterMenuGroup
+              label="Watch status"
+              activeFilter={activeFilter}
+              options={primaryLibraryFilterOptions}
+              onChoose={chooseFilter}
+            />
+          </SharedListHighlight>
         </div>
       )}
     </div>
@@ -99,11 +102,14 @@ function FilterMenuGroup({
           key={option.id}
           type="button"
           role="menuitem"
+          aria-current={activeFilter === option.id ? 'true' : undefined}
           onClick={() => onChoose(option.id)}
-          className={`flex w-full items-center justify-between rounded px-2.5 py-2 text-left text-xs transition-colors ${
+          data-shared-highlight-item
+          data-shared-highlight-id={option.id}
+          className={`relative z-10 flex w-full items-center justify-between rounded px-2.5 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${
             activeFilter === option.id
-              ? 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
-              : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]'
+              ? 'text-[var(--loom-active-text)]'
+              : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
           }`}
         >
           <span>{option.label}</span>

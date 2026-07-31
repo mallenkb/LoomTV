@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronDown, Clock, Do
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import SharedListHighlight from '@/components/SharedListHighlight';
 import { SIDEBAR_NAV_LABELS, type SidebarNavItemId } from './Settings.helpers';
 import type { LibraryFolderSection, LibraryFolderStatus } from './Settings.types';
 
@@ -302,6 +303,7 @@ export default function LibrarySettingsSection({
                   aria-label="Automatic sync interval options"
                   className="absolute left-0 top-full z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] p-1 text-[var(--loom-text)]"
                 >
+                  <SharedListHighlight activeId={String(autoSyncIntervalHours)} className="loom-shared-highlight-menu">
                   {AUTO_SYNC_OPTIONS.map((option) => {
                     const selected = option.value === autoSyncIntervalHours;
                     return (
@@ -310,16 +312,19 @@ export default function LibrarySettingsSection({
                         type="button"
                         role="option"
                         aria-selected={selected}
+                        data-shared-highlight-item
+                        data-shared-highlight-id={String(option.value)}
                         onClick={() => {
                           void setAutoSyncIntervalHours(option.value);
                           setAutoSyncMenuOpen(false);
                         }}
-                        className={`flex w-full items-center rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--loom-active-bg)] ${selected ? 'bg-[var(--loom-active-bg)] font-semibold' : ''}`}
+                        className={`relative z-10 flex w-full items-center rounded-md px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${selected ? 'font-semibold' : ''}`}
                       >
                         {option.label}
                       </button>
                     );
                   })}
+                  </SharedListHighlight>
                 </div>
               ) : null}
             </div>

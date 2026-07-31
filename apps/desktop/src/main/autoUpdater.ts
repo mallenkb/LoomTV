@@ -596,14 +596,19 @@ export async function installDownloadedUpdate() {
   // Drain playback/server work before quitAndInstall. Active HTTP streams can
   // keep the process alive after every window has closed, which leaves the
   // downloaded installer waiting for LoomTV to exit.
-  try {
-    stopAllTranscodes();
-    deps.stopNativePlayback();
-    destroyLanDiscovery();
-    await deps.closeMediaServer();
-    stopUpdateCheckTimer();
-  } catch (error) {
-    console.warn('[updates] pre-install cleanup failed:', error);
+  const cleanupSteps: Array<[string, () => void | Promise<void>]> = [
+    ['transcodes', () => stopAllTranscodes()],
+    ['native playback', () => deps.stopNativePlayback()],
+    ['LAN discovery', () => destroyLanDiscovery()],
+    ['media server', () => deps.closeMediaServer()],
+    ['update timer', () => stopUpdateCheckTimer()],
+  ];
+  for (const [label, cleanup] of cleanupSteps) {
+    try {
+      await cleanup();
+    } catch (error) {
+      console.warn(`[updates] Failed to clean up ${label} before install:`, error);
+    }
   }
 
   if (process.platform === 'darwin' && downloadedUpdateFilePath) {

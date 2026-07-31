@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
-import { motion } from 'motion/react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, UpdateState } from '@/lib/desktopApi';
@@ -10,6 +9,7 @@ import { cn } from '@/lib/utils';
 import LoomLogo from '@/components/LoomLogo';
 import ProfileAvatar from '@/components/profiles/ProfileAvatar';
 import { useTheme } from '@/components/ThemeProvider';
+import SharedListHighlight from '@/components/SharedListHighlight';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | SidebarNavItemId | 'settings';
@@ -17,8 +17,6 @@ type SidebarIcon = React.ComponentType<{ className?: string }>;
 type SidebarNavItem = { id: NavItemId; path: string; label: string; icon: SidebarIcon; activeIcon?: SidebarIcon };
 
 const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
-const navItemHeight = 40;
-const navItemGap = 4;
 const modernCategoryItems = [
   { label: 'Home', path: '/', routePrefix: '/' },
   { label: 'Anime', path: '/anime', routePrefix: '/anime' },
@@ -67,31 +65,41 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
 }
 
 function ModernCategoryPill({ pathname }: { pathname: string }) {
+  const activeCategory = modernCategoryItems.find((category) => category.path === '/'
+    ? pathname === '/'
+    : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
+
   return (
     <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-5 z-50 flex justify-center px-5">
       <nav
-        className="loom-modern-category-pill loom-no-drag flex h-12 items-center rounded-full border p-1 backdrop-blur-2xl"
+        className="loom-modern-category-pill loom-no-drag h-12 rounded-full border p-1 backdrop-blur-2xl"
         aria-label="Library categories"
       >
-        {modernCategoryItems.map((category) => {
-          const isActive = category.path === '/'
-            ? pathname === '/'
-            : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`);
-          return (
-            <Link
-              key={category.path}
-              to={category.path}
-              aria-current={isActive ? 'page' : undefined}
-              aria-pressed={isActive}
-              className={cn(
-                'inline-flex h-full items-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none',
-                isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
-              )}
-            >
-              {category.label}
-            </Link>
-          );
-        })}
+        <SharedListHighlight
+          activeId={activeCategory?.path}
+          followPointer={false}
+          className="loom-shared-highlight-category flex h-full items-center"
+        >
+          {modernCategoryItems.map((category) => {
+            const isActive = category.path === activeCategory?.path;
+            return (
+              <Link
+                key={category.path}
+                to={category.path}
+                aria-current={isActive ? 'page' : undefined}
+                aria-pressed={isActive}
+                data-shared-highlight-item
+                data-shared-highlight-id={category.path}
+                className={cn(
+                  'relative z-10 inline-flex h-full items-center rounded-full px-5 text-sm font-semibold transition-[color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
+                  isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
+                )}
+              >
+                {category.label}
+              </Link>
+            );
+          })}
+        </SharedListHighlight>
       </nav>
     </header>
   );
@@ -240,6 +248,7 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
             'bottom-full left-0 mb-2',
           )}
         >
+          <SharedListHighlight activeId={activeProfile.id} className="loom-shared-highlight-menu">
           <div className="max-h-64 space-y-0.5 overflow-y-auto">
             {selectableProfiles.map((profile) => {
               const isActive = profile.id === activeProfile.id;
@@ -248,8 +257,11 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
                   key={profile.id}
                   type="button"
                   role="menuitem"
+                  aria-current={isActive ? 'true' : undefined}
                   onClick={() => handleProfileSelect(profile.id, profile.hasPin)}
-                  className="flex h-12 w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors hover:bg-[var(--loom-surface-2)]"
+                  data-shared-highlight-item
+                  data-shared-highlight-id={profile.id}
+                  className="relative z-10 flex h-12 w-full items-center gap-2.5 rounded-lg px-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
                 >
                   <span className="h-8 w-8 shrink-0 overflow-hidden rounded-full">
                     <ProfileAvatar name={profile.name} avatarKey={profile.avatarKey} colorKey={profile.colorKey} />
@@ -276,7 +288,9 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
                   setMenuOpen(false);
                   openGate({ mode: 'edit', editProfileId: 'new', returnTo });
                 }}
-                className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+                data-shared-highlight-item
+                data-shared-highlight-id="add-profile"
+                className="relative z-10 flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
                   <Plus className="h-4 w-4" />
@@ -293,7 +307,9 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
                   setMenuOpen(false);
                   openGate({ mode: 'edit', returnTo });
                 }}
-                className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+                data-shared-highlight-item
+                data-shared-highlight-id="manage-profiles"
+                className="relative z-10 flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
               >
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
                   <UsersRound className="h-4 w-4" />
@@ -306,13 +322,16 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
             to="/settings"
             role="menuitem"
             onClick={() => setMenuOpen(false)}
-            className="flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-2)] hover:text-[var(--loom-text)]"
+            data-shared-highlight-item
+            data-shared-highlight-id="profile-settings"
+            className="relative z-10 flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
           >
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
               <SettingsNavExactIcon className="h-4 w-4" />
             </span>
             Settings
           </Link>
+          </SharedListHighlight>
         </div>
       )}
     </div>
@@ -377,7 +396,6 @@ export default function Sidebar() {
     ],
     [libraryFolderGroups],
   );
-  const activeNavIndex = navItems.findIndex((item) => item.id === activeNavItemId);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
 
   useEffect(() => {
@@ -413,35 +431,44 @@ export default function Sidebar() {
     return (
       <>
         <aside className="loom-modern-sidebar loom-no-drag fixed inset-y-0 left-0 z-50 flex w-20 flex-col items-center py-5">
-          <nav className="mt-6 flex flex-1 flex-col items-center gap-3" aria-label="Primary navigation">
-            <button
-              type="button"
-              onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
-              title="Search library"
-              aria-label="Search library"
-              className="loom-modern-sidebar-action grid h-12 w-12 place-items-center rounded-full transition-[color,transform,background-color] hover:scale-105"
+          <nav className="mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
+            <SharedListHighlight
+              activeId={activeNavItemId}
+              className="loom-shared-highlight-sidebar-modern flex flex-col items-center gap-3"
             >
-              <Search className="h-6 w-6" />
-            </button>
-            {navItems.map((item) => {
-              const isActive = activeNavItemId === item.id;
-              const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
-              return (
-                <Link
-                  key={`modern-${item.path}`}
-                  to={item.path}
-                  title={item.label}
-                  aria-label={item.label}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={cn(
-                    'loom-modern-sidebar-action grid h-12 w-12 place-items-center rounded-full transition-[color,transform,background-color] hover:scale-105',
-                    isActive && 'loom-modern-sidebar-action-active',
-                  )}
-                >
-                  <Icon className="h-6 w-6" />
-                </Link>
-              );
-            })}
+              <button
+                type="button"
+                onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
+                title="Search library"
+                aria-label="Search library"
+                data-shared-highlight-item
+                data-shared-highlight-id="search"
+                className="loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-[color,transform] hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              >
+                <Search className="h-6 w-6" />
+              </button>
+              {navItems.map((item) => {
+                const isActive = activeNavItemId === item.id;
+                const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
+                return (
+                  <Link
+                    key={`modern-${item.path}`}
+                    to={item.path}
+                    title={item.label}
+                    aria-label={item.label}
+                    aria-current={isActive ? 'page' : undefined}
+                    data-shared-highlight-item
+                    data-shared-highlight-id={item.id}
+                    className={cn(
+                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-[color,transform] hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                      isActive && 'loom-modern-sidebar-action-active',
+                    )}
+                  >
+                    <Icon className="h-6 w-6" />
+                  </Link>
+                );
+              })}
+            </SharedListHighlight>
           </nav>
           {showUpdateButton && (
             <button
@@ -485,15 +512,7 @@ export default function Sidebar() {
         </Link>
       </div>
       <nav className="flex-1 p-3 pt-0 flex flex-col">
-        <div className="relative">
-          {activeNavIndex >= 0 && (
-            <motion.span
-              className="pointer-events-none absolute left-0 right-0 top-0 h-10 rounded-lg bg-[var(--loom-sidebar-active-bg)]"
-              initial={false}
-              animate={{ y: activeNavIndex * (navItemHeight + navItemGap) }}
-              transition={{ type: 'spring', stiffness: 420, damping: 40, mass: 0.9 }}
-            />
-          )}
+        <SharedListHighlight activeId={activeNavItemId} className="loom-shared-highlight-sidebar relative">
           {navItems.map((item) => {
             const isActive = activeNavItemId === item.id;
             const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
@@ -503,11 +522,13 @@ export default function Sidebar() {
                 key={item.path}
                 to={item.path}
                 aria-current={isActive ? 'page' : undefined}
+                data-shared-highlight-item
+                data-shared-highlight-id={item.id}
                 className={cn(
-                  'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors',
+                  'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
                   isActive
                     ? 'text-[var(--loom-active-text)]'
-                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
+                    : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -524,11 +545,13 @@ export default function Sidebar() {
                 key={`mobile-${item.path}`}
                 to={item.path}
                 aria-current={isActive ? 'page' : undefined}
+                data-shared-highlight-item
+                data-shared-highlight-id={item.id}
                 className={cn(
-                  'loom-mobile-nav-link relative z-10 mb-1 hidden h-10 items-center gap-3 rounded-lg px-3 transition-colors',
+                  'loom-mobile-nav-link relative z-10 mb-1 hidden h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
                   isActive
                     ? 'text-[var(--loom-active-text)]'
-                    : 'text-[var(--loom-muted)] hover:bg-[var(--loom-sidebar-active-bg)] hover:text-[var(--loom-active-text)]',
+                    : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
                 )}
               >
                 <Icon className="w-5 h-5" />
@@ -536,7 +559,7 @@ export default function Sidebar() {
               </Link>
             );
           })}
-        </div>
+        </SharedListHighlight>
 
         <div className="mt-auto flex items-center gap-1">
           {showUpdateButton && (

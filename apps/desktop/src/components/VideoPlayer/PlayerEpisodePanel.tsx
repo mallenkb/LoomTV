@@ -8,6 +8,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { clampSidePanelWidth, epCode, isInProgress } from './helpers';
 import type { EpisodeFile, EpisodeMeta } from './types';
 import { episodeFileKey, indexEpisodeFiles } from './episodeIndex';
+import SharedListHighlight from '../SharedListHighlight';
 
 interface PlayerEpisodePanelProps {
   episodePanelWidth: number;
@@ -146,8 +147,10 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
       ref={buttonRef}
       disabled={!file}
       onClick={() => file && goToEpisode(episode.season, episode.number)}
-      className={`group relative flex w-full items-start gap-3.5 px-5 py-3 text-left transition-colors
-        ${isCurrent ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}
+      aria-current={isCurrent ? 'true' : undefined}
+      data-shared-highlight-item
+      data-shared-highlight-id={`${episode.season}-${episode.number}`}
+      className={`group relative z-10 flex w-full items-start gap-3.5 px-5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]
         ${!file ? 'cursor-not-allowed opacity-30' : ''}`}
     >
       {isCurrent && (
@@ -320,9 +323,9 @@ export default function PlayerEpisodePanel({
 
       {hasMultipleSeasons && (
         <div className="border-b border-white/[0.07] px-4 pb-3">
-          <div
-            aria-label="Jump to season"
-            className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+          <SharedListHighlight
+            activeId={String(activeSeason)}
+            className="loom-shared-highlight-season-pills -mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
           >
             {sortedSeasons.map((season) => {
               const isActive = season === activeSeason;
@@ -339,10 +342,12 @@ export default function PlayerEpisodePanel({
                   onClick={() => jumpToSeason(season)}
                   title={isCurrentSeason ? `${seasonCode(season)} · now playing` : undefined}
                   aria-pressed={isActive}
-                  className={`flex shrink-0 items-center gap-2 rounded-full border py-1.5 pl-3 pr-2 text-[11px] font-semibold tracking-tight transition-colors duration-150
+                  data-shared-highlight-item
+                  data-shared-highlight-id={String(season)}
+                  className={`relative z-10 flex shrink-0 items-center gap-2 rounded-full border py-1.5 pl-3 pr-2 text-[11px] font-semibold tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]
                     ${isActive
-                      ? 'border-[var(--loom-accent)]/70 bg-[var(--loom-accent)]/15 text-[var(--loom-accent)]'
-                      : 'border-white/10 bg-white/[0.03] text-white/70 hover:border-white/25 hover:bg-white/[0.06] hover:text-white'}
+                      ? 'border-[var(--loom-accent)]/70 text-[var(--loom-accent)]'
+                      : 'border-white/10 text-white/70 hover:border-white/25 hover:text-white'}
                   `}
                 >
                   {isCurrentSeason && (
@@ -361,51 +366,56 @@ export default function PlayerEpisodePanel({
                 </button>
               );
             })}
-          </div>
+          </SharedListHighlight>
         </div>
       )}
 
       <ScrollArea className="flex-1" ref={viewportRef} onScroll={handleScroll}>
-        {tick >= 0 && sortedSeasons.map((season) => (
-          <div
-            key={season}
-            ref={(node) => {
-              sectionRefs.current[season] = node;
-            }}
-          >
-            <div className="sticky top-0 z-10 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
-              <span className="flex items-center gap-2 text-xs font-semibold text-white">
-                {seasonCode(season)}
-                {season === currentSeason && (
-                  <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">
-                    Now playing
-                  </span>
-                )}
-              </span>
-              <span className="text-[10px] font-medium text-[var(--loom-muted)]">
-                {(groupedEpisodes[season] || []).length} episodes
-              </span>
+        <SharedListHighlight
+          activeId={`${currentSeason}-${currentEpisode}`}
+          className="loom-shared-highlight-player-episodes"
+        >
+          {tick >= 0 && sortedSeasons.map((season) => (
+            <div
+              key={season}
+              ref={(node) => {
+                sectionRefs.current[season] = node;
+              }}
+            >
+              <div className="sticky top-0 z-10 flex items-baseline justify-between border-b border-white/[0.07] bg-neutral-950/90 px-5 py-2.5 backdrop-blur-md">
+                <span className="flex items-center gap-2 text-xs font-semibold text-white">
+                  {seasonCode(season)}
+                  {season === currentSeason && (
+                    <span className="rounded-full bg-[var(--loom-accent)]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--loom-accent)]">
+                      Now playing
+                    </span>
+                  )}
+                </span>
+                <span className="text-[10px] font-medium text-[var(--loom-muted)]">
+                  {(groupedEpisodes[season] || []).length} episodes
+                </span>
+              </div>
+              {(groupedEpisodes[season] || []).map((ep) => {
+                const file = episodeFileByCode.get(episodeFileKey(ep.season, ep.number));
+                const isCurrent = ep.season === currentSeason && ep.number === currentEpisode;
+                return (
+                  <PlayerEpisodeRow
+                    key={`${ep.season}-${ep.number}`}
+                    episode={ep}
+                    file={file}
+                    isCurrent={isCurrent}
+                    currentDuration={isCurrent ? duration : undefined}
+                    currentPosition={isCurrent ? position : undefined}
+                    progressRevision={tick}
+                    displayEpisodeTitle={displayEpisodeTitle}
+                    goToEpisode={goToEpisode}
+                    buttonRef={isCurrent ? currentEpisodeRef : undefined}
+                  />
+                );
+              })}
             </div>
-            {(groupedEpisodes[season] || []).map((ep) => {
-              const file = episodeFileByCode.get(episodeFileKey(ep.season, ep.number));
-              const isCurrent = ep.season === currentSeason && ep.number === currentEpisode;
-              return (
-                <PlayerEpisodeRow
-                  key={`${ep.season}-${ep.number}`}
-                  episode={ep}
-                  file={file}
-                  isCurrent={isCurrent}
-                  currentDuration={isCurrent ? duration : undefined}
-                  currentPosition={isCurrent ? position : undefined}
-                  progressRevision={tick}
-                  displayEpisodeTitle={displayEpisodeTitle}
-                  goToEpisode={goToEpisode}
-                  buttonRef={isCurrent ? currentEpisodeRef : undefined}
-                />
-              );
-            })}
-          </div>
-        ))}
+          ))}
+        </SharedListHighlight>
       </ScrollArea>
     </aside>
   );

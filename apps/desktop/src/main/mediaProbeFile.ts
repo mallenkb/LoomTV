@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { findFFprobe } from './mediaBinaries';
 import { parseYearFromText } from './metadata/helpers';
 import { mergeProviderIds, parseIntegerTag, providerIdsFromTags, scrubTagText, tagValue } from './mediaTags';
@@ -20,15 +20,29 @@ export interface ProbeMediaFileResult {
 }
 
 const mediaProbeCache = new Map<string, ProbeMediaFileResult>();
+type MediaProbeCacheIdentity = { key: string; size: number; modifiedAtMs: number };
 
 function streamType(value?: string): LocalMediaTrack['type'] {
   if (value === 'video' || value === 'audio' || value === 'subtitle' || value === 'data') return value;
   return 'unknown';
 }
 
-function mediaProbeCacheIdentity(filePath: string): { key: string; size: number; modifiedAtMs: number } | null {
+function mediaProbeCacheIdentity(filePath: string): MediaProbeCacheIdentity | null {
   try {
     const stats = fs.statSync(filePath);
+    return {
+      key: `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`,
+      size: stats.size,
+      modifiedAtMs: Math.round(stats.mtimeMs),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function mediaProbeCacheIdentityAsync(filePath: string): Promise<MediaProbeCacheIdentity | null> {
+  try {
+    const stats = await fs.promises.stat(filePath);
     return {
       key: `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`,
       size: stats.size,
@@ -46,8 +60,40 @@ function cacheProbeResult(cacheKey: string | null, result: ProbeMediaFileResult)
   return result;
 }
 
-export function probeMediaFile(filePath: string): ProbeMediaFileResult {
-  const identity = mediaProbeCacheIdentity(filePath);
+const ffprobeArguments = (filePath: string): string[] => [
+  '-v', 'quiet',
+  '-print_format', 'json',
+  '-show_format',
+  '-show_streams',
+  '-show_chapters',
+  filePath,
+];
+
+const ffprobeOptions = {
+  encoding: 'utf8' as const,
+  timeout: 15_000,
+  maxBuffer: 1024 * 1024,
+  windowsHide: true,
+};
+
+function execFileUtf8(filePath: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(filePath, args, ffprobeOptions, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(String(stdout));
+    });
+  });
+}
+
+function probeMediaFileFromOutput(
+  filePath: string,
+  rawOutput?: string,
+  knownIdentity?: MediaProbeCacheIdentity | null,
+): ProbeMediaFileResult {
+  const identity = knownIdentity === undefined ? mediaProbeCacheIdentity(filePath) : knownIdentity;
   const cacheKey = identity?.key || null;
   if (cacheKey) {
     const cached = mediaProbeCache.get(cacheKey);
@@ -58,17 +104,10 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
   if (!ffprobePath) return {};
 
   try {
-    const raw = execFileSync(
+    const raw = rawOutput ?? execFileSync(
       ffprobePath,
-      [
-        '-v', 'quiet',
-        '-print_format', 'json',
-        '-show_format',
-        '-show_streams',
-        '-show_chapters',
-        filePath,
-      ],
-      { encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
+      ffprobeArguments(filePath),
+      ffprobeOptions,
     );
 
     const parsed = JSON.parse(raw) as {
@@ -180,6 +219,30 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
       episode,
       providerIds: mergeProviderIds(providerIdsFromTags(tags), providerIdsFromTags(videoTags)),
     });
+  } catch (error) {
+    console.error('ffprobe error for', filePath, error);
+    return cacheProbeResult(cacheKey, {});
+  }
+}
+
+export function probeMediaFile(filePath: string): ProbeMediaFileResult {
+  return probeMediaFileFromOutput(filePath);
+}
+
+export async function probeMediaFileAsync(filePath: string): Promise<ProbeMediaFileResult> {
+  const identity = await mediaProbeCacheIdentityAsync(filePath);
+  const cacheKey = identity?.key || null;
+  if (cacheKey) {
+    const cached = mediaProbeCache.get(cacheKey);
+    if (cached) return cached;
+  }
+
+  const ffprobePath = findFFprobe();
+  if (!ffprobePath) return {};
+
+  try {
+    const raw = await execFileUtf8(ffprobePath, ffprobeArguments(filePath));
+    return probeMediaFileFromOutput(filePath, raw, identity);
   } catch (error) {
     console.error('ffprobe error for', filePath, error);
     return cacheProbeResult(cacheKey, {});

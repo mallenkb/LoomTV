@@ -1,6 +1,12 @@
 import type { LibraryData, LibraryFolderGroups, LibraryFolderStatus } from './appContracts.ts';
 import { durableArtworkSource, durableArtworkSources } from './artworkSources.ts';
 import type { MediaItem } from './metadata/types.ts';
+import type {
+  LibraryCard,
+  LibraryIndexPayload,
+  LibraryItemDetailsPayload,
+  LibraryPlaybackReference,
+} from '../shared/desktopProtocol.ts';
 
 type SubtitleRecord = NonNullable<MediaItem['subtitles']>[number];
 
@@ -19,6 +25,7 @@ export type LibraryProjectionDependencies = {
   getRemoteThumbnailUrl: (filePath: string, base: string, time?: string, identity?: RemoteProfileIdentity) => string;
   signedStreamUrlForRemote: (base: string, filePath: string, identity?: RemoteProfileIdentity) => string;
   localMetadataWithTracks: (filePath: string, metadata: MediaItem['localMetadata']) => MediaItem['localMetadata'];
+  progressKeyFor: (filePath: string) => string;
   normalizeLibraryFolderGroups: (data?: Partial<LibraryData>) => LibraryFolderGroups;
   flattenLibraryFolders: (groups: LibraryFolderGroups) => string[];
   libraryFolderStatusesFor: (groups: LibraryFolderGroups) => LibraryFolderStatus[];
@@ -58,6 +65,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     libraryFolderStatusesFor,
     localMetadataWithTracks,
     normalizeLibraryFolderGroups,
+    progressKeyFor,
     remoteArtworkDeliveryUrl,
     signedStreamUrlForRemote,
     subtitleRecordsForLocalNetwork,
@@ -104,6 +112,110 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       animeShows: (data.animeShows || []).map(itemWithArtworkDeliveryUrls),
     };
   };
+
+  const playbackReferencesFor = (item: MediaItem): LibraryPlaybackReference[] => {
+    const episodeReferences = (item.episodeFiles || []).map((episodeFile) => ({
+      progressKey: progressKeyFor(episodeFile.filePath),
+      season: episodeFile.season,
+      episode: episodeFile.episode,
+      ...(episodeFile.localMetadata?.durationSeconds
+        ? { durationSeconds: episodeFile.localMetadata.durationSeconds }
+        : {}),
+    }));
+    if (episodeReferences.length > 0) return episodeReferences;
+    if (!item.filePath) return [];
+    return [{
+      progressKey: progressKeyFor(item.filePath),
+      ...(item.localMetadata?.durationSeconds ? { durationSeconds: item.localMetadata.durationSeconds } : {}),
+    }];
+  };
+
+  const cardForRenderer = (item: MediaItem): LibraryCard => ({
+    id: item.id,
+    type: item.type,
+    title: item.title,
+    year: item.year,
+    poster: artworkDeliveryUrl(item.poster),
+    backdrop: artworkDeliveryUrl(item.backdrop),
+    logo: artworkDeliveryUrl(item.logo),
+    posterCandidates: artworkDeliveryUrls(item.posterCandidates),
+    backdropCandidates: artworkDeliveryUrls(item.backdropCandidates),
+    logoCandidates: artworkDeliveryUrls(item.logoCandidates),
+    summary: item.summary,
+    rating: item.rating,
+    genres: item.genres,
+    lastPlayed: item.lastPlayed,
+    seasons: item.seasons,
+    playbackReferences: playbackReferencesFor(item),
+  });
+
+  const cardForLocalNetwork = (
+    item: MediaItem,
+    base: string,
+    identity?: RemoteProfileIdentity,
+  ): LibraryCard => {
+    const episodeThumbnailFallback = item.episodeFiles?.[0]
+      ? getRemoteThumbnailUrl(item.episodeFiles[0].filePath, base, undefined, identity)
+      : '';
+    const posterCandidates = artworkDeliveryUrls(item.posterCandidates)
+      .map((url) => remoteArtworkDeliveryUrl(url, base, identity));
+    const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates)
+      .map((url) => remoteArtworkDeliveryUrl(url, base, identity));
+    const logoCandidates = artworkDeliveryUrls(item.logoCandidates)
+      .map((url) => remoteArtworkDeliveryUrl(url, base, identity));
+    const poster = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.poster), base, identity)
+      || posterCandidates[0]
+      || episodeThumbnailFallback;
+    const backdrop = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.backdrop), base, identity)
+      || backdropCandidates[0]
+      || poster;
+
+    return {
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      year: item.year,
+      poster,
+      backdrop,
+      logo: remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.logo), base, identity),
+      posterCandidates,
+      backdropCandidates,
+      logoCandidates,
+      summary: item.summary,
+      rating: item.rating,
+      genres: item.genres,
+      lastPlayed: item.lastPlayed,
+      seasons: item.seasons,
+      playbackReferences: playbackReferencesFor(item),
+    };
+  };
+
+  const libraryIndexForRenderer = (data: LibraryData, revision: number): LibraryIndexPayload => ({
+    catalogVersion: 1,
+    revision,
+    movies: (data.movies || []).map(cardForRenderer),
+    tvShows: (data.tvShows || []).map(cardForRenderer),
+    animeShows: (data.animeShows || []).map(cardForRenderer),
+  });
+
+  const libraryIndexForLocalNetwork = (
+    data: LibraryData,
+    base: string,
+    revision: number,
+    identity?: RemoteProfileIdentity,
+  ): LibraryIndexPayload => ({
+    catalogVersion: 1,
+    revision,
+    movies: (data.movies || []).map((item) => cardForLocalNetwork(item, base, identity)),
+    tvShows: (data.tvShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
+    animeShows: (data.animeShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
+  });
+
+  const libraryItemForRenderer = (item: MediaItem, revision: number): LibraryItemDetailsPayload => ({
+    catalogVersion: 1,
+    revision,
+    item: itemWithArtworkDeliveryUrls(item),
+  });
 
   const itemForLocalNetwork = (item: MediaItem, base: string, identity?: RemoteProfileIdentity): MediaItem => {
     const episodeThumbnailFallback = item.episodeFiles?.[0] ? getRemoteThumbnailUrl(item.episodeFiles[0].filePath, base, undefined, identity) : '';
@@ -164,5 +276,25 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     };
   };
 
-  return { itemForLocalNetwork, itemWithArtworkDeliveryUrls, libraryForLocalNetwork, libraryForRenderer };
+  const libraryItemForLocalNetwork = (
+    item: MediaItem,
+    base: string,
+    revision: number,
+    identity?: RemoteProfileIdentity,
+  ): LibraryItemDetailsPayload => ({
+    catalogVersion: 1,
+    revision,
+    item: itemForLocalNetwork(item, base, identity),
+  });
+
+  return {
+    itemForLocalNetwork,
+    itemWithArtworkDeliveryUrls,
+    libraryForLocalNetwork,
+    libraryForRenderer,
+    libraryIndexForLocalNetwork,
+    libraryIndexForRenderer,
+    libraryItemForLocalNetwork,
+    libraryItemForRenderer,
+  };
 }

@@ -15,6 +15,7 @@ import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
 import { useTheme } from '@/components/ThemeProvider';
+import SharedListHighlight from '@/components/SharedListHighlight';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -494,10 +495,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       <div className="loom-detail-body loom-frame">
       <div className="loom-detail-content page-bottom-safe-lg p-8">
         <div
-          className="mb-6 flex items-center gap-8 border-b border-[var(--loom-panel-border)]"
+          className="mb-6 border-b border-[var(--loom-panel-border)]"
           role="tablist"
           aria-label="Title information"
         >
+          <SharedListHighlight activeId={activeDetailTab} className="loom-shared-highlight-list flex items-center gap-8">
           {(['episodes', 'details'] as const).map((tab) => {
             const isActive = activeDetailTab === tab;
             const label = tab === 'episodes' ? 'Episodes' : 'Details';
@@ -510,7 +512,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 aria-selected={isActive}
                 aria-controls={`detail-panel-${tab}`}
                 onClick={() => setActiveDetailTab(tab)}
-                className={`relative -mb-px border-b-2 px-0 pb-3 pt-1 text-sm font-semibold uppercase tracking-[0.16em] transition-colors ${isActive
+                data-shared-highlight-item
+                data-shared-highlight-id={tab}
+                className={`relative z-10 -mb-px border-b-2 px-3 pb-3 pt-1 text-sm font-semibold uppercase tracking-[0.16em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${isActive
                   ? 'border-[var(--loom-text)] text-[var(--loom-text)]'
                   : 'border-transparent text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
                 }`}
@@ -519,6 +523,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </button>
             );
           })}
+          </SharedListHighlight>
         </div>
 
         {activeDetailTab === 'episodes' && (
@@ -530,7 +535,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           {visibleSeasons.length === 0 ? (
             <p className="text-[var(--loom-muted)]">No season information available. Try scanning the library.</p>
           ) : (
-            <div className="space-y-2">
+            <SharedListHighlight activeId={expandedSeason === null ? null : String(expandedSeason)} className="loom-shared-highlight-season-cards space-y-2">
               {visibleSeasons.map((season) => {
                 const seasonEps = episodesWithFilesForSeason(season.number);
                 const fileCount = show.episodeFiles?.filter((file) => file.season === season.number).length || 0;
@@ -547,11 +552,17 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
                 return (
                   <div key={season.number} className="overflow-hidden rounded-lg bg-[var(--loom-panel)]">
-                    <div
+                    <div className="relative">
+                    <button
+                      type="button"
                       onClick={() => toggleSeason(season.number)}
-                      className="flex cursor-pointer items-center justify-between bg-[var(--loom-panel)] p-4 transition-colors hover:bg-[var(--loom-surface-3)]"
+                      aria-expanded={isExpanded}
+                      aria-controls={`season-${season.number}-episodes`}
+                      data-shared-highlight-item
+                      data-shared-highlight-id={String(season.number)}
+                      className={`relative z-10 flex w-full items-center text-left p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${hasFiles ? 'pr-28' : ''}`}
                     >
-                      <div className="flex items-center gap-3">
+                      <span className="flex items-center gap-3">
                         <span className="text-[var(--loom-text)]">
                           {isExpanded ? <ChevronDown className="h-4 w-4 text-[var(--loom-muted)]" /> : <ChevronRight className="h-4 w-4 text-[var(--loom-muted)]" />}
                         </span>
@@ -559,12 +570,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                         <span className="text-sm text-[var(--loom-muted)]">
                           {seasonEps.length > 0 ? `${seasonEps.length} episodes` : `${season.episodeCount || fileCount} episodes`}
                         </span>
-                      </div>
+                      </span>
+                    </button>
                       {hasFiles && (
                         <Button
                           size="sm"
-                          onClick={(event) => { event.stopPropagation(); handlePlaySeason(season.number); }}
-                          className="relative h-7 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] gap-1"
+                          onClick={() => handlePlaySeason(season.number)}
+                          className="absolute right-4 top-1/2 z-20 h-7 -translate-y-1/2 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] gap-1"
                         >
                           {seasonIsResume && seasonProgressPercent > 0 && (
                             <span className="pointer-events-none absolute inset-y-0 left-0 bg-black/20" style={{ width: `${seasonProgressPercent}%` }} />
@@ -578,7 +590,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                     </div>
 
                     {isExpanded && (
-                      <div className="divide-y divide-[var(--loom-panel-border)] bg-[var(--loom-surface-2)]">
+                      <SharedListHighlight className="loom-shared-highlight-episodes divide-y divide-[var(--loom-panel-border)] bg-[var(--loom-surface-2)]" >
+                        <div id={`season-${season.number}-episodes`} className="contents">
                         {seasonEps.length > 0 ? seasonEps.map((episode) => (
                           <EpisodeRow
                             key={episode.number}
@@ -605,12 +618,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                               onPlay={() => onPlay && onPlay(file.filePath, show.title, file.subtitles || show.subtitles, playerEpisodes, show.episodeFiles, season.number, file.episode, show.id, playerArtwork)}
                             />
                           ))}
-                      </div>
+                        </div>
+                      </SharedListHighlight>
                     )}
                   </div>
                 );
               })}
-            </div>
+            </SharedListHighlight>
           )}
         </section>
         )}
@@ -715,7 +729,9 @@ function EpisodeRow({
   return (
     <button
       type="button"
-      className="group relative flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+      data-shared-highlight-item
+      data-shared-highlight-id={`${seasonNum}-${ep.number}`}
+      className="group relative z-10 flex w-full items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
       onClick={onPlay}
       aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
     >

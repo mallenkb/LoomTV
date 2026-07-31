@@ -5,6 +5,7 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useTheme } from '@/components/ThemeProvider';
+import SharedListHighlight from '@/components/SharedListHighlight';
 import { nextSettingsSection, remoteLibraryRefreshIdentity } from '@/lib/settingsTabs';
 import {
   DEFAULT_SIDEBAR_NAV_ORDER,
@@ -811,14 +812,22 @@ export default function Settings() {
               <h1>LoomTV</h1>
               <p>Manage your library, playback, network, metadata, theme, and app details.</p>
             </div>
-            <div className="loom-settings-mobile-list">
+            <SharedListHighlight activeId={activeSection} className="loom-settings-mobile-list loom-shared-highlight-list">
               {visibleSettingsSections.map((section) => (
-                <button key={section.id} type="button" onClick={() => handleSectionSelect(section.id)}>
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => handleSectionSelect(section.id)}
+                  aria-current={section.id === activeSection ? 'page' : undefined}
+                  data-shared-highlight-item
+                  data-shared-highlight-id={section.id}
+                  className="relative z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
+                >
                   <span className="whitespace-nowrap">{section.label}</span>
                   <ChevronRight className="h-5 w-5" />
                 </button>
               ))}
-            </div>
+            </SharedListHighlight>
           </div>
 
           <div className="loom-settings-mobile-detail-bar">

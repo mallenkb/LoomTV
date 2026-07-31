@@ -4,6 +4,48 @@ export type LanLibraryPayload<TMediaItem> = {
   animeShows?: TMediaItem[];
 };
 
+export type LanCatalogVersion = 1;
+
+export type LanLibraryPlaybackReference = {
+  progressKey: string;
+  season?: number;
+  episode?: number;
+  durationSeconds?: number;
+};
+
+export type LanLibraryCard = {
+  id: string;
+  type: 'movie' | 'tv' | 'anime';
+  title: string;
+  year?: number;
+  poster: string;
+  backdrop: string;
+  logo?: string;
+  posterCandidates?: string[];
+  backdropCandidates?: string[];
+  logoCandidates?: string[];
+  summary: string;
+  rating: number;
+  genres: string[];
+  lastPlayed?: number;
+  seasons?: Array<{ number: number; title: string; episodeCount: number }>;
+  playbackReferences: LanLibraryPlaybackReference[];
+};
+
+export type LanLibraryIndexPayload<TCard extends LanLibraryCard = LanLibraryCard> = {
+  catalogVersion: LanCatalogVersion;
+  revision: number;
+  movies: TCard[];
+  tvShows: TCard[];
+  animeShows: TCard[];
+};
+
+export type LanLibraryItemDetailsPayload<TMediaItem> = {
+  catalogVersion: LanCatalogVersion;
+  revision: number;
+  item: TMediaItem;
+};
+
 export type LanPairResponse<TLibrary> = {
   deviceId: string;
   accessToken: string;

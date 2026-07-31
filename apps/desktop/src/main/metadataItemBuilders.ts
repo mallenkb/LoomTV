@@ -27,13 +27,18 @@ import {
 } from './scanClassification.ts';
 import type { BuildMovieItemRequest, BuildTVItemRequest } from './libraryScanner.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
+import {
+  getBoundedLibraryProbe,
+  LIBRARY_PROBE_CONCURRENCY,
+  mapWithConcurrency,
+} from './libraryScanConcurrency.ts';
 
 export type MetadataItemBuilderDependencies = {
   downloadMissingOpenSubtitlesForFolder: typeof import('./openSubtitles.ts').downloadMissingOpenSubtitlesForFolder;
   openSubtitlesIsConfigured: typeof import('./openSubtitles.ts').openSubtitlesIsConfigured;
-  extractSeasons: (folderPath: string, folderName: string) => Array<{ number: number; title: string; episodeCount: number }>;
-  scanEpisodeFiles: (folderPath: string) => EpisodeFile[];
-  probeMediaFile: (filePath: string) => ProbeMediaFileResult;
+  extractSeasons: (folderPath: string, folderName: string, episodeFiles?: EpisodeFile[]) => Promise<Array<{ number: number; title: string; episodeCount: number }>>;
+  scanEpisodeFiles: (folderPath: string) => Promise<EpisodeFile[]>;
+  probeMediaFile: (filePath: string) => Promise<ProbeMediaFileResult>;
   fetchJikanEpisodesForLocalAnimeSeasons: typeof import('./scanClassification.ts').fetchJikanEpisodesForLocalAnimeSeasons;
   fetchJikanMetadata: typeof import('./metadata/jikan.ts').fetchJikanMetadata;
   fetchOMDbMetadata: typeof import('./metadata/omdb.ts').fetchOMDbMetadata;
@@ -73,9 +78,10 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     getLocalThumbnailUrl,
     openSubtitlesIsConfigured,
     orderedArtworkCandidates,
-    probeMediaFile,
+    probeMediaFile: unboundedProbeMediaFile,
     scanEpisodeFiles,
   } = deps;
+  const probeMediaFile = getBoundedLibraryProbe(unboundedProbeMediaFile);
 
   const makeLocalEpisodeMeta = (files: EpisodeFile[], seriesTitle?: string): EpisodeMeta[] => files.map((file) => {
     const fallback = path.basename(file.filePath, path.extname(file.filePath))
@@ -148,9 +154,13 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       failures.forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
     }
 
-    const localSeasons = extractSeasons(fullPath, entryName);
-    const episodeFiles = scanEpisodeFiles(fullPath);
-    const episodeProbes = episodeFiles.map((file) => probeMediaFile(file.filePath));
+    const episodeFiles = await scanEpisodeFiles(fullPath);
+    const localSeasons = await extractSeasons(fullPath, entryName, episodeFiles);
+    const episodeProbes = await mapWithConcurrency(
+      episodeFiles,
+      LIBRARY_PROBE_CONCURRENCY,
+      (file) => probeMediaFile(file.filePath),
+    );
     const representativeProbe = episodeProbes.find((probe) => probe.localMetadata) || episodeProbes[0] || {};
     const providerIds = mergeProviderIds(
       ...episodeProbes.map((probe) => probe.providerIds || {}),
@@ -372,8 +382,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     forcedType,
   }: BuildMovieItemRequest): Promise<MediaItem> {
     const parsedFile = cleanMediaTitle(fileName);
-    const stats = fs.statSync(fullPath);
-    const probe = probeMediaFile(fullPath);
+    const stats = await fs.promises.stat(fullPath);
+    const probe = await probeMediaFile(fullPath);
     const providerIds = mergeProviderIds(probe.providerIds || {}, parseMetadataProviderIds(`${fullPath} ${fileName}`));
 
     const rawFileTitle = titleFallback || parsedFile.title;

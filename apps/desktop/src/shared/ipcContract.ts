@@ -1,6 +1,8 @@
 import type {
   ApiResult,
   LibraryFolderKind,
+  LibraryIndexPayload,
+  LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
   LocalNetworkPairedDevice,
@@ -61,6 +63,8 @@ export interface IpcContract {
   'database:clear': { args: []; result: LibraryPayload };
   'library:add-folder': { args: [kind?: LibraryFolderKind]; result: LibraryPayload | null };
   'library:get': { args: []; result: LibraryPayload };
+  'library:get-index': { args: []; result: LibraryIndexPayload };
+  'library:get-item': { args: [mediaId: string]; result: LibraryItemDetailsPayload | null };
   'library:remove-folder': { args: [folderPath: string]; result: LibraryPayload };
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryPayload };
   'media:can-direct-play': { args: [filePath: string, backend?: 'html5' | 'hls']; result: ApiResult<boolean> };

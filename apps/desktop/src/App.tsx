@@ -13,7 +13,7 @@ import MovieDetail from './pages/MovieDetail';
 import TVDetail from './pages/TVDetail';
 import Settings from './pages/Settings';
 import Sidebar from './components/Sidebar';
-import VideoPlayer from './components/VideoPlayer';
+import VideoPlayer from './components/VideoPlayer/LazyVideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
 import { ConfirmProvider } from './components/ConfirmProvider';
 import ErrorBoundary from './components/ErrorBoundary';

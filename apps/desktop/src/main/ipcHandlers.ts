@@ -58,6 +58,8 @@ export interface IpcHandlerDependencies<
   showOpenFolderDialog: (options: OpenDialogOptions) => Promise<OpenDialogReturnValue>;
   loadLibrary: () => TLibraryData;
   libraryForRenderer: (library?: TLibraryData) => IpcResult<'library:get'>;
+  libraryIndexForRenderer: () => IpcResult<'library:get-index'>;
+  libraryItemForRenderer: (mediaId: string) => IpcResult<'library:get-item'>;
   scanLibrary: (
     library: TLibraryData,
     options: {
@@ -180,6 +182,59 @@ function scanProgressPayload<TLibraryData>(snapshot: LibraryScanProgress<TLibrar
   };
 }
 
+const LIBRARY_SCAN_PROGRESS_INTERVAL_MS = 200;
+
+function createScanProgressPublisher<TLibraryData>(
+  sendSnapshot: (snapshot: LibraryScanProgress<TLibraryData>) => void,
+) {
+  let pendingSnapshot: LibraryScanProgress<TLibraryData> | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastSentAt = 0;
+
+  const clearTimer = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+
+  const flush = () => {
+    clearTimer();
+    const snapshot = pendingSnapshot;
+    pendingSnapshot = null;
+    if (!snapshot) return;
+
+    lastSentAt = Date.now();
+    try {
+      sendSnapshot(snapshot);
+    } catch (error) {
+      console.warn('Failed to publish library scan progress:', error);
+    }
+  };
+
+  const publish = (snapshot: LibraryScanProgress<TLibraryData>) => {
+    pendingSnapshot = snapshot;
+    if (snapshot.isComplete) {
+      flush();
+      return;
+    }
+
+    if (timer) return;
+    const elapsed = Date.now() - lastSentAt;
+    const delay = Math.max(0, LIBRARY_SCAN_PROGRESS_INTERVAL_MS - elapsed);
+    if (delay === 0) {
+      flush();
+    } else {
+      timer = setTimeout(flush, delay);
+    }
+  };
+
+  const cancel = () => {
+    clearTimer();
+    pendingSnapshot = null;
+  };
+
+  return { publish, flush, cancel };
+}
+
 export function registerIpcHandlers<
   TLibraryData,
   TSettings extends NetworkSettings & IpcResult<'settings:get'>,
@@ -197,27 +252,46 @@ export function registerIpcHandlers<
     });
   };
 
+  let libraryScanQueue: Promise<void> = Promise.resolve();
+  const enqueueLibraryScan = <T>(run: () => Promise<T>): Promise<T> => {
+    const queued = libraryScanQueue.then(() => run(), () => run());
+    libraryScanQueue = queued.then(() => undefined, () => undefined);
+    return queued;
+  };
+
   handle('library:get', () => deps.libraryForRenderer());
+  handle('library:get-index', () => deps.libraryIndexForRenderer());
+  handle('library:get-item', (_event, mediaId) => deps.libraryItemForRenderer(String(mediaId || '')));
 
   handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {
     deps.authorizeSettingsWrite();
-    const data = deps.loadLibrary();
-    const scanVersion = deps.getLibraryMutationVersion();
-    const mode: IpcLibraryScanMode = options?.force
-      ? 'full'
-      : options?.mode === 'metadata' || options?.mode === 'full'
-        ? options.mode
-        : 'quick';
-    const scanned = await deps.scanLibrary(data, {
-      mode,
-      onProgress: (snapshot) => {
-        event.sender.send('library:scan-progress', deps.libraryForRenderer(snapshot), scanProgressPayload(snapshot));
-      },
+    return enqueueLibraryScan(async () => {
+      const data = deps.loadLibrary();
+      const scanVersion = deps.getLibraryMutationVersion();
+      const mode: IpcLibraryScanMode = options?.force
+        ? 'full'
+        : options?.mode === 'metadata' || options?.mode === 'full'
+          ? options.mode
+          : 'quick';
+      const progressPublisher = createScanProgressPublisher<TLibraryData>((snapshot) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('library:scan-progress', deps.libraryForRenderer(snapshot), scanProgressPayload(snapshot));
+        }
+      });
+      try {
+        const scanned = await deps.scanLibrary(data, {
+          mode,
+          onProgress: progressPublisher.publish,
+        });
+        progressPublisher.flush();
+        if (deps.saveLibraryFromScan(scanned, scanVersion)) {
+          await deps.cacheArtworkNow(scanned);
+        }
+        return deps.libraryForRenderer();
+      } finally {
+        progressPublisher.cancel();
+      }
     });
-    if (deps.saveLibraryFromScan(scanned, scanVersion)) {
-      await deps.cacheArtworkNow(scanned);
-    }
-    return deps.libraryForRenderer();
   });
 
   handle('library:add-folder', async (_event, kind: string = 'movies') => {
@@ -232,19 +306,30 @@ export function registerIpcHandlers<
       const newFolder = result.filePaths[0];
       const updated = deps.addFolderToLibrary(data, newFolder, safeLibraryFolderKind(kind));
       deps.saveLibraryMutation(updated);
-      const scanVersion = deps.getLibraryMutationVersion();
-      const scanned = await deps.scanLibrary(updated, {
-        mode: 'quick',
-        onProgress: (snapshot) => {
+      return enqueueLibraryScan(async () => {
+        const scanData = deps.loadLibrary();
+        const scanVersion = deps.getLibraryMutationVersion();
+        const progressPublisher = createScanProgressPublisher<TLibraryData>((snapshot) => {
           BrowserWindow.getAllWindows().forEach((window) => {
-            window.webContents.send('library:scan-progress', deps.libraryForRenderer(snapshot), scanProgressPayload(snapshot));
+            if (!window.webContents.isDestroyed()) {
+              window.webContents.send('library:scan-progress', deps.libraryForRenderer(snapshot), scanProgressPayload(snapshot));
+            }
           });
-        },
+        });
+        try {
+          const scanned = await deps.scanLibrary(scanData, {
+            mode: 'quick',
+            onProgress: progressPublisher.publish,
+          });
+          progressPublisher.flush();
+          if (deps.saveLibraryFromScan(scanned, scanVersion)) {
+            await deps.cacheArtworkNow(scanned);
+          }
+          return deps.libraryForRenderer();
+        } finally {
+          progressPublisher.cancel();
+        }
       });
-      if (deps.saveLibraryFromScan(scanned, scanVersion)) {
-        await deps.cacheArtworkNow(scanned);
-      }
-      return deps.libraryForRenderer();
     }
     return null;
   });

@@ -316,8 +316,85 @@ html.loom-mpv-active .loom-app-underlay {
 
 .loom-modern-sidebar-action:hover,
 .loom-modern-sidebar-action-active {
-  background: var(--loom-sidebar-active-bg);
   color: var(--loom-text);
+}
+
+.loom-shared-highlight-group {
+  --loom-shared-highlight-background: rgb(255 255 255 / 0.05);
+  position: relative;
+}
+
+.loom-shared-highlight-group::before {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+  width: var(--shared-highlight-width, 0);
+  height: var(--shared-highlight-height, 0);
+  border-radius: 0.5rem;
+  background: var(--loom-shared-highlight-background);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(var(--shared-highlight-x, 0), var(--shared-highlight-y, 0), 0);
+  transition:
+    transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 280ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 90ms ease-out;
+  will-change: transform, width, height;
+}
+
+.loom-shared-highlight-visible::before {
+  opacity: 1;
+}
+
+.loom-shared-highlight-sidebar,
+.loom-shared-highlight-sidebar-modern {
+  --loom-shared-highlight-background: var(--loom-sidebar-active-bg);
+}
+
+.loom-shared-highlight-sidebar-modern::before {
+  border-radius: 9999px;
+}
+
+.loom-shared-highlight-category {
+  --loom-shared-highlight-background: var(--loom-text);
+}
+
+.loom-shared-highlight-category::before {
+  border-radius: 9999px;
+}
+
+.loom-shared-highlight-player-episodes {
+  --loom-shared-highlight-background: rgb(255 255 255 / 0.06);
+}
+
+.loom-shared-highlight-menu,
+.loom-shared-highlight-list,
+.loom-shared-highlight-tabs,
+.loom-shared-highlight-season-cards {
+  --loom-shared-highlight-background: var(--loom-active-bg);
+}
+
+.loom-shared-highlight-menu::before,
+.loom-shared-highlight-list::before {
+  border-radius: 0.375rem;
+}
+
+.loom-shared-highlight-tabs::before,
+.loom-shared-highlight-season-pills::before {
+  border-radius: 9999px;
+}
+
+.loom-shared-highlight-player-tabs,
+.loom-shared-highlight-player-list {
+  --loom-shared-highlight-background: rgb(255 255 255 / 0.08);
+}
+
+.loom-shared-highlight-player-segmented,
+.loom-shared-highlight-season-pills {
+  --loom-shared-highlight-background: color-mix(in srgb, var(--loom-accent) 24%, transparent);
 }
 
 .loom-modern-category-pill {
@@ -327,7 +404,6 @@ html.loom-mpv-active .loom-app-underlay {
 }
 
 .loom-modern-category-active {
-  background: var(--loom-text);
   color: var(--loom-bg);
 }
 
@@ -336,7 +412,7 @@ html.loom-mpv-active .loom-app-underlay {
 }
 
 .loom-modern-category-idle:hover {
-  color: var(--loom-text);
+  opacity: 0.68;
 }
 
 .loom-modern-search-overlay {
@@ -472,6 +548,8 @@ html.loom-mpv-active .loom-app-underlay {
   --loom-sidebar-width: 5rem;
   --loom-frame-inset: clamp(2rem, 2.6vw, 3.5rem);
   --loom-frame-gutter: calc(var(--loom-sidebar-width) + var(--loom-frame-inset));
+  --loom-frame-start: calc(var(--loom-sidebar-width) + var(--loom-frame-inset));
+  --loom-frame-end: var(--loom-frame-inset);
   /* Detail and home use the exact same centred canvas. The nav overlays the
      left gutter, so reserving it only on the detail page made that page drift
      right by half a sidebar on wide windows. */
@@ -519,15 +597,16 @@ html.loom-mpv-active .loom-app-underlay {
   left: var(--loom-sidebar-width);
 }
 
-.loom-modern-content-frame,
+.loom-modern-content-frame {
+  width: calc(100% - var(--loom-frame-start) - var(--loom-frame-end));
+  max-width: none;
+  margin-right: var(--loom-frame-end);
+  margin-left: var(--loom-frame-start);
+}
+
 .loom-modern-hero-artwork {
   width: calc(100% - (var(--loom-frame-gutter) * 2));
   max-width: var(--loom-frame-max-width);
-}
-
-.loom-modern-content-frame {
-  margin-right: auto;
-  margin-left: auto;
 }
 
 :root[data-theme="dark"][data-home-style="modern"] .loom-page {
@@ -536,8 +615,10 @@ html.loom-mpv-active .loom-app-underlay {
 }
 
 :root[data-home-style="modern"] .page-list-bottom-safe {
-  width: calc(100% - (var(--loom-frame-gutter) * 2));
-  max-width: var(--loom-frame-max-width);
+  width: calc(100% - var(--loom-frame-start) - var(--loom-frame-end));
+  max-width: none;
+  margin-right: var(--loom-frame-end);
+  margin-left: var(--loom-frame-start);
   padding-right: 2rem;
   padding-left: 2rem;
 }
@@ -767,6 +848,7 @@ html.loom-mpv-active .loom-app-underlay {
 
 .loom-page {
   background: var(--loom-bg);
+  overflow-x: clip;
 }
 
 body.platform-darwin .loom-sidebar-brand {
@@ -1649,7 +1731,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   }
 
   .loom-app-shell > aside nav a[aria-current="page"] {
-    background: var(--loom-sidebar-active-bg);
+    background: transparent;
     color: var(--loom-active-text);
   }
 

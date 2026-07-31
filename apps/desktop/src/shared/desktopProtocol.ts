@@ -1,7 +1,11 @@
 import type {
   LanActiveProfile,
   LanContentRating,
+  LanLibraryCard,
+  LanLibraryIndexPayload,
+  LanLibraryItemDetailsPayload,
   LanLibraryPayload,
+  LanLibraryPlaybackReference,
   LanProfileListEntry,
   LanProfileListKind,
   LanProfilePreferences,
@@ -177,6 +181,11 @@ export interface WireMediaItem {
     malIdBySeason?: Record<string, string>;
   };
 }
+
+export type LibraryCard = LanLibraryCard;
+export type LibraryPlaybackReference = LanLibraryPlaybackReference;
+export type LibraryIndexPayload = LanLibraryIndexPayload<LibraryCard>;
+export type LibraryItemDetailsPayload = LanLibraryItemDetailsPayload<WireMediaItem>;
 
 export interface LibraryPayload extends LanLibraryPayload<WireMediaItem> {
   movies: WireMediaItem[];

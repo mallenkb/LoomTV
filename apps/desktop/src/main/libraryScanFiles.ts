@@ -10,8 +10,14 @@ import {
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import { createSubtitleRecords, parseEpisodeFileName } from './scanClassification.ts';
 import type { EpisodeFile } from './metadata/types.ts';
+import {
+  getBoundedLibraryProbe,
+  LIBRARY_PROBE_CONCURRENCY,
+  mapWithConcurrency,
+} from './libraryScanConcurrency.ts';
 
 export type MediaFileProbe = (filePath: string) => ProbeMediaFileResult;
+export type AsyncMediaFileProbe = (filePath: string) => Promise<ProbeMediaFileResult>;
 const EMPTY_MEDIA_FILE_PROBE: MediaFileProbe = () => ({});
 
 const SKIPPED_EPISODE_DIRECTORIES = new Set([
@@ -102,8 +108,9 @@ export async function getLibraryFolderSignatureAsync(
     try {
       entries = (await fs.promises.readdir(current, { withFileTypes: true }))
         .sort((left, right) => left.name.localeCompare(right.name));
-    } catch {
-      continue;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Unable to read library directory "${current}": ${message}`, { cause: error });
     }
 
     for (const entry of entries) {
@@ -123,8 +130,9 @@ export async function getLibraryFolderSignatureAsync(
         hash.update(String(Math.round(stats.mtimeMs)));
         hash.update('\0');
         fileCount += 1;
-      } catch {
-        // A later scan will pick up files that disappear during traversal.
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Unable to inspect library file "${fullPath}": ${message}`, { cause: error });
       }
     }
   }
@@ -217,9 +225,116 @@ export function extractSeasons(
   return seasons.sort((left, right) => left.number - right.number);
 }
 
+async function matchingSubtitleFilesForVideoAsync(directory: string, videoFileName: string): Promise<string[]> {
+  const baseName = path.basename(videoFileName, path.extname(videoFileName)).toLowerCase();
+  return (await fs.promises.readdir(directory, { withFileTypes: true }))
+    .filter((entry) => !entry.isDirectory() && isSubtitleFileName(entry.name))
+    .map((entry) => entry.name)
+    .filter((fileName) => path.basename(fileName, path.extname(fileName)).toLowerCase().startsWith(baseName));
+}
+
+export async function scanEpisodeFilesAsync(
+  folderPath: string,
+  probe: AsyncMediaFileProbe,
+): Promise<EpisodeFile[]> {
+  type EpisodeCandidate = { directory: string; fileName: string; fullPath: string };
+  const candidates: EpisodeCandidate[] = [];
+
+  const collectVideoFiles = async (directory: string): Promise<void> => {
+    for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_EPISODE_DIRECTORIES.has(entry.name.toLowerCase())) await collectVideoFiles(fullPath);
+        continue;
+      }
+      if (!isVideoFileName(entry.name)) continue;
+      candidates.push({ directory, fileName: entry.name, fullPath });
+    }
+  };
+
+  await collectVideoFiles(folderPath);
+  const files = await mapWithConcurrency(
+    candidates,
+    LIBRARY_PROBE_CONCURRENCY,
+    async ({ directory, fileName, fullPath }): Promise<EpisodeFile | null> => {
+      const mediaProbe = await probe(fullPath);
+      if (!mediaProbe.localMetadata?.videoCodec) return null;
+      const parsed = parseEpisodeFileName(fileName, mediaProbe.season || seasonFromRelativePath(folderPath, directory) || 1);
+      if (!parsed) return null;
+      return {
+        season: mediaProbe.season || parsed.season,
+        episode: mediaProbe.episode || parsed.episode,
+        filePath: fullPath,
+        title: mediaProbe.embeddedTitle,
+        subtitles: createSubtitleRecords(directory, await matchingSubtitleFilesForVideoAsync(directory, fileName)),
+        localMetadata: mediaProbe.localMetadata,
+      };
+    },
+  );
+
+  return files.filter((file): file is EpisodeFile => file !== null).sort((left, right) => left.season !== right.season
+    ? left.season - right.season
+    : left.episode - right.episode);
+}
+
+export async function extractSeasonsAsync(
+  folderPath: string,
+  folderName: string,
+  probe: AsyncMediaFileProbe,
+  knownEpisodeFiles?: EpisodeFile[],
+): Promise<Array<{ number: number; title: string; episodeCount: number }>> {
+  const seasons: Array<{ number: number; title: string; episodeCount: number }> = [];
+  const entries = await fs.promises.readdir(folderPath, { withFileTypes: true });
+  const directories = entries.filter((entry) => entry.isDirectory());
+  const videoFiles = entries.filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name));
+
+  if (directories.some((directory) => /season/i.test(directory.name))) {
+    for (const directory of directories) {
+      const match = directory.name.match(/season\s*(\d+)/i);
+      const number = match ? parseInt(match[1], 10) : 1;
+      const directoryPath = path.join(folderPath, directory.name);
+      const knownEpisodeCount = knownEpisodeFiles?.filter((file) => {
+        const relativePath = path.relative(directoryPath, file.filePath);
+        return relativePath !== ''
+          && relativePath !== '..'
+          && !relativePath.startsWith(`..${path.sep}`)
+          && !path.isAbsolute(relativePath);
+      }).length;
+      const episodeCount = (knownEpisodeCount ?? (await scanEpisodeFilesAsync(directoryPath, probe)).length)
+        || (await fs.promises.readdir(directoryPath)).filter(isVideoFileName).length;
+      seasons.push({ number, title: directory.name, episodeCount });
+    }
+  } else {
+    const match = folderName.match(/[Ss](\d{1,2})/);
+    const fallbackSeason = match ? parseInt(match[1], 10) : 1;
+    const episodeFiles = knownEpisodeFiles ?? await scanEpisodeFilesAsync(folderPath, probe);
+    const grouped = new Map<number, number>();
+    episodeFiles.forEach((file) => grouped.set(file.season, (grouped.get(file.season) || 0) + 1));
+    if (grouped.size > 0) {
+      grouped.forEach((episodeCount, number) => {
+        seasons.push({ number, title: `Season ${String(number).padStart(2, '0')}`, episodeCount });
+      });
+    } else {
+      seasons.push({ number: fallbackSeason, title: `Season ${fallbackSeason}`, episodeCount: videoFiles.length });
+    }
+  }
+
+  return seasons.sort((left, right) => left.number - right.number);
+}
+
 export function createLibraryScanFiles(probe: MediaFileProbe) {
   return {
     extractSeasons: (folderPath: string, folderName: string) => extractSeasons(folderPath, folderName, probe),
     scanEpisodeFiles: (folderPath: string) => scanEpisodeFiles(folderPath, probe),
+  };
+}
+
+export function createLibraryScanFilesAsync(probe: AsyncMediaFileProbe) {
+  const boundedProbe = getBoundedLibraryProbe(probe);
+  return {
+    extractSeasons: (folderPath: string, folderName: string, episodeFiles?: EpisodeFile[]) => (
+      extractSeasonsAsync(folderPath, folderName, boundedProbe, episodeFiles)
+    ),
+    scanEpisodeFiles: (folderPath: string) => scanEpisodeFilesAsync(folderPath, boundedProbe),
   };
 }

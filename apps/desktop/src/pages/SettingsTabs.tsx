@@ -1,4 +1,5 @@
 import { SETTINGS_SECTIONS, type SettingsSection } from './Settings.helpers';
+import SharedListHighlight from '@/components/SharedListHighlight';
 
 type SettingsTabsProps = {
   activeSection: SettingsSection;
@@ -13,9 +14,9 @@ export default function SettingsTabs({ activeSection, onSelect, sections = SETTI
     >
       <div className="loom-frame">
         <div className="loom-settings-tabs-frame mx-auto max-w-5xl">
-          <div
-            className="loom-settings-tabs loom-no-drag pointer-events-auto inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
-            style={{ borderRadius: 12 }}
+          <SharedListHighlight
+            activeId={activeSection}
+            className="loom-settings-tabs loom-shared-highlight-tabs loom-no-drag pointer-events-auto inline-flex rounded-[12px] border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-1 backdrop-blur-md"
           >
             {sections.map((section) => {
               const isActive = activeSection === section.id;
@@ -25,24 +26,20 @@ export default function SettingsTabs({ activeSection, onSelect, sections = SETTI
                   type="button"
                   onClick={() => onSelect(section.id)}
                   aria-pressed={isActive}
-                  className={`relative h-9 whitespace-nowrap rounded-[8px] px-4 text-sm font-medium transition-colors ${
+                  data-shared-highlight-item
+                  data-shared-highlight-id={section.id}
+                  className={`relative z-10 h-9 whitespace-nowrap rounded-[8px] px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${
                     isActive
                       ? 'text-[var(--loom-active-text)]'
                       : 'text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
                   }`}
                   style={{ borderRadius: 8 }}
                 >
-                  {isActive && (
-                    <span
-                      className="absolute inset-0 rounded-[8px] bg-[var(--loom-active-bg)]"
-                      style={{ borderRadius: 8 }}
-                    />
-                  )}
                   <span className="relative z-10 whitespace-nowrap">{section.label}</span>
                 </button>
               );
             })}
-          </div>
+          </SharedListHighlight>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import type React from 'react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import SharedListHighlight from '@/components/SharedListHighlight';
 import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -278,7 +279,7 @@ export default function NetworkSettingsSection({
                 {isScanningPeers ? 'Looking for LoomTV devices...' : 'No other LoomTV devices found. Make sure sharing is on over there.'}
               </p>
             ) : (
-              <div className="space-y-1">
+              <SharedListHighlight activeId={remoteLibraryAddress} className="loom-shared-highlight-list space-y-1">
                 {discoveredPeers.map((peer) => {
                   const peerBaseUrl = `http://${peer.host}:${peer.port}`;
                   const isSelected = remoteLibraryAddress === peerBaseUrl;
@@ -286,18 +287,21 @@ export default function NetworkSettingsSection({
                     <button
                       key={peer.deviceId}
                       type="button"
+                      aria-pressed={isSelected}
                       onClick={() => {
                         setRemoteLibraryAddress(peerBaseUrl);
                         setShowManualNetworkAddress(true);
                       }}
-                      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors ${isSelected ? 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
+                      data-shared-highlight-item
+                      data-shared-highlight-id={peerBaseUrl}
+                      className={`relative z-10 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-white'}`}
                     >
                       <span className="truncate font-medium">{peer.deviceName}</span>
                       <span className="ml-3 shrink-0 text-[var(--loom-faint)]">{peer.host}:{peer.port}</span>
                     </button>
                   );
                 })}
-              </div>
+              </SharedListHighlight>
             )}
           </div>
 

@@ -63,7 +63,12 @@ import {
 } from './lanRoutePolicy';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 import { buildBrowserStreamArgs } from './streamTranscodePlan.ts';
-import type { LibraryPayload, MediaSegmentResponse } from '../shared/desktopProtocol.ts';
+import type {
+  LibraryIndexPayload,
+  LibraryItemDetailsPayload,
+  LibraryPayload,
+  MediaSegmentResponse,
+} from '../shared/desktopProtocol.ts';
 
 export interface MediaServerDependencies {
   ALLOWED_CORS_ORIGINS: ReadonlySet<string>;
@@ -87,6 +92,11 @@ export interface MediaServerDependencies {
   isLoopbackRequest: (req: http.IncomingMessage) => boolean;
   isSignedLanRequestValid: (reqUrl: URL) => boolean;
   libraryEtagFor: (payload: unknown) => string;
+  compactLibraryIndexForLocalNetwork: (profileId: string, deviceId: string | undefined, revision: number) => LibraryIndexPayload;
+  compactLibraryItemForLocalNetwork: (mediaId: string, profileId: string, deviceId: string | undefined, revision: number) => LibraryItemDetailsPayload | null;
+  compactLibraryIndexForRenderer: (revision: number) => LibraryIndexPayload;
+  compactLibraryItemForRenderer: (mediaId: string, revision: number) => LibraryItemDetailsPayload | null;
+  getRendererCatalogIdentity: () => string;
   libraryForLocalNetwork: (profileId?: string, deviceId?: string) => LibraryPayload;
   profileRestrictionIdentity: (profileId: string) => string;
   libraryForRenderer: () => LibraryPayload;
@@ -112,6 +122,19 @@ const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
 const SUBTITLE_RESOURCE_KIND = new Set(['subtitle'] as const);
 const hlsProfileBindings = new Map<string, { deviceId: string; profileId: string; selectionRevision: number; filePath: string }>();
+const V2_LIBRARY_ITEM_PREFIX = '/api/v2/library/items/';
+const RENDERER_LIBRARY_ITEM_PREFIX = '/api/renderer/library/items/';
+
+function libraryItemIdFromPath(pathname: string, prefix: string): string | null {
+  if (!pathname.startsWith(prefix)) return null;
+  const encodedId = pathname.slice(prefix.length);
+  if (!encodedId) return null;
+  try {
+    return decodeURIComponent(encodedId);
+  } catch {
+    return null;
+  }
+}
 
 export function getMediaServer(): http.Server | null { return mediaServer; }
 export function getMediaServerPort(): number { return mediaServerPort; }
@@ -315,6 +338,11 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     isLoopbackRequest,
     isSignedLanRequestValid,
     libraryEtagFor,
+    compactLibraryIndexForLocalNetwork,
+    compactLibraryItemForLocalNetwork,
+    compactLibraryIndexForRenderer,
+    compactLibraryItemForRenderer,
+    getRendererCatalogIdentity,
     libraryForLocalNetwork,
     libraryForRenderer,
     loadLibrary,
@@ -396,6 +424,38 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       const profileDeviceIdForRequest = (): string | null => (
         lanDeviceId || (authorizeLocalRequest(reqUrl, req) ? DESKTOP_DEVICE_ID : null)
       );
+      const catalogProfileIdentity = (profileId: string): object => ({
+        restrictions: profileRestrictionIdentity(profileId),
+        deviceId: lanDeviceId || DESKTOP_DEVICE_ID,
+        selectionRevision: lanDeviceId ? getActiveProfileState(lanDeviceId).selectionRevision : 0,
+        delivery: libraryEtagFor({
+          baseAddress: getLanServerBase() || `http://127.0.0.1:${mediaServerPort}`,
+          signingSecret: loadSettings().localNetworkHmacSecret || '',
+        }),
+      });
+      const catalogEtag = (
+        representation: 'index' | 'item',
+        revision: number,
+        profileIdentity: unknown,
+        mediaId?: string,
+      ): string => `"${libraryEtagFor({
+        catalogVersion: 1,
+        representation,
+        libraryRevision: revision,
+        profile: profileIdentity,
+        ...(mediaId ? { mediaId } : {}),
+      })}"`;
+      const writeCatalogRepresentation = (etag: string, payload: () => unknown): void => {
+        const requestEtag = String(req.headers['if-none-match'] || '');
+        if (requestEtag === etag) {
+          res.writeHead(304, { ETag: etag, 'Cache-Control': 'private, no-cache' });
+          res.end();
+          return;
+        }
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'private, no-cache');
+        writeJson(res, 200, payload());
+      };
       const assertCurrentSelectionRevision = (body: Record<string, unknown>): void => {
         if (!usesProfileApi || !lanDeviceId) return;
         const expected = Number(body.selectionRevision);
@@ -600,6 +660,45 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
         return;
       }
 
+      if (reqUrl.pathname === '/api/v2/library/index' && req.method === 'GET') {
+        if (!requireV2Scope('catalog:read')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
+        const revision = getLibraryRevision();
+        const etag = catalogEtag('index', revision, catalogProfileIdentity(profileId));
+        writeCatalogRepresentation(etag, () => compactLibraryIndexForLocalNetwork(
+          profileId,
+          lanDeviceId || undefined,
+          revision,
+        ));
+        return;
+      }
+
+      if (req.method === 'GET' && reqUrl.pathname.startsWith(V2_LIBRARY_ITEM_PREFIX)) {
+        if (!requireV2Scope('catalog:read')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
+        const mediaId = libraryItemIdFromPath(reqUrl.pathname, V2_LIBRARY_ITEM_PREFIX);
+        if (!mediaId) {
+          writeJson(res, 404, { error: 'media_not_found' });
+          return;
+        }
+        const revision = getLibraryRevision();
+        const payload = compactLibraryItemForLocalNetwork(
+          mediaId,
+          profileId,
+          lanDeviceId || undefined,
+          revision,
+        );
+        if (!payload) {
+          writeJson(res, 404, { error: 'media_not_found' });
+          return;
+        }
+        const etag = catalogEtag('item', revision, catalogProfileIdentity(profileId), mediaId);
+        writeCatalogRepresentation(etag, () => payload);
+        return;
+      }
+
 
       if (reqUrl.pathname === '/api/v2/start-hls' && req.method === 'POST') {
         if (!requireV2Scope('media:stream')) return;
@@ -713,6 +812,30 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
       // bridge. Keep their read/write surface narrowly scoped, authenticated,
       // and local-only so they render the same library and preferences as the
       // desktop window without exposing IPC administration routes.
+      if (reqUrl.pathname === '/api/renderer/library/index' && req.method === 'GET') {
+        const revision = getLibraryRevision();
+        const etag = catalogEtag('index', revision, getRendererCatalogIdentity());
+        writeCatalogRepresentation(etag, () => compactLibraryIndexForRenderer(revision));
+        return;
+      }
+
+      if (req.method === 'GET' && reqUrl.pathname.startsWith(RENDERER_LIBRARY_ITEM_PREFIX)) {
+        const mediaId = libraryItemIdFromPath(reqUrl.pathname, RENDERER_LIBRARY_ITEM_PREFIX);
+        if (!mediaId) {
+          writeJson(res, 404, { error: 'media_not_found' });
+          return;
+        }
+        const revision = getLibraryRevision();
+        const payload = compactLibraryItemForRenderer(mediaId, revision);
+        if (!payload) {
+          writeJson(res, 404, { error: 'media_not_found' });
+          return;
+        }
+        const etag = catalogEtag('item', revision, getRendererCatalogIdentity(), mediaId);
+        writeCatalogRepresentation(etag, () => payload);
+        return;
+      }
+
       if (reqUrl.pathname === '/api/renderer/library' && req.method === 'GET') {
         writeJson(res, 200, libraryForRenderer());
         return;
@@ -1483,19 +1606,45 @@ export function startMediaServer(deps: MediaServerDependencies): Promise<number>
     mediaServer = server;
     trackServerConnections(server, mediaServerSockets);
 
+    const MAX_PORT_ATTEMPTS = 20;
+    let attemptedPort = mediaServerPort;
+    let listenAttempts = 0;
+    let listenSettled = false;
+
+    const rejectListen = (error: Error) => {
+      if (listenSettled) return;
+      listenSettled = true;
+      if (mediaServer === server) mediaServer = null;
+      reject(error);
+    };
+
     const tryListen = (port: number) => {
-      server.listen(port, '0.0.0.0', () => {
-        mediaServerPort = port;
-        console.log(`Media server on port ${port}`);
-        resolve(port);
-      });
+      attemptedPort = port;
+      listenAttempts++;
+      try {
+        server.listen(port, '0.0.0.0', () => {
+          if (listenSettled) return;
+          listenSettled = true;
+          mediaServerPort = port;
+          console.log(`Media server on port ${port}`);
+          resolve(port);
+        });
+      } catch (error) {
+        rejectListen(error instanceof Error ? error : new Error(String(error)));
+      }
     };
 
     server.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code === 'EADDRINUSE') {
-        tryListen(mediaServerPort + 1);
+      if (listenSettled) return;
+      if (err.code === 'EADDRINUSE' && listenAttempts < MAX_PORT_ATTEMPTS && attemptedPort < 65_535) {
+        tryListen(attemptedPort + 1);
+      } else if (err.code === 'EADDRINUSE') {
+        rejectListen(new Error(
+          `Unable to start the media server after trying ${listenAttempts} ports from ${mediaServerPort}.`,
+          { cause: err },
+        ));
       } else {
-        reject(err);
+        rejectListen(err);
       }
     });
 

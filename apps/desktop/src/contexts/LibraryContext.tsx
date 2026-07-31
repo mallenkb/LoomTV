@@ -128,6 +128,7 @@ type LibraryAction =
   | { type: 'SET_LIBRARY_FOLDER_GROUPS'; payload: LibraryFolderGroups }
   | { type: 'SET_SCANNING'; payload: boolean }
   | { type: 'SET_SCAN_PROGRESS'; payload: number }
+  | { type: 'SET_SCAN_STATE'; payload: { isScanning: boolean; progress: number } }
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_STARTUP_PREPARED'; payload: boolean }
   | { type: 'SET_AUTO_SYNC_INTERVAL_HOURS'; payload: number };
@@ -146,50 +147,117 @@ const initialState: LibraryState = {
   autoSyncIntervalHours: 12,
 };
 
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    return left.every((value, index) => valuesEqual(value, right[index]));
+  }
+
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  const leftKeys = Object.keys(leftRecord);
+  const rightKeys = Object.keys(rightRecord);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => Object.prototype.hasOwnProperty.call(rightRecord, key)
+    && valuesEqual(leftRecord[key], rightRecord[key]));
+}
+
+function reuseIfEqual<T>(current: T, incoming: T): T {
+  return valuesEqual(current, incoming) ? current : incoming;
+}
+
+function reconcileMediaItems<T extends MediaItem>(current: T[], incoming: T[]): T[] {
+  if (current === incoming) return current;
+  const currentById = new Map(current.map((item) => [item.id, item]));
+  let changed = current.length !== incoming.length;
+  const reconciled = incoming.map((item, index) => {
+    const existing = currentById.get(item.id);
+    const next = existing && valuesEqual(existing, item) ? existing : item;
+    if (next !== current[index]) changed = true;
+    return next;
+  });
+  return changed ? reconciled : current;
+}
+
 function libraryReducer(state: LibraryState, action: LibraryAction): LibraryState {
   switch (action.type) {
     case 'SET_LIBRARY_DATA': {
-      const libraryFolderGroups = normalizeFolderGroups(action.payload.libraryFolderGroups);
+      const movies = reconcileMediaItems(state.movies, action.payload.movies || []);
+      const tvShows = reconcileMediaItems(state.tvShows, action.payload.tvShows || []);
+      const animeShows = reconcileMediaItems(state.animeShows, action.payload.animeShows || []);
+      const libraryFolders = reuseIfEqual(state.libraryFolders, action.payload.libraryFolders || []);
+      const libraryFolderGroups = reuseIfEqual(
+        state.libraryFolderGroups,
+        normalizeFolderGroups(action.payload.libraryFolderGroups),
+      );
+      const libraryFolderStatuses = reuseIfEqual(
+        state.libraryFolderStatuses,
+        action.payload.libraryFolderStatuses || [],
+      );
+      if (
+        movies === state.movies
+        && tvShows === state.tvShows
+        && animeShows === state.animeShows
+        && libraryFolders === state.libraryFolders
+        && libraryFolderGroups === state.libraryFolderGroups
+        && libraryFolderStatuses === state.libraryFolderStatuses
+      ) return state;
       return {
         ...state,
-        movies: action.payload.movies || [],
-        tvShows: action.payload.tvShows || [],
-        animeShows: action.payload.animeShows || [],
-        libraryFolders: action.payload.libraryFolders || [],
+        movies,
+        tvShows,
+        animeShows,
+        libraryFolders,
         libraryFolderGroups,
-        libraryFolderStatuses: action.payload.libraryFolderStatuses || [],
+        libraryFolderStatuses,
       };
     }
-    case 'SET_MOVIES':
-      return { ...state, movies: action.payload };
-    case 'SET_TV_SHOWS':
-      return { ...state, tvShows: action.payload };
-    case 'SET_ANIME_SHOWS':
-      return { ...state, animeShows: action.payload };
-    case 'SET_LIBRARY_FOLDERS':
-      return { ...state, libraryFolders: action.payload };
-    case 'SET_LIBRARY_FOLDER_GROUPS':
-      return { ...state, libraryFolderGroups: action.payload };
+    case 'SET_MOVIES': {
+      const movies = reconcileMediaItems(state.movies, action.payload);
+      return movies === state.movies ? state : { ...state, movies };
+    }
+    case 'SET_TV_SHOWS': {
+      const tvShows = reconcileMediaItems(state.tvShows, action.payload);
+      return tvShows === state.tvShows ? state : { ...state, tvShows };
+    }
+    case 'SET_ANIME_SHOWS': {
+      const animeShows = reconcileMediaItems(state.animeShows, action.payload);
+      return animeShows === state.animeShows ? state : { ...state, animeShows };
+    }
+    case 'SET_LIBRARY_FOLDERS': {
+      const libraryFolders = reuseIfEqual(state.libraryFolders, action.payload);
+      return libraryFolders === state.libraryFolders ? state : { ...state, libraryFolders };
+    }
+    case 'SET_LIBRARY_FOLDER_GROUPS': {
+      const libraryFolderGroups = reuseIfEqual(state.libraryFolderGroups, action.payload);
+      return libraryFolderGroups === state.libraryFolderGroups ? state : { ...state, libraryFolderGroups };
+    }
     case 'SET_SCANNING':
-      return { ...state, isScanning: action.payload };
+      return state.isScanning === action.payload ? state : { ...state, isScanning: action.payload };
     case 'SET_SCAN_PROGRESS':
-      return { ...state, scanProgress: action.payload };
+      return state.scanProgress === action.payload ? state : { ...state, scanProgress: action.payload };
+    case 'SET_SCAN_STATE':
+      return state.isScanning === action.payload.isScanning && state.scanProgress === action.payload.progress
+        ? state
+        : { ...state, isScanning: action.payload.isScanning, scanProgress: action.payload.progress };
     case 'SET_LOADING':
-      return { ...state, isLoading: action.payload };
+      return state.isLoading === action.payload ? state : { ...state, isLoading: action.payload };
     case 'SET_STARTUP_PREPARED':
-      return { ...state, isStartupPrepared: action.payload };
+      return state.isStartupPrepared === action.payload ? state : { ...state, isStartupPrepared: action.payload };
     case 'SET_AUTO_SYNC_INTERVAL_HOURS':
-      return { ...state, autoSyncIntervalHours: action.payload };
+      return state.autoSyncIntervalHours === action.payload ? state : { ...state, autoSyncIntervalHours: action.payload };
     default:
       return state;
   }
 }
 
 function normalizeShows(items: MediaItem[] | undefined): TVShow[] {
-  return (items || []).map((item) => ({
-    ...item,
-    seasons: item.seasons || [],
-  }));
+  return (items || []).map((item) => item.seasons
+    ? item as TVShow
+    : { ...item, seasons: [] });
 }
 
 interface LibraryContextType {
@@ -253,14 +321,19 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const applyScanProgress = (progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
+  const applyScanProgress = useCallback((progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
     if (!progress) return;
     const percent = progress.totalFolders > 0
       ? Math.round((progress.scannedFolders / progress.totalFolders) * 100)
       : progress.isComplete ? 100 : 0;
-    dispatch({ type: 'SET_SCANNING', payload: !progress.isComplete });
-    dispatch({ type: 'SET_SCAN_PROGRESS', payload: Math.min(100, Math.max(0, percent)) });
-  };
+    dispatch({
+      type: 'SET_SCAN_STATE',
+      payload: {
+        isScanning: !progress.isComplete,
+        progress: Math.min(100, Math.max(0, percent)),
+      },
+    });
+  }, []);
 
   const refreshLibrary = async () => {
     try {
@@ -345,12 +418,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   useEffect(() => {
-    return desktopApi.onLibraryScanProgress((library, progress) => {
-      applyLibraryData(library);
+    return desktopApi.onLibraryScanProgress((_library, progress) => {
       applyScanProgress(progress);
       dispatch({ type: 'SET_LOADING', payload: false });
     });
-  }, [applyLibraryData]);
+  }, [applyScanProgress]);
 
   useEffect(() => {
     let cancelled = false;
