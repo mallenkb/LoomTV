@@ -232,7 +232,12 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       const filePath = params.get('path');
       if (filePath) {
         params.delete('path');
-        params.set('resourceId', registerRemoteResource('subtitle', filePath, mediaScopePath));
+        const embedded = params.has('streamOrdinal');
+        params.set('resourceId', registerRemoteResource(
+          embedded ? 'media' : 'subtitle',
+          filePath,
+          embedded ? undefined : mediaScopePath,
+        ));
       }
       return buildSignedLanUrl(base, parsed.pathname, bindProfile(params, identity));
     } catch {
