@@ -16,7 +16,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import type { StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
-import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 
 export default function ModernHome() {
   const { state, addLibraryFolder } = useLibrary();
@@ -36,21 +36,22 @@ export default function ModernHome() {
   const resultsGridRef = useRef<HTMLDivElement | null>(null);
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;
   const allItems = useMemo(() => [...animeShows, ...tvShows, ...movies], [animeShows, movies, tvShows]);
+  const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const visibleItems = useMemo(
-    () => allItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, allItems, progress],
+    () => allItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, allItems, listState, progress],
   );
   const visibleAnimeShows = useMemo(
-    () => animeShows.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, animeShows, progress],
+    () => animeShows.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, animeShows, listState, progress],
   );
   const visibleTVShows = useMemo(
-    () => tvShows.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, progress, tvShows],
+    () => tvShows.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, listState, progress, tvShows],
   );
   const visibleMovies = useMemo(
-    () => movies.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, movies, progress],
+    () => movies.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, listState, movies, progress],
   );
   const normalizedQuery = searchQuery(query);
   const currentRoute = `${location.pathname}${location.search}`;
@@ -69,6 +70,24 @@ export default function ModernHome() {
       .sort((left, right) => right[1] - left[1])
       .map(([item]) => item);
   }, [progress, visibleItems]);
+  const savedItems = useMemo(() => {
+    const byId = new Map(allItems.map((item) => [item.id, item]));
+    const seen = new Set<string>();
+    return lists
+      .filter((entry) => entry.kind === 'watchlist' || entry.kind === 'favorite')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .filter((entry) => {
+        if (seen.has(entry.mediaId)) return false;
+        seen.add(entry.mediaId);
+        return true;
+      })
+      .map((entry) => byId.get(entry.mediaId))
+      .filter((item): item is MediaItem => Boolean(item));
+  }, [allItems, lists]);
+  const visibleSavedItems = useMemo(
+    () => savedItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, listState, progress, savedItems],
+  );
   const featuredHeroItems = useMemo(() => {
     const preferredLibrary = visibleAnimeShows.length > 0 ? visibleAnimeShows : visibleTVShows.length > 0 ? visibleTVShows : visibleMovies;
     return preferredLibrary.slice(0, 6);
@@ -76,10 +95,7 @@ export default function ModernHome() {
   const usesContinueWatchingHero = theme.modernHeroMode === 'continue-watching' && continueWatching.length > 0;
   const heroItems = usesContinueWatchingHero ? continueWatching.slice(0, 1) : featuredHeroItems;
   const hero = heroItems[activeHeroIndex] || heroItems[0];
-  const myListIds = useMemo(
-    () => new Set(lists.filter((entry) => entry.kind === 'watchlist').map((entry) => entry.mediaId)),
-    [lists],
-  );
+  const myListIds = listState.myListIds;
 
   useEffect(() => {
     if (activeHeroIndex < heroItems.length) return;
@@ -199,6 +215,9 @@ export default function ModernHome() {
             onHoverChange={setHeroHovered}
           />
           <main className="loom-modern-content-frame page-bottom-safe relative z-10 -mt-24 space-y-10 px-[var(--loom-frame-inset)] pb-10">
+            {visibleSavedItems.length > 0 && (
+              <PosterRail title="My List" items={visibleSavedItems} from={currentRoute} />
+            )}
             {continueWatching.length > 0 && (
               <ContinueWatchingRail items={continueWatching} from={currentRoute} progress={progress} />
             )}

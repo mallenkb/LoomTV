@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, Check, Clapperboard, Laptop2, LayoutGrid, Library, Loader2, RefreshCw, Server, Wifi } from 'lucide-react';
 import LoomBrandLockup from './LoomBrandLockup';
+import PinDigitInput from './profiles/PinDigitInput';
 import { Button } from './ui/button';
 import { desktopApi, type LocalNetworkPeer } from '@/lib/desktopApi';
 import {
@@ -314,16 +315,19 @@ function PairBar({
       <p className="text-xs font-semibold text-[var(--loom-muted)]">
         Enter the 6-digit PIN shown on <span className="text-[var(--loom-text)]">{hostLabel}</span>
       </p>
-      <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-        <input
+      <div
+        className="mt-2 flex flex-col gap-3 sm:flex-row"
+        onKeyDown={(event) => { if (event.key === 'Enter' && ready) onConnect(); }}
+      >
+        <PinDigitInput
           value={pin}
-          onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 6))}
-          onKeyDown={(event) => { if (event.key === 'Enter' && ready) onConnect(); }}
-          placeholder="000000"
-          inputMode="numeric"
-          maxLength={6}
+          onChange={setPin}
+          length={6}
+          label="Six-digit pairing PIN"
+          digitLabel="Pairing PIN digit"
           autoFocus={autoFocusPin}
-          className="h-12 w-full min-w-0 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface)] px-3 text-center text-base font-semibold tracking-[0.3em] text-[var(--loom-text)] outline-none transition placeholder:text-[var(--loom-muted)]/45 focus:border-[var(--loom-accent)] focus:ring-1 focus:ring-[var(--loom-accent)] sm:max-w-[10rem]"
+          className="min-w-0 gap-1.5"
+          inputClassName="h-10 w-10 rounded-lg bg-[var(--loom-surface)] text-base"
         />
         <Button
           size="lg"

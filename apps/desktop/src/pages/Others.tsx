@@ -9,18 +9,21 @@ import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { useProgressSnapshot } from '@/lib/progress';
-import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { useProfiles } from '@/contexts/ProfileContext';
+import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 
 export default function Others() {
   const { state, addLibraryFolder } = useLibrary();
   const { isLoading, libraryFolderGroups } = state;
+  const { lists } = useProfiles();
   const othersFolders = useMemo(() => libraryFolderGroups.others || [], [libraryFolderGroups.others]);
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const progress = useProgressSnapshot();
+  const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const items = useMemo(
     () => otherFolderItems([...state.movies, ...state.tvShows, ...state.animeShows], othersFolders),
@@ -29,8 +32,8 @@ export default function Others() {
   const filteredItems = useMemo(
     () => items
       .filter((item) => matchesMediaItem(item, normalizedQuery))
-      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, items, normalizedQuery, progress],
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, items, listState, normalizedQuery, progress],
   );
 
   return (

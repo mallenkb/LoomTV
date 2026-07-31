@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import SharedListHighlight from '@/components/SharedListHighlight';
+import PinDigitInput from '@/components/profiles/PinDigitInput';
 import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -308,17 +309,19 @@ export default function NetworkSettingsSection({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={6}
-              value={remoteShareCode}
-              onChange={(event) => setRemoteShareCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="6-digit pairing PIN"
-              aria-label="One-time pairing PIN"
-              className="h-10 w-44 rounded-lg border border-[var(--loom-border)] bg-[var(--loom-bg)] px-3 text-center text-sm font-semibold tracking-[0.28em] text-white outline-none transition-colors placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]"
-            />
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-[var(--loom-muted)]">Pairing PIN</span>
+              <PinDigitInput
+                value={remoteShareCode}
+                onChange={setRemoteShareCode}
+                length={6}
+                label="Six-digit pairing PIN"
+                digitLabel="Pairing PIN digit"
+                className="gap-1.5"
+                inputClassName="h-10 w-10 rounded-lg bg-[var(--loom-bg)] text-base"
+              />
+            </div>
             <Button
               type="button"
               onClick={connectRemoteLibrary}

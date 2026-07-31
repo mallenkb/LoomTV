@@ -7,22 +7,25 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { useProgressSnapshot } from '@/lib/progress';
-import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { useProfiles } from '@/contexts/ProfileContext';
+import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 
 export default function Movies() {
   const { state, addLibraryFolder } = useLibrary();
   const { movies, isLoading, isScanning } = state;
+  const { lists } = useProfiles();
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const progress = useProgressSnapshot();
+  const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const filteredMovies = useMemo(() => movies
     .filter((item) => matchesMediaItem(item, normalizedQuery))
-    .filter((item) => matchesLibraryFilter(item, activeFilter, progress)), [activeFilter, movies, normalizedQuery, progress]);
+    .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)), [activeFilter, listState, movies, normalizedQuery, progress]);
 
   return (
     <LibraryPageLayout

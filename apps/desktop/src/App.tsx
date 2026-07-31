@@ -453,7 +453,7 @@ function AppShell() {
           title="Playback stopped unexpectedly"
           description="Your position was saved. Closing the player returns you to the library."
           actionLabel="Close player"
-          containerClassName="fixed inset-0 z-50"
+          containerClassName="fixed inset-0 z-[70]"
           onReset={handleClose}
         >
           <VideoPlayer

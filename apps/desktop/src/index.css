@@ -582,27 +582,28 @@ html.loom-mpv-active .loom-app-underlay {
   outline: none !important;
 }
 
-/* The Modern rail is a fixed overlay rather than a flow sibling, so content has
-   to clear it itself: the gutter carries the rail's width plus the inset, which
-   guarantees a real gap between nav and content at every window size rather
-   than only on wide screens where the max-width cap happens to provide one.
-   The inset scales with the viewport so wide windows get more air. */
+/* Modern's rail is fixed, so every page resolves its frame inside the usable
+   viewport to the right of that rail. The outer frame includes one inset on
+   each side; its content therefore caps at --loom-frame-max-width while the
+   complete frame caps at max-width + both insets. This is the single geometry
+   used by Home, library/custom-folder pages, details, and Settings. */
 :root[data-home-style="modern"] {
   --loom-sidebar-width: 5rem;
   --loom-frame-inset: clamp(2rem, 2.6vw, 3.5rem);
-  --loom-frame-gutter: calc(var(--loom-sidebar-width) + var(--loom-frame-inset));
-  --loom-frame-start: calc(var(--loom-sidebar-width) + var(--loom-frame-inset));
-  --loom-frame-end: var(--loom-frame-inset);
-  /* Detail and home use the exact same centred canvas. The nav overlays the
-     left gutter, so reserving it only on the detail page made that page drift
-     right by half a sidebar on wide windows. */
-  --loom-detail-frame-edge: max(
-    var(--loom-frame-gutter),
-    calc((100vw - var(--loom-frame-max-width)) / 2)
+  --loom-frame-outer-max-width: calc(var(--loom-frame-max-width) + (var(--loom-frame-inset) * 2));
+  --loom-frame-edge: max(
+    var(--loom-frame-inset),
+    calc((100vw - var(--loom-sidebar-width) - var(--loom-frame-outer-max-width)) / 2)
   );
-  --loom-detail-frame-start: var(--loom-detail-frame-edge);
-  --loom-detail-frame-end: var(--loom-detail-frame-edge);
-  --loom-detail-frame-width: calc(100% - (var(--loom-detail-frame-edge) * 2));
+  --loom-frame-start: calc(var(--loom-sidebar-width) + var(--loom-frame-edge));
+  --loom-frame-end: var(--loom-frame-edge);
+  --loom-frame-content-start: calc(var(--loom-frame-start) + var(--loom-frame-inset));
+  --loom-frame-content-end: calc(var(--loom-frame-end) + var(--loom-frame-inset));
+  --loom-frame-content-width: calc(100% - var(--loom-frame-content-start) - var(--loom-frame-content-end));
+  --loom-frame-gutter: var(--loom-frame-content-start);
+  --loom-detail-frame-start: var(--loom-frame-content-start);
+  --loom-detail-frame-end: var(--loom-frame-content-end);
+  --loom-detail-frame-width: var(--loom-frame-content-width);
 }
 
 /* The shared page frame. Anything that should line up with the rest of the app
@@ -612,6 +613,13 @@ html.loom-mpv-active .loom-app-underlay {
   max-width: var(--loom-frame-max-width);
   margin-inline: auto;
   padding-inline: var(--loom-frame-inset);
+}
+
+:root[data-home-style="modern"] .loom-frame {
+  width: calc(100% - var(--loom-frame-start) - var(--loom-frame-end));
+  max-width: none;
+  margin-right: var(--loom-frame-end);
+  margin-left: var(--loom-frame-start);
 }
 
 /* Distance from the viewport edge to the frame's content edge. Floating
@@ -647,9 +655,27 @@ html.loom-mpv-active .loom-app-underlay {
   margin-left: var(--loom-frame-start);
 }
 
+:root[data-home-style="modern"] .loom-modern-header {
+  right: 0;
+  left: var(--loom-sidebar-width);
+}
+
+:root[data-home-style="modern"] .loom-library-search-modern {
+  right: var(--loom-frame-content-end);
+  left: var(--loom-frame-content-start);
+}
+
+:root[data-home-style="modern"] .loom-modern-home > .loom-library-search-slot {
+  right: var(--loom-frame-content-end);
+}
+
 .loom-modern-hero-artwork {
-  width: calc(100% - (var(--loom-frame-gutter) * 2));
-  max-width: var(--loom-frame-max-width);
+  right: var(--loom-frame-content-end);
+  left: var(--loom-frame-content-start);
+  width: auto;
+  max-width: none;
+  margin-right: 0;
+  margin-left: 0;
 }
 
 :root[data-theme="dark"][data-home-style="modern"] .loom-page {
@@ -908,6 +934,17 @@ html.loom-mpv-active .loom-app-underlay {
   overflow-x: clip;
 }
 
+/* Every route owns its vertical scrolling instead of delegating it to body.
+   Keep programmatic, keyboard, and touch scrolling consistent across classic
+   pages, Modern Home, and the full-screen library search surface. */
+.loom-page,
+.loom-modern-home,
+.loom-modern-search-overlay {
+  scroll-behavior: smooth;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 body.platform-darwin .loom-sidebar-brand {
   padding-top: 2.75rem;
 }
@@ -1002,6 +1039,12 @@ body.platform-darwin .loom-player-top-control {
   pointer-events: none;
 }
 
+/* Keep classic detail copy and controls above the backdrop's z-indexed edge
+   scrim. Modern details raise this wrapper further below for their own layers. */
+.loom-detail-hero-content-wrap {
+  z-index: 2;
+}
+
 /* Light theme cannot reuse the dark fade. There, --loom-bg is near-black, so
    blending the page colour up the hero also darkens it and the forced-white
    hero copy stays readable. In light theme --loom-bg is #f5f5f5, so the same
@@ -1076,9 +1119,10 @@ body.platform-darwin .loom-player-top-control {
    declaration and drops it, so any `translate: none` reset written alongside
    `transform: none` disappeared from the bundle and the utility won. */
 .loom-detail-page-modern .loom-detail-cover-image {
-  right: auto;
+  right: var(--loom-detail-frame-end);
   left: var(--loom-detail-frame-start);
-  width: var(--loom-detail-frame-width);
+  z-index: 0;
+  width: auto;
   margin: 0;
 }
 
@@ -1086,12 +1130,12 @@ body.platform-darwin .loom-player-top-control {
    The old desktop exception forced this image to 100% width, which made it
    spill beyond the shared max-width canvas on ultrawide displays. */
 body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-modern .loom-detail-cover-image {
-  right: 0;
-  left: 0;
-  width: calc(100% - (var(--loom-frame-gutter) * 2));
-  max-width: var(--loom-frame-max-width);
-  margin-right: auto;
-  margin-left: auto;
+  right: var(--loom-detail-frame-end);
+  left: var(--loom-detail-frame-start);
+  z-index: 0;
+  width: auto;
+  max-width: none;
+  margin: 0;
 }
 
 /* The side fades ease out over eleven stops per edge instead of three. Alpha
@@ -1126,7 +1170,7 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 }
 
 .loom-detail-page-modern .loom-detail-hero-fade {
-  z-index: 2;
+  z-index: 1;
   bottom: -1px;
   background: linear-gradient(
     180deg,
@@ -1210,10 +1254,13 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 .loom-detail-page-modern .loom-detail-hero-content-wrap {
   /* The body fade deliberately overlaps this area. Keep the interactive hero
      controls above that visual layer so the blend cannot intercept clicks. */
-  z-index: 5;
+  position: absolute;
+  z-index: 6;
 }
 
 .loom-detail-page-modern .loom-detail-hero-content {
+  position: relative;
+  z-index: 1;
   width: var(--loom-detail-frame-width);
   max-width: none;
   margin-right: var(--loom-detail-frame-end);
@@ -1222,7 +1269,7 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   align-items: flex-end;
   justify-content: flex-start;
   gap: 1.5rem;
-  padding: 3rem var(--loom-frame-inset) 2.5rem;
+  padding: 3rem 0 2.5rem;
 }
 
 @media (min-width: 768px) {
@@ -1342,16 +1389,16 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 }
 
 .loom-detail-page-modern .loom-detail-back {
-  left: calc(var(--loom-detail-frame-start) + var(--loom-frame-inset));
+  left: var(--loom-detail-frame-start);
   border-radius: 9999px;
 }
 
 body.platform-darwin .loom-detail-page-modern .loom-detail-back {
-  left: calc(var(--loom-detail-frame-start) + var(--loom-frame-inset));
+  left: var(--loom-detail-frame-start);
 }
 
 .loom-detail-page-modern .loom-artwork-editor-controls {
-  right: calc(var(--loom-detail-frame-end) + var(--loom-frame-inset));
+  right: var(--loom-detail-frame-end);
 }
 
 .loom-detail-page-modern .loom-artwork-fix-button,
@@ -1363,7 +1410,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   border-radius: 9999px;
 }
 
-.loom-detail-page-modern .loom-detail-body {
+.loom-detail-page-modern .loom-detail-body.loom-frame {
   --loom-detail-canvas: #000000;
   --loom-detail-blend-overlap: clamp(8rem, 14vw, 13rem);
   position: relative;
@@ -1407,8 +1454,8 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 .loom-detail-page-modern .loom-detail-body > .loom-detail-content {
   position: relative;
   z-index: 1;
-  padding-right: var(--loom-frame-inset);
-  padding-left: var(--loom-frame-inset);
+  padding-right: 0;
+  padding-left: 0;
 }
 
 .loom-detail-page-modern .loom-detail-content > section,
@@ -1541,15 +1588,9 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   background: var(--loom-bg);
 }
 
-:root[data-home-style="modern"] .loom-settings-page > .page-bottom-safe {
-  max-width: none;
-  padding-right: 0;
-  padding-left: 0;
-}
-
 :root[data-home-style="modern"] .loom-settings-content {
-  width: calc(100% - (var(--loom-frame-gutter) * 2));
-  max-width: 50rem;
+  width: 100%;
+  max-width: none;
   padding-top: 6rem;
 }
 
@@ -1557,15 +1598,9 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   left: 0;
 }
 
-:root[data-home-style="modern"] .loom-settings-tabs-positioner > .loom-frame {
-  max-width: none;
-  padding-right: 0;
-  padding-left: 0;
-}
-
 :root[data-home-style="modern"] .loom-settings-tabs-frame {
-  width: calc(100% - (var(--loom-frame-gutter) * 2));
-  max-width: 50rem;
+  width: 100%;
+  max-width: none;
 }
 
 :root[data-home-style="modern"] .loom-settings-tabs {
@@ -2331,6 +2366,11 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   :root[data-home-style="modern"] {
     /* The sidebar becomes a bottom bar at this breakpoint, so detail pages no
        longer reserve horizontal rail space. */
+    --loom-frame-start: 0px;
+    --loom-frame-end: 0px;
+    --loom-frame-content-start: 0px;
+    --loom-frame-content-end: 0px;
+    --loom-frame-content-width: 100%;
     --loom-detail-frame-start: 0px;
     --loom-detail-frame-end: 0px;
     --loom-detail-frame-width: 100%;
@@ -2366,8 +2406,15 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
 @media (max-width: 760px) {
   .loom-modern-header {
+    right: 0;
+    left: 0;
     top: max(0.75rem, env(safe-area-inset-top));
     padding-inline: 1rem;
+  }
+
+  :root[data-home-style="modern"] .loom-library-search-modern {
+    right: 0;
+    left: 0;
   }
 
   .loom-modern-header nav {

@@ -1,11 +1,21 @@
 import type { MediaItem, TVShow } from '@/contexts/LibraryContext';
 import type { StoredProgress } from '@/lib/desktopApi';
 
-export type LibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched' | 'missing-metadata' | 'missing-artwork';
+export type LibraryFilter = 'all' | 'my-list' | 'favorites' | 'in-progress' | 'unwatched' | 'watched' | 'missing-metadata' | 'missing-artwork';
 
 export interface LibraryFilterOption {
   id: LibraryFilter;
   label: string;
+}
+
+export interface LibraryListEntryLike {
+  mediaId: string;
+  kind: string;
+}
+
+export interface LibraryListState {
+  myListIds: ReadonlySet<string>;
+  favoriteIds: ReadonlySet<string>;
 }
 
 export const primaryLibraryFilterOptions: LibraryFilterOption[] = [
@@ -15,6 +25,11 @@ export const primaryLibraryFilterOptions: LibraryFilterOption[] = [
   { id: 'watched', label: 'Watched' },
 ];
 
+export const personalLibraryFilterOptions: LibraryFilterOption[] = [
+  { id: 'my-list', label: 'My List' },
+  { id: 'favorites', label: 'Favorites' },
+];
+
 export const issueLibraryFilterOptions: LibraryFilterOption[] = [
   { id: 'missing-metadata', label: 'Missing Metadata' },
   { id: 'missing-artwork', label: 'Missing Artwork' },
@@ -22,8 +37,20 @@ export const issueLibraryFilterOptions: LibraryFilterOption[] = [
 
 export const libraryFilterOptions: LibraryFilterOption[] = [
   ...primaryLibraryFilterOptions,
+  ...personalLibraryFilterOptions,
   ...issueLibraryFilterOptions,
 ];
+
+export function createLibraryListState(entries: readonly LibraryListEntryLike[]): LibraryListState {
+  return {
+    myListIds: new Set(entries
+      .filter((entry) => entry.kind === 'watchlist' || entry.kind === 'favorite')
+      .map((entry) => entry.mediaId)),
+    favoriteIds: new Set(entries
+      .filter((entry) => entry.kind === 'favorite')
+      .map((entry) => entry.mediaId)),
+  };
+}
 
 const WATCHED_THRESHOLD = 0.9;
 
@@ -88,8 +115,11 @@ export function matchesLibraryFilter(
   item: MediaItem | TVShow,
   filter: LibraryFilter,
   progress: Record<string, StoredProgress>,
+  listState?: LibraryListState,
 ): boolean {
   if (filter === 'all') return true;
+  if (filter === 'my-list') return Boolean(listState?.myListIds.has(item.id));
+  if (filter === 'favorites') return Boolean(listState?.favoriteIds.has(item.id));
   if (filter === 'missing-metadata') return !hasMetadata(item);
   if (filter === 'missing-artwork') return !hasArtwork(item);
 

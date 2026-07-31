@@ -13,7 +13,7 @@ export default function SettingsTabs({ activeSection, onSelect, sections = SETTI
       className="loom-settings-tabs-positioner loom-no-drag pointer-events-none fixed top-6 z-40"
     >
       <div className="loom-frame">
-        <div className="loom-settings-tabs-frame mx-auto max-w-5xl">
+        <div className="loom-settings-tabs-frame mx-auto max-w-[var(--loom-frame-max-width)]">
           <SharedListHighlight
             activeId={activeSection}
             followPointer={false}

@@ -6,6 +6,7 @@ import { useLibraryFilterVisibility } from '@/contexts/LibraryFilterVisibilityCo
 import {
   libraryFilterOptions,
   issueLibraryFilterOptions,
+  personalLibraryFilterOptions,
   primaryLibraryFilterOptions,
   type LibraryFilterOption,
   type LibraryFilter,
@@ -78,6 +79,12 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
           className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-lg bg-[var(--loom-surface)] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
         >
           <SharedListHighlight activeId={activeFilter} followPointer={false} className="loom-shared-highlight-menu">
+            <FilterMenuGroup
+              label="Personal lists"
+              activeFilter={activeFilter}
+              options={personalLibraryFilterOptions}
+              onChoose={chooseFilter}
+            />
             <FilterMenuGroup
               label="Watch status"
               activeFilter={activeFilter}

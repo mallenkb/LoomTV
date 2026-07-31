@@ -14,7 +14,7 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
-import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -28,6 +28,7 @@ function DefaultHome() {
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
   const myListItems = useMemo(() => {
@@ -65,30 +66,30 @@ function DefaultHome() {
       .map(([item]) => item);
   }, [animeShows, movies, tvShows, progress]);
   const visibleMyListItems = useMemo(
-    () => myListItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, myListItems, progress],
+    () => myListItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, listState, myListItems, progress],
   );
   const visibleContinueWatching = useMemo(
-    () => continueWatching.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, continueWatching, progress],
+    () => continueWatching.filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, continueWatching, listState, progress],
   );
   const filteredAnime = useMemo(
     () => animeShows
       .filter((item) => matchesMediaItem(item, normalizedQuery))
-      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, animeShows, normalizedQuery, progress],
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, animeShows, listState, normalizedQuery, progress],
   );
   const filteredTVShows = useMemo(
     () => tvShows
       .filter((item) => matchesMediaItem(item, normalizedQuery))
-      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, normalizedQuery, progress, tvShows],
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, listState, normalizedQuery, progress, tvShows],
   );
   const filteredMovies = useMemo(
     () => movies
       .filter((item) => matchesMediaItem(item, normalizedQuery))
-      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
-    [activeFilter, movies, normalizedQuery, progress],
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
+    [activeFilter, listState, movies, normalizedQuery, progress],
   );
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;

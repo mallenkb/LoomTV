@@ -1,8 +1,12 @@
-import { useState } from 'react';
-import { Lock, Users } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Bookmark, Lock, Users } from 'lucide-react';
 import { useProfiles } from '@/contexts/ProfileContext';
+import { useLibrary, type MediaItem } from '@/contexts/LibraryContext';
 import ProfileAvatar from '@/components/profiles/ProfileAvatar';
 import PinDigitInput from '@/components/profiles/PinDigitInput';
+import MediaPosterCard from '@/components/MediaPosterCard';
+import MediaRail from '@/components/MediaRail';
+import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export default function ProfilesSettingsSection() {
@@ -13,12 +17,36 @@ export default function ProfilesSettingsSection() {
     lockProfile,
     openGate,
     setAutomaticSignIn,
+    lists,
   } = useProfiles();
+  const { state: libraryState } = useLibrary();
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [showRemovePinConfirm, setShowRemovePinConfirm] = useState(false);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
+  const savedItems = useMemo(() => {
+    const byId = new Map([...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows].map((item) => [item.id, item]));
+    const seen = new Set<string>();
+    return lists
+      .filter((entry) => entry.kind === 'watchlist' || entry.kind === 'favorite')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .filter((entry) => {
+        if (seen.has(entry.mediaId)) return false;
+        seen.add(entry.mediaId);
+        return true;
+      })
+      .map((entry) => byId.get(entry.mediaId))
+      .filter((item): item is MediaItem => Boolean(item));
+  }, [libraryState.animeShows, libraryState.movies, libraryState.tvShows, lists]);
+  const favoriteItems = useMemo(() => {
+    const byId = new Map([...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows].map((item) => [item.id, item]));
+    return lists
+      .filter((entry) => entry.kind === 'favorite')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((entry) => byId.get(entry.mediaId))
+      .filter((item): item is MediaItem => Boolean(item));
+  }, [libraryState.animeShows, libraryState.movies, libraryState.tvShows, lists]);
   if (!activeProfile) return null;
 
   const handleLock = async () => {
@@ -86,6 +114,34 @@ export default function ProfilesSettingsSection() {
           <input type="checkbox" checked={activeState.automaticSignIn} onChange={(event) => void setAutomaticSignIn(event.target.checked)} className="h-4 w-4 accent-[var(--loom-accent)]" />
         </label>
       )}
+
+      <section className="space-y-5 border-t border-[var(--loom-surface-3)] pt-5">
+        <div className="flex items-start gap-3">
+          <Bookmark className="mt-0.5 h-4 w-4 shrink-0 text-[var(--loom-accent)]" />
+          <div>
+            <h3 className="text-sm font-semibold">Saved titles</h3>
+            <p className="mt-1 text-xs text-[var(--loom-muted)]">Bookmarks and favorites belong to {activeProfile.name} and are only shown for this profile.</p>
+          </div>
+        </div>
+        {savedItems.length > 0 ? (
+          <MediaRail title="My List" variant="modern">
+            {savedItems.slice(0, 24).map((item) => (
+              <MediaPosterCard key={item.id} item={item} from="/settings" variant="home" metaLine={mediaMetaLine(item)} />
+            ))}
+          </MediaRail>
+        ) : (
+          <p className="rounded-xl border border-dashed border-[var(--loom-surface-3)] px-4 py-5 text-center text-sm text-[var(--loom-muted)]">
+            No saved titles yet. Use the bookmark button on a movie or show to add one.
+          </p>
+        )}
+        {favoriteItems.length > 0 && (
+          <MediaRail title="Favorites" variant="modern">
+            {favoriteItems.slice(0, 24).map((item) => (
+              <MediaPosterCard key={item.id} item={item} from="/settings" variant="home" metaLine={mediaMetaLine(item)} />
+            ))}
+          </MediaRail>
+        )}
+      </section>
 
       <Dialog
         open={showPinSetup}

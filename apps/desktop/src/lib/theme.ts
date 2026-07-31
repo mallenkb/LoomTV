@@ -70,6 +70,21 @@ export const DARK_THEMES: Record<AppDarkTheme, {
   },
 };
 
+const MODERN_DARK_PALETTE = {
+  bg: '#000000',
+  surface: '#111111',
+  surface2: '#0b0b0c',
+  surface3: '#202022',
+  sidebar: '#000000',
+  muted: 'rgba(255, 255, 255, 0.62)',
+  faint: 'rgba(255, 255, 255, 0.38)',
+  border: 'rgba(255, 255, 255, 0.08)',
+  panel: 'rgba(12, 12, 14, 0.72)',
+  panelBorder: 'rgba(255, 255, 255, 0.10)',
+  bodyStart: '#000000',
+  bodyEnd: '#000000',
+} satisfies Omit<(typeof DARK_THEMES)[AppDarkTheme], 'label' | 'description'>;
+
 export function normalizeThemeMode(value?: string): AppThemeMode {
   return value === 'light' ? 'light' : 'dark';
 }
@@ -155,8 +170,16 @@ export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
     bodyStart: '#f5f5f5',
     bodyEnd: '#f5f5f5',
   };
-  const themePalette = mode === 'light' ? lightPalette : darkPalette;
-  const foreground = mode === 'light' ? '#171717' : '#fafafa';
+  // Modern's stylesheet declares its own cinematic palette, but applyTheme()
+  // writes these tokens inline on the root and therefore wins the cascade.
+  // Select that palette here too so Home, its artwork fades/search overlay,
+  // and the other Modern pages all resolve against the same canvas colour.
+  const themePalette = homeStyle === 'modern'
+    ? MODERN_DARK_PALETTE
+    : mode === 'light'
+      ? lightPalette
+      : darkPalette;
+  const foreground = homeStyle === 'modern' ? '#ffffff' : mode === 'light' ? '#171717' : '#fafafa';
   const accentForeground = palette.foreground;
   const accentForegroundMuted = palette.foregroundMuted;
   const root = document.documentElement;

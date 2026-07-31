@@ -807,7 +807,7 @@ export default function Settings() {
   return (
     <div className={`loom-page loom-settings-page h-full overflow-y-auto ${isMobileSettingsMenuOpen ? 'loom-settings-menu-open' : 'loom-settings-detail-open'}`}>
       <div className="loom-frame page-bottom-safe pt-6">
-        <div className="loom-settings-content mx-auto max-w-5xl pt-16">
+        <div className="loom-settings-content mx-auto max-w-[var(--loom-frame-max-width)] pt-16">
           <SettingsTabs activeSection={activeSection} onSelect={handleSectionSelect} sections={visibleSettingsSections} />
 
           <div className="loom-settings-mobile-menu">

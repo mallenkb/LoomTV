@@ -8,6 +8,9 @@ type PinDigitInputProps = {
   disabled?: boolean;
   label?: string;
   className?: string;
+  inputClassName?: string;
+  length?: number;
+  digitLabel?: string;
 };
 
 const PIN_LENGTH = 4;
@@ -19,9 +22,12 @@ export default function PinDigitInput({
   disabled = false,
   label = 'Four-digit PIN',
   className,
+  inputClassName,
+  length = PIN_LENGTH,
+  digitLabel = 'PIN digit',
 }: PinDigitInputProps) {
   const inputs = useRef<Array<HTMLInputElement | null>>([]);
-  const digits = Array.from({ length: PIN_LENGTH }, (_, index) => value[index] || '');
+  const digits = Array.from({ length }, (_, index) => value[index] || '');
 
   const replaceDigit = (index: number, input: string) => {
     const digit = input.replace(/\D/g, '').slice(-1);
@@ -51,11 +57,11 @@ export default function PinDigitInput({
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
-    const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, PIN_LENGTH);
+    const pasted = event.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
     if (!pasted) return;
     event.preventDefault();
     onChange(pasted);
-    inputs.current[Math.min(pasted.length, PIN_LENGTH) - 1]?.focus();
+    inputs.current[Math.min(pasted.length, length) - 1]?.focus();
   };
 
   return (
@@ -75,8 +81,8 @@ export default function PinDigitInput({
           autoComplete={index === 0 ? 'one-time-code' : 'off'}
           autoFocus={autoFocus && index === 0}
           disabled={disabled}
-          aria-label={`PIN digit ${index + 1}`}
-          className="h-12 w-12 rounded-lg border border-[var(--loom-surface-3)] bg-[var(--loom-surface-2)] text-center text-xl font-semibold text-[var(--loom-text)] outline-none transition-colors focus:border-[var(--loom-accent)] focus:ring-2 focus:ring-[var(--loom-accent)]/25 disabled:opacity-50"
+          aria-label={`${digitLabel} ${index + 1}`}
+          className={cn('h-12 w-12 rounded-lg border border-[var(--loom-surface-3)] bg-[var(--loom-surface-2)] text-center text-xl font-semibold text-[var(--loom-text)] outline-none transition-colors focus:border-[var(--loom-accent)] focus:ring-2 focus:ring-[var(--loom-accent)]/25 disabled:opacity-50', inputClassName)}
         />
       ))}
     </div>

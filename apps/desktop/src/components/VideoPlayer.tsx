@@ -2787,7 +2787,7 @@ export default function VideoPlayer({
   };
   return (
     <div
-      className={`loom-player-root fixed inset-0 z-50 flex ${mpvActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
+      className={`loom-player-root fixed inset-0 z-[70] flex ${mpvActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
       ref={containerRef}
     >
       <style>
