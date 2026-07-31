@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode, useCallback } from 'react';
-import { desktopApi } from '@/lib/desktopApi';
+import { desktopApi, type LibraryIndexPayload } from '@/lib/desktopApi';
 import { migrateLegacyArtwork } from '@/lib/customArtwork';
 import { hydrateProgressFromDatabase } from '@/lib/progress';
 import { useProfiles } from './ProfileContext';
@@ -34,6 +34,8 @@ export interface MediaItem {
     malId?: string;
     malIdBySeason?: Record<string, string>;
   };
+  /** Present only on lightweight catalog cards. Full details are fetched on demand. */
+  catalogRevision?: number;
 }
 
 export interface EpisodeMeta {
@@ -107,6 +109,8 @@ interface LibraryState {
   isLoading: boolean;
   isStartupPrepared: boolean;
   autoSyncIntervalHours: number;
+  catalogRevision: number | null;
+  catalogTransport: 'compact' | 'legacy';
 }
 
 type LibraryAction =
@@ -119,6 +123,8 @@ type LibraryAction =
         libraryFolders?: string[];
         libraryFolderGroups?: Partial<LibraryFolderGroups>;
         libraryFolderStatuses?: LibraryFolderStatus[];
+        catalogRevision?: number | null;
+        catalogTransport?: 'compact' | 'legacy';
       };
     }
   | { type: 'SET_MOVIES'; payload: MediaItem[] }
@@ -145,6 +151,8 @@ const initialState: LibraryState = {
   isLoading: true,
   isStartupPrepared: false,
   autoSyncIntervalHours: 12,
+  catalogRevision: null,
+  catalogTransport: 'legacy',
 };
 
 function valuesEqual(left: unknown, right: unknown): boolean {
@@ -197,6 +205,10 @@ function libraryReducer(state: LibraryState, action: LibraryAction): LibraryStat
         state.libraryFolderStatuses,
         action.payload.libraryFolderStatuses || [],
       );
+      const catalogRevision = action.payload.catalogRevision === undefined
+        ? state.catalogRevision
+        : action.payload.catalogRevision;
+      const catalogTransport = action.payload.catalogTransport ?? state.catalogTransport;
       if (
         movies === state.movies
         && tvShows === state.tvShows
@@ -204,6 +216,8 @@ function libraryReducer(state: LibraryState, action: LibraryAction): LibraryStat
         && libraryFolders === state.libraryFolders
         && libraryFolderGroups === state.libraryFolderGroups
         && libraryFolderStatuses === state.libraryFolderStatuses
+        && catalogRevision === state.catalogRevision
+        && catalogTransport === state.catalogTransport
       ) return state;
       return {
         ...state,
@@ -213,6 +227,8 @@ function libraryReducer(state: LibraryState, action: LibraryAction): LibraryStat
         libraryFolders,
         libraryFolderGroups,
         libraryFolderStatuses,
+        catalogRevision,
+        catalogTransport,
       };
     }
     case 'SET_MOVIES': {
@@ -271,6 +287,7 @@ interface LibraryContextType {
   refreshLibrary: () => Promise<void>;
   clearAppData: () => Promise<void>;
   setAutoSyncIntervalHours: (hours: number) => Promise<void>;
+  hydrateLibraryItem: (mediaId: string) => Promise<MediaItem | null>;
 }
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
@@ -297,11 +314,84 @@ function hasConfiguredFolders(data: {
   );
 }
 
+const DETAIL_CACHE_LIMIT = 32;
+
+function mediaItemFromCatalogCard(
+  card: LibraryIndexPayload['movies'][number],
+  revision: number,
+): MediaItem {
+  const playbackReferences = card.playbackReferences || [];
+  const firstReference = playbackReferences[0];
+  const episodeFiles = playbackReferences
+    .filter((reference) => Number.isFinite(reference.season) && Number.isFinite(reference.episode))
+    .map((reference) => ({
+      season: reference.season as number,
+      episode: reference.episode as number,
+      filePath: reference.progressKey,
+      title: `Episode ${reference.episode}`,
+      ...(reference.durationSeconds ? { localMetadata: { durationSeconds: reference.durationSeconds } } : {}),
+    }));
+  return {
+    id: card.id,
+    type: card.type,
+    title: card.title,
+    year: card.year || 0,
+    poster: card.poster,
+    backdrop: card.backdrop,
+    logo: card.logo,
+    posterCandidates: card.posterCandidates,
+    backdropCandidates: card.backdropCandidates,
+    logoCandidates: card.logoCandidates,
+    summary: card.summary,
+    rating: card.rating,
+    genres: card.genres,
+    cast: [],
+    filePath: firstReference?.progressKey || '',
+    lastPlayed: card.lastPlayed,
+    seasons: card.seasons,
+    episodeFiles,
+    ...(episodeFiles.length === 0 && firstReference?.durationSeconds
+      ? { localMetadata: { durationSeconds: firstReference.durationSeconds } }
+      : {}),
+    catalogRevision: revision,
+  };
+}
+
+function libraryDataFromIndex(index: LibraryIndexPayload) {
+  return {
+    movies: index.movies.map((item) => mediaItemFromCatalogCard(item, index.revision)),
+    tvShows: index.tvShows.map((item) => mediaItemFromCatalogCard(item, index.revision)),
+    animeShows: index.animeShows.map((item) => mediaItemFromCatalogCard(item, index.revision)),
+    libraryFolders: index.libraryFolders,
+    libraryFolderGroups: index.libraryFolderGroups,
+    libraryFolderStatuses: index.libraryFolderStatuses,
+    catalogRevision: index.revision,
+    catalogTransport: 'compact' as const,
+  };
+}
+
+function findItemInState(state: LibraryState, mediaId: string): MediaItem | null {
+  return [...state.movies, ...state.tvShows, ...state.animeShows].find((item) => item.id === mediaId) || null;
+}
+
+function rememberBoundedDetail(cache: Map<string, MediaItem>, key: string, item: MediaItem): void {
+  cache.delete(key);
+  cache.set(key, item);
+  while (cache.size > DETAIL_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    cache.delete(oldest);
+  }
+}
+
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const { activeProfile } = useProfiles();
   const [state, dispatch] = useReducer(libraryReducer, initialState);
   const isScanningRef = useRef(false);
   const hasConfiguredFoldersRef = useRef(false);
+  const detailCacheRef = useRef(new Map<string, MediaItem>());
+  const detailRequestsRef = useRef(new Map<string, Promise<MediaItem | null>>());
+  const legacyFallbackCountRef = useRef(0);
 
   const applyLibraryData = useCallback((data: {
     movies?: MediaItem[];
@@ -310,6 +400,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     libraryFolders?: string[];
     libraryFolderGroups?: Partial<LibraryFolderGroups>;
     libraryFolderStatuses?: LibraryFolderStatus[];
+    catalogRevision?: number | null;
+    catalogTransport?: 'compact' | 'legacy';
   }) => {
     dispatch({
       type: 'SET_LIBRARY_DATA',
@@ -320,6 +412,26 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       },
     });
   }, []);
+
+  const applyCompactIndex = useCallback((index: LibraryIndexPayload) => {
+    const compact = libraryDataFromIndex(index);
+    applyLibraryData(compact);
+    return compact;
+  }, [applyLibraryData]);
+
+  const loadPrimaryCatalog = useCallback(async () => {
+    const index = await desktopApi.getLibraryIndex();
+    if (index?.catalogVersion === 1) {
+      return applyCompactIndex(index);
+    }
+
+    legacyFallbackCountRef.current += 1;
+    console.warn(`[catalog] Compact index unavailable; using legacy library payload (fallback ${legacyFallbackCountRef.current}).`);
+    const legacy = await desktopApi.getLibrary();
+    const fallback = { ...legacy, catalogRevision: null, catalogTransport: 'legacy' as const };
+    applyLibraryData(fallback);
+    return fallback;
+  }, [applyCompactIndex, applyLibraryData]);
 
   const applyScanProgress = useCallback((progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
     if (!progress) return;
@@ -337,8 +449,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const refreshLibrary = async () => {
     try {
-      const data = await desktopApi.getLibrary();
-      applyLibraryData(data);
+      await loadPrimaryCatalog();
     } catch (error) {
       console.error('Failed to load library:', error);
     } finally {
@@ -346,14 +457,51 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const hydrateLibraryItem = useCallback(async (mediaId: string): Promise<MediaItem | null> => {
+    const catalogItem = findItemInState(state, mediaId);
+    if (!catalogItem || catalogItem.catalogRevision === undefined || state.catalogRevision === null) return catalogItem;
+    const key = `${activeProfile?.id || 'profile:none'}:${state.catalogRevision}:${mediaId}`;
+    const cached = detailCacheRef.current.get(key);
+    if (cached) {
+      rememberBoundedDetail(detailCacheRef.current, key, cached);
+      return cached;
+    }
+    const pending = detailRequestsRef.current.get(key);
+    if (pending) return pending;
+
+    const request = desktopApi.getLibraryItem(mediaId)
+      .then(async (payload) => {
+        if (!payload) {
+          legacyFallbackCountRef.current += 1;
+          console.warn(`[catalog] Item details unavailable; using legacy library payload (fallback ${legacyFallbackCountRef.current}).`);
+          const legacy = await desktopApi.getLibrary();
+          const detail = [...legacy.movies, ...legacy.tvShows, ...(legacy.animeShows || [])]
+            .find((item) => item.id === mediaId) as MediaItem | undefined;
+          if (detail) rememberBoundedDetail(detailCacheRef.current, key, detail);
+          return detail || null;
+        }
+        if (payload.revision !== state.catalogRevision) {
+          console.warn('[catalog] Ignored media details from a stale catalog revision.');
+          return catalogItem;
+        }
+        const item = payload.item as MediaItem;
+        rememberBoundedDetail(detailCacheRef.current, key, item);
+        return item;
+      })
+      .finally(() => detailRequestsRef.current.delete(key));
+    detailRequestsRef.current.set(key, request);
+    return request;
+  }, [activeProfile?.id, state]);
+
   const runLibraryScan = async (mode: 'quick' | 'metadata' | 'full') => {
     if (isScanningRef.current) return;
     isScanningRef.current = true;
     dispatch({ type: 'SET_SCANNING', payload: true });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
-      const data = await desktopApi.scanLibrary(mode);
-      applyLibraryData(data);
+      const index = await desktopApi.scanLibrary(mode);
+      if (index?.catalogVersion === 1) applyCompactIndex(index);
+      else await loadPrimaryCatalog();
     } catch (error) {
       console.error('Failed to scan library:', error);
     } finally {
@@ -369,8 +517,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const addLibraryFolder = async (kind: LibraryFolderKind = 'movies') => {
     try {
-      const data = await desktopApi.addLibraryFolder(kind);
-      if (data) applyLibraryData(data);
+      const index = await desktopApi.addLibraryFolder(kind);
+      if (index?.catalogVersion === 1) applyCompactIndex(index);
     } catch (error) {
       console.error('Failed to add library folder:', error);
     } finally {
@@ -380,8 +528,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const removeLibraryFolder = async (folder: string) => {
     try {
-      const data = await desktopApi.removeLibraryFolder(folder);
-      applyLibraryData(data);
+      const index = await desktopApi.removeLibraryFolder(folder);
+      applyCompactIndex(index);
     } catch (error) {
       console.error('Failed to remove library folder:', error);
     }
@@ -392,8 +540,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_SCANNING', payload: false });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
-      const data = await desktopApi.clearAppData();
-      applyLibraryData(data);
+      const index = await desktopApi.clearAppData();
+      applyCompactIndex(index);
       dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: initialState.autoSyncIntervalHours });
     } catch (error) {
       console.error('Failed to clear app data:', error);
@@ -418,7 +566,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   useEffect(() => {
-    return desktopApi.onLibraryScanProgress((_library, progress) => {
+    return desktopApi.onLibraryScanProgress((progress) => {
       applyScanProgress(progress);
       dispatch({ type: 'SET_LOADING', payload: false });
     });
@@ -430,11 +578,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     const prepareLibrary = async () => {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_STARTUP_PREPARED', payload: false });
-      let cached: Awaited<ReturnType<typeof desktopApi.getLibrary>> | null = null;
+      let cached: Awaited<ReturnType<typeof loadPrimaryCatalog>> | null = null;
       try {
-        cached = await desktopApi.getLibrary();
+        cached = await loadPrimaryCatalog();
         if (cancelled) return;
-        applyLibraryData(cached);
       } catch (error) {
         console.error('Failed to load library:', error);
       }
@@ -473,8 +620,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_SCANNING', payload: true });
           dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
           try {
-            const scanned = await desktopApi.scanLibrary('quick');
-            if (!cancelled) applyLibraryData(scanned);
+            const index = await desktopApi.scanLibrary('quick');
+            if (!cancelled && index?.catalogVersion === 1) applyCompactIndex(index);
           } catch (error) {
             console.error('Failed to scan library:', error);
           }
@@ -491,7 +638,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [activeProfile?.type, applyLibraryData]);
+  }, [activeProfile?.id, activeProfile?.type, applyCompactIndex, loadPrimaryCatalog]);
 
   useEffect(() => {
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
@@ -503,8 +650,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SCANNING', payload: true });
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
         try {
-          const data = await desktopApi.scanLibrary('quick');
-          applyLibraryData(data);
+          const index = await desktopApi.scanLibrary('quick');
+          if (index?.catalogVersion === 1) applyCompactIndex(index);
         } catch (error) {
           console.error('Failed to auto sync library:', error);
         } finally {
@@ -516,19 +663,18 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }, intervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [activeProfile?.type, applyLibraryData, state.autoSyncIntervalHours]);
+  }, [activeProfile?.type, applyCompactIndex, state.autoSyncIntervalHours]);
 
   useEffect(() => {
     if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;
-    const refreshRemote = () => void desktopApi.getLibrary()
-      .then(applyLibraryData)
+    const refreshRemote = () => void loadPrimaryCatalog()
       .catch((error) => console.warn('Shared library refresh failed:', error));
     const intervalId = window.setInterval(refreshRemote, 30_000);
     return () => window.clearInterval(intervalId);
-  }, [activeProfile, applyLibraryData]);
+  }, [activeProfile, loadPrimaryCatalog]);
 
   return (
-    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours }}>
+    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours, hydrateLibraryItem }}>
       {children}
     </LibraryContext.Provider>
   );

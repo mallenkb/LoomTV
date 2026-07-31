@@ -146,7 +146,23 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     genres: item.genres,
     lastPlayed: item.lastPlayed,
     seasons: item.seasons,
-    playbackReferences: playbackReferencesFor(item),
+    // Desktop progress is keyed by local paths. The LAN projection below keeps
+    // using opaque resource identifiers, so host paths never cross the network.
+    playbackReferences: (item.episodeFiles || []).length > 0
+      ? (item.episodeFiles || []).map((episodeFile) => ({
+          progressKey: episodeFile.filePath,
+          season: episodeFile.season,
+          episode: episodeFile.episode,
+          ...(episodeFile.localMetadata?.durationSeconds
+            ? { durationSeconds: episodeFile.localMetadata.durationSeconds }
+            : {}),
+        }))
+      : item.filePath
+        ? [{
+            progressKey: item.filePath,
+            ...(item.localMetadata?.durationSeconds ? { durationSeconds: item.localMetadata.durationSeconds } : {}),
+          }]
+        : [],
   });
 
   const cardForLocalNetwork = (
@@ -190,13 +206,19 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     };
   };
 
-  const libraryIndexForRenderer = (data: LibraryData, revision: number): LibraryIndexPayload => ({
-    catalogVersion: 1,
-    revision,
-    movies: (data.movies || []).map(cardForRenderer),
-    tvShows: (data.tvShows || []).map(cardForRenderer),
-    animeShows: (data.animeShows || []).map(cardForRenderer),
-  });
+  const libraryIndexForRenderer = (data: LibraryData, revision: number): LibraryIndexPayload => {
+    const libraryFolderGroups = normalizeLibraryFolderGroups(data);
+    return {
+      catalogVersion: 1,
+      revision,
+      libraryFolders: flattenLibraryFolders(libraryFolderGroups),
+      libraryFolderGroups,
+      libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
+      movies: (data.movies || []).map(cardForRenderer),
+      tvShows: (data.tvShows || []).map(cardForRenderer),
+      animeShows: (data.animeShows || []).map(cardForRenderer),
+    };
+  };
 
   const libraryIndexForLocalNetwork = (
     data: LibraryData,

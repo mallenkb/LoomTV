@@ -93,7 +93,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const { state, refreshLibrary } = useLibrary();
+  const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
   const { canManageProfiles, lists, setListEntry } = useProfiles();
   const { theme } = useTheme();
   const [movie, setMovie] = useState<MediaItem | null>(null);
@@ -103,9 +103,18 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [detailsReady, setDetailsReady] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const found = state.movies.find((m) => m.id === id);
     setMovie(found || null);
-  }, [id, state.movies]);
+    if (found?.catalogRevision !== undefined) {
+      void hydrateLibraryItem(found.id)
+        .then((details) => {
+          if (!cancelled && details) setMovie(details);
+        })
+        .catch((error) => console.warn('Could not hydrate movie details:', error));
+    }
+    return () => { cancelled = true; };
+  }, [hydrateLibraryItem, id, state.catalogRevision, state.movies]);
 
   useEffect(() => {
     setDetailsReady(false);

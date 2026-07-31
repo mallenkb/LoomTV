@@ -1,6 +1,9 @@
 import type {
   LanApiResult,
   LanHlsSession,
+  LanLibraryCard,
+  LanLibraryIndexPayload,
+  LanLibraryItemDetailsPayload,
   LanLibraryPayload,
   LanActiveProfile,
   LanClientConfig,
@@ -77,20 +80,70 @@ export type MediaItem = {
   subtitles?: SubtitleRecord[];
   localMetadata?: LocalMediaDetails;
   episodeFiles?: EpisodeFile[];
+  /** Present only on compact browse cards; full details are fetched on demand. */
+  catalogRevision?: number;
 };
 
 const MOBILE_RECONNECT_BASE_DELAY_MS = 1_000;
 const MOBILE_RECONNECT_MAX_DELAY_MS = 30_000;
 export const MOBILE_DETAIL_ITEM_CACHE_LIMIT = 24;
 
+export type MobileLibraryIndexPayload = LanLibraryIndexPayload<LanLibraryCard>;
+export type MobileLibraryItemDetailsPayload = LanLibraryItemDetailsPayload<MediaItem>;
+
+export function mobileDetailCacheKey(profileId: string, revision: number, mediaId: string): string {
+  return `${profileId || 'profile:none'}:${revision}:${mediaId}`;
+}
+
+export function mobileLibraryFromIndex(index: MobileLibraryIndexPayload): LibraryPayload {
+  const fromCard = (card: LanLibraryCard): MediaItem => {
+    const playbackReferences = card.playbackReferences || [];
+    const firstReference = playbackReferences[0];
+    const episodeFiles = playbackReferences
+      .filter((reference) => Number.isFinite(reference.season) && Number.isFinite(reference.episode))
+      .map((reference) => ({
+        season: reference.season as number,
+        episode: reference.episode as number,
+        filePath: reference.progressKey,
+        title: `Episode ${reference.episode}`,
+        ...(reference.durationSeconds ? { localMetadata: { durationSeconds: reference.durationSeconds } } : {}),
+      }));
+    return {
+      id: card.id,
+      type: card.type,
+      title: card.title,
+      year: card.year,
+      poster: card.poster,
+      backdrop: card.backdrop,
+      posterCandidates: card.posterCandidates,
+      backdropCandidates: card.backdropCandidates,
+      summary: card.summary,
+      rating: card.rating,
+      genres: card.genres,
+      filePath: firstReference?.progressKey || '',
+      lastPlayed: card.lastPlayed,
+      episodeFiles,
+      ...(episodeFiles.length === 0 && firstReference?.durationSeconds
+        ? { localMetadata: { durationSeconds: firstReference.durationSeconds } }
+        : {}),
+      catalogRevision: index.revision,
+    };
+  };
+  return {
+    movies: index.movies.map(fromCard),
+    tvShows: index.tvShows.map(fromCard),
+    animeShows: index.animeShows.map(fromCard),
+  };
+}
+
 export function mobileReconnectDelayMs(failedAttempts: number): number {
   const exponent = Math.max(0, Math.min(10, Math.floor(failedAttempts)));
   return Math.min(MOBILE_RECONNECT_MAX_DELAY_MS, MOBILE_RECONNECT_BASE_DELAY_MS * (2 ** exponent));
 }
 
-export function rememberMobileDetailItem(cache: Map<string, MediaItem>, item: MediaItem): void {
-  cache.delete(item.id);
-  cache.set(item.id, item);
+export function rememberMobileDetailItem(cache: Map<string, MediaItem>, item: MediaItem, cacheKey = item.id): void {
+  cache.delete(cacheKey);
+  cache.set(cacheKey, item);
   while (cache.size > MOBILE_DETAIL_ITEM_CACHE_LIMIT) {
     const oldestId = cache.keys().next().value;
     if (typeof oldestId !== 'string') break;
@@ -126,6 +179,8 @@ export type Connection = {
   library: LibraryPayload;
   libraryEtag: string;
   selectionRevision?: number;
+  catalogRevision?: number;
+  catalogTransport?: 'compact' | 'legacy';
 };
 
 export type SavedConnection = Pick<Connection,

@@ -91,8 +91,9 @@ import {
 } from './mobileStyles';
 import { createMobileLanClient } from './mobileLanClient';
 import {
+  mobileDetailCacheKey,
+  mobileLibraryFromIndex,
   mobileReconnectDelayMs,
-  rebuildMobileDetailItemCache,
   rememberMobileDetailItem,
 } from './mobileDomain';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
@@ -135,6 +136,8 @@ import type {
   MobileProfileListEntry,
   MobileProfilePreferences,
   MobileLibraryFilter,
+  MobileLibraryIndexPayload,
+  MobileLibraryItemDetailsPayload,
   MobileSearchScope,
   OfficialArtworkResponse,
   OfficialMetadataCandidate,
@@ -1142,6 +1145,9 @@ function AppRoot() {
   const windowSizeRef = useRef({ height, width });
   windowSizeRef.current = { height, width };
   const detailItemCacheRef = useRef(new Map<string, MediaItem>());
+  const detailItemRequestsRef = useRef(new Map<string, Promise<MediaItem>>());
+  const activeCatalogIdentityRef = useRef('profile:none:-1');
+  const legacyCatalogFallbackCountRef = useRef(0);
   const lastDetailByKindRef = useRef(new Map<LibraryKind, MediaItem>());
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [streamOptions, setStreamOptions] = useState<StreamOptions>({});
@@ -1554,23 +1560,104 @@ function AppRoot() {
     return queryMatchedItems.filter((item) => matchesMobileLibraryFilter(item, libraryFilter, progress));
   }, [libraryFilter, progress, queryMatchedItems, searchOpen]);
 
+  const activeCatalogIdentity = `${activeProfile?.id || 'profile:none'}:${connection?.catalogRevision ?? -1}`;
+  activeCatalogIdentityRef.current = activeCatalogIdentity;
+  const catalogCacheKeyFor = useCallback((mediaId: string): string => (
+    `${activeCatalogIdentity}:${mediaId}`
+  ), [activeCatalogIdentity]);
+
+  const resolveMobileDetailItem = useCallback(async (item: MediaItem): Promise<MediaItem> => {
+    if (!connection || item.catalogRevision === undefined || connection.catalogRevision === undefined) return item;
+    const key = catalogCacheKeyFor(item.id);
+    const cached = detailItemCacheRef.current.get(key);
+    if (cached) {
+      rememberMobileDetailItem(detailItemCacheRef.current, cached, key);
+      return cached;
+    }
+    const pending = detailItemRequestsRef.current.get(key);
+    if (pending) return pending;
+    const requestIdentity = activeCatalogIdentityRef.current;
+
+    const request = (async () => {
+      const response = await mobileLanClient.getLibraryItem(
+        connection.baseUrl,
+        connection.deviceToken,
+        item.id,
+      );
+      if (response.ok) {
+        const payload = await response.json() as MobileLibraryItemDetailsPayload;
+        if (payload.catalogVersion === 1 && payload.revision === connection.catalogRevision) {
+          if (activeCatalogIdentityRef.current !== requestIdentity) return item;
+          rememberMobileDetailItem(detailItemCacheRef.current, payload.item, key);
+          return payload.item;
+        }
+        return item;
+      }
+      if (response.status !== 403 && response.status !== 404 && response.status !== 410 && response.status !== 501) {
+        throw new Error(`Could not load media details (${response.status}).`);
+      }
+
+      legacyCatalogFallbackCountRef.current += 1;
+      console.warn(`[catalog] Item details unavailable; using legacy library payload (fallback ${legacyCatalogFallbackCountRef.current}).`);
+      const legacyResponse = await mobileLanClient.getLibrary(connection.baseUrl, connection.deviceToken);
+      if (!legacyResponse.ok) return item;
+      const legacyLibrary = await legacyResponse.json() as LibraryPayload;
+      const detail = allItems(legacyLibrary).find((candidate) => candidate.id === item.id) || item;
+      if (activeCatalogIdentityRef.current !== requestIdentity) return item;
+      rememberMobileDetailItem(detailItemCacheRef.current, detail, key);
+      return detail;
+    })().finally(() => detailItemRequestsRef.current.delete(key));
+    detailItemRequestsRef.current.set(key, request);
+    return request;
+  }, [catalogCacheKeyFor, connection]);
+
   useEffect(() => {
-    detailItemCacheRef.current = rebuildMobileDetailItemCache(detailItemCacheRef.current, itemsById);
+    const activePrefix = `${activeProfile?.id || 'profile:none'}:${connection?.catalogRevision ?? -1}:`;
+    for (const key of detailItemCacheRef.current.keys()) {
+      if (!key.startsWith(activePrefix)) detailItemCacheRef.current.delete(key);
+    }
     const currentDetails = new Map<LibraryKind, MediaItem>();
     for (const [kind, item] of lastDetailByKindRef.current) {
       const currentItem = itemsById.get(item.id);
-      if (currentItem) currentDetails.set(kind, currentItem);
+      const cached = detailItemCacheRef.current.get(catalogCacheKeyFor(item.id));
+      if (cached || currentItem) currentDetails.set(kind, cached || currentItem as MediaItem);
     }
     lastDetailByKindRef.current = currentDetails;
-  }, [itemsById]);
+  }, [activeProfile?.id, catalogCacheKeyFor, connection?.catalogRevision, itemsById]);
 
   const openDetailItem = useCallback((item: MediaItem) => {
-    const cached = detailItemCacheRef.current.get(item.id) || item;
-    rememberMobileDetailItem(detailItemCacheRef.current, cached);
+    const key = catalogCacheKeyFor(item.id);
+    const requestIdentity = activeCatalogIdentityRef.current;
+    const cached = detailItemCacheRef.current.get(key) || item;
     lastDetailByKindRef.current.set(activeKind, cached);
     setFilterOpen(false);
     setDetailItem(cached);
-  }, [activeKind]);
+    if (cached.catalogRevision !== undefined) {
+      void resolveMobileDetailItem(cached)
+        .then((details) => {
+          if (activeCatalogIdentityRef.current !== requestIdentity) return;
+          lastDetailByKindRef.current.set(activeKind, details);
+          setDetailItem((current) => current?.id === details.id ? details : current);
+        })
+        .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not load media details.'));
+    }
+  }, [activeKind, catalogCacheKeyFor, resolveMobileDetailItem]);
+
+  useEffect(() => {
+    if (!detailItem || detailItem.catalogRevision === undefined) return;
+    let cancelled = false;
+    const requestIdentity = activeCatalogIdentityRef.current;
+    void resolveMobileDetailItem(detailItem)
+      .then((details) => {
+        if (cancelled || activeCatalogIdentityRef.current !== requestIdentity) return;
+        lastDetailByKindRef.current.set(activeKind, details);
+        setDetailItem((current) => current?.id === details.id ? details : current);
+      })
+      .catch((nextError) => {
+        if (!cancelled) setError(nextError instanceof Error ? nextError.message : 'Could not load media details.');
+      });
+    return () => { cancelled = true; };
+  }, [activeKind, detailItem, resolveMobileDetailItem]);
 
   const closeDetail = useCallback(() => {
     lastDetailByKindRef.current.delete(activeKind);
@@ -1609,12 +1696,18 @@ function AppRoot() {
   }, [connection]);
 
   const playHomeItem = useCallback((item: MediaItem) => {
-    playerReturnItemRef.current = item;
-    setDetailItem(null);
-    setMiniPlayerTarget(null);
-    setStreamOptions({});
-    setPlayTarget(playTargetForItem(item, progress));
-  }, [progress]);
+    const requestIdentity = activeCatalogIdentityRef.current;
+    void resolveMobileDetailItem(item)
+      .then((details) => {
+        if (activeCatalogIdentityRef.current !== requestIdentity) return;
+        playerReturnItemRef.current = details;
+        setDetailItem(null);
+        setMiniPlayerTarget(null);
+        setStreamOptions({});
+        setPlayTarget(playTargetForItem(details, progress));
+      })
+      .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
+  }, [progress, resolveMobileDetailItem]);
 
   const streamOptionsKey = useMemo(() => JSON.stringify(streamOptions), [streamOptions]);
 
@@ -1907,7 +2000,8 @@ function AppRoot() {
       // ignore — player may already be torn down
     }
     const target = playTarget;
-    const returnItemId = playerReturnItemRef.current?.id || target?.mediaId || '';
+    const returnItem = playerReturnItemRef.current;
+    const returnItemId = returnItem?.id || target?.mediaId || '';
     void syncPlaybackProgress(playTarget || undefined);
 
     const portraitLock = ScreenOrientation.OrientationLock.PORTRAIT_UP;
@@ -1942,7 +2036,9 @@ function AppRoot() {
       }
       playerReturnItemRef.current = null;
       if (returnItemId && detailItem?.id !== returnItemId) {
-        const cachedReturnItem = detailItemCacheRef.current.get(returnItemId) || itemsById.get(returnItemId);
+        const cachedReturnItem = returnItem
+          || detailItemCacheRef.current.get(catalogCacheKeyFor(returnItemId))
+          || itemsById.get(returnItemId);
         if (cachedReturnItem) {
           lastDetailByKindRef.current.set(activeKind, cachedReturnItem);
           setDetailItem(cachedReturnItem);
@@ -1953,7 +2049,7 @@ function AppRoot() {
     }
     // closePlayer intentionally keeps its current player-session callback stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKind, detailItem?.id, itemsById, playTarget, playbackFailure, player]);
+  }, [activeKind, catalogCacheKeyFor, detailItem?.id, itemsById, playTarget, playbackFailure, player]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -2028,21 +2124,86 @@ function AppRoot() {
     return updated;
   }
 
+  type MobileCatalogFetchResult =
+    | { status: 'not-modified' }
+    | { status: 'unauthorized' }
+    | {
+        status: 'ok';
+        library: LibraryPayload;
+        etag: string;
+        revision?: number;
+        transport: 'compact' | 'legacy';
+      };
+
+  async function fetchMobileCatalog(
+    nextConnection: Connection,
+    etag = '',
+  ): Promise<MobileCatalogFetchResult> {
+    const readLegacy = async (legacyEtag = ''): Promise<MobileCatalogFetchResult> => {
+      const response = await mobileLanClient.getLibrary(
+        nextConnection.baseUrl,
+        nextConnection.deviceToken,
+        legacyEtag,
+      );
+      if (response.status === 304) return { status: 'not-modified' };
+      if (response.status === 401) return { status: 'unauthorized' };
+      if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
+      return {
+        status: 'ok',
+        library: await response.json() as LibraryPayload,
+        etag: response.headers.get('ETag') || '',
+        transport: 'legacy',
+      };
+    };
+
+    if (nextConnection.catalogTransport === 'legacy') return readLegacy(etag);
+
+    const response = await mobileLanClient.getLibraryIndex(
+      nextConnection.baseUrl,
+      nextConnection.deviceToken,
+      etag,
+    );
+    if (response.status === 304) return { status: 'not-modified' };
+    if (response.status === 401) return { status: 'unauthorized' };
+    let unsupportedCompactPayload = false;
+    if (response.ok) {
+      const index = await response.json() as MobileLibraryIndexPayload;
+      if (index.catalogVersion === 1 && Number.isSafeInteger(index.revision)) {
+        return {
+          status: 'ok',
+          library: mobileLibraryFromIndex(index),
+          etag: response.headers.get('ETag') || '',
+          revision: index.revision,
+          transport: 'compact',
+        };
+      }
+      unsupportedCompactPayload = true;
+    }
+
+    if (!unsupportedCompactPayload && response.status !== 403 && response.status !== 404 && response.status !== 410 && response.status !== 501) {
+      throw new Error(`Desktop sharing is unavailable (${response.status}).`);
+    }
+    legacyCatalogFallbackCountRef.current += 1;
+    console.warn(`[catalog] Compact index unavailable; using legacy library payload (fallback ${legacyCatalogFallbackCountRef.current}).`);
+    return readLegacy();
+  }
+
   async function hydrateSelectedProfile(nextConnection: Connection, profile: MobileProfile, activeState?: MobileActiveProfile): Promise<void> {
     const generation = ++profileHydrationGenerationRef.current;
-    const [libraryResponse, progressResponse, preferencesResponse, listsResponse] = await Promise.all([
-      mobileLanClient.getLibrary(nextConnection.baseUrl, nextConnection.deviceToken),
+    const [catalog, progressResponse, preferencesResponse, listsResponse] = await Promise.all([
+      fetchMobileCatalog(nextConnection),
       mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfilePreferences(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfileLists(nextConnection.baseUrl, nextConnection.deviceToken),
     ]);
     if (generation !== profileHydrationGenerationRef.current) return;
-    if (!libraryResponse.ok) throw new Error(`Desktop sharing is unavailable (${libraryResponse.status}).`);
-    const library = await libraryResponse.json() as LibraryPayload;
+    if (catalog.status !== 'ok') throw new Error('Desktop sharing is unavailable.');
     const hydratedConnection = {
       ...nextConnection,
-      library,
-      libraryEtag: libraryResponse.headers.get('ETag') || '',
+      library: catalog.library,
+      libraryEtag: catalog.etag,
+      catalogRevision: catalog.revision,
+      catalogTransport: catalog.transport,
       selectionRevision: activeState?.selectionRevision ?? nextConnection.selectionRevision,
     };
     setConnection(hydratedConnection);
@@ -2133,18 +2294,20 @@ function AppRoot() {
         setIsServerOffline(false);
         return true;
       }
-      const response = await mobileLanClient.getLibrary(activeSaved.baseUrl, activeSaved.deviceToken);
-      if (response.status === 401) {
+      const catalog = await fetchMobileCatalog(baseConnection);
+      if (catalog.status === 'unauthorized') {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
         setError('This device is no longer authorized. Select the desktop and enter its current 6-digit pairing PIN.');
         return true;
       }
-      if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
+      if (catalog.status !== 'ok') throw new Error('Desktop sharing is unavailable.');
       const nextConnection: Connection = {
         ...activeSaved,
-        library: (await response.json()) as LibraryPayload,
-        libraryEtag: response.headers.get('ETag') || '',
+        library: catalog.library,
+        libraryEtag: catalog.etag,
+        catalogRevision: catalog.revision,
+        catalogTransport: catalog.transport,
       };
       setConnection(nextConnection);
       setBaseUrl(nextConnection.baseUrl);
@@ -2231,10 +2394,17 @@ function AppRoot() {
     }
   }
 
-  async function applyLibraryInSections(nextLibrary: LibraryPayload, libraryEtag = ''): Promise<Map<string, MediaItem>> {
+  async function applyLibraryInSections(
+    nextLibrary: LibraryPayload,
+    libraryEtag = '',
+    catalogRevision?: number,
+    catalogTransport: 'compact' | 'legacy' = 'compact',
+  ): Promise<Map<string, MediaItem>> {
+    const expectedIdentity = activeCatalogIdentityRef.current;
     const sections: Array<keyof LibraryPayload> = ['movies', 'tvShows', 'animeShows'];
     for (const section of sections) {
       await wait(LIBRARY_SECTION_APPLY_DELAY_MS);
+      if (activeCatalogIdentityRef.current !== expectedIdentity) return new Map();
       setConnection((current) => {
         if (!current) return current;
         return {
@@ -2246,17 +2416,19 @@ function AppRoot() {
         };
       });
     }
+    if (activeCatalogIdentityRef.current !== expectedIdentity) return new Map();
     setConnection((current) => current
       ? {
         ...current,
         library: nextLibrary,
         libraryEtag,
+        catalogRevision,
+        catalogTransport,
       }
       : current);
 
     const nextItems = allItems(nextLibrary);
     const nextItemsById = new Map(nextItems.map((item) => [item.id, item]));
-    detailItemCacheRef.current = rebuildMobileDetailItemCache(detailItemCacheRef.current, nextItemsById);
     setDetailItem((current) => current ? nextItemsById.get(current.id) || null : null);
     const returnItem = playerReturnItemRef.current;
     if (returnItem && !nextItemsById.has(returnItem.id)) {
@@ -2272,21 +2444,19 @@ function AppRoot() {
     setIsRefreshing(true);
     try {
       void refreshProfiles(connection);
-      const response = await mobileLanClient.getLibrary(
-        connection.baseUrl,
-        connection.deviceToken,
-        connection.libraryEtag,
-      );
-      if (response.status === 304) return;
-      if (!response.ok) throw new Error(`Could not refresh the library (${response.status}).`);
-      const nextLibrary = (await response.json()) as LibraryPayload;
-      const libraryEtag = response.headers.get('ETag') || '';
+      const catalog = await fetchMobileCatalog(connection, connection.libraryEtag);
+      if (catalog.status === 'not-modified') return;
+      if (catalog.status === 'unauthorized') throw new Error('This device is no longer authorized.');
+      const nextLibrary = catalog.library;
+      const libraryEtag = catalog.etag;
       setIsRefreshing(false);
-      await applyLibraryInSections(nextLibrary, libraryEtag);
+      await applyLibraryInSections(nextLibrary, libraryEtag, catalog.revision, catalog.transport);
       void hydrateProgress({
         ...connection,
         library: nextLibrary,
         libraryEtag,
+        catalogRevision: catalog.revision,
+        catalogTransport: catalog.transport,
       });
       setIsServerOffline(false);
     } catch (nextError) {
@@ -2303,26 +2473,25 @@ function AppRoot() {
     connectionHealthCheckRef.current = true;
     try {
       void refreshProfiles(connection);
-      const response = await mobileLanClient.getLibrary(
-        connection.baseUrl,
-        connection.deviceToken,
-        connection.libraryEtag,
-      );
-      if (response.status === 401) {
+      const catalog = await fetchMobileCatalog(connection, connection.libraryEtag);
+      if (catalog.status === 'unauthorized') {
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         setSavedConnection(null);
         setConnection(null);
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
-      if (response.status === 304) {
+      if (catalog.status === 'not-modified') {
         setIsServerOffline(false);
         setError('');
         return;
       }
-      if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
-      const nextLibrary = (await response.json()) as LibraryPayload;
-      await applyLibraryInSections(nextLibrary, response.headers.get('ETag') || '');
+      await applyLibraryInSections(
+        catalog.library,
+        catalog.etag,
+        catalog.revision,
+        catalog.transport,
+      );
       setIsServerOffline(false);
       setError('');
     } catch {
@@ -2335,21 +2504,30 @@ function AppRoot() {
 
   async function syncLibraryAfterArtworkChange(itemId: string, appliedCandidate?: OfficialMetadataCandidate): Promise<void> {
     if (!connection) return;
-    const libraryResponse = await mobileLanClient.getLibrary(connection.baseUrl, connection.deviceToken);
-    if (!libraryResponse.ok) {
-      throw new Error(`Poster updated, but mobile sync failed (${libraryResponse.status}).`);
-    }
-    const nextLibrary = await readJsonResponse<LibraryPayload>(
-      libraryResponse,
-      `Poster updated, but mobile sync failed (${libraryResponse.status}).`,
+    const requestIdentity = activeCatalogIdentityRef.current;
+    const catalog = await fetchMobileCatalog({ ...connection, libraryEtag: '' });
+    if (catalog.status !== 'ok') throw new Error('Poster updated, but mobile sync failed.');
+    if (activeCatalogIdentityRef.current !== requestIdentity) return;
+    const nextItemsById = await applyLibraryInSections(
+      catalog.library,
+      catalog.etag,
+      catalog.revision,
+      catalog.transport,
     );
-    const libraryEtag = libraryResponse.headers.get('ETag') || '';
-    const nextItemsById = await applyLibraryInSections(nextLibrary, libraryEtag);
     setArtworkCacheBusters((current) => ({ ...current, [itemId]: String(Date.now()) }));
-    const refreshedItem = nextItemsById.get(itemId);
+    let refreshedItem = nextItemsById.get(itemId);
+    if (refreshedItem && catalog.transport === 'compact' && catalog.revision !== undefined) {
+      const detailResponse = await mobileLanClient.getLibraryItem(connection.baseUrl, connection.deviceToken, itemId);
+      if (detailResponse.ok) {
+        const payload = await detailResponse.json() as MobileLibraryItemDetailsPayload;
+        if (activeCatalogIdentityRef.current !== requestIdentity) return;
+        if (payload.catalogVersion === 1 && payload.revision === catalog.revision) refreshedItem = payload.item;
+      }
+    }
     if (refreshedItem) {
       const nextItem = appliedCandidate ? mergeCandidateArtwork(refreshedItem, appliedCandidate) : refreshedItem;
-      rememberMobileDetailItem(detailItemCacheRef.current, nextItem);
+      const key = mobileDetailCacheKey(activeProfile?.id || 'profile:none', catalog.revision ?? -1, itemId);
+      rememberMobileDetailItem(detailItemCacheRef.current, nextItem, key);
       setDetailItem(nextItem);
     }
   }
@@ -2706,10 +2884,22 @@ function AppRoot() {
         onOpenKind={navigateToKind}
         onToggleList={(kind, present) => detailItem ? setMobileProfileListEntry(detailItem.id, kind, present) : Promise.resolve()}
         onPlay={(target) => {
-          playerReturnItemRef.current = detailItem;
-          setMiniPlayerTarget(null);
-          setStreamOptions({});
-          setPlayTarget(target);
+          if (!detailItem) return;
+          const requestIdentity = activeCatalogIdentityRef.current;
+          void resolveMobileDetailItem(detailItem)
+            .then((details) => {
+              if (activeCatalogIdentityRef.current !== requestIdentity) return;
+              const episode = typeof target.season === 'number' && typeof target.episode === 'number'
+                ? details.episodeFiles?.find((candidate) => (
+                    candidate.season === target.season && candidate.episode === target.episode
+                  ))
+                : undefined;
+              playerReturnItemRef.current = details;
+              setMiniPlayerTarget(null);
+              setStreamOptions({});
+              setPlayTarget(episode ? episodePlayTarget(details, episode, progress) : playTargetForItem(details, progress));
+            })
+            .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
         }}
         onRefreshArtwork={refreshPosterOnHost}
       />

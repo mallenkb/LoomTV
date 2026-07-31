@@ -13,6 +13,8 @@ import type {
   ProfileUpdateInput,
   FFmpegStatus,
   LibraryFolderKind,
+  LibraryIndexPayload,
+  LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
   LibraryScanProgress,
@@ -65,6 +67,8 @@ export type {
   ActiveProfileState,
   ApiResult,
   LibraryFolderKind,
+  LibraryIndexPayload,
+  LibraryItemDetailsPayload,
   LibraryPayload,
   LibraryScanMode,
   LibraryScanProgress,
@@ -122,10 +126,12 @@ export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION_
 
 export type DesktopBridgeApi = {
       getLibrary: () => Promise<LibraryPayload>;
-      scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryPayload>;
-      onLibraryScanProgress?: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => () => void;
-      addLibraryFolder: (kind?: LibraryFolderKind) => Promise<LibraryPayload | null>;
-      removeLibraryFolder: (folderPath: string) => Promise<LibraryPayload>;
+      getLibraryIndex?: () => Promise<LibraryIndexPayload>;
+      getLibraryItem?: (mediaId: string) => Promise<LibraryItemDetailsPayload | null>;
+      scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryIndexPayload>;
+      onLibraryScanProgress?: (callback: (progress: LibraryScanProgress) => void) => () => void;
+      addLibraryFolder: (kind?: LibraryFolderKind) => Promise<LibraryIndexPayload | null>;
+      removeLibraryFolder: (folderPath: string) => Promise<LibraryIndexPayload>;
       playMedia: (filePath: string) => Promise<boolean>;
       getStreamUrl: (filePath: string, options?: StreamUrlOptions) => Promise<StreamUrlResult>;
       getSubtitleUrl?: (filePath: string, streamOrdinal?: number) => Promise<{ url: string }>;
@@ -196,7 +202,7 @@ export type DesktopBridgeApi = {
       getPlaybackLogo?: (mediaId: string) => Promise<PlaybackLogoResult>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
-      clearAppData?: () => Promise<LibraryPayload>;
+      clearAppData?: () => Promise<LibraryIndexPayload>;
       openExternal?: (url: string) => Promise<void>;
       openFolderPath?: (filePath: string) => Promise<boolean>;
       getUpdateState?: () => Promise<UpdateState>;
@@ -229,6 +235,7 @@ const LOCAL_ACCESS_QUERY_PARAM = 'loomtvToken';
 const LOCAL_ACCESS_HEADER = 'x-loomtv-token';
 let resolvedServerBase: string | null = null;
 let resolvedLocalAccessToken: string | null = null;
+let remoteCatalogCache: { identity: string; etag: string; index: LibraryIndexPayload } | null = null;
 
 async function discoverServerBase(): Promise<string> {
   if (resolvedServerBase) return resolvedServerBase;
@@ -268,7 +275,18 @@ async function localMediaUrl(pathname: string, params: URLSearchParams): Promise
 }
 
 async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
-  const request = async () => {
+  const response = await fetchLocalResponse(pathname, init);
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function fetchLocalResponse(pathname: string, init?: RequestInit): Promise<Response> {
+  const request = async (): Promise<Response> => {
     const base = await discoverServerBase();
     const token = await discoverLocalAccessToken();
     return fetch(`${base}${pathname}`, {
@@ -287,13 +305,7 @@ async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
     resolvedLocalAccessToken = null;
     response = await request();
   }
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
+  return response;
 }
 
 function normalizeLocalNetworkBaseUrl(value: string): string {
@@ -387,7 +399,9 @@ async function remoteJson<T>(pathname: string, init?: RequestInit): Promise<T> {
 function remoteProgressByStreamUrl(progress: Record<string, StoredProgress>): Record<string, StoredProgress> {
   const library = getRemoteDesktopSession()?.library;
   if (!library) return progress;
-  const mapped: Record<string, StoredProgress> = {};
+  // Keep opaque resource keys for compact cards while also mapping them to the
+  // signed stream URLs used by the legacy full-library compatibility path.
+  const mapped: Record<string, StoredProgress> = { ...progress };
   for (const item of [...(library.movies || []), ...(library.tvShows || []), ...(library.animeShows || [])]) {
     const paths = [item.filePath, ...(item.episodeFiles || []).map((episode) => episode.filePath)].filter(Boolean);
     for (const streamUrl of paths) {
@@ -463,6 +477,38 @@ function remoteLibrarySources(library: LibraryPayload): LibraryPayload {
   };
 }
 
+function remoteLibraryIndexSources(index: LibraryIndexPayload): LibraryIndexPayload {
+  const rewrite = (value?: string | null): string => value ? remoteMediaSource(value) : '';
+  const rewriteCard = (item: LibraryIndexPayload['movies'][number]) => ({
+    ...item,
+    poster: rewrite(item.poster),
+    backdrop: rewrite(item.backdrop),
+    logo: rewrite(item.logo),
+    posterCandidates: item.posterCandidates?.map(rewrite),
+    backdropCandidates: item.backdropCandidates?.map(rewrite),
+    logoCandidates: item.logoCandidates?.map(rewrite),
+  });
+  return {
+    ...index,
+    movies: index.movies.map(rewriteCard),
+    tvShows: index.tvShows.map(rewriteCard),
+    animeShows: index.animeShows.map(rewriteCard),
+  };
+}
+
+function remoteLibraryItemSources(payload: LibraryItemDetailsPayload): LibraryItemDetailsPayload {
+  const library = remoteLibrarySources({
+    movies: payload.item.type === 'movie' ? [payload.item] : [],
+    tvShows: payload.item.type === 'tv' ? [payload.item] : [],
+    animeShows: payload.item.type === 'anime' ? [payload.item] : [],
+    libraryFolders: [],
+  });
+  return {
+    ...payload,
+    item: [...library.movies, ...library.tvShows, ...(library.animeShows || [])][0] || payload.item,
+  };
+}
+
 async function refreshRemoteActiveProfileState(): Promise<ActiveProfileState> {
   const response = await remoteRequest('/api/v2/profiles/active');
   if (response.status === 409) {
@@ -475,6 +521,53 @@ async function refreshRemoteActiveProfileState(): Promise<ActiveProfileState> {
 }
 
 export const desktopApi = {
+  async getLibraryIndex(): Promise<LibraryIndexPayload | null> {
+    if (isRemoteDesktopMode()) {
+      const session = getRemoteDesktopSession();
+      const identity = session
+        ? `${session.baseUrl}:${session.deviceId}:${session.selectedProfileId || 'profile:none'}:${session.selectionRevision || 0}`
+        : 'remote:none';
+      const cached = remoteCatalogCache?.identity === identity ? remoteCatalogCache : null;
+      const response = await remoteRequest('/api/v2/library/index', {
+        headers: cached?.etag ? { 'If-None-Match': cached.etag } : {},
+      });
+      if (response.status === 304 && cached) return cached.index;
+      if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
+      if (!response.ok) {
+        if (response.status === 409) throw new Error('Select a profile from the host first.');
+        throw new Error(response.status === 401 ? 'Pairing was revoked on the host.' : 'Could not load the shared catalog.');
+      }
+      const index = remoteLibraryIndexSources(await response.json() as LibraryIndexPayload);
+      const etag = response.headers.get('ETag') || '';
+      remoteCatalogCache = { identity, etag, index };
+      updateRemoteDesktopSession({
+        library: { movies: [], tvShows: [], animeShows: [], libraryFolders: [] },
+        libraryEtag: etag,
+      });
+      return index;
+    }
+    if (window.desktopApi?.getLibraryIndex) return window.desktopApi.getLibraryIndex();
+    const response = await fetchLocalResponse('/api/renderer/library/index');
+    if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
+    if (!response.ok) throw new Error(`Could not load the local catalog (${response.status}).`);
+    return response.json() as Promise<LibraryIndexPayload>;
+  },
+
+  async getLibraryItem(mediaId: string): Promise<LibraryItemDetailsPayload | null> {
+    const encodedId = encodeURIComponent(mediaId);
+    if (isRemoteDesktopMode()) {
+      const response = await remoteRequest(`/api/v2/library/items/${encodedId}`);
+      if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
+      if (!response.ok) throw new Error(`Could not load media details (${response.status}).`);
+      return remoteLibraryItemSources(await response.json() as LibraryItemDetailsPayload);
+    }
+    if (window.desktopApi?.getLibraryItem) return window.desktopApi.getLibraryItem(mediaId);
+    const response = await fetchLocalResponse(`/api/renderer/library/items/${encodedId}`);
+    if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
+    if (!response.ok) throw new Error(`Could not load media details (${response.status}).`);
+    return response.json() as Promise<LibraryItemDetailsPayload>;
+  },
+
   async getLibrary(): Promise<LibraryPayload> {
     if (isRemoteDesktopMode()) {
       const response = await remoteRequest('/api/v2/library');
@@ -768,29 +861,29 @@ export const desktopApi = {
     return { url: await localMediaUrl('/api/thumbnail', params) };
   },
 
-  async scanLibrary(mode: LibraryScanMode = 'quick'): Promise<LibraryPayload> {
+  async scanLibrary(mode: LibraryScanMode = 'quick'): Promise<LibraryIndexPayload | null> {
     if (window.desktopApi) return window.desktopApi.scanLibrary({ force: mode === 'full', mode });
     // Folder scanning is owned by Electron. In a browser renderer, refresh the
     // shared desktop snapshot instead of calling the intentionally IPC-only
     // scan route.
-    return this.getLibrary();
+    return this.getLibraryIndex();
   },
 
-  onLibraryScanProgress(callback: (library: LibraryPayload, progress: LibraryScanProgress) => void): () => void {
+  onLibraryScanProgress(callback: (progress: LibraryScanProgress) => void): () => void {
     return window.desktopApi?.onLibraryScanProgress?.(callback) || (() => undefined);
   },
 
-  async addLibraryFolder(kind: LibraryFolderKind = 'movies'): Promise<LibraryPayload | null> {
+  async addLibraryFolder(kind: LibraryFolderKind = 'movies'): Promise<LibraryIndexPayload | null> {
     if (window.desktopApi) return window.desktopApi.addLibraryFolder(kind);
-    return fetchJson<LibraryPayload | null>('/api/library/add-folder', {
+    return fetchJson<LibraryIndexPayload | null>('/api/library/add-folder', {
       method: 'POST',
       body: JSON.stringify({ kind }),
     });
   },
 
-  async removeLibraryFolder(folderPath: string): Promise<LibraryPayload> {
+  async removeLibraryFolder(folderPath: string): Promise<LibraryIndexPayload> {
     if (window.desktopApi) return window.desktopApi.removeLibraryFolder(folderPath);
-    return fetchJson<LibraryPayload>('/api/library/remove-folder', {
+    return fetchJson<LibraryIndexPayload>('/api/library/remove-folder', {
       method: 'POST',
       body: JSON.stringify({ folderPath }),
     });
@@ -1212,9 +1305,9 @@ export const desktopApi = {
     return fetchJson<{ ok: boolean; path?: string; error?: string }>('/api/database/backup', { method: 'POST' });
   },
 
-  async clearAppData(): Promise<LibraryPayload> {
+  async clearAppData(): Promise<LibraryIndexPayload> {
     if (window.desktopApi?.clearAppData) return window.desktopApi.clearAppData();
-    return fetchJson<LibraryPayload>('/api/database/clear', { method: 'POST' });
+    return fetchJson<LibraryIndexPayload>('/api/database/clear', { method: 'POST' });
   },
 
   openExternal(url: string): void {

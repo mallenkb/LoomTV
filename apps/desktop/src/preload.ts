@@ -3,7 +3,6 @@ import type {
   DesktopBridgeApi,
 } from './lib/desktopApi';
 import type {
-  LibraryPayload,
   LibraryIndexPayload,
   LibraryItemDetailsPayload,
   LibraryScanMode,
@@ -62,12 +61,11 @@ const desktopApi = {
   getLibraryIndex: () => ipcRenderer.invoke('library:get-index'),
   getLibraryItem: (mediaId: string) => ipcRenderer.invoke('library:get-item', mediaId),
   scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => ipcRenderer.invoke('library:scan', options),
-  onLibraryScanProgress: (callback: (library: LibraryPayload, progress: LibraryScanProgress) => void) => {
+  onLibraryScanProgress: (callback: (progress: LibraryScanProgress) => void) => {
     const handler = (
       _: Electron.IpcRendererEvent,
-      library: LibraryPayload,
       progress: LibraryScanProgress,
-    ) => callback(library, progress);
+    ) => callback(progress);
     ipcRenderer.on('library:scan-progress', handler);
     return () => ipcRenderer.removeListener('library:scan-progress', handler);
   },

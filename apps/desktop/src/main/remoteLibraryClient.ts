@@ -44,6 +44,7 @@ type RemotePairPayload = {
 
 const REMOTE_ROUTE_POLICY = new Map<string, ReadonlySet<string>>([
   ['/api/v2/library', new Set(['GET'])],
+  ['/api/v2/library/index', new Set(['GET'])],
   ['/api/v2/profiles', new Set(['GET', 'POST'])],
   ['/api/v2/profiles/active', new Set(['GET'])],
   ['/api/v2/profiles/select', new Set(['POST'])],
@@ -56,6 +57,11 @@ const REMOTE_ROUTE_POLICY = new Map<string, ReadonlySet<string>>([
   ['/api/v2/playback/segments', new Set(['GET'])],
   ['/api/v2/start-hls', new Set(['POST'])],
 ]);
+
+function isAllowedRemoteApiRoute(pathname: string, method: string): boolean {
+  if (REMOTE_ROUTE_POLICY.get(pathname)?.has(method)) return true;
+  return method === 'GET' && pathname.startsWith('/api/v2/library/items/');
+}
 
 function isAllowedRemoteMediaPath(pathname: string): boolean {
   return pathname === '/stream'
@@ -311,7 +317,7 @@ export function createRemoteLibraryClient() {
     const parsedPath = new URL(pathname, 'http://loomtv.local');
     if (parsedPath.origin !== 'http://loomtv.local') throw new Error('Invalid remote-library route.');
     const method = request.method || 'GET';
-    if (!REMOTE_ROUTE_POLICY.get(parsedPath.pathname)?.has(method)) throw new Error('That remote-library operation is not allowed.');
+    if (!isAllowedRemoteApiRoute(parsedPath.pathname, method)) throw new Error('That remote-library operation is not allowed.');
     if (request.body && Buffer.byteLength(request.body, 'utf8') > MAX_REQUEST_BODY_BYTES) throw new Error('The remote-library request is too large.');
 
     let current = loadSession();

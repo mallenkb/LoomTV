@@ -275,7 +275,7 @@ export function registerIpcHandlers<
           : 'quick';
       const progressPublisher = createScanProgressPublisher<TLibraryData>((snapshot) => {
         if (!event.sender.isDestroyed()) {
-          event.sender.send('library:scan-progress', deps.libraryForRenderer(snapshot), scanProgressPayload(snapshot));
+          event.sender.send('library:scan-progress', scanProgressPayload(snapshot));
         }
       });
       try {
@@ -287,7 +287,7 @@ export function registerIpcHandlers<
         if (deps.saveLibraryFromScan(scanned, scanVersion)) {
           await deps.cacheArtworkNow(scanned);
         }
-        return deps.libraryForRenderer();
+        return deps.libraryIndexForRenderer();
       } finally {
         progressPublisher.cancel();
       }
@@ -312,7 +312,7 @@ export function registerIpcHandlers<
         const progressPublisher = createScanProgressPublisher<TLibraryData>((snapshot) => {
           BrowserWindow.getAllWindows().forEach((window) => {
             if (!window.webContents.isDestroyed()) {
-              window.webContents.send('library:scan-progress', deps.libraryForRenderer(snapshot), scanProgressPayload(snapshot));
+              window.webContents.send('library:scan-progress', scanProgressPayload(snapshot));
             }
           });
         });
@@ -325,7 +325,7 @@ export function registerIpcHandlers<
           if (deps.saveLibraryFromScan(scanned, scanVersion)) {
             await deps.cacheArtworkNow(scanned);
           }
-          return deps.libraryForRenderer();
+          return deps.libraryIndexForRenderer();
         } finally {
           progressPublisher.cancel();
         }
@@ -339,7 +339,7 @@ export function registerIpcHandlers<
     const data = deps.loadLibrary();
     const updated = deps.removeFolderFromLibrary(data, folderPath);
     deps.saveLibraryMutation(updated);
-    return deps.libraryForRenderer();
+    return deps.libraryIndexForRenderer();
   });
 
   handle('media:play', async (_event, filePath: string) => {
@@ -617,7 +617,11 @@ export function registerIpcHandlers<
     return true;
   });
   handle('database:backup', () => { deps.authorizeSettingsWrite(); return deps.backupDatabase(); });
-  handle('database:clear', () => { deps.authorizeSettingsWrite(); return deps.libraryForRenderer(deps.clearAppData()); });
+  handle('database:clear', () => {
+    deps.authorizeSettingsWrite();
+    deps.clearAppData();
+    return deps.libraryIndexForRenderer();
+  });
   handle('shell:open-external', (_event, url: string): OpenExternalResult => {
     const parsed = new URL(String(url || ''));
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {

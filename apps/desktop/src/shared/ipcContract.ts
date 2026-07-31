@@ -60,13 +60,13 @@ export interface IpcContract {
   'artwork:refresh-official': { args: [mediaId: string, target?: OfficialArtworkRefreshTarget]; result: OfficialArtworkResult };
   'artwork:save': { args: [mediaId: string, target: string, dataUrl: string]; result: Record<string, string> };
   'database:backup': { args: []; result: { ok: boolean; path?: string; error?: string } };
-  'database:clear': { args: []; result: LibraryPayload };
-  'library:add-folder': { args: [kind?: LibraryFolderKind]; result: LibraryPayload | null };
+  'database:clear': { args: []; result: LibraryIndexPayload };
+  'library:add-folder': { args: [kind?: LibraryFolderKind]; result: LibraryIndexPayload | null };
   'library:get': { args: []; result: LibraryPayload };
   'library:get-index': { args: []; result: LibraryIndexPayload };
   'library:get-item': { args: [mediaId: string]; result: LibraryItemDetailsPayload | null };
-  'library:remove-folder': { args: [folderPath: string]; result: LibraryPayload };
-  'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryPayload };
+  'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };
+  'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
   'media:can-direct-play': { args: [filePath: string, backend?: 'html5' | 'hls']; result: ApiResult<boolean> };
   'media:ffmpeg-available': { args: []; result: { available: boolean; path: string | null } };
   'media:get-file-info': { args: [filePath: string]; result: { size: number; path: string; exists: boolean } };
@@ -146,7 +146,7 @@ export interface IpcContract {
 export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
-  'library:scan-progress': { args: [library: LibraryPayload, progress: import('./desktopProtocol.ts').LibraryScanProgress] };
+  'library:scan-progress': { args: [progress: import('./desktopProtocol.ts').LibraryScanProgress] };
   'profile:active-changed': { args: [state: ActiveProfileState] };
   'profiles:changed': { args: [event: import('./desktopProtocol.ts').ProfilesChangedEvent] };
   'updates:state': { args: [state: UpdateState] };
