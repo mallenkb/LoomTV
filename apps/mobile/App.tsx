@@ -92,6 +92,7 @@ import {
 import { createMobileLanClient } from './mobileLanClient';
 import {
   mobileReconnectDelayMs,
+  normalizeCertFingerprint,
   rebuildMobileDetailItemCache,
   rememberMobileDetailItem,
 } from './mobileDomain';
@@ -306,7 +307,7 @@ function discoveredHostFromService(service: ZeroconfService): DiscoveredHost | n
   if (String(txt.protocolVersion || '') !== '2') return null;
   const deviceId = String(txt.instanceId || '').trim();
   const deviceName = String(service.name || '').trim();
-  const certFingerprint = String(txt.certFingerprint || '').trim();
+  const certFingerprint = normalizeCertFingerprint(txt.certFingerprint);
   const port = Number(service.port || 0);
   if (!deviceId || !Number.isInteger(port) || port <= 0) return null;
 
@@ -323,7 +324,7 @@ function discoveredHostFromService(service: ZeroconfService): DiscoveredHost | n
     deviceId,
     deviceName: deviceName || resolvedHost,
     serviceName,
-    baseUrl: `http://${resolvedHost}:${port}`,
+    baseUrl: `${certFingerprint ? 'https' : 'http'}://${resolvedHost}:${port}`,
     certFingerprint,
   };
 }
@@ -1352,10 +1353,18 @@ function AppRoot() {
           || !Number.isFinite(saved.accessTokenExpiresAt)
           || !Number.isFinite(saved.refreshTokenExpiresAt)
         ) return;
-        saved.hostDeviceId ||= '';
-        setSavedConnection(saved);
-        setBaseUrl(saved.baseUrl);
-        void reconnectSavedConnection(saved);
+        const certFingerprint = normalizeCertFingerprint(saved.certFingerprint);
+        if (!certFingerprint || !saved.hostDeviceId) {
+          void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+          setBaseUrl(saved.baseUrl);
+          setError('This saved desktop predates secure host identity. Select it and enter the current 6-digit pairing PIN to pair again.');
+          setIsServerOffline(true);
+          return;
+        }
+        const normalizedSaved = { ...saved, certFingerprint };
+        setSavedConnection(normalizedSaved);
+        setBaseUrl(normalizedSaved.baseUrl);
+        void reconnectSavedConnection(normalizedSaved);
       })
       .catch(() => {})
       .finally(() => {
@@ -1411,14 +1420,20 @@ function AppRoot() {
 
   useEffect(() => {
     if (!savedConnection || connection) return;
-    const discoveredSavedHost = discoveredHosts.find((host) =>
-      host.deviceId === savedConnection.hostDeviceId
-      || (!savedConnection.hostDeviceId && host.deviceName === savedConnection.hostDeviceName));
-    if (discoveredSavedHost && (
-      discoveredSavedHost.baseUrl !== savedConnection.baseUrl
-      || discoveredSavedHost.deviceId !== savedConnection.hostDeviceId
-    )) {
-      const updated = { ...savedConnection, baseUrl: discoveredSavedHost.baseUrl, hostDeviceId: discoveredSavedHost.deviceId };
+    const discoveredSavedHost = discoveredHosts.find((host) => host.deviceId === savedConnection.hostDeviceId);
+    if (discoveredSavedHost) {
+      const discoveredFingerprint = normalizeCertFingerprint(discoveredSavedHost.certFingerprint);
+      if (!discoveredFingerprint || discoveredFingerprint !== savedConnection.certFingerprint) {
+        setIsServerOffline(true);
+        setError('A desktop claiming this saved identity was discovered, but its security fingerprint does not match. Re-pair with the current 6-digit PIN before connecting.');
+        return;
+      }
+      if (discoveredSavedHost.baseUrl === savedConnection.baseUrl) return;
+      const updated = {
+        ...savedConnection,
+        baseUrl: discoveredSavedHost.baseUrl,
+        certFingerprint: discoveredFingerprint,
+      };
       setSavedConnection(updated);
       setBaseUrl(updated.baseUrl);
       void SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
@@ -2188,6 +2203,18 @@ function AppRoot() {
       }
 
       const payload = (await response.json()) as PairResponse;
+      const discoveredPairHost = host || discoveredHosts.find((candidate) => candidate.baseUrl === nextBaseUrl);
+      const certFingerprint = normalizeCertFingerprint(payload.certFingerprint);
+      const discoveredFingerprint = normalizeCertFingerprint(discoveredPairHost?.certFingerprint);
+      if (!certFingerprint) {
+        throw new Error('This desktop does not provide a secure host identity. Update LoomTV on the desktop, then pair again.');
+      }
+      if (discoveredFingerprint && discoveredFingerprint !== certFingerprint) {
+        throw new Error('The desktop security fingerprint changed during pairing. Refresh devices and verify the current pairing PIN before trying again.');
+      }
+      if (discoveredPairHost?.deviceId && payload.hostDeviceId && discoveredPairHost.deviceId !== payload.hostDeviceId) {
+        throw new Error('The desktop identity changed during pairing. Refresh devices and enter the current pairing PIN again.');
+      }
       const nextConnection = {
         baseUrl: nextBaseUrl,
         deviceId: payload.deviceId,
@@ -2195,7 +2222,8 @@ function AppRoot() {
         accessTokenExpiresAt: payload.accessTokenExpiresAt,
         refreshToken: payload.refreshToken,
         refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
-        hostDeviceId: payload.hostDeviceId || discoveredHosts.find((host) => host.baseUrl === nextBaseUrl)?.deviceId || '',
+        certFingerprint,
+        hostDeviceId: payload.hostDeviceId || discoveredPairHost?.deviceId || '',
         hostDeviceName: payload.hostDeviceName || 'Loom Media Player Desktop',
         clientDeviceName: mobileDeviceName(),
         library: payload.library || {},
@@ -2208,6 +2236,7 @@ function AppRoot() {
         accessTokenExpiresAt: nextConnection.accessTokenExpiresAt,
         refreshToken: nextConnection.refreshToken,
         refreshTokenExpiresAt: nextConnection.refreshTokenExpiresAt,
+        certFingerprint: nextConnection.certFingerprint,
         hostDeviceId: nextConnection.hostDeviceId,
         hostDeviceName: nextConnection.hostDeviceName,
         clientDeviceName: nextConnection.clientDeviceName,
