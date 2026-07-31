@@ -41,6 +41,8 @@ test('LAN scope checks do not allow one capability to imply another', () => {
 test('media server dispatch classifies routes and methods before authorization', () => {
   assert.deepEqual(mediaServerRouteAccess('/api/ping', 'GET'), { kind: 'public' });
   assert.deepEqual(mediaServerRouteAccess('/api/ping', 'POST'), { kind: 'desktop' });
+  assert.deepEqual(mediaServerRouteAccess('/api/renderer/session', 'POST'), { kind: 'public' });
+  assert.deepEqual(mediaServerRouteAccess('/api/renderer/session', 'GET'), { kind: 'desktop' });
   assert.deepEqual(mediaServerRouteAccess('/api/v2/pair', 'POST'), { kind: 'pairing' });
   assert.deepEqual(mediaServerRouteAccess('/api/v2/library', 'GET'), { kind: 'scoped', scope: 'catalog:read' });
   assert.deepEqual(mediaServerRouteAccess('/api/v2/library', 'POST'), { kind: 'desktop' });
