@@ -624,7 +624,6 @@ export default function Settings() {
     await desktopApi.unpairFromRemoteLibrary(
       sharedLibrarySnapshot.baseUrl,
       sharedLibrarySnapshot.deviceToken,
-      sharedLibrarySnapshot.deviceId,
     );
     localStorage.removeItem('loomtv:shared-library');
     localStorage.removeItem('loomtv:last-remote-library');

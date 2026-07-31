@@ -95,7 +95,7 @@ export function createMobileLanClient(
         headers: bearerHeaders(token, etag ? { 'If-None-Match': etag } : {}),
       });
     },
-    pair(baseUrl: string, body: { code: string; deviceId?: string; deviceName: string }) {
+    pair(baseUrl: string, body: { code: string; deviceName: string }) {
       return fetchImpl(`${baseUrl}/api/v2/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Loom-Profile-Api-Version': '1' },

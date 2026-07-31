@@ -478,7 +478,7 @@ export function createRemoteLibraryClient() {
     async connect(
       baseUrl: string,
       code: string,
-      device: { id?: string; name: string },
+      device: { name: string },
       expectedFingerprint?: string,
     ): Promise<RemoteLibraryConnection> {
       if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure credential storage is unavailable on this computer.');
@@ -493,7 +493,7 @@ export function createRemoteLibraryClient() {
       const response = await fetchWithTimeout(`${normalizedBaseUrl}/api/v2/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', [PROFILE_API_HEADER]: '1' },
-        body: JSON.stringify({ code: normalizedCode, deviceId: device.id, deviceName: device.name }),
+        body: JSON.stringify({ code: normalizedCode, deviceName: device.name }),
       }, 10_000, observedCertificate);
       const text = await readResponseText(response, MAX_API_RESPONSE_BYTES);
       if (!response.ok) {
@@ -568,10 +568,8 @@ export function createRemoteLibraryClient() {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${current.accessToken}`,
-            'Content-Type': 'application/json',
             [PROFILE_API_HEADER]: '1',
           },
-          body: JSON.stringify({ deviceId: current.deviceId }),
         }, 10_000, current).catch(() => undefined);
       }
       return true;

@@ -716,15 +716,13 @@ export const desktopApi = {
     };
   },
 
-  async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string, deviceId: string): Promise<void> {
+  async unpairFromRemoteLibrary(baseUrl: string, deviceToken: string): Promise<void> {
     if (window.desktopApi?.disconnectRemoteLibrary) {
       await window.desktopApi.disconnectRemoteLibrary(true);
       return;
     }
     await fetch(`${baseUrl}/api/v2/unpair`, bearerHeaders(deviceToken, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ deviceId }),
     })).catch(() => undefined);
   },
 

@@ -24,6 +24,7 @@ const IMAGE_CACHE_BUST_QUERY_PARAM = 'loomtvImageBust';
 const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const PAIRING_SESSION_TTL_MS = 5 * 60 * 1000;
+const MAX_PAIRED_DEVICES = 64;
 const DEVICE_SCOPES: LanPairedDevice['scopes'] = ['catalog:read', 'media:stream', 'playback:write'];
 
 type SignedLanUrlOptions = {
@@ -40,6 +41,7 @@ export interface LanSecurityDeps {
 export function createLanSecurity(deps: LanSecurityDeps) {
   const { loadSettings, saveSettings, localAccessToken, libraryForLocalNetwork } = deps;
   let pairingSecretExpiresAt = 0;
+  const requestAuthorizations = new WeakMap<IncomingMessage, { ok: boolean; device?: LanPairedDevice }>();
 
   function getRequestRemoteAddress(req: IncomingMessage): string {
     return normalizeRemoteAddress(req.socket.remoteAddress);
@@ -161,6 +163,8 @@ export function createLanSecurity(deps: LanSecurityDeps) {
   }
 
   function authorizeLanRequest(reqUrl: URL, req: IncomingMessage): { ok: boolean; device?: LanPairedDevice } {
+    const cached = requestAuthorizations.get(req);
+    if (cached) return cached;
     if (!isLanSharingEnabled()) return { ok: false };
     const token = requestToken(reqUrl, req);
     if (!token) return { ok: false };
@@ -168,10 +172,14 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const device = findPairedDeviceByToken(token);
     if (device) {
       touchPairedDevice(device.id, getRequestRemoteAddress(req));
-      return { ok: true, device };
+      const result = { ok: true, device };
+      requestAuthorizations.set(req, result);
+      return result;
     }
 
-    return { ok: false };
+    const result = { ok: false };
+    requestAuthorizations.set(req, result);
+    return result;
   }
 
   function authorizeLocalRequest(reqUrl: URL, req: IncomingMessage): boolean {
@@ -240,7 +248,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     }
     const code = String(body.code || '').trim().slice(0, 128);
     const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
-    const requestedDeviceId = String(body.deviceId || '').trim().slice(0, 64);
 
     if (!timingSafeStringEqual(code, expectedCode)) {
       recordPairFailure(address);
@@ -248,17 +255,25 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       return;
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'deviceId')) {
+      writeJson(res, 409, {
+        error: 'client_device_identity_not_supported',
+        message: 'This client chooses its own device identity. Update LoomTV and pair again.',
+      });
+      return;
+    }
+
     recordPairSuccess(address);
     const settings = loadSettings();
     const pairedDevices = settings.localNetworkPairedDevices || [];
-    const isSameMobileClient = (device: LanPairedDevice) => {
-      const namesMatch = device.name === deviceName
-        || (/^LoomTV (Mobile|iOS|Android)/i.test(device.name) && /^LoomTV (Mobile|iOS|Android)/i.test(deviceName));
-      return namesMatch && device.lastAddress === address;
-    };
-    const existing = pairedDevices.find((device) => requestedDeviceId && device.id === requestedDeviceId)
-      || pairedDevices.filter(isSameMobileClient).sort((a, b) => b.lastSeenAt - a.lastSeenAt)[0];
-    const deviceId = existing?.id || requestedDeviceId || randomUUID();
+    if (pairedDevices.length >= MAX_PAIRED_DEVICES) {
+      writeJson(res, 409, {
+        error: 'paired_device_limit_reached',
+        message: 'Revoke an existing paired device in Settings before pairing another one.',
+      });
+      return;
+    }
+    const deviceId = randomUUID();
     const accessToken = randomBytes(32).toString('base64url');
     const refreshToken = randomBytes(32).toString('base64url');
     const now = Date.now();
@@ -271,15 +286,14 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       refreshTokenExpiresAt: now + REFRESH_TOKEN_TTL_MS,
       scopes: DEVICE_SCOPES,
       securityEpoch: 2,
-      createdAt: existing?.createdAt || now,
+      createdAt: now,
       lastSeenAt: now,
       lastAddress: address,
     };
-    const others = pairedDevices.filter((device) => device.id !== deviceId && !isSameMobileClient(device));
     saveSettings({
       ...settings,
       localNetworkShareToken: createLanShareCode(),
-      localNetworkPairedDevices: [...others, updated],
+      localNetworkPairedDevices: [...pairedDevices, updated],
       localNetworkSecurityEpoch: 2,
     });
     pairingSecretExpiresAt = 0;

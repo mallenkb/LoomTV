@@ -19,13 +19,6 @@ export function createLanShareCode(): string {
   return String(randomInt(100000, 1000000));
 }
 
-function pairedDeviceFingerprint(device: Pick<LanPairedDevice, 'name' | 'lastAddress'>): string {
-  const normalizedName = /^loomtv (mobile|ios|android)/i.test(device.name.trim())
-    ? 'loomtv-mobile'
-    : device.name.trim().toLowerCase();
-  return `${normalizedName}\u0000${device.lastAddress || ''}`;
-}
-
 function normalizePairedDevices(value: unknown): LanPairedDevice[] {
   if (!Array.isArray(value)) return [];
   const unique = new Map<string, LanPairedDevice>();
@@ -53,12 +46,11 @@ function normalizePairedDevices(value: unknown): LanPairedDevice[] {
       lastSeenAt: Number.isFinite(entry.lastSeenAt) ? Number(entry.lastSeenAt) : Date.now(),
       lastAddress: typeof entry.lastAddress === 'string' ? entry.lastAddress : undefined,
     };
-    const key = pairedDeviceFingerprint(device);
-    const current = unique.get(key);
-    if (!current || device.lastSeenAt >= current.lastSeenAt) unique.set(key, device);
+    const current = unique.get(device.id);
+    if (!current || device.lastSeenAt >= current.lastSeenAt) unique.set(device.id, device);
   }
 
-  return [...unique.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+  return [...unique.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt).slice(0, 64);
 }
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
