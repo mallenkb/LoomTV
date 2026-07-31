@@ -94,6 +94,12 @@ import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyl
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
 import { activeSkipSegmentAt, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
 import {
+  groupEpisodesBySeason,
+  nextPlayableEpisodeFile,
+  sortedPlayableEpisodeFiles,
+  sortedSeasonNumbers,
+} from './VideoPlayer/episodeIndex';
+import {
   clampSubtitleDelay,
   hasReachedInitialResumePosition,
   isEditableShortcutTarget,
@@ -523,13 +529,7 @@ export default function VideoPlayer({
   );
   const subtitleTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'subtitle'), [mediaTracks]);
 
-  const groupedEpisodes = useMemo(() =>
-    episodes.reduce((acc, ep) => {
-      if (!acc[ep.season]) acc[ep.season] = [];
-      acc[ep.season].push(ep);
-      return acc;
-    }, {} as Record<number, EpisodeMeta[]>),
-  [episodes]);
+  const groupedEpisodes = useMemo(() => groupEpisodesBySeason(episodes), [episodes]);
 
   const displayEpisodeTitle = useCallback((season: number, episode: number, rawTitle?: string, filePath?: string): string => {
     const metadataTitle = cleanEpisodeTitleForDisplay(rawTitle, title, season, episode);
@@ -540,34 +540,19 @@ export default function VideoPlayer({
     return fileTitle !== `Episode ${episode}` ? fileTitle : metadataTitle;
   }, [title]);
 
-  const sortedSeasons = useMemo(
-    () => Object.keys(groupedEpisodes).map(Number).sort((a, b) => a - b),
-    [groupedEpisodes],
-  );
+  const sortedSeasons = useMemo(() => sortedSeasonNumbers(groupedEpisodes), [groupedEpisodes]);
 
   const playableEpisodeFiles = useMemo(
-    () => episodeFiles
-      .filter((item) => Boolean(item.filePath))
-      .slice()
-      .sort((a, b) => a.season - b.season || a.episode - b.episode),
+    () => sortedPlayableEpisodeFiles(episodeFiles),
     [episodeFiles],
   );
 
-  const nextEpisodeFile = useMemo(() => {
-    if (!hasEpisodes) return null;
-    const nextByEpisodeNumber = playableEpisodeFiles.find((item) =>
-      item.season > currentSeason
-      || (item.season === currentSeason && item.episode > currentEpisode),
-    );
-    if (nextByEpisodeNumber) return nextByEpisodeNumber;
-
-    // Some playback sources use a normalized/stream URL rather than the local
-    // file path stored in episodeFiles. Keep path matching as a fallback, but
-    // do not make next-episode navigation depend on that exact string match.
-    const currentIndex = playableEpisodeFiles.findIndex((item) => item.filePath === filePath);
-    if (currentIndex < 0) return null;
-    return playableEpisodeFiles.slice(currentIndex + 1).find((item) => item.filePath !== filePath) || null;
-  }, [currentEpisode, currentSeason, filePath, hasEpisodes, playableEpisodeFiles]);
+  const nextEpisodeFile = useMemo(
+    () => hasEpisodes
+      ? nextPlayableEpisodeFile(playableEpisodeFiles, currentSeason, currentEpisode, filePath)
+      : null,
+    [currentEpisode, currentSeason, filePath, hasEpisodes, playableEpisodeFiles],
+  );
 
   const stopTranscodeSession = useCallback(async () => {
     const sessionIds = new Set([
