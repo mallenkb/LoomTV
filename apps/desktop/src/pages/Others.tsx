@@ -9,6 +9,9 @@ import { matchesMediaItem, searchQuery } from '@/lib/search';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
+import { useProgressSnapshot } from '@/lib/progress';
+import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import LibraryFilterBar from '@/components/LibraryFilterBar';
 
 export default function Others() {
   const { state, addLibraryFolder } = useLibrary();
@@ -17,19 +20,29 @@ export default function Others() {
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const progress = useProgressSnapshot();
   const normalizedQuery = searchQuery(query);
   const items = useMemo(
     () => otherFolderItems([...state.movies, ...state.tvShows, ...state.animeShows], othersFolders),
     [othersFolders, state.animeShows, state.movies, state.tvShows],
   );
   const filteredItems = useMemo(
-    () => items.filter((item) => matchesMediaItem(item, normalizedQuery)),
-    [items, normalizedQuery],
+    () => items
+      .filter((item) => matchesMediaItem(item, normalizedQuery))
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, items, normalizedQuery, progress],
   );
 
   return (
     <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch value={query} onChange={setQuery} placeholder="Search mixed folders" showModernSearchTrigger={false} />
+      <LibrarySearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search mixed folders"
+        showModernSearchTrigger={false}
+        rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
+      />
       <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
@@ -53,7 +66,9 @@ export default function Others() {
               </div>
             )}
             {items.length > 0 && filteredItems.length === 0 && (
-              <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
+              <div className="py-12 text-center text-[var(--loom-muted)]">
+                {activeFilter === 'all' ? 'No local matches found' : 'No custom-folder titles match this filter'}
+              </div>
             )}
           </>
         )}

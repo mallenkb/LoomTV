@@ -345,6 +345,7 @@ SOFTWARE.
 ```
 
 Bundled third-party tools and dependencies remain under their own licenses. In particular, bundled FFmpeg/FFprobe builds are covered by their applicable FFmpeg and GPL notices as described above.
+- [LoomTV 1.0.98](docs/releases/v1.0.98.md): aligns custom folders with the modern library navigation and filtering experience.
 - [LoomTV 1.0.97](docs/releases/v1.0.97.md): adds library health filters and refines desktop search and detail navigation.
 - [LoomTV 1.0.96](docs/releases/v1.0.96.md): refines modern sidebar and Settings navigation hover and active states.
 - [LoomTV 1.0.95](docs/releases/v1.0.95.md): keeps active navigation and Settings tabs fixed without fluid hover highlights.

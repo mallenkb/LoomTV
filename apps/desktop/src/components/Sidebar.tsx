@@ -18,10 +18,11 @@ type SidebarNavItem = { id: NavItemId; path: string; label: string; icon: Sideba
 
 const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 const modernCategoryItems = [
-  { label: 'Home', path: '/', routePrefix: '/' },
-  { label: 'Anime', path: '/anime', routePrefix: '/anime' },
-  { label: 'TV Shows', path: '/tv', routePrefix: '/tv' },
-  { label: 'Movies', path: '/movies', routePrefix: '/movie' },
+  { label: 'Home', path: '/', routePrefix: '/', folderKey: null },
+  { label: 'Anime', path: '/anime', routePrefix: '/anime', folderKey: 'anime' },
+  { label: 'TV Shows', path: '/tv', routePrefix: '/tv', folderKey: 'tvShows' },
+  { label: 'Movies', path: '/movies', routePrefix: '/movie', folderKey: 'movies' },
+  { label: 'Others', path: '/others', routePrefix: '/others', folderKey: 'others' },
 ] as const;
 
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
@@ -65,7 +66,10 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
 }
 
 function ModernCategoryPill({ pathname }: { pathname: string }) {
-  const activeCategory = modernCategoryItems.find((category) => category.path === '/'
+  const { state } = useLibrary();
+  const visibleCategories = modernCategoryItems.filter((category) => !category.folderKey
+    || hasLinkedLibraryFolder(state.libraryFolderGroups[category.folderKey]));
+  const activeCategory = visibleCategories.find((category) => category.path === '/'
     ? pathname === '/'
     : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
 
@@ -80,7 +84,7 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
           followPointer={false}
           className="loom-shared-highlight-category flex h-full items-center"
         >
-          {modernCategoryItems.map((category) => {
+          {visibleCategories.map((category) => {
             const isActive = category.path === activeCategory?.path;
             return (
               <Link
@@ -387,7 +391,7 @@ export default function Sidebar() {
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
-      ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
+      ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies, sidebarNavItems.others] as SidebarNavItem[]).filter((item) => {
         if (desktopApi.isRemoteLibraryMode()) return true;
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
         return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
