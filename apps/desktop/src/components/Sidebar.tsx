@@ -91,7 +91,7 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
                 data-shared-highlight-item
                 data-shared-highlight-id={category.path}
                 className={cn(
-                  'relative z-10 inline-flex h-full items-center rounded-full px-5 text-sm font-semibold transition-[color,opacity] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
+                  'relative z-10 inline-flex h-full items-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
                   isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
                 )}
               >
@@ -434,7 +434,7 @@ export default function Sidebar() {
           <nav className="mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
             <SharedListHighlight
               activeId={activeNavItemId}
-              preserveActiveOnHover
+              followPointer={false}
               className="loom-shared-highlight-sidebar-modern flex flex-col items-center gap-3"
             >
               <button
@@ -444,7 +444,7 @@ export default function Sidebar() {
                 aria-label="Search library"
                 data-shared-highlight-item
                 data-shared-highlight-id="search"
-                className="loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-[color,transform] hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                className="loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
               >
                 <Search className="h-6 w-6" />
               </button>
@@ -461,7 +461,7 @@ export default function Sidebar() {
                     data-shared-highlight-item
                     data-shared-highlight-id={item.id}
                     className={cn(
-                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-[color,transform] hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
                       isActive && 'loom-modern-sidebar-action-active',
                     )}
                   >

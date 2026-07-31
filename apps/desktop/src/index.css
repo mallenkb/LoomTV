@@ -448,7 +448,8 @@ html.loom-mpv-active .loom-app-underlay {
 }
 
 .loom-modern-category-idle:hover {
-  opacity: 0.68;
+  background: var(--loom-active-bg);
+  color: var(--loom-text);
 }
 
 .loom-modern-search-overlay {
@@ -1557,11 +1558,8 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 }
 
 :root[data-home-style="modern"] .loom-settings-tabs button[aria-pressed="true"] {
-  color: var(--loom-bg) !important;
-}
-
-:root[data-home-style="modern"] .loom-settings-tabs button[aria-pressed="true"] > span:first-child {
   background: var(--loom-text);
+  color: var(--loom-bg) !important;
 }
 
 :root[data-home-style="modern"] .settings-panel,
