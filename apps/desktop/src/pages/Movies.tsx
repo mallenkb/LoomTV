@@ -31,6 +31,7 @@ export default function Movies() {
         value={query}
         onChange={setQuery}
         placeholder="Search movies"
+        showModernSearchTrigger={false}
         rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
       />
       <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">

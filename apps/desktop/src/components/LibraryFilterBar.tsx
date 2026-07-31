@@ -4,7 +4,9 @@ import { FilterFunnelIcon } from '@/components/LoomIcons';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import {
   libraryFilterOptions,
+  issueLibraryFilterOptions,
   primaryLibraryFilterOptions,
+  type LibraryFilterOption,
   type LibraryFilter,
 } from '@/lib/libraryFilters';
 
@@ -44,7 +46,7 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
   };
 
   return (
-    <div ref={menuRef} className="relative shrink-0">
+    <div ref={menuRef} className="loom-library-filter relative z-10 shrink-0 pointer-events-auto">
       <button
         type="button"
         aria-haspopup="menu"
@@ -53,7 +55,7 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
         title={`Filter: ${activeOption?.label || 'All'}`}
         onClick={() => setFilterOpen((open) => !open)}
         style={{ borderColor: 'var(--loom-control-border)' }}
-        className={`inline-flex h-12 w-12 items-center justify-center rounded-lg border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
+        className={`loom-library-filter-trigger loom-no-drag pointer-events-auto relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-lg border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
           activeFilter === 'all'
             ? 'bg-[var(--loom-panel)] text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]'
             : 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
@@ -67,11 +69,17 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
           role="menu"
           className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-lg bg-[var(--loom-surface)] p-1 shadow-[0_18px_40px_rgba(0,0,0,0.38)]"
         >
-          <SharedListHighlight activeId={activeFilter} className="loom-shared-highlight-menu">
+          <SharedListHighlight activeId={activeFilter} followPointer={false} className="loom-shared-highlight-menu">
             <FilterMenuGroup
               label="Watch status"
               activeFilter={activeFilter}
               options={primaryLibraryFilterOptions}
+              onChoose={chooseFilter}
+            />
+            <FilterMenuGroup
+              label="Library health"
+              activeFilter={activeFilter}
+              options={issueLibraryFilterOptions}
               onChoose={chooseFilter}
             />
           </SharedListHighlight>
@@ -89,7 +97,7 @@ function FilterMenuGroup({
 }: {
   label: string;
   activeFilter: LibraryFilter;
-  options: typeof primaryLibraryFilterOptions;
+  options: LibraryFilterOption[];
   onChoose: (filter: LibraryFilter) => void;
 }) {
   return (

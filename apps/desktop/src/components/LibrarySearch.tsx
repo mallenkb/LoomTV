@@ -8,15 +8,23 @@ interface LibrarySearchProps {
   onChange: (value: string) => void;
   placeholder?: string;
   rightSlot?: ReactNode;
+  /** Hide the floating search trigger when search is available from navigation. */
+  showModernSearchTrigger?: boolean;
 }
 
-export default function LibrarySearch({ value, onChange, placeholder = 'Search library', rightSlot }: LibrarySearchProps) {
+export default function LibrarySearch({
+  value,
+  onChange,
+  placeholder = 'Search library',
+  rightSlot,
+  showModernSearchTrigger = true,
+}: LibrarySearchProps) {
   const { theme } = useTheme();
   const [isModernSearchOpen, setIsModernSearchOpen] = useState(Boolean(value));
 
   if (theme.homeStyle === 'modern') {
     return (
-      <div className="loom-library-search loom-library-search-modern pointer-events-none fixed left-24 right-5 top-5 z-40 flex justify-end">
+      <div className="loom-library-search loom-library-search-modern loom-no-drag pointer-events-none fixed left-24 right-5 top-5 z-[55] flex justify-end">
         <div className="loom-library-search-inner flex items-center justify-end gap-2">
           {isModernSearchOpen ? (
             <div className="loom-library-search-control loom-no-drag pointer-events-auto flex h-12 w-[min(22rem,calc(100vw-9rem))] items-center gap-3 rounded-full border border-white/12 bg-black/55 px-4 text-white shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-colors">
@@ -42,7 +50,7 @@ export default function LibrarySearch({ value, onChange, placeholder = 'Search l
                 <X className="h-4 w-4" />
               </button>
             </div>
-          ) : (
+          ) : showModernSearchTrigger ? (
             <button
               type="button"
               onClick={() => setIsModernSearchOpen(true)}
@@ -52,7 +60,7 @@ export default function LibrarySearch({ value, onChange, placeholder = 'Search l
             >
               <SearchSmIcon className="h-5 w-5" />
             </button>
-          )}
+          ) : null}
           {rightSlot && (
             <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">
               {rightSlot}

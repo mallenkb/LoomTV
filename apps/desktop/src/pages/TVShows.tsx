@@ -38,6 +38,7 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
         value={query}
         onChange={setQuery}
         placeholder={kind === 'anime' ? 'Search anime' : 'Search tv shows'}
+        showModernSearchTrigger={false}
         rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
       />
       <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">

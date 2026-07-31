@@ -29,7 +29,7 @@ export default function Others() {
 
   return (
     <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch value={query} onChange={setQuery} placeholder="Search mixed folders" />
+      <LibrarySearch value={query} onChange={setQuery} placeholder="Search mixed folders" showModernSearchTrigger={false} />
       <div className="loom-frame page-bottom-safe page-list-bottom-safe pt-24">
         {isLoading ? (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">

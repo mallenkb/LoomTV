@@ -13,6 +13,8 @@ import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
+import LibraryFilterBar from '@/components/LibraryFilterBar';
+import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -25,6 +27,7 @@ function DefaultHome() {
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
   const myListItems = useMemo(() => {
@@ -61,17 +64,31 @@ function DefaultHome() {
       .slice(0, 10)
       .map(([item]) => item);
   }, [animeShows, movies, tvShows, progress]);
+  const visibleMyListItems = useMemo(
+    () => myListItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, myListItems, progress],
+  );
+  const visibleContinueWatching = useMemo(
+    () => continueWatching.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, continueWatching, progress],
+  );
   const filteredAnime = useMemo(
-    () => animeShows.filter((item) => matchesMediaItem(item, normalizedQuery)),
-    [animeShows, normalizedQuery],
+    () => animeShows
+      .filter((item) => matchesMediaItem(item, normalizedQuery))
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, animeShows, normalizedQuery, progress],
   );
   const filteredTVShows = useMemo(
-    () => tvShows.filter((item) => matchesMediaItem(item, normalizedQuery)),
-    [normalizedQuery, tvShows],
+    () => tvShows
+      .filter((item) => matchesMediaItem(item, normalizedQuery))
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, normalizedQuery, progress, tvShows],
   );
   const filteredMovies = useMemo(
-    () => movies.filter((item) => matchesMediaItem(item, normalizedQuery)),
-    [movies, normalizedQuery],
+    () => movies
+      .filter((item) => matchesMediaItem(item, normalizedQuery))
+      .filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, movies, normalizedQuery, progress],
   );
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
@@ -79,21 +96,26 @@ function DefaultHome() {
 
   return (
     <div className="loom-page h-full overflow-y-auto">
-      <LibrarySearch value={query} onChange={setQuery} placeholder="Search all libraries" />
+      <LibrarySearch
+        value={query}
+        onChange={setQuery}
+        placeholder="Search all libraries"
+        rightSlot={<LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />}
+      />
       <div className="loom-frame page-bottom-safe pt-24">
-        {!normalizedQuery && !isLoading && !hasLibraryItems && (
+        {!normalizedQuery && activeFilter === 'all' && !isLoading && !hasLibraryItems && (
           <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
         )}
 
-        {!normalizedQuery && myListItems.length > 0 && (
+        {!normalizedQuery && visibleMyListItems.length > 0 && (
           <MediaRail title="My List" className="mb-8">
-            <PosterCards items={myListItems.slice(0, 20)} from={currentRoute} />
+            <PosterCards items={visibleMyListItems.slice(0, 20)} from={currentRoute} />
           </MediaRail>
         )}
 
-        {!normalizedQuery && continueWatching.length > 0 && (
+        {!normalizedQuery && visibleContinueWatching.length > 0 && (
           <MediaRail title="Continue Watching" className="mb-8">
-            <PosterCards items={continueWatching} from={currentRoute} isLoading={isLoading} />
+            <PosterCards items={visibleContinueWatching} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
 
@@ -114,8 +136,10 @@ function DefaultHome() {
             <PosterCards items={filteredMovies.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
-        {normalizedQuery && !isLoading && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
-          <div className="py-12 text-center text-[var(--loom-muted)]">No local matches found</div>
+        {!isLoading && (normalizedQuery || activeFilter !== 'all') && filteredAnime.length === 0 && filteredTVShows.length === 0 && filteredMovies.length === 0 && (
+          <div className="py-12 text-center text-[var(--loom-muted)]">
+            {activeFilter !== 'all' && !normalizedQuery ? 'No titles match this filter' : 'No local matches found'}
+          </div>
         )}
       </div>
     </div>

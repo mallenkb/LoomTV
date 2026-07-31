@@ -413,6 +413,12 @@ html.loom-mpv-active .loom-app-underlay {
   border-radius: 0.375rem;
 }
 
+/* Detail tabs use the underline and text color as their active cue; keep the
+   tab strip itself transparent instead of adding a filled active pill. */
+.loom-detail-tabs {
+  --loom-shared-highlight-background: transparent;
+}
+
 .loom-shared-highlight-tabs::before,
 .loom-shared-highlight-season-pills::before {
   border-radius: 9999px;
@@ -674,7 +680,7 @@ html.loom-mpv-active .loom-app-underlay {
   transform: none;
 }
 
-:root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot button {
+:root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot .loom-library-filter-trigger {
   border-color: rgba(255, 255, 255, 0.12) !important;
   border-radius: 9999px;
   background: rgba(0, 0, 0, 0.55);
@@ -684,7 +690,8 @@ html.loom-mpv-active .loom-app-underlay {
 :root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot [role="menu"] {
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 1rem;
-  background: rgba(10, 10, 12, 0.92);
+  background: var(--loom-surface);
+  color: var(--loom-text);
   backdrop-filter: blur(22px) saturate(135%);
 }
 
@@ -927,6 +934,13 @@ body.platform-darwin .loom-main-drag-region {
 
 :root[data-home-style="modern"] .loom-main-drag-region {
   height: 2.5rem;
+}
+
+/* Keep the top-right library action outside Electron's draggable title-bar
+   hit target. App-region hit testing can otherwise win over a visually higher
+   control where the two fixed layers overlap. */
+:root[data-home-style="modern"] .loom-main-drag-region:not(.loom-main-drag-region-settings) {
+  right: 5rem;
 }
 
 .loom-main-drag-region.loom-main-drag-region-settings {
@@ -1815,13 +1829,13 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     max-width: none;
   }
 
-  .loom-library-search-slot button {
+  .loom-library-search-slot .loom-library-filter-trigger {
     height: 2.85rem;
     border-radius: 0.85rem;
     padding-inline: 0.75rem;
   }
 
-  .loom-library-search-slot button span {
+  .loom-library-search-slot .loom-library-filter-trigger span {
     max-width: 7.5rem;
     overflow: hidden;
     text-overflow: ellipsis;

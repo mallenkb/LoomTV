@@ -15,6 +15,8 @@ import { useProgressSnapshot } from '@/lib/progress';
 import { useTheme } from '@/components/ThemeProvider';
 import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import type { StoredProgress } from '@/lib/desktopApi';
+import LibraryFilterBar from '@/components/LibraryFilterBar';
+import { matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 
 export default function ModernHome() {
   const { state, addLibraryFolder } = useLibrary();
@@ -25,6 +27,7 @@ export default function ModernHome() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [heroHovered, setHeroHovered] = useState(false);
   const prefersReducedMotion = useReducedMotion();
@@ -33,27 +36,43 @@ export default function ModernHome() {
   const resultsGridRef = useRef<HTMLDivElement | null>(null);
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;
   const allItems = useMemo(() => [...animeShows, ...tvShows, ...movies], [animeShows, movies, tvShows]);
+  const visibleItems = useMemo(
+    () => allItems.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, allItems, progress],
+  );
+  const visibleAnimeShows = useMemo(
+    () => animeShows.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, animeShows, progress],
+  );
+  const visibleTVShows = useMemo(
+    () => tvShows.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, progress, tvShows],
+  );
+  const visibleMovies = useMemo(
+    () => movies.filter((item) => matchesLibraryFilter(item, activeFilter, progress)),
+    [activeFilter, movies, progress],
+  );
   const normalizedQuery = searchQuery(query);
   const currentRoute = `${location.pathname}${location.search}`;
   const results = useMemo(
-    () => normalizedQuery ? allItems.filter((item) => matchesMediaItem(item, normalizedQuery)) : [],
-    [allItems, normalizedQuery],
+    () => normalizedQuery ? visibleItems.filter((item) => matchesMediaItem(item, normalizedQuery)) : [],
+    [normalizedQuery, visibleItems],
   );
   const continueWatching = useMemo(() => {
     const recency = (item: MediaItem) => Math.max(
       progress[item.filePath]?.updatedAt || 0,
       ...(item.episodeFiles || []).map((episode) => progress[episode.filePath]?.updatedAt || 0),
     );
-    return allItems
+    return visibleItems
       .map((item) => [item, recency(item)] as const)
       .filter(([, updatedAt]) => updatedAt > 0)
       .sort((left, right) => right[1] - left[1])
       .map(([item]) => item);
-  }, [allItems, progress]);
+  }, [progress, visibleItems]);
   const featuredHeroItems = useMemo(() => {
-    const preferredLibrary = animeShows.length > 0 ? animeShows : tvShows.length > 0 ? tvShows : movies;
+    const preferredLibrary = visibleAnimeShows.length > 0 ? visibleAnimeShows : visibleTVShows.length > 0 ? visibleTVShows : visibleMovies;
     return preferredLibrary.slice(0, 6);
-  }, [animeShows, movies, tvShows]);
+  }, [visibleAnimeShows, visibleMovies, visibleTVShows]);
   const usesContinueWatchingHero = theme.modernHeroMode === 'continue-watching' && continueWatching.length > 0;
   const heroItems = usesContinueWatchingHero ? continueWatching.slice(0, 1) : featuredHeroItems;
   const hero = heroItems[activeHeroIndex] || heroItems[0];
@@ -111,6 +130,11 @@ export default function ModernHome() {
 
   return (
     <div className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
+      {!searchOpen && (
+        <div className="loom-library-search-slot loom-no-drag pointer-events-auto fixed right-5 top-5 z-[55]">
+          <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
+        </div>
+      )}
       <AnimatePresence>
         {searchOpen && (
           <motion.div
@@ -142,6 +166,9 @@ export default function ModernHome() {
                   aria-label="Search your library"
                   className="loom-modern-search-input h-16 min-w-0 flex-1 bg-transparent px-4 text-lg text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)]"
                 />
+                <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">
+                  <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
+                </div>
                 <button type="button" onClick={() => { setQuery(''); setSearchOpen(false); }} aria-label="Close search" className="grid h-10 w-10 place-items-center rounded-full text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]">
                   <X className="h-5 w-5" />
                 </button>
@@ -175,13 +202,21 @@ export default function ModernHome() {
             {continueWatching.length > 0 && (
               <ContinueWatchingRail items={continueWatching} from={currentRoute} progress={progress} />
             )}
-            {animeShows.length > 0 && <PosterRail title="Anime" items={animeShows} from={currentRoute} />}
-            {tvShows.length > 0 && <PosterRail title="TV Shows" items={tvShows} from={currentRoute} />}
-            {movies.length > 0 && <PosterRail title="Movies" items={movies} from={currentRoute} />}
+            {visibleAnimeShows.length > 0 && <PosterRail title="Anime" items={visibleAnimeShows} from={currentRoute} />}
+            {visibleTVShows.length > 0 && <PosterRail title="TV Shows" items={visibleTVShows} from={currentRoute} />}
+            {visibleMovies.length > 0 && <PosterRail title="Movies" items={visibleMovies} from={currentRoute} />}
           </main>
         </>
       ) : !searchOpen && isLoading ? (
         <ModernHomeSkeleton />
+      ) : !searchOpen && activeFilter !== 'all' && visibleItems.length === 0 ? (
+        <div className="flex min-h-full items-center justify-center px-[var(--loom-frame-inset)] pt-24">
+          <div className="max-w-lg text-center">
+            <h1 className="text-3xl font-bold">No titles match this filter</h1>
+            <p className="mt-3 text-sm text-[var(--loom-muted)]">Try another filter to see more of your library.</p>
+            <Button onClick={() => setActiveFilter('all')} className="mt-7 rounded-full px-6">Clear filter</Button>
+          </div>
+        </div>
       ) : !searchOpen ? (
         <div className="flex min-h-full items-center justify-center px-[var(--loom-frame-inset)] pt-24">
           <div className="max-w-lg text-center">

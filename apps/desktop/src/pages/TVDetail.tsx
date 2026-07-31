@@ -499,7 +499,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           role="tablist"
           aria-label="Title information"
         >
-          <SharedListHighlight activeId={activeDetailTab} className="loom-shared-highlight-list flex items-center gap-8">
+          <SharedListHighlight activeId={activeDetailTab} followPointer={false} className="loom-detail-tabs loom-shared-highlight-list flex items-center gap-8">
           {(['episodes', 'details'] as const).map((tab) => {
             const isActive = activeDetailTab === tab;
             const label = tab === 'episodes' ? 'Episodes' : 'Details';
@@ -514,7 +514,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 onClick={() => setActiveDetailTab(tab)}
                 data-shared-highlight-item
                 data-shared-highlight-id={tab}
-                className={`relative z-10 -mb-px border-b-2 px-3 pb-3 pt-1 text-sm font-semibold uppercase tracking-[0.16em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${isActive
+                className={`relative z-10 -mb-px border-b-2 pb-3 pt-1 text-sm font-semibold uppercase tracking-[0.16em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${isActive
                   ? 'border-[var(--loom-text)] text-[var(--loom-text)]'
                   : 'border-transparent text-[var(--loom-muted)] hover:text-[var(--loom-text)]'
                 }`}
