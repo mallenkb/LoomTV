@@ -30,18 +30,18 @@ the current completion percentage and status.
 | P0 | True headless server runtime — **100% · ✅ Done** | Everything else depends on running without Electron, a desktop session, tray, or display. |
 | P0 | Docker/Compose and NAS deployment — **90% · 🟡 Partial** | Makes LoomTV installable on Unraid, TrueNAS, Synology-style hosts, Linux servers, and mini PCs; real NAS/GPU matrix validation remains. |
 | P0 | NAS-safe library engine — **95% · 🟡 Partial** | Prevents an offline share from appearing as deleted media and makes large network scans reliable; durable restart-resume validation remains. |
-| P1 | Hosted web client and admin UI — **100% · ✅ Done** | A headless server needs browser-based onboarding, library management, playback, profiles, progress, and diagnostics; `/app/` now provides the viewer client and `/admin/` remains the control plane. |
-| P1 | Backup, restore, health, and logs — **100% · ✅ Done** | Essential for trusting LoomTV as an always-on appliance; checksummed restore, rollback points, storage readiness, diagnostics, and filtered logs are implemented. |
+| P1 | Hosted web client and admin UI — **75% · 🟡 Partial** | A headless server needs browser-based onboarding, library management, playback, profiles, progress, and diagnostics; `/app/` provides a working viewer MVP and `/admin/` the control plane, but artwork, series browsing, and real capability negotiation remain. |
+| P1 | Backup, restore, health, and logs — **85% · 🟡 Partial** | Essential for trusting LoomTV as an always-on appliance; checksummed restore with rollback points is implemented and covered by an automated round-trip test, but a restore drill on a real deployment and cross-version compatibility remain. |
 | P1 | Client-aware hardware transcoding — **80% · 🟡 Partial** | Necessary for multiple devices, lower-powered NAS hardware, HDR, and TV playback; physical GPU and HDR validation remains. |
 | P2 | Android TV/Fire TV client — **0% · 🔴 Not started** | The highest-value client once the independent server exists. |
 | P2 | Collections, versions, extras, and NFO — **0% · 🔴 Not started** | Improves serious video libraries without expanding into unrelated media types. |
-| P2 | Public, versioned API — **100% · ✅ Done** | Enables community clients and integrations without committing to a plugin runtime; `/api/v1`, discovery, OpenAPI metadata, bearer scopes, and compatibility guidance are now stable. Webhooks remain a separate 0% notifications feature. |
+| P2 | Public, versioned API — **80% · 🟡 Partial** | Enables community clients and integrations without committing to a plugin runtime; `/api/v1`, discovery, OpenAPI metadata, bearer scopes, and series grouping are implemented and contract-tested. SDK examples, webhooks, and a written compatibility policy remain. |
 
 ## Kanban board
 
 A compact status view for quick scanning. Full “Left” and “Why it matters” details are listed in the expanded notes below.
 
-| ✅ Done (35) | 🟡 Partial (15) | 🔴 Not started (15) |
+| ✅ Done (32) | 🟡 Partial (18) | 🔴 Not started (15) |
 | :--- | :--- | :--- |
 | **Local-first / self-hosted — 100%** | **Architecture — 95%** | **Music libraries — 0%**; **Internet remote streaming — 0%** |
 | **Desktop platforms — 100%** | **Headless / always-on server — 95%** | **Photos — 0%** |
@@ -54,12 +54,12 @@ A compact status view for quick scanning. Full “Left” and “Why it matters�
 | **Fix match / refresh one item — 100%** | **Granular user permissions — 90%** | **Watch together / SyncPlay — 0%** |
 | **Artwork control — 100%** | **Credentials & lockout — 90%** | **Offline downloads — 0%** |
 | **Search & library filters — 100%** | **Mobile clients — 70%** | **Casting, DLNA & device control — 0%** |
-| **Favorites / watchlist — 100%** | &nbsp; | **TV & console clients — 0%** |
+| **Favorites / watchlist — 100%** | **Hosted web client — 75%** | **TV & console clients — 0%** |
 | **Direct play — 100%** | **TLS, proxy & network policy — 70%** | **Plugin system — 0%** |
 | **Remux & transcoding — 100%** | **Multiple saved servers — 45%** | **Notifications & webhooks — 0%** |
-| **Native desktop engine — 100%** | &nbsp; | &nbsp; |
+| **Native desktop engine — 100%** | **Backup & restore — 85%** | &nbsp; |
 | **Audio & subtitle tracks — 100%** | **Device & session management — 75%** | &nbsp; |
-| **Automatic subtitle downloads — 100%** | &nbsp; | &nbsp; |
+| **Automatic subtitle downloads — 100%** | **Public API & integrations — 80%** | &nbsp; |
 | **Subtitle styling & dual subtitles — 100%** | **Admin dashboard, logs & reports — 95%** | &nbsp; |
 | **Playback speed & seeking — 100%** | &nbsp; | &nbsp; |
 | **Resume, watched state & history — 100%** | &nbsp; | &nbsp; |
@@ -74,9 +74,6 @@ A compact status view for quick scanning. Full “Left” and “Why it matters�
 | **Per-profile preferences — 100%** | &nbsp; | &nbsp; |
 | **LAN discovery & pairing — 100%** | &nbsp; | &nbsp; |
 | **Remote desktop client — 100%** | &nbsp; | &nbsp; |
-| **Hosted web client — 100%** | &nbsp; | &nbsp; |
-| **Backup & restore — 100%** | &nbsp; | &nbsp; |
-| **Public API & integrations — 100%** | &nbsp; | &nbsp; |
 | **Themes & UI customization — 100%** | &nbsp; | &nbsp; |
 
 
@@ -221,7 +218,7 @@ linear backlog view.
 - [ ] **Mobile clients — 70%**
   - **What's left:** Finish the Expo MVP, offline/error states, release builds, and device coverage.
   - **Why it matters:** Phones and tablets are the most common remote screens.
-- [x] **Hosted web client — 100%**
+- [ ] **Hosted web client — 75%**
   - **What's left:** No core gap; `/app/` now provides onboarding, sign-in, profiles, library browsing, direct playback, HLS fallback, progress sync, and capability-aware controls.
   - **Why it matters:** Makes a NAS usable from any modern browser without installing LoomTV.
 - [ ] **TLS, proxy & network policy — 70%**
@@ -230,13 +227,13 @@ linear backlog view.
 - [ ] **Multiple saved servers — 45%**
   - **What's left:** Add server list, switching, per-server tokens, and connection health.
   - **Why it matters:** Supports users with more than one desktop or NAS host.
-- [x] **Backup & restore — 100%**
+- [ ] **Backup & restore — 85%**
   - **What's left:** No core gap; checksummed versioned envelopes, legacy restore migration, automatic rollback points, hosted profile/progress inclusion, and session revocation are implemented. Media bytes remain the NAS backup system's responsibility.
   - **Why it matters:** An unattended NAS needs recovery, not only backup creation.
 - [ ] **Device & session management — 75%**
   - **What's left:** Add richer stream history, device naming/approval, termination from the dashboard, and reports.
   - **Why it matters:** Helps owners diagnose and control concurrent playback.
-- [x] **Public API & integrations — 100%**
+- [ ] **Public API & integrations — 80%**
   - **What's left:** No core API gap; `/api/v1`, discovery, OpenAPI metadata, bearer scopes, profile/progress resources, media links, diagnostics, and compatibility examples are documented. Webhooks remain a separate notifications feature.
   - **Why it matters:** Lets automation and third-party clients build on LoomTV safely.
 - [ ] **Admin dashboard, logs & reports — 95%**
@@ -299,7 +296,7 @@ linear backlog view.
 | Local-first / self-hosted | 100% | ✅ Done | Nothing for the current desktop scope. | Keeps media, profiles, and progress under the owner's control. |
 | Architecture | 95% | 🟡 Partial | Finish the shared persistence contract for profiles, watch state, and the desktop database adapter. | Prevents desktop/server behavior from drifting. |
 | Desktop platforms | 100% | ✅ Done | Continue normal release validation. | Makes the existing product useful across major desktop hosts. |
-| Headless / always-on server | 95% | 🟡 Partial | Move profiles/watch state and the full database contract into the server; verify restart and mount-loss recovery on real NAS hosts. | This is the foundation for a dependable NAS appliance. |
+| Headless / always-on server | 95% | 🟡 Partial | Hosted watch state is now durable SQLite and the catalog carries shared movie/episode classification; the remaining work is online metadata providers, the full desktop database contract, and restart/mount-loss verification on real NAS hosts. | This is the foundation for a dependable NAS appliance. |
 | Open source | 100% | ✅ Done | Keep license and dependency provenance current. | Enables trust, self-hosting, and community contribution. |
 | Application updates | 100% | ✅ Done | Document image tags, digests, rollback, and unattended container upgrades. | NAS operators need safe upgrades without a desktop session. |
 
@@ -317,7 +314,7 @@ linear backlog view.
 | Live TV & internet radio | 0% | 🔴 Not started | Add tuner/IPTV/radio models, channel guide, and playback. | Required for true live-media-server parity. |
 | DVR recording | 0% | 🔴 Not started | Add schedules, recording storage, conflict handling, and permissions. | Turns live TV into an unattended NAS workflow. |
 | Multiple folders & NAS | 95% | 🟡 Partial | Finish mount identity checks, durable resume across process restarts, and real NAS validation. | Prevents an offline share from looking like an empty library. |
-| Scanning & scheduling | 90% | 🟡 Partial | Add deeper job scheduling, cancellation, throttling, and durable resume. | Keeps large libraries current without monopolizing NAS resources. |
+| Scanning & scheduling | 90% | 🟡 Partial | Quick/metadata/full modes now behave distinctly (quick preserves unchanged records; metadata/full rebuild classification); deeper job scheduling, cancellation, throttling, and durable resume remain. | Keeps large libraries current without monopolizing NAS resources. |
 | Metadata providers | 100% | ✅ Done | No core gap; maintain provider fallbacks and credentials. | Good metadata is central to discovery and matching. |
 | Fix match / refresh one item | 100% | ✅ Done | No core gap. | Gives users a safe recovery path for imperfect matches. |
 | Artwork control | 100% | ✅ Done | No core gap. | Lets users correct the visual library without rescanning everything. |
@@ -370,7 +367,7 @@ linear backlog view.
 | Remote desktop client | 100% | ✅ Done | No core gap for same-LAN desktop use. | Provides a mature client while headless work continues. |
 | Mobile clients | 70% | 🟡 Partial | Finish the Expo MVP, offline/error states, release builds, and device coverage. | Phones and tablets are the most common remote screens. |
 | TV & console clients | 0% | 🔴 Not started | Build Android TV/Fire TV first, then target a major TV or console platform. | Expands LoomTV into the living room where Jellyfin is strongest. |
-| Hosted web client | 100% | ✅ Done | No core gap; `/app/` provides onboarding, profiles, library browsing, direct/HLS playback, progress sync, and capability negotiation. | Makes a NAS usable from any modern browser without installing LoomTV. |
+| Hosted web client | 75% | 🟡 Partial | `/app/` covers onboarding, profiles, library browsing, direct/HLS playback, and progress sync; artwork, series browsing UI, richer progress editing, and real capability negotiation remain. | Makes a NAS usable from any modern browser without installing LoomTV. |
 | Internet remote streaming | 0% | 🔴 Not started | Define a secure remote-access model, TLS, identity, rate limits, and relay/reverse-proxy guidance. | Enables away-from-home use without unsafe port exposure. |
 | TLS, proxy & network policy | 70% | 🟡 Partial | Add built-in certificate lifecycle, strict external-media transport checks, and readiness semantics for a reverse proxy. | Protects admin credentials and streaming sessions on real networks. |
 | Multiple saved servers | 45% | 🟡 Partial | Add server list, switching, per-server tokens, and connection health. | Supports users with more than one desktop or NAS host. |
@@ -379,10 +376,10 @@ linear backlog view.
 
 | Feature | Completion | Status | What's left | Why it matters |
 | --- | ---: | --- | --- | --- |
-| Backup & restore | 100% | ✅ Done | No core gap; checksummed versioned snapshots, legacy migration, automatic rollback, hosted profile/progress inclusion, and session revocation are implemented. | An unattended NAS needs recovery, not only backup creation. |
+| Backup & restore | 85% | 🟡 Partial | Checksummed snapshots, rollback artifacts, hosted profile/progress inclusion, and session revocation are implemented and round-trip tested; a restore drill on a real deployment and cross-version compatibility remain. | An unattended NAS needs recovery, not only backup creation. |
 | Device & session management | 75% | 🟡 Partial | Add richer stream history, device naming/approval, termination from the dashboard, and reports. | Helps owners diagnose and control concurrent playback. |
 | Plugin system | 0% | 🔴 Not started | Define a sandboxed extension API, permissions, packaging, and lifecycle. | Would close Jellyfin's largest ecosystem advantage. |
-| Public API & integrations | 100% | ✅ Done | No core API gap; `/api/v1`, discovery, OpenAPI metadata, scopes, profile/progress/media resources, and compatibility examples are documented. Webhooks remain a separate notifications feature. | Lets automation and third-party clients build on LoomTV safely. |
+| Public API & integrations | 80% | 🟡 Partial | `/api/v1`, discovery, OpenAPI metadata, scopes, profile/progress/media resources, and series grouping are implemented and contract-tested; SDK examples, webhooks, and a written compatibility policy remain. | Lets automation and third-party clients build on LoomTV safely. |
 | Admin dashboard, logs & reports | 95% | 🟡 Partial | Add export formats and long-term analytics beyond the retained operational log window. | Reduces time to diagnose NAS and playback failures. |
 | Notifications & webhooks | 0% | 🔴 Not started | Add event subscriptions for scans, failures, backups, sessions, and updates. | Makes an always-on server observable without constant polling. |
 | Themes & UI customization | 100% | ✅ Done | No core gap; keep headless theme tokens aligned with desktop. | Preserves a cohesive LoomTV identity across clients. |
@@ -402,5 +399,5 @@ linear backlog view.
 - Build and run Docker Compose on a real NAS, including restart and offline-mount scenarios.
 - Verify non-root permissions, read-only media, backup restore, and multi-architecture images.
 - Run physical GPU self-tests and end-to-end HLS playback for each supported backend.
-- Add automated server tests for authentication, scan checkpoints, corrupt state, path safety, and mount loss.
+- ~~Add automated server tests for authentication, scan checkpoints, corrupt state, path safety, and mount loss.~~ Done: `apps/server/tests/` covers auth/lockout, backup/restore round-trip, tampered backups, path escape, offline roots, scan modes, classification, SQLite watch-state migration, and the `/api/v1` contract end to end.
 - Reconcile the headless README and audit artifacts whenever these percentages change.
