@@ -108,6 +108,24 @@ export function createHeadlessClientState({ dataDir }) {
   }
 
   return {
+    /**
+     * Return a normalized, credential-free snapshot for the admin backup
+     * envelope.  The client store is deliberately separate from the catalog
+     * adapter, but it still participates in the same backup/restore contract.
+     */
+    async exportState() {
+      const state = await loadState();
+      return normalizeState(JSON.parse(JSON.stringify(state)));
+    },
+
+    /** Replace the client store from a validated backup snapshot. */
+    async importState(raw) {
+      const normalized = normalizeState(raw);
+      await saveState(normalized);
+      statePromise = Promise.resolve(normalized);
+      return normalized;
+    },
+
     async listProfiles(ownerId, canSeeAll = false) {
       const state = await loadState();
       const profiles = canSeeAll ? state.profiles : state.profiles.filter((profile) => profile.ownerId === ownerId);

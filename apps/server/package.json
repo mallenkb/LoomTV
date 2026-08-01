@@ -17,7 +17,8 @@
   "dependencies": {
     "@loom-media-server/media-core": "workspace:*",
     "@loom-media-server/runtime-paths": "workspace:*",
-    "@loom-media-server/transcode-capabilities": "workspace:*"
+    "@loom-media-server/transcode-capabilities": "workspace:*",
+    "hls.js": "1.6.16"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

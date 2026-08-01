@@ -5,8 +5,11 @@ import process from 'node:process';
 import { MEDIA_CORE_CONTRACT_VERSION } from '@loom-media-server/media-core';
 import { createAdminApiHandler, createAdminPage } from './admin-page.js';
 import { createHeadlessAdminService } from './admin-service.js';
+import { createHeadlessClientState } from './client-state.js';
 import { createHeadlessMediaService } from './media-service.js';
+import { createPublicApiHandler } from './public-api.js';
 import { createHeadlessTranscoder } from './transcoder.js';
+import { createWebAppPage } from './web-app.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
 const CONTRACT_VERSION = 1;
@@ -67,6 +70,7 @@ export function createHeadlessServer(options) {
   let stopPromise;
   const transcoder = createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath });
   let mediaService;
+  const clientState = createHeadlessClientState({ dataDir: options.paths.dataDir });
 
   const healthPayload = async () => {
     const address = formatAddress(server, options.host);
@@ -101,6 +105,10 @@ export function createHeadlessServer(options) {
       capabilities: {
         headless: true,
         adminUi: true,
+        webApp: true,
+        publicApi: true,
+        profiles: true,
+        watchProgress: true,
         desktopRoutes: false,
         mediaStreaming: true,
         libraryScanning: true,
@@ -118,6 +126,8 @@ export function createHeadlessServer(options) {
     baseUrl: options.host === '0.0.0.0' ? undefined : `http://${options.host}:${options.port}`,
     getRuntimeHealth: healthPayload,
     getSessions: () => mediaService?.listSessions() || [],
+    getClientState: () => clientState.exportState(),
+    replaceClientState: (snapshot) => clientState.importState(snapshot),
   });
   mediaService = createHeadlessMediaService({
     adminService,
@@ -133,13 +143,25 @@ export function createHeadlessServer(options) {
     requireSecureTransport: options.requireSecureTransport === true,
     trustProxy: options.trustProxy === true,
   });
+  const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath });
+  const publicApi = createPublicApiHandler({
+    service: adminService,
+    clientState,
+    mediaService,
+    getRuntimeHealth: healthPayload,
+    version: options.version,
+    requireSecureTransport: options.requireSecureTransport === true,
+    trustProxy: options.trustProxy === true,
+  });
 
   server = http.createServer(async (req, res) => {
     try {
       applySecurityHeaders(res);
       const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      if (await webApp(req, res)) return;
       if (await adminPage(req, res)) return;
       if (await adminApi(req, res)) return;
+      if (await publicApi(req, res)) return;
       // Media handlers return false only when the pathname is not theirs;
       // a successful response may itself resolve to undefined after piping.
       if ((await mediaService.handle(req, res, requestUrl)) !== false) return;

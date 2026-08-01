@@ -26,6 +26,10 @@ function writeError(res, status, code, message, details = {}) {
   writeJson(res, status, { ok: false, error: { code, message, ...details } });
 }
 
+function writeData(res, status, data, headers = {}) {
+  writeJson(res, status, { ok: true, data }, headers);
+}
+
 function requiredString(value, field, max = 4_096) {
   if (typeof value !== 'string' || !value.trim()) throw requestError(400, `${field}_required`, `${field} is required.`);
   const normalized = value.trim();
@@ -83,14 +87,46 @@ function pathForMedia(url, mediaId, action) {
   const query = new URLSearchParams(url.searchParams);
   query.delete('profileId');
   query.set('itemId', mediaId);
-  const path = action === 'direct'
-    ? `/api/media/items/${encodeURIComponent(mediaId)}`
-    : '/api/media/transcode';
+  const path = action === 'download'
+    ? `/api/media/items/${encodeURIComponent(mediaId)}/download`
+    : action === 'direct'
+      ? `/api/media/items/${encodeURIComponent(mediaId)}`
+      : '/api/media/transcode';
   return new URL(`${path}?${query.toString()}`, 'http://loomtv.local');
 }
 
 function authTokenPresent(req, url) {
   return Boolean(req.headers.authorization || req.headers['x-loom-admin-token'] || url.searchParams.get('token'));
+}
+
+function publicHealthSummary(health) {
+  const media = health?.media || {};
+  const transcoder = health?.transcoder || {};
+  return {
+    status: health?.status,
+    media: {
+      configured: Boolean(media.configured),
+      state: media.state || 'unknown',
+      readable: media.readable === true,
+    },
+    transcoder: {
+      available: transcoder.available === true,
+      hardwareAcceleration: transcoder.hardwareAcceleration === true,
+      recommendedBackend: transcoder.recommendedBackend || 'software',
+    },
+  };
+}
+
+function publicLibraryItem(item) {
+  if (!item || typeof item !== 'object') return item;
+  const { path: _path, ...safeItem } = item;
+  return safeItem;
+}
+
+function publicLibraryRoot(root) {
+  if (!root || typeof root !== 'object') return root;
+  const { path: _path, ...safeRoot } = root;
+  return safeRoot;
 }
 
 function discoveryDocument(version, health) {
@@ -109,12 +145,10 @@ function discoveryDocument(version, health) {
       hlsTranscoding: Boolean(health.capabilities?.transcoding),
       hardwareAcceleration: Boolean(health.capabilities?.hardwareAcceleration),
       profilePins: false,
-      downloads: false,
+      downloads: true,
     },
     health: {
-      status: health.status,
-      media: health.media,
-      transcoder: health.transcoder,
+      ...publicHealthSummary(health),
     },
   };
 }
@@ -130,11 +164,13 @@ const OPENAPI_DOCUMENT = Object.freeze({
   security: [{ bearerAuth: [] }],
   paths: {
     '/api/v1/discovery': { get: { summary: 'Discover capabilities and client URLs' } },
+    '/api/v1/health': { get: { summary: 'Read a safe unauthenticated health summary' } },
     '/api/v1/auth/onboarding': { get: { summary: 'Check whether owner onboarding is required' } },
     '/api/v1/auth/owner': { post: { summary: 'Create the first owner account' } },
     '/api/v1/auth/session': { post: { summary: 'Create an authenticated session' }, delete: { summary: 'Revoke the current session' } },
     '/api/v1/auth/me': { get: { summary: 'Return the authenticated account' } },
     '/api/v1/library': { get: { summary: 'List the authenticated catalog' } },
+    '/api/v1/library/roots': { get: { summary: 'List the authenticated library roots' } },
     '/api/v1/library/{mediaId}': { get: { summary: 'Read one catalog item' } },
     '/api/v1/library/scan': { get: { summary: 'Read scan status' }, post: { summary: 'Start a library scan' } },
     '/api/v1/profiles': { get: { summary: 'List profiles' }, post: { summary: 'Create a profile' } },
@@ -144,7 +180,12 @@ const OPENAPI_DOCUMENT = Object.freeze({
     '/api/v1/profiles/{profileId}/progress/{mediaId}': { get: { summary: 'Read progress' }, put: { summary: 'Save progress' } },
     '/api/v1/media/{mediaId}': { get: { summary: 'Read media playback links' } },
     '/api/v1/media/{mediaId}/direct': { get: { summary: 'Stream a browser-compatible file' } },
+    '/api/v1/media/{mediaId}/download': { get: { summary: 'Download the original media file' } },
     '/api/v1/media/{mediaId}/transcode': { post: { summary: 'Start an HLS transcode' } },
+    '/api/v1/sessions': { get: { summary: 'List active playback sessions' } },
+    '/api/v1/logs': { get: { summary: 'Read operational logs' } },
+    '/api/v1/backups': { get: { summary: 'Read backup status' }, post: { summary: 'Create a backup' } },
+    '/api/v1/backups/restore': { post: { summary: 'Validate and restore a backup' } },
   },
   components: {
     securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
@@ -155,8 +196,15 @@ const OPENAPI_DOCUMENT = Object.freeze({
  * Versioned viewer/client API. Existing `/api/admin` and `/api/media` routes
  * remain intact; this handler is a stable adapter around those services.
  */
-export function createPublicApiHandler({ service, clientState, mediaService, getRuntimeHealth, version }) {
+export function createPublicApiHandler({ service, clientState, mediaService, getRuntimeHealth, version, requireSecureTransport = false, trustProxy = false }) {
   if (!service || !clientState || !mediaService) throw new Error('createPublicApiHandler requires server services.');
+
+  function isSecureRequest(req) {
+    if (req.socket?.encrypted) return true;
+    if (!trustProxy) return false;
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+    return forwardedProto === 'https';
+  }
 
   async function principalForRequest(req) {
     return service.authenticateRequest(req);
@@ -200,11 +248,21 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       } else writeJson(res, 200, OPENAPI_DOCUMENT, { 'Cache-Control': 'public, max-age=300' });
       return true;
     }
+    if (pathname === PUBLIC_API_PREFIX && req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        [PUBLIC_API_HEADER]: PUBLIC_API_VERSION,
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token, X-Loom-Device-Id',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'Access-Control-Max-Age': '600',
+      });
+      res.end();
+      return true;
+    }
     if (!pathname.startsWith(`${PUBLIC_API_PREFIX}/`)) return false;
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         [PUBLIC_API_HEADER]: PUBLIC_API_VERSION,
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token, X-Loom-Device-Id',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Max-Age': '600',
       });
@@ -214,19 +272,31 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
 
     const segments = pathname.slice(`${PUBLIC_API_PREFIX}/`.length).split('/').filter(Boolean);
     const resource = segments[0] || '';
+    const publicDiscovery = (resource === 'discovery' && req.method === 'GET')
+      || (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET')
+      || (pathname === `${PUBLIC_API_PREFIX}/openapi.json` && (req.method === 'GET' || req.method === 'HEAD'));
+    if (requireSecureTransport && !publicDiscovery && !isSecureRequest(req)) {
+      writeError(res, 426, 'secure_transport_required', 'Use HTTPS for credential, API, and media requests.');
+      return true;
+    }
+
     try {
       if (resource === 'discovery' && req.method === 'GET') {
         writeJson(res, 200, discoveryDocument(version, await getRuntimeHealth()));
         return true;
       }
+      if (resource === 'health' && req.method === 'GET') {
+        writeJson(res, 200, { ok: true, data: await service.getHealth(null, { summary: true }) });
+        return true;
+      }
       if (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET') {
-        writeJson(res, 200, { ownerConfigured: await service.isOwnerConfigured(), apiVersion: PUBLIC_API_VERSION });
+        writeData(res, 200, { ownerConfigured: await service.isOwnerConfigured(), apiVersion: PUBLIC_API_VERSION });
         return true;
       }
       if (resource === 'auth' && segments[1] === 'owner' && req.method === 'POST') {
         if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
         const body = await readJsonBody(req);
-        writeJson(res, 201, await service.createOwner({
+        writeData(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
         }));
@@ -234,7 +304,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       }
       if (resource === 'auth' && segments[1] === 'session' && req.method === 'POST') {
         const body = await readJsonBody(req);
-        writeJson(res, 200, await service.createSession({
+        writeData(res, 200, await service.createSession({
           username: optionalString(body.username, 'username', 80),
           password: requiredString(body.password, 'password', 256),
           address: req.socket?.remoteAddress,
@@ -251,20 +321,25 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       }
       if (resource === 'auth' && segments[1] === 'me' && req.method === 'GET') {
         const principal = await requirePrincipal(req);
-        writeJson(res, 200, { user: await service.getCurrentUser(principal) });
+        writeData(res, 200, { user: await service.getCurrentUser(principal) });
         return true;
       }
       if (resource === 'library' && segments.length === 1 && req.method === 'GET') {
         const principal = await requirePrincipal(req, 'library.read');
-        writeJson(res, 200, { items: await service.listLibraryItems(principal) });
+        writeData(res, 200, { items: (await service.listLibraryItems(principal)).map(publicLibraryItem) });
+        return true;
+      }
+      if (resource === 'library' && segments[1] === 'roots' && segments.length === 2 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'library.read');
+        writeData(res, 200, { roots: (await service.listLibraryRoots(principal)).map(publicLibraryRoot) });
         return true;
       }
       if (resource === 'library' && segments[1] === 'scan' && (req.method === 'GET' || req.method === 'POST')) {
         const principal = await requirePrincipal(req, req.method === 'GET' ? 'library.read' : 'library.manage');
-        if (req.method === 'GET') writeJson(res, 200, await service.getScanStatus(principal));
+        if (req.method === 'GET') writeData(res, 200, await service.getScanStatus(principal));
         else {
           const body = await readJsonBody(req);
-          writeJson(res, 202, await service.startLibraryScan({ mode: body.mode, rootId: body.rootId }, principal));
+          writeData(res, 202, await service.startLibraryScan({ mode: body.mode, rootId: body.rootId }, principal));
         }
         return true;
       }
@@ -272,42 +347,42 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const principal = await requirePrincipal(req, 'library.read');
         const item = await service.getLibraryItem(decodeSegment(segments[1], 'mediaId'), principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
-        writeJson(res, 200, { item });
+        writeData(res, 200, { item: publicLibraryItem(item) });
         return true;
       }
       if (resource === 'profiles' && segments.length === 1 && req.method === 'GET') {
         const principal = await requirePrincipal(req);
-        writeJson(res, 200, { profiles: await clientState.listProfiles(principal.id, canSeeAllProfiles(principal)) });
+        writeData(res, 200, { profiles: await clientState.listProfiles(principal.id, canSeeAllProfiles(principal)) });
         return true;
       }
       if (resource === 'profiles' && segments.length === 1 && req.method === 'POST') {
         const principal = await requirePrincipal(req);
         const body = await readJsonBody(req);
-        writeJson(res, 201, { profile: await clientState.createProfile(body, principal.id) });
+        writeData(res, 201, { profile: await clientState.createProfile(body, principal.id) });
         return true;
       }
       if (resource === 'profiles' && segments.length === 2 && req.method === 'PATCH') {
         const principal = await requirePrincipal(req);
         const body = await readJsonBody(req);
-        writeJson(res, 200, { profile: await clientState.updateProfile(decodeSegment(segments[1], 'profileId'), body, principal.id, canSeeAllProfiles(principal)) });
+        writeData(res, 200, { profile: await clientState.updateProfile(decodeSegment(segments[1], 'profileId'), body, principal.id, canSeeAllProfiles(principal)) });
         return true;
       }
       if (resource === 'profiles' && segments.length === 3 && segments[2] === 'select' && req.method === 'POST') {
         const principal = await requirePrincipal(req);
-        writeJson(res, 200, { profile: await clientState.selectProfile(decodeSegment(segments[1], 'profileId'), principal.id, canSeeAllProfiles(principal)) });
+        writeData(res, 200, { profile: await clientState.selectProfile(decodeSegment(segments[1], 'profileId'), principal.id, canSeeAllProfiles(principal)) });
         return true;
       }
       if (resource === 'profiles' && segments.length >= 3 && segments[2] === 'progress') {
         const principal = await requirePrincipal(req);
         const profileId = decodeSegment(segments[1], 'profileId');
         if (segments.length === 3 && req.method === 'GET') {
-          writeJson(res, 200, { progress: await clientState.listProgress(profileId, principal.id, canSeeAllProfiles(principal)) });
+          writeData(res, 200, { progress: await clientState.listProgress(profileId, principal.id, canSeeAllProfiles(principal)) });
           return true;
         }
         if (segments.length === 4 && (req.method === 'GET' || req.method === 'PUT' || req.method === 'POST')) {
           const mediaId = decodeSegment(segments[3], 'mediaId');
-          if (req.method === 'GET') writeJson(res, 200, { progress: await clientState.getProgress(profileId, mediaId, principal.id, canSeeAllProfiles(principal)) });
-          else writeJson(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, canSeeAllProfiles(principal)) });
+          if (req.method === 'GET') writeData(res, 200, { progress: await clientState.getProgress(profileId, mediaId, principal.id, canSeeAllProfiles(principal)) });
+          else writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, canSeeAllProfiles(principal)) });
           return true;
         }
       }
@@ -316,20 +391,63 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const mediaId = decodeSegment(segments[1], 'mediaId');
         const item = await service.getLibraryItem(mediaId, principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
-        writeJson(res, 200, {
-          item,
+        writeData(res, 200, {
+          item: publicLibraryItem(item),
           directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct`,
+          downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download`,
           transcodeUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode`,
         });
         return true;
       }
-      if (resource === 'media' && segments.length === 3 && (segments[2] === 'direct' || segments[2] === 'transcode')) {
+      if (resource === 'media' && segments.length === 3 && (segments[2] === 'direct' || segments[2] === 'download' || segments[2] === 'transcode')) {
         const mediaId = decodeSegment(segments[1], 'mediaId');
         if (segments[2] === 'transcode') await requirePrincipal(req, 'transcode');
+        else if (segments[2] === 'download') await requirePrincipal(req, 'downloads');
         else if (!authTokenPresent(req, url)) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
+        if (segments[2] === 'download') {
+          const queryUrl = pathForMedia(url, mediaId, 'download');
+          return mediaService.handle(req, res, queryUrl);
+        }
         return handleMedia(req, res, url, mediaId, segments[2]);
       }
-      return false;
+      if (resource === 'sessions' && segments.length === 1 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'sessions.read');
+        writeData(res, 200, { sessions: await service.listSessions(principal) });
+        return true;
+      }
+      if (resource === 'logs' && segments.length === 1 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'logs.read');
+        const limit = Number(url.searchParams.get('limit') || 100);
+        const offset = Number(url.searchParams.get('offset') || 0);
+        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || !Number.isSafeInteger(offset) || offset < 0) {
+          throw requestError(400, 'pagination_invalid', 'limit must be 1–500 and offset must be a non-negative integer.');
+        }
+        writeData(res, 200, await service.listLogs({
+          limit,
+          offset,
+          level: url.searchParams.get('level') || undefined,
+          source: url.searchParams.get('source') || undefined,
+          search: url.searchParams.get('search') || undefined,
+        }, principal));
+        return true;
+      }
+      if (resource === 'backups' && segments.length === 1 && (req.method === 'GET' || req.method === 'POST')) {
+        const principal = await requirePrincipal(req, req.method === 'GET' ? 'backup.read' : 'backup.create');
+        if (req.method === 'GET') writeData(res, 200, await service.getBackupStatus(principal));
+        else {
+          const body = await readJsonBody(req);
+          writeData(res, 202, await service.startBackup({ destination: optionalString(body.destination, 'destination', 4_096) }, principal));
+        }
+        return true;
+      }
+      if (resource === 'backups' && segments[1] === 'restore' && segments.length === 2 && req.method === 'POST') {
+        const principal = await requirePrincipal(req, 'backup.create');
+        const body = await readJsonBody(req);
+        writeData(res, 200, await service.restoreBackup({ path: requiredString(body.path || body.source, 'path', 4_096) }, principal));
+        return true;
+      }
+      writeError(res, 404, 'not_found', 'The requested API resource does not exist.');
+      return true;
     } catch (error) {
       const status = Number.isInteger(error?.status) ? error.status : 500;
       const code = error?.code || 'request_failed';

@@ -270,6 +270,9 @@ importers:
       '@loom-media-server/transcode-capabilities':
         specifier: workspace:*
         version: link:../../packages/transcode-capabilities
+      hls.js:
+        specifier: 1.6.16
+        version: 1.6.16
     devDependencies:
       '@types/node':
         specifier: 22.20.1
@@ -284,9 +287,9 @@ importers:
         specifier: 5.7.3
         version: 5.7.3
 
-  packages/runtime-paths: {}
-
   packages/media-core: {}
+
+  packages/runtime-paths: {}
 
   packages/transcode-capabilities: {}
 
