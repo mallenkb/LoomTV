@@ -276,8 +276,7 @@ jobs:
               -name '*.rpm' -o \
               -name '*.AppImage' -o \
               -name '*.blockmap' -o \
-              -name '*.yml' -o \
-              -name '*.yaml' \
+              -name 'latest*.yml' \
             \) -print0
           )
           if (( ${#assets[@]} == 0 )); then
