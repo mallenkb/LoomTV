@@ -109,6 +109,17 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
     }
 
     const existing = Array.isArray(state.catalog) ? state.catalog : [];
+    // Scan modes share one traversal but differ in how records merge:
+    // - quick/metadata: an unchanged file (same id, size, mtime) keeps its
+    //   existing catalog record, so enriched fields survive routine rescans.
+    // - full: every discovered file gets a freshly rebuilt record.
+    const existingById = mode === 'full' ? null : new Map(existing.map((item) => [item.id, item]));
+    const mergeRecord = (record) => {
+      const previous = existingById?.get(record.id);
+      return previous && previous.sizeBytes === record.sizeBytes && previous.modifiedAtMs === record.modifiedAtMs
+        ? { ...previous, available: true, indexedAt: record.indexedAt }
+        : record;
+    };
     const selectedRootIds = new Set(roots.map((root) => root.id));
     const nextCatalog = existing.filter((item) => !selectedRootIds.has(item.rootId));
     for (const root of roots) {
@@ -121,7 +132,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         const discoveredIds = new Set(result.records.map((item) => item.id));
         nextCatalog.push(...existing.filter((item) => item.rootId === root.id && !discoveredIds.has(item.id)).map((item) => ({ ...item, available: false })));
       }
-      nextCatalog.push(...result.records);
+      nextCatalog.push(...result.records.map(mergeRecord));
     }
 
     const current = await loadState();
@@ -140,7 +151,13 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         indexedFiles: nextCatalog.length,
         offlineRoots,
         errors: errors.slice(0, 100),
-        warning: offlineRoots.length || errors.length ? 'Some files or roots were unavailable. Existing records were preserved.' : undefined,
+        warning: [
+          offlineRoots.length || errors.length ? 'Some files or roots were unavailable. Existing records were preserved.' : null,
+          // The headless runtime has no metadata engine yet, so a requested
+          // metadata scan must say what it actually did instead of implying
+          // enrichment happened.
+          mode === 'metadata' ? 'Metadata enrichment is not available on the headless server yet; file records were refreshed instead.' : null,
+        ].filter(Boolean).join(' ') || undefined,
       };
       await saveState(current);
     }
