@@ -635,7 +635,7 @@
       <p class="section-intro">The same 65 capabilities grouped by LoomTV’s current state. Each card shows its implementation estimate; percentages describe LoomTV completion, not parity with Jellyfin’s maturity. The feature matrix below keeps the side-by-side comparison.</p>
       <div class="kanban-grid">
       <article class="kanban-lane done-lane">
-        <div class="kanban-lane-header"><h3>✅ Done</h3><span class="count">32 capabilities · 49.2%</span></div>
+        <div class="kanban-lane-header"><h3>✅ Done</h3><span class="count">35 capabilities · 53.8%</span></div>
         <div class="kanban-cards">
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Local-first / self-hosted</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
@@ -664,10 +664,6 @@
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Anime</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
           <p>Dedicated Anime library, Jikan metadata, anime season mapping, and anime-oriented skip providers.</p>
-        </article>
-        <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Scanning &amp; scheduling</h4><span class="status yes">Done</span><span class="status completion">90%</span></div>
-          <p>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Metadata providers</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
@@ -765,10 +761,26 @@
           <div class="kanban-card-head"><h4>Themes &amp; UI customization</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
           <p>Per-profile light/dark mode, accent presets, loader style, sidebar ordering, and custom artwork within one designed system.</p>
         </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Admin separation</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Hosted web client</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>The headless server now serves a same-origin viewer client at <code>/app/</code> with onboarding, profiles, library browsing, direct playback, packaged HLS fallback, progress sync, and capability negotiation.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Backup &amp; restore</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Checksummed versioned envelopes include catalog, roots, account policy, logs, hosted profiles/progress, and scan state; restore validates, creates a rollback point, replaces state atomically, and revokes sessions. Media bytes remain NAS-managed.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Public API &amp; integrations</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p><code>/api/v1</code> now provides discovery, OpenAPI metadata, bearer scopes, profile/progress, library, media, diagnostics, backup, and compatibility examples. Webhooks remain a separate notifications feature.</p>
+        </article>
         </div>
       </article>
       <article class="kanban-lane partial-lane">
-        <div class="kanban-lane-header"><h3>🟡 Partial</h3><span class="count">18 capabilities · 27.7%</span></div>
+        <div class="kanban-lane-header"><h3>🟡 Partial</h3><span class="count">15 capabilities · 23.1%</span></div>
         <div class="kanban-cards">
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Architecture</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
@@ -787,6 +799,10 @@
           <p>Desktop and headless libraries support multiple configured roots, host-mounted SMB/NFS paths, offline-root preservation, checkpointed scans, readable-root checks, and scoped server-side catalog/media access; long-running NAS and multi-architecture validation remains.</p>
         </article>
         <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Scanning &amp; scheduling</h4><span class="status partial">Partial</span><span class="status completion">90%</span></div>
+          <p>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling are shipped; deeper job cancellation, throttling, and durable resume remain.</p>
+        </article>
+        <article class="kanban-card">
           <div class="kanban-card-head"><h4>Hardware transcoding</h4><span class="status partial">Partial</span><span class="status completion">80%</span></div>
           <p>Capability probing, H.264/HEVC/AV1 profiles, zero-copy paths, and software fallback are wired for supported backends; physical GPU matrix validation remains.</p>
         </article>
@@ -797,10 +813,6 @@
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Chapters &amp; trickplay previews</h4><span class="status partial">Partial</span><span class="status completion">60%</span></div>
           <p>Parses chapters and generates thumbnails for items/episodes, but no full timeline trickplay image system was found.</p>
-        </article>
-        <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Admin separation</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
-          <p>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Granular user permissions</h4><span class="status partial">Partial</span><span class="status completion">90%</span></div>
@@ -815,10 +827,6 @@
           <p>Expo iOS/Android companion supports pairing, browsing, playback, HLS fallback, profiles, and progress, but the repository labels it an MVP in progress.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Hosted web client</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
-          <p>The headless server now serves a same-origin viewer client at <code>/app/</code> with onboarding, profiles, library browsing, direct playback, packaged HLS fallback, progress sync, and capability negotiation.</p>
-        </article>
-        <article class="kanban-card">
           <div class="kanban-card-head"><h4>TLS, proxy &amp; network policy</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
           <p>Opt-in sharing, route allowlists, signed URLs, rate limits, device/profile binding, security headers, <code>--require-secure-transport</code>, and <code>--trust-proxy</code>; TLS termination itself remains an external reverse-proxy/VPN responsibility.</p>
         </article>
@@ -827,16 +835,8 @@
           <p>Host-or-remote onboarding and persisted pairing exist, but no multi-server switcher was found.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Backup &amp; restore</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
-          <p>Checksummed versioned envelopes include catalog, roots, account policy, logs, hosted profiles/progress, and scan state; restore validates, creates a rollback point, replaces state atomically, and revokes sessions. Media bytes remain NAS-managed.</p>
-        </article>
-        <article class="kanban-card">
           <div class="kanban-card-head"><h4>Device &amp; session management</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
           <p>Headless bearer sessions expire, can be revoked, bind optional device IDs, enforce per-user concurrent-session limits, and expose active HLS/transcode sessions; richer history and dashboard termination remain.</p>
-        </article>
-        <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Public API &amp; integrations</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
-          <p><code>/api/v1</code> now provides discovery, OpenAPI metadata, bearer scopes, profile/progress, library, media, diagnostics, backup, and compatibility examples. Webhooks remain a separate notifications feature.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Admin dashboard, logs &amp; reports</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
@@ -1044,7 +1044,7 @@
             </tr>
             <tr>
               <td class="feature-name">Scanning &amp; scheduling</td>
-              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling.</td>
+              <td data-label="LoomTV"><span class="status partial">Partial · 90%</span><br>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling are shipped; deeper cancellation, throttling, and durable resume remain.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Scheduled tasks cover scans, subtitles, trickplay, keyframes, cache cleanup, and maintenance.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin depth</span>Both scan; Jellyfin offers a broader task scheduler and maintenance surface.</td>
             </tr>
@@ -1280,7 +1280,7 @@
               <td class="feature-name">Hosted web client</td>
               <td data-label="LoomTV"><span class="status yes">Hosted viewer + admin</span><br>The headless server serves a same-origin viewer client at <code>/app/</code> with onboarding, profiles, library browsing, direct playback, packaged HLS fallback, progress sync, and capability negotiation.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>The server hosts a full web client for supported desktop and mobile browsers.</td>
-              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Any modern browser can be a first-class client.</td>
+              <td data-label="Assessment"><span class="edge-label">Core parity</span>Both now provide browser-based viewing; Jellyfin still covers more clients and server-wide controls.</td>
             </tr>
             <tr>
               <td class="feature-name">Internet remote streaming</td>
@@ -1350,34 +1350,34 @@
     </section>
 
     <section id="priorities" aria-labelledby="priorities-heading">
-      <h2 id="priorities-heading">Highest-value gaps for a focused NAS-ready LoomTV</h2>
+      <h2 id="priorities-heading">Roadmap status and highest-value gaps</h2>
       <p class="section-intro">
-        Full Jellyfin parity would dilute LoomTV's focused video and anime experience. These priorities first establish a dependable headless appliance, then widen client reach and deepen the enthusiast-video features where LoomTV can lead.
+        This roadmap mirrors the Kanban lanes above: ✅ shipped, 🟡 partial, and 🔴 not started. Full Jellyfin parity would dilute LoomTV's focused video and anime experience, so the remaining work stays centered on a dependable NAS appliance, client reach, and serious video-library depth.
       </p>
       <div class="priority-grid">
         <article class="priority">
-          <h3><span class="rank">01.</span> A real always-on server mode</h3>
+          <h3><span class="rank">01.</span> <span class="status partial">Partial · 95%</span> Finish the always-on server contract</h3>
           <p>The GUI-independent server, persistent state, scanning, direct delivery, HLS transcoding, admin API, and browser control plane now exist. Finish the shared desktop/headless database, profile/watch-state contract, restart recovery, and full NAS validation.</p>
         </article>
         <article class="priority">
-          <h3><span class="rank">02.</span> NAS-safe container deployment</h3>
-          <p>Ship a non-root multi-architecture image, health checks, separate config/cache/media volumes, graceful shutdown, backups, and scan behavior that never erases an offline share.</p>
+          <h3><span class="rank">02.</span> <span class="status partial">Partial · 90%</span> Validate NAS-safe container deployment</h3>
+          <p>The non-root Docker/Compose image, health checks, separate config/cache/media volumes, graceful shutdown, backups, and offline-root protections are shipped. Complete real NAS, multi-architecture, and GPU validation with documented upgrade/rollback guidance.</p>
         </article>
         <article class="priority">
-          <h3><span class="rank">03.</span> Hosted web client and administration</h3>
-          <p>Browser onboarding, library and scan controls, health, sessions, logs, backups, user policy, transcode diagnostics, and a full `/app/` viewer client are now available in the headless service.</p>
+          <h3><span class="rank">03.</span> <span class="status yes">Done · 100%</span> Hosted web client and administration</h3>
+          <p>Browser onboarding, library and scan controls, health, sessions, logs, backups, user policy, transcode diagnostics, and the full same-origin <code>/app/</code> viewer client are available in the headless service. Remaining work is polish and broader operational reporting.</p>
         </article>
         <article class="priority">
-          <h3><span class="rank">04.</span> Hardware/HDR pipeline</h3>
-          <p>Make transcoding capability-aware and configurable across decoding, encoding, subtitle burn-in, HDR/HLG/Dolby Vision tone mapping, and client profiles.</p>
+          <h3><span class="rank">04.</span> <span class="status partial">Partial · 80%</span> Hardware/HDR pipeline</h3>
+          <p>Capability-aware decoding, encoding, subtitle burn-in, codec profiles, software fallback, and managed HDR/HLG tone mapping are wired. Validate Intel, NVIDIA, AMD, Apple Silicon, Rockchip, Dolby Vision, and client-profile behavior under load.</p>
         </article>
         <article class="priority">
-          <h3><span class="rank">05.</span> TV and living-room clients</h3>
+          <h3><span class="rank">05.</span> <span class="status no">Not started · 0%</span> TV and living-room clients</h3>
           <p>After the server contract is stable, Android TV/Fire TV plus one major smart-TV platform would change where LoomTV can be used more than another metadata provider.</p>
         </article>
         <article class="priority">
-          <h3><span class="rank">06.</span> Focused enthusiast features and API</h3>
-          <p>Collections, versions, extras, NFO interoperability, and a stable public API deepen serious video libraries while preserving LoomTV's anime, dual-subtitle, skip-marker, and household-profile advantages.</p>
+          <h3><span class="rank">06.</span> <span class="status no">Not started · 0%</span> Collections, versions, extras, and NFO</h3>
+          <p>Add collections, ordered/smart playlists, alternate cuts, extras, grouped versions, and local NFO interoperability. The versioned public API is already done; webhooks remain a separate not-started notification feature.</p>
         </article>
       </div>
     </section>
