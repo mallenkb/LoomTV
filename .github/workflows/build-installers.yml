@@ -268,4 +268,9 @@ jobs:
               --generate-notes
           fi
 
-          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          mapfile -d '' assets < <(find release-assets -type f -print0)
+          if (( ${#assets[@]} == 0 )); then
+            echo 'No release files were downloaded.' >&2
+            exit 1
+          fi
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
