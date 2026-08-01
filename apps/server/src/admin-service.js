@@ -30,6 +30,12 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 const LOGIN_DELAY_MS = 250;
 const STATE_FILENAME = 'headless-admin.json';
+const STATE_VERSION = 1;
+const BACKUP_FORMAT = 'loomtv-headless-backup';
+const BACKUP_VERSION = 1;
+const MAX_BACKUP_HISTORY = 24;
+const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
+const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function invalidInput(message) {
   return Object.assign(new Error(message), { status: 400, code: 'invalid_request' });
@@ -78,6 +84,115 @@ function maxSessionsInput(value, preserveUndefined = false) {
   if (value === undefined || value === null || value === '') return null;
   if (!Number.isSafeInteger(value) || value < 1 || value > 32) {
     throw invalidInput('maxSessions must be an integer between 1 and 32, or null.');
+  }
+  return value;
+}
+
+function backupError(message) {
+  return Object.assign(new Error(message), { status: 422, code: 'invalid_backup' });
+}
+
+function stableChecksum(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function backupDataFromState(state, clientState) {
+  return {
+    stateVersion: STATE_VERSION,
+    owner: state.owner,
+    users: state.users,
+    roots: state.roots,
+    catalog: state.catalog,
+    scan: state.scan,
+    logs: state.logs,
+    profiles: state.profiles,
+    watchState: state.watchState,
+    // The hosted client's profiles/progress live in a separate adapter so
+    // desktop and headless stores cannot overwrite one another. Keep that
+    // adapter in the same backup envelope so a restore is complete.
+    clientState: clientState && typeof clientState === 'object' ? clientState : undefined,
+  };
+}
+
+function backupEnvelopeFromState(state, sourceVersion, clientState) {
+  const data = backupDataFromState(state, clientState);
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    createdAt: new Date().toISOString(),
+    source: { version: sourceVersion || '0.0.0', stateVersion: STATE_VERSION },
+    checksum: stableChecksum(data),
+    data,
+  };
+}
+
+function normalizeBackupHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry) => entry && typeof entry === 'object' && typeof entry.kind === 'string')
+    .map((entry) => ({
+      kind: entry.kind === 'restore' ? 'restore' : 'backup',
+      createdAt: Number(entry.createdAt) || Date.now(),
+      destination: typeof entry.destination === 'string' ? entry.destination.slice(0, 4_096) : undefined,
+      checksum: typeof entry.checksum === 'string' ? entry.checksum.slice(0, 128) : undefined,
+      formatVersion: Number(entry.formatVersion) || BACKUP_VERSION,
+      sizeBytes: Number.isFinite(entry.sizeBytes) ? Number(entry.sizeBytes) : undefined,
+      source: typeof entry.source === 'string' ? entry.source.slice(0, 4_096) : undefined,
+      status: typeof entry.status === 'string' ? entry.status.slice(0, 32) : undefined,
+    }))
+    .slice(0, MAX_BACKUP_HISTORY);
+}
+
+function normalizeBackupStatus(value) {
+  const status = value && typeof value === 'object' ? value : {};
+  return {
+    state: ['never', 'running', 'completed', 'failed', 'restored'].includes(status.state) ? status.state : 'never',
+    lastBackupAt: Number.isFinite(status.lastBackupAt) ? Number(status.lastBackupAt) : undefined,
+    lastRestoreAt: Number.isFinite(status.lastRestoreAt) ? Number(status.lastRestoreAt) : undefined,
+    destination: typeof status.destination === 'string' ? status.destination.slice(0, 4_096) : undefined,
+    sizeBytes: Number.isFinite(status.sizeBytes) ? Number(status.sizeBytes) : undefined,
+    checksum: typeof status.checksum === 'string' ? status.checksum.slice(0, 128) : undefined,
+    formatVersion: Number(status.formatVersion) || undefined,
+    restoredFrom: typeof status.restoredFrom === 'string' ? status.restoredFrom.slice(0, 4_096) : undefined,
+    rollbackDestination: typeof status.rollbackDestination === 'string' ? status.rollbackDestination.slice(0, 4_096) : undefined,
+    error: typeof status.error === 'string' ? status.error.slice(0, 500) : undefined,
+    history: normalizeBackupHistory(status.history),
+  };
+}
+
+function validateBackupEnvelope(value) {
+  // Backups created before the checksummed envelope were raw admin-state JSON
+  // files. Accept them as a one-time migration so an upgrade cannot strand a
+  // NAS owner with an otherwise valid recovery point.
+  if (value && typeof value === 'object' && !value.format && value.owner && Array.isArray(value.roots)) {
+    const data = backupDataFromState(value, undefined);
+    return {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      createdAt: new Date().toISOString(),
+      source: { version: 'legacy', stateVersion: STATE_VERSION },
+      checksum: stableChecksum(data),
+      data,
+      legacy: true,
+    };
+  }
+  if (!value || typeof value !== 'object' || value.format !== BACKUP_FORMAT) {
+    throw backupError('The selected file is not a LoomTV backup.');
+  }
+  if (value.version !== BACKUP_VERSION || !value.data || typeof value.data !== 'object') {
+    throw backupError('This LoomTV backup format is not supported by this server.');
+  }
+  if (typeof value.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(value.checksum)) {
+    throw backupError('The backup checksum is missing or malformed.');
+  }
+  const checksum = stableChecksum(value.data);
+  const expected = Buffer.from(value.checksum, 'hex');
+  const actual = Buffer.from(checksum, 'hex');
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+    throw backupError('The backup checksum does not match its contents.');
+  }
+  if (!value.data.owner || typeof value.data.owner !== 'object') {
+    throw backupError('The backup does not contain an owner account.');
   }
   return value;
 }
@@ -168,8 +283,10 @@ function defaultState() {
     loginAttempts: [],
     roots: [],
     catalog: [],
+    profiles: [],
+    watchState: {},
     scan: { state: 'idle' },
-    backup: { state: 'never' },
+    backup: normalizeBackupStatus({ state: 'never' }),
     logs: [],
   };
 }
@@ -268,9 +385,23 @@ function normalizeState(raw) {
         indexedAt: Number(entry.indexedAt) || Date.now(),
       }));
   }
+  if (Array.isArray(raw.profiles)) state.profiles = raw.profiles.slice(0, 4_096);
+  if (raw.watchState && typeof raw.watchState === 'object' && !Array.isArray(raw.watchState)) {
+    try {
+      const serialized = JSON.stringify(raw.watchState);
+      if (serialized.length <= 8 * 1024 * 1024) state.watchState = JSON.parse(serialized);
+    } catch {
+      state.watchState = {};
+    }
+  }
   if (raw.scan && typeof raw.scan === 'object') state.scan = { ...state.scan, ...raw.scan };
-  if (raw.backup && typeof raw.backup === 'object') state.backup = { ...state.backup, ...raw.backup };
-  if (Array.isArray(raw.logs)) state.logs = raw.logs.slice(0, MAX_LOGS);
+  state.backup = normalizeBackupStatus(raw.backup);
+  if (Array.isArray(raw.logs)) {
+    const cutoff = Date.now() - LOG_RETENTION_MS;
+    state.logs = raw.logs
+      .filter((entry) => entry && Number(entry.timestamp) > cutoff)
+      .slice(0, MAX_LOGS);
+  }
   return state;
 }
 
@@ -280,9 +411,12 @@ export function createHeadlessAdminService(options) {
   const mediaDir = options.mediaDir ? path.resolve(options.mediaDir) : null;
   const getRuntimeHealth = options.getRuntimeHealth || (async () => ({}));
   const getSessions = options.getSessions || (async () => []);
+  const getClientState = options.getClientState || (async () => null);
+  const replaceClientState = options.replaceClientState || (async () => undefined);
   let statePromise;
   let writeQueue = Promise.resolve();
   let ownerCreationPromise = null;
+  let backupPromise = null;
 
   async function saveState(state) {
     writeQueue = writeQueue.catch(() => undefined).then(async () => {
@@ -292,6 +426,47 @@ export function createHeadlessAdminService(options) {
       await fs.rename(temporaryPath, statePath);
     });
     return writeQueue;
+  }
+
+  async function writeBackupFile(destination, envelope) {
+    const serialized = JSON.stringify(envelope, null, 2);
+    if (Buffer.byteLength(serialized) > MAX_BACKUP_BYTES) throw backupError('The backup is larger than the supported limit.');
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    const temporaryPath = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporaryPath, serialized, { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(temporaryPath, destination);
+    } catch (error) {
+      await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    const stats = await fs.stat(destination);
+    return { sizeBytes: stats.size, checksum: envelope.checksum };
+  }
+
+  async function storageStatus(targetPath) {
+    try {
+      const [stats, writable] = await Promise.all([
+        fs.statfs(targetPath),
+        fs.access(targetPath).then(() => true).catch(() => false),
+      ]);
+      return {
+        path: targetPath,
+        writable,
+        totalBytes: Number(stats.blocks) * Number(stats.bsize),
+        freeBytes: Number(stats.bavail) * Number(stats.bsize),
+      };
+    } catch (error) {
+      return { path: targetPath, writable: false, state: error?.code || 'unavailable' };
+    }
+  }
+
+  function pruneLogs(state, now = Date.now()) {
+    const before = state.logs.length;
+    state.logs = state.logs
+      .filter((entry) => Number(entry.timestamp) > now - LOG_RETENTION_MS)
+      .slice(0, MAX_LOGS);
+    return state.logs.length !== before;
   }
 
   async function loadState() {
@@ -332,7 +507,7 @@ export function createHeadlessAdminService(options) {
       message: String(message).slice(0, 500),
       ...(details ? { details } : {}),
     });
-    state.logs = state.logs.slice(0, MAX_LOGS);
+    pruneLogs(state);
     await saveState(state);
   }
 
@@ -984,6 +1159,18 @@ export function createHeadlessAdminService(options) {
         : '';
       const currentState = await loadState();
       const catalogCount = Array.isArray(currentState.catalog) ? currentState.catalog.length : 0;
+      const storage = summaryOnly ? null : await storageStatus(dataDir);
+      const latestBackup = normalizeBackupHistory(currentState.backup?.history).find((entry) => entry.kind === 'backup' && entry.status === 'completed');
+      const checks = [
+        { name: 'Headless runtime', state: 'pass', message: 'The server is running without Electron.' },
+        { name: 'Headless catalog', state: 'pass', message: `${catalogCount} media records and scan checkpoints are available without Electron.` },
+        { name: 'Media root', state: mediaState === 'online' ? 'pass' : 'warn', message: runtime.media?.path && !summaryOnly ? `${runtime.media.path} is ${mediaState}.` : `Media root is ${mediaState}.` },
+        { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : transcoderState === 'limited' ? 'warn' : 'fail', message: transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
+      ];
+      if (!summaryOnly) {
+        checks.push({ name: 'Persistent storage', state: storage?.writable && (storage.freeBytes === undefined || storage.freeBytes > 64 * 1024 * 1024) ? 'pass' : 'warn', message: storage?.writable ? `${storage.freeBytes == null ? 'Available' : `${Math.round(storage.freeBytes / 1024 / 1024)} MB free`}.` : 'Data directory is not writable.' });
+        checks.push({ name: 'Latest backup', state: latestBackup ? 'pass' : 'warn', message: latestBackup ? `Last verified snapshot ${new Date(latestBackup.createdAt).toISOString()}.` : 'No verified backup has been recorded.' });
+      }
       const safeTranscoder = {
         state: transcoderHealth.state,
         available: transcoderHealth.available,
@@ -1002,18 +1189,8 @@ export function createHeadlessAdminService(options) {
         database: 'catalog',
         transcoder: transcoderState,
         transcoderDetails: summaryOnly ? safeTranscoder : transcoderHealth,
-        ...(summaryOnly ? {} : {
-          storage: {
-            dataPath: dataDir,
-            ...(mediaDir ? { totalBytes: undefined } : {}),
-          },
-        }),
-        checks: [
-          { name: 'Headless runtime', state: 'pass', message: 'The server is running without Electron.' },
-          { name: 'Headless catalog', state: 'pass', message: `${catalogCount} media records and scan checkpoints are available without Electron.` },
-          { name: 'Media root', state: mediaState === 'online' ? 'pass' : 'warn', message: runtime.media?.path && !summaryOnly ? `${runtime.media.path} is ${mediaState}.` : `Media root is ${mediaState}.` },
-          { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : transcoderState === 'limited' ? 'warn' : 'fail', message: transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
-        ],
+        ...(summaryOnly ? {} : { storage }),
+        checks,
       };
     },
 
@@ -1022,9 +1199,29 @@ export function createHeadlessAdminService(options) {
       return getSessions();
     },
 
-    async listLogs(limit = 100, principal) {
+    async listLogs(input = {}, principal) {
       ensurePrincipalPermission(principal, 'logs.read');
-      return (await loadState()).logs.slice(0, limit);
+      const options = typeof input === 'number' ? { limit: input } : (input || {});
+      const limit = Number.isSafeInteger(options.limit) ? Math.max(1, Math.min(500, options.limit)) : 100;
+      const offset = Number.isSafeInteger(options.offset) ? Math.max(0, options.offset) : 0;
+      const state = await loadState();
+      const pruned = pruneLogs(state);
+      if (pruned) await saveState(state);
+      const level = ['debug', 'info', 'warn', 'error'].includes(options.level) ? options.level : null;
+      const source = typeof options.source === 'string' ? options.source.trim().slice(0, 128).toLocaleLowerCase() : '';
+      const search = typeof options.search === 'string' ? options.search.trim().toLocaleLowerCase().slice(0, 200) : '';
+      const before = Number.isFinite(options.before) ? Number(options.before) : null;
+      const after = Number.isFinite(options.after) ? Number(options.after) : null;
+      const filtered = state.logs.filter((entry) => (
+        (!level || entry.level === level)
+        && (!source || String(entry.source || '').toLocaleLowerCase() === source)
+        && (!search || `${entry.message || ''} ${entry.source || ''}`.toLocaleLowerCase().includes(search))
+        && (before === null || Number(entry.timestamp) < before)
+        && (after === null || Number(entry.timestamp) > after)
+      ));
+      const logs = filtered.slice(offset, offset + limit);
+      const nextOffset = offset + logs.length < filtered.length ? offset + logs.length : null;
+      return { logs, page: { limit, offset, total: filtered.length, nextOffset, hasMore: nextOffset !== null } };
     },
 
     async getBackupStatus(principal) {
@@ -1032,26 +1229,100 @@ export function createHeadlessAdminService(options) {
       return (await loadState()).backup;
     },
 
+    async getDiagnostics(principal) {
+      ensurePrincipalPermission(principal, 'admin.read');
+      const health = await this.getHealth(principal);
+      const state = await loadState();
+      const logs = hasPermission(principal, 'logs.read')
+        ? await this.listLogs({ limit: 50 }, principal)
+        : { logs: [], page: { limit: 50, offset: 0, total: 0, nextOffset: null, hasMore: false } };
+      return {
+        generatedAt: Date.now(),
+        health,
+        backup: hasPermission(principal, 'backup.read') ? state.backup : { state: 'restricted' },
+        sessions: hasPermission(principal, 'sessions.read') ? await this.listSessions(principal) : [],
+        logs,
+      };
+    },
+
     async startBackup(input = {}, principal) {
       ensurePrincipalPermission(principal, 'backup.create');
-      const state = await loadState();
-      const destination = path.resolve(input.destination || path.join(dataDir, 'backups'));
-      state.backup = { state: 'running', destination };
-      await saveState(state);
+      if (backupPromise) return backupPromise;
+      backupPromise = (async () => {
+        const state = await loadState();
+        const destination = path.resolve(input.destination || path.join(dataDir, 'backups'));
+        state.backup = { ...normalizeBackupStatus(state.backup), state: 'running', destination };
+        await saveState(state);
+        try {
+          const envelope = backupEnvelopeFromState(state, options.version, await getClientState());
+          const outputPath = path.join(destination, `loomtv-backup-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID().slice(0, 8)}.json`);
+          const artifact = await writeBackupFile(outputPath, envelope);
+          const createdAt = Date.now();
+          const history = [{ kind: 'backup', status: 'completed', createdAt, destination: outputPath, checksum: artifact.checksum, formatVersion: BACKUP_VERSION, sizeBytes: artifact.sizeBytes }, ...normalizeBackupHistory(state.backup.history)].slice(0, MAX_BACKUP_HISTORY);
+          state.backup = { ...normalizeBackupStatus(state.backup), state: 'completed', lastBackupAt: createdAt, destination: outputPath, sizeBytes: artifact.sizeBytes, checksum: artifact.checksum, formatVersion: BACKUP_VERSION, history };
+          await saveState(state);
+          await appendLog('info', 'Headless admin state backup completed.', { destination: outputPath, checksum: artifact.checksum, sizeBytes: artifact.sizeBytes });
+        } catch (error) {
+          state.backup = { ...normalizeBackupStatus(state.backup), state: 'failed', error: error instanceof Error ? error.message : String(error) };
+          await saveState(state);
+          await appendLog('error', 'Headless admin state backup failed.');
+        }
+        return state.backup;
+      })();
       try {
-        await fs.mkdir(destination, { recursive: true });
-        const outputPath = path.join(destination, `loomtv-admin-${new Date().toISOString().replaceAll(':', '-')}.json`);
-        await fs.copyFile(statePath, outputPath);
-        const stats = await fs.stat(outputPath);
-        state.backup = { state: 'completed', lastBackupAt: Date.now(), destination: outputPath, sizeBytes: stats.size };
-        await saveState(state);
-        await appendLog('info', `Headless admin state backed up to ${outputPath}.`);
-      } catch (error) {
-        state.backup = { state: 'failed', error: error instanceof Error ? error.message : String(error), destination };
-        await saveState(state);
-        await appendLog('error', 'Headless admin state backup failed.');
+        return await backupPromise;
+      } finally {
+        backupPromise = null;
       }
-      return state.backup;
+    },
+
+    async restoreBackup(input = {}, principal) {
+      ensurePrincipalPermission(principal, 'backup.create');
+      const source = typeof input.path === 'string' ? input.path.trim() : '';
+      if (!source || source.length > 4_096) throw invalidInput('A backup path is required.');
+      const sourcePath = path.resolve(source);
+      if (sourcePath === statePath) throw backupError('The live admin state cannot be restored as a backup.');
+      const stats = await fs.stat(sourcePath).catch((error) => {
+        throw Object.assign(new Error('The selected backup file is unavailable.'), { status: error?.code === 'EACCES' ? 403 : 404, code: error?.code === 'EACCES' ? 'permission_denied' : 'backup_not_found' });
+      });
+      if (!stats.isFile()) throw backupError('The selected backup path is not a file.');
+      if (stats.size > MAX_BACKUP_BYTES) throw backupError('The selected backup is larger than the supported limit.');
+      let envelope;
+      try {
+        envelope = JSON.parse(await fs.readFile(sourcePath, 'utf8'));
+      } catch {
+        throw backupError('The selected backup is not valid JSON.');
+      }
+      envelope = validateBackupEnvelope(envelope);
+      const current = await loadState();
+      const rollbackDir = path.join(dataDir, 'backups', 'pre-restore');
+      const rollbackPath = path.join(rollbackDir, `loomtv-pre-restore-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID().slice(0, 8)}.json`);
+      const previousClientState = await getClientState();
+      const rollbackEnvelope = backupEnvelopeFromState(current, options.version, previousClientState);
+      const rollbackArtifact = await writeBackupFile(rollbackPath, rollbackEnvelope);
+      const replacement = normalizeState({ ...envelope.data, sessions: [], loginAttempts: [] });
+      if (!replacement.owner) throw backupError('The backup does not contain a usable owner account.');
+      const restoredAt = Date.now();
+      const history = [{ kind: 'restore', status: 'completed', createdAt: restoredAt, source: sourcePath, destination: rollbackPath, checksum: envelope.checksum, formatVersion: envelope.version, sizeBytes: stats.size }, ...normalizeBackupHistory(current.backup.history)].slice(0, MAX_BACKUP_HISTORY);
+      replacement.backup = { ...normalizeBackupStatus(current.backup), state: 'restored', lastRestoreAt: restoredAt, restoredFrom: sourcePath, rollbackDestination: rollbackPath, destination: sourcePath, sizeBytes: stats.size, checksum: envelope.checksum, formatVersion: envelope.version, history };
+      await saveState(replacement);
+      try {
+        if (envelope.data.clientState !== undefined) await replaceClientState(envelope.data.clientState);
+      } catch (error) {
+        // Keep the restore all-or-nothing across the admin and hosted-client
+        // stores. The rollback artifact remains available if this recovery
+        // write itself fails.
+        await saveState(current);
+        throw Object.assign(new Error('The hosted client profile state could not be restored.'), {
+          status: 500,
+          code: 'client_state_restore_failed',
+          cause: error,
+        });
+      }
+      Object.keys(current).forEach((key) => { delete current[key]; });
+      Object.assign(current, replacement);
+      await appendLog('warn', 'Headless admin state restored from backup.', { source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, rollbackSizeBytes: rollbackArtifact.sizeBytes });
+      return { restored: true, source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, backup: current.backup };
     },
   };
 }

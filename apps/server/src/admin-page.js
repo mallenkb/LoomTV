@@ -141,6 +141,8 @@ function permissionForRoute(pathname, method, prefix) {
   if (pathname === `${prefix}/health`) return 'admin.read';
   if (pathname === `${prefix}/sessions`) return 'sessions.read';
   if (pathname === `${prefix}/logs`) return 'logs.read';
+  if (pathname === `${prefix}/diagnostics`) return 'admin.read';
+  if (pathname === `${prefix}/backup/restore`) return 'backup.create';
   if (pathname === `${prefix}/backup`) return method === 'GET' ? 'backup.read' : 'backup.create';
   if (pathname === `${prefix}/users` || pathname.startsWith(`${prefix}/users/`)) return method === 'GET' ? 'users.read' : 'users.manage';
   if (pathname === `${prefix}/account/password`) return 'account.password';
@@ -174,6 +176,24 @@ function limitFromQuery(value) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 500) throw requestError(400, 'limit must be between 1 and 500.');
   return parsed;
+}
+
+function logQueryFromUrl(url) {
+  return {
+    limit: limitFromQuery(url.searchParams.get('limit')),
+    offset: (() => {
+      const value = url.searchParams.get('offset');
+      if (!value) return 0;
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 100_000) throw requestError(400, 'offset must be a non-negative integer.');
+      return parsed;
+    })(),
+    level: optionalString(url.searchParams.get('level'), 'level', 16),
+    source: optionalString(url.searchParams.get('source'), 'source', 128),
+    search: optionalString(url.searchParams.get('search'), 'search', 200),
+    before: url.searchParams.get('before') ? Number(url.searchParams.get('before')) : undefined,
+    after: url.searchParams.get('after') ? Number(url.searchParams.get('after')) : undefined,
+  };
 }
 
 /**
@@ -348,7 +368,16 @@ export function createAdminApiHandler(options = {}) {
         return true;
       }
       if (pathname === `${prefix}/logs` && method === 'GET') {
-        writeJson(res, 200, { logs: await service.listLogs(limitFromQuery(url.searchParams.get('limit')), principal) });
+        writeJson(res, 200, await service.listLogs(logQueryFromUrl(url), principal));
+        return true;
+      }
+      if (pathname === `${prefix}/diagnostics` && method === 'GET') {
+        writeJson(res, 200, await service.getDiagnostics(principal));
+        return true;
+      }
+      if (pathname === `${prefix}/backup/restore` && method === 'POST') {
+        const body = await readJsonBody(req, maxBodyBytes);
+        writeJson(res, 200, await service.restoreBackup({ path: requiredString(body.path || body.source, 'path', 4_096) }, principal));
         return true;
       }
       if (pathname === `${prefix}/backup`) {
