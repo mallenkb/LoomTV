@@ -784,11 +784,11 @@
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Architecture</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
-          <p>Electron remains the primary client, while the GUI-independent server now owns persistent headless state, scanning, media delivery, HLS transcoding, and authenticated admin routes; full desktop/profile core unification is still in progress.</p>
+          <p>Electron remains the primary client, while the GUI-independent server owns persistent headless state, scanning, media delivery, HLS transcoding, and authenticated admin routes. Media identity and filename classification (movie vs episode, series/season/episode, anime hints) now live in the shared <code>media-core</code> package used by both runtimes; full desktop database/profile core unification is still in progress.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Headless / always-on server</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
-          <p>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, hosted profiles/progress, and on-demand HLS transcoding now run without Electron; shared desktop database parity and production NAS validation remain.</p>
+          <p>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, classified catalog scanning (movie/episode/series structure), direct media delivery, durable SQLite-backed hosted profiles/progress, and on-demand HLS transcoding now run without Electron; online metadata providers, shared desktop database parity, and production NAS validation remain.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Other / mixed videos</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
@@ -800,7 +800,7 @@
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Scanning &amp; scheduling</h4><span class="status partial">Partial</span><span class="status completion">90%</span></div>
-          <p>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling are shipped; deeper job cancellation, throttling, and durable resume remain.</p>
+          <p>Quick, metadata, and full scans now behave distinctly (quick preserves unchanged records; metadata/full rebuild classification), with progress reporting, checkpointing, configurable periodic sync, and analysis scheduling; deeper job cancellation, throttling, and durable resume remain.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Hardware transcoding</h4><span class="status partial">Partial</span><span class="status completion">80%</span></div>
@@ -964,7 +964,7 @@
             </tr>
             <tr>
               <td class="feature-name">Headless / always-on server</td>
-              <td data-label="LoomTV"><span class="status partial">Operational headless server</span><br>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, hosted profiles/progress, and on-demand HLS transcoding now run without Electron; shared desktop database parity and production NAS validation remain.</td>
+              <td data-label="LoomTV"><span class="status partial">Operational headless server</span><br>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, classified catalog scanning (movie/episode/series structure), direct media delivery, durable SQLite-backed hosted profiles/progress, and on-demand HLS transcoding now run without Electron; online metadata providers, shared desktop database parity, and production NAS validation remain.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Designed for always-on service, package, NAS, and container deployments.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin maturity</span>LoomTV is now usable as a headless media service, but Jellyfin still has the broader server contract, clients, and operational validation.</td>
             </tr>
@@ -1044,7 +1044,7 @@
             </tr>
             <tr>
               <td class="feature-name">Scanning &amp; scheduling</td>
-              <td data-label="LoomTV"><span class="status partial">Partial · 90%</span><br>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling are shipped; deeper cancellation, throttling, and durable resume remain.</td>
+              <td data-label="LoomTV"><span class="status partial">Partial · 90%</span><br>Quick, metadata, and full scans behave distinctly (quick preserves unchanged records; metadata/full rebuild classification), with progress reporting, checkpointing, and configurable periodic sync; deeper cancellation, throttling, and durable resume remain.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Scheduled tasks cover scans, subtitles, trickplay, keyframes, cache cleanup, and maintenance.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin depth</span>Both scan; Jellyfin offers a broader task scheduler and maintenance surface.</td>
             </tr>
@@ -1154,7 +1154,7 @@
             </tr>
             <tr>
               <td class="feature-name">Resume, watched state &amp; history</td>
-              <td data-label="LoomTV"><span class="status yes">Per profile</span><br>Position, duration, watched state, and recency are stored in SQLite and synchronized to paired clients.</td>
+              <td data-label="LoomTV"><span class="status yes">Per profile</span><br>Position, duration, watched state, and recency are stored in SQLite on both the desktop and the headless server (with one-time migration from the legacy JSON store) and synchronized to paired clients.</td>
               <td data-label="Jellyfin"><span class="status yes">Per user</span><br>Resume and played state synchronize across the user’s connected clients.</td>
               <td data-label="Assessment"><span class="edge-label">Tie</span>Core continuity exists in both.</td>
             </tr>
