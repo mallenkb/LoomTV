@@ -215,11 +215,11 @@ export default function ModernHome() {
             onHoverChange={setHeroHovered}
           />
           <main className="loom-modern-content-frame page-bottom-safe relative z-10 -mt-24 space-y-10 px-[var(--loom-frame-inset)] pb-10">
-            {visibleSavedItems.length > 0 && (
-              <PosterRail title="My List" items={visibleSavedItems} from={currentRoute} />
-            )}
             {continueWatching.length > 0 && (
               <ContinueWatchingRail items={continueWatching} from={currentRoute} progress={progress} />
+            )}
+            {visibleSavedItems.length > 0 && (
+              <PosterRail title="My List" items={visibleSavedItems} from={currentRoute} />
             )}
             {visibleAnimeShows.length > 0 && <PosterRail title="Anime" items={visibleAnimeShows} from={currentRoute} />}
             {visibleTVShows.length > 0 && <PosterRail title="TV Shows" items={visibleTVShows} from={currentRoute} />}

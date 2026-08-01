@@ -108,15 +108,15 @@ function DefaultHome() {
           <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
         )}
 
-        {!normalizedQuery && visibleMyListItems.length > 0 && (
-          <MediaRail title="My List" className="mb-8">
-            <PosterCards items={visibleMyListItems.slice(0, 20)} from={currentRoute} />
-          </MediaRail>
-        )}
-
         {!normalizedQuery && visibleContinueWatching.length > 0 && (
           <MediaRail title="Continue Watching" className="mb-8">
             <PosterCards items={visibleContinueWatching} from={currentRoute} isLoading={isLoading} />
+          </MediaRail>
+        )}
+
+        {!normalizedQuery && visibleMyListItems.length > 0 && (
+          <MediaRail title="My List" className="mb-8">
+            <PosterCards items={visibleMyListItems.slice(0, 20)} from={currentRoute} />
           </MediaRail>
         )}
 
