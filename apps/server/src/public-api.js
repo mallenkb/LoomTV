@@ -195,6 +195,7 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/auth/session': { post: { summary: 'Create an authenticated session' }, delete: { summary: 'Revoke the current session' } },
     '/api/v1/auth/me': { get: { summary: 'Return the authenticated account' } },
     '/api/v1/library': { get: { summary: 'List the authenticated catalog' } },
+    '/api/v1/library/series': { get: { summary: 'List episodes grouped into series and seasons' } },
     '/api/v1/library/roots': { get: { summary: 'List the authenticated library roots' }, post: { summary: 'Add a library root' } },
     '/api/v1/library/roots/{rootId}': { delete: { summary: 'Remove a library root' } },
     '/api/v1/library/{mediaId}': { get: { summary: 'Read one catalog item' } },
@@ -358,6 +359,37 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       if (resource === 'library' && segments.length === 1 && req.method === 'GET') {
         const principal = await requirePrincipal(req, 'library.read');
         writeData(res, 200, { items: (await service.listLibraryItems(principal)).map(publicLibraryItem) });
+        return true;
+      }
+      if (resource === 'library' && segments[1] === 'series' && segments.length === 2 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'library.read');
+        const items = await service.listLibraryItems(principal);
+        const seriesByKey = new Map();
+        for (const item of items) {
+          if (item.kind !== 'episode' || !item.series?.title) continue;
+          const key = item.series.title.toLowerCase();
+          const entry = seriesByKey.get(key) || { title: item.series.title, animeLikely: false, seasons: new Map() };
+          if (item.animeLikely) entry.animeLikely = true;
+          const seasonNumber = item.series.season ?? 1;
+          const season = entry.seasons.get(seasonNumber) || { season: seasonNumber, episodes: [] };
+          season.episodes.push(publicLibraryItem(item));
+          entry.seasons.set(seasonNumber, season);
+          seriesByKey.set(key, entry);
+        }
+        const series = [...seriesByKey.values()]
+          .map((entry) => ({
+            title: entry.title,
+            animeLikely: entry.animeLikely,
+            episodeCount: [...entry.seasons.values()].reduce((total, season) => total + season.episodes.length, 0),
+            seasons: [...entry.seasons.values()]
+              .sort((left, right) => left.season - right.season)
+              .map((season) => ({
+                ...season,
+                episodes: season.episodes.sort((left, right) => (left.series?.episode ?? 0) - (right.series?.episode ?? 0)),
+              })),
+          }))
+          .sort((left, right) => left.title.localeCompare(right.title));
+        writeData(res, 200, { series });
         return true;
       }
       if (resource === 'library' && segments[1] === 'roots' && segments.length === 2 && (req.method === 'GET' || req.method === 'POST')) {

@@ -378,6 +378,18 @@ function normalizeState(raw) {
         path: path.resolve(entry.path),
         relativePath: typeof entry.relativePath === 'string' ? entry.relativePath.slice(0, 4_096) : path.basename(entry.path),
         title: typeof entry.title === 'string' ? entry.title.slice(0, 500) : path.basename(entry.path),
+        kind: entry.kind === 'episode' ? 'episode' : 'movie',
+        ...(Number.isSafeInteger(entry.year) && entry.year > 1900 && entry.year < 2200 ? { year: entry.year } : {}),
+        ...(entry.animeLikely === true ? { animeLikely: true } : {}),
+        ...(entry.series && typeof entry.series === 'object' && typeof entry.series.title === 'string'
+          ? {
+            series: {
+              title: entry.series.title.slice(0, 500),
+              season: Number.isSafeInteger(entry.series.season) && entry.series.season >= 0 ? entry.series.season : 1,
+              episode: Number.isSafeInteger(entry.series.episode) && entry.series.episode >= 0 ? entry.series.episode : null,
+            },
+          }
+          : {}),
         extension: typeof entry.extension === 'string' ? entry.extension.slice(0, 16) : path.extname(entry.path).slice(1).toLowerCase(),
         sizeBytes: Number.isFinite(entry.sizeBytes) ? Number(entry.sizeBytes) : undefined,
         modifiedAtMs: Number.isFinite(entry.modifiedAtMs) ? Number(entry.modifiedAtMs) : undefined,

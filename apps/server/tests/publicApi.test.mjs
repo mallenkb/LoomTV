@@ -124,6 +124,9 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     const authed = api(baseUrl, token);
     const mediaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-public-media-'));
     await fs.writeFile(path.join(mediaDir, 'sample.mkv'), 'fake-video');
+    await fs.mkdir(path.join(mediaDir, 'My Show', 'Season 1'), { recursive: true });
+    await fs.writeFile(path.join(mediaDir, 'My Show', 'Season 1', 'My.Show.S01E01.mkv'), 'fake-episode-1');
+    await fs.writeFile(path.join(mediaDir, 'My Show', 'Season 1', 'My.Show.S01E02.mkv'), 'fake-episode-2');
 
     const root = await authed('POST', '/api/v1/library/roots', { path: mediaDir });
     assert.equal(root.status, 201);
@@ -139,8 +142,20 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     assert.equal(status.payload.data.state, 'completed');
 
     const library = await authed('GET', '/api/v1/library');
-    assert.equal(library.payload.data.items.length, 1);
-    const mediaId = library.payload.data.items[0].id;
+    assert.equal(library.payload.data.items.length, 3);
+    const movie = library.payload.data.items.find((item) => item.kind === 'movie');
+    assert.equal(movie.title, 'sample');
+    for (const item of library.payload.data.items) assert.equal(item.path, undefined, 'server paths must not leak');
+    const mediaId = movie.id;
+
+    const series = await authed('GET', '/api/v1/library/series');
+    assert.equal(series.status, 200);
+    assert.equal(series.payload.data.series.length, 1);
+    const show = series.payload.data.series[0];
+    assert.equal(show.title, 'My Show');
+    assert.equal(show.episodeCount, 2);
+    assert.equal(show.seasons[0].season, 1);
+    assert.deepEqual(show.seasons[0].episodes.map((episode) => episode.series.episode), [1, 2]);
 
     const media = await authed('GET', `/api/v1/media/${encodeURIComponent(mediaId)}`);
     assert.equal(media.status, 200);

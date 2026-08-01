@@ -8,6 +8,15 @@ import path from 'node:path';
  */
 export const MEDIA_CORE_CONTRACT_VERSION = 1;
 
+export {
+  classifyVideoFile,
+  cleanMediaTitle,
+  isLikelyAnimePath,
+  isLikelyEpisodeFileName,
+  parseEpisodeFileName,
+  seriesTitleFromEpisodeName,
+} from './classification.mjs';
+
 export const VIDEO_EXTENSIONS = Object.freeze([
   '.3gp', '.avi', '.divx', '.flv', '.m2ts', '.m4v', '.mkv', '.mov',
   '.mp4', '.mpeg', '.mpg', '.mts', '.mxf', '.ogm', '.ogv', '.ts', '.vob',

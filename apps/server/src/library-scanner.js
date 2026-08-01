@@ -1,15 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { createMediaItemId, isVideoFilePath } from '@loom-media-server/media-core';
+import { classifyVideoFile, createMediaItemId, isVideoFilePath } from '@loom-media-server/media-core';
 const CHECKPOINT_EVERY_FILES = 50;
-
-function titleFor(filePath) {
-  return path.basename(filePath, path.extname(filePath)).replace(/[._-]+/g, ' ').replace(/\s+/g, ' ').trim() || path.basename(filePath);
-}
 
 function mediaRecord(root, filePath, stats) {
   const relativePath = path.relative(root.path, filePath);
+  // Shared classification keeps the headless catalog structurally identical
+  // to what the desktop scanner derives for the same mounted files.
+  const classification = classifyVideoFile(relativePath);
   return {
     // The shared identity algorithm is also used by the Electron scanner.
     // This keeps a mounted library portable between desktop and headless
@@ -18,7 +17,11 @@ function mediaRecord(root, filePath, stats) {
     rootId: root.id,
     path: filePath,
     relativePath,
-    title: titleFor(filePath),
+    title: classification.title,
+    kind: classification.kind,
+    ...(classification.year ? { year: classification.year } : {}),
+    ...(classification.animeLikely ? { animeLikely: true } : {}),
+    ...(classification.series ? { series: classification.series } : {}),
     extension: path.extname(filePath).slice(1).toLowerCase(),
     sizeBytes: stats.size,
     modifiedAtMs: stats.mtimeMs,
@@ -110,10 +113,12 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
 
     const existing = Array.isArray(state.catalog) ? state.catalog : [];
     // Scan modes share one traversal but differ in how records merge:
-    // - quick/metadata: an unchanged file (same id, size, mtime) keeps its
-    //   existing catalog record, so enriched fields survive routine rescans.
-    // - full: every discovered file gets a freshly rebuilt record.
-    const existingById = mode === 'full' ? null : new Map(existing.map((item) => [item.id, item]));
+    // - quick: an unchanged file (same id, size, mtime) keeps its existing
+    //   catalog record, so classification and enriched fields survive
+    //   routine rescans.
+    // - metadata/full: every discovered file gets a freshly rebuilt record
+    //   with re-derived classification.
+    const existingById = mode === 'quick' ? new Map(existing.map((item) => [item.id, item])) : null;
     const mergeRecord = (record) => {
       const previous = existingById?.get(record.id);
       return previous && previous.sizeBytes === record.sizeBytes && previous.modifiedAtMs === record.modifiedAtMs
@@ -153,10 +158,10 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         errors: errors.slice(0, 100),
         warning: [
           offlineRoots.length || errors.length ? 'Some files or roots were unavailable. Existing records were preserved.' : null,
-          // The headless runtime has no metadata engine yet, so a requested
-          // metadata scan must say what it actually did instead of implying
-          // enrichment happened.
-          mode === 'metadata' ? 'Metadata enrichment is not available on the headless server yet; file records were refreshed instead.' : null,
+          // Classification (movie/episode structure, series grouping) is the
+          // metadata this runtime can derive today. Online provider
+          // enrichment is still desktop-only, and the scan must say so.
+          mode === 'metadata' ? 'File classification was refreshed. Online metadata providers are not available on the headless server yet.' : null,
         ].filter(Boolean).join(' ') || undefined,
       };
       await saveState(current);

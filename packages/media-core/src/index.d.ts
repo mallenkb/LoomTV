@@ -41,3 +41,36 @@ export interface PortableProfile {
 }
 
 export function profileView(profile: unknown): PortableProfile | null;
+
+export interface CleanedMediaTitle {
+  title: string;
+  year: number;
+}
+
+export interface EpisodeNumbers {
+  season: number;
+  episode: number;
+}
+
+export interface VideoClassification {
+  kind: 'movie' | 'episode';
+  title: string;
+  year?: number;
+  animeLikely: boolean;
+  series?: {
+    title: string;
+    season: number;
+    episode: number | null;
+  };
+}
+
+export function cleanMediaTitle(name: string): CleanedMediaTitle;
+export function isLikelyEpisodeFileName(name: string): boolean;
+export function parseEpisodeFileName(
+  fileName: string,
+  fallbackSeason: number,
+  options?: { aggressive?: boolean },
+): EpisodeNumbers | null;
+export function seriesTitleFromEpisodeName(fileName: string): string | null;
+export function isLikelyAnimePath(filePath: string, title?: string): boolean;
+export function classifyVideoFile(relativePath: string): VideoClassification;

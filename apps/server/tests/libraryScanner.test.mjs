@@ -93,15 +93,36 @@ test('quick rescans keep enriched fields on unchanged files; full rescans rebuil
   assert.equal(state.catalog[0].plot, undefined, 'full scan must rebuild records from disk');
 });
 
-test('a metadata scan states that enrichment is not available yet', async () => {
-  const rootPath = await makeLibrary(['anything.mkv']);
+test('a metadata scan refreshes classification and discloses missing online providers', async () => {
+  const rootPath = await makeLibrary(['Show/Season 1/Show.S01E02.mkv']);
   const { scanner, state } = makeHarness({ roots: [{ id: 'root-1', path: rootPath }] });
 
   await scanner.start({ mode: 'metadata' });
   const scan = await waitForScan(state);
 
   assert.equal(scan.state, 'completed');
-  assert.match(scan.warning, /metadata enrichment is not available/i);
+  assert.match(scan.warning, /online metadata providers are not available/i);
+  // A stale record must be rebuilt with fresh classification by metadata mode.
+  state.catalog[0].series = { title: 'Wrong Show', season: 9, episode: 9 };
+  await scanner.start({ mode: 'metadata' });
+  await waitForScan(state);
+  assert.deepEqual(state.catalog[0].series, { title: 'Show', season: 1, episode: 2 });
+});
+
+test('scanned records carry shared classification fields', async () => {
+  const rootPath = await makeLibrary([
+    'Severance/Season 2/Severance.S02E03.mkv',
+    'Movies/Heat.1995.1080p.mkv',
+  ]);
+  const { scanner, state } = makeHarness({ roots: [{ id: 'root-1', path: rootPath }] });
+  await scanner.start({});
+  await waitForScan(state);
+
+  const episode = state.catalog.find((item) => item.kind === 'episode');
+  const movie = state.catalog.find((item) => item.kind === 'movie');
+  assert.deepEqual(episode.series, { title: 'Severance', season: 2, episode: 3 });
+  assert.equal(movie.title, 'Heat');
+  assert.equal(movie.year, 1995);
 });
 
 test('a changed file gets a fresh record even during a quick scan', async () => {
