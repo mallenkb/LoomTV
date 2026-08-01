@@ -54,7 +54,7 @@ A compact status view for quick scanning. Full “Left” and “Why it matters�
 | **Metadata providers — 100%** | &nbsp; | &nbsp; |
 | **Fix match / refresh one item — 100%** | **Granular user permissions — 90%** | **Watch together / SyncPlay — 0%** |
 | **Artwork control — 100%** | **Credentials & lockout — 90%** | **Offline downloads — 0%** |
-| **Search & library filters — 100%** | **Mobile clients — 70%** | **Casting, DLNA & device control — 0%** |
+| **Search & library filters — 100%** | **Mobile clients — 95%** | **Casting, DLNA & device control — 0%** |
 | **Favorites / watchlist — 100%** | **Hosted web client — 75%** | **TV & console clients — 0%** |
 | **Direct play — 100%** | **TLS, proxy & network policy — 70%** | **Plugin system — 0%** |
 | **Remux & transcoding — 100%** | **Multiple saved servers — 45%** | **Notifications & webhooks — 0%** |
@@ -216,8 +216,8 @@ linear backlog view.
 - [ ] **Credentials & lockout — 90%**
   - **What's left:** Add a user-safe recovery flow, built-in HTTPS certificate handling, and operational audit/alerting around lockouts.
   - **Why it matters:** Protects an always-on server from password abuse.
-- [ ] **Mobile clients — 70%**
-  - **What's left:** Finish the Expo MVP, offline/error states, release builds, and device coverage.
+- [ ] **Mobile clients — 95%**
+  - **What's left:** Execute the tracked physical iOS/Android phone-and-tablet release matrix and complete account-owned App Store/Google Play provisioning.
   - **Why it matters:** Phones and tablets are the most common remote screens.
 - [ ] **Hosted web client — 75%**
   - **What's left:** No core gap; `/app/` now provides onboarding, sign-in, profiles, library browsing, direct playback, HLS fallback, progress sync, and capability-aware controls.
@@ -366,7 +366,7 @@ linear backlog view.
 | --- | ---: | --- | --- | --- |
 | LAN discovery & pairing | 100% | ✅ Done | No core gap; keep pairing tokens revocable. | Makes same-LAN setup approachable without exposing NAS credentials. |
 | Remote desktop client | 100% | ✅ Done | No core gap for same-LAN desktop use. | Provides a mature client while headless work continues. |
-| Mobile clients | 70% | 🟡 Partial | Finish the Expo MVP, offline/error states, release builds, and device coverage. | Phones and tablets are the most common remote screens. |
+| Mobile clients | 95% | 🟡 Partial | The same-LAN client, cold-start offline catalog, outage recovery, and reproducible preview/production build profiles are implemented; physical device/store sign-off remains. | Phones and tablets are the most common remote screens. |
 | TV & console clients | 0% | 🔴 Not started | Build Android TV/Fire TV first, then target a major TV or console platform. | Expands LoomTV into the living room where Jellyfin is strongest. |
 | Hosted web client | 75% | 🟡 Partial | `/app/` covers onboarding, profiles, library browsing, direct/HLS playback, and progress sync; artwork, series browsing UI, richer progress editing, and real capability negotiation remain. | Makes a NAS usable from any modern browser without installing LoomTV. |
 | Internet remote streaming | 0% | 🔴 Not started | Define a secure remote-access model, TLS, identity, rate limits, and relay/reverse-proxy guidance. | Enables away-from-home use without unsafe port exposure. |
