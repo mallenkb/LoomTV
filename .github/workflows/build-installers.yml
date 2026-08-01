@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches:
-      - main
-      - 'codex/**'
     tags:
       - 'v*'
 
@@ -272,13 +269,13 @@ jobs:
 
           mapfile -d '' assets < <(
             find release-assets -type f \( \
-              -name '*.dmg' -o \
-              -name '*.zip' -o \
-              -name '*.exe' -o \
-              -name '*.deb' -o \
-              -name '*.rpm' -o \
-              -name '*.AppImage' -o \
-              -name '*.blockmap' -o \
+            -name 'LoomTV-*.dmg' -o \
+            -name 'LoomTV-*.zip' -o \
+            -name 'LoomTV-*.exe' -o \
+            -name 'LoomTV-*.deb' -o \
+            -name 'LoomTV-*.rpm' -o \
+            -name 'LoomTV-*.AppImage' -o \
+            -name 'LoomTV-*.blockmap' -o \
               -name 'latest*.yml' \
             \) -print0
           )
