@@ -1,5 +1,9 @@
 # NAS Support Plan
 
+For the current headless/container/systemd deployment instructions, see
+[nas-deployment.md](nas-deployment.md). This document remains the product and
+implementation plan for NAS library behavior.
+
 Loom Media Server should support network-attached storage as a first-class source for local media libraries. The desktop app remains the media host: it reads from local disks or mounted NAS shares, then serves playback to the desktop player or paired mobile clients.
 
 ## Support Model

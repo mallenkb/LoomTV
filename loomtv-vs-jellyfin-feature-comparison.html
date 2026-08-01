@@ -1,0 +1,1433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A feature-by-feature comparison of LoomTV 1.0.101 and Jellyfin 10.11.x.">
+  <title>LoomTV vs Jellyfin — Feature comparison</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --surface: #ffffff;
+      --surface-soft: #f1f3f1;
+      --ink: #202523;
+      --muted: #626a66;
+      --line: #dfe3e0;
+      --accent: #2563eb;
+      --accent-soft: #eaf0ff;
+      --yes: #176b45;
+      --yes-bg: #e7f5ee;
+      --partial: #835c08;
+      --partial-bg: #fff4d6;
+      --no: #9a3944;
+      --no-bg: #fdebed;
+      --neutral: #4f5b55;
+      --neutral-bg: #edf0ee;
+      --radius: 8px;
+      --shadow: 0 8px 24px rgba(31, 38, 34, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 76px;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.58;
+    }
+
+    a { color: var(--accent); }
+    a:hover { text-decoration-thickness: 2px; }
+    a:focus-visible, summary:focus-visible {
+      outline: 3px solid rgba(37, 99, 235, 0.35);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    .wrap {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(223, 227, 224, 0.92);
+      background: rgba(247, 247, 244, 0.94);
+      backdrop-filter: blur(12px);
+    }
+
+    .nav-inner {
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 750;
+      text-decoration: none;
+      letter-spacing: -0.01em;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .nav-links a:hover { color: var(--ink); }
+
+    header {
+      padding: 66px 0 44px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 820px;
+      margin: 0;
+      font-size: clamp(36px, 6vw, 52px);
+      line-height: 1.06;
+      letter-spacing: -0.045em;
+    }
+
+    .lede {
+      max-width: 780px;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+
+    .scope {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    .scope span {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      padding: 6px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    main { padding: 44px 0 72px; }
+
+    section + section {
+      margin-top: 52px;
+      padding-top: 50px;
+      border-top: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 34px);
+      line-height: 1.18;
+      letter-spacing: -0.025em;
+    }
+
+    .section-intro {
+      max-width: 760px;
+      margin: 10px 0 24px;
+      color: var(--muted);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .summary-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .summary-card .label {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .summary-card h3 {
+      margin: 7px 0 7px;
+      font-size: 18px;
+      line-height: 1.28;
+    }
+
+    .summary-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .decision {
+      margin-top: 18px;
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--accent-soft);
+      padding: 18px 20px;
+    }
+
+    .decision strong { display: block; margin-bottom: 3px; }
+    .decision p { margin: 0; color: #344259; }
+
+    .kanban-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+      align-items: start;
+    }
+
+    .kanban-lane {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--yes);
+      border-radius: var(--radius);
+      background: var(--surface-soft);
+    }
+
+    .kanban-lane.partial-lane { border-top-color: var(--partial); }
+    .kanban-lane.no-lane { border-top-color: var(--no); }
+
+    .kanban-lane-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 15px 16px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .kanban-lane-header h3 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.25;
+    }
+
+    .kanban-lane-header .count {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .kanban-cards {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .kanban-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface);
+      padding: 13px;
+      box-shadow: 0 3px 12px rgba(31, 38, 34, 0.04);
+    }
+
+    .kanban-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      gap: 6px 8px;
+    }
+
+    .kanban-card h4 {
+      flex: 1 1 140px;
+      min-width: 0;
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .kanban-card-head .status { flex: 0 0 auto; }
+
+    .kanban-card-head .completion {
+      color: var(--neutral);
+      background: var(--neutral-bg);
+    }
+
+    .kanban-card p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.48;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 24px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.025em;
+      white-space: nowrap;
+      vertical-align: baseline;
+    }
+
+    .yes { color: var(--yes); background: var(--yes-bg); }
+    .partial { color: var(--partial); background: var(--partial-bg); }
+    .no { color: var(--no); background: var(--no-bg); }
+    .neutral { color: var(--neutral); background: var(--neutral-bg); }
+
+    .table-shell {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    col.feature { width: 19%; }
+    col.product { width: 30%; }
+    col.edge { width: 21%; }
+
+    th, td {
+      overflow-wrap: anywhere;
+      vertical-align: top;
+    }
+
+    thead th {
+      position: sticky;
+      top: 60px;
+      z-index: 10;
+      border-bottom: 1px solid var(--line);
+      background: #f0f2ef;
+      padding: 13px 14px;
+      color: #47514c;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.055em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    tbody td {
+      border-top: 1px solid var(--line);
+      padding: 14px;
+      color: #424a46;
+      font-size: 13px;
+    }
+
+    tbody tr:first-child td { border-top: 0; }
+    tbody tr:not(.section-row):hover td { background: #fafbf9; }
+
+    td.feature-name {
+      color: var(--ink);
+      font-weight: 730;
+    }
+
+    td .status { margin: 0 0 7px; }
+
+    .section-row td {
+      border-top: 1px solid #cbd2cd;
+      background: #e9ece9;
+      color: #3f4944;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 850;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .edge-label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-weight: 780;
+    }
+
+    .priority-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+    }
+
+    .priority {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 20px;
+    }
+
+    .priority h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .priority p { margin: 0; color: var(--muted); font-size: 14px; }
+    .priority .rank { color: var(--accent); font-weight: 800; }
+
+    .method-note {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 20px;
+    }
+
+    .method-note p { margin: 0; color: var(--muted); }
+    .method-note p + p { margin-top: 10px; }
+
+    .sources {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 20px;
+    }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 14px 16px;
+    }
+
+    summary {
+      min-height: 30px;
+      cursor: pointer;
+      color: var(--ink);
+      font-weight: 750;
+    }
+
+    details ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    details li + li { margin-top: 6px; }
+
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 28px 0 40px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer strong { color: var(--ink); }
+
+    @media (max-width: 820px) {
+      .summary-grid, .kanban-grid { grid-template-columns: 1fr; }
+      .priority-grid, .sources { grid-template-columns: 1fr; }
+      .nav-links a:nth-child(5) { display: none; }
+
+      .table-shell {
+        overflow: visible;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+
+      table, tbody { display: block; }
+      thead { display: none; }
+
+      tbody tr:not(.section-row) {
+        display: block;
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--surface);
+        box-shadow: 0 4px 14px rgba(31, 38, 34, 0.04);
+      }
+
+      tbody td {
+        display: grid;
+        grid-template-columns: minmax(92px, 30%) minmax(0, 1fr);
+        gap: 12px;
+        border-top: 1px solid var(--line);
+        padding: 12px 14px;
+      }
+
+      tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.055em;
+        text-transform: uppercase;
+      }
+
+      tbody td.feature-name {
+        display: block;
+        border-top: 0;
+        background: #f4f6f3;
+        font-size: 15px;
+      }
+
+      tbody td.feature-name::before { content: none; }
+
+      .section-row {
+        display: block;
+        margin: 28px 0 10px;
+      }
+
+      .section-row:first-child { margin-top: 0; }
+
+      .section-row td {
+        display: block;
+        border: 0;
+        border-radius: var(--radius);
+      }
+
+      .section-row td::before { content: none; }
+    }
+
+    @media (max-width: 600px) {
+      .wrap { width: min(100% - 24px, 1120px); }
+      .nav-inner { min-height: 56px; }
+      .nav-links { gap: 12px; }
+      .nav-links a:nth-child(4) { display: none; }
+      header { padding: 46px 0 34px; }
+      .lede { font-size: 16px; }
+      main { padding-top: 34px; }
+      section + section { margin-top: 40px; padding-top: 38px; }
+
+      tbody td {
+        grid-template-columns: 1fr;
+        gap: 5px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+
+    @media print {
+      nav { position: static; }
+      .table-shell { box-shadow: none; }
+      thead th { position: static; }
+      a { color: inherit; }
+    }
+  </style>
+</head>
+<body>
+  <nav aria-label="Page navigation">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top">LoomTV × Jellyfin</a>
+      <div class="nav-links">
+        <a href="#summary">Summary</a>
+        <a href="#matrix">Feature matrix</a>
+        <a href="#kanban">Kanban</a>
+        <a href="#priorities">Priorities</a>
+        <a href="#sources">Sources</a>
+      </div>
+    </div>
+  </nav>
+
+  <header id="top">
+    <div class="wrap">
+      <p class="eyebrow">Product comparison · 1 August 2026</p>
+      <h1>LoomTV vs Jellyfin, feature by feature</h1>
+      <p class="lede">
+        LoomTV is a focused video library and player that now also has a GUI-independent headless server boundary. Jellyfin remains a mature, continuously running media server with a much larger client and plugin ecosystem. This matrix compares what is implemented today—not what is merely planned.
+      </p>
+      <div class="scope" aria-label="Comparison scope">
+        <span>LoomTV 1.0.101 source</span>
+        <span>Jellyfin 10.11.x stable line</span>
+        <span>65 capabilities</span>
+        <span>Core vs plugin distinctions included</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="summary" aria-labelledby="summary-heading">
+      <h2 id="summary-heading">The short answer</h2>
+      <p class="section-intro">
+        LoomTV covers the central movie, television, and anime experience surprisingly well. Jellyfin’s lead is not mainly basic playback; it is breadth, server maturity, remote reach, client coverage, and extensibility.
+      </p>
+
+      <div class="summary-grid">
+        <article class="summary-card">
+          <span class="label">LoomTV leads</span>
+          <h3>Focused household video UX</h3>
+          <p>Dedicated anime treatment, temporary Guest profiles, profile export/import, rich per-profile preferences, MPV dual subtitles, and built-in skip-marker analysis are meaningful differentiators.</p>
+        </article>
+        <article class="summary-card">
+          <span class="label">Rough parity</span>
+          <h3>Core personal video library</h3>
+          <p>Both cover movies and shows, metadata and artwork, search, resume state, Continue Watching, direct play, remuxing, transcoding, subtitles, and next-episode playback. LoomTV now adds headless catalog/media routes and server-side account policy.</p>
+        </article>
+        <article class="summary-card">
+          <span class="label">Jellyfin leads</span>
+          <h3>Media-server platform depth</h3>
+          <p>Jellyfin adds headless hosting, remote access, web/TV/console clients, music, photos, books, Live TV/DVR, stronger hardware/HDR processing, plugins, APIs, and deeper administration.</p>
+        </article>
+      </div>
+
+      <aside class="decision" aria-label="Decision guidance">
+        <strong>Practical positioning</strong>
+        <p>Choose LoomTV for a simpler, cinematic, local-first household video experience. Choose Jellyfin when the requirement is “serve every media type to every device, at home or away.” LoomTV does not yet replace Jellyfin as a general-purpose media server.</p>
+      </aside>
+    </section>
+
+    <section id="kanban" aria-labelledby="kanban-heading">
+      <h2 id="kanban-heading">Kanban view</h2>
+      <p class="section-intro">The same 65 capabilities grouped by LoomTV’s current state. Each card shows its implementation estimate; percentages describe LoomTV completion, not parity with Jellyfin’s maturity. The feature matrix below keeps the side-by-side comparison.</p>
+      <div class="kanban-grid">
+      <article class="kanban-lane done-lane">
+        <div class="kanban-lane-header"><h3>✅ Done</h3><span class="count">32 capabilities · 49.2%</span></div>
+        <div class="kanban-cards">
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Local-first / self-hosted</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Library, profiles, progress, and settings live on the desktop host.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Desktop platforms</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Installers are configured for macOS, Windows, and Linux.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Open source</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Repository code is MIT licensed.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Application updates</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Packaged desktop builds check, download, and prompt to install GitHub-hosted updates.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Movies</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Dedicated movie library, detail pages, metadata, artwork, filters, and playback.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>TV shows</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Series, seasons, episodes, next-episode playback, and episode progress.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Anime</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Dedicated Anime library, Jikan metadata, anime season mapping, and anime-oriented skip providers.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Scanning &amp; scheduling</h4><span class="status yes">Done</span><span class="status completion">90%</span></div>
+          <p>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Metadata providers</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>TMDB, OMDb, TVmaze, Jikan, and fanart.tv-backed flows provide titles, summaries, ratings, cast, and artwork.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Fix match / refresh one item</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Choose a provider candidate, apply official metadata, refresh artwork, or repair a single item.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Artwork control</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Poster, backdrop, logo, cover choices, custom uploads, caching, and targeted repair.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Search &amp; library filters</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Search includes title, year, genre, cast, and character; filters include in-progress, watched, unwatched, and missing data/artwork.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Favorites / watchlist</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Per-profile Favorites and Watchlist data are exposed as one deduplicated My List experience.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Direct play</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Direct local playback through MPV or browser-compatible streams, selected by probe results.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Remux &amp; transcoding</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Direct-stream/remux and FFmpeg HLS fallback support seeking, track swaps, and subtitle burn-in.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Native desktop engine</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Dedicated MPV path with lifecycle management and browser fallback.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Audio &amp; subtitle tracks</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Embedded/external track selection, live stream replacement, saved per-title/profile defaults, and subtitle burn-in.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Automatic subtitle downloads</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>OpenSubtitles credentials, language choices, auto-download, quota awareness, and dialogue-first defaults.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Subtitle styling &amp; dual subtitles</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Position, scale, size, colors, borders, background, delay, and an MPV secondary-subtitle track.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Playback speed &amp; seeking</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Variable speed, configurable skip intervals, keyboard seeking, and recovery across remux/transcode restarts.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Resume, watched state &amp; history</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Position, duration, watched state, and recency are stored in SQLite and synchronized to paired clients.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Continue Watching</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Profile-specific rail, exact episode continuation, next-unwatched suggestions, and per-profile dismissal.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Next-episode autoplay</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Always enabled with countdown and next-episode prompt behavior.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Skip intro / recap / outro / credits</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Provider, chapter, fingerprint, and visual analysis; manual marker editing; intro, recap, outro, credits, and preview prompts.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Multiple viewers</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Owner, Standard, Kids, and temporary Guest profiles with a “Who’s watching?” gate.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Parental controls</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Country-aware age ratings, maximum age, unrated-content policy, and allowed library roots, enforced server-side.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Temporary Guest profile</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Device-bound Guest sessions are explicitly modeled and cleaned up.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Profile export &amp; import</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Versioned profile files include progress, track choices, preferences, restrictions, and personal lists with validation on import.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Per-profile preferences</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Theme, accent, loader, navigation order, skip intervals, progress, track defaults, My List, and restrictions.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>LAN discovery &amp; pairing</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>mDNS/Bonjour discovery, manual address entry, six-digit pairing, scoped device tokens, and revocation.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Remote desktop client</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>A desktop can start in remote mode, pair to a host, browse profiles/library, stream, transcode, and sync progress.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Themes &amp; UI customization</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Per-profile light/dark mode, accent presets, loader style, sidebar ordering, and custom artwork within one designed system.</p>
+        </article>
+        </div>
+      </article>
+      <article class="kanban-lane partial-lane">
+        <div class="kanban-lane-header"><h3>🟡 Partial</h3><span class="count">18 capabilities · 27.7%</span></div>
+        <div class="kanban-cards">
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Architecture</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
+          <p>Electron remains the primary client, while the GUI-independent server now owns persistent headless state, scanning, media delivery, HLS transcoding, and authenticated admin routes; full desktop/profile core unification is still in progress.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Headless / always-on server</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
+          <p>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, and on-demand HLS transcoding now run without Electron; profile/watch-state parity and production NAS validation remain.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Other / mixed videos</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
+          <p>An Others section accepts mixed folders and attempts to classify recognized movies, TV, and anime.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Multiple folders &amp; NAS</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
+          <p>Desktop and headless libraries support multiple configured roots, host-mounted SMB/NFS paths, offline-root preservation, checkpointed scans, readable-root checks, and scoped server-side catalog/media access; long-running NAS and multi-architecture validation remains.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Hardware transcoding</h4><span class="status partial">Partial</span><span class="status completion">80%</span></div>
+          <p>Capability probing, H.264/HEVC/AV1 profiles, zero-copy paths, and software fallback are wired for supported backends; physical GPU matrix validation remains.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>HDR / Dolby Vision tone mapping</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
+          <p>Managed HDR/HLG-to-SDR tone-map filters and capability reporting are wired; Dolby Vision variants and hardware-specific output still need validation.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Chapters &amp; trickplay previews</h4><span class="status partial">Partial</span><span class="status completion">60%</span></div>
+          <p>Parses chapters and generates thumbnails for items/episodes, but no full timeline trickplay image system was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Admin separation</h4><span class="status partial">Partial</span><span class="status completion">100%</span></div>
+          <p>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Granular user permissions</h4><span class="status partial">Partial</span><span class="status completion">90%</span></div>
+          <p>Headless users support viewer/user/admin roles, explicit library/read/manage, stream, transcode, backup, session/log, user-management, remote, download, and deletion permissions, per-library-root scoping, device allow-lists, session limits, protected downloads, and deletion routes. Topology-aware remote policy and richer device history remain.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Credentials &amp; lockout</h4><span class="status partial">Partial</span><span class="status completion">90%</span></div>
+          <p>Scrypt-backed owner and headless-user passwords, identity/IP throttling after five failures for 15 minutes, constant-time verification delay, disabled accounts, bearer-session expiry/revocation, self-service/admin password changes, security headers, device/session policy, and optional HTTPS/reverse-proxy enforcement. Recovery tokens and built-in certificate lifecycle remain.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Mobile clients</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
+          <p>Expo iOS/Android companion supports pairing, browsing, playback, HLS fallback, profiles, and progress, but the repository labels it an MVP in progress.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Hosted web client</h4><span class="status partial">Partial</span><span class="status completion">60%</span></div>
+          <p>The headless server now serves a themed browser admin surface and authenticated media routes; a complete browser library/playback/profile client remains.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>TLS, proxy &amp; network policy</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
+          <p>Opt-in sharing, route allowlists, signed URLs, rate limits, device/profile binding, security headers, <code>--require-secure-transport</code>, and <code>--trust-proxy</code>; TLS termination itself remains an external reverse-proxy/VPN responsibility.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Multiple saved servers</h4><span class="status partial">Partial</span><span class="status completion">45%</span></div>
+          <p>Host-or-remote onboarding and persisted pairing exist, but no multi-server switcher was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Backup &amp; restore</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
+          <p>Desktop database/profile transfer and the headless server’s authenticated state snapshot are available; full version-aware restore, rollback, and media/catalog recovery are still incomplete.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Device &amp; session management</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
+          <p>Headless bearer sessions expire, can be revoked, bind optional device IDs, enforce per-user concurrent-session limits, and expose active HLS/transcode sessions; richer history and dashboard termination remain.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Public API &amp; integrations</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
+          <p>Has an authenticated LAN HTTP protocol and typed Electron bridge for its own clients, but not a documented general integration platform.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Admin dashboard, logs &amp; reports</h4><span class="status partial">Partial</span><span class="status completion">85%</span></div>
+          <p>Browser administration now covers readiness, library roots, scan state, active sessions, operational logs, backups, account policy, and transcode capability; historical analytics and storage/report exports remain.</p>
+        </article>
+        </div>
+      </article>
+      <article class="kanban-lane no-lane">
+        <div class="kanban-lane-header"><h3>🔴 Not started</h3><span class="count">15 capabilities · 23.1%</span></div>
+        <div class="kanban-cards">
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Music libraries</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No music library, album model, queue, lyrics, or dedicated audio player was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Photos</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>Images are used as artwork, not as a browsable personal photo library.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Books &amp; comics</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No ebook, comic, PDF, or reading workflow.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Live TV &amp; internet radio</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No tuner, channel guide, IPTV, or radio model was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>DVR recording</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No recording schedule or recorded-TV pipeline.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Local NFO metadata</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>Uses its SQLite database and file probing; no NFO reader/writer was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Collections &amp; playlists</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No general collection, box-set, smart-list, or ordered playlist model was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Extras, editions &amp; versions</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No explicit extras folders, alternate cuts, grouped duplicates, or version selector was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Watch together / SyncPlay</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No synchronized group room or co-watching protocol was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Offline downloads</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>Paired clients stream from the host; no offline media cache or download manager was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Casting, DLNA &amp; device control</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No Chromecast, AirPlay, DLNA server, or playback handoff/control model was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>TV &amp; console clients</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No Android TV, Fire TV, Roku, webOS, Tizen, tvOS, Xbox, PlayStation, or Kodi client was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Internet remote streaming</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>Documentation explicitly limits the current target to same-LAN use and warns against public exposure.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Plugin system</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>Providers and features are compiled into the product; no plugin catalog or third-party extension API was found.</p>
+        </article>
+        <article class="kanban-card">
+          <div class="kanban-card-head"><h4>Notifications &amp; webhooks</h4><span class="status no">Not started</span><span class="status completion">0%</span></div>
+          <p>No webhook, Gotify, Slack, email, or event-notification integration was found.</p>
+        </article>
+        </div>
+      </article>
+      </div>
+    </section>
+
+    <section id="matrix" aria-labelledby="matrix-heading">
+      <h2 id="matrix-heading">Full feature matrix</h2>
+      <p class="section-intro">
+        “Partial” means the capability exists with narrower scope, an in-progress client, or a meaningful platform limitation. Jellyfin capabilities that require a plugin or specific client are labeled instead of being treated as universal core features.
+      </p>
+
+      <div class="legend" aria-label="Status legend">
+        <span class="status yes">Yes / strong</span><span>implemented and usable</span>
+        <span class="status partial">Partial</span><span>meaningfully limited</span>
+        <span class="status no">No</span><span>not found in current implementation</span>
+        <span class="status neutral">Plugin / external</span><span>not universal core behavior</span>
+      </div>
+
+      <div class="table-shell">
+        <table>
+          <caption style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Feature comparison between LoomTV 1.0.101 and Jellyfin 10.11.x</caption>
+          <colgroup>
+            <col class="feature">
+            <col class="product">
+            <col class="product">
+            <col class="edge">
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Capability</th>
+              <th scope="col">LoomTV 1.0.101</th>
+              <th scope="col">Jellyfin 10.11.x</th>
+              <th scope="col">Assessment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="section-row"><td colspan="4">Platform &amp; deployment</td></tr>
+            <tr>
+              <td class="feature-name">Local-first / self-hosted</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Library, profiles, progress, and settings live on the desktop host.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Fully self-hosted; cloud accounts are not required.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both respect local ownership and can operate without a hosted catalog.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Architecture</td>
+              <td data-label="LoomTV"><span class="status partial">Desktop + headless boundary</span><br>Electron remains the primary client, while the GUI-independent server now owns persistent headless state, scanning, media delivery, HLS transcoding, and authenticated admin routes; full desktop/profile core unification is still in progress.</td>
+              <td data-label="Jellyfin"><span class="status yes">Server + clients</span><br>Dedicated server process with separate web, desktop, mobile, TV, and third-party clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin maturity</span>LoomTV now has the core server seam, but Jellyfin still has the more unified server/client architecture and wider deployment coverage.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Desktop platforms</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Installers are configured for macOS, Windows, and Linux.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Server and official desktop client options cover the major desktop platforms.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both are cross-platform on desktop.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Headless / always-on server</td>
+              <td data-label="LoomTV"><span class="status partial">Operational headless server</span><br>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, and on-demand HLS transcoding now run without Electron; profile/watch-state parity and production NAS validation remain.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Designed for always-on service, package, NAS, and container deployments.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin maturity</span>LoomTV is now usable as a headless media service, but Jellyfin still has the broader server contract, clients, and operational validation.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Open source</td>
+              <td data-label="LoomTV"><span class="status yes">MIT</span><br>Repository code is MIT licensed.</td>
+              <td data-label="Jellyfin"><span class="status yes">GPL</span><br>Free and open source across the server and official clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Licenses differ, but both are open-source products.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Application updates</td>
+              <td data-label="LoomTV"><span class="status yes">Built in</span><br>Packaged desktop builds check, download, and prompt to install GitHub-hosted updates.</td>
+              <td data-label="Jellyfin"><span class="status neutral">External</span><br>Server updates normally arrive through the host package manager, app store, or container workflow.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV on desktop</span>More consumer-app-like updating for its primary client.</td>
+            </tr>
+
+            <tr class="section-row"><td colspan="4">Library &amp; discovery</td></tr>
+            <tr>
+              <td class="feature-name">Movies</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Dedicated movie library, detail pages, metadata, artwork, filters, and playback.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Mature Movies library with versions, extras, metadata, and broad client support.</td>
+              <td data-label="Assessment"><span class="edge-label">Near parity</span>Jellyfin has deeper organization features; the core experience exists in both.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">TV shows</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Series, seasons, episodes, next-episode playback, and episode progress.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Full Shows library with seasons, specials, extras, themes, and broad clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Near parity</span>Jellyfin is deeper; LoomTV covers the primary workflow.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Anime</td>
+              <td data-label="LoomTV"><span class="status yes">First-class</span><br>Dedicated Anime library, Jikan metadata, anime season mapping, and anime-oriented skip providers.</td>
+              <td data-label="Jellyfin"><span class="status partial">Shows + plugins</span><br>Anime is generally organized as Shows; AniDB, AniList, AniSearch, Kitsu, and Shoko integrations are available through plugins.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV out of box</span>Jellyfin can be richer after configuration; LoomTV makes anime a core product concept.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Other / mixed videos</td>
+              <td data-label="LoomTV"><span class="status partial">Partial</span><br>An Others section accepts mixed folders and attempts to classify recognized movies, TV, and anime.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Home videos, music videos, photos, and mixed libraries are available, although Jellyfin discourages mixed libraries for metadata reliability.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>More explicit content types and folder views.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Music libraries</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No music library, album model, queue, lyrics, or dedicated audio player was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Albums, artists, embedded tags, lyrics, playlists, and specialist music clients are supported.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>A major breadth gap.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Photos</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>Images are used as artwork, not as a browsable personal photo library.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Photo and photo-album libraries are supported by the server and selected clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Not in LoomTV’s present scope.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Books &amp; comics</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No ebook, comic, PDF, or reading workflow.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Book libraries and formats are supported, with additional readers and metadata plugins available.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Another out-of-scope media type for LoomTV.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Live TV &amp; internet radio</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No tuner, channel guide, IPTV, or radio model was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>HDHomeRun and M3U tuners, EPG data, IPTV, and internet radio are supported.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Large functional difference.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">DVR recording</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No recording schedule or recorded-TV pipeline.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Live TV can be recorded and recording management can be permissioned per user.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Not present in LoomTV.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Multiple folders &amp; NAS</td>
+              <td data-label="LoomTV"><span class="status partial">Mounted shares + headless safety</span><br>Desktop and headless libraries support multiple configured roots, host-mounted SMB/NFS paths, offline-root preservation, checkpointed scans, readable-root checks, and scoped server-side catalog/media access; long-running NAS and multi-architecture validation remains.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Libraries can combine multiple local or network paths; mature server deployment patterns cover NAS use.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin maturity</span>LoomTV now has the functional NAS path; Jellyfin still leads on years of deployment hardening and client coverage.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Scanning &amp; scheduling</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Manual quick/full scans, progress reporting, configurable periodic sync, cache preservation, and analysis scheduling.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Scheduled tasks cover scans, subtitles, trickplay, keyframes, cache cleanup, and maintenance.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin depth</span>Both scan; Jellyfin offers a broader task scheduler and maintenance surface.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Metadata providers</td>
+              <td data-label="LoomTV"><span class="status yes">Built in</span><br>TMDB, OMDb, TVmaze, Jikan, and fanart.tv-backed flows provide titles, summaries, ratings, cast, and artwork.</td>
+              <td data-label="Jellyfin"><span class="status yes">Core + plugins</span><br>TMDB, OMDb, local NFO, and a large catalog of optional metadata providers.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie for video basics</span>Jellyfin wins breadth; LoomTV ships a strong opinionated provider set.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Fix match / refresh one item</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Choose a provider candidate, apply official metadata, refresh artwork, or repair a single item.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Identify, edit, lock, and refresh metadata at item or library level.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both support targeted correction instead of requiring a full rescan.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Artwork control</td>
+              <td data-label="LoomTV"><span class="status yes">Strong</span><br>Poster, backdrop, logo, cover choices, custom uploads, caching, and targeted repair.</td>
+              <td data-label="Jellyfin"><span class="status yes">Strong</span><br>Multiple image types, local sidecar images, embedded images, provider selection, and editing.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both provide serious artwork management.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Local NFO metadata</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>Uses its SQLite database and file probing; no NFO reader/writer was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Local <code>.nfo</code> files are a built-in metadata source and can be saved alongside media.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Better interoperability with other media managers.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Search &amp; library filters</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Search includes title, year, genre, cast, and character; filters include in-progress, watched, unwatched, and missing data/artwork.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Broad search, sort, filter, genre, person, studio, tag, and library views.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin depth</span>LoomTV covers high-value video-library filters.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Collections &amp; playlists</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No general collection, box-set, smart-list, or ordered playlist model was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Collections and playlists are core concepts; automatic TMDB box sets are available via official plugin.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Important for large libraries.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Favorites / watchlist</td>
+              <td data-label="LoomTV"><span class="status yes">My List</span><br>Per-profile Favorites and Watchlist data are exposed as one deduplicated My List experience.</td>
+              <td data-label="Jellyfin"><span class="status yes">Favorites</span><br>Favorites span many media types; playlists can cover queue-like organization.</td>
+              <td data-label="Assessment"><span class="edge-label">Different strengths</span>LoomTV has the clearer video watchlist; Jellyfin favorites cover more media types.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Extras, editions &amp; versions</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No explicit extras folders, alternate cuts, grouped duplicates, or version selector was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Supports trailers, featurettes, interviews, themes, multipart items, and multiple movie versions.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>A meaningful enthusiast-library advantage.</td>
+            </tr>
+
+            <tr class="section-row"><td colspan="4">Playback</td></tr>
+            <tr>
+              <td class="feature-name">Direct play</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Direct local playback through MPV or browser-compatible streams, selected by probe results.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Client device profiles select direct play whenever the container and streams are compatible.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both aim to avoid conversion when possible.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Remux &amp; transcoding</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Direct-stream/remux and FFmpeg HLS fallback support seeking, track swaps, and subtitle burn-in.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Mature FFmpeg remuxing and transcoding adapts to client capabilities and bitrate limits.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin maturity</span>Comparable modes; Jellyfin offers more configuration and field history.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Native desktop engine</td>
+              <td data-label="LoomTV"><span class="status yes">MPV</span><br>Dedicated MPV path with lifecycle management and browser fallback.</td>
+              <td data-label="Jellyfin"><span class="status yes">Client-dependent</span><br>Jellyfin Media Player and MPV Shim provide MPV-based desktop playback.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both have a strong native desktop route.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Hardware transcoding</td>
+              <td data-label="LoomTV"><span class="status partial">Capability probing</span><br>Capability probing, H.264/HEVC/AV1 profiles, zero-copy paths, and software fallback are wired for supported backends; physical GPU matrix validation remains.</td>
+              <td data-label="Jellyfin"><span class="status yes">Extensive</span><br>Validated QSV, NVENC/NVDEC, AMF, VA-API, VideoToolbox, and RKMPP pipelines with deeper decode/encode controls.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Much broader hardware coverage and administration.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">HDR / Dolby Vision tone mapping</td>
+              <td data-label="LoomTV"><span class="status partial">Managed tone-map path</span><br>Managed HDR/HLG-to-SDR tone-map filters and capability reporting are wired; Dolby Vision variants and hardware-specific output still need validation.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Supports software and hardware-assisted HDR/HLG and supported Dolby Vision tone-mapping paths.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>A major advantage for mixed HDR clients.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Audio &amp; subtitle tracks</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Embedded/external track selection, live stream replacement, saved per-title/profile defaults, and subtitle burn-in.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Embedded/external audio and subtitle selection with extraction, conversion, remux, or burn-in as required.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both cover the core multilingual playback workflow.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Automatic subtitle downloads</td>
+              <td data-label="LoomTV"><span class="status yes">Built in</span><br>OpenSubtitles credentials, language choices, auto-download, quota awareness, and dialogue-first defaults.</td>
+              <td data-label="Jellyfin"><span class="status neutral">Official plugin</span><br>The Open Subtitles plugin downloads missing subtitles and can be configured per library.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV setup</span>Built into LoomTV’s settings; Jellyfin is equally capable after plugin installation.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Subtitle styling &amp; dual subtitles</td>
+              <td data-label="LoomTV"><span class="status yes">Strong</span><br>Position, scale, size, colors, borders, background, delay, and an MPV secondary-subtitle track.</td>
+              <td data-label="Jellyfin"><span class="status partial">Client-dependent</span><br>Subtitle styling is supported in several clients, but a standard cross-client dual-subtitle workflow is not core.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV</span>Especially valuable for language learners and anime viewers.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Playback speed &amp; seeking</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Variable speed, configurable skip intervals, keyboard seeking, and recovery across remux/transcode restarts.</td>
+              <td data-label="Jellyfin"><span class="status yes">Client-dependent</span><br>Modern clients provide seeking and speed controls; exact controls vary by platform.</td>
+              <td data-label="Assessment"><span class="edge-label">Near parity</span>LoomTV offers a consistent primary desktop implementation.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Resume, watched state &amp; history</td>
+              <td data-label="LoomTV"><span class="status yes">Per profile</span><br>Position, duration, watched state, and recency are stored in SQLite and synchronized to paired clients.</td>
+              <td data-label="Jellyfin"><span class="status yes">Per user</span><br>Resume and played state synchronize across the user’s connected clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Core continuity exists in both.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Continue Watching</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Profile-specific rail, exact episode continuation, next-unwatched suggestions, and per-profile dismissal.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Continue Watching / Next Up is a standard cross-client feature.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both serve the high-frequency resume workflow.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Next-episode autoplay</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Always enabled with countdown and next-episode prompt behavior.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Supported by major clients, often with configurable behavior.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Jellyfin is more configurable; LoomTV is more opinionated.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Skip intro / recap / outro / credits</td>
+              <td data-label="LoomTV"><span class="status yes">Built in</span><br>Provider, chapter, fingerprint, and visual analysis; manual marker editing; intro, recap, outro, credits, and preview prompts.</td>
+              <td data-label="Jellyfin"><span class="status partial">Framework + plugins</span><br>Core stores media segments, while plugins create them; actions and supported segment types vary by client.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV</span>More complete out of the box and more deeply integrated into one player.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Chapters &amp; trickplay previews</td>
+              <td data-label="LoomTV"><span class="status partial">Partial</span><br>Parses chapters and generates thumbnails for items/episodes, but no full timeline trickplay image system was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Chapter images and generated trickplay/keyframe previews are first-class scheduled metadata tasks.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Better visual scrubbing and chapter preview infrastructure.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Watch together / SyncPlay</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No synchronized group room or co-watching protocol was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">SyncPlay</span><br>Users and clients can join rooms for synchronized viewing.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Unique collaboration feature.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Offline downloads</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>Paired clients stream from the host; no offline media cache or download manager was found.</td>
+              <td data-label="Jellyfin"><span class="status partial">Downloads</span><br>Server permissions allow downloads; true managed sync/offline behavior depends on the client, including third-party apps.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Not fully universal, but an available ecosystem capability.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Casting, DLNA &amp; device control</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No Chromecast, AirPlay, DLNA server, or playback handoff/control model was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Chromecast is available in web, DLNA through an official plugin, and users can control compatible logged-in/shared devices.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Substantially better living-room interoperability.</td>
+            </tr>
+
+            <tr class="section-row"><td colspan="4">Profiles, permissions &amp; security</td></tr>
+            <tr>
+              <td class="feature-name">Multiple viewers</td>
+              <td data-label="LoomTV"><span class="status yes">Profiles</span><br>Owner, Standard, Kids, and temporary Guest profiles with a “Who’s watching?” gate.</td>
+              <td data-label="Jellyfin"><span class="status yes">Users</span><br>Local user accounts with individual identity, preferences, permissions, and history.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie, different model</span>LoomTV feels like a household streaming app; Jellyfin behaves like a server account system.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Admin separation</td>
+              <td data-label="LoomTV"><span class="status partial">Owner + roles</span><br>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</td>
+              <td data-label="Jellyfin"><span class="status yes">Admin role</span><br>Users can be granted or denied full server management.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both separate watching from server administration.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Parental controls</td>
+              <td data-label="LoomTV"><span class="status yes">Kids profiles</span><br>Country-aware age ratings, maximum age, unrated-content policy, and allowed library roots, enforced server-side.</td>
+              <td data-label="Jellyfin"><span class="status yes">User policy</span><br>Maximum rating, unrated blocking, allowed/blocked tags, library access, and access schedules.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin breadth</span>LoomTV’s implementation is strong; Jellyfin has more policy dimensions.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Granular user permissions</td>
+              <td data-label="LoomTV"><span class="status partial">Headless RBAC + root scopes</span><br>Headless users support viewer/user/admin roles, explicit library/read/manage, stream, transcode, backup, session/log, user-management, remote, download, and deletion permissions, per-library-root scoping, device allow-lists, session limits, protected downloads, and deletion routes. Topology-aware remote policy and richer device history remain.</td>
+              <td data-label="Jellyfin"><span class="status yes">Extensive</span><br>Per-user libraries, devices, remote access, bitrate, transcoding, downloads, Live TV, deletion, and remote-control permissions.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin breadth</span>LoomTV now covers the security-critical authorization model; Jellyfin still exposes more mature per-device, remote, download, and client-policy controls.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Credentials &amp; lockout</td>
+              <td data-label="LoomTV"><span class="status partial">Password accounts + lockout</span><br>Scrypt-backed owner and headless-user passwords, identity/IP throttling after five failures for 15 minutes, constant-time verification delay, disabled accounts, bearer-session expiry/revocation, self-service password change, security headers, and optional HTTPS/reverse-proxy enforcement.</td>
+              <td data-label="Jellyfin"><span class="status yes">Accounts</span><br>Passwords, failed-login lockout, hidden/disabled users, remote access policy, and optional LDAP/SSO plugins.</td>
+              <td data-label="Assessment"><span class="edge-label">Comparable foundation</span>LoomTV now has a real server credential boundary; Jellyfin still offers more mature external identity, LDAP/SSO, and remote-account operations.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Temporary Guest profile</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Device-bound Guest sessions are explicitly modeled and cleaned up.</td>
+              <td data-label="Jellyfin"><span class="status no">No equivalent</span><br>An administrator can create a normal user, but not the same ephemeral guest-session model.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV</span>Useful for visitors without adding durable household state.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Profile export &amp; import</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>Versioned profile files include progress, track choices, preferences, restrictions, and personal lists with validation on import.</td>
+              <td data-label="Jellyfin"><span class="status partial">Server backup</span><br>Server backup/restore exists, but there is no comparable portable per-user profile package in the standard UI.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV</span>A distinctive household migration feature.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Per-profile preferences</td>
+              <td data-label="LoomTV"><span class="status yes">Strong</span><br>Theme, accent, loader, navigation order, skip intervals, progress, track defaults, My List, and restrictions.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>User display, playback, subtitle, language, home-screen, and library preferences vary by client.</td>
+              <td data-label="Assessment"><span class="edge-label">LoomTV consistency</span>One tightly controlled UI makes its personalization unusually coherent.</td>
+            </tr>
+
+            <tr class="section-row"><td colspan="4">Networking &amp; clients</td></tr>
+            <tr>
+              <td class="feature-name">LAN discovery &amp; pairing</td>
+              <td data-label="LoomTV"><span class="status yes">Yes</span><br>mDNS/Bonjour discovery, manual address entry, six-digit pairing, scoped device tokens, and revocation.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>UDP server discovery plus six-character Quick Connect authorization on many clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie</span>Both reduce setup friction on a local network.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Remote desktop client</td>
+              <td data-label="LoomTV"><span class="status yes">Same LAN</span><br>A desktop can start in remote mode, pair to a host, browse profiles/library, stream, transcode, and sync progress.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Official desktop player and browser clients connect locally or remotely.</td>
+              <td data-label="Assessment"><span class="edge-label">Tie on LAN</span>Jellyfin extends the same model beyond the LAN.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Mobile clients</td>
+              <td data-label="LoomTV"><span class="status partial">In progress</span><br>Expo iOS/Android companion supports pairing, browsing, playback, HLS fallback, profiles, and progress, but the repository labels it an MVP in progress.</td>
+              <td data-label="Jellyfin"><span class="status yes">Mature ecosystem</span><br>Official Android and iOS apps plus several specialist third-party clients.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Broader distribution, maturity, and feature coverage.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">TV &amp; console clients</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No Android TV, Fire TV, Roku, webOS, Tizen, tvOS, Xbox, PlayStation, or Kodi client was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Broad</span><br>Official clients include Android TV/Fire TV, Roku, webOS, Tizen, Xbox, plus Kodi and Apple TV options.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>This is one of the largest product gaps.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Hosted web client</td>
+              <td data-label="LoomTV"><span class="status partial">Admin-first browser mode</span><br>The headless server now serves a themed browser admin surface and authenticated media routes; a complete browser library/playback/profile client remains.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>The server hosts a full web client for supported desktop and mobile browsers.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Any modern browser can be a first-class client.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Internet remote streaming</td>
+              <td data-label="LoomTV"><span class="status no">Not supported</span><br>Documentation explicitly limits the current target to same-LAN use and warns against public exposure.</td>
+              <td data-label="Jellyfin"><span class="status yes">Manual setup</span><br>Remote access is supported through reverse proxy, VPN, or carefully configured network exposure.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Critical for away-from-home use.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">TLS, proxy &amp; network policy</td>
+              <td data-label="LoomTV"><span class="status partial">Configurable headless transport</span><br>Opt-in sharing, route allowlists, signed URLs, rate limits, device/profile binding, security headers, <code>--require-secure-transport</code>, and <code>--trust-proxy</code>; TLS termination itself remains an external reverse-proxy/VPN responsibility.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>HTTP(S), reverse proxy, base URL, known proxies, local network ranges, remote filters, and per-user external access controls.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Designed for configurable multi-network deployment.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Multiple saved servers</td>
+              <td data-label="LoomTV"><span class="status partial">One active host</span><br>Host-or-remote onboarding and persisted pairing exist, but no multi-server switcher was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Client-dependent</span><br>Major clients can remember and switch among multiple server connections.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Better for users belonging to more than one server.</td>
+            </tr>
+
+            <tr class="section-row"><td colspan="4">Operations, ecosystem &amp; customization</td></tr>
+            <tr>
+              <td class="feature-name">Backup &amp; restore</td>
+              <td data-label="LoomTV"><span class="status partial">Headless state backup</span><br>Desktop database/profile transfer and the headless server’s authenticated state snapshot are available; full version-aware restore, rollback, and media/catalog recovery are still incomplete.</td>
+              <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Backup/restore can include the database, metadata, subtitles, and trickplay data.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin overall</span>LoomTV is better at profile portability; Jellyfin is better at full-server recovery.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Device &amp; session management</td>
+              <td data-label="LoomTV"><span class="status partial">Headless sessions + limits</span><br>Headless bearer sessions expire, can be revoked, bind optional device IDs, enforce per-user concurrent-session limits, and expose active HLS/transcode sessions; richer history and dashboard termination remain.</td>
+              <td data-label="Jellyfin"><span class="status yes">Full dashboard</span><br>Tracks current and historical devices, active sessions, users, stream details, and remote controls.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>More operational visibility.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Plugin system</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>Providers and features are compiled into the product; no plugin catalog or third-party extension API was found.</td>
+              <td data-label="Jellyfin"><span class="status yes">Large ecosystem</span><br>Plugins extend authentication, metadata, Live TV, subtitles, notifications, analytics, integrations, and more.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Probably its strongest long-term platform advantage.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Public API &amp; integrations</td>
+              <td data-label="LoomTV"><span class="status partial">Scoped protocol</span><br>Has an authenticated LAN HTTP protocol and typed Electron bridge for its own clients, but not a documented general integration platform.</td>
+              <td data-label="Jellyfin"><span class="status yes">Extensive API</span><br>Documented HTTP API, WebSockets, SDKs, Kodi integrations, media managers, and a large client ecosystem.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Far easier to integrate into a wider self-hosted stack.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Admin dashboard, logs &amp; reports</td>
+              <td data-label="LoomTV"><span class="status partial">Headless control plane</span><br>Browser administration now covers readiness, library roots, scan state, active sessions, operational logs, backups, account policy, and transcode capability; historical analytics and storage/report exports remain.</td>
+              <td data-label="Jellyfin"><span class="status yes">Comprehensive</span><br>Dashboard, scheduled tasks, activity, logs, sessions, storage, encoding details, reports, and playback-reporting plugins.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Better for diagnosis and multi-user administration.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Notifications &amp; webhooks</td>
+              <td data-label="LoomTV"><span class="status no">No</span><br>No webhook, Gotify, Slack, email, or event-notification integration was found.</td>
+              <td data-label="Jellyfin"><span class="status neutral">Plugins</span><br>Webhook and notification plugins connect server events to external services.</td>
+              <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Useful for automation and server monitoring.</td>
+            </tr>
+            <tr>
+              <td class="feature-name">Themes &amp; UI customization</td>
+              <td data-label="LoomTV"><span class="status yes">Strong, curated</span><br>Per-profile light/dark mode, accent presets, loader style, sidebar ordering, and custom artwork within one designed system.</td>
+              <td data-label="Jellyfin"><span class="status yes">Strong, open-ended</span><br>Display preferences, themes, branding, splash/login settings, and custom CSS in the web client.</td>
+              <td data-label="Assessment"><span class="edge-label">Different strengths</span>LoomTV is cohesive and easy; Jellyfin is more extensible.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="priorities" aria-labelledby="priorities-heading">
+      <h2 id="priorities-heading">Highest-value gaps for a focused NAS-ready LoomTV</h2>
+      <p class="section-intro">
+        Full Jellyfin parity would dilute LoomTV's focused video and anime experience. These priorities first establish a dependable headless appliance, then widen client reach and deepen the enthusiast-video features where LoomTV can lead.
+      </p>
+      <div class="priority-grid">
+        <article class="priority">
+          <h3><span class="rank">01.</span> A real always-on server mode</h3>
+          <p>The GUI-independent server, persistent state, scanning, direct delivery, HLS transcoding, admin API, and browser control plane now exist. Finish the shared desktop/headless database, profile/watch-state contract, restart recovery, and full NAS validation.</p>
+        </article>
+        <article class="priority">
+          <h3><span class="rank">02.</span> NAS-safe container deployment</h3>
+          <p>Ship a non-root multi-architecture image, health checks, separate config/cache/media volumes, graceful shutdown, backups, and scan behavior that never erases an offline share.</p>
+        </article>
+        <article class="priority">
+          <h3><span class="rank">03.</span> Hosted web client and administration</h3>
+          <p>Browser onboarding, library and scan controls, health, sessions, logs, backups, user policy, and transcode diagnostics are now available in headless administration. Finish browser library playback, profiles, progress, and capability negotiation.</p>
+        </article>
+        <article class="priority">
+          <h3><span class="rank">04.</span> Hardware/HDR pipeline</h3>
+          <p>Make transcoding capability-aware and configurable across decoding, encoding, subtitle burn-in, HDR/HLG/Dolby Vision tone mapping, and client profiles.</p>
+        </article>
+        <article class="priority">
+          <h3><span class="rank">05.</span> TV and living-room clients</h3>
+          <p>After the server contract is stable, Android TV/Fire TV plus one major smart-TV platform would change where LoomTV can be used more than another metadata provider.</p>
+        </article>
+        <article class="priority">
+          <h3><span class="rank">06.</span> Focused enthusiast features and API</h3>
+          <p>Collections, versions, extras, NFO interoperability, and a stable public API deepen serious video libraries while preserving LoomTV's anime, dual-subtitle, skip-marker, and household-profile advantages.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="sources" aria-labelledby="sources-heading">
+      <h2 id="sources-heading">Method and sources</h2>
+      <div class="method-note">
+        <p><strong>Method:</strong> LoomTV claims were checked against the current local source tree, package version, release notes, UI routes, typed desktop bridge, media server routes, scanner, profile service, playback/transcode code, and mobile README. Roadmap-only items were not credited as shipped.</p>
+        <p><strong>Jellyfin scope:</strong> Current stable 10.11.x behavior as documented by the Jellyfin project on 1 August 2026. Where support depends on a plugin or a specific client, the table says so. This avoids treating the entire ecosystem as if every feature shipped in every client.</p>
+      </div>
+
+      <div class="sources">
+        <details open>
+          <summary>LoomTV evidence</summary>
+          <ul>
+            <li><a href="README.md">Repository README</a> and <a href="ROADMAP.md">roadmap</a></li>
+            <li><a href="docs/releases/v1.0.59.md">Profiles, Kids controls, lists, security, and profile transfer</a></li>
+            <li><a href="docs/releases/v1.0.63.md">Remote desktop mode and skip-marker types</a></li>
+            <li><a href="docs/releases/v1.0.64.md">My List and desktop browser mode</a></li>
+            <li><a href="docs/releases/v1.0.66.md">Paired remote-library security</a></li>
+            <li><a href="docs/releases/v1.0.89.md">Audio/subtitle preference stability</a> through <a href="docs/releases/v1.0.101.md">current release notes</a></li>
+            <li><a href="apps/mobile/README.md">Mobile client status and limits</a></li>
+            <li><a href="apps/server/README.md">Headless server deployment and administration</a>, including Docker/NAS configuration</li>
+            <li>Current source: desktop bridge, profile service, headless auth/policy service, media server, scanner, metadata providers, MPV/browser player, skip analysis, and transcode pipeline</li>
+          </ul>
+        </details>
+
+        <details open>
+          <summary>Official Jellyfin evidence</summary>
+          <ul>
+            <li><a href="https://jellyfin.org/docs/general/quick-start/">Quick Start</a> and <a href="https://jellyfin.org/docs/general/server/libraries/">Libraries</a></li>
+            <li><a href="https://jellyfin.org/downloads/clients/all/">All clients</a></li>
+            <li><a href="https://jellyfin.org/docs/general/server/users/adding-managing-users/">Users, permissions, and parental controls</a></li>
+            <li><a href="https://jellyfin.org/docs/general/post-install/networking/">Networking and remote access</a></li>
+            <li><a href="https://jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/">Hardware acceleration and tone mapping</a></li>
+            <li><a href="https://jellyfin.org/docs/general/server/live-tv/">Live TV and DVR</a></li>
+            <li><a href="https://jellyfin.org/docs/general/server/plugins/">Plugin catalog</a> and <a href="https://jellyfin.org/docs/general/server/plugins/open-subtitles/">Open Subtitles</a></li>
+            <li><a href="https://jellyfin.org/docs/general/server/metadata/">Metadata</a>, <a href="https://jellyfin.org/docs/general/server/metadata/media-segments/">media segments</a>, and <a href="https://jellyfin.org/docs/general/server/metadata/chapter-images/">chapter images</a></li>
+            <li><a href="https://jellyfin.org/docs/general/server/quick-connect/">Quick Connect</a>, <a href="https://jellyfin.org/posts/jellyfin-10-6-0/">SyncPlay</a>, and <a href="https://jellyfin.org/docs/general/administration/backup-and-restore/">backup and restore</a></li>
+            <li><a href="https://jellyfin.org/posts/jellyfin-release-10.11.0/">Jellyfin 10.11 release overview</a></li>
+          </ul>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <strong>LoomTV × Jellyfin comparison.</strong> A current-state product matrix for deciding where LoomTV already competes and where the platform gap remains.
+    </div>
+  </footer>
+</body>
+</html>

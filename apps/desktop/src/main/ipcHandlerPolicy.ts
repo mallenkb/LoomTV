@@ -1,3 +1,5 @@
+import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
+
 type NetworkStatusSettings<TPairedDevice> = {
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
@@ -31,7 +33,14 @@ export function buildNetworkStatus<TPairedDevice>(deps: NetworkStatusDependencie
   };
 }
 
-export function ffmpegAvailability(findFFmpeg: () => string | null) {
+export function ffmpegAvailability(
+  findFFmpeg: () => string | null,
+  getTranscodeCapabilities?: (path: string | null) => TranscodeCapabilities,
+) {
   const ffmpegPath = findFFmpeg();
-  return { available: ffmpegPath !== null, path: ffmpegPath };
+  return {
+    available: ffmpegPath !== null,
+    path: ffmpegPath,
+    ...(getTranscodeCapabilities ? { capabilities: getTranscodeCapabilities(ffmpegPath) } : {}),
+  };
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { normalizeProfileType } from '@loom-media-server/media-core';
 import type BetterSqlite3 from 'better-sqlite3';
 import type {
   LanProfileListEntry,
@@ -74,7 +75,7 @@ function rowToRecord(row: ProfileRow): ProfileRecord {
     name: row.name,
     avatarKey: row.avatar_key,
     colorKey: row.color_key,
-    type: isGuest ? 'guest' : row.profile_type,
+    type: isGuest ? 'guest' : normalizeProfileType(row.profile_type, 'standard'),
     hasPin: Boolean(row.pin_hash),
     isGuest,
     ...(row.guest_device_id ? { guestDeviceId: row.guest_device_id } : {}),

@@ -73,7 +73,7 @@ export type LibraryFolderSection = {
 export type LibraryFolderStatus = {
   path: string;
   kind: LibraryFolderSection['key'];
-  state: 'available' | 'unavailable';
+  state: 'available' | 'degraded' | 'unavailable';
   isNetworkLike: boolean;
   checkedAt: number;
   message: string;

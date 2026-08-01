@@ -84,6 +84,9 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
       codec_name?: string;
       profile?: string;
       pix_fmt?: string;
+      color_transfer?: string;
+      color_primaries?: string;
+      color_space?: string;
       avg_frame_rate?: string;
       r_frame_rate?: string;
       width?: number;
@@ -105,6 +108,9 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
     height: stream.height,
     profile: stream.profile,
     pixelFormat: stream.pix_fmt,
+    colorTransfer: stream.color_transfer,
+    colorPrimaries: stream.color_primaries,
+    colorSpace: stream.color_space,
     frameRate: parseFrameRate(stream.avg_frame_rate) ?? parseFrameRate(stream.r_frame_rate),
     default: stream.disposition?.default === 1,
     forced: stream.disposition?.forced === 1,

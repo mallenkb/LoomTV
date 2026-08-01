@@ -11,6 +11,9 @@ export interface MediaTrack {
   height?: number;
   profile?: string;
   pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
   /** Frames per second, resolved from ffprobe's rational frame rate. */
   frameRate?: number;
   default?: boolean;
@@ -47,7 +50,14 @@ export interface SubtitleStyleOptions {
 }
 
 export interface TranscodeOptions {
-  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
+  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf' | 'rkmpp';
+  targetVideoCodec?: 'h264' | 'hevc' | 'av1';
+  softwareVideoEncoder?: 'libx264' | 'libx265' | 'libsvtav1' | 'libaom-av1';
+  maxWidth?: number;
+  maxHeight?: number;
+  videoBitrateKbps?: number;
+  audioBitrateKbps?: number;
+  toneMap?: boolean;
   startSeconds?: number;
   videoTrackIndex?: number;
   audioTrackIndex?: number;
@@ -76,4 +86,8 @@ export interface TranscodeSession {
   seekable: boolean;
   /** Absolute timeline offset of the first segment (0 for seekable streams). */
   startSeconds: number;
+  /** Encoder actually selected after capability checks and fallback. */
+  preset?: 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf' | 'rkmpp';
+  /** Output codec selected for this session. */
+  codec?: 'h264' | 'hevc' | 'av1';
 }

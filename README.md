@@ -30,6 +30,22 @@ This project is for organizing and playing media files that you own, have create
 - Fetch posters, backdrops, cast data, ratings, and summaries from metadata providers.
 - Continue watching with saved playback progress.
 - Play local media with direct stream and HLS/transcode fallback support.
+
+## Headless and NAS deployment
+
+The repository now includes a GUI-independent headless server for NAS and
+always-on hosts. It provides runtime health, mounted-root status, a persistent
+catalog scanner that preserves records when a share is offline, authenticated
+direct media delivery, on-demand HLS transcoding, a browser control surface,
+and Docker/systemd deployment scaffolding. Profiles and watch-state storage
+remain desktop-only.
+
+- Start the health/admin boundary with `pnpm server:start`.
+- Open `/healthz` or `/admin/` on the configured server address.
+- Follow the [NAS deployment guide](docs/nas-deployment.md) for Docker Compose,
+  systemd, mounted SMB/NFS shares, backups, permissions, and hardware access.
+- See the [feature status matrix](docs/loomtv-vs-jellyfin-feature-status.md) for
+  current completion percentages, remaining gaps, and recommended priorities.
 - Generate thumbnails and inspect local media details with bundled FFmpeg/FFprobe resources.
 - Customize artwork, theme color, loader style, and sidebar ordering.
 - Back up the local database from Settings.
@@ -345,6 +361,7 @@ SOFTWARE.
 ```
 
 Bundled third-party tools and dependencies remain under their own licenses. In particular, bundled FFmpeg/FFprobe builds are covered by their applicable FFmpeg and GPL notices as described above.
+- [LoomTV 1.0.102](docs/releases/v1.0.102.md): adds the headless NAS server foundation, shared media/transcoding capabilities, and reliable multi-platform release publishing.
 - [LoomTV 1.0.101](docs/releases/v1.0.101.md): fixes mobile test module resolution and keeps secure LAN transport injection intact for releases.
 - [LoomTV 1.0.100](docs/releases/v1.0.100.md): hardens desktop trust boundaries and refreshes responsive Modern layout, accessibility, and CI safeguards.
 - [LoomTV 1.0.99](docs/releases/v1.0.99.md): fixes library-page spacing and aligns the playback bar and custom-folder pages with Modern Home.

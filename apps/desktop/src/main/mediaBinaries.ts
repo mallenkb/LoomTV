@@ -4,9 +4,13 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
+import {
+  probeTranscodeCapabilities,
+  type TranscodeCapabilities,
+} from '@loom-media-server/transcode-capabilities';
 
-export { appendH264EncoderOptions, type H264HardwareEncoder } from './transcodeFilters.ts';
-import type { H264HardwareEncoder } from './transcodeFilters.ts';
+export { appendH264EncoderOptions, type H264HardwareEncoder, type HardwareVideoEncoder } from './transcodeFilters.ts';
+import type { H264HardwareEncoder, HardwareVideoEncoder } from './transcodeFilters.ts';
 
 let cachedFFmpegPath: string | null | undefined;
 let cachedFFprobePath: string | null | undefined;
@@ -15,7 +19,6 @@ let ffmpegCheckedAt = 0;
 let ffprobeCheckedAt = 0;
 let fpcalcCheckedAt = 0;
 const MISSING_BINARY_CACHE_MS = 30_000;
-const encoderCache = new Map<string, { size: number; modifiedAtMs: number; encoder: H264HardwareEncoder | null }>();
 
 function platformFolder(): 'win' | 'mac' | 'linux' {
   if (process.platform === 'win32') return 'win';
@@ -91,31 +94,21 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string[]
   return [...new Set(candidates)];
 }
 
-function hasFFmpegEncoder(binaryPath: string, encoder: string): boolean {
-  try {
-    const output = execFileSync(binaryPath, ['-hide_banner', '-encoders'], { encoding: 'utf8', timeout: 3000 });
-    return output.includes(encoder);
-  } catch {
-    return false;
-  }
+export function preferredH264HardwareEncoder(binaryPath: string): H264HardwareEncoder | null {
+  return preferredHardwareEncoder(binaryPath, 'h264') as H264HardwareEncoder | null;
 }
 
-export function preferredH264HardwareEncoder(binaryPath: string): H264HardwareEncoder | null {
-  try {
-    const stats = fs.statSync(binaryPath);
-    const cached = encoderCache.get(binaryPath);
-    if (cached && cached.size === stats.size && cached.modifiedAtMs === stats.mtimeMs) return cached.encoder;
+export function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'hevc' | 'av1' = 'h264'): HardwareVideoEncoder | null {
+  const capabilities = getTranscodeCapabilities(binaryPath);
+  const preferred = capabilities.backends.find((entry) => entry.id === capabilities.recommendedBackend);
+  const backend = preferred?.codecs[codec]?.available
+    ? preferred
+    : capabilities.backends.find((entry) => entry.codecs[codec]?.available);
+  return backend?.codecs[codec]?.encoder as HardwareVideoEncoder | undefined || null;
+}
 
-    const candidates: H264HardwareEncoder[] =
-      process.platform === 'darwin'
-        ? ['h264_videotoolbox', 'h264_nvenc', 'h264_qsv']
-        : ['h264_nvenc', 'h264_qsv', 'h264_videotoolbox'];
-    const encoder = candidates.find((candidate) => hasFFmpegEncoder(binaryPath, candidate)) || null;
-    encoderCache.set(binaryPath, { size: stats.size, modifiedAtMs: stats.mtimeMs, encoder });
-    return encoder;
-  } catch {
-    return null;
-  }
+export function getTranscodeCapabilities(binaryPath = findFFmpeg()): TranscodeCapabilities {
+  return probeTranscodeCapabilities(binaryPath, { probeTimeoutMs: 5000 });
 }
 
 export function findFFmpeg(): string | null {
@@ -138,16 +131,18 @@ export function findFFmpeg(): string | null {
     ...systemBinaryCandidates('ffmpeg'),
   ];
 
+  let fallback: string | null = null;
   for (const candidate of candidates) {
     const binary = existingCompatibleBinary(candidate);
-    if (binary && preferredH264HardwareEncoder(binary)) {
+    if (binary && !fallback) fallback = binary;
+    if (binary && probeTranscodeCapabilities(binary, { skipSmokeTest: true }).recommendedBackend !== 'software') {
       cachedFFmpegPath = binary;
       ffmpegCheckedAt = Date.now();
       return binary;
     }
   }
 
-  cachedFFmpegPath = firstExistingBinary(candidates);
+  cachedFFmpegPath = fallback;
   ffmpegCheckedAt = Date.now();
   return cachedFFmpegPath;
 }

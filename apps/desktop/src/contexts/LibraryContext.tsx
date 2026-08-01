@@ -91,7 +91,7 @@ export interface LibraryFolderGroups {
 export interface LibraryFolderStatus {
   path: string;
   kind: LibraryFolderKind;
-  state: 'available' | 'unavailable';
+  state: 'available' | 'degraded' | 'unavailable';
   isNetworkLike: boolean;
   checkedAt: number;
   message: string;

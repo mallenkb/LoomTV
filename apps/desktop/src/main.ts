@@ -22,7 +22,7 @@ import {
   destroyLanDiscovery,
   discoverLanPeers,
 } from './main/lanDiscovery';
-import { findFFmpeg } from './main/mediaBinaries';
+import { findFFmpeg, getTranscodeCapabilities } from './main/mediaBinaries';
 import {
   assertLocalMediaPath,
   canDirectPlay,
@@ -474,7 +474,12 @@ const { scanDirectoryAsItem, scanFolder } = createLibraryScanner({
 
 async function scanLibrary(
   data: LibraryData,
-  options: { force?: boolean; mode?: LibraryScanMode; onProgress?: (snapshot: LibraryScanProgress) => void | Promise<void> } = {},
+  options: {
+    force?: boolean;
+    mode?: LibraryScanMode;
+    onProgress?: (snapshot: LibraryScanProgress) => void | Promise<void>;
+    onCheckpoint?: (snapshot: LibraryScanProgress) => void | Promise<void>;
+  } = {},
 ): Promise<LibraryData> {
   const mode: LibraryScanMode = options.force ? 'full' : options.mode || 'quick';
   const settings = loadSettings();
@@ -509,6 +514,7 @@ async function scanLibrary(
   const processedFolders = new Set<string>();
   const folderStatusesByPath = new Map<string, LibraryFolderStatus>();
   let scannedFolders = 0;
+  let checkpointedFolders = 0;
 
   const appendItem = (item: MediaItem, folderKind: ScanCacheFolderKind = 'auto') => {
     const type: MediaItem['type'] = folderKind === 'movies'
@@ -601,8 +607,12 @@ async function scanLibrary(
   });
 
   const publishProgress = async (isComplete = false) => {
-    if (!options.onProgress) return;
-    await options.onProgress(currentLibrarySnapshot(isComplete));
+    const snapshot = currentLibrarySnapshot(isComplete);
+    if (!isComplete && scannedFolders > checkpointedFolders) {
+      await options.onCheckpoint?.(snapshot);
+      checkpointedFolders = scannedFolders;
+    }
+    await options.onProgress?.(snapshot);
   };
 
   const scanGroup = async (
@@ -635,49 +645,64 @@ async function scanLibrary(
         continue;
       }
 
-      const folderSignature = await getLibraryFolderSignatureAsync(folder);
-      const cachedEntry = previousScanCache[folder];
+      try {
+        const folderSignature = await getLibraryFolderSignatureAsync(folder);
+        const cachedEntry = previousScanCache[folder];
 
-      if (
-        mode !== 'full'
-        && folderSignature
-        && cachedEntry?.version === SCAN_CACHE_VERSION
-        && cachedEntry?.folderKind === folderKind
-        && cachedEntry.signature === folderSignature.signature
-        && (cachedEntry.subtitleProfile || '') === subtitleProfile
-      ) {
-        const metadataIsFresh = mode !== 'metadata' || Date.now() - (cachedEntry.scannedAt || 0) < 7 * 24 * 60 * 60 * 1000;
-        if (metadataIsFresh && cachedItems.length === cachedEntry.itemCount && cachedItemsAreComplete(cachedItems)) {
-          appendItems(cachedItems, folderKind);
-          nextScanCache[folder] = cachedEntry;
-          processedFolders.add(folder);
-          scannedFolders++;
-          await publishProgress(false);
-          continue;
+        if (
+          mode !== 'full'
+          && folderSignature
+          && cachedEntry?.version === SCAN_CACHE_VERSION
+          && cachedEntry?.folderKind === folderKind
+          && cachedEntry.signature === folderSignature.signature
+          && (cachedEntry.subtitleProfile || '') === subtitleProfile
+        ) {
+          const metadataIsFresh = mode !== 'metadata' || Date.now() - (cachedEntry.scannedAt || 0) < 7 * 24 * 60 * 60 * 1000;
+          if (metadataIsFresh && cachedItems.length === cachedEntry.itemCount && cachedItemsAreComplete(cachedItems)) {
+            appendItems(cachedItems, folderKind);
+            nextScanCache[folder] = cachedEntry;
+            processedFolders.add(folder);
+            scannedFolders++;
+            await publishProgress(false);
+            continue;
+          }
         }
-      }
 
-      const folderCtx: ScanContext = folderKind === 'auto' ? { ...ctx } : { ...ctx, folderKind };
-      const directItem = await scanDirectoryAsItem(folder, folderCtx);
-      const items = directItem
-        ? [directItem]
-        : await scanFolder(folder, folderCtx, async (partialItems) => {
-          appendItems(preserveItems(partialItems), folderKind);
-          await publishProgress(false);
+        const folderCtx: ScanContext = folderKind === 'auto' ? { ...ctx } : { ...ctx, folderKind };
+        const directItem = await scanDirectoryAsItem(folder, folderCtx);
+        const items = directItem
+          ? [directItem]
+          : await scanFolder(folder, folderCtx, async (partialItems) => {
+            appendItems(preserveItems(partialItems), folderKind);
+            await publishProgress(false);
+          });
+        const uniqueItems = Array.from(new Map(items.map((item) => [item.id, item])).values());
+
+        if (directItem) appendItems(preserveItems(uniqueItems), folderKind);
+        if (folderSignature) {
+          nextScanCache[folder] = {
+            version: SCAN_CACHE_VERSION,
+            folderKind,
+            signature: folderSignature.signature,
+            subtitleProfile,
+            fileCount: folderSignature.fileCount,
+            itemCount: uniqueItems.length,
+            scannedAt: Date.now(),
+          };
+        }
+      } catch (error) {
+        const currentStatus = getLibraryFolderStatus(folder, libraryFolderKindForScanKind(folderKind));
+        const message = error instanceof Error ? error.message : String(error);
+        folderStatusesByPath.set(folder, {
+          ...currentStatus,
+          state: currentStatus.state === 'unavailable' ? 'unavailable' : 'degraded',
+          message: currentStatus.state === 'unavailable'
+            ? `The folder disconnected during scanning. Saved items were preserved. ${message}`
+            : `The folder remained available, but its scan could not finish. Saved items were preserved. ${message}`,
         });
-      const uniqueItems = Array.from(new Map(items.map((item) => [item.id, item])).values());
-
-      if (directItem) appendItems(preserveItems(uniqueItems), folderKind);
-      if (folderSignature) {
-        nextScanCache[folder] = {
-          version: SCAN_CACHE_VERSION,
-          folderKind,
-          signature: folderSignature.signature,
-          subtitleProfile,
-          fileCount: folderSignature.fileCount,
-          itemCount: uniqueItems.length,
-          scannedAt: Date.now(),
-        };
+        appendItems(cachedItemsForFolder(folder, folderKind, { preserveUnavailable: true }), folderKind);
+        if (previousScanCache[folder]) nextScanCache[folder] = previousScanCache[folder];
+        console.warn(`[library] Preserved ${folder} after an incomplete scan:`, error);
       }
       processedFolders.add(folder);
       scannedFolders++;
@@ -1016,6 +1041,11 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   return true;
 }
 
+function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): boolean {
+  if (scanVersion !== libraryMutationVersion) return false;
+  return saveLibrary(data);
+}
+
 const {
   applyOfficialMetadataCandidate,
   getOfficialMetadataCandidates,
@@ -1193,6 +1223,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   libraryItemForRenderer: compactLibraryItemForRenderer,
   scanLibrary,
   saveLibraryFromScan,
+  saveLibraryScanCheckpoint,
   getLibraryMutationVersion: () => libraryMutationVersion,
   cacheArtworkNow,
   addFolderToLibrary,
@@ -1440,6 +1471,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   checkForUpdates,
   installDownloadedUpdate,
   findFFmpeg,
+  getTranscodeCapabilities,
   safeResult,
   probeMedia,
   canDirectPlay,

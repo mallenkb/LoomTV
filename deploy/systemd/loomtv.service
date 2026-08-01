@@ -1,0 +1,40 @@
+[Unit]
+Description=LoomTV headless media server
+Documentation=https://github.com/mallenkb/LoomTV/blob/main/docs/nas-deployment.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=loomtv
+Group=loomtv
+EnvironmentFile=-/etc/loomtv/loomtv.env
+WorkingDirectory=/opt/loomtv
+
+# The release layout intentionally mirrors the container layout.  Keep the
+# source entrypoint here until a packaged server binary is published.
+ExecStart=/usr/bin/node /opt/loomtv/apps/server/src/cli.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+SuccessExitStatus=0 143
+UMask=0027
+LimitNOFILE=65536
+
+# The service only needs to read media and write its data/cache directories.
+# The paths below should match /etc/loomtv/loomtv.env.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+PrivateDevices=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/loomtv /var/cache/loomtv
+
+[Install]
+WantedBy=multi-user.target

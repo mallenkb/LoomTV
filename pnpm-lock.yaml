@@ -43,6 +43,12 @@ importers:
       '@loom-media-server/lan-protocol':
         specifier: workspace:*
         version: link:../../packages/lan-protocol
+      '@loom-media-server/media-core':
+        specifier: workspace:*
+        version: link:../../packages/media-core
+      '@loom-media-server/transcode-capabilities':
+        specifier: workspace:*
+        version: link:../../packages/transcode-capabilities
       better-sqlite3:
         specifier: 12.11.1
         version: 12.11.1
@@ -253,11 +259,36 @@ importers:
         specifier: ~5.9.2
         version: 5.9.3
 
+  apps/server:
+    dependencies:
+      '@loom-media-server/media-core':
+        specifier: workspace:*
+        version: link:../../packages/media-core
+      '@loom-media-server/runtime-paths':
+        specifier: workspace:*
+        version: link:../../packages/runtime-paths
+      '@loom-media-server/transcode-capabilities':
+        specifier: workspace:*
+        version: link:../../packages/transcode-capabilities
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.1
+        version: 22.20.1
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
+
   packages/lan-protocol:
     devDependencies:
       typescript:
         specifier: 5.7.3
         version: 5.7.3
+
+  packages/runtime-paths: {}
+
+  packages/media-core: {}
+
+  packages/transcode-capabilities: {}
 
 packages:
 
@@ -1852,9 +1883,6 @@ packages:
 
   '@types/node@18.19.130':
     resolution: {integrity: sha512-GRaXQx6jGfL8sKfaIDD6OupbIHBr9jv7Jnaml9tB7l4v068PAOXqfcujMMo5PhbIs6ggR1XODELqahT2R8v0fg==}
-
-  '@types/node@22.19.19':
-    resolution: {integrity: sha512-dyh/xO2Fh5bYrfWaaqGrRQQGkNdmYw6AmaAUvYeUMNTWQtvb796ikLdmTchRmOlOiIJ1TDXfWgVx1QkUlQ6Hew==}
 
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
@@ -7646,7 +7674,7 @@ snapshots:
       '@inquirer/figures': 1.0.15
       '@inquirer/type': 2.0.0
       '@types/mute-stream': 0.0.4
-      '@types/node': 22.19.19
+      '@types/node': 22.20.1
       '@types/wrap-ansi': 3.0.0
       ansi-escapes: 4.3.2
       cli-width: 4.1.0
@@ -7752,14 +7780,14 @@ snapshots:
     dependencies:
       '@jest/fake-timers': 29.7.0
       '@jest/types': 29.6.3
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       jest-mock: 29.7.0
 
   '@jest/fake-timers@29.7.0':
     dependencies:
       '@jest/types': 29.6.3
       '@sinonjs/fake-timers': 10.3.0
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       jest-message-util: 29.7.0
       jest-mock: 29.7.0
       jest-util: 29.7.0
@@ -7793,7 +7821,7 @@ snapshots:
       '@jest/schemas': 29.6.3
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
@@ -8247,7 +8275,7 @@ snapshots:
 
   '@types/appdmg@0.5.5':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
     optional: true
 
   '@types/aria-query@5.0.4': {}
@@ -8281,7 +8309,7 @@ snapshots:
     dependencies:
       '@types/http-cache-semantics': 4.2.0
       '@types/keyv': 3.1.4
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       '@types/responselike': 1.0.3
 
   '@types/chai@5.2.3':
@@ -8317,7 +8345,7 @@ snapshots:
 
   '@types/graceful-fs@4.1.9':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
 
   '@types/http-cache-semantics@4.2.0': {}
 
@@ -8335,23 +8363,19 @@ snapshots:
 
   '@types/keyv@3.1.4':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
 
   '@types/ms@2.1.0': {}
 
   '@types/mute-stream@0.0.4':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
 
   '@types/node@10.17.60': {}
 
   '@types/node@18.19.130':
     dependencies:
       undici-types: 5.26.5
-
-  '@types/node@22.19.19':
-    dependencies:
-      undici-types: 6.21.0
 
   '@types/node@22.20.1':
     dependencies:
@@ -8381,7 +8405,7 @@ snapshots:
 
   '@types/responselike@1.0.3':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
 
   '@types/stack-utils@2.0.3': {}
 
@@ -8398,7 +8422,7 @@ snapshots:
 
   '@types/yauzl@2.10.3':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
     optional: true
 
   '@typescript-eslint/eslint-plugin@8.64.0(@typescript-eslint/parser@8.64.0(eslint@10.7.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.7.3))(eslint@10.7.0(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.7.3)':
@@ -9288,7 +9312,7 @@ snapshots:
 
   chrome-launcher@0.15.2(supports-color@8.1.1):
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       escape-string-regexp: 4.0.0
       is-wsl: 2.2.0
       lighthouse-logger: 1.4.2(supports-color@8.1.1)
@@ -9299,7 +9323,7 @@ snapshots:
 
   chromium-edge-launcher@0.2.0(supports-color@8.1.1):
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       escape-string-regexp: 4.0.0
       is-wsl: 2.2.0
       lighthouse-logger: 1.4.2(supports-color@8.1.1)
@@ -10735,7 +10759,7 @@ snapshots:
       '@jest/environment': 29.7.0
       '@jest/fake-timers': 29.7.0
       '@jest/types': 29.6.3
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       jest-mock: 29.7.0
       jest-util: 29.7.0
 
@@ -10745,7 +10769,7 @@ snapshots:
     dependencies:
       '@jest/types': 29.6.3
       '@types/graceful-fs': 4.1.9
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       anymatch: 3.1.3
       fb-watchman: 2.0.2
       graceful-fs: 4.2.11
@@ -10772,7 +10796,7 @@ snapshots:
   jest-mock@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       jest-util: 29.7.0
 
   jest-regex-util@29.6.3: {}
@@ -10780,7 +10804,7 @@ snapshots:
   jest-util@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       chalk: 4.1.2
       ci-info: 3.9.0
       graceful-fs: 4.2.11
@@ -10797,13 +10821,13 @@ snapshots:
 
   jest-worker@27.5.1:
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       merge-stream: 2.0.0
       supports-color: 8.1.1
 
   jest-worker@29.7.0:
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 22.20.1
       jest-util: 29.7.0
       merge-stream: 2.0.0
       supports-color: 8.1.1

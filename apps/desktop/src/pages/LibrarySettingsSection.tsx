@@ -78,7 +78,7 @@ export default function LibrarySettingsSection({
   onClearAppData,
 }: LibrarySettingsSectionProps) {
   const statusByPath = new Map(folderStatuses.map((status) => [status.path, status]));
-  const unavailableCount = folderStatuses.filter((status) => status.state === 'unavailable').length;
+  const problemCount = folderStatuses.filter((status) => status.state !== 'available').length;
   const networkFolderCount = folderStatuses.filter((status) => status.isNetworkLike).length;
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
@@ -94,22 +94,22 @@ export default function LibrarySettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {(networkFolderCount > 0 || unavailableCount > 0) && (
+          {(networkFolderCount > 0 || problemCount > 0) && (
             <div className={`mb-4 rounded-lg border p-3 text-sm ${
-              unavailableCount > 0
+              problemCount > 0
                 ? 'settings-status-banner-warning border-amber-500/30 bg-amber-500/10 text-amber-100'
                 : 'settings-status-banner-success border-emerald-500/25 bg-emerald-500/10 text-emerald-100'
             }`}
             >
               <div className="flex items-start gap-2">
-                {unavailableCount > 0 ? (
+                {problemCount > 0 ? (
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 ) : (
                   <HardDrive className="mt-0.5 h-4 w-4 shrink-0" />
                 )}
                 <p>
-                  {unavailableCount > 0
-                    ? `${unavailableCount} folder${unavailableCount === 1 ? '' : 's'} need to be reconnected. Quick Sync will preserve their saved items and continue with available folders.`
+                  {problemCount > 0
+                    ? `${problemCount} folder${problemCount === 1 ? '' : 's'} could not complete the last health check or scan. Quick Sync preserves saved items and continues with healthy folders.`
                     : `${networkFolderCount} network-style folder${networkFolderCount === 1 ? '' : 's'} detected. Loom will route mobile playback through this desktop so phones do not need NAS access.`}
                 </p>
               </div>
@@ -248,7 +248,7 @@ export default function LibrarySettingsSection({
             <div className="flex flex-wrap gap-2">
               <Button onClick={scanLibrary} disabled={isScanning} className="gap-2">
                 <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
-                {isScanning ? 'Syncing...' : unavailableCount > 0 ? 'Sync Available Folders' : 'Quick Sync'}
+                {isScanning ? 'Syncing...' : problemCount > 0 ? 'Retry Incomplete Folders' : 'Quick Sync'}
               </Button>
               <Button onClick={refreshMetadata} disabled={isScanning} variant="outline" className="gap-2">
                 Refresh Metadata
@@ -400,10 +400,11 @@ function FolderStatusLine({ status }: { status?: LibraryFolderStatus }) {
   }
 
   const available = status.state === 'available';
+  const degraded = status.state === 'degraded';
   const Icon = available ? CheckCircle2 : AlertTriangle;
   const label = available
     ? status.isNetworkLike ? 'NAS available' : 'Available'
-    : status.isNetworkLike ? 'Reconnect NAS share' : 'Folder unavailable';
+    : degraded ? 'Scan incomplete' : status.isNetworkLike ? 'Reconnect NAS share' : 'Folder unavailable';
   return (
     <span className={`mt-1 flex min-w-0 items-center gap-1.5 text-xs ${available ? 'settings-status-available' : 'settings-status-unavailable'}`}>
       <Icon className="h-3.5 w-3.5 shrink-0" />

@@ -118,6 +118,9 @@ function probeMediaFileFromOutput(
         codec_name?: string;
         profile?: string;
         pix_fmt?: string;
+        color_transfer?: string;
+        color_primaries?: string;
+        color_space?: string;
         width?: number;
         height?: number;
         channels?: number;
@@ -151,6 +154,9 @@ function probeMediaFileFromOutput(
         height: stream.height,
         profile: stream.profile,
         pixelFormat: stream.pix_fmt,
+        colorTransfer: stream.color_transfer,
+        colorPrimaries: stream.color_primaries,
+        colorSpace: stream.color_space,
         default: stream.disposition?.default === 1,
         forced: stream.disposition?.forced === 1,
       }));
@@ -196,6 +202,9 @@ function probeMediaFileFromOutput(
         videoCodec: videoStream?.codec_name,
         videoProfile: videoStream?.profile,
         pixelFormat: videoStream?.pix_fmt,
+        colorTransfer: videoStream?.color_transfer,
+        colorPrimaries: videoStream?.color_primaries,
+        colorSpace: videoStream?.color_space,
         audioCodec: audioStreams[0]?.codec,
         audioTracks: audioStreams.length || undefined,
         subtitleTracks: subtitleStreams.length || undefined,

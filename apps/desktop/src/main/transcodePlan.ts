@@ -1,12 +1,15 @@
 import path from 'node:path';
+import { normalizePlaybackProfile } from '@loom-media-server/media-core';
 import type { TranscodeOptions } from './mediaTypes';
 import {
+  appendHardwareEncoderOptions,
   hasBitmapSubtitleSelection,
   hasSubtitleSelection,
   streamMap,
   subtitleFilterComplex,
   subtitleSelections,
   textSubtitleFilter,
+  type HardwareVideoEncoder,
 } from './transcodeFilters.ts';
 
 // Report the stream ready as soon as the first segment is written. With 2s
@@ -34,14 +37,57 @@ export function buildEmbeddedSubtitleVttArgs(filePath: string, streamOrdinal: nu
   ];
 }
 
-export type TranscodePreset = 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
+export type TranscodePreset = 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf' | 'rkmpp';
 
 export interface HlsMediaInfo {
   videoCodec?: string;
   videoProfile?: string;
   pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
   audioCodec?: string;
   frameRate?: number;
+}
+
+function needsToneMapping(mediaInfo?: HlsMediaInfo): boolean {
+  const transfer = String(mediaInfo?.colorTransfer || '').toLowerCase();
+  const primaries = String(mediaInfo?.colorPrimaries || '').toLowerCase();
+  const pixelFormat = String(mediaInfo?.pixelFormat || '').toLowerCase();
+  return transfer.includes('smpte2084')
+    || transfer.includes('arib-std-b67')
+    || transfer.includes('hlg')
+    || (primaries.includes('bt2020') && /10|12/.test(pixelFormat));
+}
+
+function toneMappingFilter(preset: TranscodePreset, upload = true): string {
+  const outputFormat = preset === 'vaapi' && upload ? 'nv12,hwupload' : 'yuv420p';
+  return `zscale=transfer=linear:npl=100,format=gbrpf32le,tonemap=mobius,zscale=transfer=bt709:primaries=bt709:matrix=bt709,format=${outputFormat}`;
+}
+
+function outputVideoCodec(options: TranscodeOptions): 'h264' | 'hevc' | 'av1' {
+  return normalizePlaybackProfile(options).codec;
+}
+
+function hardwareEncoderForPreset(preset: TranscodePreset, codec: 'h264' | 'hevc' | 'av1'): HardwareVideoEncoder | null {
+  if (preset === 'software') return null;
+  const suffix = preset === 'videotoolbox' ? 'videotoolbox' : preset;
+  const encoder = `${codec === 'h264' ? 'h264' : codec}_${suffix}`;
+  return encoder as HardwareVideoEncoder;
+}
+
+function softwareEncoderForCodec(codec: 'h264' | 'hevc' | 'av1', requested?: TranscodeOptions['softwareVideoEncoder']): string {
+  if (codec === 'h264') return requested === 'libx264' ? requested : 'libx264';
+  if (codec === 'hevc') return requested === 'libx265' ? requested : 'libx265';
+  return requested === 'libsvtav1' || requested === 'libaom-av1' ? requested : 'libsvtav1';
+}
+
+function scaleFilter(options: TranscodeOptions): string | null {
+  const profile = normalizePlaybackProfile(options);
+  const width = profile.maxWidth;
+  const height = profile.maxHeight;
+  if (!width && !height) return null;
+  return `scale=${width || -2}:${height || -2}:force_original_aspect_ratio=decrease`;
 }
 
 /**
@@ -108,6 +154,13 @@ export function transcodeSessionKey(filePath: string, options: TranscodeOptions)
     filePath: path.resolve(filePath),
     options: {
       preset: options.preset || 'auto',
+      targetVideoCodec: options.targetVideoCodec || 'h264',
+      softwareVideoEncoder: options.softwareVideoEncoder,
+      maxWidth: options.maxWidth,
+      maxHeight: options.maxHeight,
+      videoBitrateKbps: options.videoBitrateKbps,
+      audioBitrateKbps: options.audioBitrateKbps,
+      toneMap: options.toneMap,
       videoTrackIndex: options.videoTrackIndex,
       audioTrackIndex: options.audioTrackIndex,
       subtitleTrackIndex: options.subtitleTrackIndex,
@@ -218,27 +271,48 @@ export function buildHlsArgs({
   windowSegments = HLS_WINDOW_SEGMENTS,
 }: BuildHlsArgsInput): string[] {
   const args: string[] = [];
+  const playbackProfile = normalizePlaybackProfile(options);
   const hasAudio = options.audioTrackIndex !== -1;
   const hasSubtitle = hasSubtitleSelection(options);
   const bitmapSubtitle = hasBitmapSubtitleSelection(options);
+  const targetCodec = outputVideoCodec(options);
+  const profileVideo = Boolean(options.maxWidth || options.maxHeight || options.videoBitrateKbps || options.toneMap);
   // Seekable windows must re-encode so keyframes (and therefore segment
   // boundaries) land on a deterministic grid that matches the VOD playlist.
-  const copyVideo = !seekable && !hasSubtitle && isCopySafeVideo(mediaInfo);
+  const copyVideo = !seekable && !profileVideo && targetCodec === 'h264' && !hasSubtitle && isCopySafeVideo(mediaInfo);
   // Audio must also be re-encoded in seekable mode: a stream-copied audio track
   // mixed with a re-encoded video track under input-seek + output_ts_offset gets
   // its timestamps handled differently and drifts out of A/V (and subtitle)
   // sync. Re-encoding both streams keeps them on a single, shifted timeline.
-  const copyAudio = !seekable && hasAudio && isCopySafeAudio(mediaInfo);
+  const copyAudio = !seekable && !options.audioBitrateKbps && hasAudio && isCopySafeAudio(mediaInfo);
   const segSeconds = segmentSeconds > 0 ? segmentSeconds : HLS_SEGMENT_SECONDS;
+  const toneMap = !copyVideo && options.toneMap !== false && (Boolean(options.toneMap) || needsToneMapping(mediaInfo));
+  const scaling = !copyVideo ? scaleFilter(options) : null;
 
   if (typeof options.startSeconds === 'number' && options.startSeconds > 0) {
     args.push('-ss', ffmpegSeconds(options.startSeconds));
   }
 
-  if (!copyVideo && preset === 'nvenc') {
+  // Use a zero-copy decode/encode chain only when no software filter needs to
+  // touch the decoded frames. Subtitle burn-in, scaling, and tone mapping stay
+  // on the explicit software-upload path below so CUDA/QSV/VA-API frames are
+  // never handed to an incompatible filter.
+  const canUseHardwareDecode = !copyVideo
+    && !hasSubtitle
+    && !bitmapSubtitle
+    && !toneMap
+    && !scaling
+    && ['videotoolbox', 'nvenc', 'qsv', 'vaapi'].includes(preset);
+  if (canUseHardwareDecode && preset === 'nvenc') {
     args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
-  } else if (!copyVideo && preset === 'qsv') {
-    args.push('-hwaccel', 'qsv');
+  } else if (canUseHardwareDecode && preset === 'qsv') {
+    args.push('-init_hw_device', 'qsv=hw', '-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
+  } else if (canUseHardwareDecode && preset === 'videotoolbox') {
+    args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
+  } else if (preset === 'vaapi') {
+    const vaapiDevice = process.env.LOOMTV_VAAPI_DEVICE || process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
+    args.push('-vaapi_device', vaapiDevice);
+    if (canUseHardwareDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_output_format', 'vaapi');
   }
 
   args.push('-i', filePath);
@@ -252,11 +326,15 @@ export function buildHlsArgs({
 
   if (bitmapSubtitle) {
     const subtitleFilter = subtitleFilterComplex(filePath, options);
+    const needsPostFilter = preset === 'vaapi' || toneMap || scaling;
+    const output = needsPostFilter ? `${subtitleFilter.output}processed` : subtitleFilter.output;
     args.push(
       '-filter_complex',
-      subtitleFilter.filter,
+      preset === 'vaapi' || toneMap || scaling
+        ? `${subtitleFilter.filter};[${subtitleFilter.output}]${[toneMap ? toneMappingFilter(preset) : 'format=yuv420p', scaling].filter(Boolean).join(',')}${preset === 'vaapi' ? ',format=nv12,hwupload' : ''}[${output}]`
+        : subtitleFilter.filter,
       '-map',
-      `[${subtitleFilter.output}]`,
+      `[${output}]`,
     );
   } else {
     args.push('-map', streamMap('v', options.videoTrackIndex));
@@ -275,7 +353,7 @@ export function buildHlsArgs({
     const textSelections = subtitleSelections(options);
     const primarySubtitle = textSelections.find((selection) => selection.placement === 'primary') || textSelections[0];
     const secondarySubtitle = textSelections.find((selection) => selection !== primarySubtitle);
-    args.push('-vf', textSubtitleFilter(
+    const subtitleFilter = textSubtitleFilter(
       filePath,
       primarySubtitle?.streamOrdinal ?? subtitleOrdinal,
       options.subtitleStyle,
@@ -283,29 +361,39 @@ export function buildHlsArgs({
       secondarySubtitle?.streamOrdinal,
       primarySubtitle?.filePath,
       secondarySubtitle?.filePath,
-    ));
+    );
+    const toneMappedSubtitleFilter = toneMap
+      ? `${toneMappingFilter(preset, false)},${subtitleFilter}${preset === 'vaapi' ? ',format=nv12,hwupload' : ''}`
+      : preset === 'vaapi'
+        ? `${subtitleFilter},format=nv12,hwupload`
+        : subtitleFilter;
+    args.push('-vf', [toneMappedSubtitleFilter, scaling].filter(Boolean).join(','));
   } else if (!copyVideo && !bitmapSubtitle) {
-    args.push('-vf', 'format=yuv420p');
+    if (!canUseHardwareDecode) {
+      const baseFilter = toneMap ? toneMappingFilter(preset, false) : 'format=yuv420p';
+      args.push('-vf', [baseFilter, scaling, preset === 'vaapi' ? 'format=nv12,hwupload' : null].filter(Boolean).join(','));
+    }
   }
 
   if (copyVideo) {
     args.push('-c:v', 'copy');
-  } else if (preset === 'nvenc') {
-    args.push('-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '23', '-b:v', '0');
-  } else if (preset === 'qsv') {
-    args.push('-c:v', 'h264_qsv', '-global_quality', '23', '-look_ahead', '0');
-  } else if (preset === 'videotoolbox') {
-    args.push(
-      '-c:v', 'h264_videotoolbox',
-      '-allow_sw', '1',
-      '-realtime', '1',
-      '-b:v', '6500k',
-      '-maxrate', '8500k',
-      '-bufsize', '12000k',
-      '-profile:v', 'main',
-    );
+  } else if (hardwareEncoderForPreset(preset, targetCodec)) {
+    const encoder = hardwareEncoderForPreset(preset, targetCodec);
+    args.push('-c:v', encoder as string);
+    appendHardwareEncoderOptions(args, encoder as HardwareVideoEncoder);
+    if (playbackProfile.videoBitrateKbps) {
+      const bitrate = Math.max(128, playbackProfile.videoBitrateKbps);
+      args.push('-b:v', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`);
+    }
   } else {
-    args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main');
+    args.push('-c:v', softwareEncoderForCodec(targetCodec, options.softwareVideoEncoder));
+    if (targetCodec === 'h264') args.push('-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p', '-profile:v', 'main');
+    if (targetCodec === 'hevc') args.push('-preset', 'medium', '-crf', '28', '-pix_fmt', 'yuv420p');
+    if (targetCodec === 'av1') args.push('-preset', '8', '-crf', '32', '-pix_fmt', 'yuv420p');
+    if (playbackProfile.videoBitrateKbps) {
+      const bitrate = Math.max(128, playbackProfile.videoBitrateKbps);
+      args.push('-b:v', `${bitrate}k`, '-maxrate', `${bitrate}k`, '-bufsize', `${bitrate * 2}k`);
+    }
   }
 
   if (!hasAudio) {
@@ -321,7 +409,8 @@ export function buildHlsArgs({
     // `first_pts=0` pins the first sample to the window's zero so it lines up with
     // the first video frame before `-output_ts_offset` shifts both onto the
     // global timeline.
-    args.push('-c:a', 'aac', '-af', 'aresample=async=1:first_pts=0', '-b:a', '160k', '-ac', '2');
+    const audioBitrate = playbackProfile.audioBitrateKbps;
+    args.push('-c:a', 'aac', '-af', 'aresample=async=1:first_pts=0', '-b:a', `${audioBitrate}k`, '-ac', '2');
   }
 
   args.push('-fflags', '+genpts');

@@ -15,6 +15,7 @@ import type {
   LanStoredProgress,
   LanStreamOptions,
 } from '@loom-media-server/lan-protocol';
+import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 
 export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 export type LibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -24,7 +25,7 @@ export interface LibraryFolderGroups { movies: string[]; tvShows: string[]; anim
 export interface LibraryFolderStatus {
   path: string;
   kind: LibraryFolderKind;
-  state: 'available' | 'unavailable';
+  state: 'available' | 'degraded' | 'unavailable';
   isNetworkLike: boolean;
   checkedAt: number;
   message: string;
@@ -39,6 +40,9 @@ export interface WireLocalMediaDetails {
   videoCodec?: string;
   videoProfile?: string;
   pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
   audioCodec?: string;
   audioTracks?: number;
   subtitleTracks?: number;
@@ -264,7 +268,11 @@ export type SkipAnalysisRunScope = {
 
 export interface MetadataKeyTestResult { provider: string; ok: boolean; message: string }
 export interface PlaybackLogoResult { logo?: string; logoCandidates?: string[] }
-export interface FFmpegStatus { available: boolean; path: string | null }
+export interface FFmpegStatus {
+  available: boolean;
+  path: string | null;
+  capabilities?: TranscodeCapabilities;
+}
 export type ApiResult<T> = { ok: boolean; data?: T; error?: string };
 
 export interface UpdateState {
@@ -294,7 +302,14 @@ export interface SubtitleStyleOptions {
 }
 
 export interface TranscodeOptions {
-  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv';
+  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf' | 'rkmpp';
+  targetVideoCodec?: 'h264' | 'hevc' | 'av1';
+  softwareVideoEncoder?: 'libx264' | 'libx265' | 'libsvtav1' | 'libaom-av1';
+  maxWidth?: number;
+  maxHeight?: number;
+  videoBitrateKbps?: number;
+  audioBitrateKbps?: number;
+  toneMap?: boolean;
   startSeconds?: number;
   videoTrackIndex?: number;
   audioTrackIndex?: number;
@@ -317,11 +332,14 @@ export interface TranscodeSession {
   outputDir: string;
   seekable: boolean;
   startSeconds: number;
+  preset?: 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf' | 'rkmpp';
+  codec?: 'h264' | 'hevc' | 'av1';
 }
 
 export type StreamUrlOptions = LanStreamOptions & Pick<TranscodeOptions,
   | 'videoTrackIndex' | 'secondarySubtitleTrackIndex' | 'secondarySubtitleStreamOrdinal'
-  | 'secondarySubtitleCodec' | 'secondarySubtitleFilePath'
+  | 'secondarySubtitleCodec' | 'secondarySubtitleFilePath' | 'targetVideoCodec'
+  | 'maxWidth' | 'maxHeight' | 'videoBitrateKbps' | 'audioBitrateKbps' | 'toneMap'
 > & { subtitleStyle?: SubtitleStyleOptions };
 
 export type PlaybackMode = 'direct' | 'remux' | 'direct-stream' | 'transcode';

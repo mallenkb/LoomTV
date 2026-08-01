@@ -13,6 +13,7 @@ import type { ManualMediaSegmentInput, MediaSegmentRequest, MediaSegmentResponse
 import type { IpcInvokeChannel } from '../shared/ipcChannels';
 import type { IpcContract } from '../shared/ipcContract';
 import type { StoredProgress } from '../shared/desktopProtocol.ts';
+import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 import { buildNetworkStatus, ffmpegAvailability } from './ipcHandlerPolicy.ts';
 import { sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import {
@@ -66,9 +67,11 @@ export interface IpcHandlerDependencies<
     options: {
       mode: IpcLibraryScanMode;
       onProgress?: (snapshot: LibraryScanProgress<TLibraryData>) => void;
+      onCheckpoint?: (snapshot: LibraryScanProgress<TLibraryData>) => void | Promise<void>;
     },
   ) => Promise<TLibraryData>;
   saveLibraryFromScan: (library: TLibraryData, scanVersion: number) => boolean;
+  saveLibraryScanCheckpoint: (library: TLibraryData, scanVersion: number) => boolean;
   getLibraryMutationVersion: () => number;
   cacheArtworkNow: (library: TLibraryData) => Promise<void>;
   addFolderToLibrary: (library: TLibraryData, folderPath: string, kind: IpcLibraryFolderKind) => TLibraryData;
@@ -165,6 +168,7 @@ export interface IpcHandlerDependencies<
   checkForUpdates: () => IpcResult<'updates:check'> | Promise<IpcResult<'updates:check'>>;
   installDownloadedUpdate: () => IpcResult<'updates:install'> | Promise<IpcResult<'updates:install'>>;
   findFFmpeg: () => string | null;
+  getTranscodeCapabilities: (path: string | null) => TranscodeCapabilities;
   safeResult: <T>(fn: () => T | Promise<T>) => Promise<ApiResult<T>>;
   probeMedia: (filePath: string) => Promise<ProbeResult>;
   canDirectPlay: (filePath: string, probe: ProbeResult, backend: 'html5' | 'hls') => boolean;
@@ -285,6 +289,9 @@ export function registerIpcHandlers<
         const scanned = await deps.scanLibrary(data, {
           mode,
           onProgress: progressPublisher.publish,
+          onCheckpoint: (snapshot) => {
+            deps.saveLibraryScanCheckpoint(snapshot, scanVersion);
+          },
         });
         progressPublisher.flush();
         if (deps.saveLibraryFromScan(scanned, scanVersion)) {
@@ -323,6 +330,9 @@ export function registerIpcHandlers<
           const scanned = await deps.scanLibrary(scanData, {
             mode: 'quick',
             onProgress: progressPublisher.publish,
+            onCheckpoint: (snapshot) => {
+              deps.saveLibraryScanCheckpoint(snapshot, scanVersion);
+            },
           });
           progressPublisher.flush();
           if (deps.saveLibraryFromScan(scanned, scanVersion)) {
@@ -664,7 +674,7 @@ export function registerIpcHandlers<
     return deps.installDownloadedUpdate();
   });
 
-  handle('media:ffmpeg-available', () => ffmpegAvailability(deps.findFFmpeg));
+  handle('media:ffmpeg-available', () => ffmpegAvailability(deps.findFFmpeg, deps.getTranscodeCapabilities));
 
   handle('media:probe', (_event, filePath: string) => deps.safeResult(() => {
     deps.authorizeMediaPath(filePath);

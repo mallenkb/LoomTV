@@ -1,0 +1,64 @@
+name: loomtv
+
+services:
+  loomtv:
+    # Pin this to a release tag or digest in production.  The build block is
+    # useful for local development and for NAS hosts that build on-device.
+    image: ghcr.io/mallenkb/loomtv:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        LOOMTV_UID: ${PUID:-1000}
+        LOOMTV_GID: ${PGID:-1000}
+    container_name: loomtv
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "${LOOMTV_PORT:-3847}:3847"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3847
+      DATA_DIR: /config
+      CACHE_DIR: /cache
+      MEDIA_DIR: /media
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      # Set this only when the container has /dev/dri mounted.
+      LOOMTV_VAAPI_DEVICE: ${LOOMTV_VAAPI_DEVICE:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - "${LOOMTV_CONFIG_DIR:-./data/config}:/config"
+      - "${LOOMTV_CACHE_DIR:-./data/cache}:/cache"
+      # Keep media read-only.  Mount the host's SMB/NFS path here; LoomTV
+      # should not receive NAS credentials or manage the network share.
+      - "${LOOMTV_MEDIA_DIR:-./data/media}:/media:ro"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3847)+'/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+    # Hardware transcoding is opt-in.  Uncomment only on a host configured
+    # for the corresponding runtime; see docs/nas-deployment.md.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "${RENDER_GID:?set RENDER_GID for /dev/dri}"
+
+    # NVIDIA Container Toolkit example (do not combine with the /dev/dri
+    # example above unless the host explicitly needs both paths):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu, video]

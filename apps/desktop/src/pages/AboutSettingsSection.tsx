@@ -3,6 +3,7 @@ import LoomLoader from '@/components/LoomLoader';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { APP_VERSION, desktopApi, type UpdateState } from '@/lib/desktopApi';
 import type { AppThemeSettings } from '@/lib/theme';
+import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 import { cn } from '@/lib/utils';
 import {
   APP_LICENSE,
@@ -14,6 +15,7 @@ import {
 type FFmpegStatus = {
   available: boolean;
   path: string | null;
+  capabilities?: TranscodeCapabilities;
 };
 
 type AboutSettingsSectionProps = {
@@ -84,6 +86,19 @@ export default function AboutSettingsSection({
               )}
             </div>
             <p className="mt-3 text-xs text-[var(--loom-faint)]">{APP_LICENSE.copyright}</p>
+            {ffmpegStatus?.capabilities && (
+              <div className="mt-3 text-xs text-[var(--loom-faint)]">
+                <span className="font-medium text-[var(--loom-muted)]">Transcoding:</span>{' '}
+                {ffmpegStatus.capabilities.hardwareAcceleration
+                  ? `${ffmpegStatus.capabilities.recommendedBackend} hardware encode`
+                  : 'software fallback'}
+                {' · '}
+                H.264 {ffmpegStatus.capabilities.codecs.h264 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.h264 ? 'software' : '—'}
+                {' · '}HEVC {ffmpegStatus.capabilities.codecs.hevc ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.hevc ? 'software' : '—'}
+                {' · '}AV1 {ffmpegStatus.capabilities.codecs.av1 ? 'hardware' : ffmpegStatus.capabilities.softwareCodecs.av1 ? 'software' : '—'}
+                {ffmpegStatus.capabilities.toneMapping ? ' · HDR tone-map ready' : ''}
+              </div>
+            )}
           </div>
 
           <div className="flex min-w-0 flex-col items-end gap-3">

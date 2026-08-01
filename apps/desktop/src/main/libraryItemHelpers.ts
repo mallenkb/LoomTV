@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import path from 'node:path';
+import { createMediaItemId as createSharedMediaItemId } from '@loom-media-server/media-core';
 import { isGenericGroupingFolderTitle, normalizeTitleForMatch, titleMatchesLocal, usefulLocalTitle } from './metadata/helpers.ts';
 import type { MediaItem } from './metadata/types.ts';
 import { durableArtworkSource } from './artworkSources.ts';
@@ -14,7 +13,7 @@ export function srtToVtt(input: string): string {
 }
 
 export function createMediaItemId(filePath: string): string {
-  return createHash('sha256').update(path.resolve(filePath)).digest('hex').slice(0, 32);
+  return createSharedMediaItemId(filePath);
 }
 
 function mediaItemHasUsableArtwork(item: MediaItem): boolean {

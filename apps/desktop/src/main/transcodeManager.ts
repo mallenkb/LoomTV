@@ -8,7 +8,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { appendQueryToHlsPlaylist } from './hlsPlaylist';
 import { killAllManagedFfmpeg, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
-import { findFFmpeg } from './mediaBinaries';
+import { findFFmpeg, getTranscodeCapabilities } from './mediaBinaries';
 import { pipeResponse } from './httpResponses';
 import { assertLocalMediaPath, probeMedia } from './mediaProbe';
 import {
@@ -75,7 +75,6 @@ const HLS_RESTART_BUDGET_WINDOW_MS = 30 * 1000;
 const MAX_HLS_RESTARTS_PER_WINDOW = 16;
 const MAX_HLS_STREAM_CREDENTIALS_PER_SESSION = 4;
 export const HLS_STREAM_TOKEN_QUERY_PARAM = 'streamToken';
-const encoderSupport = new Map<string, boolean>();
 const transcodeSessionDisposalListeners = new Set<(sessionId: string) => void>();
 
 export function registerTranscodeSessionDisposalListener(listener: (sessionId: string) => void): () => void {
@@ -171,40 +170,46 @@ export async function cleanupOldTranscodes(): Promise<void> {
   }
 }
 
-function hasEncoder(ffmpegPath: string, encoder: string): boolean {
-  const key = `${ffmpegPath}:${encoder}`;
-  const cached = encoderSupport.get(key);
-  if (typeof cached === 'boolean') return cached;
-
-  try {
-    const output = execFileSync(ffmpegPath, ['-hide_banner', '-encoders'], { encoding: 'utf8' });
-    const supported = output.includes(encoder);
-    encoderSupport.set(key, supported);
-    return supported;
-  } catch {
-    encoderSupport.set(key, false);
-    return false;
-  }
-}
-
 function selectedPreset(ffmpegPath: string, options: TranscodeOptions): TranscodePreset {
   const preset = options.preset || 'auto';
-  if (preset !== 'auto') return preset as TranscodePreset;
-  const candidates: Array<'videotoolbox' | 'nvenc' | 'qsv'> =
-    process.platform === 'darwin'
-      ? ['videotoolbox', 'nvenc', 'qsv']
-      : process.platform === 'win32'
-        ? ['nvenc', 'qsv', 'videotoolbox']
-        : ['nvenc', 'qsv', 'videotoolbox'];
-  const encoderForPreset: Record<'videotoolbox' | 'nvenc' | 'qsv', string> = {
-    videotoolbox: 'h264_videotoolbox',
-    nvenc: 'h264_nvenc',
-    qsv: 'h264_qsv',
-  };
-  for (const candidate of candidates) {
-    if (hasEncoder(ffmpegPath, encoderForPreset[candidate])) return candidate;
+  if (preset === 'software') return 'software';
+  const capabilities = getTranscodeCapabilities(ffmpegPath);
+  const codec = options.targetVideoCodec === 'hevc' || options.targetVideoCodec === 'av1' ? options.targetVideoCodec : 'h264';
+  if (preset !== 'auto') {
+    const requested = capabilities.backends.find((backend) => backend.id === preset);
+    return requested?.codecs[codec]?.available ? preset as TranscodePreset : 'software';
   }
-  return 'software';
+  const recommended = capabilities.backends.find((backend) => backend.id === capabilities.recommendedBackend);
+  if (recommended?.codecs[codec]?.available) return capabilities.recommendedBackend as TranscodePreset;
+  return capabilities.backends.find((backend) => backend.codecs[codec]?.available)?.id as TranscodePreset || 'software';
+}
+
+function normalizeTranscodeOptions(ffmpegPath: string, options: TranscodeOptions): TranscodeOptions {
+  const codec = options.targetVideoCodec === 'hevc' || options.targetVideoCodec === 'av1' ? options.targetVideoCodec : 'h264';
+  const capabilities = getTranscodeCapabilities(ffmpegPath);
+  const hardwareAvailable = capabilities.backends.some((backend) => backend.codecs[codec]?.available);
+  const softwareAvailable = capabilities.softwareCodecs[codec];
+  if (!(hardwareAvailable || softwareAvailable)) {
+    // Keep an unsupported client request playable when H.264 is available, but
+    // never carry an HEVC/AV1 software encoder into the H.264 fallback.
+    const fallbackEncoder = capabilities.softwareEncoders.h264 as TranscodeOptions['softwareVideoEncoder'] | null | undefined;
+    return {
+      ...options,
+      targetVideoCodec: 'h264',
+      softwareVideoEncoder: fallbackEncoder || undefined,
+    };
+  }
+
+  // The capability probe is authoritative. Clearing a stale caller-provided
+  // encoder prevents a profile such as AV1+libx264 from reaching FFmpeg, while
+  // still allowing the hardware path to fall back to the verified software
+  // encoder when device startup fails.
+  const softwareVideoEncoder = capabilities.softwareEncoders[codec] as TranscodeOptions['softwareVideoEncoder'] | null | undefined;
+  return {
+    ...options,
+    targetVideoCodec: codec,
+    softwareVideoEncoder: softwareVideoEncoder || undefined,
+  };
 }
 
 function selectedTrack(tracks: MediaTrack[], type: MediaTrack['type'], selectedIndex?: number): MediaTrack | undefined {
@@ -227,6 +232,9 @@ async function hlsMediaInfo(filePath: string, options: TranscodeOptions): Promis
       frameRate: video?.frameRate,
       videoProfile: video?.profile,
       pixelFormat: video?.pixelFormat,
+      colorTransfer: video?.colorTransfer,
+      colorPrimaries: video?.colorPrimaries,
+      colorSpace: video?.colorSpace,
       audioCodec: audio?.codec,
     };
   } catch {
@@ -564,6 +572,8 @@ function transcodeSessionResult(session: ActiveSession, serverBase: string): Tra
     playlistUrl,
     seekable: session.seekable,
     startSeconds: session.seekable ? 0 : session.windowStartIndex * session.segmentSeconds,
+    preset: session.preset,
+    codec: session.options.targetVideoCodec || 'h264',
   };
 }
 
@@ -640,12 +650,13 @@ export async function startTranscode(
   assertLocalMediaPath(filePath);
   const ffmpeg = findFFmpeg();
   if (!ffmpeg) throw new Error('FFmpeg is not available.');
-  const sessionKey = `${sessionScope}\0${transcodeSessionKey(filePath, options)}`;
+  const effectiveOptions = normalizeTranscodeOptions(ffmpeg, options);
+  const sessionKey = `${sessionScope}\0${transcodeSessionKey(filePath, effectiveOptions)}`;
 
   const existingSession = reusableSession(sessionKey);
   if (existingSession) {
     const startIndex = existingSession.seekable
-      ? clampIndex(Math.floor((options.startSeconds || 0) / existingSession.segmentSeconds), existingSession.segmentCount)
+      ? clampIndex(Math.floor((effectiveOptions.startSeconds || 0) / existingSession.segmentSeconds), existingSession.segmentCount)
       : 0;
     await ensureSessionReadyAt(ffmpeg, existingSession, startIndex);
     return transcodeSessionResult(existingSession, serverBase);
@@ -661,7 +672,7 @@ export async function startTranscode(
   // Resolved before the segment grid: the encoder splits on frame boundaries, so
   // the playlist must be built on the same frame-aligned length or a segment's
   // declared start drifts away from the content it actually holds.
-  const mediaInfo = await hlsMediaInfo(filePath, options);
+  const mediaInfo = await hlsMediaInfo(filePath, effectiveOptions);
   const segmentSeconds = frameAlignedSegmentSeconds(SEGMENT_SECONDS, mediaInfo?.frameRate);
   const seekable = durationSeconds > 0;
   const segmentCount = transcodeSegmentCount(durationSeconds, segmentSeconds);
@@ -671,7 +682,7 @@ export async function startTranscode(
   fs.mkdirSync(outputDir, { recursive: true });
 
   const startIndex = seekable
-    ? clampIndex(Math.floor((options.startSeconds || 0) / segmentSeconds), segmentCount)
+    ? clampIndex(Math.floor((effectiveOptions.startSeconds || 0) / segmentSeconds), segmentCount)
     : 0;
 
   const session: ActiveSession = {
@@ -680,8 +691,8 @@ export async function startTranscode(
     filePath,
     outputDir,
     playlistUrl: playlistUrlFor(serverBase, sessionId),
-    options,
-    preset: selectedPreset(ffmpeg, options),
+    options: effectiveOptions,
+    preset: selectedPreset(ffmpeg, effectiveOptions),
     mediaInfo,
     durationSeconds,
     segmentSeconds,

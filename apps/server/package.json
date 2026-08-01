@@ -1,0 +1,26 @@
+{
+  "name": "loom-media-server-headless",
+  "productName": "LoomTV Server",
+  "version": "1.0.102",
+  "description": "Headless LoomTV server for NAS and always-on hosts",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "bin": {
+    "loomtv-server": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "server": "node src/cli.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@loom-media-server/media-core": "workspace:*",
+    "@loom-media-server/runtime-paths": "workspace:*",
+    "@loom-media-server/transcode-capabilities": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "typescript": "5.7.3"
+  }
+}

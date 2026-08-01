@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron';
+import { profileView } from '@loom-media-server/media-core';
 import {
   clearDeviceProfileSelection,
   createGuestProfile,
@@ -71,14 +72,15 @@ function failureKey(deviceId: string, profileId: string, address: string): strin
 }
 
 function summary(profile: ProfileRecord): ProfileSummary {
+  const portable = profileView(profile);
   return {
-    id: profile.id,
-    name: profile.name,
+    id: portable?.id || profile.id,
+    name: portable?.name || profile.name,
     avatarKey: profile.avatarKey,
     colorKey: profile.colorKey,
-    type: profile.type,
-    hasPin: profile.hasPin,
-    isGuest: profile.isGuest,
+    type: portable?.type || profile.type,
+    hasPin: portable?.hasPin ?? profile.hasPin,
+    isGuest: portable?.isGuest ?? profile.isGuest,
     sortOrder: profile.sortOrder,
     ...(profile.lastUsedAt ? { lastUsedAt: profile.lastUsedAt } : {}),
   };

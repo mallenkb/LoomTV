@@ -9,6 +9,9 @@ export interface LocalMediaTrack {
   height?: number;
   profile?: string;
   pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
   default?: boolean;
   forced?: boolean;
 }
@@ -22,6 +25,9 @@ export interface LocalMediaDetails {
   videoCodec?: string;
   videoProfile?: string;
   pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
   audioCodec?: string;
   audioTracks?: number;
   subtitleTracks?: number;

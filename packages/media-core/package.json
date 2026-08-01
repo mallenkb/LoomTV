@@ -1,0 +1,18 @@
+{
+  "name": "@loom-media-server/media-core",
+  "version": "1.0.0",
+  "description": "Shared media identity, scan, playback-profile, and profile vocabulary for LoomTV runtimes",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ]
+}

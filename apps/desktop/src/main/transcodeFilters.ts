@@ -1,6 +1,24 @@
 import type { SubtitleStyleOptions, TranscodeOptions } from './mediaTypes';
 
-export type H264HardwareEncoder = 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv';
+export type H264HardwareEncoder =
+  | 'h264_videotoolbox'
+  | 'h264_nvenc'
+  | 'h264_qsv'
+  | 'h264_vaapi'
+  | 'h264_amf'
+  | 'h264_rkmpp';
+
+export type HardwareVideoEncoder = H264HardwareEncoder
+  | 'hevc_videotoolbox'
+  | 'hevc_nvenc'
+  | 'hevc_qsv'
+  | 'hevc_vaapi'
+  | 'hevc_amf'
+  | 'hevc_rkmpp'
+  | 'av1_nvenc'
+  | 'av1_qsv'
+  | 'av1_vaapi'
+  | 'av1_amf';
 
 export function appendH264EncoderOptions(args: string[], encoder: H264HardwareEncoder): void {
   if (encoder === 'h264_videotoolbox') {
@@ -20,7 +38,50 @@ export function appendH264EncoderOptions(args: string[], encoder: H264HardwareEn
     return;
   }
 
-  args.push('-global_quality', '23', '-look_ahead', '0');
+  if (encoder === 'h264_qsv') {
+    args.push('-global_quality', '23', '-look_ahead', '0');
+    return;
+  }
+
+  if (encoder === 'h264_vaapi') {
+    args.push('-qp', '23');
+    return;
+  }
+
+  if (encoder === 'h264_amf') {
+    args.push('-quality', 'balanced', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23');
+    return;
+  }
+
+  args.push('-qp_init', '23');
+}
+
+export function appendHardwareEncoderOptions(args: string[], encoder: HardwareVideoEncoder): void {
+  if (encoder.startsWith('h264_')) {
+    appendH264EncoderOptions(args, encoder as H264HardwareEncoder);
+    return;
+  }
+  if (encoder.endsWith('_nvenc')) {
+    args.push('-preset', 'p4', '-cq', '23', '-b:v', '0');
+    return;
+  }
+  if (encoder.endsWith('_qsv')) {
+    args.push('-global_quality', '23', '-look_ahead', '0');
+    return;
+  }
+  if (encoder.endsWith('_vaapi')) {
+    args.push('-qp', '23');
+    return;
+  }
+  if (encoder.endsWith('_amf')) {
+    args.push('-quality', 'balanced', '-rc', 'cqp', '-qp_i', '23', '-qp_p', '23');
+    return;
+  }
+  if (encoder.endsWith('_rkmpp')) {
+    args.push('-qp_init', '23');
+    return;
+  }
+  args.push('-allow_sw', '1', '-realtime', '1', '-b:v', '6500k', '-maxrate', '8500k', '-bufsize', '12000k');
 }
 
 export function queryNumber(value: string | null): number | undefined {
@@ -258,6 +319,12 @@ export function appendStreamOptionParams(
 ): void {
   if (!options) return;
   if (typeof options.startSeconds === 'number' && options.startSeconds > 0) params.set('t', String(Math.floor(options.startSeconds)));
+  if (options.targetVideoCodec) params.set('codec', options.targetVideoCodec);
+  if (typeof options.maxWidth === 'number') params.set('maxWidth', String(Math.floor(options.maxWidth)));
+  if (typeof options.maxHeight === 'number') params.set('maxHeight', String(Math.floor(options.maxHeight)));
+  if (typeof options.videoBitrateKbps === 'number') params.set('videoBitrateKbps', String(Math.floor(options.videoBitrateKbps)));
+  if (typeof options.audioBitrateKbps === 'number') params.set('audioBitrateKbps', String(Math.floor(options.audioBitrateKbps)));
+  if (options.toneMap) params.set('toneMap', '1');
   if (typeof options.videoTrackIndex === 'number') params.set('video', String(options.videoTrackIndex));
   if (typeof options.audioTrackIndex === 'number') params.set('audio', String(options.audioTrackIndex));
   if (typeof options.subtitleTrackIndex === 'number') params.set('subtitle', String(options.subtitleTrackIndex));

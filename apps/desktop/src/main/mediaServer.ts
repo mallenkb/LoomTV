@@ -6,8 +6,9 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { Socket as NodeSocket } from 'node:net';
+import { MEDIA_CORE_CONTRACT_VERSION } from '@loom-media-server/media-core';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './mimeTypes';
-import { findFFmpeg, preferredH264HardwareEncoder } from './mediaBinaries';
+import { findFFmpeg, getTranscodeCapabilities, preferredHardwareEncoder } from './mediaBinaries';
 import {
   parseSubtitleStyle,
   queryNumber,
@@ -692,6 +693,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         res.setHeader('Cache-Control', 'no-store');
         writeJson(res, 200, {
           ok: true,
+          mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
           port: loopbackRequest ? mediaServerPort : lanMediaServerPort,
           transport: loopbackRequest ? 'loopback-http' : 'tls',
           ...(!loopbackRequest ? { certFingerprint: lanCertificateFingerprint } : {}),
@@ -1041,6 +1043,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       if (reqUrl.pathname === '/api/renderer/ffmpeg' && req.method === 'GET') {
         const ffmpegPath = findFFmpeg();
         writeJson(res, 200, { available: Boolean(ffmpegPath), path: ffmpegPath });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/media/transcode-capabilities' && req.method === 'GET') {
+        const ffmpegPath = findFFmpeg();
+        writeJson(res, 200, {
+          ok: true,
+          data: getTranscodeCapabilities(ffmpegPath),
+        });
         return;
       }
 
@@ -1772,6 +1783,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       res.once('finish', releaseStreamLease);
 
       const ffmpegPath = findFFmpeg();
+      const requestedCodec = ['h264', 'hevc', 'av1'].includes(reqUrl.searchParams.get('codec') || '')
+        ? reqUrl.searchParams.get('codec') as TranscodeOptions['targetVideoCodec']
+        : undefined;
+      const capabilities = requestedCodec && ffmpegPath ? getTranscodeCapabilities(ffmpegPath) : undefined;
+      const requestedCodecSupported = !requestedCodec || Boolean(
+        capabilities?.codecs[requestedCodec]
+        || capabilities?.softwareCodecs[requestedCodec],
+      );
       const streamOptions: TranscodeOptions = {
         startSeconds: Number.isFinite(startSec) && startSec > 0 ? startSec : undefined,
         videoTrackIndex: queryNumber(reqUrl.searchParams.get('video')),
@@ -1785,9 +1804,49 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         secondarySubtitleCodec: reqUrl.searchParams.get('secondarySubtitleCodec') || undefined,
         secondarySubtitleFilePath,
         subtitleStyle: parseSubtitleStyle(reqUrl.searchParams.get('subtitleStyle')),
+        targetVideoCodec: requestedCodec,
+        softwareVideoEncoder: requestedCodec && capabilities?.softwareEncoders[requestedCodec]
+          ? capabilities.softwareEncoders[requestedCodec] as TranscodeOptions['softwareVideoEncoder']
+          : undefined,
+        maxWidth: queryNumber(reqUrl.searchParams.get('maxWidth')),
+        maxHeight: queryNumber(reqUrl.searchParams.get('maxHeight')),
+        videoBitrateKbps: queryNumber(reqUrl.searchParams.get('videoBitrateKbps')),
+        audioBitrateKbps: queryNumber(reqUrl.searchParams.get('audioBitrateKbps')),
+        toneMap: reqUrl.searchParams.get('toneMap') === '1' ? true : undefined,
         forceTranscode: reqUrl.searchParams.get('forceTranscode') === '1',
       };
-      const playbackPlan = browserPlaybackPlan(filePath, streamOptions);
+      const basePlaybackPlan = browserPlaybackPlan(filePath, streamOptions);
+      const profileTranscode = Boolean(
+        streamOptions.targetVideoCodec && streamOptions.targetVideoCodec !== 'h264'
+        || streamOptions.maxWidth
+        || streamOptions.maxHeight
+        || streamOptions.videoBitrateKbps
+        || streamOptions.audioBitrateKbps
+        || streamOptions.toneMap,
+      );
+      if (profileTranscode && requestedCodec && capabilities && !requestedCodecSupported) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          error: 'output_codec_unavailable',
+          codec: requestedCodec,
+          message: `FFmpeg cannot produce ${requestedCodec.toUpperCase()} on this host.`,
+          capabilities: capabilities.codecs,
+          softwareCodecs: capabilities.softwareCodecs,
+        }));
+        return;
+      }
+      const playbackPlan = profileTranscode
+        ? {
+          ...basePlaybackPlan,
+          mode: 'transcode' as const,
+          reason: 'the requested client output profile requires transcoding',
+          contentType: 'video/mp4',
+          copyVideo: false,
+          copyAudio: false,
+          requiresFfmpeg: true,
+          requiresSeekRestart: false,
+        }
+        : basePlaybackPlan;
 
       if (playbackPlan.requiresFfmpeg && !ffmpegPath) {
         res.writeHead(503, { 'Content-Type': 'text/plain' });
@@ -1802,16 +1861,21 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const audioCodec = playbackPlan.audioCodec;
         const copyVideo = playbackPlan.copyVideo;
         const copyAudio = playbackPlan.copyAudio;
-        const hardwareEncoder = copyVideo ? null : preferredH264HardwareEncoder(ffmpegPath);
+        const targetCodec = streamOptions.targetVideoCodec || 'h264';
+        const outputVideoCodec = profileTranscode ? targetCodec : videoCodec;
+        const outputAudioCodec = copyAudio ? audioCodec : 'aac';
+        const hardwareEncoder = copyVideo
+          ? null
+          : preferredHardwareEncoder(ffmpegPath, targetCodec);
 
-        console.log(`[stream] ${path.basename(filePath)} | mode:${playbackPlan.mode} reason:${playbackPlan.reason} video:${videoCodec}(${copyVideo ? 'copy' : hardwareEncoder || 'libx264'}) audio:${audioCodec}(${copyAudio ? 'copy' : 'encode'})`);
+        console.log(`[stream] ${path.basename(filePath)} | mode:${playbackPlan.mode} reason:${playbackPlan.reason} video:${outputVideoCodec}(${copyVideo ? 'copy' : hardwareEncoder || 'libx264'}) audio:${outputAudioCodec}(${copyAudio ? 'copy' : 'encode'})`);
 
         res.writeHead(200, {
           'Content-Type': playbackPlan.contentType,
           'Transfer-Encoding': 'chunked',
           'X-Playback-Mode': playbackPlan.mode,
-          'X-Video-Codec': videoCodec,
-          'X-Audio-Codec': audioCodec,
+          'X-Video-Codec': outputVideoCodec,
+          'X-Audio-Codec': outputAudioCodec,
         });
 
         const args = buildBrowserStreamArgs({

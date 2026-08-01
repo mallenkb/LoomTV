@@ -164,6 +164,26 @@ export function browserPlaybackPlanForMetadata(
     );
   }
 
+  if (options.toneMap) {
+    return requireAccurateSeek(
+      makePlan('transcode', 'HDR output requires tone mapping to SDR', container, metadata, false, false),
+      options,
+    );
+  }
+
+  if (
+    (options.targetVideoCodec && options.targetVideoCodec !== 'h264')
+    || options.maxWidth
+    || options.maxHeight
+    || options.videoBitrateKbps
+    || options.audioBitrateKbps
+  ) {
+    return requireAccurateSeek(
+      makePlan('transcode', 'the requested client output profile requires transcoding', container, metadata, false, false),
+      options,
+    );
+  }
+
   if (
     typeof options.subtitleTrackIndex === 'number'
     || typeof options.secondarySubtitleTrackIndex === 'number'
