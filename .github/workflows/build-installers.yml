@@ -88,6 +88,9 @@ jobs:
       - name: Validate tracked Android build policy
         run: corepack pnpm mobile:verify-android-config
 
+      - name: Validate mobile release configuration
+        run: corepack pnpm mobile:verify-release-config
+
       - name: Regenerate Android project from tracked Expo configuration
         run: corepack pnpm --filter @loom-media-server/mobile exec expo prebuild --clean --platform android --no-install
 

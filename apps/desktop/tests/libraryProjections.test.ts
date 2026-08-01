@@ -67,6 +67,7 @@ function projections() {
     getRemoteThumbnailUrl: (filePath, base) => `${base}/thumbnail/${encodeURIComponent(filePath)}`,
     signedStreamUrlForRemote: (base, filePath) => `${base}/stream/${encodeURIComponent(filePath)}`,
     localMetadataWithTracks: (_filePath, metadata) => ({ ...metadata, tracks: [] }),
+    progressKeyFor: (filePath) => `resource:${filePath.split('/').at(-1)}`,
     normalizeLibraryFolderGroups: (data) => data?.libraryFolderGroups || defaultGroups,
     flattenLibraryFolders: (groups) => [...groups.movies, ...groups.tvShows, ...groups.anime, ...groups.others],
     libraryFolderStatusesFor: (groups) => [...groups.movies, ...groups.tvShows, ...groups.anime, ...groups.others].map((folder) => ({
@@ -118,4 +119,18 @@ test('renderer and LAN projections preserve media fields while rewriting deliver
   assert.equal(lan.tvShows[0].episodeFiles?.[0].subtitles?.[0].url, 'http://loom.local/subtitle/en');
   assert.deepEqual(lan.tvShows[0].localMetadata?.tracks, []);
   assert.equal(input.tvShows[0].filePath, '/library/show');
+});
+
+test('compact indexes expose mixed-folder membership without leaking host paths', () => {
+  const input = library();
+  input.libraryFolderGroups = { movies: [], tvShows: [], anime: [], others: ['/library'] };
+  const projection = projections();
+
+  const renderer = projection.libraryIndexForRenderer(input, 3);
+  assert.deepEqual(renderer.others?.map((item) => item.id), ['show']);
+
+  const lan = projection.libraryIndexForLocalNetwork(input, 'http://loom.local', 3);
+  assert.deepEqual(lan.others?.map((item) => item.id), ['show']);
+  assert.equal(lan.others?.[0].playbackReferences[0].progressKey, 'resource:show.s01e01.mkv');
+  assert.equal(JSON.stringify(lan.others).includes('/library/'), false);
 });

@@ -133,6 +133,7 @@ export function mobileLibraryFromIndex(index: MobileLibraryIndexPayload): Librar
     movies: index.movies.map(fromCard),
     tvShows: index.tvShows.map(fromCard),
     animeShows: index.animeShows.map(fromCard),
+    others: (index.others || []).map(fromCard),
   };
 }
 

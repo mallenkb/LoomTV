@@ -61,6 +61,28 @@ export function stripInlineArtworkFromLibrary(data: LibraryData): LibraryData {
   };
 }
 
+function normalizedPathPrefix(value: string | undefined): string {
+  return (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function itemBelongsToOtherFolders(item: MediaItem, folderPrefixes: string[]): boolean {
+  const belongs = (candidate: string | undefined) => {
+    const normalized = normalizedPathPrefix(candidate);
+    return folderPrefixes.some((folder) => normalized === folder || normalized.startsWith(`${folder}/`));
+  };
+  if (item.type === 'movie') return belongs(item.filePath);
+  return item.episodeFiles?.length
+    ? item.episodeFiles.some((episode) => belongs(episode.filePath))
+    : belongs(item.filePath);
+}
+
+function itemsInOtherFolders(data: LibraryData, groups: LibraryFolderGroups): MediaItem[] {
+  const folderPrefixes = groups.others.map(normalizedPathPrefix).filter(Boolean);
+  if (folderPrefixes.length === 0) return [];
+  return [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]
+    .filter((item) => itemBelongsToOtherFolders(item, folderPrefixes));
+}
+
 export function createLibraryDeliveryProjections(deps: LibraryProjectionDependencies) {
   const {
     artworkDeliveryUrl,
@@ -222,6 +244,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       movies: (data.movies || []).map(cardForRenderer),
       tvShows: (data.tvShows || []).map(cardForRenderer),
       animeShows: (data.animeShows || []).map(cardForRenderer),
+      others: itemsInOtherFolders(data, libraryFolderGroups).map(cardForRenderer),
     };
   };
 
@@ -230,13 +253,18 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     base: string,
     revision: number,
     identity?: RemoteProfileIdentity,
-  ): LibraryIndexPayload => ({
-    catalogVersion: 1,
-    revision,
-    movies: (data.movies || []).map((item) => cardForLocalNetwork(item, base, identity)),
-    tvShows: (data.tvShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
-    animeShows: (data.animeShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
-  });
+  ): LibraryIndexPayload => {
+    const libraryFolderGroups = normalizeLibraryFolderGroups(data);
+    return {
+      catalogVersion: 1,
+      revision,
+      movies: (data.movies || []).map((item) => cardForLocalNetwork(item, base, identity)),
+      tvShows: (data.tvShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
+      animeShows: (data.animeShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
+      others: itemsInOtherFolders(data, libraryFolderGroups)
+        .map((item) => cardForLocalNetwork(item, base, identity)),
+    };
+  };
 
   const libraryItemForRenderer = (item: MediaItem, revision: number): LibraryItemDetailsPayload => ({
     catalogVersion: 1,

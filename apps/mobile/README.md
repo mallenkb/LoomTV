@@ -1,10 +1,10 @@
 # LoomTV Mobile
 
-LoomTV Mobile is an Expo React Native companion app in progress for browsing and playing a paired Loom Media Player desktop library from another device.
+LoomTV Mobile is the Expo React Native companion for browsing and playing a paired Loom Media Player desktop library from an iPhone, iPad, Android phone, or Android tablet.
 
-The current development target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in Loom Media Player desktop settings. Internet remote streaming is not documented as supported yet and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
+The supported target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in Loom Media Player desktop settings. Internet remote streaming is not supported and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
 
-## Current In-Progress Capabilities
+## Supported Capabilities
 
 - Pair with a Loom Media Player desktop host using a desktop base URL and 6-digit pairing code.
 - Browse Home, Movies, TV Shows, Anime, Settings, detail pages, and episode lists.
@@ -13,6 +13,9 @@ The current development target is same-LAN remote playback: the desktop app rema
 - Request HLS/transcode sessions from the desktop app when a file format needs a mobile-compatible stream.
 - Save playback progress back to the paired desktop host.
 - Show continue-watching and watched/progress states from synced progress.
+- Switch and lock profiles, honor automatic sign-in, and keep favorites/My List profile-scoped.
+- Reconnect automatically after an address change or temporary desktop/Wi-Fi outage.
+- Browse the last saved metadata catalog during a cold-start outage for an automatic-sign-in profile; playback and mutations remain disabled until the desktop reconnects.
 
 ## Development
 
@@ -38,6 +41,26 @@ the tracked policy; when `apps/mobile/android` exists, the same command also
 checks its application ID, version, cleartext/network policy, and Gradle wrapper
 checksum. CI performs a clean Expo prebuild and requires the generated checks.
 
+## Preview and Store Builds
+
+The tracked [`eas.json`](./eas.json) defines installable Android/iOS preview builds, an iOS Simulator build, and auto-incrementing production builds. Install and authenticate the EAS CLI, then run from this directory:
+
+```sh
+corepack pnpm build:preview:android
+corepack pnpm build:preview:ios
+corepack pnpm build:simulator:ios
+corepack pnpm build:production
+```
+
+Validate the release contract first from the repository root:
+
+```sh
+corepack pnpm mobile:verify-release-config
+corepack pnpm mobile:verify-android-config
+```
+
+Before submission, complete every platform and scenario in [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md). Apple/Google signing credentials and the initial Expo project link are account-owned setup and are intentionally not stored in Git.
+
 ## Pairing Flow
 
 1. Start Loom Media Player desktop.
@@ -58,7 +81,7 @@ checksum. CI performs a clean Expo prebuild and requires the generated checks.
 
 ## Known Limits
 
-- The mobile app is an MVP companion client in progress.
-- Same-LAN streaming is the first supported target.
+- Same-LAN streaming is the supported target.
 - Mobile playback support depends on platform codec support or successful HLS/transcode fallback.
-- Setup, diagnostics, and error recovery still need polish.
+- The offline catalog contains metadata only; downloaded media is a separate future feature.
+- Internet remote streaming, casting, TV clients, and multiple saved servers are separate feature tracks.

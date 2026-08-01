@@ -1,7 +1,7 @@
 {
   "name": "loom-media-server-headless",
   "productName": "LoomTV Server",
-  "version": "1.0.102",
+  "version": "1.0.103",
   "description": "Headless LoomTV server for NAS and always-on hosts",
   "private": true,
   "type": "module",

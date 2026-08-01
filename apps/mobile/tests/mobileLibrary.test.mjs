@@ -63,8 +63,12 @@ test('library selectors preserve collection order and text matching behavior', (
   const anime = { id: 'anime', type: 'anime', title: 'Sky Story', filePath: resourceId, genres: ['Action Adventure'] };
   const tv = { id: 'tv', type: 'tv', title: 'Drama House', filePath: resourceId };
   const movie = { id: 'movie', type: 'movie', title: 'Comedy Night', filePath: resourceId };
+  const other = { id: 'other', type: 'movie', title: 'Home Video', filePath: resourceId };
 
-  assert.deepEqual(allItems({ animeShows: [anime], tvShows: [tv], movies: [movie] }), [anime, tv, movie]);
+  assert.deepEqual(
+    allItems({ animeShows: [anime], tvShows: [tv], movies: [movie], others: [movie, other] }),
+    [anime, tv, movie, other],
+  );
   assert.equal(matchesQuery(anime, 'action'), true);
   assert.equal(matchesQuery(anime, 'missing'), false);
 });

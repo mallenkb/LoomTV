@@ -34,12 +34,11 @@ Upcoming work:
 
 ## React Native Companion Client
 
-The Expo React Native mobile client is in progress. The intended first release target is same-LAN companion playback from a paired desktop host, not standalone mobile NAS access or Internet remote streaming.
+The Expo React Native client now implements the intended first-release scope: same-LAN companion browsing and playback from a paired desktop host, including profiles, favorites, progress, direct/HLS playback, reconnect recovery, and a saved metadata catalog for cold-start outages.
 
-Upcoming work:
-- Finish and verify pairing against the desktop LAN API.
-- Polish library browsing, detail pages, episode lists, and continue-watching states.
-- Verify direct stream and HLS/transcode playback on iOS and Android.
-- Sync playback progress back to the desktop host reliably.
-- Document mobile setup, known limits, and troubleshooting steps.
+Release work:
+- Execute `apps/mobile/RELEASE_CHECKLIST.md` on the required iOS/Android phone and tablet matrix.
+- Provision the account-owned EAS, App Store Connect, and Google Play signing/submission records.
 - Keep NAS-backed playback routed through the desktop host so the mobile app does not need NAS credentials.
+
+Internet remote streaming, offline media downloads, casting, multiple saved servers, and TV clients remain separate feature tracks rather than blockers for the same-LAN mobile companion.

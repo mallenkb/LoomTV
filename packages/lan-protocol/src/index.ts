@@ -2,6 +2,8 @@ export type LanLibraryPayload<TMediaItem> = {
   movies?: TMediaItem[];
   tvShows?: TMediaItem[];
   animeShows?: TMediaItem[];
+  /** Items whose source belongs to a user-configured mixed/Others root. */
+  others?: TMediaItem[];
 };
 
 export type LanCatalogVersion = 1;
@@ -38,6 +40,8 @@ export type LanLibraryIndexPayload<TCard extends LanLibraryCard = LanLibraryCard
   movies: TCard[];
   tvShows: TCard[];
   animeShows: TCard[];
+  /** May overlap the typed collections; clients should de-duplicate aggregate views by id. */
+  others?: TCard[];
 };
 
 export type LanLibraryItemDetailsPayload<TMediaItem> = {

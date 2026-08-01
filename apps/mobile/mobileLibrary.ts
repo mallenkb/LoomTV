@@ -145,6 +145,7 @@ export function libraryWithPlayedItem(library: LibraryPayload, streamPath: strin
     movies: markItems(library.movies),
     tvShows: markItems(library.tvShows),
     animeShows: markItems(library.animeShows),
+    others: markItems(library.others),
   };
 }
 
@@ -153,13 +154,19 @@ export function collections(library: LibraryPayload) {
     anime: library.animeShows || [],
     tv: library.tvShows || [],
     movies: library.movies || [],
-    others: [] as MediaItem[],
+    others: library.others || [],
   };
 }
 
 export function allItems(library: LibraryPayload): MediaItem[] {
   const grouped = collections(library);
-  return [...grouped.anime, ...grouped.tv, ...grouped.movies, ...grouped.others];
+  const items = [...grouped.anime, ...grouped.tv, ...grouped.movies, ...grouped.others];
+  const seenIds = new Set<string>();
+  return items.filter((item) => {
+    if (seenIds.has(item.id)) return false;
+    seenIds.add(item.id);
+    return true;
+  });
 }
 
 export function matchesQuery(item: MediaItem, query: string): boolean {

@@ -11,6 +11,7 @@ LoomTV Mobile includes the following runtime packages, each licensed under the M
 - expo-image
 - expo-screen-orientation
 - expo-secure-store
+- expo-sqlite
 - expo-status-bar
 - expo-video
 - React

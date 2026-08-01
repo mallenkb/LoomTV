@@ -15,6 +15,9 @@
       "requireFullScreen": true,
       "supportsTablet": true,
       "bundleIdentifier": "app.loomtv.mobile",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSBonjourServices": [
           "_loomtv._tcp"

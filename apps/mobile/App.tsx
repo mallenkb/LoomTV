@@ -110,6 +110,12 @@ import {
 } from './mobileDomain';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
 import { reconcileSavedHost } from './mobileHostIdentity';
+import {
+  canRestoreMobileOfflineSnapshot,
+  clearMobileOfflineSnapshot,
+  loadMobileOfflineSnapshot,
+  saveMobileOfflineSnapshot,
+} from './mobileOfflineCache';
 import { MobileReducedMotionProvider, useMobileReducedMotion } from './mobileReducedMotion';
 import {
   MOBILE_THEME_COLOR_OPTIONS,
@@ -212,6 +218,32 @@ const MOBILE_SUBTITLE_SIZE_OPTIONS = [
   { value: 96, label: '300%' },
 ];
 const mobileLanClient = createMobileLanClient((input, init) => fetch(secureLanUrl(input), init));
+
+class MobileCredentialRefreshError extends Error {
+  constructor(readonly status: number) {
+    super(`Credential refresh failed (${status}).`);
+    this.name = 'MobileCredentialRefreshError';
+  }
+}
+
+function isCredentialAuthorizationFailure(error: unknown): boolean {
+  return error instanceof MobileCredentialRefreshError
+    && (error.status === 400 || error.status === 401 || error.status === 403);
+}
+
+function isHostIdentityFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return message.includes('certificate') || message.includes('fingerprint') || message.includes('tls identity');
+}
+
+function formatOfflineSnapshotTime(savedAt: number): string {
+  try {
+    return new Date(savedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return 'an earlier sync';
+  }
+}
+
 const PROFILE_COLOR_HEX: Record<string, string> = {
   ember: 'f97316',
   gold: 'f59e0b',
@@ -298,6 +330,7 @@ const MOBILE_OPEN_SOURCE_NOTICES = [
   { name: 'expo-image', license: 'MIT' },
   { name: 'expo-screen-orientation', license: 'MIT' },
   { name: 'expo-secure-store', license: 'MIT' },
+  { name: 'expo-sqlite', license: 'MIT' },
   { name: 'expo-status-bar', license: 'MIT' },
   { name: 'expo-video', license: 'MIT' },
   { name: 'React', license: 'MIT' },
@@ -1136,6 +1169,7 @@ function AppRoot() {
   const [isPreparingStream, setIsPreparingStream] = useState(false);
   const [error, setError] = useState('');
   const [isServerOffline, setIsServerOffline] = useState(false);
+  const [offlineSnapshotSavedAt, setOfflineSnapshotSavedAt] = useState<number | null>(null);
   const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null);
   const [streamRetryNonce, setStreamRetryNonce] = useState(0);
   const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
@@ -1183,6 +1217,8 @@ function AppRoot() {
     settings: 0,
   });
   const reconnectingSavedConnectionRef = useRef(false);
+  const credentialRefreshPromiseRef = useRef<{ key: string; promise: Promise<SavedConnection> } | null>(null);
+  const credentialRefreshKeyRef = useRef('');
   const connectionHealthCheckRef = useRef(false);
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
@@ -1327,7 +1363,9 @@ function AppRoot() {
         ) return;
         const certFingerprint = normalizeCertFingerprint(saved.certFingerprint);
         if (!certFingerprint || !saved.hostDeviceId) {
+          invalidateCredentialRefresh();
           void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+          if (saved.hostDeviceId) void clearMobileOfflineSnapshot(saved.hostDeviceId);
           setBaseUrl(saved.baseUrl);
           setError('This saved desktop predates secure host identity. Select it and enter the current 6-digit pairing PIN to pair again.');
           setIsServerOffline(true);
@@ -1347,6 +1385,51 @@ function AppRoot() {
     // setters, and the saved value, so it is intentionally not reactive.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!connection?.hostDeviceId) return undefined;
+    const usesProfiles = profiles.length > 0 || activeProfile !== null;
+    const profileCanPersist = !usesProfiles || Boolean(
+      activeProfile
+      && automaticProfileSignIn
+      && !activeProfile.hasPin
+      && !activeProfile.isGuest,
+    );
+    if (showProfilePicker || !profileCanPersist) {
+      void clearMobileOfflineSnapshot(connection.hostDeviceId);
+      return undefined;
+    }
+    if (isServerOffline) return undefined;
+
+    const timer = setTimeout(() => {
+      void saveMobileOfflineSnapshot({
+        hostDeviceId: connection.hostDeviceId,
+        activeProfile,
+        automaticProfileSignIn,
+        profiles,
+        library: connection.library,
+        libraryEtag: connection.libraryEtag,
+        catalogRevision: connection.catalogRevision,
+        catalogTransport: connection.catalogTransport,
+        selectionRevision: connection.selectionRevision,
+        progress,
+        profileLists,
+      }).catch(() => {
+        // The online experience remains usable when the optional metadata cache fails.
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [
+    activeProfile,
+    automaticProfileSignIn,
+    connection,
+    isServerOffline,
+    profileLists,
+    profiles,
+    progress,
+    showProfilePicker,
+  ]);
 
   useEffect(() => {
     if (connection) {
@@ -1402,6 +1485,7 @@ function AppRoot() {
       }
       if (reconciliation.kind === 'unchanged') return;
       const updated = reconciliation.connection;
+      invalidateCredentialRefresh();
       setSavedConnection(updated);
       setBaseUrl(updated.baseUrl);
       void SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
@@ -1443,17 +1527,26 @@ function AppRoot() {
     return () => clearInterval(healthCheck);
     // These connection fields intentionally own the health-check lifecycle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appState, connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag]);
+  }, [appState, connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag, isServerOffline]);
 
   useEffect(() => {
     if (!savedConnection || !connection) return undefined;
     const delay = Math.max(0, connection.accessTokenExpiresAt - Date.now() - 60_000);
     const timer = setTimeout(() => {
-      void refreshSavedCredentials(savedConnection).catch(async () => {
-        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-        setSavedConnection(null);
-        setConnection(null);
-        setError('Your secure session expired. Pair with the desktop again.');
+      void refreshSavedCredentials(savedConnection).catch(async (nextError) => {
+        if (isCredentialAuthorizationFailure(nextError)) {
+          invalidateCredentialRefresh();
+          await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+          await clearMobileOfflineSnapshot(savedConnection.hostDeviceId);
+          setSavedConnection(null);
+          setConnection(null);
+          setOfflineSnapshotSavedAt(null);
+          setIsServerOffline(false);
+          setError('Your secure session expired. Pair with the desktop again.');
+          return;
+        }
+        setIsServerOffline(true);
+        setError('The desktop could not refresh this session. Your saved library remains available while LoomTV reconnects.');
       });
     }, delay);
     return () => clearTimeout(timer);
@@ -1544,7 +1637,7 @@ function AppRoot() {
   ), [activeCatalogIdentity]);
 
   const resolveMobileDetailItem = useCallback(async (item: MediaItem): Promise<MediaItem> => {
-    if (!connection || item.catalogRevision === undefined || connection.catalogRevision === undefined) return item;
+    if (isServerOffline || !connection || item.catalogRevision === undefined || connection.catalogRevision === undefined) return item;
     const key = catalogCacheKeyFor(item.id);
     const cached = detailItemCacheRef.current.get(key);
     if (cached) {
@@ -1586,7 +1679,7 @@ function AppRoot() {
     })().finally(() => detailItemRequestsRef.current.delete(key));
     detailItemRequestsRef.current.set(key, request);
     return request;
-  }, [catalogCacheKeyFor, connection]);
+  }, [catalogCacheKeyFor, connection, isServerOffline]);
 
   useEffect(() => {
     const activePrefix = `${activeProfile?.id || 'profile:none'}:${connection?.catalogRevision ?? -1}:`;
@@ -1647,6 +1740,7 @@ function AppRoot() {
     present: boolean,
   ) => {
     if (!connection) return;
+    if (isServerOffline) throw new Error('Reconnect to the desktop before changing My List.');
     let response = await mobileLanClient.setProfileList(
       connection.baseUrl,
       connection.deviceToken,
@@ -1670,9 +1764,13 @@ function AppRoot() {
       nextLists = await response.json() as MobileProfileListEntry[];
     }
     setProfileLists(nextLists);
-  }, [connection]);
+  }, [connection, isServerOffline]);
 
   const playHomeItem = useCallback((item: MediaItem) => {
+    if (isServerOffline) {
+      setError('Playback needs the paired desktop. Your saved library is still available to browse.');
+      return;
+    }
     const requestIdentity = activeCatalogIdentityRef.current;
     void resolveMobileDetailItem(item)
       .then((details) => {
@@ -1684,7 +1782,7 @@ function AppRoot() {
         setPlayTarget(playTargetForItem(details, progress));
       })
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
-  }, [progress, resolveMobileDetailItem]);
+  }, [isServerOffline, progress, resolveMobileDetailItem]);
 
   const streamOptionsKey = useMemo(() => JSON.stringify(streamOptions), [streamOptions]);
 
@@ -2068,6 +2166,11 @@ function AppRoot() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playTarget, playbackUrl, connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, player]);
 
+  function invalidateCredentialRefresh(): void {
+    credentialRefreshKeyRef.current = '';
+    credentialRefreshPromiseRef.current = null;
+  }
+
   async function hydrateProgress(nextConnection = connection) {
     if (!nextConnection) return;
     try {
@@ -2080,25 +2183,41 @@ function AppRoot() {
   }
 
   async function refreshSavedCredentials(saved: SavedConnection): Promise<SavedConnection> {
-    const currentDeviceName = mobileDeviceName();
-    const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken, currentDeviceName);
-    if (!response.ok) throw new Error(`Credential refresh failed (${response.status}).`);
-    const payload = (await response.json()) as Pick<PairResponse,
-      'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>;
-    const updated: SavedConnection = {
-      ...saved,
-      deviceToken: payload.accessToken,
-      accessTokenExpiresAt: payload.accessTokenExpiresAt,
-      refreshToken: payload.refreshToken,
-      refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
-      clientDeviceName: currentDeviceName,
-    };
-    await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
-    setSavedConnection(updated);
-    setConnection((current) => current && current.deviceId === updated.deviceId
-      ? { ...current, ...updated }
-      : current);
-    return updated;
+    const refreshKey = `${saved.hostDeviceId}:${saved.deviceId}:${saved.baseUrl}:${saved.refreshToken}`;
+    if (credentialRefreshPromiseRef.current?.key === refreshKey) {
+      return credentialRefreshPromiseRef.current.promise;
+    }
+    credentialRefreshKeyRef.current = refreshKey;
+
+    const refresh = (async () => {
+      const currentDeviceName = mobileDeviceName();
+      const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken, currentDeviceName);
+      if (!response.ok) throw new MobileCredentialRefreshError(response.status);
+      const payload = (await response.json()) as Pick<PairResponse,
+        'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>;
+      const updated: SavedConnection = {
+        ...saved,
+        deviceToken: payload.accessToken,
+        accessTokenExpiresAt: payload.accessTokenExpiresAt,
+        refreshToken: payload.refreshToken,
+        refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
+        clientDeviceName: currentDeviceName,
+      };
+      if (credentialRefreshKeyRef.current !== refreshKey) {
+        throw new Error('Credential refresh was superseded by another connection.');
+      }
+      await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+      setSavedConnection(updated);
+      setConnection((current) => current && current.deviceId === updated.deviceId
+        ? { ...current, ...updated }
+        : current);
+      return updated;
+    })();
+    const tracked = refresh.finally(() => {
+      if (credentialRefreshPromiseRef.current?.key === refreshKey) credentialRefreshPromiseRef.current = null;
+    });
+    credentialRefreshPromiseRef.current = { key: refreshKey, promise: tracked };
+    return tracked;
   }
 
   type MobileCatalogFetchResult =
@@ -2184,6 +2303,8 @@ function AppRoot() {
       selectionRevision: activeState?.selectionRevision ?? nextConnection.selectionRevision,
     };
     setConnection(hydratedConnection);
+    setIsServerOffline(false);
+    setOfflineSnapshotSavedAt(null);
     setActiveProfile(profile);
     setShowProfilePicker(false);
     setProfilePinTarget(null);
@@ -2254,6 +2375,39 @@ function AppRoot() {
     }
   }
 
+  async function restoreOfflineConnection(saved: SavedConnection): Promise<boolean> {
+    if (saved.refreshTokenExpiresAt <= Date.now()) {
+      await clearMobileOfflineSnapshot(saved.hostDeviceId);
+      return false;
+    }
+    const snapshot = await loadMobileOfflineSnapshot(saved.hostDeviceId);
+    if (!snapshot) return false;
+    if (!canRestoreMobileOfflineSnapshot(snapshot)) {
+      await clearMobileOfflineSnapshot(saved.hostDeviceId);
+      return false;
+    }
+
+    setConnection({
+      ...saved,
+      library: snapshot.library,
+      libraryEtag: snapshot.libraryEtag,
+      catalogRevision: snapshot.catalogRevision,
+      catalogTransport: snapshot.catalogTransport,
+      selectionRevision: snapshot.selectionRevision,
+    });
+    setProfiles(snapshot.profiles);
+    setActiveProfile(snapshot.activeProfile);
+    setAutomaticProfileSignIn(snapshot.automaticProfileSignIn);
+    setProfileLists(snapshot.profileLists);
+    setProgress(snapshot.progress);
+    setShowProfilePicker(false);
+    setBaseUrl(saved.baseUrl);
+    setOfflineSnapshotSavedAt(snapshot.savedAt);
+    setIsServerOffline(true);
+    setError(`Desktop is offline. Showing the library saved ${formatOfflineSnapshotTime(snapshot.savedAt)}; playback and changes will work again after reconnecting.`);
+    return true;
+  }
+
   async function reconnectSavedConnection(saved: SavedConnection): Promise<boolean> {
     if (appStateRef.current !== 'active' || reconnectingSavedConnectionRef.current) return false;
     reconnectingSavedConnectionRef.current = true;
@@ -2261,22 +2415,39 @@ function AppRoot() {
     try {
       const certFingerprint = String((saved as SavedConnection & { certFingerprint?: string }).certFingerprint || '');
       await configureSecureLanTransport(saved.baseUrl, certFingerprint);
-      const activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
+      let activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
         || saved.clientDeviceName !== mobileDeviceName()
         ? await refreshSavedCredentials(saved)
         : saved;
-      const baseConnection: Connection = { ...activeSaved, library: {}, libraryEtag: '' };
+      let baseConnection: Connection = { ...activeSaved, library: {}, libraryEtag: '' };
       const profileInitialized = await initializeProfiles(baseConnection);
       if (profileInitialized) {
         setBaseUrl(baseConnection.baseUrl);
         setError('');
         setIsServerOffline(false);
+        setOfflineSnapshotSavedAt(null);
         return true;
       }
-      const catalog = await fetchMobileCatalog(baseConnection);
+      let catalog = await fetchMobileCatalog(baseConnection);
       if (catalog.status === 'unauthorized') {
+        activeSaved = await refreshSavedCredentials(activeSaved);
+        baseConnection = { ...activeSaved, library: {}, libraryEtag: '' };
+        if (await initializeProfiles(baseConnection)) {
+          setBaseUrl(baseConnection.baseUrl);
+          setError('');
+          setIsServerOffline(false);
+          setOfflineSnapshotSavedAt(null);
+          return true;
+        }
+        catalog = await fetchMobileCatalog(baseConnection);
+      }
+      if (catalog.status === 'unauthorized') {
+        invalidateCredentialRefresh();
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        await clearMobileOfflineSnapshot(saved.hostDeviceId);
         setSavedConnection(null);
+        setOfflineSnapshotSavedAt(null);
+        setIsServerOffline(false);
         setError('This device is no longer authorized. Select the desktop and enter its current 6-digit pairing PIN.');
         return true;
       }
@@ -2292,11 +2463,24 @@ function AppRoot() {
       setBaseUrl(nextConnection.baseUrl);
       setError('');
       setIsServerOffline(false);
+      setOfflineSnapshotSavedAt(null);
       void hydrateProgress(nextConnection);
       return true;
-    } catch {
+    } catch (nextError) {
+      if (isCredentialAuthorizationFailure(nextError)) {
+        invalidateCredentialRefresh();
+        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        await clearMobileOfflineSnapshot(saved.hostDeviceId);
+        setSavedConnection(null);
+        setConnection(null);
+        setOfflineSnapshotSavedAt(null);
+        setError('Your secure session expired. Select the desktop and enter its current 6-digit pairing PIN.');
+        setIsServerOffline(false);
+        return true;
+      }
+      if (!isHostIdentityFailure(nextError) && await restoreOfflineConnection(saved)) return true;
       setIsServerOffline(true);
-      setError('');
+      setError(nextError instanceof Error ? nextError.message : 'The paired desktop is unavailable.');
       return false;
     } finally {
       reconnectingSavedConnectionRef.current = false;
@@ -2374,10 +2558,13 @@ function AppRoot() {
         hostDeviceName: nextConnection.hostDeviceName,
         clientDeviceName: nextConnection.clientDeviceName,
       } satisfies SavedConnection;
+      credentialRefreshPromiseRef.current = null;
+      credentialRefreshKeyRef.current = `${nextSavedConnection.hostDeviceId}:${nextSavedConnection.deviceId}:${nextSavedConnection.baseUrl}:${nextSavedConnection.refreshToken}`;
       await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection));
       setSavedConnection(nextSavedConnection);
       setShareCode('');
       setIsServerOffline(false);
+      setOfflineSnapshotSavedAt(null);
       if (!await initializeProfiles(nextConnection)) {
         setConnection(nextConnection);
         void hydrateProgress(nextConnection);
@@ -2398,7 +2585,7 @@ function AppRoot() {
     catalogTransport: 'compact' | 'legacy' = 'compact',
   ): Promise<Map<string, MediaItem>> {
     const expectedIdentity = activeCatalogIdentityRef.current;
-    const sections: Array<keyof LibraryPayload> = ['movies', 'tvShows', 'animeShows'];
+    const sections: Array<keyof LibraryPayload> = ['movies', 'tvShows', 'animeShows', 'others'];
     for (const section of sections) {
       await wait(LIBRARY_SECTION_APPLY_DELAY_MS);
       if (activeCatalogIdentityRef.current !== expectedIdentity) return new Map();
@@ -2437,13 +2624,44 @@ function AppRoot() {
   async function refreshLibrary() {
     if (!connection) return;
     setError('');
-    setIsServerOffline(false);
     setIsRefreshing(true);
     try {
-      void refreshProfiles(connection);
-      const catalog = await fetchMobileCatalog(connection, connection.libraryEtag);
-      if (catalog.status === 'not-modified') return;
-      if (catalog.status === 'unauthorized') throw new Error('This device is no longer authorized.');
+      let activeConnection = connection;
+      let activeSavedConnection = savedConnection;
+      if (activeSavedConnection && connection.accessTokenExpiresAt <= Date.now() + 60_000) {
+        const refreshed = await refreshSavedCredentials(activeSavedConnection);
+        activeSavedConnection = refreshed;
+        activeConnection = { ...connection, ...refreshed };
+      }
+      if (isServerOffline && await initializeProfiles(activeConnection)) {
+        setIsServerOffline(false);
+        setOfflineSnapshotSavedAt(null);
+        setError('');
+        return;
+      }
+      void refreshProfiles(activeConnection);
+      let catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
+      if (catalog.status === 'unauthorized' && activeSavedConnection) {
+        const refreshed = await refreshSavedCredentials(activeSavedConnection);
+        activeConnection = { ...activeConnection, ...refreshed };
+        catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
+      }
+      if (catalog.status === 'not-modified') {
+        setIsServerOffline(false);
+        setOfflineSnapshotSavedAt(null);
+        return;
+      }
+      if (catalog.status === 'unauthorized') {
+        invalidateCredentialRefresh();
+        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        await clearMobileOfflineSnapshot(connection.hostDeviceId);
+        setSavedConnection(null);
+        setConnection(null);
+        setOfflineSnapshotSavedAt(null);
+        setIsServerOffline(false);
+        setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
+        return;
+      }
       const nextLibrary = catalog.library;
       const libraryEtag = catalog.etag;
       setIsRefreshing(false);
@@ -2456,7 +2674,19 @@ function AppRoot() {
         catalogTransport: catalog.transport,
       });
       setIsServerOffline(false);
+      setOfflineSnapshotSavedAt(null);
     } catch (nextError) {
+      if (isCredentialAuthorizationFailure(nextError)) {
+        invalidateCredentialRefresh();
+        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        await clearMobileOfflineSnapshot(connection.hostDeviceId);
+        setSavedConnection(null);
+        setConnection(null);
+        setOfflineSnapshotSavedAt(null);
+        setIsServerOffline(false);
+        setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
+        return;
+      }
       const connectionError = connectionErrorFor(nextError, 'Refresh failed.');
       setError(connectionError.message);
       setIsServerOffline(connectionError.isOffline);
@@ -2469,17 +2699,42 @@ function AppRoot() {
     if (!connection || connectionHealthCheckRef.current || isRefreshing) return;
     connectionHealthCheckRef.current = true;
     try {
-      void refreshProfiles(connection);
-      const catalog = await fetchMobileCatalog(connection, connection.libraryEtag);
+      let activeConnection = connection;
+      let activeSavedConnection = savedConnection;
+      if (activeSavedConnection && connection.accessTokenExpiresAt <= Date.now() + 60_000) {
+        const refreshed = await refreshSavedCredentials(activeSavedConnection);
+        activeSavedConnection = refreshed;
+        activeConnection = { ...connection, ...refreshed };
+      }
+
+      if (isServerOffline && await initializeProfiles(activeConnection)) {
+        setIsServerOffline(false);
+        setOfflineSnapshotSavedAt(null);
+        setError('');
+        return;
+      }
+
+      void refreshProfiles(activeConnection);
+      let catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
+      if (catalog.status === 'unauthorized' && activeSavedConnection) {
+        const refreshed = await refreshSavedCredentials(activeSavedConnection);
+        activeConnection = { ...activeConnection, ...refreshed };
+        catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
+      }
       if (catalog.status === 'unauthorized') {
+        invalidateCredentialRefresh();
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        await clearMobileOfflineSnapshot(connection.hostDeviceId);
         setSavedConnection(null);
         setConnection(null);
+        setOfflineSnapshotSavedAt(null);
+        setIsServerOffline(false);
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
       if (catalog.status === 'not-modified') {
         setIsServerOffline(false);
+        setOfflineSnapshotSavedAt(null);
         setError('');
         return;
       }
@@ -2490,10 +2745,24 @@ function AppRoot() {
         catalog.transport,
       );
       setIsServerOffline(false);
+      setOfflineSnapshotSavedAt(null);
       setError('');
-    } catch {
+    } catch (nextError) {
+      if (isCredentialAuthorizationFailure(nextError)) {
+        invalidateCredentialRefresh();
+        await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+        await clearMobileOfflineSnapshot(connection.hostDeviceId);
+        setSavedConnection(null);
+        setConnection(null);
+        setOfflineSnapshotSavedAt(null);
+        setIsServerOffline(false);
+        setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
+        return;
+      }
       setIsServerOffline(true);
-      setError(`Desktop app offline or sharing is off. ${serverOfflineHint}`);
+      setError(offlineSnapshotSavedAt
+        ? `Desktop is offline. Showing the library saved ${formatOfflineSnapshotTime(offlineSnapshotSavedAt)}; LoomTV will reconnect automatically.`
+        : `Desktop app offline or sharing is off. ${serverOfflineHint}`);
     } finally {
       connectionHealthCheckRef.current = false;
     }
@@ -2531,6 +2800,10 @@ function AppRoot() {
 
   async function refreshPosterOnHost(item: MediaItem) {
     if (!connection) return;
+    if (isServerOffline) {
+      setArtworkRefreshError('Reconnect to the desktop before changing artwork.');
+      return;
+    }
     setArtworkRefreshError('');
     setRefreshingArtworkId(item.id);
     try {
@@ -2557,6 +2830,10 @@ function AppRoot() {
 
   async function applyPosterCandidate(candidate: OfficialMetadataCandidate, candidateKey: string) {
     if (!connection || !posterCandidateSheet) return;
+    if (isServerOffline) {
+      setArtworkRefreshError('Reconnect to the desktop before changing artwork.');
+      return;
+    }
     const itemId = posterCandidateSheet.item.id;
     setArtworkRefreshError('');
     setApplyingPosterCandidateId(candidateKey);
@@ -2663,6 +2940,11 @@ function AppRoot() {
                     sticky
                   />
                 ) : null}
+                {error ? (
+                  <View style={styles.errorCard}>
+                    <Text selectable style={styles.errorText}>{error}</Text>
+                  </View>
+                ) : null}
                 <SettingsScreen
                   activeProfile={activeProfile}
                   automaticProfileSignIn={automaticProfileSignIn}
@@ -2679,27 +2961,36 @@ function AppRoot() {
                   mobileThemeColor={mobileThemeColor}
                   mobileThemeMode={mobileThemeMode}
                   onLockProfile={() => {
-                    void mobileLanClient.lockProfile(connection.baseUrl, connection.deviceToken).then(() => {
-                      profileHydrationGenerationRef.current += 1;
-                      setActiveProfile(null);
-                      setAutomaticProfileSignIn(false);
-                      setProfileLists([]);
-                      setProgress({});
-                      setConnection((current) => current ? { ...current, library: {} } : current);
-                      setShowProfilePicker(true);
-                    });
+                    void clearMobileOfflineSnapshot(connection.hostDeviceId);
+                    profileHydrationGenerationRef.current += 1;
+                    setActiveProfile(null);
+                    setAutomaticProfileSignIn(false);
+                    setProfileLists([]);
+                    setProgress({});
+                    setConnection((current) => current ? { ...current, library: {} } : current);
+                    setShowProfilePicker(true);
+                    void mobileLanClient.lockProfile(connection.baseUrl, connection.deviceToken).catch(() => {});
                   }}
                   onSetAutomaticSignIn={(enabled) => {
+                    if (!enabled) {
+                      setAutomaticProfileSignIn(false);
+                      void clearMobileOfflineSnapshot(connection.hostDeviceId);
+                    }
                     void mobileLanClient.setAutomaticSignIn(connection.baseUrl, connection.deviceToken, enabled).then(async (response) => {
-                      if (!response.ok) return;
+                      if (!response.ok) throw new Error('Automatic sign-in update failed.');
                       const state = await response.json() as MobileActiveProfile;
                       setAutomaticProfileSignIn(state.automaticSignIn);
+                      if (!state.automaticSignIn) void clearMobileOfflineSnapshot(connection.hostDeviceId);
+                    }).catch(() => {
+                      setError('Automatic sign-in could not be updated while the desktop is offline.');
                     });
                   }}
                   onSwitchProfile={() => setShowProfilePicker(true)}
                   onDisconnect={() => {
                     profileHydrationGenerationRef.current += 1;
+                    invalidateCredentialRefresh();
                     void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+                    void clearMobileOfflineSnapshot(connection.hostDeviceId);
                     setSavedConnection(null);
                     setConnection(null);
                     setBaseUrl('');
@@ -2719,6 +3010,7 @@ function AppRoot() {
                     setArtworkCacheBusters({});
                     setError('');
                     setIsServerOffline(false);
+                    setOfflineSnapshotSavedAt(null);
                   }}
                   onRefresh={refreshLibrary}
                   onSelectTheme={selectMobileTheme}
@@ -2879,9 +3171,21 @@ function AppRoot() {
         isRefreshingArtwork={Boolean(detailItem && refreshingArtworkId === detailItem.id)}
         onClose={closeDetail}
         onOpenKind={navigateToKind}
-        onToggleList={(kind, present) => detailItem ? setMobileProfileListEntry(detailItem.id, kind, present) : Promise.resolve()}
+        onToggleList={async (kind, present) => {
+          if (!detailItem) return;
+          try {
+            await setMobileProfileListEntry(detailItem.id, kind, present);
+            setArtworkRefreshError('');
+          } catch (nextError) {
+            setArtworkRefreshError(nextError instanceof Error ? nextError.message : 'My List could not be updated.');
+          }
+        }}
         onPlay={(target) => {
           if (!detailItem) return;
+          if (isServerOffline) {
+            setError('Playback needs the paired desktop. Your saved library is still available to browse.');
+            return;
+          }
           const requestIdentity = activeCatalogIdentityRef.current;
           void resolveMobileDetailItem(detailItem)
             .then((details) => {
@@ -2921,6 +3225,10 @@ function AppRoot() {
           onDismiss={() => setMiniPlayerTarget(null)}
           onOpen={() => {
             if (!miniPlayerTarget) return;
+            if (isServerOffline) {
+              setError('Playback needs the paired desktop. Your saved library is still available to browse.');
+              return;
+            }
             playerReturnItemRef.current = detailItem;
             setStreamOptions({});
             setPlayTarget(miniPlayerTarget);
