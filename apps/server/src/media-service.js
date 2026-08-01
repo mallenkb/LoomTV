@@ -215,6 +215,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
     if (!entry || entry.expiresAt <= Date.now() || entry.itemId !== itemId) return null;
     if ((permission === 'downloads' && entry.action !== 'download')
       || (permission === 'stream' && entry.action !== 'direct')) return null;
+    if (typeof adminService.getPrincipalById !== 'function') return null;
     const principal = await adminService.getPrincipalById(entry.userId);
     if (!principal) return null;
     const permitted = typeof adminService.authorizePrincipal === 'function'
