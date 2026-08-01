@@ -12,6 +12,7 @@
   "scripts": {
     "start": "node src/cli.js",
     "server": "node src/cli.js",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
