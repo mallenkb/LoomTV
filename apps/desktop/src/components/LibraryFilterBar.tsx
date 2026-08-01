@@ -80,15 +80,15 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
         >
           <SharedListHighlight activeId={activeFilter} followPointer={false} className="loom-shared-highlight-menu">
             <FilterMenuGroup
-              label="Personal lists"
-              activeFilter={activeFilter}
-              options={personalLibraryFilterOptions}
-              onChoose={chooseFilter}
-            />
-            <FilterMenuGroup
               label="Watch status"
               activeFilter={activeFilter}
               options={primaryLibraryFilterOptions}
+              onChoose={chooseFilter}
+            />
+            <FilterMenuGroup
+              label="Personal lists"
+              activeFilter={activeFilter}
+              options={personalLibraryFilterOptions}
               onChoose={chooseFilter}
             />
             <FilterMenuGroup

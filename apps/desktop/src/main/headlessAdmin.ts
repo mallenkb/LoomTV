@@ -450,7 +450,7 @@ export function createHeadlessAdminHandler(options: HeadlessAdminHandlerOptions)
           sendError(res, 501, 'mounted_folder_browsing_unavailable', 'Mounted-folder browsing is not available on this server. Enter the server path manually.');
           return true;
         }
-        const requestedPath = optionalString(url.searchParams.get('path'), 'path', 4_096);
+        const requestedPath = optionalString(requestUrl.searchParams.get('path'), 'path', 4_096);
         sendJson(res, 200, await service.listLibraryDirectories(requestedPath));
         return true;
       }
