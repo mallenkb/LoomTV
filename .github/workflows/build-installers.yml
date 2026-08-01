@@ -284,4 +284,12 @@ jobs:
             echo 'No release files were downloaded.' >&2
             exit 1
           fi
-          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          existing_assets="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')"
+          for asset in "${assets[@]}"; do
+            asset_name="$(basename "$asset")"
+            if grep -Fqx "$asset_name" <<< "$existing_assets"; then
+              echo "Keeping existing release asset: $asset_name"
+              continue
+            fi
+            gh release upload "$GITHUB_REF_NAME" "$asset"
+          done
