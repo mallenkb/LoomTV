@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createHeadlessClientState, headlessClientStateFilename } from '../src/client-state.js';
+import { createHeadlessClientState, legacyHeadlessClientStateFilename } from '../src/client-state.js';
 
 async function makeStore() {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-client-state-'));
@@ -41,7 +41,7 @@ test('progress round-trips and derives watched state near the end of playback', 
   assert.equal(read.watched, true);
 });
 
-test('malformed persisted state is normalized instead of crashing the store', async () => {
+test('a malformed legacy JSON store is normalized during migration instead of crashing', async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-client-state-'));
   const junkProfiles = [
     { id: 'ok', ownerId: 'user-a', name: 'x'.repeat(500), type: 'not-a-type', createdAt: 'yesterday' },
@@ -50,7 +50,7 @@ test('malformed persisted state is normalized instead of crashing the store', as
     null,
   ];
   await fs.writeFile(
-    path.join(dataDir, headlessClientStateFilename),
+    path.join(dataDir, legacyHeadlessClientStateFilename),
     JSON.stringify({ profiles: junkProfiles, progress: { p: { m: { position: -5, duration: 'NaN' } } }, selections: 42 }),
   );
   const store = createHeadlessClientState({ dataDir });
@@ -58,6 +58,30 @@ test('malformed persisted state is normalized instead of crashing the store', as
   assert.equal(profiles.length, 1);
   assert.equal(profiles[0].name.length <= 80, true);
   assert.equal(['owner', 'standard', 'kid', 'guest'].includes(profiles[0].type), true);
+});
+
+test('legacy JSON state migrates into SQLite once and survives a store reopen', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-client-state-'));
+  const legacy = {
+    profiles: [{ id: 'legacy-1', ownerId: 'user-a', name: 'From JSON', type: 'kid', createdAt: 5, updatedAt: 6 }],
+    progress: { 'legacy-1': { 'media-1': { position: 10, duration: 100, watched: false, updatedAt: 7 } } },
+    selections: { 'user-a': 'legacy-1' },
+  };
+  await fs.writeFile(path.join(dataDir, legacyHeadlessClientStateFilename), JSON.stringify(legacy));
+
+  const store = createHeadlessClientState({ dataDir });
+  const profiles = await store.listProfiles('user-a');
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].name, 'From JSON');
+  assert.equal((await store.getProgress('legacy-1', 'media-1', 'user-a')).position, 10);
+
+  // The JSON file is renamed so the migration cannot run twice.
+  await assert.rejects(() => fs.access(path.join(dataDir, legacyHeadlessClientStateFilename)));
+  await fs.access(path.join(dataDir, `${legacyHeadlessClientStateFilename}.migrated`));
+
+  // A fresh store instance over the same dataDir reads the SQLite data.
+  const reopened = createHeadlessClientState({ dataDir });
+  assert.equal((await reopened.listProfiles('user-a'))[0].name, 'From JSON');
 });
 
 test('exportState/importState round-trips profiles and progress for backups', async () => {
