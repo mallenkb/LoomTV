@@ -6,16 +6,16 @@ media stored on a host-mounted disk, SMB share, or NFS share.
 
 The container and systemd examples use the server entrypoint at
 `apps/server/src/cli.js`. They expect the headless server to expose
-`GET /healthz` and `/admin/`, and to accept `HOST`, `PORT`, `DATA_DIR`,
-`CACHE_DIR`, and `MEDIA_DIR`. The desktop Electron app remains a separate
-client/runtime for profiles and watch-state storage.
+`GET /healthz`, `/app/`, and `/admin/`, and to accept `HOST`, `PORT`,
+`DATA_DIR`, `CACHE_DIR`, and `MEDIA_DIR`. The desktop Electron app remains a
+separate client/runtime, while the hosted client keeps portable profiles and
+watch progress on the server.
 
 The headless server now owns a small persistent catalog, safe background scans,
-direct HTTP media delivery, and on-demand HLS transcoding. Profile and watch
-state remain desktop-only until their storage is extracted behind the same
-contract. The deployment shape is stable now, so NAS operators can exercise
-process startup, storage paths, health checks, permissions, and graceful
-shutdown without an Electron session.
+direct HTTP media delivery, on-demand HLS transcoding, and a same-origin
+browser client. The deployment shape is stable now, so NAS operators can
+exercise process startup, storage paths, health checks, permissions, browser
+playback, and graceful shutdown without an Electron session.
 
 ## Storage model
 
@@ -23,7 +23,7 @@ Keep LoomTV's application state on local storage and mount media separately:
 
 | Path | Contents | Backup | Container mode |
 | --- | --- | --- | --- |
-| `/config` | SQLite database, settings, profiles, progress | Yes | Read/write |
+| `/config` | Headless admin/catalog state, hosted profiles, and progress | Yes | Read/write |
 | `/cache` | Artwork, thumbnails, temporary transcode/cache data | Optional | Read/write |
 | `/media` | Movies, shows, anime, subtitles | Usually no; back up at the NAS layer | Read-only recommended |
 
@@ -78,7 +78,9 @@ docker compose up -d
 docker compose ps
 docker compose logs --follow loomtv
 curl --fail http://127.0.0.1:3847/healthz
-# Then open http://127.0.0.1:3847/admin/ from a trusted browser.
+# Open the viewer client or control plane from a trusted browser:
+# http://127.0.0.1:3847/app/
+# http://127.0.0.1:3847/admin/
 ```
 
 The Compose file builds locally by default and also names the published image.
@@ -168,8 +170,8 @@ consume GPU resources; the cached capabilities endpoint remains read-only.
 
 ### Headless media API
 
-After creating an owner and signing in to `/admin/`, the server exposes these
-authenticated routes:
+After creating an owner and signing in to `/admin/` or `/app/`, the server
+exposes these authenticated routes:
 
 - `GET /api/admin/library/items` — indexed media records, including whether a
   record is temporarily unavailable because its NAS root is offline.
@@ -182,6 +184,12 @@ authenticated routes:
   `maxWidth`, `maxHeight`, `videoBitrateKbps`, `audioBitrateKbps`, and
   `toneMap=1`. The server chooses a verified backend for the requested codec,
   then falls back to a software encoder when that codec is available.
+
+Third-party clients should use the stable `/api/v1` contract. Discovery and
+OpenAPI metadata are available at `/api/v1/discovery` and
+`/api/v1/openapi.json`; library, profile/progress, direct/download, and HLS
+resources carry `X-LoomTV-API-Version: 1`. The browser client probes direct
+playback first and requests HLS when the source is not browser-compatible.
 
 Keep the admin bearer token private. HLS session tokens are scoped to one
 generated session and are not accepted by administrative routes.
@@ -219,8 +227,8 @@ groups and restart the service.
 
 ## Backup and restore
 
-Stop LoomTV before copying `/config` or `/var/lib/loomtv`. This keeps SQLite's
-WAL and journal files consistent:
+Stop LoomTV before copying `/config` or `/var/lib/loomtv` when making a
+filesystem-level safety copy. This keeps the state files consistent:
 
 ```sh
 docker compose stop loomtv
@@ -233,11 +241,14 @@ Back up `/cache` only if preserving artwork cache saves meaningful rebuild time;
 it can be deleted and regenerated. Media should be protected by the NAS's own
 backup/snapshot policy.
 
-To restore, stop the service, move the existing config directory aside, extract
-the backup with the correct owner, and start LoomTV. Keep the old directory
-until the restored server has opened the library and playback state correctly.
-Database migrations may be one-way: restore the matching config backup before
-rolling back to an older LoomTV image.
+The admin backup is a checksummed, versioned JSON envelope. It includes the
+headless catalog, roots, account policy, scan checkpoint, logs, and hosted
+client profiles/watch progress. `POST /api/admin/backup/restore` validates the
+checksum, creates a pre-restore rollback snapshot, replaces both state files,
+and revokes active sessions. Restore from the admin UI or API while the server
+is running; keep the generated rollback path until the restored library and
+browser playback have been checked. Raw state backups from the earliest
+headless release are accepted as a legacy migration format.
 
 ## Upgrades and diagnostics
 
@@ -251,7 +262,7 @@ rolling back to an older LoomTV image.
 Use `docker compose logs loomtv` or `journalctl -u loomtv -f` for structured
 startup and scan errors. A failed health check means the process is not serving
 `/healthz`; it does not by itself mean the NAS is offline. Check the host mount
-and permissions separately before attempting a destructive rescan. The first
-headless admin backup covers server-control state; it does not yet snapshot the
-desktop SQLite catalog until that database is extracted behind the server
-contract.
+and permissions separately before attempting a destructive rescan. The
+headless backup covers server-control state and the hosted browser
+profile/progress adapter; it does not copy media bytes, which should be
+protected by the NAS snapshot/backup policy.

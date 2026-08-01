@@ -3,8 +3,8 @@
 `loomtv-server` is the headless runtime boundary for LoomTV. It starts without
 Electron, a display server, or a tray process and is suitable for a
 NAS/container deployment. Library scanning, catalog access, direct media
-delivery, HLS transcoding, and browser administration are available without a
-desktop session.
+delivery, HLS transcoding, a hosted browser client, and browser administration
+are available without a desktop session.
 
 ## Shared runtime core
 
@@ -106,3 +106,49 @@ adds browser security headers and never stores plaintext passwords or tokens.
 Do not expose this first headless boundary directly to the public Internet.
 Use a VPN or a separately authenticated reverse proxy, and keep the owner
 password and admin token on a trusted network.
+
+## Hosted browser client and versioned API
+
+Open `/app/` for the viewer-facing client. It supports first-run owner
+onboarding, account sign-in, profile selection/creation, library browsing,
+direct browser playback with an HLS/transcode fallback, and server-side watch
+progress. `/admin/` remains the control-plane UI for roots, scans, users,
+diagnostics, logs, and recovery operations.
+
+Integrations should use `/api/v1` rather than the internal `/api/admin` and
+`/api/media` routes. The public contract advertises its version in
+`X-LoomTV-API-Version: 1` and exposes discovery plus an OpenAPI document:
+
+```text
+GET  /api/v1/discovery
+GET  /api/v1/openapi.json
+POST /api/v1/auth/session
+GET  /api/v1/library
+GET  /api/v1/profiles
+PUT  /api/v1/profiles/:profileId/progress/:mediaId
+GET  /api/v1/media/:mediaId
+POST /api/v1/media/:mediaId/transcode
+```
+
+The versioned API uses bearer sessions, stable `{ ok, data }`/`{ ok: false,
+error: { code, message } }` envelopes for JSON resources, and permission
+scopes from the same policy as the admin API. Direct/download URLs are
+short-lived tokenized URLs because an HTML video element cannot attach a
+bearer header; clients should prefer the returned URLs and never persist the
+owner token in a URL or log. Catalog and library-root responses intentionally
+omit host filesystem paths; mounted media remains server-owned.
+
+## Backup and restore
+
+The admin UI and `/api/admin/backup` create a versioned JSON envelope containing
+the catalog, roots, account policy, scan checkpoint, logs, and hosted-client
+profiles/watch progress. The envelope includes a SHA-256 checksum and is
+written atomically. `POST /api/admin/backup/restore` validates the format and
+checksum, writes an automatic pre-restore rollback snapshot, replaces both
+state stores, and revokes active sessions. Raw state files from the first
+headless release are accepted as a one-time legacy restore format.
+
+Health now includes storage writability/free space, verified-backup readiness,
+transcoder details, and operational checks. Logs support `level`, `source`,
+`search`, `before`, `after`, `limit`, and `offset` filters and are retained for
+30 days (up to 250 entries).

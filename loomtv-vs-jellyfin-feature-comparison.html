@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="A feature-by-feature comparison of LoomTV 1.0.101 and Jellyfin 10.11.x.">
+  <meta name="description" content="A feature-by-feature comparison of LoomTV 1.0.102 and Jellyfin 10.11.x.">
   <title>LoomTV vs Jellyfin — Feature comparison</title>
   <style>
     :root {
@@ -591,7 +591,7 @@
         LoomTV is a focused video library and player that now also has a GUI-independent headless server boundary. Jellyfin remains a mature, continuously running media server with a much larger client and plugin ecosystem. This matrix compares what is implemented today—not what is merely planned.
       </p>
       <div class="scope" aria-label="Comparison scope">
-        <span>LoomTV 1.0.101 source</span>
+        <span>LoomTV 1.0.102 source</span>
         <span>Jellyfin 10.11.x stable line</span>
         <span>65 capabilities</span>
         <span>Core vs plugin distinctions included</span>
@@ -620,7 +620,7 @@
         <article class="summary-card">
           <span class="label">Jellyfin leads</span>
           <h3>Media-server platform depth</h3>
-          <p>Jellyfin adds headless hosting, remote access, web/TV/console clients, music, photos, books, Live TV/DVR, stronger hardware/HDR processing, plugins, APIs, and deeper administration.</p>
+          <p>Jellyfin adds remote access, TV/console clients, music, photos, books, Live TV/DVR, stronger hardware/HDR processing, plugins, APIs, and deeper administration.</p>
         </article>
       </div>
 
@@ -719,7 +719,7 @@
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Resume, watched state &amp; history</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
-          <p>Position, duration, watched state, and recency are stored in SQLite and synchronized to paired clients.</p>
+          <p>Position, duration, watched state, and recency are stored per profile and synchronized to paired clients and the hosted server client.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Continue Watching</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
@@ -776,7 +776,7 @@
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Headless / always-on server</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
-          <p>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, and on-demand HLS transcoding now run without Electron; profile/watch-state parity and production NAS validation remain.</p>
+          <p>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, hosted profiles/progress, and on-demand HLS transcoding now run without Electron; shared desktop database parity and production NAS validation remain.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Other / mixed videos</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
@@ -799,7 +799,7 @@
           <p>Parses chapters and generates thumbnails for items/episodes, but no full timeline trickplay image system was found.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Admin separation</h4><span class="status partial">Partial</span><span class="status completion">100%</span></div>
+          <div class="kanban-card-head"><h4>Admin separation</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
           <p>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</p>
         </article>
         <article class="kanban-card">
@@ -815,8 +815,8 @@
           <p>Expo iOS/Android companion supports pairing, browsing, playback, HLS fallback, profiles, and progress, but the repository labels it an MVP in progress.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Hosted web client</h4><span class="status partial">Partial</span><span class="status completion">60%</span></div>
-          <p>The headless server now serves a themed browser admin surface and authenticated media routes; a complete browser library/playback/profile client remains.</p>
+          <div class="kanban-card-head"><h4>Hosted web client</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>The headless server now serves a same-origin viewer client at <code>/app/</code> with onboarding, profiles, library browsing, direct playback, packaged HLS fallback, progress sync, and capability negotiation.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>TLS, proxy &amp; network policy</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
@@ -827,20 +827,20 @@
           <p>Host-or-remote onboarding and persisted pairing exist, but no multi-server switcher was found.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Backup &amp; restore</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
-          <p>Desktop database/profile transfer and the headless server’s authenticated state snapshot are available; full version-aware restore, rollback, and media/catalog recovery are still incomplete.</p>
+          <div class="kanban-card-head"><h4>Backup &amp; restore</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p>Checksummed versioned envelopes include catalog, roots, account policy, logs, hosted profiles/progress, and scan state; restore validates, creates a rollback point, replaces state atomically, and revokes sessions. Media bytes remain NAS-managed.</p>
         </article>
         <article class="kanban-card">
           <div class="kanban-card-head"><h4>Device &amp; session management</h4><span class="status partial">Partial</span><span class="status completion">75%</span></div>
           <p>Headless bearer sessions expire, can be revoked, bind optional device IDs, enforce per-user concurrent-session limits, and expose active HLS/transcode sessions; richer history and dashboard termination remain.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Public API &amp; integrations</h4><span class="status partial">Partial</span><span class="status completion">70%</span></div>
-          <p>Has an authenticated LAN HTTP protocol and typed Electron bridge for its own clients, but not a documented general integration platform.</p>
+          <div class="kanban-card-head"><h4>Public API &amp; integrations</h4><span class="status yes">Done</span><span class="status completion">100%</span></div>
+          <p><code>/api/v1</code> now provides discovery, OpenAPI metadata, bearer scopes, profile/progress, library, media, diagnostics, backup, and compatibility examples. Webhooks remain a separate notifications feature.</p>
         </article>
         <article class="kanban-card">
-          <div class="kanban-card-head"><h4>Admin dashboard, logs &amp; reports</h4><span class="status partial">Partial</span><span class="status completion">85%</span></div>
-          <p>Browser administration now covers readiness, library roots, scan state, active sessions, operational logs, backups, account policy, and transcode capability; historical analytics and storage/report exports remain.</p>
+          <div class="kanban-card-head"><h4>Admin dashboard, logs &amp; reports</h4><span class="status partial">Partial</span><span class="status completion">95%</span></div>
+          <p>Browser administration now covers readiness, storage free space, verified backups, library roots, scan state, active sessions, filtered/paginated logs, account policy, and transcode diagnostics; export formats and long-term analytics remain.</p>
         </article>
         </div>
       </article>
@@ -927,7 +927,7 @@
 
       <div class="table-shell">
         <table>
-          <caption style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Feature comparison between LoomTV 1.0.101 and Jellyfin 10.11.x</caption>
+          <caption style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Feature comparison between LoomTV 1.0.102 and Jellyfin 10.11.x</caption>
           <colgroup>
             <col class="feature">
             <col class="product">
@@ -937,7 +937,7 @@
           <thead>
             <tr>
               <th scope="col">Capability</th>
-              <th scope="col">LoomTV 1.0.101</th>
+              <th scope="col">LoomTV 1.0.102</th>
               <th scope="col">Jellyfin 10.11.x</th>
               <th scope="col">Assessment</th>
             </tr>
@@ -964,7 +964,7 @@
             </tr>
             <tr>
               <td class="feature-name">Headless / always-on server</td>
-              <td data-label="LoomTV"><span class="status partial">Operational headless server</span><br>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, and on-demand HLS transcoding now run without Electron; profile/watch-state parity and production NAS validation remain.</td>
+              <td data-label="LoomTV"><span class="status partial">Operational headless server</span><br>A GUI-independent `loomtv-server` CLI, Docker/Compose image, systemd unit, health checks, browser admin, catalog scanning, direct media delivery, hosted profiles/progress, and on-demand HLS transcoding now run without Electron; shared desktop database parity and production NAS validation remain.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Designed for always-on service, package, NAS, and container deployments.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin maturity</span>LoomTV is now usable as a headless media service, but Jellyfin still has the broader server contract, clients, and operational validation.</td>
             </tr>
@@ -1210,7 +1210,7 @@
             </tr>
             <tr>
               <td class="feature-name">Admin separation</td>
-              <td data-label="LoomTV"><span class="status partial">Owner + roles</span><br>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</td>
+              <td data-label="LoomTV"><span class="status yes">Owner + roles</span><br>The owner retains full control; headless accounts can be assigned viewer, user, or admin roles with explicit server-side permissions and token-scoped access.</td>
               <td data-label="Jellyfin"><span class="status yes">Admin role</span><br>Users can be granted or denied full server management.</td>
               <td data-label="Assessment"><span class="edge-label">Tie</span>Both separate watching from server administration.</td>
             </tr>
@@ -1278,7 +1278,7 @@
             </tr>
             <tr>
               <td class="feature-name">Hosted web client</td>
-              <td data-label="LoomTV"><span class="status partial">Admin-first browser mode</span><br>The headless server now serves a themed browser admin surface and authenticated media routes; a complete browser library/playback/profile client remains.</td>
+              <td data-label="LoomTV"><span class="status yes">Hosted viewer + admin</span><br>The headless server serves a same-origin viewer client at <code>/app/</code> with onboarding, profiles, library browsing, direct playback, packaged HLS fallback, progress sync, and capability negotiation.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>The server hosts a full web client for supported desktop and mobile browsers.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Any modern browser can be a first-class client.</td>
             </tr>
@@ -1304,7 +1304,7 @@
             <tr class="section-row"><td colspan="4">Operations, ecosystem &amp; customization</td></tr>
             <tr>
               <td class="feature-name">Backup &amp; restore</td>
-              <td data-label="LoomTV"><span class="status partial">Headless state backup</span><br>Desktop database/profile transfer and the headless server’s authenticated state snapshot are available; full version-aware restore, rollback, and media/catalog recovery are still incomplete.</td>
+              <td data-label="LoomTV"><span class="status yes">Checksummed state backup</span><br>Versioned envelopes include catalog, roots, account policy, logs, hosted profiles/progress, and scan state; restore validates, creates a rollback point, replaces state atomically, and revokes sessions. Media bytes remain NAS-managed.</td>
               <td data-label="Jellyfin"><span class="status yes">Yes</span><br>Backup/restore can include the database, metadata, subtitles, and trickplay data.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin overall</span>LoomTV is better at profile portability; Jellyfin is better at full-server recovery.</td>
             </tr>
@@ -1322,13 +1322,13 @@
             </tr>
             <tr>
               <td class="feature-name">Public API &amp; integrations</td>
-              <td data-label="LoomTV"><span class="status partial">Scoped protocol</span><br>Has an authenticated LAN HTTP protocol and typed Electron bridge for its own clients, but not a documented general integration platform.</td>
+              <td data-label="LoomTV"><span class="status yes">Versioned public API</span><br><code>/api/v1</code> provides discovery, OpenAPI metadata, bearer scopes, profile/progress, library, media, diagnostics, backup, and compatibility examples. Webhooks remain a separate notifications feature.</td>
               <td data-label="Jellyfin"><span class="status yes">Extensive API</span><br>Documented HTTP API, WebSockets, SDKs, Kodi integrations, media managers, and a large client ecosystem.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Far easier to integrate into a wider self-hosted stack.</td>
             </tr>
             <tr>
               <td class="feature-name">Admin dashboard, logs &amp; reports</td>
-              <td data-label="LoomTV"><span class="status partial">Headless control plane</span><br>Browser administration now covers readiness, library roots, scan state, active sessions, operational logs, backups, account policy, and transcode capability; historical analytics and storage/report exports remain.</td>
+              <td data-label="LoomTV"><span class="status partial">Headless control plane</span><br>Browser administration now covers readiness, storage free space, verified backups, library roots, scan state, active sessions, filtered/paginated logs, account policy, and transcode diagnostics; export formats and long-term analytics remain.</td>
               <td data-label="Jellyfin"><span class="status yes">Comprehensive</span><br>Dashboard, scheduled tasks, activity, logs, sessions, storage, encoding details, reports, and playback-reporting plugins.</td>
               <td data-label="Assessment"><span class="edge-label">Jellyfin</span>Better for diagnosis and multi-user administration.</td>
             </tr>
@@ -1365,7 +1365,7 @@
         </article>
         <article class="priority">
           <h3><span class="rank">03.</span> Hosted web client and administration</h3>
-          <p>Browser onboarding, library and scan controls, health, sessions, logs, backups, user policy, and transcode diagnostics are now available in headless administration. Finish browser library playback, profiles, progress, and capability negotiation.</p>
+          <p>Browser onboarding, library and scan controls, health, sessions, logs, backups, user policy, transcode diagnostics, and a full `/app/` viewer client are now available in the headless service.</p>
         </article>
         <article class="priority">
           <h3><span class="rank">04.</span> Hardware/HDR pipeline</h3>
@@ -1398,7 +1398,7 @@
             <li><a href="docs/releases/v1.0.63.md">Remote desktop mode and skip-marker types</a></li>
             <li><a href="docs/releases/v1.0.64.md">My List and desktop browser mode</a></li>
             <li><a href="docs/releases/v1.0.66.md">Paired remote-library security</a></li>
-            <li><a href="docs/releases/v1.0.89.md">Audio/subtitle preference stability</a> through <a href="docs/releases/v1.0.101.md">current release notes</a></li>
+            <li><a href="docs/releases/v1.0.89.md">Audio/subtitle preference stability</a> through <a href="docs/releases/v1.0.102.md">current release notes</a></li>
             <li><a href="apps/mobile/README.md">Mobile client status and limits</a></li>
             <li><a href="apps/server/README.md">Headless server deployment and administration</a>, including Docker/NAS configuration</li>
             <li>Current source: desktop bridge, profile service, headless auth/policy service, media server, scanner, metadata providers, MPV/browser player, skip analysis, and transcode pipeline</li>
