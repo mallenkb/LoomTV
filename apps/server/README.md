@@ -100,8 +100,10 @@ staged.
 
 Sign-in attempts are throttled and locked for a short window after repeated
 failures. Set `--require-secure-transport --trust-proxy` (or the matching
-environment variables) when TLS terminates at a reverse proxy. The server also
-adds browser security headers and never stores plaintext passwords or tokens.
+environment variables) only when LoomTV is behind a trusted TLS reverse
+proxy; `--trust-proxy` accepts that proxy's `X-Forwarded-Proto` signal. The
+server also adds browser security headers and never stores plaintext passwords
+or tokens.
 
 Do not expose this first headless boundary directly to the public Internet.
 Use a VPN or a separately authenticated reverse proxy, and keep the owner
@@ -132,11 +134,11 @@ POST /api/v1/media/:mediaId/transcode
 
 The versioned API uses bearer sessions, stable `{ ok, data }`/`{ ok: false,
 error: { code, message } }` envelopes for JSON resources, and permission
-scopes from the same policy as the admin API. Direct/download URLs are
-short-lived tokenized URLs because an HTML video element cannot attach a
-bearer header; clients should prefer the returned URLs and never persist the
-owner token in a URL or log. Catalog and library-root responses intentionally
-omit host filesystem paths; mounted media remains server-owned.
+scopes from the same policy as the admin API. Direct/download URLs carry
+five-minute, media-and-user-bound tokens because an HTML video element cannot
+attach a bearer header; clients should prefer the returned URLs and never
+persist a token in a URL or log. Catalog and library-root responses
+intentionally omit host filesystem paths; mounted media remains server-owned.
 
 ## Backup and restore
 

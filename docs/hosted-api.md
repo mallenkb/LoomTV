@@ -34,6 +34,7 @@ existing `/api/admin` contract remains available for control-plane clients.
 ```sh
 TOKEN='paste-token-here'
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:3847/api/v1/library
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:3847/api/v1/library/roots
 curl -H "Authorization: Bearer $TOKEN" -X POST \
   -H 'content-type: application/json' \
   -d '{}' http://127.0.0.1:3847/api/v1/library/scan
@@ -47,6 +48,10 @@ curl -H "Authorization: Bearer $TOKEN" -X PUT \
   -H 'content-type: application/json' \
   -d '{"position":612,"duration":3600}' \
   http://127.0.0.1:3847/api/v1/profiles/<profileId>/progress/<mediaId>
+
+Administrators can use the same versioned surface for scoped user accounts,
+library-root management, diagnostics, password changes, sessions, logs, and
+backup/restore. These routes use the same permission names as `/api/admin`.
 ```
 
 Profiles and progress are stored in the headless data directory and are scoped
@@ -55,19 +60,20 @@ accounts can only access profiles they created.
 
 ## Playback
 
-`GET /api/v1/media/<mediaId>` returns the item plus `directUrl` and
-`transcodeUrl`. Direct browser playback uses a short-lived authenticated query
-token because an HTML `<video>` element cannot attach an Authorization header:
+`GET /api/v1/media/<mediaId>` returns the item plus tokenized `directUrl`,
+`downloadUrl`, and `transcodeUrl`. Direct browser playback uses a five-minute,
+media-and-user-bound query token because an HTML `<video>` element cannot
+attach an Authorization header:
 
 ```js
 const details = await api(`/api/v1/media/${mediaId}`);
-video.src = `${details.directUrl}?token=${encodeURIComponent(token)}`;
+video.src = details.directUrl;
 ```
 
 For incompatible media, `POST` the returned `transcodeUrl` with the bearer
 token and requested `codec`, `maxWidth`, `maxHeight`, or bitrate query values.
 The response contains an HLS playlist URL whose session token is validated by
-the server. Hardware selection and software fallback remain host-specific and
+the server for up to 30 minutes. Hardware selection and software fallback remain host-specific and
 are reported through `/api/v1/discovery`. `/app/` probes direct playback first
 and uses the packaged HLS runtime for browsers without native HLS support.
 
@@ -91,7 +97,10 @@ curl -H "Authorization: Bearer $TOKEN" \
 Backup creation and restore require `backup.create`; logs require `logs.read`.
 Restore validates the checksum and writes a pre-restore rollback snapshot before
 replacing state. The media API remains read-only unless an account is granted
-the separate `media.delete` permission.
+the separate `media.delete` permission. Public API backup writes and restores
+are restricted to the server-owned backup directory; use the admin API for
+deployment-local backup workflows that intentionally target another mounted
+volume.
 
 Version `1` is additive within its resource names. Clients should ignore
 unknown response fields, use the discovery document to gate optional
@@ -99,7 +108,9 @@ capabilities, and treat a changed major path (`/api/v2`) as a new contract.
 The server sends `X-LoomTV-API-Version: 1` on every versioned response. Webhook
 subscriptions are intentionally not part of this contract yet; they remain a
 separate notifications feature so clients do not depend on an unstable event
-delivery model.
+delivery model. The hosted client is same-origin by design; the server does
+not emit wildcard CORS headers. Cross-origin browser integrations should use a
+trusted reverse proxy that adds an explicit origin allow-list.
 
 Media files stay read-only from LoomTV's perspective. The API never exposes
 host filesystem paths to normal client responses.

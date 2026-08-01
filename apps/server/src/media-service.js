@@ -17,15 +17,21 @@ const MIME_TYPES = {
 };
 const DIRECT_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts']);
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const MEDIA_TOKEN_TTL_MS = 5 * 60 * 1000;
+const MAX_MEDIA_TOKENS = 4_096;
 const PLAYLIST_WAIT_MS = 20_000;
 
 function json(res, status, payload) {
-  const body = JSON.stringify(payload);
+  const publicPayload = res.__loomtvPublicApi && payload?.ok === false && typeof payload.error === 'string'
+    ? { ...payload, error: { code: payload.error, message: payload.message || payload.error } }
+    : payload;
+  const body = JSON.stringify(publicPayload);
   if (!res.headersSent) {
     res.writeHead(status, {
       'Cache-Control': 'no-store',
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Length': Buffer.byteLength(body),
+      ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}),
     });
   }
   res.end(body);
@@ -183,9 +189,47 @@ function transcodeArgs(filePath, outputDir, health, profile) {
 
 export function createHeadlessMediaService({ adminService, transcoder, cacheDir, authorize }) {
   const sessions = new Map();
+  const mediaTokens = new Map();
   const root = path.join(path.resolve(cacheDir), 'headless-transcodes');
 
+  function pruneMediaTokens(now = Date.now()) {
+    for (const [token, entry] of mediaTokens) {
+      if (entry.expiresAt <= now) mediaTokens.delete(token);
+    }
+    while (mediaTokens.size > MAX_MEDIA_TOKENS) mediaTokens.delete(mediaTokens.keys().next().value);
+  }
+
+  function issuePlaybackToken(itemId, userId, action) {
+    pruneMediaTokens();
+    const token = randomBytes(24).toString('base64url');
+    const expiresAt = Date.now() + MEDIA_TOKEN_TTL_MS;
+    mediaTokens.set(token, { itemId, userId, action, expiresAt });
+    pruneMediaTokens();
+    return { token, expiresAt };
+  }
+
+  async function authorizePlaybackToken(token, url, permission) {
+    pruneMediaTokens();
+    const entry = mediaTokens.get(token);
+    const itemId = url.searchParams.get('itemId');
+    if (!entry || entry.expiresAt <= Date.now() || entry.itemId !== itemId) return null;
+    if ((permission === 'downloads' && entry.action !== 'download')
+      || (permission === 'stream' && entry.action !== 'direct')) return null;
+    const principal = await adminService.getPrincipalById(entry.userId);
+    if (!principal) return null;
+    const permitted = typeof adminService.authorizePrincipal === 'function'
+      ? await adminService.authorizePrincipal(principal, permission)
+      : await authorize({ headers: { authorization: `Bearer ${token}` } }, permission);
+    return permitted ? { ok: true, principal } : null;
+  }
+
   async function authorizedFor(req, url, permission) {
+    const headerToken = req.headers.authorization || req.headers['x-loom-admin-token'] || '';
+    const queryToken = url.searchParams.get('token') || '';
+    if (!headerToken && queryToken) {
+      const playback = await authorizePlaybackToken(queryToken, url, permission);
+      if (playback) return playback;
+    }
     const token = tokenFromRequest(req, url);
     if (!token) return { ok: false, status: 401 };
     const authenticatedRequest = {
@@ -271,7 +315,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
     const stats = await fsPromises.stat(filePath).catch(() => null);
     if (!stats?.isFile()) return json(res, 404, { ok: false, error: 'not_found' });
     if (!allowRange) {
-      res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': stats.size, 'Cache-Control': 'no-store', ...extraHeaders });
+      res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': stats.size, 'Cache-Control': 'no-store', ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}), ...extraHeaders });
       if (req.method === 'HEAD') return res.end();
       const stream = fs.createReadStream(filePath);
       stream.once('error', () => { if (!res.destroyed) res.destroy(); });
@@ -279,7 +323,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
     }
     const range = parseRange(req.headers.range, stats.size);
     if (range === 'invalid') {
-      res.writeHead(416, { 'Content-Range': `bytes */${stats.size}` });
+      res.writeHead(416, { 'Content-Range': `bytes */${stats.size}`, ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}) });
       return res.end();
     }
     const start = range?.start || 0;
@@ -290,6 +334,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       'Content-Length': end - start + 1,
       ...(range ? { 'Content-Range': `bytes ${start}-${end}/${stats.size}` } : {}),
       'Cache-Control': 'no-store',
+      ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}),
       ...extraHeaders,
     });
     if (req.method === 'HEAD') return res.end();
@@ -308,6 +353,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       'Content-Type': 'application/vnd.apple.mpegurl',
       'Content-Length': Buffer.byteLength(playlist),
       'Cache-Control': 'no-store',
+      ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}),
     });
     if (req.method === 'HEAD') return res.end();
     return res.end(playlist);
@@ -402,6 +448,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
 
   return {
     handle,
+    issuePlaybackToken,
     async listSessions() {
       const now = Date.now();
       for (const session of sessions.values()) if (now - session.lastActivityAt > SESSION_TTL_MS) cleanupSession(session);
@@ -420,6 +467,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
     },
     async stop() {
       for (const session of sessions.values()) cleanupSession(session);
+      mediaTokens.clear();
     },
   };
 }

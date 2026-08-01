@@ -153,7 +153,32 @@ function discoveryDocument(version, health) {
   };
 }
 
-const OPENAPI_DOCUMENT = Object.freeze({
+function completeOpenApi(document) {
+  for (const [route, pathItem] of Object.entries(document.paths || {})) {
+    const parameterNames = [...route.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (!operation || typeof operation !== 'object' || method === 'parameters') continue;
+      operation.responses ||= {
+        '200': { description: 'Request succeeded.' },
+        '400': { description: 'The request was invalid.' },
+        '401': { description: 'Authentication is required.' },
+        '403': { description: 'The account is not allowed to perform this action.' },
+        '404': { description: 'The requested resource was not found.' },
+      };
+      if (parameterNames.length) {
+        operation.parameters ||= parameterNames.map((name) => ({
+          name,
+          in: 'path',
+          required: true,
+          schema: { type: 'string' },
+        }));
+      }
+    }
+  }
+  return document;
+}
+
+const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
   openapi: '3.0.3',
   info: {
     title: 'LoomTV Hosted API',
@@ -170,7 +195,8 @@ const OPENAPI_DOCUMENT = Object.freeze({
     '/api/v1/auth/session': { post: { summary: 'Create an authenticated session' }, delete: { summary: 'Revoke the current session' } },
     '/api/v1/auth/me': { get: { summary: 'Return the authenticated account' } },
     '/api/v1/library': { get: { summary: 'List the authenticated catalog' } },
-    '/api/v1/library/roots': { get: { summary: 'List the authenticated library roots' } },
+    '/api/v1/library/roots': { get: { summary: 'List the authenticated library roots' }, post: { summary: 'Add a library root' } },
+    '/api/v1/library/roots/{rootId}': { delete: { summary: 'Remove a library root' } },
     '/api/v1/library/{mediaId}': { get: { summary: 'Read one catalog item' } },
     '/api/v1/library/scan': { get: { summary: 'Read scan status' }, post: { summary: 'Start a library scan' } },
     '/api/v1/profiles': { get: { summary: 'List profiles' }, post: { summary: 'Create a profile' } },
@@ -182,6 +208,10 @@ const OPENAPI_DOCUMENT = Object.freeze({
     '/api/v1/media/{mediaId}/direct': { get: { summary: 'Stream a browser-compatible file' } },
     '/api/v1/media/{mediaId}/download': { get: { summary: 'Download the original media file' } },
     '/api/v1/media/{mediaId}/transcode': { post: { summary: 'Start an HLS transcode' } },
+    '/api/v1/users': { get: { summary: 'List scoped user accounts' }, post: { summary: 'Create a user account' } },
+    '/api/v1/users/{userId}': { patch: { summary: 'Update a user account' }, delete: { summary: 'Remove a user account' } },
+    '/api/v1/account/password': { post: { summary: 'Change or reset an account password' } },
+    '/api/v1/diagnostics': { get: { summary: 'Read administrator diagnostics' } },
     '/api/v1/sessions': { get: { summary: 'List active playback sessions' } },
     '/api/v1/logs': { get: { summary: 'Read operational logs' } },
     '/api/v1/backups': { get: { summary: 'Read backup status' }, post: { summary: 'Create a backup' } },
@@ -190,7 +220,7 @@ const OPENAPI_DOCUMENT = Object.freeze({
   components: {
     securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
   },
-});
+}));
 
 /**
  * Versioned viewer/client API. Existing `/api/admin` and `/api/media` routes
@@ -225,6 +255,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
 
   async function handleMedia(req, res, url, mediaId, action) {
     const queryUrl = pathForMedia(url, mediaId, action);
+    res.__loomtvPublicApi = true;
     // Direct playback URLs are also usable by an HTMLMediaElement, which
     // cannot attach Authorization headers. The underlying media service still
     // validates the short-lived/session token from the query string.
@@ -329,9 +360,20 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeData(res, 200, { items: (await service.listLibraryItems(principal)).map(publicLibraryItem) });
         return true;
       }
-      if (resource === 'library' && segments[1] === 'roots' && segments.length === 2 && req.method === 'GET') {
-        const principal = await requirePrincipal(req, 'library.read');
-        writeData(res, 200, { roots: (await service.listLibraryRoots(principal)).map(publicLibraryRoot) });
+      if (resource === 'library' && segments[1] === 'roots' && segments.length === 2 && (req.method === 'GET' || req.method === 'POST')) {
+        const principal = await requirePrincipal(req, req.method === 'GET' ? 'library.read' : 'library.manage');
+        if (req.method === 'GET') writeData(res, 200, { roots: (await service.listLibraryRoots(principal)).map(publicLibraryRoot) });
+        else {
+          const body = await readJsonBody(req);
+          writeData(res, 201, { root: publicLibraryRoot(await service.addLibraryRoot({ path: requiredString(body.path, 'path', 4_096), kind: optionalString(body.kind, 'kind', 16) }, principal)) });
+        }
+        return true;
+      }
+      if (resource === 'library' && segments[1] === 'roots' && segments.length === 3 && req.method === 'DELETE') {
+        const principal = await requirePrincipal(req, 'library.manage');
+        await service.removeLibraryRoot(decodeSegment(segments[2], 'rootId'), principal);
+        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+        res.end();
         return true;
       }
       if (resource === 'library' && segments[1] === 'scan' && (req.method === 'GET' || req.method === 'POST')) {
@@ -382,7 +424,11 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         if (segments.length === 4 && (req.method === 'GET' || req.method === 'PUT' || req.method === 'POST')) {
           const mediaId = decodeSegment(segments[3], 'mediaId');
           if (req.method === 'GET') writeData(res, 200, { progress: await clientState.getProgress(profileId, mediaId, principal.id, canSeeAllProfiles(principal)) });
-          else writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, canSeeAllProfiles(principal)) });
+          else {
+            const media = await service.getLibraryItem(mediaId, principal);
+            if (!media) throw requestError(404, 'media_not_found', 'Media item was not found.');
+            writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, canSeeAllProfiles(principal)) });
+          }
           return true;
         }
       }
@@ -391,10 +437,17 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const mediaId = decodeSegment(segments[1], 'mediaId');
         const item = await service.getLibraryItem(mediaId, principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
+        const directToken = typeof mediaService.issuePlaybackToken === 'function'
+          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')?.token
+          : null;
+        const downloadToken = typeof mediaService.issuePlaybackToken === 'function'
+          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'download')?.token
+          : null;
+        const tokenQuery = (token) => token ? `?token=${encodeURIComponent(token)}` : '';
         writeData(res, 200, {
           item: publicLibraryItem(item),
-          directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct`,
-          downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download`,
+          directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`,
+          downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download${tokenQuery(downloadToken)}`,
           transcodeUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode`,
         });
         return true;
@@ -402,9 +455,12 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       if (resource === 'media' && segments.length === 3 && (segments[2] === 'direct' || segments[2] === 'download' || segments[2] === 'transcode')) {
         const mediaId = decodeSegment(segments[1], 'mediaId');
         if (segments[2] === 'transcode') await requirePrincipal(req, 'transcode');
-        else if (segments[2] === 'download') await requirePrincipal(req, 'downloads');
+        else if (segments[2] === 'download' && !req.headers.authorization && !req.headers['x-loom-admin-token']) {
+          if (!url.searchParams.get('token')) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
+        }
         else if (!authTokenPresent(req, url)) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
         if (segments[2] === 'download') {
+          res.__loomtvPublicApi = true;
           const queryUrl = pathForMedia(url, mediaId, 'download');
           return mediaService.handle(req, res, queryUrl);
         }
@@ -436,14 +492,67 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         if (req.method === 'GET') writeData(res, 200, await service.getBackupStatus(principal));
         else {
           const body = await readJsonBody(req);
-          writeData(res, 202, await service.startBackup({ destination: optionalString(body.destination, 'destination', 4_096) }, principal));
+          const destination = optionalString(body.destination, 'destination', 4_096);
+          if (destination && typeof service.isBackupPathAllowed === 'function' && !service.isBackupPathAllowed(destination)) {
+            throw requestError(403, 'backup_path_forbidden', 'Public API backups must stay inside the server backup directory.');
+          }
+          writeData(res, 202, await service.startBackup({ destination }, principal));
         }
         return true;
       }
       if (resource === 'backups' && segments[1] === 'restore' && segments.length === 2 && req.method === 'POST') {
         const principal = await requirePrincipal(req, 'backup.create');
         const body = await readJsonBody(req);
-        writeData(res, 200, await service.restoreBackup({ path: requiredString(body.path || body.source, 'path', 4_096) }, principal));
+        const source = requiredString(body.path || body.source, 'path', 4_096);
+        if (typeof service.isBackupPathAllowed === 'function' && !service.isBackupPathAllowed(source)) {
+          throw requestError(403, 'backup_path_forbidden', 'Public API restores must read from the server backup directory.');
+        }
+        writeData(res, 200, await service.restoreBackup({ path: source }, principal));
+        return true;
+      }
+      if (resource === 'users' && segments.length === 1 && (req.method === 'GET' || req.method === 'POST')) {
+        const principal = await requirePrincipal(req, req.method === 'GET' ? 'users.read' : 'users.manage');
+        if (req.method === 'GET') writeData(res, 200, { users: await service.listUsers(principal) });
+        else {
+          const body = await readJsonBody(req);
+          writeData(res, 201, { user: await service.createUser({
+            name: requiredString(body.name, 'name', 80),
+            password: requiredString(body.password, 'password', 256),
+            role: optionalString(body.role, 'role', 16),
+            permissions: body.permissions,
+            rootIds: body.rootIds,
+            deviceIds: body.deviceIds,
+            maxSessions: body.maxSessions,
+          }, principal) });
+        }
+        return true;
+      }
+      if (resource === 'users' && segments.length === 2 && (req.method === 'PATCH' || req.method === 'DELETE')) {
+        const principal = await requirePrincipal(req, 'users.manage');
+        const userId = decodeSegment(segments[1], 'userId');
+        if (req.method === 'DELETE') {
+          await service.removeUser(userId, principal);
+          res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+          res.end();
+        } else {
+          const body = await readJsonBody(req);
+          writeData(res, 200, { user: await service.updateUser(userId, body, principal) });
+        }
+        return true;
+      }
+      if (resource === 'account' && segments[1] === 'password' && segments.length === 2 && req.method === 'POST') {
+        const principal = await requirePrincipal(req);
+        const body = await readJsonBody(req);
+        writeData(res, 200, await service.changePassword({
+          userId: optionalString(body.userId, 'userId', 128),
+          currentPassword: body.currentPassword,
+          newPassword: requiredString(body.newPassword, 'newPassword', 256),
+        }, principal));
+        return true;
+      }
+      if (resource === 'diagnostics' && segments.length === 1 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'admin.read');
+        writeData(res, 200, await service.getDiagnostics(principal));
         return true;
       }
       writeError(res, 404, 'not_found', 'The requested API resource does not exist.');

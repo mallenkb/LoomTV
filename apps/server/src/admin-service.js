@@ -1229,6 +1229,15 @@ export function createHeadlessAdminService(options) {
       return (await loadState()).backup;
     },
 
+    getBackupRoot() {
+      return path.join(dataDir, 'backups');
+    },
+
+    isBackupPathAllowed(candidate) {
+      if (typeof candidate !== 'string' || !candidate.trim()) return false;
+      return isPathWithin(path.join(dataDir, 'backups'), path.resolve(candidate));
+    },
+
     async getDiagnostics(principal) {
       ensurePrincipalPermission(principal, 'admin.read');
       const health = await this.getHealth(principal);
