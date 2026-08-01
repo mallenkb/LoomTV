@@ -41,16 +41,17 @@ the current completion percentage and status.
 
 A compact status view for quick scanning. Full “Left” and “Why it matters” details are listed in the expanded notes below.
 
-| ✅ Done (32) | 🟡 Partial (18) | 🔴 Not started (15) |
+| ✅ Done (33) | 🟡 Partial (17) | 🔴 Not started (15) |
 | :--- | :--- | :--- |
 | **Local-first / self-hosted — 100%** | **Architecture — 95%** | **Music libraries — 0%**; **Internet remote streaming — 0%** |
 | **Desktop platforms — 100%** | **Headless / always-on server — 95%** | **Photos — 0%** |
-| **Open source — 100%** | **Other / mixed videos — 75%** | **Books & comics — 0%** |
+| **Open source — 100%** | &nbsp; | **Books & comics — 0%** |
 | **Application updates — 100%** | **Multiple folders & NAS — 95%** | **Live TV & internet radio — 0%** |
 | **Movies — 100%** | **Scanning & scheduling — 90%** | **DVR recording — 0%** |
 | **TV shows — 100%** | **Hardware transcoding — 80%** | **Local NFO metadata — 0%** |
 | **Anime — 100%** | **HDR / Dolby Vision tone mapping — 70%** | **Collections & playlists — 0%** |
-| **Metadata providers — 100%** | **Chapters & trickplay previews — 60%** | **Extras, editions & versions — 0%** |
+| **Other / mixed videos — 100%** | **Chapters & trickplay previews — 60%** | **Extras, editions & versions — 0%** |
+| **Metadata providers — 100%** | &nbsp; | &nbsp; |
 | **Fix match / refresh one item — 100%** | **Granular user permissions — 90%** | **Watch together / SyncPlay — 0%** |
 | **Artwork control — 100%** | **Credentials & lockout — 90%** | **Offline downloads — 0%** |
 | **Search & library filters — 100%** | **Mobile clients — 70%** | **Casting, DLNA & device control — 0%** |
@@ -84,7 +85,7 @@ A compact status view for quick scanning. Full “Left” and “Why it matters�
 The expanded text cards below mirror the table for readers who prefer a
 linear backlog view.
 
-### ✅ Done (32)
+### ✅ Done (33)
 
 - [x] **Local-first / self-hosted — 100%**
   - **What's left:** Nothing for the current desktop scope.
@@ -107,6 +108,9 @@ linear backlog view.
 - [x] **Anime — 100%**
   - **What's left:** No core gap; continue provider maintenance.
   - **Why it matters:** Anime is a genuine LoomTV differentiator.
+- [x] **Other / mixed videos — 100%**
+  - **What's left:** No core gap for supported video files; continue maintaining classifier rules as new naming conventions appear.
+  - **Why it matters:** Lets users keep home videos and unusual media in mixed folders without manual sorting or losing files.
 - [x] **Metadata providers — 100%**
   - **What's left:** No core gap; maintain provider fallbacks and credentials.
   - **Why it matters:** Good metadata is central to discovery and matching.
@@ -183,7 +187,7 @@ linear backlog view.
   - **What's left:** No core gap; keep headless theme tokens aligned with desktop.
   - **Why it matters:** Preserves a cohesive LoomTV identity across clients.
 
-### 🟡 Partial (18)
+### 🟡 Partial (17)
 
 - [ ] **Architecture — 95%**
   - **What's left:** Unify the desktop and headless database, scanner, playback, and profile core.
@@ -191,9 +195,6 @@ linear backlog view.
 - [ ] **Headless / always-on server — 95%**
   - **What's left:** Move profiles/watch state and the full database contract into the server; verify restart and mount-loss recovery on real NAS hosts.
   - **Why it matters:** This is the foundation for a dependable NAS appliance.
-- [ ] **Other / mixed videos — 75%**
-  - **What's left:** Improve mixed-folder classification and ambiguous-file handling.
-  - **Why it matters:** Lets users keep home videos and unusual media without manual sorting.
 - [ ] **Multiple folders & NAS — 95%**
   - **What's left:** Finish mount identity checks, durable resume across process restarts, and real NAS validation.
   - **Why it matters:** Prevents an offline share from looking like an empty library.
@@ -307,7 +308,7 @@ linear backlog view.
 | Movies | 100% | ✅ Done | No core gap. | The primary library workflow is complete. |
 | TV shows | 100% | ✅ Done | No core gap. | Series, seasons, episodes, and continuation work end to end. |
 | Anime | 100% | ✅ Done | No core gap; continue provider maintenance. | Anime is a genuine LoomTV differentiator. |
-| Other / mixed videos | 75% | 🟡 Partial | Improve mixed-folder classification and ambiguous-file handling. | Lets users keep home videos and unusual media without manual sorting. |
+| Other / mixed videos | 100% | ✅ Done | No core gap for supported video files; mixed roots retain every file, classify structured TV/anime folders, and keep ambiguous loose files playable. | Lets users keep home videos and unusual media in mixed folders without manual sorting or losing files. |
 | Music libraries | 0% | 🔴 Not started | Add albums, artists, tags, queues, lyrics, and an audio player. | Expands LoomTV into a broader household media server. |
 | Photos | 0% | 🔴 Not started | Add photo libraries, albums, browsing, and image delivery. | Covers another major NAS use case. |
 | Books & comics | 0% | 🔴 Not started | Add ebook/comic/PDF metadata and reading clients. | Matches Jellyfin's broader personal-media scope. |

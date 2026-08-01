@@ -54,7 +54,7 @@ export function parseEpisodeFileName(fileName: string, fallbackSeason: number): 
 }
 
 function seriesTitleFromEpisodeFileName(fileName: string): string | null {
-  const withoutExt = fileName.replace(/\.[^.]+$/, '');
+  const withoutExt = fileName.replace(/\.(3gp|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|mts|mxf|ogm|ogv|ts|vob|webm|wmv)$/i, '');
   const match = withoutExt.match(/^(.+?)[._ -]+[Ss]\s*\d{1,2}\s*[._ -]*[Ee]\s*\d{1,3}\b/);
   if (!match) return null;
   const title = cleanMediaTitle(match[1]).title;

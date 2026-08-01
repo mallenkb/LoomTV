@@ -29,9 +29,15 @@ test('year-titled movies keep the later year as release year (ported desktop beh
 test('parseEpisodeFileName reads SxxEyy, named episodes, and gated bare numbers', () => {
   assert.deepEqual(parseEpisodeFileName('Show.S03E12.mkv', 1), { season: 3, episode: 12 });
   assert.deepEqual(parseEpisodeFileName('Show - Episode 7.mkv', 2), { season: 2, episode: 7 });
+  assert.deepEqual(parseEpisodeFileName('Show - E08.mkv', 2), { season: 2, episode: 8 });
   // Bare numbers only parse in aggressive mode: "Rocky 3" is a movie.
   assert.equal(parseEpisodeFileName('Rocky 3.mkv', 1), null);
   assert.deepEqual(parseEpisodeFileName('Title - 07.mkv', 4, { aggressive: true }), { season: 4, episode: 7 });
+});
+
+test('cleanMediaTitle strips the full shared video extension set', () => {
+  assert.equal(cleanMediaTitle('Birthday.divx').title, 'Birthday');
+  assert.equal(cleanMediaTitle('Holiday.mxf').title, 'Holiday');
 });
 
 test('seriesTitleFromEpisodeName recovers the show name from scene-style names', () => {

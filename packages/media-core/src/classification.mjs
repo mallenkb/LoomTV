@@ -19,7 +19,7 @@ const RELEASE_GROUPS = /\b(yts|rarbg|ettv|eztv|tgx|galaxyrg|psa|pahe|ntb|success
  */
 export function cleanMediaTitle(name) {
   const source = String(name || '');
-  const withoutExt = source.replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts|vtt|srt|ass|ssa)$/i, '');
+  const withoutExt = source.replace(/\.(3gp|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|mts|mxf|ogm|ogv|ts|vob|webm|wmv|vtt|srt|ass|ssa)$/i, '');
   const yearMatches = [...withoutExt.matchAll(/\b(19\d{2}|20\d{2})\b/g)];
   const maxReleaseYear = new Date().getFullYear() + 1;
   const releaseYearMatch =
@@ -48,7 +48,9 @@ export function cleanMediaTitle(name) {
 
 /** True when a bare file name looks like a TV episode. */
 export function isLikelyEpisodeFileName(name) {
-  return /[Ss]\d{1,2}[Ee]\d{1,3}/.test(name) || /(?:episode|ep)\s*\d{1,3}\b/i.test(name);
+  return /[Ss]\d{1,2}[Ee]\d{1,3}/.test(name)
+    || /(?:episode|ep)\s*\d{1,3}\b/i.test(name)
+    || /(?:^|[\s._-])[Ee]\s*\d{1,3}\b/i.test(name);
 }
 
 /**
@@ -65,7 +67,7 @@ export function parseEpisodeFileName(fileName, fallbackSeason, { aggressive = fa
     return { season: parseInt(seasonEpisode[1], 10), episode: parseInt(seasonEpisode[2], 10) };
   }
 
-  const namedEpisode = withoutExt.match(/(?:episode|ep)\s*0*(\d{1,3})\b/i);
+  const namedEpisode = withoutExt.match(/(?:episode|ep|e)\s*0*(\d{1,3})\b/i);
   if (namedEpisode) return { season: fallbackSeason, episode: parseInt(namedEpisode[1], 10) };
   if (!aggressive) return null;
 

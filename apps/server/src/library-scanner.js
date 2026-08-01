@@ -17,6 +17,9 @@ function mediaRecord(root, filePath, stats) {
     rootId: root.id,
     path: filePath,
     relativePath,
+    // Keep the hosted client’s coarse card model in sync with the richer
+    // classifier vocabulary used by the series endpoint.
+    type: classification.kind === 'episode' ? 'tv' : 'movie',
     title: classification.title,
     kind: classification.kind,
     ...(classification.year ? { year: classification.year } : {}),

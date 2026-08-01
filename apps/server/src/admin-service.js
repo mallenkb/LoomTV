@@ -377,6 +377,7 @@ function normalizeState(raw) {
         rootId: entry.rootId.slice(0, 128),
         path: path.resolve(entry.path),
         relativePath: typeof entry.relativePath === 'string' ? entry.relativePath.slice(0, 4_096) : path.basename(entry.path),
+        type: entry.type === 'tv' || entry.kind === 'episode' ? 'tv' : 'movie',
         title: typeof entry.title === 'string' ? entry.title.slice(0, 500) : path.basename(entry.path),
         kind: entry.kind === 'episode' ? 'episode' : 'movie',
         ...(Number.isSafeInteger(entry.year) && entry.year > 1900 && entry.year < 2200 ? { year: entry.year } : {}),

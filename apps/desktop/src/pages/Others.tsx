@@ -108,7 +108,13 @@ function otherFolderItems(items: MediaItem[], folders: string[]): MediaItem[] {
 
 function itemBelongsToFolders(item: MediaItem, folders: string[]): boolean {
   if (item.type === 'movie') return pathBelongsToFolders(item.filePath, folders);
-  return ((item as TVShow).episodeFiles || []).some((file) => pathBelongsToFolders(file.filePath, folders));
+  const episodeFiles = (item as TVShow).episodeFiles || [];
+  // Loose episode-looking files in a mixed root are retained as playable
+  // catalog items even when no series structure could be formed. Fall back to
+  // the item's own path so Others never hides a file the scanner indexed.
+  return episodeFiles.length > 0
+    ? episodeFiles.some((file) => pathBelongsToFolders(file.filePath, folders))
+    : pathBelongsToFolders(item.filePath, folders);
 }
 
 function pathBelongsToFolders(filePath: string | undefined, folders: string[]): boolean {

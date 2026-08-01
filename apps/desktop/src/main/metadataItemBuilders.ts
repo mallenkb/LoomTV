@@ -426,8 +426,14 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         : Promise.resolve(null),
       shouldUseShowProviders ? fetchTVMetadata(searchTitle, searchYear) : Promise.resolve(null),
     ]);
-    const matchedTmdbData = tmdbById || tmdbBySearch || null;
-    const matchedOmdbData = omdbById || omdbBySearch || null;
+    // Mixed “Others” roots contain home videos and ambiguous filenames. Never
+    // attach an unrelated provider hit just because a loose title produced a
+    // result; ID-tagged matches remain trusted, while search matches must
+    // agree with one of the local title candidates.
+    const matchedTmdbData = tmdbById
+      || (remoteMatchesAnyLocalTitle(localTitleCandidates, tmdbBySearch?.title) ? tmdbBySearch : null);
+    const matchedOmdbData = omdbById
+      || (remoteMatchesAnyLocalTitle(localTitleCandidates, omdbBySearch?.Title) ? omdbBySearch : null);
     const matchedJikanMeta = remoteMatchesAnyLocalTitle(localTitleCandidates, jikanMeta?.title) ? jikanMeta : null;
     const localAndAnimeAliasTitles = uniqueLocalTitles([
       ...localTitleCandidates,

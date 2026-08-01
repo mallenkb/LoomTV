@@ -69,7 +69,7 @@ export function isGenericGroupingFolderTitle(value: string): boolean {
 }
 
 export function cleanMediaTitle(name: string): { title: string; year: number } {
-  const withoutExt = name.replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts|vtt|srt|ass|ssa)$/i, '');
+  const withoutExt = name.replace(/\.(3gp|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|mts|mxf|ogm|ogv|ts|vob|webm|wmv|vtt|srt|ass|ssa)$/i, '');
   const yearMatches = [...withoutExt.matchAll(/\b(19\d{2}|20\d{2})\b/g)];
   const maxReleaseYear = new Date().getFullYear() + 1;
   const releaseYearMatch =
@@ -137,7 +137,7 @@ function basenameFromPath(value?: string | null): string {
 
 export function seriesTitleFromEpisodeFileName(value?: string | null): string | null {
   if (!value) return null;
-  const withoutExt = basenameFromPath(value).replace(/\.(mkv|mp4|avi|mov|webm|m4v|wmv|flv|mpg|mpeg|m2ts|3gp|ts)$/i, '');
+  const withoutExt = basenameFromPath(value).replace(/\.(3gp|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|mts|mxf|ogm|ogv|ts|vob|webm|wmv)$/i, '');
   const withoutReleaseGroups = withoutExt.replace(/\[[^\]]*]/g, ' ');
   const beforeEpisodeMarker = withoutReleaseGroups
     .replace(/\s+-\s+S\d{1,2}E\d{1,3}\s+-\s+.*$/i, ' ')

@@ -20,10 +20,12 @@ import {
 import {
   createSubtitleRecords,
   isLikelyAnimePath,
-  isTVPattern,
   shouldTreatAsTV,
 } from './scanClassification.ts';
 
+// An omitted kind is the mixed “Others” mode: keep every supported video and
+// infer structured TV/anime folders without forcing the whole root into one
+// library type.
 export type ScanFolderKind = 'movies' | 'tv' | 'anime';
 
 export interface ScanContext {
@@ -108,6 +110,48 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
     }
   }
 
+  async function buildLooseVideoItems(
+    folderPath: string,
+    videoFiles: string[],
+    subtitleFiles: string[],
+    ctx: ScanContext,
+  ): Promise<MediaItem[]> {
+    const items: MediaItem[] = [];
+    await processWithConcurrencyInOrder(
+      videoFiles,
+      LIBRARY_ITEM_CONCURRENCY,
+      async (videoFile): Promise<MediaItem | null> => {
+        const fullPath = path.join(folderPath, videoFile);
+        const parsedVideo = cleanMediaTitle(videoFile);
+        const matchingSubtitles = subtitleFiles.filter((subtitle) =>
+          path.basename(subtitle, path.extname(subtitle)).startsWith(path.basename(videoFile, path.extname(videoFile))),
+        );
+        const forcedType = ctx.folderKind === 'movies'
+          ? 'movie'
+          : ctx.folderKind === 'anime'
+            ? 'anime'
+            : ctx.folderKind === 'tv'
+              ? 'tv'
+              : undefined;
+        return buildMovieItemFromFile({
+          fullPath,
+          fileName: videoFile,
+          titleFallback: parsedVideo.title,
+          subtitles: createSubtitleRecords(folderPath, matchingSubtitles),
+          year: parsedVideo.year,
+          omdbApiKey: ctx.omdbApiKey,
+          tmdbApiKey: ctx.tmdbApiKey,
+          fanartApiKey: ctx.fanartApiKey,
+          forcedType,
+        });
+      },
+      async (item) => {
+        if (item) items.push(item);
+      },
+    );
+    return items;
+  }
+
 async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promise<MediaItem | null> {
   const dirEntries = await fs.promises.readdir(folderPath, { withFileTypes: true });
 
@@ -124,6 +168,9 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
   const detectedFolderKind = detectLibraryFolderKind(folderPath);
 
   if (ctx.folderKind && detectedFolderKind) return null;
+  // An Others root can contain several loose videos and child folders. Let the
+  // full walker enumerate every file instead of treating the root as one item.
+  if (!ctx.folderKind && (videoFiles.length > 1 || subDirs.length > 0)) return null;
   if (ctx.folderKind === 'movies' && videoFiles.length > 1) return null;
 
   if (videoFiles.length === 0 && !hasSeasonDirs && nestedEpisodeFiles.length === 0) return null;
@@ -223,22 +270,24 @@ async function scanFolder(
         LIBRARY_ITEM_CONCURRENCY,
         async (videoFile): Promise<MediaItem | null> => {
           const fullVideoPath = path.join(folderPath, videoFile);
-          const probe = await probeMediaFile(fullVideoPath);
-          const isTVFile = shouldTreatAsTV(videoFile, [videoFile], false, probe);
-          if (ctx.folderKind !== 'movies' && isTVFile) return null;
 
           const baseName = path.basename(videoFile, path.extname(videoFile));
           const matchingSubtitles = rootSubtitleFiles.filter((subtitle) =>
             path.basename(subtitle, path.extname(subtitle)).startsWith(baseName),
           );
+          const parsedVideo = cleanMediaTitle(videoFile);
+          const looseFileProbe = ctx.folderKind ? undefined : await probeMediaFile(fullVideoPath);
+          const recognizedLooseEpisode = !ctx.folderKind
+            && shouldTreatAsTV(videoFile, [videoFile], false, looseFileProbe);
           const forcedMovieType = ctx.folderKind === 'movies'
             ? 'movie'
             : ctx.folderKind === 'anime'
               ? 'anime'
               : ctx.folderKind === 'tv'
                 ? 'tv'
-                : undefined;
-          const parsedVideo = cleanMediaTitle(videoFile);
+                : recognizedLooseEpisode
+                  ? (isLikelyAnimePath(fullVideoPath, parsedVideo.title) ? 'anime' : 'tv')
+                  : undefined;
           return buildMovieItemFromFile({
             fullPath: fullVideoPath,
             fileName: videoFile,
@@ -301,11 +350,24 @@ async function scanFolder(
 
           const isTV = ctx.folderKind === 'tv'
             || ctx.folderKind === 'anime'
-            || (ctx.folderKind !== 'movies' && (hasSeasonDirs || isTVPattern(entry.name, videoFiles)));
+            || (ctx.folderKind !== 'movies' && shouldTreatAsTV(
+              entry.name,
+              videoFiles,
+              hasSeasonDirs,
+              videoFiles[0] ? await probeMediaFile(path.join(fullPath, videoFiles[0])) : undefined,
+            ));
           const parsedFolder = cleanMediaTitle(entry.name);
           const subtitles = createSubtitleRecords(fullPath, subtitleFiles);
 
           if (isTV) {
+            // An Others folder may mix episodes with ordinary videos. The TV
+            // builder consumes only recognized episodes; preserve any sibling
+            // videos as standalone playable items instead of silently losing
+            // them from the mixed library.
+            const knownEpisodeFiles = ctx.folderKind
+              ? []
+              : await scanEpisodeFiles(fullPath);
+            const episodePaths = new Set(knownEpisodeFiles.map((file) => path.resolve(file.filePath)));
             const tvItem = await buildTVItemFromFolder({
               fullPath,
               entryName: entry.name,
@@ -319,21 +381,20 @@ async function scanFolder(
               fanartApiKey: ctx.fanartApiKey,
               openSubtitles: ctx.openSubtitles,
             });
-            return tvItem ? [tvItem] : [];
+            const looseVideoFiles = ctx.folderKind
+              ? []
+              : videoFiles.filter((videoFile) => !episodePaths.has(path.resolve(path.join(fullPath, videoFile))));
+            const looseItems = looseVideoFiles.length > 0
+              ? await buildLooseVideoItems(fullPath, looseVideoFiles, subtitleFiles, ctx)
+              : [];
+            return [
+              ...(tvItem ? [tvItem] : []),
+              ...looseItems,
+            ];
           }
 
           if (videoFiles.length === 0) return [];
-          return [await buildMovieItemFromFile({
-            fullPath: path.join(fullPath, videoFiles[0]),
-            fileName: videoFiles[0],
-            titleFallback: parsedFolder.title,
-            subtitles,
-            year: parsedFolder.year,
-            omdbApiKey: ctx.omdbApiKey,
-            tmdbApiKey: ctx.tmdbApiKey,
-            fanartApiKey: ctx.fanartApiKey,
-            forcedType: ctx.folderKind === 'movies' ? 'movie' : undefined,
-          })];
+          return buildLooseVideoItems(fullPath, videoFiles, subtitleFiles, ctx);
         },
         async (nextItems) => {
           for (const item of nextItems) await addItems([item]);

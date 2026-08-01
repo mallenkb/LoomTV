@@ -56,6 +56,8 @@ test('a scan indexes nested video files and skips non-video files', async () => 
     assert.equal(item.available, true);
     assert.equal(typeof item.id, 'string');
   }
+  assert.equal(state.catalog.find((item) => item.kind === 'episode')?.type, 'tv');
+  assert.equal(state.catalog.find((item) => item.kind === 'movie')?.type, 'movie');
 });
 
 test('an offline root preserves existing records as unavailable instead of deleting them', async () => {

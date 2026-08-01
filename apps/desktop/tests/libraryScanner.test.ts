@@ -50,3 +50,47 @@ test('library scanner delegates standalone and nested movie files with an explic
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('mixed Others scans retain every loose video and detect structured TV folders', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'loomtv-mixed-library-'));
+  const homeVideos = path.join(root, 'Home Videos');
+  const show = path.join(root, 'Example Show');
+  mkdirSync(homeVideos);
+  mkdirSync(show);
+  writeFileSync(path.join(root, 'Loose Movie.mkv'), 'video');
+  writeFileSync(path.join(homeVideos, 'Birthday.divx'), 'video');
+  writeFileSync(path.join(homeVideos, 'Holiday.mxf'), 'video');
+  writeFileSync(path.join(show, 'Example.Show.S01E01.mkv'), 'video');
+
+  const movieCalls: Array<{ filePath: string; forcedType?: MediaItem['type'] }> = [];
+  const tvCalls: string[] = [];
+  const scanner = createLibraryScanner({
+    buildMovieItemFromFile: async (request) => {
+      movieCalls.push({ filePath: request.fullPath, forcedType: request.forcedType });
+      return item(request.fullPath, request.forcedType || 'movie');
+    },
+    buildTVItemFromFolder: async (request) => {
+      tvCalls.push(request.fullPath);
+      return item(request.fullPath, 'tv');
+    },
+    probeMediaFile: () => ({}),
+    scanEpisodeFiles: (folderPath) => folderPath === show
+      ? [{ season: 1, episode: 1, filePath: path.join(show, 'Example.Show.S01E01.mkv') }]
+      : [],
+    shouldSplitContainerFolder: () => false,
+  });
+
+  try {
+    const items = await scanner.scanFolder(root, {});
+    assert.equal(items.length, 4);
+    assert.deepEqual(movieCalls.map((call) => path.basename(call.filePath)).sort(), [
+      'Birthday.divx',
+      'Holiday.mxf',
+      'Loose Movie.mkv',
+    ]);
+    assert.deepEqual(movieCalls.map((call) => call.forcedType), [undefined, undefined, undefined]);
+    assert.deepEqual(tvCalls, [show]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
