@@ -13,14 +13,20 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { formatTime } from './helpers';
 import type { ControlTab } from './types';
+
+const VOLUME_ACK_TIMEOUT_MS = 1_200;
+
+const clampVolume = (value: number): number => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
 
 interface PlayerControlBarProps {
   showControls: boolean;
   seekSliderRef: React.RefObject<HTMLDivElement | null>;
   progressFillRef: React.RefObject<HTMLDivElement | null>;
   progressThumbRef: React.RefObject<HTMLDivElement | null>;
+  scrubTimeHudRef: React.RefObject<HTMLDivElement | null>;
   currentTimeTextRef: React.RefObject<HTMLSpanElement | null>;
   durationTimeTextRef: React.RefObject<HTMLSpanElement | null>;
   playbackPositionRef: React.RefObject<number>;
@@ -58,6 +64,7 @@ export default function PlayerControlBar({
   seekSliderRef,
   progressFillRef,
   progressThumbRef,
+  scrubTimeHudRef,
   currentTimeTextRef,
   durationTimeTextRef,
   playbackPositionRef,
@@ -89,6 +96,86 @@ export default function PlayerControlBar({
   openMediaPanel,
   toggleFullscreen,
 }: PlayerControlBarProps) {
+  const engineVolume = clampVolume(volume);
+  const engineVolumeRef = useRef(engineVolume);
+  const engineMutedRef = useRef(muted);
+  const volumeInputRef = useRef<HTMLInputElement | null>(null);
+  const lastAudibleVolumeRef = useRef(engineVolume > 0 ? engineVolume : 1);
+  const pendingVolumeRef = useRef<number | null>(null);
+  const pendingMutedRef = useRef<boolean | null>(null);
+  const pendingAckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [displayVolume, setDisplayVolume] = useState(engineVolume);
+  const [displayMuted, setDisplayMuted] = useState(muted || engineVolume === 0);
+
+  engineVolumeRef.current = engineVolume;
+  engineMutedRef.current = muted;
+  if (engineVolume > 0) lastAudibleVolumeRef.current = engineVolume;
+
+  const scheduleAckFallback = () => {
+    if (pendingAckTimerRef.current) clearTimeout(pendingAckTimerRef.current);
+    pendingAckTimerRef.current = setTimeout(() => {
+      pendingAckTimerRef.current = null;
+      pendingVolumeRef.current = null;
+      pendingMutedRef.current = null;
+      setDisplayVolume(engineVolumeRef.current);
+      setDisplayMuted(engineMutedRef.current || engineVolumeRef.current === 0);
+    }, VOLUME_ACK_TIMEOUT_MS);
+  };
+
+  useEffect(() => {
+    const pendingVolume = pendingVolumeRef.current;
+    if (pendingVolume === null) {
+      setDisplayVolume(engineVolume);
+    } else if (Math.abs(engineVolume - pendingVolume) < 0.001) {
+      pendingVolumeRef.current = null;
+      setDisplayVolume(engineVolume);
+    }
+  }, [engineVolume]);
+
+  useEffect(() => {
+    const pendingMuted = pendingMutedRef.current;
+    if (pendingMuted === null) {
+      setDisplayMuted(muted || engineVolume === 0);
+    } else if (muted === pendingMuted) {
+      pendingMutedRef.current = null;
+      setDisplayMuted(muted || engineVolume === 0);
+    }
+  }, [engineVolume, muted]);
+
+  useEffect(() => () => {
+    if (pendingAckTimerRef.current) clearTimeout(pendingAckTimerRef.current);
+  }, []);
+
+  const handleVolumeChange: React.ChangeEventHandler<HTMLInputElement> = (event) => {
+    const nextVolume = clampVolume(Number.parseFloat(event.currentTarget.value));
+    const nextMuted = nextVolume === 0;
+    if (nextVolume > 0) lastAudibleVolumeRef.current = nextVolume;
+    pendingVolumeRef.current = nextVolume;
+    pendingMutedRef.current = nextMuted;
+    setDisplayVolume(nextVolume);
+    setDisplayMuted(nextMuted);
+    scheduleAckFallback();
+    handleVolume(event);
+  };
+
+  const handleMuteClick = () => {
+    if (volumeIsMuted && displayVolume === 0 && volumeInputRef.current) {
+      const restoredVolume = Math.max(0.1, lastAudibleVolumeRef.current);
+      const input = volumeInputRef.current;
+      input.value = String(restoredVolume);
+      handleVolumeChange({ currentTarget: input, target: input } as React.ChangeEvent<HTMLInputElement>);
+      return;
+    }
+    const nextMuted = !(displayMuted || displayVolume === 0);
+    pendingMutedRef.current = nextMuted;
+    setDisplayMuted(nextMuted);
+    scheduleAckFallback();
+    toggleMute();
+  };
+
+  const volumeIsMuted = displayMuted || displayVolume === 0;
+  const visibleVolume = volumeIsMuted ? 0 : displayVolume;
+
   return (
     <div
       className={`loom-player-controls absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/95 via-black/55 to-transparent px-6 pb-6 pt-14 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -122,11 +209,19 @@ export default function PlayerControlBar({
           aria-valuemax={duration || 0}
           aria-valuenow={Math.min(position, duration || position)}
           aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
-          aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+          aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End"
           onPointerDown={handleProgressPointerDown}
           onKeyDown={handleProgressKeyDown}
           className="group relative h-6 min-w-0 flex-1 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
         >
+          <div
+            ref={scrubTimeHudRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-full z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-black/85 px-2.5 py-1 text-xs font-semibold tabular-nums text-white opacity-0 shadow-lg backdrop-blur-md transition-opacity duration-150"
+            style={{ left: `${progressPct}%` }}
+          >
+            {formatTime(position)} / {formatTime(duration)}
+          </div>
           <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
             <div
               ref={progressFillRef}
@@ -177,24 +272,27 @@ export default function PlayerControlBar({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={toggleMute}
+            onClick={handleMuteClick}
             className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-            title={muted || volume === 0 ? 'Unmute (M)' : 'Mute (M)'}
-            aria-label={muted || volume === 0 ? 'Unmute' : 'Mute'}
-            aria-pressed={muted || volume === 0}
+            title={volumeIsMuted ? 'Unmute (M)' : 'Mute (M)'}
+            aria-label={volumeIsMuted ? 'Unmute' : 'Mute'}
+            aria-pressed={volumeIsMuted}
           >
-            {muted || volume === 0 ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
+            {volumeIsMuted ? <VolumeX className="h-5 w-5" strokeWidth={2.25} /> : <Volume2 className="h-5 w-5" strokeWidth={2.25} />}
           </button>
           <input
+            ref={volumeInputRef}
             type="range"
             min={0}
             max={1}
-            step={0.05}
-            value={muted ? 0 : volume}
-            onChange={handleVolume}
+            step={0.01}
+            value={visibleVolume}
+            onChange={handleVolumeChange}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
             aria-label="Volume"
-            aria-valuetext={`${Math.round((muted ? 0 : volume) * 100)}%`}
-            style={{ '--loom-volume-pct': `${Math.round((muted ? 0 : volume) * 100)}%` } as React.CSSProperties}
+            aria-valuetext={`${Math.round(visibleVolume * 100)}%${volumeIsMuted ? ' (muted)' : ''}`}
+            style={{ '--loom-volume-pct': `${Math.round(visibleVolume * 100)}%` } as React.CSSProperties}
             className="loom-volume-slider w-24 outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
           />
         </div>
@@ -230,6 +328,7 @@ export default function PlayerControlBar({
           <button
             type="button"
             onClick={openEpisodePanel}
+            data-player-panel-toggle="true"
             className={`flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showSidebar ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
             title="Episode list"
             aria-label="Episode list"
@@ -244,6 +343,7 @@ export default function PlayerControlBar({
         <button
           type="button"
           onClick={openSubtitlesPanel}
+          data-player-panel-toggle="true"
           className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showMediaPanel && mediaPanelTab === 'subtitles' ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
           title="Subtitles"
           aria-label="Subtitles"
@@ -256,6 +356,7 @@ export default function PlayerControlBar({
         <button
           type="button"
           onClick={openMediaPanel}
+          data-player-panel-toggle="true"
           className={`grid h-11 w-11 shrink-0 place-items-center rounded-lg outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${showMediaPanel && mediaPanelTab === 'video' ? 'border border-white/20 bg-black/55 text-white shadow-lg backdrop-blur-md' : 'text-white/85 hover:bg-white/10 hover:text-white'}`}
           title="Playback settings"
           aria-label="Playback settings"

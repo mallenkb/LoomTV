@@ -64,6 +64,18 @@ export type LanPairResponse<TLibrary> = {
   libraryEtag: string;
 };
 
+export type LanPairApprovalRequest = {
+  requestId: string;
+  requestSecret: string;
+  expiresAt: number;
+  status: 'pending';
+};
+
+export type LanPairApprovalStatus = {
+  status: 'pending' | 'denied' | 'expired';
+  expiresAt?: number;
+};
+
 export type LanStoredProgress = {
   position: number;
   duration: number;
@@ -74,6 +86,13 @@ export type LanStoredProgress = {
 export type LanStreamOptions = {
   forceTranscode?: boolean;
   startSeconds?: number;
+  targetVideoCodec?: 'h264' | 'hevc' | 'av1';
+  maxWidth?: number;
+  maxHeight?: number;
+  videoBitrateKbps?: number;
+  audioBitrateKbps?: number;
+  toneMap?: boolean;
+  preset?: 'auto' | 'software' | 'videotoolbox' | 'nvenc' | 'qsv' | 'vaapi' | 'amf' | 'rkmpp';
   audioTrackIndex?: number;
   subtitleTrackIndex?: number;
   subtitleStreamOrdinal?: number;
@@ -82,6 +101,48 @@ export type LanStreamOptions = {
   subtitleStyle?: {
     fontSize?: number;
   };
+};
+
+export type LanPlaybackCapabilities = {
+  containers?: string[];
+  videoCodecs?: string[];
+  audioCodecs?: string[];
+  supportsHls?: boolean;
+  supportsHdr?: boolean;
+  supportsTextSubtitles?: boolean;
+  maxWidth?: number;
+  maxHeight?: number;
+  maxVideoBitrateKbps?: number;
+};
+
+export type LanPlaybackPlan = {
+  mode: 'direct' | 'remux' | 'direct-stream' | 'transcode';
+  reason: string;
+  sourceAction: 'direct' | 'transcode';
+  codec?: string;
+  backend?: string;
+  facts?: {
+    container: string;
+    videoCodec: string;
+    audioCodec: string;
+    width: number;
+    height: number;
+    bitrate: number;
+    hdr: boolean;
+  };
+};
+
+export type LanPlaybackPlanRequest = {
+  mediaId: string;
+  capabilities?: LanPlaybackCapabilities;
+  selectionRevision?: number;
+};
+
+export type LanPlaybackPlanResponse = {
+  mediaCoreContractVersion: number;
+  capabilities: Required<LanPlaybackCapabilities>;
+  plan: LanPlaybackPlan;
+  recommendedOptions?: LanStreamOptions;
 };
 
 export type LanApiResult<T> = {
@@ -161,6 +222,7 @@ export type LanClientCapabilities = {
   kidsRestrictions: boolean;
   profilePreferences: boolean;
   profileLists: boolean;
+  playbackPlan: boolean;
 };
 
 export type LanClientConfig = LanProfilePreferences & {

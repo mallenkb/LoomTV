@@ -18,6 +18,28 @@ import {
 export const TRANSCODE_READY_SEGMENTS = 1;
 export const HLS_SEGMENT_SECONDS = 2;
 export const HLS_WINDOW_SEGMENTS = 45;
+export const LOCAL_HLS_SEGMENT_SECONDS = 1;
+export const LOCAL_HLS_WINDOW_SEGMENTS = 30;
+
+export type HlsSegmentProfile = 'local-interactive' | 'lan-stable';
+
+export const HLS_SEGMENT_PROFILES: Readonly<Record<HlsSegmentProfile, {
+  segmentSeconds: number;
+  windowSegments: number;
+}>> = Object.freeze({
+  'local-interactive': {
+    segmentSeconds: LOCAL_HLS_SEGMENT_SECONDS,
+    windowSegments: LOCAL_HLS_WINDOW_SEGMENTS,
+  },
+  'lan-stable': {
+    segmentSeconds: HLS_SEGMENT_SECONDS,
+    windowSegments: HLS_WINDOW_SEGMENTS,
+  },
+});
+
+export function hlsSegmentProfileForScope(scope?: string): HlsSegmentProfile {
+  return scope?.startsWith('lan:') ? 'lan-stable' : 'local-interactive';
+}
 
 export function buildEmbeddedSubtitleVttArgs(filePath: string, streamOrdinal: number): string[] {
   const safeOrdinal = Number.isFinite(streamOrdinal) && streamOrdinal > 0

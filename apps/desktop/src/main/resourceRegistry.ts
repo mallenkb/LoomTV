@@ -8,10 +8,63 @@ type RegisteredResource = {
   kind: LocalResourceKind;
   value: string;
   scopePath?: string;
+  catalogGeneration: number;
+  lastUsedAt: number;
 };
 
 const resources = new Map<string, RegisteredResource>();
 const MAX_REGISTERED_RESOURCES = 100_000;
+const PREVIOUS_CATALOG_GENERATIONS_TO_KEEP = 1;
+const RESOURCE_EXPIRY_MS = 30 * 60 * 1_000;
+const RESOURCE_PRUNE_BATCH_SIZE = 64;
+let currentCatalogGeneration = 0;
+let resourcePruneIterator: IterableIterator<[string, RegisteredResource]> | null = null;
+
+function pruneExpiredResources(now = Date.now(), includeGeneration = false): void {
+  const oldestAllowedGeneration = Math.max(
+    0,
+    currentCatalogGeneration - PREVIOUS_CATALOG_GENERATIONS_TO_KEEP,
+  );
+  if (includeGeneration) {
+    for (const [id, resource] of resources) {
+      const expiredByGeneration = resource.catalogGeneration < oldestAllowedGeneration;
+      const expiredByTime = resource.catalogGeneration < currentCatalogGeneration
+        && now - resource.lastUsedAt >= RESOURCE_EXPIRY_MS;
+      if (expiredByGeneration || expiredByTime) resources.delete(id);
+    }
+    resourcePruneIterator = null;
+    return;
+  }
+
+  resourcePruneIterator ??= resources.entries();
+  for (let scanned = 0; scanned < RESOURCE_PRUNE_BATCH_SIZE; scanned += 1) {
+    const next = resourcePruneIterator.next();
+    if (next.done) {
+      resourcePruneIterator = null;
+      return;
+    }
+    const [id, resource] = next.value;
+    if (
+      resources.get(id) === resource
+      && resource.catalogGeneration < currentCatalogGeneration
+      && now - resource.lastUsedAt >= RESOURCE_EXPIRY_MS
+    ) {
+      resources.delete(id);
+    }
+  }
+}
+
+/**
+ * Advances the catalog epoch without changing the deterministic resource IDs.
+ * The current and immediately previous epochs remain resolvable so a paired
+ * client can finish a request while it observes a catalog refresh. Expiry is
+ * opportunistic: callers pay no timer or background-task cost.
+ */
+export function setResourceRegistryCatalogGeneration(generation: number): void {
+  if (!Number.isSafeInteger(generation) || generation <= currentCatalogGeneration) return;
+  currentCatalogGeneration = generation;
+  pruneExpiredResources(Date.now(), true);
+}
 
 function normalizedScopePath(scopePath: string): string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(scopePath)) {
@@ -34,17 +87,29 @@ export function registerResource(
   value: string,
   scopePath?: string,
 ): string {
+  const now = Date.now();
+  pruneExpiredResources(now);
   const normalized = kind === 'external-artwork' ? value.trim() : path.resolve(value);
   const normalizedResourceScope = scopePath ? normalizedScopePath(scopePath) : undefined;
   const identity = normalizedResourceScope
     ? `${kind}\0${normalized}\0scope\0${normalizedResourceScope}`
     : `${kind}\0${normalized}`;
   const id = createHmac('sha256', secret).update(identity).digest('base64url');
-  if (resources.size >= MAX_REGISTERED_RESOURCES && !resources.has(id)) {
+  if (resources.has(id)) {
+    // Re-registering an existing capability is a use and should refresh its
+    // position in the bounded registry rather than leaving it FIFO-stale.
+    resources.delete(id);
+  } else if (resources.size >= MAX_REGISTERED_RESOURCES) {
     const oldest = resources.keys().next().value;
     if (oldest) resources.delete(oldest);
   }
-  resources.set(id, { kind, value: normalized, scopePath: normalizedResourceScope });
+  resources.set(id, {
+    kind,
+    value: normalized,
+    scopePath: normalizedResourceScope,
+    catalogGeneration: currentCatalogGeneration,
+    lastUsedAt: now,
+  });
   return id;
 }
 
@@ -59,6 +124,7 @@ export function resolveLocalResource(
   libraryRoots: readonly string[],
   expectedScopePath?: string,
 ): string {
+  pruneExpiredResources();
   const resource = resources.get(id);
   if (!resource || !allowedKinds.has(resource.kind) || resource.kind === 'external-artwork') {
     throw new Error('Unknown local resource. Refresh the paired library and try again.');
@@ -83,11 +149,20 @@ export function resolveLocalResource(
   if (!contained || !fs.statSync(candidate).isFile()) {
     throw new Error('The requested resource is outside the configured library.');
   }
+  resources.delete(id);
+  resource.catalogGeneration = currentCatalogGeneration;
+  resource.lastUsedAt = Date.now();
+  resources.set(id, resource);
   return candidate;
 }
 
 export function resolveExternalArtworkResource(id: string): string {
+  pruneExpiredResources();
   const resource = resources.get(id);
   if (!resource || resource.kind !== 'external-artwork') throw new Error('Unknown artwork resource.');
+  resources.delete(id);
+  resource.catalogGeneration = currentCatalogGeneration;
+  resource.lastUsedAt = Date.now();
+  resources.set(id, resource);
   return resource.value;
 }

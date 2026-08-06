@@ -1,12 +1,20 @@
 import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 
-type NetworkStatusSettings<TPairedDevice> = {
+type PublicPairedDevice = {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt: number;
+  lastAddress?: string;
+};
+
+type NetworkStatusSettings<TPairedDevice extends PublicPairedDevice> = {
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
   localNetworkPairedDevices?: TPairedDevice[];
 };
 
-export type NetworkStatusDependencies<TPairedDevice> = {
+export type NetworkStatusDependencies<TPairedDevice extends PublicPairedDevice> = {
   loadSettings: () => NetworkStatusSettings<TPairedDevice>;
   getLanShareToken: () => string;
   getLanServerBase: () => string | null;
@@ -16,7 +24,7 @@ export type NetworkStatusDependencies<TPairedDevice> = {
   getLocalNetworkAddresses: () => string[];
 };
 
-export function buildNetworkStatus<TPairedDevice>(deps: NetworkStatusDependencies<TPairedDevice>) {
+export function buildNetworkStatus<TPairedDevice extends PublicPairedDevice>(deps: NetworkStatusDependencies<TPairedDevice>) {
   const settings = deps.loadSettings();
   const baseUrl = deps.getLanServerBase();
   return {
@@ -29,7 +37,13 @@ export function buildNetworkStatus<TPairedDevice>(deps: NetworkStatusDependencie
     addresses: deps.getLocalNetworkAddresses(),
     baseUrl,
     libraryUrl: baseUrl ? `${baseUrl}/api/v2/library` : null,
-    pairedDevices: settings.localNetworkPairedDevices || [],
+    pairedDevices: (settings.localNetworkPairedDevices || []).map((device) => ({
+      id: device.id,
+      name: device.name,
+      createdAt: device.createdAt,
+      lastSeenAt: device.lastSeenAt,
+      ...(device.lastAddress ? { lastAddress: device.lastAddress } : {}),
+    })),
   };
 }
 

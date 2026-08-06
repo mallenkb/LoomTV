@@ -15,7 +15,6 @@ import {
   type ManagedMediaSegment,
   type MediaSegment,
   type MediaSegmentType,
-  type MpvPlaybackState,
 } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
@@ -66,6 +65,7 @@ import {
   getStoredDuration,
   hlsErrorSummary,
   isBitmapSubtitleCodec,
+  isSignsOnlySubtitleTrack,
   loadSharedTrackPreferences,
   loadSubtitlesDefaultEnabled,
   mediaErrorMessage,
@@ -118,13 +118,62 @@ import {
 } from './VideoPlayer/playerControls';
 import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
+import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
+import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
 const POSITION_UI_UPDATE_INTERVAL_MS = 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2000;
+const NATIVE_SCRUB_PREVIEW_INTERVAL_MS = 80;
+const NATIVE_SEEK_GUARD_TIMEOUT_MS = 2500;
+const NATIVE_SEEK_LANDING_TOLERANCE_SECONDS = 1.25;
+// Keep the first surface click pending long enough for the macOS double-click
+// interval to deliver its second click. This prevents a slow system double
+// click from pausing before the fullscreen gesture is recognized.
+const SURFACE_DOUBLE_CLICK_WINDOW_MS = 500;
+
+function subtitleLanguageKey(language?: string): string {
+  const normalized = (language || '').trim().toLowerCase().split(/[-_]/)[0];
+  if (!normalized || normalized === 'und') return '';
+  try {
+    const DisplayNames = (Intl as typeof Intl & {
+      DisplayNames?: new (locales: string[], options: { type: 'language' }) => { of: (code: string) => string | undefined };
+    }).DisplayNames;
+    if (!DisplayNames) return normalized;
+    return (new DisplayNames(['en'], { type: 'language' }).of(normalized) || normalized).toLowerCase();
+  } catch {
+    return normalized;
+  }
+}
+
+function compatibleTextSubtitleTrack(tracks: MediaTrack[], selectedIndex: number): MediaTrack | null {
+  const selected = tracks.find((track) => track.type === 'subtitle' && track.index === selectedIndex);
+  if (!selected || !isBitmapSubtitleCodec(selected.codec)) return null;
+
+  const textTracks = tracks.filter((track) => track.type === 'subtitle' && !isBitmapSubtitleCodec(track.codec));
+  const language = subtitleLanguageKey(selected.language);
+  const languageMatches = textTracks.filter((track) => subtitleLanguageKey(track.language) === language);
+  if (languageMatches.length === 0) return null;
+
+  const forcedMatches = languageMatches.filter((track) => Boolean(track.forced) === Boolean(selected.forced));
+  const forcedPool = forcedMatches.length > 0 ? forcedMatches : languageMatches;
+  const signsOnly = isSignsOnlySubtitleTrack(selected);
+  const intentMatches = forcedPool.filter((track) => isSignsOnlySubtitleTrack(track) === signsOnly);
+  const intentPool = intentMatches.length > 0 ? intentMatches : forcedPool;
+  const accessibilityIntent = /\b(?:sdh|cc|hearing[ -]?impaired)\b/i.test(selected.title || '');
+  const accessibilityMatches = intentPool.filter((track) =>
+    /\b(?:sdh|cc|hearing[ -]?impaired)\b/i.test(track.title || '') === accessibilityIntent,
+  );
+  const candidates = accessibilityMatches.length > 0 ? accessibilityMatches : intentPool;
+
+  return candidates.find((track) => Boolean(track.default) === Boolean(selected.default))
+    || candidates.find((track) => track.source === selected.source)
+    || candidates[0]
+    || null;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -148,15 +197,19 @@ export default function VideoPlayer({
   const { theme } = useTheme();
   const isModern = theme.homeStyle === 'modern';
   const containerRef = useRef<HTMLDivElement>(null);
+  const videoViewportRef = useRef<HTMLDivElement>(null);
   const seekSliderRef = useRef<HTMLDivElement>(null);
   const progressFillRef = useRef<HTMLDivElement>(null);
   const progressThumbRef = useRef<HTMLDivElement>(null);
+  const scrubTimeHudRef = useRef<HTMLDivElement>(null);
   const currentTimeTextRef = useRef<HTMLSpanElement>(null);
   const durationTimeTextRef = useRef<HTMLSpanElement>(null);
   const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
   const errorCloseButtonRef = useRef<HTMLButtonElement>(null);
   const showRemainingTimeRef = useRef(false);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const surfaceSingleClickActionRef = useRef<{ wasPaused: boolean; executedAt: number } | null>(null);
+  const surfaceDoubleClickGuardUntilMsRef = useRef(0);
   const hlsRef = useRef<Hls | null>(null);
   const transcodeSessionIdRef = useRef<string | null>(null);
   const pendingSourceSwapRef = useRef<{
@@ -187,6 +240,7 @@ export default function VideoPlayer({
   const selectedVideoTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedAudioTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
+  const subtitleSelectionExplicitRef = useRef(false);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
   const subtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
   const audioDelayRef = useRef(0);
@@ -201,6 +255,11 @@ export default function VideoPlayer({
   const isScrubbingRef = useRef(false);
   const scrubPreviewRafRef = useRef<number | null>(null);
   const scrubListenerCleanupRef = useRef<(() => void) | null>(null);
+  const scrubHudHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nativeScrubSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingNativeScrubSeekRef = useRef<number | null>(null);
+  const lastNativeScrubSeekAtRef = useRef(0);
+  const nativeSeekGuardRef = useRef<{ target: number; expiresAt: number } | null>(null);
   const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTranscodeSeekRef = useRef<number | null>(null);
   const transcodeSeekActiveRef = useRef(false);
@@ -216,6 +275,7 @@ export default function VideoPlayer({
   const streamUsesBrowserPipelineRef = useRef(false);
   const subtitleStyleApplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nativeSubtitleFallbackRef = useRef(false);
+  const libVlcSubtitleFallbackRef = useRef(false);
   const nativeSubtitleStyleRefreshRafRef = useRef<number | null>(null);
   // Set before handing control to the next episode so queued events from the
   // outgoing media element cannot restart that same episode during teardown.
@@ -224,8 +284,17 @@ export default function VideoPlayer({
   // intent across the final seek so an ended event advances instead of being
   // treated as an interrupted transcode that should restart this file.
   const pendingCreditsCompletionRef = useRef(false);
-  const mpvEngineRef = useRef<MpvPlaybackEngine | null>(null);
-  const mpvInitialTracksAppliedRef = useRef(false);
+  const playbackEngineRef = useRef<PlaybackEngine | null>(null);
+  const nativeInitialTracksAppliedRef = useRef(false);
+
+  const cancelPendingSurfaceClick = useCallback((preserveDoubleClickGuard = false) => {
+    if (clickTimerRef.current !== null) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    surfaceSingleClickActionRef.current = null;
+    if (!preserveDoubleClickGuard) surfaceDoubleClickGuardUntilMsRef.current = 0;
+  }, []);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
   const [streamIsTranscoded, setStreamIsTranscoded] = useState(false);
@@ -233,7 +302,9 @@ export default function VideoPlayer({
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const [mpvActive, setMpvActive] = useState(false);
+  const [nativePlaybackActive, setNativePlaybackActive] = useState(false);
+  const [nativeEngineKind, setNativeEngineKind] = useState<PlaybackEngineKind | null>(null);
+  const libVlcSurfaceActive = nativePlaybackActive && nativeEngineKind === 'libvlc';
 
   const libraryDurationHint = useMemo(() => {
     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
@@ -290,15 +361,48 @@ export default function VideoPlayer({
   const [markerSaving, setMarkerSaving] = useState(false);
   const [markerError, setMarkerError] = useState<string | null>(null);
   const [rejectedSegments, setRejectedSegments] = useState<ManagedMediaSegment[]>([]);
+  const syncNativeViewport = useCallback(async () => {
+    if (!libVlcSurfaceActive) return true;
+    const element = videoViewportRef.current;
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    return desktopApi.libvlc.setViewport({
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    });
+  }, [libVlcSurfaceActive]);
   const playerStateRef = useRef<PlayerState>(playerState);
   const {
     fullscreen,
     handlePointerMove,
     showControls,
     showTopControls,
-    toggleFullscreen,
-  } = usePlayerChrome(paused, containerRef);
+    toggleFullscreen: requestFullscreenToggle,
+  } = usePlayerChrome(paused, containerRef, libVlcSurfaceActive, syncNativeViewport);
+  const toggleFullscreen = useCallback(() => {
+    cancelPendingSurfaceClick();
+    requestFullscreenToggle();
+  }, [cancelPendingSurfaceClick, requestFullscreenToggle]);
   const startSidePanelResize = useSidePanelResize();
+
+  // Fullscreen can also change through the browser/system lifecycle. Any
+  // pending surface click belongs to the previous gesture and must not pause
+  // or resume playback after that transition has started.
+  useEffect(() => {
+    cancelPendingSurfaceClick(surfaceDoubleClickGuardUntilMsRef.current > Date.now());
+  }, [cancelPendingSurfaceClick, fullscreen]);
+
+  // titleBarStyle is 'hiddenInset', so the macOS traffic lights float over
+  // whatever sits beneath them — in the player, the video. Fade them with the
+  // player's own chrome instead of leaving them permanently on the picture,
+  // and always restore them when the player unmounts.
+  useEffect(() => {
+    void desktopApi.setWindowChromeVisible(showTopControls);
+  }, [showTopControls]);
+  useEffect(() => () => { void desktopApi.setWindowChromeVisible(true); }, []);
 
   useEffect(() => {
     playerStateRef.current = playerState;
@@ -327,6 +431,10 @@ export default function VideoPlayer({
     }
     if (progressThumbRef.current) {
       progressThumbRef.current.style.left = `${progressPercent}%`;
+    }
+    if (scrubTimeHudRef.current) {
+      scrubTimeHudRef.current.style.left = `${progressPercent}%`;
+      scrubTimeHudRef.current.textContent = `${formatTime(safePosition)} / ${formatTime(safeDuration)}`;
     }
     if (currentTimeTextRef.current) {
       const displayTime = showRemainingTimeRef.current
@@ -475,8 +583,11 @@ export default function VideoPlayer({
   useEffect(() => {
     setDismissedNextPromptKey(null);
     setRejectedSegments([]);
+    subtitleSelectionExplicitRef.current = false;
     pendingEpisodeTransitionRef.current = null;
     pendingCreditsCompletionRef.current = false;
+    nativeSeekGuardRef.current = null;
+    pendingNativeScrubSeekRef.current = null;
   }, [filePath]);
 
   useEffect(() => {
@@ -514,6 +625,8 @@ export default function VideoPlayer({
     () => subtitles.filter((subtitle) => subtitle.source !== 'opensubtitles' || openSubtitlesEnabled),
     [openSubtitlesEnabled, subtitles],
   );
+  const visibleSubtitlesRef = useRef(visibleSubtitles);
+  visibleSubtitlesRef.current = visibleSubtitles;
   const externalSubtitleTracks = useMemo<MediaTrack[]>(
     () => visibleSubtitles.map((subtitle, index) => ({
       index: -1000 - index,
@@ -739,7 +852,7 @@ export default function VideoPlayer({
     userPausedRef.current = false;
     suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
     const video = videoRef.current;
-    if (mpvEngineRef.current) void mpvEngineRef.current.pause();
+    if (playbackEngineRef.current) void playbackEngineRef.current.pause();
     if (video) {
       video.autoplay = false;
       video.pause();
@@ -1052,25 +1165,52 @@ export default function VideoPlayer({
     }
   }, [clearHls, filePath, startTranscodedFallback, stopTranscodeSession]);
 
-  const handleMpvState = useCallback((state: MpvPlaybackState) => {
+  const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
+
+    const now = performance.now();
+    const seekGuard = nativeSeekGuardRef.current;
+    const reportedPosition = typeof state.position === 'number' ? state.position : null;
+    let suppressSeekSnapshot = isScrubbingRef.current;
+    if (!suppressSeekSnapshot && seekGuard) {
+      const landed = reportedPosition !== null
+        && Math.abs(reportedPosition - seekGuard.target) <= NATIVE_SEEK_LANDING_TOLERANCE_SECONDS;
+      const expired = now >= seekGuard.expiresAt;
+      const reportedDuration = state.duration ?? playbackDurationRef.current ?? probedDurationRef.current;
+      const seekExpectedToEnd = reportedDuration > 0
+        && reportedDuration - seekGuard.target <= NATIVE_SEEK_LANDING_TOLERANCE_SECONDS;
+      const staleEndedState = state.status === 'ended' && !seekExpectedToEnd;
+      if (landed || (state.status === 'ended' && seekExpectedToEnd)) {
+        nativeSeekGuardRef.current = null;
+      } else if (expired) {
+        nativeSeekGuardRef.current = null;
+        suppressSeekSnapshot = staleEndedState;
+      } else {
+        // LibVLC reports on a polling interval. A snapshot already in flight
+        // before a seek must not pull Loom's optimistic timeline, subtitles,
+        // pause state, or saved progress back to the old position.
+        suppressSeekSnapshot = true;
+      }
+    }
 
     if (typeof state.duration === 'number' || typeof state.position === 'number') {
       const nextDuration = state.duration ?? playbackDurationRef.current ?? probedDurationRef.current;
       const nextPosition = state.position ?? playbackPositionRef.current;
-      if (!isScrubbingRef.current) {
+      if (!suppressSeekSnapshot) {
         updatePlaybackSnapshot(nextPosition, nextDuration, {
           forceReact: state.status === 'ended',
         });
+      } else if (typeof state.duration === 'number' && state.duration !== playbackDurationRef.current) {
+        updatePlaybackSnapshot(playbackPositionRef.current, nextDuration);
       }
-      const now = Date.now();
-      if (nextPosition > 10 && nextDuration > 0 && now - lastProgressSaveRef.current >= PROGRESS_SAVE_INTERVAL_MS) {
-        lastProgressSaveRef.current = now;
+      const wallClockNow = Date.now();
+      if (!suppressSeekSnapshot && nextPosition > 10 && nextDuration > 0 && wallClockNow - lastProgressSaveRef.current >= PROGRESS_SAVE_INTERVAL_MS) {
+        lastProgressSaveRef.current = wallClockNow;
         void savePlaybackProgress(filePath, nextPosition, nextDuration);
       }
     }
 
-    if (typeof state.paused === 'boolean') {
+    if (typeof state.paused === 'boolean' && !suppressSeekSnapshot) {
       setPaused(state.paused);
       if (state.paused && playbackPositionRef.current > 10 && playbackDurationRef.current > 0) {
         void savePlaybackProgress(filePath, playbackPositionRef.current, playbackDurationRef.current);
@@ -1095,8 +1235,8 @@ export default function VideoPlayer({
       probeTracksRef.current = nextTracks;
       setMediaTracks(nextTracks);
 
-      if (!mpvInitialTracksAppliedRef.current) {
-        mpvInitialTracksAppliedRef.current = true;
+      if (!nativeInitialTracksAppliedRef.current) {
+        nativeInitialTracksAppliedRef.current = true;
         const preferences = sharedTrackPreferencesRef.current;
         const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id
           ?? firstTrackIndex(nextTracks, 'video');
@@ -1116,35 +1256,47 @@ export default function VideoPlayer({
         setSelectedVideoTrackIndex(selectedVideo);
         setSelectedAudioTrackIndex(selectedAudio);
         setSelectedSubtitleTrackIndex(selectedSubtitle);
-        void mpvEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
-        void mpvEngineRef.current?.selectAudio(selectedAudio >= 0 ? selectedAudio : null);
-        void mpvEngineRef.current?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
+        void playbackEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
+        void playbackEngineRef.current?.selectAudio(selectedAudio >= 0 ? selectedAudio : null);
+        // LibVLC SPU IDs are not the same namespace as Loom's probe IDs. Its
+        // native path is therefore allowed to keep only the deterministic
+        // bitmap/default track selected at media-open time; parseable text is
+        // rendered by Loom's overlay instead of sending an arbitrary ID.
+        if (playbackEngineRef.current?.kind !== 'libvlc') {
+          void playbackEngineRef.current?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
+        }
       } else {
         const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id ?? -1;
         const selectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id ?? -1;
-        const selectedSubtitle = state.tracks.find((track) => track.type === 'subtitle' && track.selected)?.id ?? -1;
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
         selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
-        selectedSubtitleTrackIndexRef.current = selectedSubtitle;
         setSelectedVideoTrackIndex(selectedVideo);
         setSelectedAudioTrackIndex(selectedAudio);
-        setSelectedSubtitleTrackIndex(selectedSubtitle);
+        // Loom owns parseable-text subtitle selection while LibVLC's native
+        // SPU IDs live in a different namespace. Do not let recurring LibVLC
+        // state snapshots overwrite the renderer-overlay selection with the
+        // native fallback track (or "off").
+        if (playbackEngineRef.current?.kind !== 'libvlc') {
+          const selectedSubtitle = state.tracks.find((track) => track.type === 'subtitle' && track.selected)?.id ?? -1;
+          selectedSubtitleTrackIndexRef.current = selectedSubtitle;
+          setSelectedSubtitleTrackIndex(selectedSubtitle);
+        }
       }
     }
 
-    if (state.status === 'starting' || state.status === 'loading') {
+    if (!suppressSeekSnapshot && (state.status === 'starting' || state.status === 'loading')) {
       setPlayerState('loading');
-      setStatusMessage('Opening with mpv...');
+      setStatusMessage('Opening with native player...');
       setPaused(true);
-    } else if (state.status === 'ready') {
+    } else if (!suppressSeekSnapshot && state.status === 'ready') {
       setPlayerState('ready');
       setStatusMessage('');
       setErrorMessage(null);
-      // A transient pause property while mpv opens is engine state, not user
+      // A transient pause property while the native engine opens is engine state, not user
       // intent. Every explicit Play/Resume action enters with this ref false,
       // so reaffirm autoplay once the native file is actually ready.
-      if (!userPausedRef.current) void mpvEngineRef.current?.play();
-    } else if (state.status === 'ended') {
+      if (!userPausedRef.current) void playbackEngineRef.current?.play();
+    } else if (!suppressSeekSnapshot && state.status === 'ended') {
       const totalDuration = state.duration || playbackDurationRef.current || probedDurationRef.current;
       if (totalDuration > 0) {
         updatePlaybackSnapshot(totalDuration, totalDuration, { forceReact: true });
@@ -1156,14 +1308,64 @@ export default function VideoPlayer({
       }
     } else if (state.status === 'error') {
       const fallbackPosition = playbackPositionRef.current;
-      const engine = mpvEngineRef.current;
-      mpvEngineRef.current = null;
+      const failedEngineKind = playbackEngineRef.current?.kind;
+      const engine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
       void engine?.destroy();
-      setMpvActive(false);
-      document.documentElement.classList.remove('loom-mpv-active');
-      setStatusMessage('Falling back to the compatible player...');
-      setErrorMessage(state.error || null);
-      void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
+      setNativePlaybackActive(false);
+      setNativeEngineKind(null);
+      document.documentElement.classList.remove('loom-native-active');
+      void (async () => {
+        if (failedEngineKind === 'libvlc' && await MpvPlaybackEngine.available().catch(() => false)) {
+          const fallbackEngine = new MpvPlaybackEngine(handleNativePlaybackState);
+          if (!playbackEngineRef.current && playerActiveRef.current) {
+            playbackEngineRef.current = fallbackEngine;
+            try {
+              const style = subtitleStyleRef.current;
+              const loaded = await fallbackEngine.load(filePath, {
+                startSeconds: fallbackPosition,
+                audioDelay: audioDelayRef.current,
+                subtitleDelay: style.delaySeconds,
+                subtitleStyle: {
+                  fontSize: Math.round(style.fontSize * style.scale),
+                  color: style.fontColor,
+                  borderColor: style.borderColor,
+                  borderWidth: style.borderEnabled ? style.borderWidth : 0,
+                  backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+                  position: style.position,
+                },
+                subtitleFiles: visibleSubtitlesRef.current.flatMap((subtitle) => {
+                  try {
+                    const parsed = new URL(subtitle.url, 'http://127.0.0.1');
+                    const subtitlePath = parsed.searchParams.get('path');
+                    return subtitlePath ? [{ path: subtitlePath, source: subtitle.source || 'sidecar' as const }] : [];
+                  } catch {
+                    return [];
+                  }
+                }),
+              });
+              if (loaded && playerActiveRef.current && playbackEngineRef.current === fallbackEngine) {
+                setNativePlaybackActive(true);
+                setNativeEngineKind('mpv');
+                document.documentElement.classList.add('loom-native-active');
+                setStatusMessage('Opening with mpv...');
+                setErrorMessage(null);
+                return;
+              }
+            } catch (error) {
+              console.warn('[player] MPV fallback after LibVLC failure could not start.', error);
+            }
+            if (playbackEngineRef.current === fallbackEngine) playbackEngineRef.current = null;
+            await fallbackEngine.destroy();
+          } else {
+            await fallbackEngine.destroy();
+          }
+        }
+        if (!playerActiveRef.current) return;
+        setStatusMessage('Falling back to the compatible player...');
+        setErrorMessage(state.error || null);
+        void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
+      })();
     }
   }, [filePath, startBrowserStreamAt, updatePlaybackSnapshot]);
 
@@ -1172,10 +1374,11 @@ export default function VideoPlayer({
     hlsRecoveryAttemptsRef.current = 0;
     hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
-    setMpvActive(false);
+    setNativePlaybackActive(false);
+    setNativeEngineKind(null);
+    document.documentElement.classList.remove('loom-native-active');
     setSelectedSecondarySubtitleTrackIndex(-1);
-    mpvInitialTracksAppliedRef.current = false;
-    document.documentElement.classList.remove('loom-mpv-active');
+    nativeInitialTracksAppliedRef.current = false;
     setPlayerState('loading');
     setStatusMessage('Retrying playback...');
     setErrorMessage(null);
@@ -1202,6 +1405,7 @@ export default function VideoPlayer({
 
   // ─── Load media stream URL ────────────────────────────────────────────────
   useEffect(() => {
+    cancelPendingSurfaceClick();
     const loadToken = ++loadTokenRef.current;
     const savedStartPosition = getPlayableStartPosition(filePath, probedDurationRef.current);
     const isReloadingSameFile = loadedFilePathRef.current === filePath;
@@ -1210,6 +1414,7 @@ export default function VideoPlayer({
       savedStartPosition,
     );
     loadedFilePathRef.current = filePath;
+    if (!isReloadingSameFile) libVlcSubtitleFallbackRef.current = false;
     initialResumePositionRef.current = requestedStartPosition;
     playerActiveRef.current = true;
     userPausedRef.current = false;
@@ -1232,6 +1437,10 @@ export default function VideoPlayer({
     streamIsSeekableRef.current = false;
     streamUsesBrowserPipelineRef.current = false;
     setStreamIsTranscoded(false);
+    setNativePlaybackActive(false);
+    setNativeEngineKind(null);
+    nativeInitialTracksAppliedRef.current = false;
+    document.documentElement.classList.remove('loom-native-active');
     updatePlaybackSnapshot(
       requestedStartPosition,
       probedDurationRef.current || getStoredDuration(filePath),
@@ -1257,24 +1466,72 @@ export default function VideoPlayer({
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data, preferences);
 
-        const canUseLocalMpv = !/^(?:https?|plexserver):/i.test(filePath)
-          && await MpvPlaybackEngine.available();
+        const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath);
+        const libVlcAvailable = isLocalFile && await LibVlcPlaybackEngine.available().catch(() => false);
+        const mpvAvailable = isLocalFile && await MpvPlaybackEngine.available().catch(() => false);
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-        if (canUseLocalMpv) {
-          const subtitleFiles = visibleSubtitles.flatMap((subtitle) => {
-            try {
-              const parsed = new URL(subtitle.url, 'http://127.0.0.1');
-              const subtitlePath = parsed.searchParams.get('path');
-              return subtitlePath ? [{
-                path: subtitlePath,
-                source: subtitle.source || 'sidecar' as const,
-              }] : [];
-            } catch {
-              return [];
-            }
-          });
-          const engine = new MpvPlaybackEngine(handleMpvState);
-          mpvEngineRef.current = engine;
+        const allSubtitleFiles = visibleSubtitles.flatMap((subtitle) => {
+          try {
+            const parsed = new URL(subtitle.url, 'http://127.0.0.1');
+            const subtitlePath = parsed.searchParams.get('path');
+            return subtitlePath ? [{ path: subtitlePath, source: subtitle.source || 'sidecar' as const }] : [];
+          } catch {
+            return [];
+          }
+        });
+        let selectedSubtitleIndex = selectedSubtitleTrackIndexRef.current;
+        let selectedSubtitleTrack = probeTracksRef.current.find((track) =>
+          track.type === 'subtitle' && track.index === selectedSubtitleIndex,
+        );
+        const textAlternative = compatibleTextSubtitleTrack(probeTracksRef.current, selectedSubtitleIndex);
+        const preserveExactSubtitle = subtitleSelectionExplicitRef.current || preferences.subtitle !== undefined;
+        if (libVlcAvailable && textAlternative && !preserveExactSubtitle) {
+          // LibVLC cannot restyle image-based subtitles at runtime. For an
+          // automatic/default selection, keep the same language and subtitle
+          // intent while choosing a parseable text track that Loom can render.
+          selectedSubtitleIndex = textAlternative.index;
+          selectedSubtitleTrack = textAlternative;
+          selectedSubtitleTrackIndexRef.current = textAlternative.index;
+          setSelectedSubtitleTrackIndex(textAlternative.index);
+        }
+        const bitmapNeedsCompatibilityEngine = Boolean(
+          libVlcAvailable
+          && selectedSubtitleTrack
+          && isBitmapSubtitleCodec(selectedSubtitleTrack.codec),
+        );
+        const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = [];
+        if (bitmapNeedsCompatibilityEngine && mpvAvailable) {
+          // Preserve an explicit or bitmap-only choice through the old engine,
+          // whose subtitle control path is implemented, instead of exposing
+          // LibVLC controls that silently cannot apply visual styling.
+          nativeEngineFactories.push(MpvPlaybackEngine);
+          if (libVlcAvailable) nativeEngineFactories.push(LibVlcPlaybackEngine);
+        } else {
+          if (libVlcAvailable) nativeEngineFactories.push(LibVlcPlaybackEngine);
+          if (mpvAvailable) nativeEngineFactories.push(MpvPlaybackEngine);
+        }
+        const selectedExternalSubtitle = (() => {
+          if (selectedSubtitleIndex > -1000) return undefined;
+          const selected = visibleSubtitles[-1000 - selectedSubtitleIndex];
+          if (!selected) return undefined;
+          try {
+            const parsed = new URL(selected.url, 'http://127.0.0.1');
+            const subtitlePath = parsed.searchParams.get('path');
+            return subtitlePath ? { path: subtitlePath, source: selected.source || 'sidecar' as const } : undefined;
+          } catch {
+            return undefined;
+          }
+        })();
+        const libVlcNativeSubtitleFallback = Boolean(
+          selectedSubtitleTrack
+          && isBitmapSubtitleCodec(selectedSubtitleTrack.codec),
+        );
+        for (const NativePlaybackEngine of nativeEngineFactories) {
+          const engine = new NativePlaybackEngine(handleNativePlaybackState);
+          playbackEngineRef.current = engine;
+          const subtitleFiles = engine.kind === 'libvlc'
+            ? (selectedExternalSubtitle ? [selectedExternalSubtitle] : [])
+            : allSubtitleFiles;
           const initialSubtitleStyle = subtitleStyleRef.current;
           let loaded = false;
           try {
@@ -1293,27 +1550,35 @@ export default function VideoPlayer({
                 position: initialSubtitleStyle.position,
               },
               subtitleFiles,
+              // Loom's text overlay owns parseable subtitles. LibVLC native
+              // SPU output starts only for bitmap/unsupported tracks, where
+              // the renderer cannot provide equivalent cues or styling.
+              nativeSubtitles: engine.kind === 'libvlc'
+                ? subtitlesDefaultEnabledRef.current && (libVlcNativeSubtitleFallback || libVlcSubtitleFallbackRef.current)
+                : subtitlesDefaultEnabledRef.current && selectedSubtitleIndex !== -1,
             });
           } catch (error) {
-            console.warn('[player] Native mpv startup failed; using browser fallback.', error);
+            console.warn(`[player] Native ${engine.kind} startup failed; trying the next fallback.`, error);
           }
           if (!playerActiveRef.current || loadToken !== loadTokenRef.current) {
             await engine.destroy();
             return;
           }
           if (loaded) {
-            setMpvActive(true);
+            setNativePlaybackActive(true);
+            setNativeEngineKind(engine.kind);
             setStreamUrl('');
-            document.documentElement.classList.add('loom-mpv-active');
-            setStatusMessage('Opening with mpv...');
+            document.documentElement.classList.add('loom-native-active');
+            setStatusMessage(`Opening with ${engine.kind}...`);
             return;
           }
-          mpvEngineRef.current = null;
+          playbackEngineRef.current = null;
           await engine.destroy();
         }
 
-        setMpvActive(false);
-        document.documentElement.classList.remove('loom-mpv-active');
+        setNativePlaybackActive(false);
+        setNativeEngineKind(null);
+        document.documentElement.classList.remove('loom-native-active');
         await startBrowserStreamAt(requestedStartPosition);
       } catch (error) {
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
@@ -1327,16 +1592,17 @@ export default function VideoPlayer({
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
       browserStreamGenerationRef.current += 1;
-      const engine = mpvEngineRef.current;
-      mpvEngineRef.current = null;
+      const engine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
       void engine?.destroy();
-      document.documentElement.classList.remove('loom-mpv-active');
+      document.documentElement.classList.remove('loom-native-active');
       void stopTranscodeSession();
     };
   }, [
     applyProbeData,
+    cancelPendingSurfaceClick,
     filePath,
-    handleMpvState,
+    handleNativePlaybackState,
     reloadToken,
     startBrowserStreamAt,
     startPosition,
@@ -1445,12 +1711,13 @@ export default function VideoPlayer({
           return;
         }
 
+        const remoteBufferProfile = desktopApi.isRemoteLibraryMode();
         const hls = new Hls({
           autoStartLoad: false,
           startPosition: hlsStartPosition,
-          maxBufferLength: 45,
-          maxMaxBufferLength: 90,
-          backBufferLength: 30,
+          maxBufferLength: remoteBufferProfile ? 45 : 20,
+          maxMaxBufferLength: remoteBufferProfile ? 90 : 45,
+          backBufferLength: remoteBufferProfile ? 30 : 15,
           manifestLoadingMaxRetry: 20,
           manifestLoadingRetryDelay: 500,
           fragLoadingMaxRetry: 20,
@@ -1777,7 +2044,7 @@ export default function VideoPlayer({
   ]);
 
   useEffect(() => () => {
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    cancelPendingSurfaceClick();
     if (subtitleStyleApplyTimerRef.current) {
       clearTimeout(subtitleStyleApplyTimerRef.current);
       subtitleStyleApplyTimerRef.current = null;
@@ -1790,6 +2057,16 @@ export default function VideoPlayer({
       cancelAnimationFrame(scrubPreviewRafRef.current);
       scrubPreviewRafRef.current = null;
     }
+    if (scrubHudHideTimerRef.current) {
+      clearTimeout(scrubHudHideTimerRef.current);
+      scrubHudHideTimerRef.current = null;
+    }
+    if (nativeScrubSeekTimerRef.current) {
+      clearTimeout(nativeScrubSeekTimerRef.current);
+      nativeScrubSeekTimerRef.current = null;
+    }
+    pendingNativeScrubSeekRef.current = null;
+    nativeSeekGuardRef.current = null;
     scrubListenerCleanupRef.current?.();
     scrubListenerCleanupRef.current = null;
     if (transcodeSeekTimerRef.current) {
@@ -1800,7 +2077,7 @@ export default function VideoPlayer({
       clearTimeout(transcodeSeekSafetyRef.current);
       transcodeSeekSafetyRef.current = null;
     }
-  }, []);
+  }, [cancelPendingSurfaceClick]);
 
   useEffect(() => {
     clearNextEpisodeCountdown();
@@ -1821,9 +2098,9 @@ export default function VideoPlayer({
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       userPausedRef.current = !paused;
-      void (paused ? mpvEngineRef.current.play() : mpvEngineRef.current.pause());
+      void (paused ? playbackEngineRef.current.play() : playbackEngineRef.current.pause());
       return;
     }
     const video = videoRef.current;
@@ -1839,8 +2116,27 @@ export default function VideoPlayer({
     video.pause();
   }, [paused, playerState]);
 
+  const restorePlaybackStateAfterSurfaceDoubleClick = useCallback(() => {
+    const action = surfaceSingleClickActionRef.current;
+    surfaceSingleClickActionRef.current = null;
+    if (!action || Date.now() - action.executedAt > SURFACE_DOUBLE_CLICK_WINDOW_MS + 750) return;
+
+    userPausedRef.current = action.wasPaused;
+    setPaused(action.wasPaused);
+    const engine = playbackEngineRef.current;
+    if (engine) {
+      void (action.wasPaused ? engine.pause() : engine.play());
+      return;
+    }
+    const video = videoRef.current;
+    if (!video) return;
+    video.autoplay = !action.wasPaused;
+    if (action.wasPaused) video.pause();
+    else void video.play().catch(() => setPaused(true));
+  }, []);
+
   const persistFinalPlaybackProgress = useCallback(async () => {
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       const snapshotPosition = playbackPositionRef.current;
       const snapshotDuration = playbackDurationRef.current || probedDurationRef.current;
       if (snapshotPosition > 10 && snapshotDuration > 0) {
@@ -1864,6 +2160,7 @@ export default function VideoPlayer({
   }, [filePath, streamIsTranscoded, updatePlaybackSnapshot]);
 
   const shutdownPlayback = useCallback(async () => {
+    cancelPendingSurfaceClick();
     await persistFinalPlaybackProgress();
     playerActiveRef.current = false;
     userPausedRef.current = true;
@@ -1871,33 +2168,34 @@ export default function VideoPlayer({
     sourceLoadTokenRef.current += 1;
     clearNextEpisodeCountdown();
     clearHls();
-    const engine = mpvEngineRef.current;
-    mpvEngineRef.current = null;
+    const engine = playbackEngineRef.current;
+    playbackEngineRef.current = null;
     await engine?.destroy();
-    setMpvActive(false);
-    document.documentElement.classList.remove('loom-mpv-active');
+    setNativePlaybackActive(false);
+    setNativeEngineKind(null);
+    document.documentElement.classList.remove('loom-native-active');
     const video = videoRef.current;
     if (video) {
       video.autoplay = false;
       clearVideoElement(video);
     }
     await stopTranscodeSession();
-  }, [clearHls, clearNextEpisodeCountdown, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
+  }, [cancelPendingSurfaceClick, clearHls, clearNextEpisodeCountdown, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
 
   useEffect(() => registerPlaybackShutdown(async () => {
     await shutdownPlayback();
     onClose();
   }), [onClose, shutdownPlayback]);
 
-  const handleClose = useCallback((event?: React.SyntheticEvent) => {
+  const handleClose = useCallback(async (event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    void shutdownPlayback();
+    await shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
 
-  const handleBack = useCallback((event?: React.SyntheticEvent) => {
+  const handleBack = useCallback(async (event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    void shutdownPlayback();
+    await shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
 
@@ -1934,46 +2232,48 @@ export default function VideoPlayer({
   }, [showMediaPanel, mediaPanelTab]);
 
   useEffect(() => {
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setSpeed(playbackRate);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setSpeed(playbackRate);
       return;
     }
     const video = videoRef.current;
     if (video) {
       video.playbackRate = playbackRate;
     }
-  }, [mpvActive, playbackRate, streamUrl]);
+  }, [nativePlaybackActive, playbackRate, streamUrl]);
 
   useEffect(() => {
-    if (!mpvActive || !mpvEngineRef.current) return;
+    if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const normalizeRatio = (value: string) => value.replace(/\s*\/\s*/, ':');
-    void mpvEngineRef.current.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode));
-  }, [aspectMode, mpvActive]);
+    void playbackEngineRef.current.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode));
+  }, [aspectMode, nativePlaybackActive]);
 
   useEffect(() => {
-    if (!mpvActive || !mpvEngineRef.current) return;
+    if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const crop = cropMode === 'none' || cropMode === 'custom' ? null : cropMode.replace(/\s*\/\s*/, ':');
-    void mpvEngineRef.current.setVideoCrop(crop);
-  }, [cropMode, mpvActive]);
+    void playbackEngineRef.current.setVideoCrop(crop);
+  }, [cropMode, nativePlaybackActive]);
 
   useEffect(() => {
-    if (mpvActive) void mpvEngineRef.current?.setVideoRotation(rotation);
-  }, [mpvActive, rotation]);
+    if (nativePlaybackActive) void playbackEngineRef.current?.setVideoRotation(rotation);
+  }, [nativePlaybackActive, rotation]);
 
   useEffect(() => {
-    if (!mpvActive || !mpvEngineRef.current) return;
+    if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const style = subtitleStyleRef.current;
-    void mpvEngineRef.current.setSubtitleDelay(style.delaySeconds);
-    void mpvEngineRef.current.setAudioDelay(audioDelay);
-    void mpvEngineRef.current.setSubtitleStyle({
-      fontSize: Math.round(style.fontSize * style.scale),
-      color: style.fontColor,
-      borderColor: style.borderColor,
-      borderWidth: style.borderEnabled ? style.borderWidth : 0,
-      backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
-      position: style.position,
-    });
-  }, [audioDelay, mpvActive]);
+    void playbackEngineRef.current.setSubtitleDelay(style.delaySeconds);
+    void playbackEngineRef.current.setAudioDelay(audioDelay);
+    if (playbackEngineRef.current.kind !== 'libvlc') {
+      void playbackEngineRef.current.setSubtitleStyle({
+        fontSize: Math.round(style.fontSize * style.scale),
+        color: style.fontColor,
+        borderColor: style.borderColor,
+        borderWidth: style.borderEnabled ? style.borderWidth : 0,
+        backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+        position: style.position,
+      });
+    }
+  }, [audioDelay, nativePlaybackActive]);
 
   useEffect(() => {
     applyNativeTextTrackVisibility();
@@ -1985,10 +2285,19 @@ export default function VideoPlayer({
       updatePlaybackSnapshot(nextPosition, duration || playbackDurationRef.current, { forceReact: true });
     }
 
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.seek(nextPosition);
+    if (playbackEngineRef.current) {
+      const seekGuard = {
+        target: nextPosition,
+        expiresAt: performance.now() + NATIVE_SEEK_GUARD_TIMEOUT_MS,
+      };
+      nativeSeekGuardRef.current = seekGuard;
+      void playbackEngineRef.current.seek(nextPosition).catch(() => {
+        if (nativeSeekGuardRef.current === seekGuard) nativeSeekGuardRef.current = null;
+      });
       return;
     }
+
+    nativeSeekGuardRef.current = null;
 
     const video = videoRef.current;
     if (!video) return;
@@ -2134,20 +2443,66 @@ export default function VideoPlayer({
     }
   }, [duration, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
 
+  const flushNativeScrubPreview = useCallback(() => {
+    nativeScrubSeekTimerRef.current = null;
+    const target = pendingNativeScrubSeekRef.current;
+    const engine = playbackEngineRef.current;
+    if (!isScrubbingRef.current || target === null || !engine) {
+      pendingNativeScrubSeekRef.current = null;
+      return;
+    }
+    pendingNativeScrubSeekRef.current = null;
+    lastNativeScrubSeekAtRef.current = performance.now();
+    // Preview seeks are intentionally coalesced. LibVLC renders the frame at
+    // each sampled target while Loom remains the source of truth for the bar
+    // and subtitle clock; the exact release target is sent separately below.
+    void engine.seek(target);
+  }, []);
+
+  const requestNativeScrubPreview = useCallback((target: number) => {
+    if (!playbackEngineRef.current) return;
+    pendingNativeScrubSeekRef.current = target;
+    if (nativeScrubSeekTimerRef.current) return;
+    const elapsed = performance.now() - lastNativeScrubSeekAtRef.current;
+    const delay = Math.max(0, NATIVE_SCRUB_PREVIEW_INTERVAL_MS - elapsed);
+    if (delay === 0) {
+      flushNativeScrubPreview();
+      return;
+    }
+    nativeScrubSeekTimerRef.current = setTimeout(flushNativeScrubPreview, delay);
+  }, [flushNativeScrubPreview]);
+
+  const cancelNativeScrubPreview = useCallback(() => {
+    if (nativeScrubSeekTimerRef.current) {
+      clearTimeout(nativeScrubSeekTimerRef.current);
+      nativeScrubSeekTimerRef.current = null;
+    }
+    pendingNativeScrubSeekRef.current = null;
+  }, []);
+
   const handleProgressPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!duration) return;
     if (event.button !== 0) return;
     event.preventDefault();
     const bar = event.currentTarget;
+    const pointerId = event.pointerId;
+    const rect = bar.getBoundingClientRect();
+    if (rect.width <= 0) return;
     bar.setPointerCapture(event.pointerId);
     setDismissedNextPromptKey(null);
     clearNextEpisodeCountdown();
-    const rect = bar.getBoundingClientRect();
     let pendingPosition = playbackPositionRef.current;
     isScrubbingRef.current = true;
+    bar.dataset.scrubbing = 'true';
+    if (scrubHudHideTimerRef.current) {
+      clearTimeout(scrubHudHideTimerRef.current);
+      scrubHudHideTimerRef.current = null;
+    }
+    if (scrubTimeHudRef.current) scrubTimeHudRef.current.style.opacity = '1';
     const previewFromClientX = (clientX: number) => {
       const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
       pendingPosition = ratio * duration;
+      requestNativeScrubPreview(pendingPosition);
       if (scrubPreviewRafRef.current !== null) return;
       scrubPreviewRafRef.current = requestAnimationFrame(() => {
         scrubPreviewRafRef.current = null;
@@ -2155,10 +2510,14 @@ export default function VideoPlayer({
       });
     };
     previewFromClientX(event.clientX);
-    const handleMove = (moveEvent: PointerEvent) => previewFromClientX(moveEvent.clientX);
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId === pointerId) previewFromClientX(moveEvent.clientX);
+    };
     let removeScrubListeners = () => undefined;
-    const handleUp = (upEvent: PointerEvent) => {
-      previewFromClientX(upEvent.clientX);
+    const finishScrub = (finishEvent: PointerEvent, updateFromPointer: boolean) => {
+      if (finishEvent.pointerId !== pointerId) return;
+      if (updateFromPointer) previewFromClientX(finishEvent.clientX);
+      cancelNativeScrubPreview();
       if (scrubPreviewRafRef.current !== null) {
         cancelAnimationFrame(scrubPreviewRafRef.current);
         scrubPreviewRafRef.current = null;
@@ -2166,32 +2525,47 @@ export default function VideoPlayer({
       updatePlaybackSnapshot(pendingPosition, duration, { forceReact: true });
       seekTo(pendingPosition);
       isScrubbingRef.current = false;
-      if (bar.hasPointerCapture(upEvent.pointerId)) bar.releasePointerCapture(upEvent.pointerId);
+      delete bar.dataset.scrubbing;
+      scrubHudHideTimerRef.current = setTimeout(() => {
+        scrubHudHideTimerRef.current = null;
+        if (scrubTimeHudRef.current) scrubTimeHudRef.current.style.opacity = '0';
+      }, 180);
+      if (bar.hasPointerCapture(pointerId)) bar.releasePointerCapture(pointerId);
       removeScrubListeners();
     };
+    const handleUp = (upEvent: PointerEvent) => finishScrub(upEvent, true);
+    // pointercancel coordinates are frequently 0/0. Commit the last valid
+    // preview target instead of turning a cancelled drag into a jump to zero.
+    const handleCancel = (cancelEvent: PointerEvent) => finishScrub(cancelEvent, false);
     removeScrubListeners = () => {
       bar.removeEventListener('pointermove', handleMove);
       bar.removeEventListener('pointerup', handleUp);
-      bar.removeEventListener('pointercancel', handleUp);
+      bar.removeEventListener('pointercancel', handleCancel);
       if (scrubListenerCleanupRef.current === removeScrubListeners) scrubListenerCleanupRef.current = null;
     };
     scrubListenerCleanupRef.current?.();
     scrubListenerCleanupRef.current = removeScrubListeners;
     bar.addEventListener('pointermove', handleMove);
     bar.addEventListener('pointerup', handleUp);
-    bar.addEventListener('pointercancel', handleUp);
-  }, [clearNextEpisodeCountdown, duration, seekTo, updatePlaybackSnapshot]);
+    bar.addEventListener('pointercancel', handleCancel);
+  }, [cancelNativeScrubPreview, clearNextEpisodeCountdown, duration, requestNativeScrubPreview, seekTo, updatePlaybackSnapshot]);
 
   const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!duration) return;
     const big = event.shiftKey ? 60 : 10;
     const small = 5;
-    if (event.key === 'ArrowLeft') {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
       event.preventDefault();
       seekTo(playbackPositionRef.current - (event.shiftKey ? big : small));
-    } else if (event.key === 'ArrowRight') {
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
       event.preventDefault();
       seekTo(playbackPositionRef.current + (event.shiftKey ? big : small));
+    } else if (event.key === 'PageDown') {
+      event.preventDefault();
+      seekTo(playbackPositionRef.current - duration * 0.1);
+    } else if (event.key === 'PageUp') {
+      event.preventDefault();
+      seekTo(playbackPositionRef.current + duration * 0.1);
     } else if (event.key === 'Home') {
       event.preventDefault();
       seekTo(0);
@@ -2205,9 +2579,9 @@ export default function VideoPlayer({
     const v = parseFloat(e.target.value);
     setVolume(v);
     setMuted(v === 0);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setVolume(v);
-      void mpvEngineRef.current.setMuted(v === 0);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setVolume(v);
+      void playbackEngineRef.current.setMuted(v === 0);
       return;
     }
     const video = videoRef.current;
@@ -2217,8 +2591,8 @@ export default function VideoPlayer({
   }, []);
 
   const toggleMute = useCallback(() => {
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setMuted(!muted);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setMuted(!muted);
       return;
     }
     const video = videoRef.current;
@@ -2226,7 +2600,7 @@ export default function VideoPlayer({
   }, [muted]);
 
   const restartForTrackChange = useCallback(() => {
-    if (mpvEngineRef.current) return;
+    if (playbackEngineRef.current) return;
     if (!streamUrl) return;
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
@@ -2236,6 +2610,11 @@ export default function VideoPlayer({
       trackChangeGeneration: generation,
     });
   }, [applyNativeTextTrackVisibility, startBrowserStreamAt, streamUrl]);
+
+  const restartLibVlcForSubtitleFallback = useCallback(() => {
+    if (playbackEngineRef.current?.kind !== 'libvlc') return;
+    setReloadToken((value) => value + 1);
+  }, []);
 
   const selectedSubtitleIsBurnedIn = useCallback(() => {
     const selected = selectedEmbeddedSubtitle(probeTracksRef.current, selectedSubtitleTrackIndexRef.current);
@@ -2247,17 +2626,19 @@ export default function VideoPlayer({
       clearTimeout(subtitleStyleApplyTimerRef.current);
       subtitleStyleApplyTimerRef.current = null;
     }
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       const style = subtitleStyleRef.current;
-      void mpvEngineRef.current.setSubtitleDelay(style.delaySeconds);
-      void mpvEngineRef.current.setSubtitleStyle({
-        fontSize: Math.round(style.fontSize * style.scale),
-        color: style.fontColor,
-        borderColor: style.borderColor,
-        borderWidth: style.borderEnabled ? style.borderWidth : 0,
-        backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
-        position: style.position,
-      });
+      void playbackEngineRef.current.setSubtitleDelay(style.delaySeconds);
+      if (playbackEngineRef.current.kind !== 'libvlc') {
+        void playbackEngineRef.current.setSubtitleStyle({
+          fontSize: Math.round(style.fontSize * style.scale),
+          color: style.fontColor,
+          borderColor: style.borderColor,
+          borderWidth: style.borderEnabled ? style.borderWidth : 0,
+          backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
+          position: style.position,
+        });
+      }
       return;
     }
     applyNativeTextTrackVisibility();
@@ -2275,7 +2656,7 @@ export default function VideoPlayer({
   }, [applyNativeTextTrackVisibility, selectedSubtitleIsBurnedIn, startTranscodedFallback]);
 
   const scheduleSubtitleStyleToStream = useCallback(() => {
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       applySubtitleStyleToStream();
       return;
     }
@@ -2324,15 +2705,15 @@ export default function VideoPlayer({
     const nextDelay = Math.max(-60, Math.min(60, seconds));
     audioDelayRef.current = nextDelay;
     setAudioDelay(nextDelay);
-    void mpvEngineRef.current?.setAudioDelay(nextDelay);
+    void playbackEngineRef.current?.setAudioDelay(nextDelay);
   }, []);
 
   const selectVideoTrack = useCallback((trackIndex: number) => {
     if (selectedVideoTrackIndexRef.current === trackIndex) return;
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.selectVideo(trackIndex >= 0 ? trackIndex : null);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.selectVideo(trackIndex >= 0 ? trackIndex : null);
       return;
     }
     restartForTrackChange();
@@ -2346,8 +2727,8 @@ export default function VideoPlayer({
     sharedTrackPreferencesRef.current = nextPreferences;
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
       return;
     }
     restartForTrackChange();
@@ -2355,6 +2736,7 @@ export default function VideoPlayer({
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
     if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
+    subtitleSelectionExplicitRef.current = true;
     const enabled = trackIndex >= 0 || trackIndex <= -1000;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'subtitle');
     const playbackAction = subtitleTrackPlaybackAction({
@@ -2366,12 +2748,25 @@ export default function VideoPlayer({
     const nextPreferences = { ...sharedTrackPreferencesRef.current, subtitle: preference };
     sharedTrackPreferencesRef.current = nextPreferences;
     subtitlesDefaultEnabledRef.current = enabled;
+    libVlcSubtitleFallbackRef.current = false;
     setSubtitlesDefaultEnabled(enabled);
     saveSubtitlesDefaultEnabled(enabled);
     selectedSubtitleTrackIndexRef.current = trackIndex;
     setSelectedSubtitleTrackIndex(trackIndex);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.selectSubtitle(enabled ? trackIndex : null);
+    if (playbackEngineRef.current?.kind === 'libvlc') {
+      // Do not pass Loom/probe IDs to LibVLC's independent SPU namespace.
+      // Reopen only for a bitmap track, where native rendering is the explicit
+      // fallback; parseable text remains on the Loom overlay path.
+      if (selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec)) {
+        libVlcSubtitleFallbackRef.current = true;
+        restartLibVlcForSubtitleFallback();
+      } else {
+        void playbackEngineRef.current.selectSubtitle(null);
+      }
+      return;
+    }
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.selectSubtitle(enabled ? trackIndex : null);
       return;
     }
     if (playbackAction === 'burn-in') {
@@ -2390,25 +2785,26 @@ export default function VideoPlayer({
   }, [
     applyNativeTextTrackVisibility,
     restartForTrackChange,
+    restartLibVlcForSubtitleFallback,
     selectedSubtitleIsBurnedIn,
     trackPreferenceScopeKey,
   ]);
 
   const selectSecondarySubtitleTrack = useCallback((trackIndex: number) => {
-    if (!mpvEngineRef.current) return;
+    if (!playbackEngineRef.current) return;
     setSelectedSecondarySubtitleTrackIndex(trackIndex);
-    void mpvEngineRef.current.selectSecondarySubtitle(trackIndex >= 0 ? trackIndex : null);
+    void playbackEngineRef.current.selectSecondarySubtitle(trackIndex >= 0 ? trackIndex : null);
   }, []);
 
   const changeVolume = useCallback((delta: number) => {
-    const currentVolume = mpvEngineRef.current ? volume : videoRef.current?.volume ?? volume;
+    const currentVolume = playbackEngineRef.current ? volume : videoRef.current?.volume ?? volume;
     const nextVolume = Math.min(1, Math.max(0, currentVolume + delta));
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
 
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setVolume(nextVolume);
-      void mpvEngineRef.current.setMuted(nextVolume === 0);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setVolume(nextVolume);
+      void playbackEngineRef.current.setMuted(nextVolume === 0);
       return;
     }
 
@@ -2426,34 +2822,88 @@ export default function VideoPlayer({
     setPlaybackRate(1);
   }, []);
 
-  const handleSurfaceClick = useCallback(() => {
-    if (playerState === 'error') return;
+  const handleSurfaceClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isPlayerControlTarget(event.target)) {
+      cancelPendingSurfaceClick();
+      return;
+    }
+    if (playerState === 'error') {
+      cancelPendingSurfaceClick();
+      return;
+    }
     if (showMediaPanel || showSidebar) {
+      cancelPendingSurfaceClick();
       setShowMediaPanel(false);
       setShowSidebar(false);
       return;
     }
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+    // Some macOS/Electron input paths report the second press through the
+    // click count but do not deliver a reliable `dblclick` event over the
+    // transparent native-video composition. Keep the first click pending for
+    // the full gesture window, then handle that signal while suppressing the
+    // following dblclick so fullscreen toggles exactly once.
+    if (event.detail > 1) {
+      restorePlaybackStateAfterSurfaceDoubleClick();
+      cancelPendingSurfaceClick();
+      if (event.detail === 2 && playerState !== 'error') {
+        toggleFullscreen();
+        surfaceDoubleClickGuardUntilMsRef.current = Date.now() + SURFACE_DOUBLE_CLICK_WINDOW_MS;
+      }
+      return;
+    }
+
+    cancelPendingSurfaceClick();
     clickTimerRef.current = setTimeout(() => {
+      if (playerState !== 'loading') {
+        surfaceSingleClickActionRef.current = { wasPaused: paused, executedAt: Date.now() };
+      }
       togglePlay();
       clickTimerRef.current = null;
-    }, 220);
-  }, [playerState, showMediaPanel, showSidebar, togglePlay]);
+    }, SURFACE_DOUBLE_CLICK_WINDOW_MS);
+  }, [cancelPendingSurfaceClick, paused, playerState, restorePlaybackStateAfterSurfaceDoubleClick, showMediaPanel, showSidebar, toggleFullscreen, togglePlay]);
 
   const handleSurfaceDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (isPlayerControlTarget(event.target)) {
+      cancelPendingSurfaceClick();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
-    if (clickTimerRef.current) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
+    if (surfaceDoubleClickGuardUntilMsRef.current > Date.now()) {
+      surfaceDoubleClickGuardUntilMsRef.current = 0;
+      return;
     }
+    restorePlaybackStateAfterSurfaceDoubleClick();
+    cancelPendingSurfaceClick();
     if (playerState !== 'error') toggleFullscreen();
-  }, [playerState, toggleFullscreen]);
+  }, [cancelPendingSurfaceClick, playerState, restorePlaybackStateAfterSurfaceDoubleClick, toggleFullscreen]);
 
   const handleSurfaceDoubleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (isPlayerControlTarget(event.target)) return;
+    if (isPlayerControlTarget(event.target)) {
+      cancelPendingSurfaceClick();
+      return;
+    }
     handleSurfaceDoubleClick(event);
-  }, [handleSurfaceDoubleClick]);
+  }, [cancelPendingSurfaceClick, handleSurfaceDoubleClick]);
+
+  // Dismissing an open side panel must work from anywhere outside it, not only
+  // from the video surface. The surface's own click handler never sees a press
+  // on the macOS title drag strip, the letterboxed margins, or the control bar,
+  // so anything opened from the control bar could not be closed by clicking
+  // "next to" it. Watch the whole player root in the capture phase instead, and
+  // ignore presses that land inside a panel or on the control that toggles one.
+  const handleRootPointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const isControl = isPlayerControlTarget(event.target);
+    const isPanel = Boolean(target?.closest?.('.player-side-panel, [data-player-panel-toggle="true"]'));
+    if (isControl || isPanel) {
+      cancelPendingSurfaceClick();
+    }
+    if (!showMediaPanel && !showSidebar) return;
+    if (isPanel) return;
+    setShowMediaPanel(false);
+    setShowSidebar(false);
+  }, [cancelPendingSurfaceClick, showMediaPanel, showSidebar]);
 
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
@@ -2477,86 +2927,105 @@ export default function VideoPlayer({
 
       switch (e.key) {
         case 'Escape':
+          cancelPendingSurfaceClick();
           e.preventDefault();
-          handleBack();
+          if (fullscreen) toggleFullscreen();
+          else handleBack();
           break;
         case ' ':
         case 'Spacebar':
           if (hasCommandModifier) break;
+          cancelPendingSurfaceClick();
           e.preventDefault();
           togglePlay();
           break;
         case 'ArrowLeft':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
           break;
         case 'ArrowRight':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           seekTo(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
           break;
         case 'ArrowUp':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           changeVolume(0.05);
           break;
         case 'ArrowDown':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           changeVolume(-0.05);
           break;
         case 'm':
         case 'M':
           if (hasCommandModifier) break;
+          cancelPendingSurfaceClick();
           e.preventDefault();
           toggleMute();
           break;
         case 'Backspace':
           if (e.metaKey || e.ctrlKey || e.altKey) break;
+          cancelPendingSurfaceClick();
           e.preventDefault();
           handleBack();
           break;
         case 'f':
         case 'F':
           if (hasCommandModifier) break;
+          cancelPendingSurfaceClick();
           e.preventDefault();
           toggleFullscreen();
           break;
         case '[':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           changePlaybackRate(-0.25);
           break;
         case ']':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           changePlaybackRate(0.25);
           break;
         case 'r':
         case 'R':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           resetPlaybackRate();
           break;
         case 'Home':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           seekTo(0);
           break;
         case 'End':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           seekTo(duration);
           break;
         case 'z':
         case 'Z':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           adjustSubtitleDelay(-(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS));
           break;
         case 'x':
         case 'X':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           adjustSubtitleDelay(e.shiftKey ? SUBTITLE_DELAY_FINE_STEP_SECONDS : SUBTITLE_DELAY_STEP_SECONDS);
           break;
         case 'c':
         case 'C':
+          cancelPendingSurfaceClick();
           e.preventDefault();
           resetSubtitleDelay();
           break;
         default:
           if (/^[0-9]$/.test(e.key) && duration > 0) {
+            cancelPendingSurfaceClick();
             e.preventDefault();
             seekTo((Number(e.key) / 10) * duration);
           }
@@ -2566,9 +3035,11 @@ export default function VideoPlayer({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
+    cancelPendingSurfaceClick,
     changePlaybackRate,
     changeVolume,
     duration,
+    fullscreen,
     handleBack,
     handleClose,
     resetPlaybackRate,
@@ -2584,10 +3055,36 @@ export default function VideoPlayer({
 
   // ─── Derived ───────────────────────────────────────────────────────────────
 
+  const activePlaybackEngine = nativePlaybackActive ? nativeEngineKind : 'browser';
+  const playbackInformation = {
+    engine: activePlaybackEngine === 'libvlc'
+      ? 'LibVLC'
+      : activePlaybackEngine === 'mpv'
+        ? 'mpv'
+        : 'Chromium',
+    mode: nativePlaybackActive
+      ? 'Native local playback'
+      : streamIsTranscoded
+        ? 'HLS transcode'
+        : streamUrl
+          ? 'Direct stream'
+          : 'Preparing',
+    hardwareDecode: nativePlaybackActive ? 'Native engine managed' : 'Chromium managed',
+    encodeBackend: streamIsTranscoded ? 'Host transcoder' : 'Not used',
+    note: streamIsTranscoded ? 'HLS backend details are reported by the host transcoder.' : undefined,
+  };
   const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
   const selectedSubtitleForOverlay = selectedSubtitleTrackIndex >= 0
     ? selectedEmbeddedSubtitle(mediaTracks, selectedSubtitleTrackIndex)
     : null;
+  const selectedSubtitleTrackForSettings = mediaTracks.find((track) =>
+    track.type === 'subtitle' && track.index === selectedSubtitleTrackIndex,
+  );
+  const subtitleStyleCompatibilityMessage = nativeEngineKind === 'libvlc'
+    && selectedSubtitleTrackForSettings
+    && isBitmapSubtitleCodec(selectedSubtitleTrackForSettings.codec)
+    ? 'This image-based subtitle is rendered by LibVLC and cannot be restyled live. Choose an SRT, ASS, or WebVTT track to use Loom\'s position, size, outline, and color controls.'
+    : undefined;
   const subtitleIsBurnedIn = streamIsTranscoded
     && Boolean(selectedSubtitleForOverlay && isBitmapSubtitleCodec(selectedSubtitleForOverlay.track.codec));
   const showSubtitleOverlay = shouldShowSubtitleOverlay({
@@ -2596,6 +3093,41 @@ export default function VideoPlayer({
     cueCount: subtitleCues.length,
     subtitleIsBurnedIn,
   });
+
+  // LibVLC remains a subtitle fallback while Loom's renderer is the primary
+  // surface. Once usable cues are available, disable the native SPU so the
+  // same subtitle is never painted twice. If cue loading fails, leaving the
+  // native track enabled preserves subtitle visibility for bitmap/unsupported
+  // formats.
+  useEffect(() => {
+    const engine = playbackEngineRef.current;
+    if (!nativePlaybackActive || nativeEngineKind !== 'libvlc' || engine?.kind !== 'libvlc') return;
+    const selectedTrack = probeTracksRef.current.find((track) =>
+      track.type === 'subtitle' && track.index === selectedSubtitleTrackIndex,
+    );
+    const nativeFallbackAllowed = Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec));
+    if (!subtitlesDefaultEnabled || selectedSubtitleTrackIndex === -1 || showSubtitleOverlay || !nativeFallbackAllowed) {
+      void engine.selectSubtitle(null);
+    }
+  }, [nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
+
+  useEffect(() => {
+    if (!nativePlaybackActive || nativeEngineKind !== 'libvlc') return;
+    if (!subtitlesDefaultEnabled || selectedSubtitleTrackIndex > -1000 || subtitleCues.length > 0) return;
+    // A sidecar/OpenSubtitles track has an authorized, deterministic file
+    // path. If Loom cannot obtain parseable cues, reopen LibVLC with only that
+    // selected file as a native fallback. Embedded text tracks do not have a
+    // safe SPU-ID mapping here, so they remain on Loom/MPV/browser fallback.
+    if (!visibleSubtitles[-1000 - selectedSubtitleTrackIndex]) return;
+    if (libVlcSubtitleFallbackRef.current) return;
+    const timer = setTimeout(() => {
+      if (libVlcSubtitleFallbackRef.current || playbackEngineRef.current?.kind !== 'libvlc') return;
+      libVlcSubtitleFallbackRef.current = true;
+      restartLibVlcForSubtitleFallback();
+    }, 1_600);
+    return () => clearTimeout(timer);
+  }, [nativeEngineKind, nativePlaybackActive, restartLibVlcForSubtitleFallback, selectedSubtitleTrackIndex, subtitleCues.length, subtitlesDefaultEnabled, visibleSubtitles]);
+
   const useNativeSubtitleTracks = shouldUseNativeSubtitleTracks({
     subtitlesEnabled: subtitlesDefaultEnabled,
     selectedSubtitleTrackIndex,
@@ -2621,6 +3153,30 @@ export default function VideoPlayer({
     objectFit: cropMode === 'none' ? 'contain' : 'cover',
     transform: rotation === 0 ? undefined : `rotate(${rotation}deg)`,
   };
+
+  useEffect(() => {
+    if (!libVlcSurfaceActive) return;
+    let raf: number | null = null;
+    let disposed = false;
+    const syncViewport = () => {
+      if (raf !== null) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        if (disposed) return;
+        void syncNativeViewport();
+      });
+    };
+    syncViewport();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(syncViewport) : null;
+    if (observer && videoViewportRef.current) observer.observe(videoViewportRef.current);
+    window.addEventListener('resize', syncViewport);
+    return () => {
+      disposed = true;
+      if (raf !== null) cancelAnimationFrame(raf);
+      observer?.disconnect();
+      window.removeEventListener('resize', syncViewport);
+    };
+  }, [aspectMode, cropMode, fullscreen, libVlcSurfaceActive, rotation, syncNativeViewport, videoFrameRatio]);
 
   const currentEpLabel = useMemo(() => {
     if (!hasEpisodes) return null;
@@ -2787,7 +3343,14 @@ export default function VideoPlayer({
   };
   return (
     <div
-      className={`loom-player-root fixed inset-0 z-[70] flex ${mpvActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
+      className={`loom-player-root fixed inset-0 z-[70] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''}`}
+      onPointerDownCapture={handleRootPointerDownCapture}
+      // Reveal the chrome from anywhere in the player, not just the video
+      // surface. The surface excludes the letterboxed margins and sits under
+      // the macOS drag band, so a pointer crossing those areas produced no
+      // pointermove and the controls stayed hidden with no way to bring
+      // them back.
+      onPointerMove={handlePointerMove}
       ref={containerRef}
     >
       <style>
@@ -2799,7 +3362,7 @@ export default function VideoPlayer({
         }`}
       </style>
       <div
-        className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : 'bg-black'} ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
+        className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden ${nativePlaybackActive ? 'bg-transparent' : 'bg-black'} ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
         onPointerMove={handlePointerMove}
         onClick={handleSurfaceClick}
         onDoubleClickCapture={handleSurfaceDoubleClickCapture}
@@ -2814,10 +3377,11 @@ export default function VideoPlayer({
         />
 
         <div
-          className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : ''} ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
+          ref={videoViewportRef}
+          className={`loom-player-viewport relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden bg-transparent ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
           style={videoFrameStyle}
         >
-          {!mpvActive && (
+          {!nativePlaybackActive && (
             <video
               ref={videoRef}
               className="h-full w-full"
@@ -2846,6 +3410,7 @@ export default function VideoPlayer({
             transcodeStartSecondsRef={transcodeStartSecondsRef}
             streamIsSeekableRef={streamIsSeekableRef}
             streamIsTranscoded={streamIsTranscoded}
+            currentTimeRef={nativeEngineKind === 'libvlc' ? playbackPositionRef : undefined}
             style={subtitleStyle}
             visible={showSubtitleOverlay}
           />
@@ -2941,21 +3506,33 @@ export default function VideoPlayer({
           />
         )}
 
-        {shouldShowSkipPrompt(activeMediaSegment, showMarkerEditor) && activeMediaSegment && (
+        {nextCountdown === null && shouldShowSkipPrompt(activeMediaSegment, showMarkerEditor) && activeMediaSegment && (
           <button
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              if (activeMediaSegment.type === 'preview' && nextEpisodeFile) {
-                playNextEpisodeNow(true);
+              const markerDuration = activeMediaSegment.mediaDurationMs / 1000;
+              const mediaDuration = Math.max(markerDuration, duration, playbackDurationRef.current);
+              const markerEnd = activeMediaSegment.endMs === null
+                ? mediaDuration
+                : activeMediaSegment.endMs / 1000;
+              const terminalSegment = activeMediaSegment.endMs === null
+                || (mediaDuration > 0 && mediaDuration - markerEnd <= END_COMPLETION_TOLERANCE_SECONDS);
+
+              if (terminalSegment && mediaDuration > 0) {
+                // An end marker means "finish this episode". Move only
+                // forward, mark it complete, and show Loom's existing Up Next
+                // view for three seconds instead of abruptly changing files.
+                pendingCreditsCompletionRef.current = false;
+                seekTo(mediaDuration);
+                markCurrentEpisodeComplete();
+                if (nextEpisodeFile) scheduleNextEpisode();
                 return;
               }
-              const targetSeconds = activeMediaSegment.endMs === null
-                ? Math.max(activeMediaSegment.startMs / 1000, activeMediaSegment.mediaDurationMs / 1000 - END_COMPLETION_TOLERANCE_SECONDS)
-                : activeMediaSegment.endMs / 1000;
-              if (activeMediaSegment.endMs === null) {
-                pendingCreditsCompletionRef.current = activeMediaSegment.type === 'credits';
-              }
+
+              // Never let a stale or overlapping marker turn a Skip action
+              // into an accidental rewind.
+              const targetSeconds = Math.max(playbackPositionRef.current, markerEnd);
               seekTo(targetSeconds);
             }}
             className="loom-player-skip-prompt absolute bottom-32 right-8 z-40 rounded-md border border-white/25 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-xl backdrop-blur-md transition hover:bg-white hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
@@ -2994,6 +3571,7 @@ export default function VideoPlayer({
           seekSliderRef={seekSliderRef}
           progressFillRef={progressFillRef}
           progressThumbRef={progressThumbRef}
+          scrubTimeHudRef={scrubTimeHudRef}
           currentTimeTextRef={currentTimeTextRef}
           durationTimeTextRef={durationTimeTextRef}
           playbackPositionRef={playbackPositionRef}
@@ -3046,21 +3624,23 @@ export default function VideoPlayer({
           setRotation={setRotation}
           playbackRate={playbackRate}
           setPlaybackRate={setPlaybackRate}
+          playbackInformation={playbackInformation}
           audioTracks={audioTracks}
           selectedAudioTrackIndex={selectedAudioTrackIndex}
           selectAudioTrack={selectAudioTrack}
           audioDelay={audioDelay}
           updateAudioDelay={updateAudioDelay}
-          audioDelayAvailable={mpvActive}
+          audioDelayAvailable={nativePlaybackActive}
           subtitlesDefaultEnabled={subtitlesDefaultEnabled}
           subtitleTracks={subtitleTracks}
           selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
           selectSubtitleTrack={selectSubtitleTrack}
-          secondarySubtitlesAvailable={mpvActive}
+          secondarySubtitlesAvailable={nativePlaybackActive && nativeEngineKind === 'mpv'}
           selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
           selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
           subtitleStyle={subtitleStyle}
           subtitleCueFontSize={subtitleCueFontSize}
+          subtitleStyleCompatibilityMessage={subtitleStyleCompatibilityMessage}
           updateSubtitleStyle={updateSubtitleStyle}
           applySubtitleStyleToStream={applySubtitleStyleToStream}
           onCorrectSkipTiming={() => {

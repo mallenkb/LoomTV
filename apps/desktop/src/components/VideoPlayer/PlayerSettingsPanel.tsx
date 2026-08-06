@@ -36,6 +36,21 @@ const ROTATION_OPTIONS: { value: RotationMode; label: string }[] = [
   { value: 270, label: '270°' },
 ];
 
+function colorInputValue(value: string): string {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
+}
+
+const SUBTITLE_REFERENCE_FONT_SIZE_PX = 32;
+const SUBTITLE_MAX_OUTLINE_WIDTH_PX = 10;
+
+function subtitleSizePercent(fontSize: number): number {
+  return Math.round((fontSize / SUBTITLE_REFERENCE_FONT_SIZE_PX) * 100);
+}
+
+function subtitleOutlinePercent(borderWidth: number): number {
+  return Math.round((borderWidth / SUBTITLE_MAX_OUTLINE_WIDTH_PX) * 100);
+}
+
 function SegmentedSetting<T extends string | number>({
   options,
   value,
@@ -88,6 +103,13 @@ interface PlayerSettingsPanelProps {
   setRotation: (rotation: RotationMode) => void;
   playbackRate: number;
   setPlaybackRate: (rate: number) => void;
+  playbackInformation: {
+    engine: string;
+    mode: string;
+    hardwareDecode: string;
+    encodeBackend: string;
+    note?: string;
+  };
   audioTracks: MediaTrack[];
   selectedAudioTrackIndex: number;
   selectAudioTrack: (trackIndex: number) => void;
@@ -103,6 +125,7 @@ interface PlayerSettingsPanelProps {
   selectSecondarySubtitleTrack: (trackIndex: number) => void;
   subtitleStyle: SubtitleStyleSettings;
   subtitleCueFontSize: number;
+  subtitleStyleCompatibilityMessage?: string;
   updateSubtitleStyle: (key: keyof SubtitleStyleSettings, value: number | string) => void;
   applySubtitleStyleToStream: () => void;
   onCorrectSkipTiming: () => void;
@@ -126,6 +149,7 @@ export default function PlayerSettingsPanel({
   setRotation,
   playbackRate,
   setPlaybackRate,
+  playbackInformation,
   audioTracks,
   selectedAudioTrackIndex,
   selectAudioTrack,
@@ -141,6 +165,7 @@ export default function PlayerSettingsPanel({
   selectSecondarySubtitleTrack,
   subtitleStyle,
   subtitleCueFontSize,
+  subtitleStyleCompatibilityMessage,
   updateSubtitleStyle,
   applySubtitleStyleToStream,
   onCorrectSkipTiming,
@@ -162,6 +187,11 @@ export default function PlayerSettingsPanel({
       tracks: subtitleTracks.filter((track) => track.source === 'opensubtitles'),
     },
   ].filter((group) => group.tracks.length > 0);
+
+  const selectedTrackLabel = (tracks: MediaTrack[], selectedIndex: number, emptyLabel: string) => {
+    const selectedTrack = tracks.find((track) => track.index === selectedIndex);
+    return selectedTrack ? trackLabel(selectedTrack, tracks.indexOf(selectedTrack)) : emptyLabel;
+  };
 
   return (
     <aside
@@ -263,8 +293,11 @@ export default function PlayerSettingsPanel({
                 </div>
               </div>
 
-              <details className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2">
-                <summary className="cursor-pointer text-xs font-semibold text-white/55">Advanced</summary>
+              <section
+                className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2"
+                aria-labelledby="advanced-settings-heading"
+              >
+                <h3 id="advanced-settings-heading" className="text-xs font-semibold text-white/55">Advanced</h3>
                 <button
                   type="button"
                   onClick={onCorrectSkipTiming}
@@ -272,7 +305,37 @@ export default function PlayerSettingsPanel({
                 >
                   Correct automatic skip timing
                 </button>
-              </details>
+
+                <section className="mt-4 border-t border-white/10 pt-4" aria-labelledby="playback-information-heading">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 id="playback-information-heading" className="text-xs font-semibold text-white">Playback Information</h3>
+                      <p className="mt-1 text-[10px] text-white/45">Current engine and stream details</p>
+                    </div>
+                  </div>
+                  <dl className="mt-3 space-y-2 text-xs">
+                    {[
+                      ['Engine', playbackInformation.engine],
+                      ['Mode', playbackInformation.mode],
+                      ['Video', selectedTrackLabel(videoTracks, selectedVideoTrackIndex, 'Not selected')],
+                      ['Audio', selectedTrackLabel(audioTracks, selectedAudioTrackIndex, 'Not selected')],
+                      ['Subtitles', selectedTrackLabel(subtitleTracks, selectedSubtitleTrackIndex, 'Off')],
+                      ['Hardware decode', playbackInformation.hardwareDecode],
+                      ['Encode backend', playbackInformation.encodeBackend],
+                    ].map(([label, value]) => (
+                      <div key={label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+                        <dt className="text-white/55">{label}</dt>
+                        <dd className="min-w-0 break-words text-right text-white/85">{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {playbackInformation.note && (
+                    <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-white/45">
+                      {playbackInformation.note}
+                    </p>
+                  )}
+                </section>
+              </section>
             </div>
           )}
 
@@ -404,7 +467,13 @@ export default function PlayerSettingsPanel({
                 </div>
               )}
 
-              <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
+              {subtitleStyleCompatibilityMessage ? (
+                <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.08] p-4" role="status">
+                  <p className="text-xs font-semibold text-white">Visual styling unavailable for this track</p>
+                  <p className="mt-1 text-xs leading-relaxed text-white/60">{subtitleStyleCompatibilityMessage}</p>
+                </div>
+              ) : (
+                <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-xs font-semibold text-white">Position</p>
@@ -424,7 +493,7 @@ export default function PlayerSettingsPanel({
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-xs font-semibold text-white">Size</p>
-                    <span className="text-xs text-[var(--loom-accent)]">{subtitleCueFontSize}px</span>
+                    <span className="text-xs text-[var(--loom-accent)]">{subtitleSizePercent(subtitleCueFontSize)}%</span>
                   </div>
                   <input
                     type="range"
@@ -440,7 +509,7 @@ export default function PlayerSettingsPanel({
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-xs font-semibold text-white">Outline</p>
-                    <span className="text-xs text-[var(--loom-accent)]">{subtitleStyle.borderWidth}px</span>
+                    <span className="text-xs text-[var(--loom-accent)]">{subtitleOutlinePercent(subtitleStyle.borderWidth)}%</span>
                   </div>
                   <input
                     type="range"
@@ -463,7 +532,7 @@ export default function PlayerSettingsPanel({
                       <span className="block text-xs font-semibold text-white">{label}</span>
                       <input
                         type="color"
-                        value={String(subtitleStyle[key])}
+                        value={colorInputValue(String(subtitleStyle[key]))}
                         onChange={(event) => updateSubtitleStyle(key, event.target.value)}
                         className="h-9 w-full cursor-pointer rounded-md border border-white/10 bg-white/10 p-1"
                       />
@@ -478,7 +547,8 @@ export default function PlayerSettingsPanel({
                 >
                   Apply subtitle style
                 </button>
-              </div>
+                </div>
+              )}
 
             </div>
           )}

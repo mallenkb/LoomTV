@@ -109,10 +109,6 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
   );
 }
 
-function isModernDetailRoute(pathname: string): boolean {
-  return pathname.startsWith('/anime/') || pathname.startsWith('/tv/') || pathname.startsWith('/movie/');
-}
-
 function AnimeIcon({ className, solid = false }: { className?: string; solid?: boolean }) {
   return (
     <svg
@@ -248,7 +244,7 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
           role="menu"
           aria-label="Profiles"
           className={cn(
-            'absolute z-50 w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-2xl',
+            'absolute z-50 isolate w-[12.12rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl bg-[var(--loom-surface)] p-1 text-[var(--loom-text)] shadow-[0_20px_60px_rgba(0,0,0,0.62)]',
             'bottom-full left-0 mb-2',
           )}
         >
@@ -503,7 +499,7 @@ export default function Sidebar() {
           )}
           <SidebarProfileSwitcher compact />
         </aside>
-        {!isModernDetailRoute(location.pathname) && !location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
+        {!location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
       </>
     );
   }

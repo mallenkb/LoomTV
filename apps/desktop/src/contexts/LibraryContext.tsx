@@ -322,16 +322,23 @@ function mediaItemFromCatalogCard(
 ): MediaItem {
   const playbackReferences = card.playbackReferences || [];
   const firstReference = playbackReferences[0];
-  const episodeFiles = playbackReferences
-    .filter((reference) => Number.isFinite(reference.season) && Number.isFinite(reference.episode))
-    .map((reference) => ({
-      season: reference.season as number,
-      episode: reference.episode as number,
-      filePath: reference.progressKey,
-      title: `Episode ${reference.episode}`,
-      ...(reference.durationSeconds ? { localMetadata: { durationSeconds: reference.durationSeconds } } : {}),
-    }));
-  return {
+  // Existing Home, Continue Watching, detail, and player paths all rely on
+  // normal Array iteration/enumeration semantics. Keep this compact shape as
+  // a plain enumerable array; rich episode metadata is still hydrated only
+  // for the bounded set of opened titles.
+  const episodeFiles: EpisodeFile[] = playbackReferences.flatMap((reference) => (
+    Number.isFinite(reference.season) && Number.isFinite(reference.episode)
+      ? [{
+          season: reference.season as number,
+          episode: reference.episode as number,
+          filePath: reference.progressKey,
+          ...(reference.durationSeconds
+            ? { localMetadata: { durationSeconds: reference.durationSeconds } }
+            : {}),
+        }]
+      : []
+  ));
+  const item: MediaItem = {
     id: card.id,
     type: card.type,
     title: card.title,
@@ -349,12 +356,14 @@ function mediaItemFromCatalogCard(
     filePath: firstReference?.progressKey || '',
     lastPlayed: card.lastPlayed,
     seasons: card.seasons,
-    episodeFiles,
-    ...(episodeFiles.length === 0 && firstReference?.durationSeconds
+    ...(episodeFiles.length > 0 ? { episodeFiles } : {}),
+    ...(firstReference?.durationSeconds
       ? { localMetadata: { durationSeconds: firstReference.durationSeconds } }
       : {}),
     catalogRevision: revision,
   };
+
+  return item;
 }
 
 function libraryDataFromIndex(index: LibraryIndexPayload) {
@@ -387,11 +396,30 @@ function rememberBoundedDetail(cache: Map<string, MediaItem>, key: string, item:
 export function LibraryProvider({ children }: { children: ReactNode }) {
   const { activeProfile } = useProfiles();
   const [state, dispatch] = useReducer(libraryReducer, initialState);
+  const activeProfileId = activeProfile?.id || 'profile:none';
+  const activeProfileIdRef = useRef(activeProfileId);
+  const libraryProfileIdRef = useRef<string | null>(null);
+  const libraryCatalogRevisionRef = useRef<number | null>(null);
+  const stateRef = useRef(state);
   const isScanningRef = useRef(false);
   const hasConfiguredFoldersRef = useRef(false);
   const detailCacheRef = useRef(new Map<string, MediaItem>());
   const detailRequestsRef = useRef(new Map<string, Promise<MediaItem | null>>());
+  const detailScopeRef = useRef<string | null>(null);
+  const detailGenerationRef = useRef(0);
   const legacyFallbackCountRef = useRef(0);
+
+  stateRef.current = state;
+  activeProfileIdRef.current = activeProfileId;
+
+  const clearDetailStateIfScopeChanged = useCallback((catalogRevision: number | null) => {
+    const nextScope = `${activeProfileId}:${catalogRevision ?? 'legacy'}`;
+    if (detailScopeRef.current === nextScope) return;
+    detailScopeRef.current = nextScope;
+    detailGenerationRef.current += 1;
+    detailCacheRef.current.clear();
+    detailRequestsRef.current.clear();
+  }, [activeProfileId]);
 
   const applyLibraryData = useCallback((data: {
     movies?: MediaItem[];
@@ -403,6 +431,22 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     catalogRevision?: number | null;
     catalogTransport?: 'compact' | 'legacy';
   }) => {
+    if (activeProfileIdRef.current !== activeProfileId) return false;
+    const nextCatalogRevision = data.catalogRevision === undefined
+      ? stateRef.current.catalogRevision
+      : data.catalogRevision;
+    if (
+      libraryProfileIdRef.current === activeProfileId
+      && typeof libraryCatalogRevisionRef.current === 'number'
+      && typeof nextCatalogRevision === 'number'
+      && nextCatalogRevision < libraryCatalogRevisionRef.current
+    ) {
+      console.warn('[catalog] Ignored a library payload from an older catalog revision.');
+      return false;
+    }
+    clearDetailStateIfScopeChanged(nextCatalogRevision);
+    libraryProfileIdRef.current = activeProfileId;
+    libraryCatalogRevisionRef.current = nextCatalogRevision;
     dispatch({
       type: 'SET_LIBRARY_DATA',
       payload: {
@@ -411,16 +455,19 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         animeShows: normalizeShows(data.animeShows),
       },
     });
-  }, []);
+    return true;
+  }, [activeProfileId, clearDetailStateIfScopeChanged]);
 
   const applyCompactIndex = useCallback((index: LibraryIndexPayload) => {
+    if (activeProfileIdRef.current !== activeProfileId) return null;
     const compact = libraryDataFromIndex(index);
-    applyLibraryData(compact);
-    return compact;
-  }, [applyLibraryData]);
+    return applyLibraryData(compact) ? compact : null;
+  }, [activeProfileId, applyLibraryData]);
 
   const loadPrimaryCatalog = useCallback(async () => {
+    const requestProfileId = activeProfileId;
     const index = await desktopApi.getLibraryIndex();
+    if (activeProfileIdRef.current !== requestProfileId) return null;
     if (index?.catalogVersion === 1) {
       return applyCompactIndex(index);
     }
@@ -428,10 +475,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     legacyFallbackCountRef.current += 1;
     console.warn(`[catalog] Compact index unavailable; using legacy library payload (fallback ${legacyFallbackCountRef.current}).`);
     const legacy = await desktopApi.getLibrary();
+    if (activeProfileIdRef.current !== requestProfileId) return null;
     const fallback = { ...legacy, catalogRevision: null, catalogTransport: 'legacy' as const };
-    applyLibraryData(fallback);
-    return fallback;
-  }, [applyCompactIndex, applyLibraryData]);
+    return applyLibraryData(fallback) ? fallback : null;
+  }, [activeProfileId, applyCompactIndex, applyLibraryData]);
 
   const applyScanProgress = useCallback((progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
     if (!progress) return;
@@ -457,10 +504,21 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  useEffect(() => {
+    clearDetailStateIfScopeChanged(state.catalogRevision);
+  }, [activeProfileId, clearDetailStateIfScopeChanged, state.catalogRevision]);
+
   const hydrateLibraryItem = useCallback(async (mediaId: string): Promise<MediaItem | null> => {
-    const catalogItem = findItemInState(state, mediaId);
-    if (!catalogItem || catalogItem.catalogRevision === undefined || state.catalogRevision === null) return catalogItem;
-    const key = `${activeProfile?.id || 'profile:none'}:${state.catalogRevision}:${mediaId}`;
+    const currentState = stateRef.current;
+    if (libraryProfileIdRef.current !== activeProfileId) return null;
+    // applyLibraryData updates the accepted revision before React commits the
+    // reducer state. Do not let a detail request in that short gap restore the
+    // previous scope or cache a response under an obsolete revision.
+    if (libraryCatalogRevisionRef.current !== currentState.catalogRevision) return null;
+    clearDetailStateIfScopeChanged(currentState.catalogRevision);
+    const catalogItem = findItemInState(currentState, mediaId);
+    if (!catalogItem || catalogItem.catalogRevision === undefined || currentState.catalogRevision === null) return catalogItem;
+    const key = `${activeProfileId}:${currentState.catalogRevision}:${mediaId}`;
     const cached = detailCacheRef.current.get(key);
     if (cached) {
       rememberBoundedDetail(detailCacheRef.current, key, cached);
@@ -469,29 +527,36 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     const pending = detailRequestsRef.current.get(key);
     if (pending) return pending;
 
-    const request = desktopApi.getLibraryItem(mediaId)
+    const requestGeneration = detailGenerationRef.current;
+    let request: Promise<MediaItem | null>;
+    request = desktopApi.getLibraryItem(mediaId)
       .then(async (payload) => {
+        if (requestGeneration !== detailGenerationRef.current) return null;
         if (!payload) {
           legacyFallbackCountRef.current += 1;
           console.warn(`[catalog] Item details unavailable; using legacy library payload (fallback ${legacyFallbackCountRef.current}).`);
           const legacy = await desktopApi.getLibrary();
+          if (requestGeneration !== detailGenerationRef.current) return null;
           const detail = [...legacy.movies, ...legacy.tvShows, ...(legacy.animeShows || [])]
             .find((item) => item.id === mediaId) as MediaItem | undefined;
           if (detail) rememberBoundedDetail(detailCacheRef.current, key, detail);
           return detail || null;
         }
-        if (payload.revision !== state.catalogRevision) {
+        const latestState = stateRef.current;
+        if (payload.revision !== latestState.catalogRevision) {
           console.warn('[catalog] Ignored media details from a stale catalog revision.');
-          return catalogItem;
+          return findItemInState(latestState, mediaId);
         }
         const item = payload.item as MediaItem;
         rememberBoundedDetail(detailCacheRef.current, key, item);
         return item;
       })
-      .finally(() => detailRequestsRef.current.delete(key));
+      .finally(() => {
+        if (detailRequestsRef.current.get(key) === request) detailRequestsRef.current.delete(key);
+      });
     detailRequestsRef.current.set(key, request);
     return request;
-  }, [activeProfile?.id, state]);
+  }, [activeProfileId, clearDetailStateIfScopeChanged]);
 
   const runLibraryScan = async (mode: 'quick' | 'metadata' | 'full') => {
     if (isScanningRef.current) return;

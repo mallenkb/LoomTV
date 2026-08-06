@@ -36,6 +36,12 @@ The bundled FFmpeg builds include GPL components, so the bundled FFmpeg tools ar
 
 LoomTV invokes FFmpeg as separate command line executables. The FFmpeg binaries remain third-party software owned by their respective copyright holders.
 
+The machine-readable provenance record is `runtime-provenance.json`. It records the
+provider, source references, revisions, configured features, license files, and
+the runtime file paths. The current provider notices do not include binary or
+archive SHA-256 values, so the corresponding manifest hash fields are explicitly
+`null` rather than inferred.
+
 For FFmpeg source code, documentation, and legal details, see:
 
 - https://ffmpeg.org/

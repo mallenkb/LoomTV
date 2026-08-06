@@ -54,6 +54,7 @@ function PauseOverlay({
               <img
                 src={logoSources[0]}
                 alt={title}
+                decoding="async"
                 className="mb-4 h-40 max-h-[28vh] w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
                 onError={(event) => {
                   event.currentTarget.style.display = 'none';

@@ -201,6 +201,12 @@ function hashToken(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function timingSafeStringEqual(left, right) {
+  const expected = Buffer.from(String(left || ''), 'utf8');
+  const actual = Buffer.from(String(right || ''), 'utf8');
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
 function normalizedIdentity(value) {
   return String(value || '').trim().toLocaleLowerCase();
 }
@@ -674,7 +680,7 @@ export function createHeadlessAdminService(options) {
     const state = await loadState();
     const now = Date.now();
     const active = state.sessions.filter((entry) => entry.expiresAt > now && principalForUserId(state, entry.userId));
-    const session = active.find((entry) => entry.tokenHash === hashToken(token));
+    const session = active.find((entry) => timingSafeStringEqual(entry.tokenHash, hashToken(token)));
     if (active.length !== state.sessions.length) {
       state.sessions = active;
       await saveState(state);
@@ -709,7 +715,7 @@ export function createHeadlessAdminService(options) {
       if (!token) return false;
       const state = await loadState();
       const before = state.sessions.length;
-      state.sessions = state.sessions.filter((entry) => entry.tokenHash !== hashToken(token));
+      state.sessions = state.sessions.filter((entry) => !timingSafeStringEqual(entry.tokenHash, hashToken(token)));
       if (state.sessions.length === before) return false;
       await saveState(state);
       return true;

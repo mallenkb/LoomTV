@@ -1,11 +1,22 @@
 import { desktopApi, type MpvCommand, type MpvStartOptions } from '@/lib/desktopApi';
-import type { PlaybackEngine, PlaybackEngineStateListener } from './PlaybackEngine';
+import type {
+  PlaybackCommand,
+  PlaybackEngine,
+  PlaybackEngineStateListener,
+  PlaybackStartOptions,
+} from './PlaybackEngine';
+import PlaybackVolumeController from './PlaybackVolumeController';
 
 export default class MpvPlaybackEngine implements PlaybackEngine {
   readonly kind = 'mpv' as const;
+  readonly surface = 'external-window' as const;
   private sessionId: string | null = null;
   private readonly pendingStates: Parameters<PlaybackEngineStateListener>[0][] = [];
   private readonly unsubscribe: () => void;
+  private readonly volumeController = new PlaybackVolumeController(async (volume, muted) => {
+    await this.command({ type: 'set-volume', volume });
+    await this.command({ type: 'set-muted', muted });
+  });
 
   constructor(private readonly listener: PlaybackEngineStateListener) {
     this.unsubscribe = desktopApi.mpv.onState((state) => {
@@ -21,8 +32,9 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     return (await desktopApi.mpv.availability()).available;
   }
 
-  async load(filePath: string, options?: MpvStartOptions): Promise<boolean> {
-    const result = await desktopApi.mpv.start(filePath, options);
+  async load(filePath: string, options?: PlaybackStartOptions): Promise<boolean> {
+    this.volumeController.reset(options?.volume, options?.muted);
+    const result = await desktopApi.mpv.start(filePath, options as MpvStartOptions | undefined);
     if (!result.ok || !result.sessionId) {
       throw new Error(result.error || 'Native mpv playback could not be started.');
     }
@@ -33,15 +45,15 @@ export default class MpvPlaybackEngine implements PlaybackEngine {
     return true;
   }
 
-  private async command(command: MpvCommand): Promise<void> {
-    if (this.sessionId) await desktopApi.mpv.command(this.sessionId, command);
+  private async command(command: PlaybackCommand): Promise<void> {
+    if (this.sessionId) await desktopApi.mpv.command(this.sessionId, command as MpvCommand);
   }
 
   play(): Promise<void> { return this.command({ type: 'set-paused', paused: false }); }
   pause(): Promise<void> { return this.command({ type: 'set-paused', paused: true }); }
   seek(position: number): Promise<void> { return this.command({ type: 'seek', position }); }
-  setVolume(volume: number): Promise<void> { return this.command({ type: 'set-volume', volume }); }
-  setMuted(muted: boolean): Promise<void> { return this.command({ type: 'set-muted', muted }); }
+  setVolume(volume: number): Promise<void> { return this.volumeController.setVolume(volume); }
+  setMuted(muted: boolean): Promise<void> { return this.volumeController.setMuted(muted); }
   setSpeed(speed: number): Promise<void> { return this.command({ type: 'set-speed', speed }); }
   selectVideo(trackId: number | null): Promise<void> { return this.command({ type: 'set-video-track', trackId }); }
   selectAudio(trackId: number | null): Promise<void> { return this.command({ type: 'set-audio-track', trackId }); }

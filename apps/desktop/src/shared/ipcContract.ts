@@ -80,6 +80,9 @@ export interface IpcContract {
   'media:stop-transcode': { args: [sessionId: string]; result: ApiResult<boolean> };
   'metadata:test-keys': { args: [keys: MetadataApiKeys]; result: MetadataKeyTestResult[] };
   'mpv:availability': { args: []; result: MpvAvailability };
+  'mpv:choose-executable': { args: []; result: MpvAvailability };
+  'mpv:reset-executable': { args: []; result: MpvAvailability };
+  'mpv:refresh-availability': { args: []; result: MpvAvailability };
   'mpv:start': { args: [filePath: string, options?: MpvStartOptions]; result: { ok: boolean; sessionId?: string; error?: string } };
   'mpv:command': { args: [sessionId: string, command: MpvCommand]; result: boolean };
   'mpv:stop': { args: [sessionId: string]; result: boolean };

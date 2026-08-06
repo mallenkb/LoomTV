@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import type { LocalSegmentAnalysisStatus, SkipAnalysisSettings } from '@/lib/desktopApi';
+import type { LibVlcAvailability, LocalSegmentAnalysisStatus, MpvAvailability, SkipAnalysisSettings } from '@/lib/desktopApi';
 import SkipTimestampManager from './SkipTimestampManager';
 
 type PlaybackSettingsSectionProps = {
@@ -20,6 +20,11 @@ type PlaybackSettingsSectionProps = {
     scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
   ) => Promise<{ queued: number } | undefined> | void;
   onSave: () => void | boolean | Promise<void | boolean>;
+  libvlcAvailability?: LibVlcAvailability | null;
+  mpvAvailability?: MpvAvailability | null;
+  onMpvChoose?: () => void | Promise<void>;
+  onMpvReset?: () => void | Promise<void>;
+  onMpvRefresh?: () => void | Promise<void>;
 };
 
 const INTRO_TYPES = ['intro', 'recap'] as const;
@@ -47,6 +52,11 @@ export default function PlaybackSettingsSection({
   analysisStatus,
   onAnalysisAction,
   onSave,
+  libvlcAvailability = null,
+  mpvAvailability = null,
+  onMpvChoose,
+  onMpvReset,
+  onMpvRefresh,
 }: PlaybackSettingsSectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -133,6 +143,42 @@ export default function PlaybackSettingsSection({
           <div className="mt-4 flex justify-end">
             <Button type="button" disabled={!playbackSettingsDirty} onClick={onSave}>Save playback settings</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="text-white">Native playback fallback (mpv)</CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            LibVLC plays local files through an in-window native surface on macOS. Configure an external mpv installation here as the fallback for the classic integrated player experience; packaged releases may also include a verified mpv payload.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="font-medium text-white">
+                {mpvAvailability === null
+                  ? 'Checking mpv…'
+                  : mpvAvailability.available
+                    ? `Available${mpvAvailability.version ? ` · ${mpvAvailability.version}` : ''}`
+                    : 'Not detected'}
+              </span>
+              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
+                {mpvAvailability?.runtimeSource === 'user-selected' ? 'Selected executable' : mpvAvailability?.runtimeSource === 'environment' ? 'Environment' : 'System search'}
+              </span>
+            </div>
+            <p className="mt-2 break-all text-xs text-[var(--loom-muted)]">
+              {mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason || 'The desktop app is checking for an external runtime.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={() => void onMpvChoose?.()} disabled={!onMpvChoose}>Choose mpv executable</Button>
+            <Button type="button" variant="outline" onClick={() => void onMpvReset?.()} disabled={!onMpvReset || mpvAvailability?.runtimeSource !== 'user-selected'}>Use system mpv</Button>
+            <Button type="button" variant="outline" onClick={() => void onMpvRefresh?.()} disabled={!onMpvRefresh}>Refresh</Button>
+          </div>
+          <p className="text-xs text-[var(--loom-faint)]">
+            LoomTV keeps the existing player UI in every case. If LibVLC is unavailable it tries mpv, then falls back to its Chromium/HLS path.
+          </p>
         </CardContent>
       </Card>
 
@@ -331,6 +377,53 @@ export default function PlaybackSettingsSection({
         )}
       </Card>
       </>}
+
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="text-white">More information</CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            How LoomTV chooses a playback path for local, network, and remote media.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
+              <dt className="text-xs font-semibold text-white/60">Local files</dt>
+              <dd className="mt-1 text-white/85">Classic Loom player UI → LibVLC native surface (macOS) → mpv fallback → Chromium/HLS</dd>
+            </div>
+            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
+              <dt className="text-xs font-semibold text-white/60">Network &amp; remote media</dt>
+              <dd className="mt-1 text-white/85">Chromium direct stream or HLS, selected by the host playback plan</dd>
+            </div>
+            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
+              <dt className="text-xs font-semibold text-white/60">Hardware decode</dt>
+              <dd className="mt-1 text-white/85">Native engines manage decoding; Chromium reports browser-managed decoding</dd>
+            </div>
+            <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
+              <dt className="text-xs font-semibold text-white/60">Encode backend</dt>
+              <dd className="mt-1 text-white/85">The host transcoder is used only when direct playback is not compatible</dd>
+            </div>
+          </dl>
+
+          <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="font-medium text-white">LibVLC runtime</span>
+              <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
+                {libvlcAvailability === null
+                  ? 'Checking…'
+                  : libvlcAvailability.available
+                    ? `Available${libvlcAvailability.version ? ` · ${libvlcAvailability.version}` : ''}`
+                    : libvlcAvailability.reason?.includes('held back')
+                      ? 'Held back for overlay safety'
+                      : 'Unavailable'}
+              </span>
+            </div>
+            <p className="mt-2 break-all text-xs text-[var(--loom-muted)]">
+              {libvlcAvailability?.libraryPath || libvlcAvailability?.warning || libvlcAvailability?.reason || 'The desktop app is checking the bundled runtime.'}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

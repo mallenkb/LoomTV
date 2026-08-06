@@ -1,7 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import type { LibraryData, LibraryFolderGroups, ScanCacheEntry, ScanCacheFolderKind } from './appContracts.ts';
 import { customArtworkReference } from './artworkCache.ts';
-import type { StoredProgress } from './databasePlaybackRepository.ts';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
 
 type SeasonEntry = { number: number; title: string; episodeCount: number };
@@ -104,7 +103,6 @@ function durableArtworkSources(sources?: string[]): string[] {
 
 function applyDurableState(
   item: MediaItem,
-  progress: Map<string, StoredProgress>,
   custom: Map<string, Map<string, string>>,
 ): MediaItem {
   const next = { ...item };
@@ -157,7 +155,6 @@ export function hasLibraryData(database: BetterSqlite3.Database): boolean {
 
 export function loadLibrary(
   database: BetterSqlite3.Database,
-  progress: Map<string, StoredProgress>,
   custom: Map<string, Map<string, string>>,
 ): LibraryData | null {
   if (!hasLibraryData(database)) return null;
@@ -248,7 +245,7 @@ export function loadLibrary(
       seasons: seasonsByMedia.get(row.id) || undefined,
       episodes: episodesByMedia.get(row.id) || undefined,
       episodeFiles: episodeFilesByMedia.get(row.id) || undefined,
-    }, progress, custom);
+    }, custom);
 
     if (item.type === 'movie') data.movies.push(item);
     else if (item.type === 'anime') data.animeShows.push(item);

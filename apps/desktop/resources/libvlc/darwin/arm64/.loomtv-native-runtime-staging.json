@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "engine": "libvlc",
+  "target": "darwin-arm64",
+  "layout": "resources/libvlc/darwin/arm64",
+  "sourceMode": "source-root"
+}

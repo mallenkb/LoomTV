@@ -1,5 +1,7 @@
 import type { OfficialMetadataCandidate, PlaybackTrackPreferences, StreamOptions } from './mobileDomain.ts';
 import type {
+  LanPlaybackCapabilities,
+  LanPairApprovalRequest,
   LanProfileListKind,
   LanProfilePreferences,
   LanProfileSelectionRequest,
@@ -72,6 +74,13 @@ export function createMobileLanClient(
         body: JSON.stringify({ mediaId, options, selectionRevision }),
       });
     },
+    getPlaybackPlan(baseUrl: string, token: string, mediaId: string, capabilities: LanPlaybackCapabilities, selectionRevision?: number) {
+      return fetchImpl(`${baseUrl}/api/v2/playback-plan`, {
+        method: 'POST',
+        headers: bearerHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ mediaId, capabilities, selectionRevision }),
+      });
+    },
     getProgress(baseUrl: string, token: string) {
       return fetchImpl(`${baseUrl}/api/v2/progress`, { headers: bearerHeaders(token) });
     },
@@ -104,25 +113,32 @@ export function createMobileLanClient(
         headers: bearerHeaders(token),
       });
     },
-    pair(baseUrl: string, body: { code: string; deviceName: string }) {
+    pair(baseUrl: string, body: { code?: string; deviceName: string; approvalRequested?: boolean }) {
       return fetchImpl(`${baseUrl}/api/v2/pair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Loom-Profile-Api-Version': '1' },
         body: JSON.stringify(body),
       });
     },
-    getOfficialArtworkCandidates(baseUrl: string, token: string, mediaId: string) {
-      return fetchImpl(`${baseUrl}/api/artwork/official-candidates`, {
+    pairingApprovalStatus(baseUrl: string, request: Pick<LanPairApprovalRequest, 'requestId' | 'requestSecret'>) {
+      return fetchImpl(`${baseUrl}/api/v2/pair/status`, {
         method: 'POST',
-        headers: bearerHeaders(token, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ mediaId }),
+        headers: { 'Content-Type': 'application/json', 'X-Loom-Profile-Api-Version': '1' },
+        body: JSON.stringify(request),
       });
     },
-    applyOfficialArtwork(baseUrl: string, token: string, mediaId: string, candidate: OfficialMetadataCandidate) {
-      return fetchImpl(`${baseUrl}/api/artwork/apply-official`, {
+    getOfficialArtworkCandidates(baseUrl: string, token: string, mediaId: string, selectionRevision?: number) {
+      return fetchImpl(`${baseUrl}/api/v2/artwork/official-candidates`, {
         method: 'POST',
         headers: bearerHeaders(token, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ mediaId, candidate }),
+        body: JSON.stringify({ mediaId, selectionRevision }),
+      });
+    },
+    applyOfficialArtwork(baseUrl: string, token: string, mediaId: string, candidate: OfficialMetadataCandidate, selectionRevision?: number) {
+      return fetchImpl(`${baseUrl}/api/v2/artwork/apply-official`, {
+        method: 'POST',
+        headers: bearerHeaders(token, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ mediaId, candidate, selectionRevision }),
       });
     },
     getTrackPreferences(baseUrl: string, token: string, scope: string) {

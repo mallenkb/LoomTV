@@ -2,15 +2,13 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 import {
   probeTranscodeCapabilities,
   type TranscodeCapabilities,
 } from '@loom-media-server/transcode-capabilities';
 
 export { appendH264EncoderOptions, type H264HardwareEncoder, type HardwareVideoEncoder } from './transcodeFilters.ts';
-import type { H264HardwareEncoder, HardwareVideoEncoder } from './transcodeFilters.ts';
+import type { HardwareVideoEncoder } from './transcodeFilters.ts';
 
 let cachedFFmpegPath: string | null | undefined;
 let cachedFFprobePath: string | null | undefined;
@@ -64,11 +62,12 @@ function firstExistingBinary(candidates: Array<string | null | undefined>): stri
 
 function bundledBinary(name: 'ffmpeg' | 'ffprobe'): string | null {
   const relative = path.join('ffmpeg', platformFolder(), binaryName(name));
-  return firstExistingBinary([
+  const candidates: Array<string | null | undefined> = [
     path.join(process.resourcesPath || '', relative),
     path.join(app.getAppPath(), 'resources', relative),
-    path.join(process.cwd(), 'resources', relative),
-  ]);
+  ];
+  if (!app.isPackaged) candidates.push(path.join(process.cwd(), 'resources', relative));
+  return firstExistingBinary(candidates);
 }
 
 function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string[] {
@@ -94,10 +93,6 @@ function systemBinaryCandidates(name: 'ffmpeg' | 'ffprobe' | 'fpcalc'): string[]
   return [...new Set(candidates)];
 }
 
-export function preferredH264HardwareEncoder(binaryPath: string): H264HardwareEncoder | null {
-  return preferredHardwareEncoder(binaryPath, 'h264') as H264HardwareEncoder | null;
-}
-
 export function preferredHardwareEncoder(binaryPath: string, codec: 'h264' | 'hevc' | 'av1' = 'h264'): HardwareVideoEncoder | null {
   const capabilities = getTranscodeCapabilities(binaryPath);
   const preferred = capabilities.backends.find((entry) => entry.id === capabilities.recommendedBackend);
@@ -117,32 +112,13 @@ export function findFFmpeg(): string | null {
     return cachedFFmpegPath;
   }
   const bundled = bundledBinary('ffmpeg');
-  const appNodeModule = path.join(
-    app.getAppPath(),
-    'node_modules',
-    'ffmpeg-static',
-    process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
-  );
-
-  const candidates = [
-    bundled,
-    ffmpegStatic,
-    appNodeModule,
-    ...systemBinaryCandidates('ffmpeg'),
-  ];
-
-  let fallback: string | null = null;
-  for (const candidate of candidates) {
-    const binary = existingCompatibleBinary(candidate);
-    if (binary && !fallback) fallback = binary;
-    if (binary && probeTranscodeCapabilities(binary, { skipSmokeTest: true }).recommendedBackend !== 'software') {
-      cachedFFmpegPath = binary;
-      ffmpegCheckedAt = Date.now();
-      return binary;
-    }
+  if (bundled) {
+    cachedFFmpegPath = bundled;
+    ffmpegCheckedAt = Date.now();
+    return bundled;
   }
 
-  cachedFFmpegPath = fallback;
+  cachedFFmpegPath = firstExistingBinary(systemBinaryCandidates('ffmpeg'));
   ffmpegCheckedAt = Date.now();
   return cachedFFmpegPath;
 }
@@ -157,51 +133,6 @@ export function findFFprobe(): string | null {
     cachedFFprobePath = bundled;
     ffprobeCheckedAt = Date.now();
     return bundled;
-  }
-
-  try {
-    const staticBinary = existingCompatibleBinary(ffprobeStatic?.path);
-    if (staticBinary) {
-      cachedFFprobePath = staticBinary;
-      ffprobeCheckedAt = Date.now();
-      return staticBinary;
-    }
-  } catch {
-    // Fall through.
-  }
-
-  try {
-    if (ffmpegStatic) {
-      const sibling = path.join(path.dirname(ffmpegStatic), binaryName('ffprobe'));
-      const siblingBinary = existingCompatibleBinary(sibling);
-      if (siblingBinary) {
-        cachedFFprobePath = siblingBinary;
-        ffprobeCheckedAt = Date.now();
-        return siblingBinary;
-      }
-    }
-  } catch {
-    // Fall through.
-  }
-
-  try {
-    const candidate = path.join(
-      app.getAppPath(),
-      'node_modules',
-      'ffprobe-static',
-      'bin',
-      process.platform,
-      process.arch,
-      process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe',
-    );
-    const bundledModuleBinary = existingCompatibleBinary(candidate);
-    if (bundledModuleBinary) {
-      cachedFFprobePath = bundledModuleBinary;
-      ffprobeCheckedAt = Date.now();
-      return bundledModuleBinary;
-    }
-  } catch {
-    // Fall through.
   }
 
   cachedFFprobePath = firstExistingBinary(systemBinaryCandidates('ffprobe'));

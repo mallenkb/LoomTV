@@ -1,4 +1,10 @@
+import path from 'node:path';
 import { isOwnerPrincipal } from './auth-policy.js';
+import {
+  MEDIA_CORE_CONTRACT_VERSION,
+  normalizeClientPlaybackCapabilities,
+  playbackPlanForMedia,
+} from '@loom-media-server/media-core';
 
 export const PUBLIC_API_PREFIX = '/api/v1';
 export const PUBLIC_API_VERSION = '1';
@@ -129,6 +135,24 @@ function publicLibraryRoot(root) {
   return safeRoot;
 }
 
+function mediaPlaybackFacts(item) {
+  const metadata = item?.localMetadata || item?.metadata || {};
+  const filePath = item?.path || item?.filePath || '';
+  return {
+    ...item,
+    container: metadata.container || item?.container || path.extname(filePath).replace(/^\./, ''),
+    videoCodec: metadata.videoCodec || item?.videoCodec,
+    audioCodec: metadata.audioCodec || item?.audioCodec,
+    width: metadata.width || item?.width,
+    height: metadata.height || item?.height,
+    bitrateKbps: metadata.bitrateKbps || item?.bitrateKbps,
+    colorTransfer: metadata.colorTransfer || item?.colorTransfer,
+    colorPrimaries: metadata.colorPrimaries || item?.colorPrimaries,
+    pixelFormat: metadata.pixelFormat || item?.pixelFormat,
+    audioTracks: metadata.audioTracks ?? item?.audioTracks,
+  };
+}
+
 function discoveryDocument(version, health) {
   return {
     apiVersion: PUBLIC_API_VERSION,
@@ -143,6 +167,7 @@ function discoveryDocument(version, health) {
       library: true,
       directStreaming: true,
       hlsTranscoding: Boolean(health.capabilities?.transcoding),
+      playbackPlan: true,
       hardwareAcceleration: Boolean(health.capabilities?.hardwareAcceleration),
       profilePins: false,
       downloads: true,
@@ -208,6 +233,7 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/media/{mediaId}': { get: { summary: 'Read media playback links' } },
     '/api/v1/media/{mediaId}/direct': { get: { summary: 'Stream a browser-compatible file' } },
     '/api/v1/media/{mediaId}/download': { get: { summary: 'Download the original media file' } },
+    '/api/v1/media/{mediaId}/playback-plan': { post: { summary: 'Choose direct playback or an HLS transcode for a client profile' } },
     '/api/v1/media/{mediaId}/transcode': { post: { summary: 'Start an HLS transcode' } },
     '/api/v1/users': { get: { summary: 'List scoped user accounts' }, post: { summary: 'Create a user account' } },
     '/api/v1/users/{userId}': { patch: { summary: 'Update a user account' }, delete: { summary: 'Remove a user account' } },
@@ -481,6 +507,41 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`,
           downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download${tokenQuery(downloadToken)}`,
           transcodeUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode`,
+        });
+        return true;
+      }
+      if (resource === 'media' && segments.length === 3 && segments[2] === 'playback-plan' && req.method === 'POST') {
+        const principal = await requirePrincipal(req, 'library.read');
+        const mediaId = decodeSegment(segments[1], 'mediaId');
+        const item = await service.getLibraryItem(mediaId, principal);
+        if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
+        const body = await readJsonBody(req);
+        const capabilities = normalizeClientPlaybackCapabilities(body.capabilities || body);
+        const facts = mediaPlaybackFacts(item);
+        const plan = playbackPlanForMedia(facts, capabilities);
+        const tokenQuery = (token) => token ? `?token=${encodeURIComponent(token)}` : '';
+        const directToken = plan.sourceAction === 'direct' && typeof mediaService.issuePlaybackToken === 'function'
+          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')?.token
+          : null;
+        const profileQuery = new URLSearchParams({
+          codec: plan.codec || 'h264',
+          backend: 'auto',
+          ...(capabilities.maxWidth ? { maxWidth: String(capabilities.maxWidth) } : {}),
+          ...(capabilities.maxHeight ? { maxHeight: String(capabilities.maxHeight) } : {}),
+          ...(capabilities.maxVideoBitrateKbps ? { videoBitrateKbps: String(capabilities.maxVideoBitrateKbps) } : {}),
+          ...(plan.facts?.hdr && !capabilities.supportsHdr ? { toneMap: '1' } : {}),
+        });
+        writeData(res, 200, {
+          mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
+          capabilities,
+          plan,
+          item: publicLibraryItem(item),
+          directUrl: plan.sourceAction === 'direct'
+            ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`
+            : null,
+          transcodeUrl: plan.sourceAction === 'transcode'
+            ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode?${profileQuery.toString()}`
+            : null,
         });
         return true;
       }

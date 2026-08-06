@@ -1,10 +1,10 @@
 {
   "name": "loom-media-server-desktop",
   "productName": "LoomTV",
-  "version": "1.0.104",
+  "version": "1.0.105",
   "description": "A local media server for your movie and TV show collection",
   "main": ".vite/build/main.js",
-  "packageManager": "pnpm@11.17.0",
+  "packageManager": "pnpm@11.20.0",
   "private": true,
   "repository": {
     "type": "git",
@@ -14,11 +14,11 @@
     "preinstall": "node scripts/enforce-pnpm.cjs",
     "prestart": "node scripts/enforce-pnpm.cjs && electron-rebuild -f -w better-sqlite3",
     "prebuild": "node scripts/enforce-pnpm.cjs",
-    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
-    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
-    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
-    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
-    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs",
+    "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
+    "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
+    "predist": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
+    "prepublish": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
+    "prerelease": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
     "prelint": "node scripts/enforce-pnpm.cjs",
     "start": "node scripts/run-electron-forge.cjs start",
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
@@ -55,7 +55,6 @@
     "@electron-forge/maker-rpm": "7.11.1",
     "@electron-forge/maker-squirrel": "7.11.1",
     "@electron-forge/maker-zip": "7.11.1",
-    "@electron-forge/plugin-auto-unpack-natives": "7.11.1",
     "@electron-forge/plugin-fuses": "7.11.1",
     "@electron-forge/plugin-vite": "7.11.1",
     "@electron-forge/shared-types": "7.11.1",
@@ -77,7 +76,7 @@
     "eslint-plugin-import-x": "4.17.1",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.7.0",
-    "pnpm": "11.17.0",
+    "pnpm": "11.20.0",
     "postcss": "8.5.18",
     "tailwindcss": "4.2.4",
     "typescript": "5.7.3",
@@ -94,9 +93,8 @@
     "clsx": "2.1.1",
     "electron-squirrel-startup": "1.0.1",
     "electron-updater": "6.8.9",
-    "ffmpeg-static": "5.3.0",
-    "ffprobe-static": "3.1.0",
     "hls.js": "1.6.16",
+    "koffi": "3.1.4",
     "lucide-react": "1.14.0",
     "motion": "12.38.0",
     "react": "19.2.7",
@@ -142,6 +140,26 @@
         "to": "trayIcon@2x.png"
       },
       {
+        "from": "resources/libvlc",
+        "to": "libvlc"
+      },
+      {
+        "from": "resources/mpv",
+        "to": "mpv"
+      },
+      {
+        "from": "resources/ffmpeg/runtime-provenance.json",
+        "to": "ffmpeg/runtime-provenance.json"
+      },
+      {
+        "from": "resources/ffmpeg/NOTICE.md",
+        "to": "ffmpeg/NOTICE.md"
+      },
+      {
+        "from": "resources/ffmpeg/COPYING.GPLv3.txt",
+        "to": "ffmpeg/COPYING.GPLv3.txt"
+      },
+      {
         "from": "resources/fpcalc/NOTICE.md",
         "to": "fpcalc/NOTICE.md"
       },
@@ -154,7 +172,9 @@
     "asarUnpack": [
       "**/*.node",
       "**/ffmpeg*",
-      "**/ffprobe*"
+      "**/ffprobe*",
+      "**/libvlc/**/*",
+      "**/mpv/**/*"
     ],
     "publish": [
       {

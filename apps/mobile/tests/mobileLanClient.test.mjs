@@ -44,6 +44,29 @@ test('pairing sends exactly the existing JSON request contract without authoriza
   });
 });
 
+test('one-tap pairing requests desktop approval and polls with its short-lived secret', async () => {
+  const { client, requests } = recordingClient();
+  await client.pair('https://desktop.local:3848', {
+    approvalRequested: true,
+    deviceName: 'LoomTV iOS',
+  });
+  await client.pairingApprovalStatus('https://desktop.local:3848', {
+    requestId: 'approval-id',
+    requestSecret: 'approval-secret',
+  });
+
+  assert.equal(requests[0].input, 'https://desktop.local:3848/api/v2/pair');
+  assert.deepEqual(JSON.parse(requests[0].init.body), {
+    approvalRequested: true,
+    deviceName: 'LoomTV iOS',
+  });
+  assert.equal(requests[1].input, 'https://desktop.local:3848/api/v2/pair/status');
+  assert.deepEqual(JSON.parse(requests[1].init.body), {
+    requestId: 'approval-id',
+    requestSecret: 'approval-secret',
+  });
+});
+
 test('HLS preparation preserves media ID, options, and bearer headers', async () => {
   const { client, requests } = recordingClient();
   await client.startHls('http://desktop.local:3847', 'token', 'resource-id', {

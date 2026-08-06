@@ -6,7 +6,11 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { Socket as NodeSocket } from 'node:net';
-import { MEDIA_CORE_CONTRACT_VERSION } from '@loom-media-server/media-core';
+import {
+  MEDIA_CORE_CONTRACT_VERSION,
+  normalizeClientPlaybackCapabilities,
+  playbackPlanForMedia,
+} from '@loom-media-server/media-core';
 import { getImageMimeType, getMimeType, getSubtitleMimeType } from './mimeTypes';
 import { findFFmpeg, getTranscodeCapabilities, preferredHardwareEncoder } from './mediaBinaries';
 import {
@@ -42,8 +46,12 @@ import {
   saveProgress,
   setProfileListEntry,
 } from './database';
-import { getLocalNetworkAddresses, getLocalNetworkName } from './networkInfo';
 import type { TranscodeOptions } from './mediaTypes';
+import type {
+  OfficialArtworkRefreshResult,
+  OfficialMetadataApplyTarget,
+  OfficialMetadataCandidate,
+} from './officialMetadataService';
 import { browserPlaybackPlan } from './transcodeDecision';
 import { probeMedia } from './mediaProbe';
 import { isSubtitleFileName, isVideoFileName } from './fileClassification';
@@ -79,7 +87,7 @@ import {
   mediaServerRouteAccess,
   type LanRouteScope,
 } from './lanRoutePolicy';
-import type { AppSettings, LanPairedDevice } from './appContracts.ts';
+import type { AppSettings, LanPairedDevice, LibraryData } from './appContracts.ts';
 import type { LanTlsIdentity } from './lanTlsIdentity.ts';
 import {
   sanitizeRendererSettingsPatch,
@@ -106,11 +114,19 @@ export interface MediaServerDependencies {
   assertSubtitleCanAccessMediaPath: (profileId: string, mediaFilePath: string, subtitleFilePath: string) => void;
   decodeDataUrl: (dataUrl: string) => { buffer: Buffer; mimeType: string } | null;
   getLanServerBase: () => string | null;
+  getLanHmacSecret: () => string;
   getLibraryRevision: () => number;
   getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) => Promise<MediaSegmentResponse>;
+  getOfficialMetadataCandidates: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
+  applyOfficialMetadataCandidate: (
+    mediaId: string,
+    candidate: OfficialMetadataCandidate,
+    target?: OfficialMetadataApplyTarget,
+  ) => Promise<OfficialArtworkRefreshResult>;
   getWebRendererDevServerUrl: () => string | null;
   getWebRendererRoot: () => string | null;
   handleLanPairRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
+  handleLanPairStatusRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
   handleLanRefreshRequest: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>;
   isExternalArtworkUrl: (source: string) => boolean;
   isImageFileName: (fileName: string) => boolean;
@@ -127,7 +143,8 @@ export interface MediaServerDependencies {
   libraryForLocalNetwork: (profileId?: string, deviceId?: string) => LibraryPayload;
   profileRestrictionIdentity: (profileId: string) => string;
   libraryForRenderer: () => LibraryPayload;
-  loadLibrary: () => { libraryFolders: string[] };
+  loadLibrary: () => LibraryData;
+  resourceRegistryEpoch: string;
   loadSettings: () => AppSettings;
   readJsonBody: (req: http.IncomingMessage) => Promise<Record<string, unknown>>;
   requireLocalOrLanAccess: (reqUrl: URL, req: http.IncomingMessage, res: http.ServerResponse) => boolean;
@@ -168,6 +185,14 @@ function libraryItemIdFromPath(pathname: string, prefix: string): string | null 
   }
 }
 
+function libraryItemPathForId(library: LibraryData, mediaId: string): string | null {
+  for (const collection of [library.movies || [], library.tvShows || [], library.animeShows || []]) {
+    const item = collection.find((candidate) => candidate.id === mediaId);
+    if (item?.filePath) return item.filePath;
+  }
+  return null;
+}
+
 export function getMediaServer(): http.Server | null { return mediaServer; }
 export function getLanMediaServer(): https.Server | null { return lanMediaServer; }
 export function getMediaServerPort(): number { return mediaServerPort; }
@@ -196,7 +221,6 @@ function writeLanLandingPage(
   details: {
     baseUrl: string | null;
     deviceName: string;
-    networkName: string;
     sharingEnabled: boolean;
   },
 ): void {
@@ -229,10 +253,10 @@ ol{margin:18px 0 0;padding-left:22px;color:var(--muted)}li{margin:8px 0}b{color:
 <div class="box"><div class="label">Desktop address</div><div class="value">${htmlEscape(baseUrl)}</div></div>
 <ol>
 <li>Open <b>LoomTV mobile</b>, not this browser page.</li>
-<li>In the mobile app, choose <b>Pair device</b>.</li>
-<li>Enter this desktop address and the <b>6-digit pairing PIN shown in desktop Settings &gt; Network</b>.</li>
+<li>Choose this desktop and tap <b>Connect</b>.</li>
+<li>Approve the device in the desktop prompt. If approval is unavailable, use <b>Connect manually</b> with the address and PIN from Settings &gt; Network.</li>
 </ol>
-<footer>${htmlEscape(details.deviceName)} &middot; ${htmlEscape(details.networkName)}</footer>
+<footer>${htmlEscape(details.deviceName)}</footer>
 </main>
 </body>
 </html>`;
@@ -443,11 +467,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     assertSubtitleCanAccessMediaPath,
     decodeDataUrl,
     getLanServerBase,
+    getLanHmacSecret,
     getLibraryRevision,
     getMediaSegments,
+    getOfficialMetadataCandidates,
+    applyOfficialMetadataCandidate,
     getWebRendererDevServerUrl,
     getWebRendererRoot,
     handleLanPairRequest,
+    handleLanPairStatusRequest,
     handleLanRefreshRequest,
     isExternalArtworkUrl,
     isImageFileName,
@@ -469,6 +497,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     readJsonBody,
     requireLocalOrLanAccess,
     requireStreamAccess,
+    resourceRegistryEpoch,
     safeEndResponse,
     saveSettings,
     writeJson,
@@ -556,7 +585,8 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         selectionRevision: lanDeviceId ? getActiveProfileState(lanDeviceId).selectionRevision : 0,
         delivery: libraryEtagFor({
           baseAddress: getLanServerBase() || `http://127.0.0.1:${mediaServerPort}`,
-          signingSecret: loadSettings().localNetworkHmacSecret || '',
+          signingSecret: getLanHmacSecret(),
+          resourceRegistryEpoch,
         }),
       });
       const catalogEtag = (
@@ -683,7 +713,6 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         writeLanLandingPage(res, {
           baseUrl: getLanServerBase(),
           deviceName: settings.localNetworkDeviceName || os.hostname(),
-          networkName: getLocalNetworkName(),
           sharingEnabled: isLanSharingEnabled(),
         });
         return;
@@ -717,13 +746,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           ok: true,
           app: 'LoomTV',
           deviceId: settings.localNetworkDeviceId,
-          deviceName: settings.localNetworkDeviceName || os.hostname(),
           sharingEnabled: Boolean(settings.localNetworkSharingEnabled),
-          networkName: getLocalNetworkName(),
           port: loopbackRequest ? mediaServerPort : lanMediaServerPort,
           transport: loopbackRequest ? 'loopback-http' : 'tls',
           ...(!loopbackRequest ? { certFingerprint: lanCertificateFingerprint } : {}),
-          addresses: getLocalNetworkAddresses(),
         });
         return;
       }
@@ -737,9 +763,19 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       }
 
       if (reqUrl.pathname === '/api/v2/pair' && req.method === 'POST') {
+        res.setHeader('Cache-Control', 'no-store');
         handleLanPairRequest(req, res).catch((error) => {
           console.error('[lan/pair] error', error);
           writeJson(res, 500, { error: 'Pairing failed' });
+        });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/pair/status' && req.method === 'POST') {
+        res.setHeader('Cache-Control', 'no-store');
+        handleLanPairStatusRequest(req, res).catch((error) => {
+          console.error('[lan/pair/status] error', error);
+          writeJson(res, 500, { error: 'Pairing approval check failed' });
         });
         return;
       }
@@ -842,6 +878,74 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         return;
       }
 
+      if (reqUrl.pathname === '/api/v2/playback-plan' && req.method === 'POST') {
+        if (!requireV2Scope('media:stream')) return;
+        readJsonBody(req)
+          .then(async (body) => {
+            assertCurrentSelectionRevision(body);
+            const mediaResourceId = String(body.mediaId || '');
+            let filePath = '';
+            try {
+              filePath = resolveLocalResource(mediaResourceId, MEDIA_RESOURCE_KIND, getLibraryRoots());
+            } catch {
+              // Keep the response deliberately opaque for stale or invalid IDs.
+            }
+            if (!filePath || !fs.existsSync(filePath)) {
+              writeJson(res, 404, { ok: false, code: 'MEDIA_NOT_FOUND', error: 'The media file is unavailable.' });
+              return;
+            }
+            const identity = requireProfileMediaAccess(filePath);
+            if (!identity) return;
+            const probe = await probeMedia(filePath);
+            const video = probe.tracks.find((track) => track.type === 'video');
+            const capabilities = normalizeClientPlaybackCapabilities(body.capabilities || {});
+            const sourcePlan = playbackPlanForMedia({
+              path: filePath,
+              container: probe.container,
+              videoCodec: probe.videoCodec,
+              audioCodec: probe.audioCodec,
+              width: probe.resolution?.width,
+              height: probe.resolution?.height,
+              bitrateKbps: probe.bitrateKbps,
+              colorTransfer: video?.colorTransfer,
+              colorPrimaries: video?.colorPrimaries,
+              pixelFormat: video?.pixelFormat,
+              audioTracks: probe.tracks.some((track) => track.type === 'audio') ? 1 : 0,
+            }, capabilities);
+            const ffmpegAvailable = Boolean(findFFmpeg());
+            const plan = sourcePlan.sourceAction === 'transcode' && !ffmpegAvailable
+              ? {
+                ...sourcePlan,
+                backend: 'unavailable',
+                reason: `${sourcePlan.reason} FFmpeg is not available on the host.`,
+              }
+              : sourcePlan;
+            const recommendedOptions = plan.sourceAction === 'transcode'
+              ? {
+                targetVideoCodec: plan.codec === 'h264' || plan.codec === 'hevc' || plan.codec === 'av1' ? plan.codec : 'h264',
+                ...(capabilities.maxWidth ? { maxWidth: capabilities.maxWidth } : {}),
+                ...(capabilities.maxHeight ? { maxHeight: capabilities.maxHeight } : {}),
+                ...(capabilities.maxVideoBitrateKbps ? { videoBitrateKbps: capabilities.maxVideoBitrateKbps } : {}),
+                toneMap: Boolean(plan.facts?.hdr && !capabilities.supportsHdr),
+                preset: 'auto' as const,
+              }
+              : undefined;
+            writeJson(res, 200, {
+              ok: true,
+              data: {
+                mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
+                capabilities,
+                plan,
+                ...(recommendedOptions ? { recommendedOptions } : {}),
+              },
+            });
+          })
+          .catch((error) => {
+            console.error('LAN playback plan API error:', error);
+            writeJson(res, 500, { ok: false, code: 'PLAYBACK_PLAN_FAILED', error: 'Unable to choose a playback plan.' });
+          });
+        return;
+      }
 
       if (reqUrl.pathname === '/api/v2/start-hls' && req.method === 'POST') {
         if (!requireV2Scope('media:stream')) return;
@@ -1082,7 +1186,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               assertSubtitleCanAccessMediaPath(profileId, mediaFilePath, subtitleFilePath);
               if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
               const resourceId = registerResource(
-                loadSettings().localNetworkHmacSecret || '',
+                getLanHmacSecret(),
                 'subtitle',
                 subtitleFilePath,
                 mediaFilePath,
@@ -1139,6 +1243,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const preferences = profileId ? getProfilePreferences(profileId) : {};
         writeJson(res, 200, {
           profileApiVersion: 1,
+          mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
           capabilities: {
             profiles: true,
             profileCreation: true,
@@ -1146,6 +1251,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             kidsRestrictions: true,
             profilePreferences: true,
             profileLists: true,
+            playbackPlan: true,
           },
           appThemeMode: preferences.appThemeMode ?? settings.appThemeMode,
           appThemeColor: preferences.appThemeColor ?? settings.appThemeColor,
@@ -1302,12 +1408,70 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         }
       }
 
+      if (reqUrl.pathname === '/api/v2/artwork/official-candidates' && req.method === 'POST') {
+        if (!requireV2Scope('catalog:read')) return;
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
+        readJsonBody(req)
+          .then(async (body) => {
+            assertCurrentSelectionRevision(body);
+            requireOwner(profileDeviceId);
+            const mediaId = String(body.mediaId || '').trim();
+            if (!mediaId || mediaId.length > 512) {
+              writeJson(res, 400, { error: 'mediaId is required' });
+              return;
+            }
+            writeJson(res, 200, await getOfficialMetadataCandidates(mediaId));
+          })
+          .catch(writeProfileError);
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/v2/artwork/apply-official' && req.method === 'POST') {
+        if (!requireV2Scope('catalog:read')) return;
+        const profileDeviceId = profileDeviceIdForRequest();
+        if (!profileDeviceId) {
+          writeJson(res, 409, { error: 'profile_required' });
+          return;
+        }
+        readJsonBody(req)
+          .then(async (body) => {
+            assertCurrentSelectionRevision(body);
+            requireOwner(profileDeviceId);
+            const mediaId = String(body.mediaId || '').trim();
+            const rawCandidate = body.candidate;
+            const candidateId = rawCandidate && typeof rawCandidate === 'object' && !Array.isArray(rawCandidate)
+              && typeof (rawCandidate as { id?: unknown }).id === 'string'
+              ? String((rawCandidate as { id: string }).id).trim()
+              : '';
+            if (!mediaId || mediaId.length > 512 || !candidateId || candidateId.length > 512) {
+              writeJson(res, 400, { error: 'mediaId and a candidate id are required' });
+              return;
+            }
+            const candidates = await getOfficialMetadataCandidates(mediaId);
+            const candidate = candidates.find((entry) => entry.id === candidateId);
+            if (!candidate) {
+              writeJson(res, 400, { error: 'The selected metadata candidate is no longer available.' });
+              return;
+            }
+            const target = body.target === 'poster' || body.target === 'cover' || body.target === 'episodes'
+              ? body.target as OfficialMetadataApplyTarget
+              : 'all';
+            writeJson(res, 200, await applyOfficialMetadataCandidate(mediaId, candidate, target));
+          })
+          .catch(writeProfileError);
+        return;
+      }
+
 
       if (reqUrl.pathname === '/api/v2/progress' && req.method === 'GET') {
         if (!requireV2Scope('playback:write')) return;
         const profileId = profileIdForRequest();
         if (!profileId) return;
-        const secret = loadSettings().localNetworkHmacSecret || '';
+        const secret = getLanHmacSecret();
         writeJson(res, 200, Object.fromEntries(
           Object.entries(getAllProgress(profileId)).map(([storedPath, progress]) => [
             registerResource(secret, 'media', storedPath),
@@ -1479,6 +1643,13 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       if (reqUrl.pathname === '/api/custom-artwork') {
         const mediaId = reqUrl.searchParams.get('mediaId') || '';
         const target = reqUrl.searchParams.get('target') || '';
+        const mediaPath = mediaId ? libraryItemPathForId(loadLibrary(), mediaId) : null;
+        if (!mediaPath) {
+          res.writeHead(404);
+          res.end();
+          return;
+        }
+        if (!requireProfileMediaAccess(mediaPath)) return;
         const artwork = mediaId && target ? getCustomArtworkData(mediaId, target) : null;
         if (!artwork) {
           res.writeHead(404);
@@ -1520,6 +1691,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/thumbnail') {
         const time = reqUrl.searchParams.get('t') || '00:01:00';
+        if (!/^(?:\d{1,2}:\d{2}:\d{2}(?:\.\d+)?|\d+(?:\.\d+)?)$/.test(time)) {
+          writeJson(res, 400, { error: 'Invalid thumbnail timestamp.' });
+          return;
+        }
         const embedded = reqUrl.searchParams.get('embedded') === '1';
         const streamIndex = parseIntegerTag(reqUrl.searchParams.get('stream') || undefined);
         const ffmpegPath = findFFmpeg();

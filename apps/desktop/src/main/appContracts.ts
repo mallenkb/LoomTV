@@ -59,6 +59,8 @@ export type LanPairedDevice = {
 };
 
 export interface AppSettings extends SettingsPayload {
+  /** Main-process-only optional external mpv path; never accepted from generic renderer settings writes. */
+  mpvExecutablePath?: string;
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
   localNetworkHmacSecret?: string;

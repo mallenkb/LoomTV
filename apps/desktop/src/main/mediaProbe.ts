@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import path from 'node:path';
 import { findFFprobe } from './mediaBinaries';
+import {
+  getSharedProbeResult,
+  makeProbeCacheKey,
+  setSharedProbeResult,
+} from './sharedProbeCache';
 import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
 
-const PROBE_CACHE_LIMIT = 1000;
-const probeCache = new Map<string, ProbeResult>();
 const execFileAsync = promisify(execFile);
 
 function statLocalMediaPath(filePath: string): fs.Stats {
@@ -50,23 +52,19 @@ export function assertLocalMediaPath(filePath: string): string {
 }
 
 function probeCacheKey(filePath: string, stats: fs.Stats): string {
-  return `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`;
+  return makeProbeCacheKey(filePath, stats.size, stats.mtimeMs);
 }
 
 function cacheProbeResult(cacheKey: string, result: ProbeResult): ProbeResult {
-  if (probeCache.size >= PROBE_CACHE_LIMIT) {
-    const oldestKey = probeCache.keys().next().value;
-    if (oldestKey) probeCache.delete(oldestKey);
-  }
-  probeCache.set(cacheKey, result);
+  setSharedProbeResult(cacheKey, 'media', result);
   return result;
 }
 
 export async function probeMedia(filePath: string): Promise<ProbeResult> {
   const stats = statLocalMediaPath(filePath);
   const cacheKey = probeCacheKey(filePath, stats);
-  const cached = probeCache.get(cacheKey);
-  if (cached) return cached;
+  const cached = getSharedProbeResult<ProbeResult>(cacheKey, 'media');
+  if (cached !== undefined) return cached;
 
   const ffprobe = findFFprobe();
   if (!ffprobe) throw new Error('ffprobe is not available.');

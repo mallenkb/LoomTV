@@ -3,6 +3,7 @@ import { Play, X } from 'lucide-react';
 import { useLibrary, EpisodeFile, EpisodeMeta, MediaItem, TVShow } from '@/contexts/LibraryContext';
 import { desktopApi } from '@/lib/desktopApi';
 import type { StoredProgress } from '@/lib/desktopApi';
+import { artworkVariant } from '@/lib/artworkVariants';
 import { useProgressSnapshot } from '@/lib/progress';
 import { useProfiles } from '@/contexts/ProfileContext';
 import {
@@ -403,9 +404,15 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
       <div className="loom-continue-watching group pointer-events-auto relative mx-auto max-w-[var(--loom-frame-max-width)] overflow-hidden rounded-xl bg-[var(--loom-panel)] shadow-[0_14px_42px_rgba(0,0,0,0.42)] backdrop-blur-md">
         {artwork?.backdrop ? (
           <img
-            src={artwork.backdrop}
+            // Painted blurred, at 20% opacity, behind a gradient. A w1280
+            // rendition costs 3.7MB of decoded RGBA here and is permanently
+            // resident because this bar is fixed. w300 is indistinguishable
+            // once blurred.
+            src={artworkVariant(artwork.backdrop, 'w300')}
             alt=""
             aria-hidden
+            loading="lazy"
+            decoding="async"
             className="pointer-events-none absolute inset-0 h-full w-full scale-105 object-cover object-[center_25%] opacity-20 blur-[2px]"
           />
         ) : null}
@@ -423,6 +430,8 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
               <img
                 src={thumbnailSrc}
                 alt=""
+                loading="lazy"
+                decoding="async"
                 className="h-full w-full object-cover"
                 onError={() => setFailedSources((previous) => [...previous, thumbnailSrc])}
               />

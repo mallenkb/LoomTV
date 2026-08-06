@@ -63,6 +63,7 @@ const REMOTE_ROUTE_POLICY = new Map<string, ReadonlySet<string>>([
   ['/api/v2/playback-track-preferences', new Set(['GET', 'POST'])],
   ['/api/v2/playback/segments', new Set(['GET'])],
   ['/api/v2/start-hls', new Set(['POST'])],
+  ['/api/v2/playback-plan', new Set(['POST'])],
 ]);
 
 function isAllowedRemoteApiRoute(pathname: string, method: string): boolean {

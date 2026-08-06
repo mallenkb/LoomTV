@@ -11,6 +11,7 @@ import {
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
 import {
   LOCAL_ACCESS_HEADER,
@@ -33,15 +34,19 @@ import {
   cleanupOldTranscodes,
   startTranscode,
   stopAllTranscodes,
+  stopTranscodesForScope,
   stopTranscode,
 } from './main/transcodeManager';
 import { probeMediaFile, probeMediaFileAsync } from './main/mediaProbeFile';
 import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/httpResponses';
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
-import { createLanSecurity } from './main/lanSecurity';
+import { createLanSecurity, type LanPairingApprovalPrompt } from './main/lanSecurity';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { createArtworkUrls } from './main/artworkUrls';
-import { registerResource } from './main/resourceRegistry';
+import {
+  registerResource,
+  setResourceRegistryCatalogGeneration,
+} from './main/resourceRegistry';
 import { isImageFileName, isMacSidecarFile, isSubtitleFileName, isVideoFileName } from './main/fileClassification';
 import { createArtworkFinders } from './main/artworkFinders';
 import {
@@ -58,6 +63,7 @@ import {
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
 import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
+import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
@@ -256,9 +262,13 @@ if (squirrelStartup) app.quit();
 // remuxed instead of re-encoded, giving near-instant local playback.
 app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,HardwareMediaKeyHandling,MediaFoundationH264Encoding');
 
-// Avoid Chromium's zero-copy shared-image path, which can spam mailbox errors
-// during video surface churn, without disabling the video compositor itself.
-app.commandLine.appendSwitch('disable-zero-copy');
+// Keep Chromium's zero-copy path enabled for normal playback. It avoids an
+// unnecessary GPU-to-CPU round trip in the browser fallback. Affected drivers
+// retain an explicit compatibility escape hatch for support runs.
+const disableZeroCopy = ['1', 'true', 'yes'].includes(
+  String(process.env.LOOMTV_DISABLE_ZERO_COPY || '').trim().toLowerCase(),
+);
+if (disableZeroCopy) app.commandLine.appendSwitch('disable-zero-copy');
 
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
@@ -272,7 +282,12 @@ app.setPath('userData', USER_DATA_DIR);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
-  app.quit();
+  // Do not merely schedule app.quit() here. Electron keeps executing the
+  // current main-process turn until the quit event loop runs, which allowed a
+  // losing dev/installer launch to continue into app.whenReady() and create a
+  // second server/window. A secondary instance has no resources to clean up;
+  // exit immediately before registering any startup handlers.
+  app.exit(0);
 }
 
 let isAppShuttingDown = false;
@@ -283,10 +298,40 @@ function showOpenFolderDialog(options: OpenDialogOptions) {
     ? dialog.showOpenDialog(win, options)
     : dialog.showOpenDialog(options);
 }
+
+async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Promise<boolean> {
+  let win = getMainWindow();
+  if (!win || win.isDestroyed()) {
+    createWindow();
+    win = getMainWindow();
+  }
+  if (!win || win.isDestroyed()) return false;
+
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  const secondsRemaining = Math.max(1, Math.ceil((request.expiresAt - Date.now()) / 1000));
+  const result = await dialog.showMessageBox(win, {
+    type: 'question',
+    title: 'LoomTV device request',
+    message: `${request.deviceName} wants to connect`,
+    detail: `Network address: ${request.address}\n\nAllow this device to browse and stream your LoomTV library? This request expires in ${secondsRemaining} seconds.`,
+    buttons: ['Allow', 'Deny'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  return result.response === 0;
+}
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const SCAN_CACHE_VERSION = 9;
 let libraryMutationVersion = 0;
+
+function advanceLibraryMutationVersion(): void {
+  libraryMutationVersion++;
+  setResourceRegistryCatalogGeneration(libraryMutationVersion);
+}
 
 const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
 const MAIN_WINDOW_DEV_SERVER_URL =
@@ -309,10 +354,12 @@ const ALLOWED_CORS_ORIGINS = new Set<string>(
   ].filter(Boolean),
 );
 const remoteLibraryClient = createRemoteLibraryClient();
+const RESOURCE_REGISTRY_BOOT_ID = randomUUID();
 
 const {
   isLoopbackRequest,
   getLanServerBase,
+  getLanHmacSecret,
   isLanSharingEnabled,
   getLanShareToken,
   buildSignedLanUrl,
@@ -323,6 +370,7 @@ const {
   requireStreamAccess,
   flushPairedDeviceTouches,
   handleLanPairRequest,
+  handleLanPairStatusRequest,
   handleLanRefreshRequest,
   libraryEtagFor,
   syncLanAdvertisement,
@@ -331,6 +379,7 @@ const {
   saveSettings,
   localAccessToken: LOCAL_ACCESS_TOKEN,
   libraryForLocalNetwork,
+  requestPairingApproval: requestLanPairingApproval,
 });
 
 const {
@@ -350,7 +399,7 @@ const {
   localAccessToken: LOCAL_ACCESS_TOKEN,
   buildSignedLanUrl,
   registerRemoteResource: (kind, value, scopePath) => registerResource(
-    loadSettings().localNetworkHmacSecret || '',
+    getLanHmacSecret(),
     kind,
     value,
     scopePath,
@@ -381,7 +430,7 @@ const {
   libraryFolderStatusesFor,
   localMetadataWithTracks,
   normalizeLibraryFolderGroups,
-  progressKeyFor: (filePath) => registerResource(loadSettings().localNetworkHmacSecret || '', 'media', filePath),
+  progressKeyFor: (filePath) => registerResource(getLanHmacSecret(), 'media', filePath),
   remoteArtworkDeliveryUrl,
   signedStreamUrlForRemote,
   subtitleRecordsForLocalNetwork,
@@ -409,7 +458,7 @@ function clearAppData(): LibraryData {
       console.warn(`[data] Failed to remove legacy file ${filePath}:`, error);
     }
   }
-  libraryMutationVersion++;
+  advanceLibraryMutationVersion();
   return loadLibrary();
 }
 
@@ -901,8 +950,9 @@ function getRendererCatalogIdentity(): string {
   const deliveryIdentity = libraryEtagFor({
     localAccessToken: LOCAL_ACCESS_TOKEN,
     serverPort: getMediaServerPort(),
+    resourceRegistryBootId: RESOURCE_REGISTRY_BOOT_ID,
   });
-  return `${profileIdentity}:${deliveryIdentity}`;
+  return `${profileIdentity}:${deliveryIdentity}:${RESOURCE_REGISTRY_BOOT_ID}`;
 }
 
 function signedStreamUrlForRemote(
@@ -910,7 +960,7 @@ function signedStreamUrlForRemote(
   filePath: string,
   identity?: { deviceId: string; profileId: string; selectionRevision: number },
 ): string {
-  const resourceId = registerResource(loadSettings().localNetworkHmacSecret || '', 'media', filePath);
+  const resourceId = registerResource(getLanHmacSecret(), 'media', filePath);
   return buildSignedLanUrl(base, '/stream', new URLSearchParams({
     resourceId,
     ...(identity ? {
@@ -1023,7 +1073,7 @@ function saveLibrary(data: LibraryData): boolean {
 
 function saveLibraryMutation(data: LibraryData): void {
   const previous = loadLibrary();
-  libraryMutationVersion++;
+  advanceLibraryMutationVersion();
   if (saveLibrary(data)) reconcileSkipAnalysisAfterScan(previous, data);
 }
 
@@ -1034,7 +1084,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
   const previous = loadLibrary();
   if (!saveLibrary(data)) return false;
-  libraryMutationVersion++;
+  advanceLibraryMutationVersion();
   cleanupOrphanedAutomaticSegments();
   warmSkipSegmentsAfterScan(data);
   reconcileSkipAnalysisAfterScan(previous, data);
@@ -1075,7 +1125,7 @@ const {
   localTitleFromPath,
   orderedArtworkCandidates,
   probeMediaFile,
-  saveLibrary,
+  saveLibrary: saveLibraryMutation,
 });
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
   if (!candidatePath) return false;
@@ -1153,7 +1203,6 @@ function configureRendererSecurityPolicy(): void {
     'http://localhost:*',
     'http://[::1]:*',
     'https:',
-    'plexserver:',
   ];
   if (MAIN_WINDOW_DEV_SERVER_URL) {
     connectSrc.push('ws://localhost:*', 'ws://127.0.0.1:*', 'ws://[::1]:*');
@@ -1170,6 +1219,8 @@ function configureRendererSecurityPolicy(): void {
     "object-src 'none'",
     "base-uri 'none'",
     "frame-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
   ].join('; ');
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -1231,6 +1282,8 @@ registerIpcHandlers<LibraryData, AppSettings>({
   saveLibraryMutation,
   assertLocalMediaPath,
   authorizeMediaPath: (filePath) => assertProfileCanAccessPath(loadLibrary(), requireDesktopProfileId(), filePath),
+  assertSubtitleCanAccessMediaPath: (mediaFilePath, subtitleFilePath) =>
+    assertSubtitleCanAccessMediaPath(loadLibrary(), requireDesktopProfileId(), mediaFilePath, subtitleFilePath),
   registerSubtitleResource: (mediaFilePath, subtitleFilePath) => {
     assertLocalMediaPath(subtitleFilePath);
     if (!isSubtitleFileName(subtitleFilePath)) throw new Error('Unsupported subtitle file.');
@@ -1241,7 +1294,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
       subtitleFilePath,
     );
     return registerResource(
-      loadSettings().localNetworkHmacSecret || '',
+      getLanHmacSecret(),
       'subtitle',
       subtitleFilePath,
       mediaFilePath,
@@ -1261,7 +1314,10 @@ registerIpcHandlers<LibraryData, AppSettings>({
   },
   authorizeSettingsWrite: () => { requireOwner(); },
   saveSettings,
-  onSettingsSaved: analysisCoordinator.settingsChanged,
+  onSettingsSaved: () => {
+    analysisCoordinator.settingsChanged();
+    if (!loadSettings().localNetworkSharingEnabled) stopTranscodesForScope('lan:');
+  },
   syncLanAdvertisement,
   testMetadataKeys,
   getLanShareToken,
@@ -1496,7 +1552,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
 });
 
 // VideoPlayer keeps Chromium/HLS as its compatibility backend. Local desktop
-// playback can additionally use the typed mpv handlers registered above.
+// playback can additionally use the trusted native-engine handlers registered above.
 
 // ─── App lifecycle ────────────────────────────────────────────────────────────
 
@@ -1512,11 +1568,15 @@ export const mediaServerDeps = {
     assertSubtitleCanAccessMediaPath(loadLibrary(), profileId, mediaFilePath, subtitleFilePath),
   decodeDataUrl,
   getLanServerBase,
+  getLanHmacSecret,
   getLibraryRevision: () => libraryMutationVersion,
   getMediaSegments: skipSegmentService.getSegments,
+  getOfficialMetadataCandidates,
+  applyOfficialMetadataCandidate,
   getWebRendererDevServerUrl: () => MAIN_WINDOW_DEV_SERVER_URL || null,
   getWebRendererRoot: () => path.join(__dirname, '../renderer/main_window'),
   handleLanPairRequest,
+  handleLanPairStatusRequest,
   handleLanRefreshRequest,
   isExternalArtworkUrl,
   isImageFileName,
@@ -1527,7 +1587,7 @@ export const mediaServerDeps = {
   // process exits before this getter is read, so it cannot rotate the first
   // installation identity during a simultaneous launch.
   get lanTlsIdentity() {
-    return loadOrCreateLanTlsIdentity(app.getPath('userData'));
+    return loadOrCreateLanTlsIdentity(app.getPath('userData'), getLocalNetworkAddresses());
   },
   libraryEtagFor,
   compactLibraryIndexForLocalNetwork,
@@ -1538,6 +1598,7 @@ export const mediaServerDeps = {
   libraryForLocalNetwork,
   libraryForRenderer,
   loadLibrary,
+  resourceRegistryEpoch: RESOURCE_REGISTRY_BOOT_ID,
   loadSettings,
   profileRestrictionIdentity,
   readJsonBody,
@@ -1584,9 +1645,13 @@ async function startBackgroundServices(): Promise<void> {
   // Playback engine selection is not a user setting, so the resolved runtime is
   // reported here instead: it is the first thing needed to triage a playback bug.
   console.log(mpvRuntimeSummary());
+  console.log(libVlcRuntimeSummary());
   initAutoUpdater({
     getMainWindow,
-    stopNativePlayback: stopAllMpvPlayback,
+    stopNativePlayback: () => {
+      stopAllMpvPlayback();
+      stopAllLibVlcPlayback();
+    },
     closeMediaServer: async () => {
       const localServerToClose = getMediaServer();
       const lanServerToClose = getLanMediaServer();
@@ -1647,7 +1712,10 @@ app.whenReady().then(async () => {
   });
 }).catch((error) => {
   console.error('Failed to start LoomTV:', error);
-  app.quit();
+  // A failed startup must not remain as a headless process holding the single
+  // instance lock. This is especially important when a native dependency
+  // (such as better-sqlite3) has not been rebuilt for the current Electron ABI.
+  app.exit(1);
 });
 
 app.on('second-instance', () => {
@@ -1680,6 +1748,7 @@ app.on('before-quit', () => {
   destroyServerTray();
   destroyLanDiscovery();
   stopAllMpvPlayback();
+  stopAllLibVlcPlayback();
   // Skip if quitAndInstall already drained these — re-running close() on a
   // null server can throw and abort the install path.
   if (!isUpdateInstalling()) {

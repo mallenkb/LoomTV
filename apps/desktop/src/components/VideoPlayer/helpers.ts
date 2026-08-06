@@ -2,7 +2,6 @@ import { cleanEpisodeTitleForDisplay, episodeCode } from '../../lib/episodeTitle
 import { getProgressState } from '../../lib/progress.ts';
 import { desktopApi } from '../../lib/desktopApi.ts';
 import {
-  AUTOPLAY_NEXT_EPISODE_KEY,
   DEFAULT_MEDIA_PANEL_WIDTH,
   MAX_SIDE_PANEL_RATIO,
   MIN_SIDE_PANEL_WIDTH,
@@ -340,22 +339,6 @@ export function saveSubtitlesDefaultEnabled(enabled: boolean): void {
     localStorage.setItem(SUBTITLES_DEFAULT_KEY, enabled ? 'true' : 'false');
   } catch (_error) {
     // Ignore storage failures; subtitles still work for this session.
-  }
-}
-
-export function loadAutoplayNextEpisode(): boolean {
-  try {
-    return localStorage.getItem(AUTOPLAY_NEXT_EPISODE_KEY) !== 'false';
-  } catch {
-    return true;
-  }
-}
-
-export function saveAutoplayNextEpisode(enabled: boolean): void {
-  try {
-    localStorage.setItem(AUTOPLAY_NEXT_EPISODE_KEY, enabled ? 'true' : 'false');
-  } catch (_error) {
-    // Autoplay still applies for the current session.
   }
 }
 

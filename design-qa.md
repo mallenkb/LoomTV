@@ -104,3 +104,57 @@
 - P3: a future pass could add scroll-position-aware contrast to the fixed category control on unusually bright backdrops.
 
 final result: passed
+
+---
+
+## Mobile server-unavailable state — 2026-08-01
+
+- Source visual truth: `/var/folders/pd/0s26rrp54jd95230zcfqg3lw0000gn/T/codex-clipboard-a54b4495-4307-4fcb-8134-5408896f1692.png` (`1182 x 2258`, framed iPhone screenshot showing the previous offline banner over stale library content).
+- Implementation screenshot: `.codex-design-qa/mobile-server-unavailable-ios.png` (`1206 x 2622`, iPhone 17 Simulator content at native 3x density; approximately `402 x 874` CSS points).
+- Combined comparison evidence: `.codex-design-qa/mobile-server-unavailable-comparison.png` (`1180 x 1200`; both captures scaled proportionally to the same 1200px comparison height).
+- Android runtime evidence: `.codex-design-qa/mobile-android-pairing-runtime.png` (`945 x 2048`, physical Samsung SM-S906B after the development client loaded successfully).
+- State: paired server unavailable, saved catalog present, dark theme.
+- Density normalization: the source includes simulator canvas and device framing while the implementation is a content-only simulator capture, so the comparison normalizes height and evaluates composition rather than pixel alignment.
+
+**Full-view comparison evidence**
+
+- The unavailable state now owns the screen. Stale artwork, filter/search controls, and bottom navigation no longer imply that playback or live library actions remain available.
+- The LoomTV logo, connection icon, title, concise recovery copy, and actions form one centered vertical path with generous safe-area spacing. The redundant eyebrow label is intentionally absent.
+- Retry is the only primary action. Connection settings is secondary, and saved-catalog browsing is a tertiary opt-in.
+
+**Focused-region comparison evidence**
+
+- A separate crop was not needed: the implementation capture keeps the heading, explanatory copy, and all three actions legible at full-view size, and the requested change concerns whole-screen hierarchy rather than a small visual detail.
+
+**Required fidelity surfaces**
+
+- Fonts and typography: existing LoomTV system typography is retained; the 30px/800 title establishes a clear error-state hierarchy without truncation or a redundant eyebrow label.
+- Spacing and layout rhythm: the content is centered in a 420px maximum-width column and controls use consistent 52px touch targets with safe-area spacing.
+- Colors and visual tokens: the existing background, accent, border, panel, text, muted, and faint theme tokens are reused; no new competing status color was introduced.
+- Image quality and assets: the official reusable `LoomLogo` and Ionicons are used; stale poster/backdrop imagery is intentionally absent.
+- Copy and content: “Server unavailable” names the problem directly, server-neutral language covers desktop and NAS hosts, “Reconnect” is the primary CTA, and the saved-catalog limitation is explicit in two short lines.
+
+**Findings**
+
+- No actionable P0, P1, or P2 visual differences remain for the requested clean unavailable state.
+
+**Comparison history**
+
+- P1: the previous banner sat above stale library artwork and active navigation, making unavailable playback and live actions appear usable. Fixed by replacing the normal shell with a dedicated full-screen unavailable state. Post-fix evidence: `.codex-design-qa/mobile-server-unavailable-ios.png` and `.codex-design-qa/mobile-server-unavailable-comparison.png`.
+- P3: the first dedicated state still repeated the connection explanation in an eyebrow, footer, and longer body copy. Fixed by removing the label/footer and shortening the body; the primary CTA is now “Reconnect”. Post-fix evidence: `.codex-design-qa/mobile-server-unavailable-ios.png`.
+
+**Implementation Checklist**
+
+- [x] Dedicated server-unavailable page replaces stale library content by default.
+- [x] Retry is the primary action.
+- [x] Connection settings remains reachable.
+- [x] Saved catalog remains available only through an explicit tertiary action.
+- [x] Active library navigation is hidden while the unavailable page is shown.
+- [x] iPhone 17 Simulator rendering was captured and visually inspected.
+- [x] Android development APK compiled, installed, opened, and reached LoomTV’s pairing screen on a physical Samsung device.
+
+**Follow-up Polish**
+
+- None required for this state.
+
+final result: passed

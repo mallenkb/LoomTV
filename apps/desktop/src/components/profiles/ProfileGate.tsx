@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, ImagePlus, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 import { cn } from '@/lib/utils';

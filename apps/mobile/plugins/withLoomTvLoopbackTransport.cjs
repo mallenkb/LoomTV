@@ -30,7 +30,7 @@ module.exports = function withLoomTvLoopbackTransport(config) {
   });
 
   config = withDangerousMod(config, ['android', (androidConfig) => {
-    const target = path.join(
+    const mainTarget = path.join(
       androidConfig.modRequest.platformProjectRoot,
       'app',
       'src',
@@ -39,8 +39,19 @@ module.exports = function withLoomTvLoopbackTransport(config) {
       'xml',
       'loomtv_network_security_config.xml',
     );
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, ANDROID_BUILD_POLICY.networkSecurityConfig, 'utf8');
+    const debugTarget = path.join(
+      androidConfig.modRequest.platformProjectRoot,
+      'app',
+      'src',
+      'debug',
+      'res',
+      'xml',
+      'loomtv_network_security_config.xml',
+    );
+    fs.mkdirSync(path.dirname(mainTarget), { recursive: true });
+    fs.mkdirSync(path.dirname(debugTarget), { recursive: true });
+    fs.writeFileSync(mainTarget, ANDROID_BUILD_POLICY.networkSecurityConfig, 'utf8');
+    fs.writeFileSync(debugTarget, ANDROID_BUILD_POLICY.debugNetworkSecurityConfig, 'utf8');
     return androidConfig;
   }]);
 

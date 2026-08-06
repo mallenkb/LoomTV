@@ -152,18 +152,6 @@ export function rememberMobileDetailItem(cache: Map<string, MediaItem>, item: Me
   }
 }
 
-export function rebuildMobileDetailItemCache(
-  cache: ReadonlyMap<string, MediaItem>,
-  itemsById: ReadonlyMap<string, MediaItem>,
-): Map<string, MediaItem> {
-  const rebuilt = new Map<string, MediaItem>();
-  for (const id of cache.keys()) {
-    const currentItem = itemsById.get(id);
-    if (currentItem) rememberMobileDetailItem(rebuilt, currentItem);
-  }
-  return rebuilt;
-}
-
 export type LibraryPayload = LanLibraryPayload<MediaItem>;
 export type PairResponse = LanPairResponse<LibraryPayload>;
 

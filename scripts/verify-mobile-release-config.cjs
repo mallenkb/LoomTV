@@ -30,6 +30,7 @@ function assetExists(relativePath, label) {
 }
 
 expect(appConfig.version === mobilePackage.version, 'app.json and mobile package versions must match');
+expect(Boolean(appConfig.scheme), 'A stable mobile URL scheme is required for the development client');
 expect(Boolean(appConfig.ios?.bundleIdentifier), 'iOS bundleIdentifier is required');
 expect(appConfig.ios?.supportsTablet === true, 'iOS tablet support must stay enabled');
 expect(appConfig.ios?.config?.usesNonExemptEncryption === false, 'iOS export-compliance declaration must be explicit');
@@ -56,10 +57,18 @@ for (const permission of [
 const plugins = (appConfig.plugins || []).map(pluginName);
 expect(plugins.includes('./plugins/withLoomTvLoopbackTransport.cjs'), 'secure LAN transport config plugin is required');
 expect(plugins.includes('./plugins/with-gradle-distribution-checksum.cjs'), 'Gradle checksum config plugin is required');
+expect(Boolean(mobilePackage.dependencies?.['expo-dev-client']), 'expo-dev-client is required for native LAN development');
 expect(Boolean(mobilePackage.dependencies?.['expo-sqlite']), 'expo-sqlite is required for offline library metadata');
+expect(
+  /(?:^|\s)--dev-client(?:\s|$)/.test(mobilePackage.scripts?.start || ''),
+  'mobile start must target the native development client instead of Expo Go',
+);
 
 expect(easConfig.cli?.appVersionSource === 'remote', 'EAS must own native build-number increments');
 expect(easConfig.cli?.requireCommit === true, 'EAS releases must be built from a committed revision');
+expect(easConfig.build?.development?.developmentClient === true, 'development builds must include expo-dev-client');
+expect(easConfig.build?.development?.distribution === 'internal', 'development builds must be installable internally');
+expect(easConfig.build?.['development-simulator']?.ios?.simulator === true, 'an iOS development-simulator profile is required');
 expect(easConfig.build?.preview?.distribution === 'internal', 'preview builds must use internal distribution');
 expect(easConfig.build?.preview?.android?.buildType === 'apk', 'Android preview builds must produce an installable APK');
 expect(easConfig.build?.['preview-simulator']?.ios?.simulator === true, 'an iOS Simulator profile is required');
@@ -67,6 +76,9 @@ expect(easConfig.build?.production?.autoIncrement === true, 'production builds m
 expect(Boolean(easConfig.submit?.production), 'production submission profile is required');
 
 for (const scriptName of [
+  'build:development:android',
+  'build:development:ios',
+  'build:development:simulator:ios',
   'build:preview:android',
   'build:preview:ios',
   'build:simulator:ios',

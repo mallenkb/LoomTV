@@ -24,7 +24,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 11.17.0
+          version: 11.20.0
           run_install: false
 
       - name: Set up Node.js
@@ -66,7 +66,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 11.17.0
+          version: 11.20.0
           run_install: false
 
       - name: Set up Node.js
@@ -121,7 +121,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 11.17.0
+          version: 11.20.0
           run_install: false
 
       - name: Set up Node.js
@@ -167,6 +167,10 @@ jobs:
           node apps/desktop/scripts/fetch-fpcalc.cjs
 
           if [[ "$RUNNER_OS" == "macOS" ]]; then
+            if [[ "$GITHUB_REF" == refs/tags/v* && -z "${MACOS_CSC_LINK:-}" ]]; then
+              echo 'Tagged macOS releases require a Developer ID signing credential (MACOS_CSC_LINK).' >&2
+              exit 1
+            fi
             if [[ -n "${MACOS_CSC_LINK:-}" ]]; then
               export CSC_LINK="$MACOS_CSC_LINK"
               export CSC_KEY_PASSWORD="${MACOS_CSC_KEY_PASSWORD:-}"

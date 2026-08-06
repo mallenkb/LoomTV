@@ -81,9 +81,9 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
 }
 
 export function isPlayerControlTarget(target: EventTarget | null): boolean {
-  if (typeof HTMLElement === 'undefined' || !(target instanceof HTMLElement)) return false;
+  if (typeof Element === 'undefined' || !(target instanceof Element)) return false;
   return Boolean(target.closest(
-    'button, input, select, textarea, a, [role="slider"], [data-player-control], .player-side-panel',
+    'button, input, select, textarea, a, [role="slider"], [data-player-control], .loom-player-controls, .player-side-panel',
   ));
 }
 

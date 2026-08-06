@@ -20,6 +20,8 @@ import { hashProfilePin, verifyProfilePin } from './profilePin.ts';
 export const DESKTOP_DEVICE_ID = 'desktop-primary';
 const UNLOCK_TTL_MS = 4 * 60 * 60 * 1_000;
 const MAX_RETRY_DELAY_MS = 15 * 60 * 1_000;
+const PROFILE_FAILURE_STALE_MS = UNLOCK_TTL_MS;
+const PROFILE_SECURITY_PRUNE_INTERVAL_MS = 60 * 1_000;
 
 export type ProfileErrorCode =
   | 'profile_required'
@@ -58,10 +60,26 @@ export type ActiveProfileState = {
   automaticSignIn: boolean;
 };
 
-type FailureState = { failures: number; blockedUntil: number };
+type FailureState = { failures: number; blockedUntil: number; lastTouchedAt: number };
 
 const unlockedUntil = new Map<string, number>();
 const failures = new Map<string, FailureState>();
+let nextProfileSecurityPruneAt = 0;
+
+function pruneProfileSecurityState(now = Date.now()): void {
+  if (now < nextProfileSecurityPruneAt) return;
+  nextProfileSecurityPruneAt = now + PROFILE_SECURITY_PRUNE_INTERVAL_MS;
+  for (const [key, expiry] of unlockedUntil) {
+    if (expiry <= now) unlockedUntil.delete(key);
+  }
+  for (const [key, state] of failures) {
+    // Keep every active retry delay intact. Once the delay and conservative
+    // stale window have elapsed, old counters no longer need to stay resident.
+    if (state.blockedUntil <= now && now - state.lastTouchedAt >= PROFILE_FAILURE_STALE_MS) {
+      failures.delete(key);
+    }
+  }
+}
 
 function unlockKey(deviceId: string, profileId: string): string {
   return `${deviceId}:${profileId}`;
@@ -91,6 +109,7 @@ export function profileSummaries(deviceId?: string): ProfileSummary[] {
 }
 
 function isUnlocked(deviceId: string, profileId: string): boolean {
+  pruneProfileSecurityState();
   const expiry = unlockedUntil.get(unlockKey(deviceId, profileId)) ?? 0;
   if (expiry > Date.now()) return true;
   unlockedUntil.delete(unlockKey(deviceId, profileId));
@@ -98,10 +117,12 @@ function isUnlocked(deviceId: string, profileId: string): boolean {
 }
 
 function markUnlocked(deviceId: string, profileId: string): void {
+  pruneProfileSecurityState();
   unlockedUntil.set(unlockKey(deviceId, profileId), Date.now() + UNLOCK_TTL_MS);
 }
 
 async function unlockProfile(deviceId: string, profile: ProfileRecord, pin: string | undefined, address: string): Promise<void> {
+  pruneProfileSecurityState();
   const credentials = getProfilePinCredentials(profile.id);
   if (!credentials || isUnlocked(deviceId, profile.id)) return;
 
@@ -117,7 +138,7 @@ async function unlockProfile(deviceId: string, profile: ProfileRecord, pin: stri
     const delay = failureCount < 5
       ? 0
       : Math.min(MAX_RETRY_DELAY_MS, 30_000 * 2 ** (failureCount - 5));
-    failures.set(key, { failures: failureCount, blockedUntil: now + delay });
+    failures.set(key, { failures: failureCount, blockedUntil: now + delay, lastTouchedAt: now });
     throw new ProfileError('profile_locked', 'That PIN could not be accepted.', delay || undefined);
   }
 
@@ -126,6 +147,7 @@ async function unlockProfile(deviceId: string, profile: ProfileRecord, pin: stri
 }
 
 export function getActiveProfileState(deviceId: string): ActiveProfileState {
+  pruneProfileSecurityState();
   const selection = getDeviceProfileSelectionState(deviceId);
   if (selection && getProfile(selection.profileId)) {
     return {

@@ -38,7 +38,7 @@ class LoomTvSecureTransportModule : Module() {
       withContext(Dispatchers.IO) { proxy.start(origin, certFingerprint) }
     }
 
-    AsyncFunction("stop") Coroutine {
+    AsyncFunction("stop") Coroutine { ->
       withContext(Dispatchers.IO) { proxy.stop() }
     }
 

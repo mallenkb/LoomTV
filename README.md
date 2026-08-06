@@ -145,11 +145,12 @@ Download the installer or archive for your operating system, then run it like an
 - Tailwind CSS and local UI components for styling.
 - better-sqlite3 for local persistence.
 - FFmpeg, FFprobe, and HLS.js for direct playback checks and HLS/transcode fallback.
+- A bundled LibVLC/Koffi bridge reserved for local desktop playback experiments, with the established mpv and Chromium/HLS fallbacks.
 
-## Playback Roadmap
+## Playback Architecture
 
-- Short term: keep playback inside Loom Media Server by using browser-compatible streams and HLS/transcode fallbacks so custom React controls can stay over the video.
-- Long term: add dedicated native playback only if the in-app HTML5/HLS path cannot cover a real user workflow.
+- Local desktop files preserve the classic Loom player composition. On macOS they play through the LibVLC in-window native surface, then packaged or user/system-installed mpv, then the browser/HLS path; other platforms start at mpv. Set `LOOMTV_LIBVLC_COMPOSITED_SURFACE=0` to force the mpv/browser fallback for a launch.
+- LAN, remote, and mobile playback continue through LoomTV's authenticated direct-play/transcode and browser/HLS paths.
 
 ## Getting Started
 
@@ -292,11 +293,11 @@ apps/
 
 ## Building and Packaging
 
-The Forge configuration packages the desktop app with ASAR enabled and includes media tooling resources from `apps/desktop/resources/ffmpeg`. Platform makers are configured for ZIP on macOS, Squirrel on Windows, and DEB/RPM on Linux.
+The Forge configuration packages the desktop app with ASAR enabled and includes media tooling resources from `apps/desktop/resources/ffmpeg`, plus staged native playback payloads under `apps/desktop/resources/libvlc` and `apps/desktop/resources/mpv` when those target artifacts are supplied. Platform makers are configured for ZIP on macOS, Squirrel on Windows, and DEB/RPM on Linux.
 
 ## Third-Party Notices
 
-Loom Media Server depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, Lucide React, ffmpeg-static, and ffprobe-static.
+Loom Media Server depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, Lucide React, and Koffi. Release payloads include staged native LibVLC and MPV artifacts for the target platforms that have been explicitly supplied and verified; the LibVLC payload remains gated until its surface can preserve Loom's single-window renderer composition. Unsupported or development targets continue to use compatible system runtimes and browser/HLS fallback where available. LoomTV does not download native runtimes at application runtime.
 
 The application also includes local UI component patterns inspired by shadcn/ui.
 
@@ -310,6 +311,15 @@ Loom Media Server bundles FFmpeg and FFprobe command line tools so users do not 
 - Loom Media Server invokes FFmpeg as separate command line executables. The FFmpeg binaries remain third-party software owned by their respective copyright holders.
 
 See `apps/desktop/resources/ffmpeg/NOTICE.md` for bundled build details, source references, and download URLs. See `apps/desktop/resources/ffmpeg/COPYING.GPLv3.txt` for the GPLv3 license text.
+
+### LibVLC / VLC media engine
+
+LibVLC and libvlccore are generally distributed under LGPL-2.1-or-later, but
+VLC plugin modules and bundled dependencies can carry different terms. The
+exact staged payload provenance, checksums, and applicable notice requirements
+are recorded in `apps/desktop/resources/libvlc/NOTICE.md`. See the
+[VideoLAN legal notices](https://www.videolan.org/legal.html) for upstream
+licensing information.
 
 ### Metadata Providers
 
@@ -361,6 +371,7 @@ SOFTWARE.
 ```
 
 Bundled third-party tools and dependencies remain under their own licenses. In particular, bundled FFmpeg/FFprobe builds are covered by their applicable FFmpeg and GPL notices as described above.
+- [LoomTV 1.0.105](docs/releases/v1.0.105.md): bundles native playback runtimes, improves desktop playback and memory behavior, and refreshes mobile/server release configuration.
 - [LoomTV 1.0.104](docs/releases/v1.0.104.md): fixes Home personal-list placement and hardens desktop release asset publishing.
 - [LoomTV 1.0.103](docs/releases/v1.0.103.md): completes mixed-video library handling, expands the mobile companion, and adds release-configuration safeguards.
 - [LoomTV 1.0.102](docs/releases/v1.0.102.md): adds the headless NAS server foundation, shared media/transcoding capabilities, and reliable multi-platform release publishing.

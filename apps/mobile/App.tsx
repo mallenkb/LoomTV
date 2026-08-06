@@ -48,6 +48,7 @@ import {
 } from 'expo-video';
 import Zeroconf from 'react-native-zeroconf';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect as SvgRect, Stop } from 'react-native-svg';
+import type { LanPairApprovalRequest } from '@loom-media-server/lan-protocol';
 import {
   AudioTracksIcon,
   AutoThemeIcon,
@@ -94,7 +95,6 @@ import {
   connectionErrorFor,
   discoveredHostFromService,
   normalizeBaseUrl,
-  serverOfflineHint,
 } from './mobileConnection';
 import {
   configureSecureLanTransport,
@@ -206,6 +206,7 @@ const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
 ];
 
 const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v2';
+const MOBILE_ONBOARDING_OFFLINE_MESSAGE = 'Server unavailable right now. Choose a desktop to reconnect.';
 const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
 const MOBILE_THEME_COLOR_KEY = 'loomtv.mobile-theme-color.v1';
 const MOBILE_SUBTITLE_FONT_SIZE_KEY = 'loomtv.mobile-subtitle-font-size.v1';
@@ -229,11 +230,6 @@ class MobileCredentialRefreshError extends Error {
 function isCredentialAuthorizationFailure(error: unknown): boolean {
   return error instanceof MobileCredentialRefreshError
     && (error.status === 400 || error.status === 401 || error.status === 403);
-}
-
-function isHostIdentityFailure(error: unknown): boolean {
-  const message = error instanceof Error ? error.message.toLowerCase() : '';
-  return message.includes('certificate') || message.includes('fingerprint') || message.includes('tls identity');
 }
 
 function formatOfflineSnapshotTime(savedAt: number): string {
@@ -639,6 +635,31 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForPairingApproval(
+  baseUrl: string,
+  request: LanPairApprovalRequest,
+): Promise<Response> {
+  if (
+    !request.requestId
+    || !request.requestSecret
+    || !Number.isFinite(request.expiresAt)
+    || request.expiresAt <= Date.now()
+  ) {
+    throw new Error('The desktop returned an invalid approval request. Use the pairing PIN instead.');
+  }
+
+  const deadline = Math.min(request.expiresAt, Date.now() + 65_000);
+  while (Date.now() < deadline) {
+    await wait(750);
+    const response = await mobileLanClient.pairingApprovalStatus(baseUrl, {
+      requestId: request.requestId,
+      requestSecret: request.requestSecret,
+    });
+    if (response.status !== 202) return response;
+  }
+  throw new Error('The desktop approval request expired. Tap Connect to try again or use the pairing PIN.');
 }
 
 function FallbackImage({
@@ -1169,6 +1190,8 @@ function AppRoot() {
   const [isPreparingStream, setIsPreparingStream] = useState(false);
   const [error, setError] = useState('');
   const [isServerOffline, setIsServerOffline] = useState(false);
+  const [isOnboarding, setIsOnboarding] = useState(false);
+  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
   const [offlineSnapshotSavedAt, setOfflineSnapshotSavedAt] = useState<number | null>(null);
   const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null);
   const [streamRetryNonce, setStreamRetryNonce] = useState(0);
@@ -1217,6 +1240,7 @@ function AppRoot() {
     settings: 0,
   });
   const reconnectingSavedConnectionRef = useRef(false);
+  const requestedHostRepairRef = useRef<string | null>(null);
   const credentialRefreshPromiseRef = useRef<{ key: string; promise: Promise<SavedConnection> } | null>(null);
   const credentialRefreshKeyRef = useRef('');
   const connectionHealthCheckRef = useRef(false);
@@ -1432,7 +1456,10 @@ function AppRoot() {
   ]);
 
   useEffect(() => {
-    if (connection) {
+    // Keep Bonjour running while an offline snapshot is being shown. The saved
+    // connection remains in state for offline browsing, so `connection !== null`
+    // alone must not disable rediscovery of a host whose address changed.
+    if (connection && !isServerOffline) {
       setIsDiscoveringHosts(false);
       return;
     }
@@ -1453,7 +1480,9 @@ function AppRoot() {
       setDiscoveredHosts((current) => current.filter((host) => host.serviceName !== name));
     });
     zeroconf.on('error', () => {
-      setDiscoveryError('Automatic discovery is unavailable. You can still connect manually.');
+      setDiscoveryError(
+        'Automatic discovery is unavailable. Check Local Network permission and desktop Settings → Network, then tap Refresh. You can still connect manually.',
+      );
       setIsDiscoveringHosts(false);
     });
     zeroconf.on('start', () => setIsDiscoveringHosts(true));
@@ -1471,16 +1500,23 @@ function AppRoot() {
       zeroconf.removeAllListeners();
       zeroconf.removeDeviceListeners();
     };
-  }, [connection, discoveryScanNonce]);
+  }, [connection, discoveryScanNonce, isServerOffline]);
 
   useEffect(() => {
-    if (!savedConnection || connection) return;
+    if (!savedConnection || (connection && !isServerOffline)) return;
     const discoveredSavedHost = discoveredHosts.find((host) => host.deviceId === savedConnection.hostDeviceId);
     if (discoveredSavedHost) {
       const reconciliation = reconcileSavedHost(savedConnection, discoveredSavedHost);
       if (reconciliation.kind === 'identity-mismatch') {
         setIsServerOffline(true);
         setError('A desktop claiming this saved identity was discovered, but its security fingerprint does not match. Re-pair with the current 6-digit PIN before connecting.');
+        // A certificate rotation is expected after the desktop repairs an
+        // expired LAN identity. Only an explicit Reconnect request may turn
+        // that mismatch into a fresh, approval-gated pairing request.
+        if (requestedHostRepairRef.current === savedConnection.hostDeviceId) {
+          requestedHostRepairRef.current = null;
+          void pairWithDesktop(discoveredSavedHost);
+        }
         return;
       }
       if (reconciliation.kind === 'unchanged') return;
@@ -1493,10 +1529,14 @@ function AppRoot() {
     }
     // Keep the reconnect cadence tied to saved-session state, not callback identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, discoveredHosts, savedConnection]);
+  }, [connection, discoveredHosts, isServerOffline, savedConnection]);
 
   useEffect(() => {
-    if (!savedConnection || connection || appState !== 'active') return;
+    // Keep retrying a saved credential while the onboarding screen is visible.
+    // A desktop restart can briefly fail the first request while its HTTPS
+    // listener is coming back; onboarding must not turn that transient outage
+    // into a new pairing/approval flow.
+    if (!savedConnection || (connection && !isServerOffline) || isPairing || appState !== 'active') return;
     let cancelled = false;
     let failedAttempts = 0;
     let retry: ReturnType<typeof setTimeout> | null = null;
@@ -1519,7 +1559,7 @@ function AppRoot() {
     };
     // Keep the retry loop stable while the saved session remains unchanged.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appState, connection, savedConnection]);
+  }, [appState, connection, isPairing, isServerOffline, savedConnection]);
 
   useEffect(() => {
     if (!connection || appState !== 'active') return;
@@ -1546,7 +1586,7 @@ function AppRoot() {
           return;
         }
         setIsServerOffline(true);
-        setError('The desktop could not refresh this session. Your saved library remains available while LoomTV reconnects.');
+        setError(MOBILE_ONBOARDING_OFFLINE_MESSAGE);
       });
     }, delay);
     return () => clearTimeout(timer);
@@ -2303,6 +2343,7 @@ function AppRoot() {
       selectionRevision: activeState?.selectionRevision ?? nextConnection.selectionRevision,
     };
     setConnection(hydratedConnection);
+    setIsOnboarding(false);
     setIsServerOffline(false);
     setOfflineSnapshotSavedAt(null);
     setActiveProfile(profile);
@@ -2401,6 +2442,7 @@ function AppRoot() {
     setProfileLists(snapshot.profileLists);
     setProgress(snapshot.progress);
     setShowProfilePicker(false);
+    setIsOnboarding(false);
     setBaseUrl(saved.baseUrl);
     setOfflineSnapshotSavedAt(snapshot.savedAt);
     setIsServerOffline(true);
@@ -2411,7 +2453,6 @@ function AppRoot() {
   async function reconnectSavedConnection(saved: SavedConnection): Promise<boolean> {
     if (appStateRef.current !== 'active' || reconnectingSavedConnectionRef.current) return false;
     reconnectingSavedConnectionRef.current = true;
-    setIsServerOffline(false);
     try {
       const certFingerprint = String((saved as SavedConnection & { certFingerprint?: string }).certFingerprint || '');
       await configureSecureLanTransport(saved.baseUrl, certFingerprint);
@@ -2424,6 +2465,7 @@ function AppRoot() {
       if (profileInitialized) {
         setBaseUrl(baseConnection.baseUrl);
         setError('');
+        setIsOnboarding(false);
         setIsServerOffline(false);
         setOfflineSnapshotSavedAt(null);
         return true;
@@ -2435,6 +2477,7 @@ function AppRoot() {
         if (await initializeProfiles(baseConnection)) {
           setBaseUrl(baseConnection.baseUrl);
           setError('');
+          setIsOnboarding(false);
           setIsServerOffline(false);
           setOfflineSnapshotSavedAt(null);
           return true;
@@ -2462,6 +2505,7 @@ function AppRoot() {
       setConnection(nextConnection);
       setBaseUrl(nextConnection.baseUrl);
       setError('');
+      setIsOnboarding(false);
       setIsServerOffline(false);
       setOfflineSnapshotSavedAt(null);
       void hydrateProgress(nextConnection);
@@ -2478,9 +2522,10 @@ function AppRoot() {
         setIsServerOffline(false);
         return true;
       }
-      if (!isHostIdentityFailure(nextError) && await restoreOfflineConnection(saved)) return true;
-      setIsServerOffline(true);
-      setError(nextError instanceof Error ? nextError.message : 'The paired desktop is unavailable.');
+      const connectionError = connectionErrorFor(nextError, 'The paired desktop is unavailable.');
+      if (connectionError.isOffline && await restoreOfflineConnection(saved)) return true;
+      returnToOnboarding();
+      setError(connectionError.message);
       return false;
     } finally {
       reconnectingSavedConnectionRef.current = false;
@@ -2489,31 +2534,56 @@ function AppRoot() {
   }
 
   async function pairWithDesktop(discoveredHost?: DiscoveredHost) {
+    const preserveOfflineSnapshot = Boolean(connection && isServerOffline);
     setError('');
-    setIsServerOffline(false);
+    if (!preserveOfflineSnapshot) setIsServerOffline(false);
     setIsPairing(true);
     try {
       const host = discoveredHost && typeof discoveredHost.baseUrl === 'string' ? discoveredHost : undefined;
       const nextBaseUrl = normalizeBaseUrl(host?.baseUrl || baseUrl);
       const code = shareCode.trim();
-      if (!/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit pairing PIN from the desktop app.');
+      if (!host && !/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit pairing PIN from the desktop app.');
       const observedFingerprint = host?.certFingerprint
         ? host.certFingerprint.replace(/[^0-9a-f]/gi, '').toLowerCase()
         : await probeLanCertificate(nextBaseUrl);
       await configureSecureLanTransport(nextBaseUrl, observedFingerprint);
 
-      const response = await mobileLanClient.pair(nextBaseUrl, {
+      let response = await mobileLanClient.pair(nextBaseUrl, host ? {
+        approvalRequested: true,
+        deviceName: mobileDeviceName(),
+      } : {
           code,
           deviceName: mobileDeviceName(),
       });
+      if (host && response.status === 202) {
+        setShareCode('');
+        const approval = await readJsonResponse<LanPairApprovalRequest>(
+          response,
+          'The desktop did not return a valid approval request.',
+        );
+        response = await waitForPairingApproval(nextBaseUrl, approval);
+      }
       if (!response.ok) {
-        if (response.status === 401) throw new Error('The sharing code was not accepted.');
+        const failure = await readJsonResponse<{ error?: string; message?: string; status?: string }>(
+          response,
+          `Could not pair with the desktop app (${response.status}).`,
+        );
+        const failureMessage = failure.message || failure.error;
+        if (response.status === 403 && failure.status === 'denied') {
+          throw new Error('The desktop denied this connection. Tap Connect to request access again.');
+        }
+        if (response.status === 401) {
+          throw new Error(host
+            ? 'This desktop does not support one-tap approval yet. Update LoomTV or use Connect manually with its current PIN.'
+            : 'The sharing code was not accepted.');
+        }
         if (response.status === 429) {
+          if (failureMessage) throw new Error(failureMessage);
           const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') || '', 10);
           const waitMinutes = Number.isFinite(retryAfterSeconds) ? Math.max(1, Math.ceil(retryAfterSeconds / 60)) : 5;
           throw new Error(`Too many failed attempts. Wait ${waitMinutes} minutes, then use the current PIN from desktop Settings.`);
         }
-        throw new Error(`Could not pair with the desktop app (${response.status}).`);
+        throw new Error(failureMessage || `Could not pair with the desktop app (${response.status}).`);
       }
 
       const payload = (await response.json()) as PairResponse;
@@ -2527,10 +2597,10 @@ function AppRoot() {
         throw new Error('The desktop TLS identity changed during pairing. Refresh discovery and try again.');
       }
       if (discoveredFingerprint && discoveredFingerprint !== certFingerprint) {
-        throw new Error('The desktop security fingerprint changed during pairing. Refresh devices and verify the current pairing PIN before trying again.');
+        throw new Error('The desktop security fingerprint changed during pairing. Refresh devices and approve the connection again.');
       }
       if (discoveredPairHost?.deviceId && payload.hostDeviceId && discoveredPairHost.deviceId !== payload.hostDeviceId) {
-        throw new Error('The desktop identity changed during pairing. Refresh devices and enter the current pairing PIN again.');
+        throw new Error('The desktop identity changed during pairing. Refresh devices and approve the connection again.');
       }
       const nextConnection = {
         baseUrl: nextBaseUrl,
@@ -2563,6 +2633,7 @@ function AppRoot() {
       await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(nextSavedConnection));
       setSavedConnection(nextSavedConnection);
       setShareCode('');
+      setIsOnboarding(false);
       setIsServerOffline(false);
       setOfflineSnapshotSavedAt(null);
       if (!await initializeProfiles(nextConnection)) {
@@ -2572,7 +2643,7 @@ function AppRoot() {
     } catch (nextError) {
       const connectionError = connectionErrorFor(nextError, 'Pairing failed.');
       setError(connectionError.message);
-      setIsServerOffline(connectionError.isOffline);
+      setIsServerOffline(preserveOfflineSnapshot || connectionError.isOffline);
     } finally {
       setIsPairing(false);
     }
@@ -2688,6 +2759,8 @@ function AppRoot() {
         return;
       }
       const connectionError = connectionErrorFor(nextError, 'Refresh failed.');
+      if (connectionError.isOffline && savedConnection && await restoreOfflineConnection(savedConnection)) return;
+      if (connectionError.isOffline) returnToOnboarding();
       setError(connectionError.message);
       setIsServerOffline(connectionError.isOffline);
     } finally {
@@ -2698,6 +2771,7 @@ function AppRoot() {
   async function checkDesktopConnection() {
     if (!connection || connectionHealthCheckRef.current || isRefreshing) return;
     connectionHealthCheckRef.current = true;
+    setIsCheckingConnection(true);
     try {
       let activeConnection = connection;
       let activeSavedConnection = savedConnection;
@@ -2759,13 +2833,80 @@ function AppRoot() {
         setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
-      setIsServerOffline(true);
-      setError(offlineSnapshotSavedAt
-        ? `Desktop is offline. Showing the library saved ${formatOfflineSnapshotTime(offlineSnapshotSavedAt)}; LoomTV will reconnect automatically.`
-        : `Desktop app offline or sharing is off. ${serverOfflineHint}`);
+      const connectionError = connectionErrorFor(nextError, MOBILE_ONBOARDING_OFFLINE_MESSAGE);
+      if (connectionError.isOffline && savedConnection && await restoreOfflineConnection(savedConnection)) return;
+      returnToOnboarding();
+      setError(connectionError.message);
     } finally {
       connectionHealthCheckRef.current = false;
+      setIsCheckingConnection(false);
     }
+  }
+
+  function requestServerReconnect() {
+    // A retry should also restart Bonjour. This covers NAS/desktop hosts whose
+    // DHCP address changed while the mobile app was showing its cached library.
+    if (savedConnection) {
+      const discoveredSavedHost = discoveredHosts.find((host) => host.deviceId === savedConnection.hostDeviceId);
+      if (discoveredSavedHost && reconcileSavedHost(savedConnection, discoveredSavedHost).kind === 'identity-mismatch') {
+        // The desktop's certificate changed, so the old pin cannot be reused.
+        // Request a fresh approval from the discovered host; this keeps the
+        // security boundary intact while making Reconnect self-healing.
+        requestedHostRepairRef.current = null;
+        void pairWithDesktop(discoveredSavedHost);
+        return;
+      }
+      requestedHostRepairRef.current = savedConnection.hostDeviceId;
+    }
+    setDiscoveredHosts([]);
+    setDiscoveryScanNonce((current) => current + 1);
+    if (savedConnection) {
+      setIsRestoringConnection(true);
+      void reconnectSavedConnection(savedConnection);
+      return;
+    }
+    void checkDesktopConnection();
+  }
+
+  async function connectToDiscoveredHost(host?: DiscoveredHost): Promise<void> {
+    if (!host || !savedConnection) {
+      await pairWithDesktop(host);
+      return;
+    }
+
+    const reconciliation = reconcileSavedHost(savedConnection, host);
+    if (reconciliation.kind === 'identity-mismatch') {
+      // A changed certificate is the one case where the saved pin cannot be
+      // reused. Pairing through the discovered host requests desktop approval
+      // and stores the replacement credential for future reconnects.
+      await pairWithDesktop(host);
+      return;
+    }
+
+    const updated = reconciliation.connection;
+    if (updated !== savedConnection) {
+      invalidateCredentialRefresh();
+      setSavedConnection(updated);
+      setBaseUrl(updated.baseUrl);
+      await SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
+    }
+    setIsRestoringConnection(true);
+    await reconnectSavedConnection(updated);
+  }
+
+  function returnToOnboarding(): void {
+    // Keep the encrypted saved connection and offline snapshot on disk, but
+    // remove the stale live connection so onboarding can show the host that
+    // Bonjour currently discovers.
+    setConnection(null);
+    setIsOnboarding(true);
+    setIsServerOffline(false);
+    setOfflineSnapshotSavedAt(null);
+    setShowProfilePicker(false);
+    setPlayTarget(null);
+    setMiniPlayerTarget(null);
+    setPlaybackUrl(null);
+    setStreamOptions({});
   }
 
   async function syncLibraryAfterArtworkChange(itemId: string, appliedCandidate?: OfficialMetadataCandidate): Promise<void> {
@@ -2811,6 +2952,7 @@ function AppRoot() {
         connection.baseUrl,
         connection.deviceToken,
         item.id,
+        connection.selectionRevision,
       );
       const result = await readJsonResponse<OfficialMetadataCandidate[] | { error?: string }>(
         response,
@@ -2843,6 +2985,7 @@ function AppRoot() {
         connection.deviceToken,
         itemId,
         candidate,
+        connection.selectionRevision,
       );
       const result = await readJsonResponse<OfficialArtworkResponse>(
         response,
@@ -2864,7 +3007,6 @@ function AppRoot() {
     styles.scrollContent,
     { paddingBottom: 96 + insets.bottom, paddingTop: insets.top + 12 },
   ];
-  const canRetryPairing = isServerOffline && Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode.trim());
   const libraryRefreshControl = (
     <RefreshControl
       colors={[accent]}
@@ -2883,7 +3025,7 @@ function AppRoot() {
     <MobileThemeProvider value={themeContextValue}>
     <View style={styles.app}>
       <StatusBar style={showStartupSplash || text !== '#000000' ? 'light' : 'dark'} />
-      {!connection ? (
+      {!connection || isOnboarding ? (
         <PairingScreen
           baseUrl={baseUrl}
           discoveredHosts={discoveredHosts}
@@ -2892,16 +3034,24 @@ function AppRoot() {
           isDiscoveringHosts={isDiscoveringHosts}
           isPairing={isPairing}
           isRestoringConnection={isRestoringConnection}
-          isServerOffline={isServerOffline}
           onRefreshDiscovery={() => {
             setDiscoveredHosts([]);
             setDiscoveryScanNonce((current) => current + 1);
           }}
+          // Returning to onboarding keeps the saved credential in SecureStore,
+          // but lets Bonjour present the current host instead of exposing a
+          // stale address or a manual-IP form first.
           savedConnection={savedConnection}
-          setBaseUrl={setBaseUrl}
-          setShareCode={setShareCode}
+          setBaseUrl={(value) => {
+            setBaseUrl(value);
+            if (error) setError('');
+          }}
+          setShareCode={(value) => {
+            setShareCode(value);
+            if (error) setError('');
+          }}
           shareCode={shareCode}
-          onPair={pairWithDesktop}
+          onPair={connectToDiscoveredHost}
         />
       ) : showProfilePicker ? (
         <MobileProfilePicker
@@ -2940,7 +3090,18 @@ function AppRoot() {
                     sticky
                   />
                 ) : null}
-                {error ? (
+                {isServerOffline ? (
+                  <OfflineNotice
+                    message={error}
+                    onRetry={requestServerReconnect}
+                    onOpenSettings={() => {
+                      navigateToKind('settings');
+                      setSettingsSection('network');
+                    }}
+                    savedAt={offlineSnapshotSavedAt}
+                    isRetrying={isCheckingConnection || isRefreshing}
+                  />
+                ) : error ? (
                   <View style={styles.errorCard}>
                     <Text selectable style={styles.errorText}>{error}</Text>
                   </View>
@@ -3056,20 +3217,20 @@ function AppRoot() {
                         onChange={setLibraryFilter}
                       />
                     ) : null}
-                    {error ? (
+                    {isServerOffline ? (
+                      <OfflineNotice
+                        message={error}
+                        onRetry={requestServerReconnect}
+                        onOpenSettings={() => {
+                          navigateToKind('settings');
+                          setSettingsSection('network');
+                        }}
+                        savedAt={offlineSnapshotSavedAt}
+                        isRetrying={isCheckingConnection || isRefreshing}
+                      />
+                    ) : error ? (
                       <View style={styles.errorCard}>
                         <Text selectable style={styles.errorText}>{error}</Text>
-                        {canRetryPairing ? (
-                          <Pressable
-                            onPress={() => { void pairWithDesktop(); }}
-                            style={({ pressed }) => [styles.reconnectButton, pressed && styles.pressed]}
-                            disabled={isPairing}
-                          >
-                            <Text style={styles.reconnectButtonText}>
-                              {isPairing ? 'Reconnecting…' : 'Reconnect'}
-                            </Text>
-                          </Pressable>
-                        ) : null}
                       </View>
                     ) : null}
                     {showHomeRails ? (
@@ -3276,7 +3437,6 @@ function PairingScreen({
   isDiscoveringHosts,
   isPairing,
   isRestoringConnection,
-  isServerOffline,
   onRefreshDiscovery,
   savedConnection,
   setBaseUrl,
@@ -3291,20 +3451,19 @@ function PairingScreen({
   isDiscoveringHosts: boolean;
   isPairing: boolean;
   isRestoringConnection: boolean;
-  isServerOffline: boolean;
   onRefreshDiscovery: () => void;
   savedConnection: SavedConnection | null;
   setBaseUrl: (value: string) => void;
   setShareCode: (value: string) => void;
   shareCode: string;
-  onPair: (host?: DiscoveredHost) => void;
+  onPair: (host?: DiscoveredHost) => Promise<void>;
 }) {
   const { colors: { accent, accentForeground, faint, text }, styles } = useMobileTheme();
   const canPair = Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode.trim());
   const [showManual, setShowManual] = useState(false);
-  // Without a saved desktop, manual entry is the always-visible fallback under
-  // the device list; with one, it stays behind a single link.
-  const manualVisible = !savedConnection || showManual;
+  const [connectingHostDeviceId, setConnectingHostDeviceId] = useState<string | null>(null);
+  const isConnecting = isPairing || isRestoringConnection;
+  const manualVisible = showManual;
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   useEffect(() => {
@@ -3338,22 +3497,8 @@ function PairingScreen({
           </Text>
         </View>
         <View style={styles.formBlock}>
-          {savedConnection && !showManual ? (
-            <View style={styles.savedHostCard}>
-              <View style={styles.hostStatusRow}>
-                <View style={[styles.hostStatusDot, (isRestoringConnection || !isServerOffline) && styles.hostStatusDotSearching]} />
-                <Text style={styles.savedHostStatus}>
-                  {isRestoringConnection ? 'Reconnecting…' : 'Desktop is offline'}
-                </Text>
-              </View>
-              <Text selectable style={styles.hostName}>{savedConnection.hostDeviceName}</Text>
-              <Text selectable style={styles.hostAddress}>{savedConnection.baseUrl}</Text>
-            </View>
-          ) : null}
-
-          {!savedConnection ? (
-            <View style={styles.discoveryBlock}>
-              <View style={styles.discoveryHeading}>
+          <View style={styles.discoveryBlock}>
+            <View style={styles.discoveryHeading}>
                 <Text style={styles.discoveryTitle}>Devices</Text>
                 <Pressable
                   accessibilityRole="button"
@@ -3365,55 +3510,58 @@ function PairingScreen({
                   {isDiscoveringHosts ? <ActivityIndicator size="small" color={accent} /> : <RefreshIcon size={17} color={accent} />}
                 </Pressable>
               </View>
-              {discoveredHosts.map((host) => (
-                  <Pressable
+            {discoveredHosts.map((host) => (
+                <Pressable
                     key={host.deviceId}
-                    disabled={isPairing}
+                    disabled={isConnecting}
                     onPress={() => {
+                      setShareCode('');
                       setBaseUrl(host.baseUrl);
-                      setShowManual(true);
+                      setShowManual(false);
+                      setConnectingHostDeviceId(host.deviceId);
+                      void onPair(host).finally(() => {
+                        setConnectingHostDeviceId((current) => current === host.deviceId ? null : current);
+                      });
                     }}
-                    style={({ pressed }) => [styles.hostCard, pressed && styles.pressed]}
+                    style={({ pressed }) => [
+                      styles.hostCard,
+                      connectingHostDeviceId === host.deviceId && isConnecting && styles.hostCardSelected,
+                      pressed && styles.pressed,
+                    ]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Use ${host.deviceName}`}
-                    accessibilityHint="Fills the desktop address so you can enter its pairing PIN"
-                    accessibilityState={{ disabled: isPairing }}
+                    accessibilityLabel={`Connect to ${host.deviceName}`}
+                    accessibilityHint="Uses the saved secure pairing when available; first-time devices may need desktop approval"
+                    accessibilityState={{ busy: isConnecting, disabled: isConnecting }}
                   >
                     <View style={styles.hostCardCopy}>
                       <Text selectable numberOfLines={1} style={styles.hostName}>{host.deviceName}</Text>
                       <Text selectable numberOfLines={1} style={styles.hostAddress}>{host.baseUrl}</Text>
                     </View>
-                    <Text style={styles.hostConnectLabel}>Use this desktop</Text>
-                  </Pressable>
-              ))}
-              {!discoveredHosts.length ? (
-                <View style={styles.emptyDiscoveryCard}>
-                  {isDiscoveringHosts ? (
-                    <ActivityIndicator size="small" color={accent} />
-                  ) : (
-                    <>
-                      <Text style={styles.emptyDiscoveryTitle}>No desktops found</Text>
-                      <Text style={styles.emptyDiscoveryCopy}>
-                        {discoveryError
-                          ? 'Enter the address below.'
-                          : 'Turn on Local Network Sharing in the desktop app.'}
-                      </Text>
-                    </>
-                  )}
-                </View>
-              ) : null}
-            </View>
-          ) : null}
+                    {connectingHostDeviceId === host.deviceId && isConnecting
+                      ? <ActivityIndicator size="small" color={accent} />
+                      : <Text style={styles.hostConnectLabel}>Connect</Text>}
+                </Pressable>
+            ))}
+            {!discoveredHosts.length ? (
+              <View style={styles.emptyDiscoveryCard}>
+                {isDiscoveringHosts ? (
+                  <ActivityIndicator size="small" color={accent} />
+                ) : (
+                  <>
+                    <Text style={styles.emptyDiscoveryTitle}>No desktops found</Text>
+                    <Text style={styles.emptyDiscoveryCopy}>
+                      {discoveryError
+                        ? discoveryError
+                        : 'Turn on Local Network Sharing in the desktop app.'}
+                    </Text>
+                  </>
+                )}
+              </View>
+            ) : null}
+          </View>
 
           {manualVisible ? (
             <View style={styles.manualForm}>
-              {!savedConnection ? (
-                <View style={styles.manualDivider}>
-                  <View style={styles.manualDividerLine} />
-                  <Text style={styles.manualDividerText}>or connect manually</Text>
-                  <View style={styles.manualDividerLine} />
-                </View>
-              ) : null}
               <View style={styles.inputField}>
                 <Text nativeID="desktop-address-label" style={styles.inputLabel}>Desktop address</Text>
                 <TextInput
@@ -3461,34 +3609,122 @@ function PairingScreen({
           {manualVisible ? (
             <PressableScale
               scaleTo={0.97}
-              style={[styles.primaryButton, (!canPair || isPairing) && styles.disabledButton]}
+              style={[styles.primaryButton, (!canPair || isConnecting) && styles.disabledButton]}
               onPress={() => onPair()}
-              disabled={!canPair || isPairing}
+              disabled={!canPair || isConnecting}
               accessibilityRole="button"
               accessibilityLabel="Connect"
             >
               {isPairing ? <ActivityIndicator color={accentForeground} /> : <Text style={styles.primaryButtonText}>Connect</Text>}
             </PressableScale>
           ) : null}
-          {manualVisible ? (
+          {isConnecting && !manualVisible ? (
             <Text selectable style={styles.manualHint}>
-              Address and code: desktop app → Settings → Network
+              {isPairing ? 'Approve this device in LoomTV on your desktop.' : 'Connecting to your saved desktop…'}
+            </Text>
+          ) : manualVisible ? (
+            <Text selectable style={styles.manualHint}>
+              Use the HTTPS address and PIN from desktop app → Settings → Network. The desktop-only http://127.0.0.1:3847 address will not work on this device.
             </Text>
           ) : null}
-          {savedConnection ? (
-            <Pressable
-              onPress={() => {
-                if (showManual) Keyboard.dismiss();
-                setShowManual((current) => !current);
-              }}
-              style={styles.helpToggle}
-            >
-              <Text style={styles.helpToggleText}>{showManual ? 'Cancel' : 'Connect manually'}</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            accessibilityLabel={showManual ? 'Cancel manual connection' : 'Connect manually'}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: isConnecting }}
+            disabled={isConnecting}
+            onPress={() => {
+              if (showManual) {
+                Keyboard.dismiss();
+                setShowManual(false);
+                return;
+              }
+              setShowManual(true);
+            }}
+            style={[styles.helpToggle, isConnecting && styles.disabledButton]}
+          >
+            <Text style={styles.helpToggleText}>{showManual ? 'Cancel' : 'Connect manually'}</Text>
+          </Pressable>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+function OfflineNotice({
+  isRetrying,
+  message,
+  onOpenSettings,
+  onRetry,
+  savedAt,
+}: {
+  isRetrying: boolean;
+  message: string;
+  onOpenSettings?: () => void;
+  onRetry: () => void;
+  savedAt?: number | null;
+}) {
+  const { colors: { accent, accentForeground, text }, styles } = useMobileTheme();
+  const normalizedMessage = message.toLowerCase();
+  const isGenericMessage = !message
+    || normalizedMessage.includes('desktop app offline')
+    || normalizedMessage.includes('could not reach the desktop')
+    || normalizedMessage.includes('desktop is offline')
+    || normalizedMessage.includes('sharing is off')
+    || normalizedMessage.includes('reconnect automatically');
+  const body = !isGenericMessage
+    ? message
+    : savedAt
+      ? `Your saved library is available from ${formatOfflineSnapshotTime(savedAt)}. Playback and changes will resume when the desktop reconnects. LoomTV will keep trying automatically.`
+      : 'The desktop app or Local Network Sharing is unavailable. Check that the desktop is running and both devices are on the same network. LoomTV will keep trying automatically.';
+
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      accessibilityRole="alert"
+      style={styles.offlineNotice}
+    >
+      <View style={styles.offlineNoticeHeader}>
+        <View style={styles.offlineNoticeIcon}>
+          <Ionicons name="cloud-offline-outline" size={19} color={accent} />
+        </View>
+        <View style={styles.offlineNoticeCopy}>
+          <Text style={styles.offlineNoticeTitle}>{savedAt ? 'Saved library' : 'Server unavailable'}</Text>
+          <Text selectable style={styles.offlineNoticeBody}>{body}</Text>
+        </View>
+      </View>
+      <View style={styles.offlineNoticeActions}>
+        <Pressable
+          accessibilityLabel={isRetrying ? 'Reconnecting to the server' : 'Reconnect to the server'}
+          accessibilityRole="button"
+          accessibilityState={{ busy: isRetrying, disabled: isRetrying }}
+          disabled={isRetrying}
+          onPress={onRetry}
+          style={({ pressed }) => [
+            styles.offlineNoticeAction,
+            styles.offlineNoticeActionPrimary,
+            pressed && styles.pressed,
+          ]}
+        >
+          {isRetrying
+            ? <ActivityIndicator color={accentForeground} size="small" />
+            : <Ionicons name="refresh-outline" size={17} color={accentForeground} />}
+          <Text style={[styles.offlineNoticeActionText, styles.offlineNoticeActionTextPrimary]}>
+            {isRetrying ? 'Reconnecting…' : 'Reconnect'}
+          </Text>
+        </Pressable>
+        {onOpenSettings ? (
+          <Pressable
+            accessibilityLabel="Open connection settings"
+            accessibilityRole="button"
+            onPress={onOpenSettings}
+            style={({ pressed }) => [styles.offlineNoticeAction, pressed && styles.pressed]}
+          >
+            <Ionicons name="settings-outline" size={17} color={text} />
+            <Text style={styles.offlineNoticeActionText}>Connection settings</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
   );
 }
 

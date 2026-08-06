@@ -1,9 +1,13 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { findFFprobe } from './mediaBinaries';
 import { parseYearFromText } from './metadata/helpers';
 import { mergeProviderIds, parseIntegerTag, providerIdsFromTags, scrubTagText, tagValue } from './mediaTags';
+import {
+  getSharedProbeResult,
+  makeProbeCacheKey,
+  setSharedProbeResult,
+} from './sharedProbeCache';
 import type { MetadataProviderIds } from './mediaTags';
 import type { LocalMediaDetails, LocalMediaTrack } from './metadata/types';
 
@@ -19,7 +23,6 @@ export interface ProbeMediaFileResult {
   providerIds?: MetadataProviderIds;
 }
 
-const mediaProbeCache = new Map<string, ProbeMediaFileResult>();
 type MediaProbeCacheIdentity = { key: string; size: number; modifiedAtMs: number };
 
 function streamType(value?: string): LocalMediaTrack['type'] {
@@ -31,7 +34,7 @@ function mediaProbeCacheIdentity(filePath: string): MediaProbeCacheIdentity | nu
   try {
     const stats = fs.statSync(filePath);
     return {
-      key: `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`,
+      key: makeProbeCacheKey(filePath, stats.size, stats.mtimeMs),
       size: stats.size,
       modifiedAtMs: Math.round(stats.mtimeMs),
     };
@@ -44,7 +47,7 @@ async function mediaProbeCacheIdentityAsync(filePath: string): Promise<MediaProb
   try {
     const stats = await fs.promises.stat(filePath);
     return {
-      key: `${path.resolve(filePath)}:${stats.size}:${Math.round(stats.mtimeMs)}`,
+      key: makeProbeCacheKey(filePath, stats.size, stats.mtimeMs),
       size: stats.size,
       modifiedAtMs: Math.round(stats.mtimeMs),
     };
@@ -53,10 +56,12 @@ async function mediaProbeCacheIdentityAsync(filePath: string): Promise<MediaProb
   }
 }
 
+function getCachedProbeResult(cacheKey: string | null): ProbeMediaFileResult | undefined {
+  return getSharedProbeResult<ProbeMediaFileResult>(cacheKey, 'media-file');
+}
+
 function cacheProbeResult(cacheKey: string | null, result: ProbeMediaFileResult): ProbeMediaFileResult {
-  if (!cacheKey) return result;
-  if (mediaProbeCache.size > 5000) mediaProbeCache.clear();
-  mediaProbeCache.set(cacheKey, result);
+  setSharedProbeResult(cacheKey, 'media-file', result);
   return result;
 }
 
@@ -95,10 +100,8 @@ function probeMediaFileFromOutput(
 ): ProbeMediaFileResult {
   const identity = knownIdentity === undefined ? mediaProbeCacheIdentity(filePath) : knownIdentity;
   const cacheKey = identity?.key || null;
-  if (cacheKey) {
-    const cached = mediaProbeCache.get(cacheKey);
-    if (cached) return cached;
-  }
+  const cached = getCachedProbeResult(cacheKey);
+  if (cached !== undefined) return cached;
 
   const ffprobePath = findFFprobe();
   if (!ffprobePath) return {};
@@ -241,10 +244,8 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
 export async function probeMediaFileAsync(filePath: string): Promise<ProbeMediaFileResult> {
   const identity = await mediaProbeCacheIdentityAsync(filePath);
   const cacheKey = identity?.key || null;
-  if (cacheKey) {
-    const cached = mediaProbeCache.get(cacheKey);
-    if (cached) return cached;
-  }
+  const cached = getCachedProbeResult(cacheKey);
+  if (cached !== undefined) return cached;
 
   const ffprobePath = findFFprobe();
   if (!ffprobePath) return {};

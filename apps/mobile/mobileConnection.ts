@@ -9,7 +9,11 @@ export function normalizeBaseUrl(value: string): string {
   if (!trimmed) throw new Error('Enter the desktop app address.');
   const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const parsed = new URL(normalized);
-  if (parsed.protocol !== 'https:') throw new Error('Enter a secure HTTPS desktop address.');
+  if (parsed.protocol !== 'https:') {
+    throw new Error(
+      'Use the secure HTTPS LAN address from desktop Settings → Network (for example, https://192.168.1.25:3848).',
+    );
+  }
   return parsed.origin;
 }
 

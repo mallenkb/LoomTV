@@ -14,8 +14,13 @@ export type LanTlsIdentity = {
   certFingerprint: string;
 };
 
-const IDENTITY_FILE_VERSION = 1;
-const MIN_REMAINING_VALIDITY_MS = 7 * 24 * 60 * 60 * 1000;
+const IDENTITY_FILE_VERSION = 2;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Keep generated certificates below Apple's 398-day server-certificate limit.
+// The extra day of headroom also leaves room for clock/encoding differences.
+const MAX_CERTIFICATE_VALIDITY_MS = 397 * DAY_MS;
+const MAX_ACCEPTED_VALIDITY_MS = 398 * DAY_MS;
+const MIN_REMAINING_VALIDITY_MS = 7 * DAY_MS;
 
 function encodedLength(length: number): Buffer {
   if (length < 0x80) return Buffer.from([length]);
@@ -90,7 +95,22 @@ function extension(oid: string, value: Buffer, critical = false): Buffer {
   );
 }
 
-function createSelfSignedIdentity(): LanTlsIdentity {
+function isIpv4Address(value: string): boolean {
+  const octets = value.split('.');
+  return octets.length === 4 && octets.every((octet) => (
+    /^(?:0|[1-9]\d{0,2})$/.test(octet) && Number(octet) <= 255
+  ));
+}
+
+function subjectAlternativeNames(addresses: readonly string[]): Buffer[] {
+  const ipEntries = [...new Set(addresses.filter(isIpv4Address))].map((address) => (
+    // iPAddress is GeneralName tag [7] and carries the raw four-byte address.
+    der(0x87, Buffer.from(address.split('.').map(Number)))
+  ));
+  return [der(0x82, Buffer.from('localhost', 'ascii')), ...ipEntries];
+}
+
+function createSelfSignedIdentity(sanAddresses: readonly string[] = []): LanTlsIdentity {
   const { privateKey, publicKey } = generateKeyPairSync('ec', {
     namedCurve: 'prime256v1',
   });
@@ -99,8 +119,7 @@ function createSelfSignedIdentity(): LanTlsIdentity {
   const signatureAlgorithm = sequence(objectIdentifier('1.2.840.10045.4.3.2'));
   const commonName = sequence(set(sequence(objectIdentifier('2.5.4.3'), utf8String('LoomTV LAN'))));
   const notBefore = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const notAfter = new Date(notBefore);
-  notAfter.setUTCFullYear(notAfter.getUTCFullYear() + 10);
+  const notAfter = new Date(notBefore.getTime() + MAX_CERTIFICATE_VALIDITY_MS);
   const serial = randomBytes(16);
   serial[0] &= 0x7f;
 
@@ -111,7 +130,7 @@ function createSelfSignedIdentity(): LanTlsIdentity {
     extension('2.5.29.19', sequence(boolean(true), integer(0)), true),
     extension('2.5.29.15', bitString(Buffer.from([0x84]), 2), true),
     extension('2.5.29.37', sequence(objectIdentifier('1.3.6.1.5.5.7.3.1'))),
-    extension('2.5.29.17', sequence(der(0x82, Buffer.from('localhost', 'ascii')))),
+    extension('2.5.29.17', sequence(...subjectAlternativeNames(sanAddresses))),
   );
   const tbsCertificate = sequence(
     explicit(0, integer(2)),
@@ -149,7 +168,15 @@ function parseStoredIdentity(value: unknown): LanTlsIdentity | null {
     const certificate = new X509Certificate(record.certificatePem);
     const privateKey = createPrivateKey(record.privateKeyPem);
     if (!certificate.checkPrivateKey(privateKey)) return null;
-    if (Date.parse(certificate.validTo) < Date.now() + MIN_REMAINING_VALIDITY_MS) return null;
+    const validFrom = Date.parse(certificate.validFrom);
+    const validTo = Date.parse(certificate.validTo);
+    if (
+      !Number.isFinite(validFrom)
+      || !Number.isFinite(validTo)
+      || validTo <= validFrom
+      || validTo - validFrom > MAX_ACCEPTED_VALIDITY_MS
+      || validTo < Date.now() + MIN_REMAINING_VALIDITY_MS
+    ) return null;
     return {
       certificatePem: record.certificatePem,
       privateKeyPem: record.privateKeyPem,
@@ -185,7 +212,10 @@ function replaceIdentityFile(temporaryPath: string, identityPath: string): void 
   }
 }
 
-export function loadOrCreateLanTlsIdentity(userDataPath: string): LanTlsIdentity {
+export function loadOrCreateLanTlsIdentity(
+  userDataPath: string,
+  sanAddresses: readonly string[] = [],
+): LanTlsIdentity {
   const identityPath = path.join(userDataPath, 'lan-tls-identity.json');
   try {
     const stored = parseStoredIdentity(JSON.parse(fs.readFileSync(identityPath, 'utf8')));
@@ -194,7 +224,7 @@ export function loadOrCreateLanTlsIdentity(userDataPath: string): LanTlsIdentity
     // A missing, malformed, or expired identity is replaced atomically below.
   }
 
-  const identity = createSelfSignedIdentity();
+  const identity = createSelfSignedIdentity(sanAddresses);
   fs.mkdirSync(userDataPath, { recursive: true });
   const temporaryPath = `${identityPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   fs.writeFileSync(temporaryPath, JSON.stringify({
