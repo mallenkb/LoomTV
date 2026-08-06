@@ -30,7 +30,7 @@ if (
   runtimeManifest.manifestVersion !== 1
   || runtimeManifest.application?.license !== 'MIT'
   || runtimeManifest.pathsAreRelativeTo !== 'resources'
-  || runtimeManifest.distributionPolicy?.mpvBundled !== false
+  || runtimeManifest.distributionPolicy?.mpvBundled !== true
   || runtimeManifest.distributionPolicy?.mpvDownloadedByLoomTV !== false
   || runtimeManifest.distributionPolicy?.mpvLinkedByLoomTV !== false
   || !Array.isArray(runtimeManifest.components)
