@@ -280,7 +280,8 @@ function shellQuote(value: string): string {
 
 interface MacAppPublisherIdentity {
   bundleIdentifier: string;
-  teamIdentifier: string;
+  teamIdentifier?: string;
+  adHoc: boolean;
 }
 
 function describeSubprocessError(error: unknown): string {
@@ -316,20 +317,20 @@ async function getMacAppPublisherIdentity(appPath: string, label: string): Promi
 
   const bundleIdentifier = output.match(/^Identifier=(.+)$/m)?.[1]?.trim();
   const teamIdentifier = output.match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim();
+  const adHoc = /^Signature=adhoc$/m.test(output);
   const unusableIdentity = /^(?:not set|none|adhoc|ad hoc|-|unknown)$/i;
 
-  if (
-    !bundleIdentifier
-    || !teamIdentifier
-    || unusableIdentity.test(bundleIdentifier)
-    || unusableIdentity.test(teamIdentifier)
-  ) {
+  if (!bundleIdentifier || unusableIdentity.test(bundleIdentifier) || (!teamIdentifier && !adHoc)) {
     throw new Error(
-      `${label} does not have a usable macOS publisher identity; a bundle identifier and TeamIdentifier are required, and ad-hoc signatures are not accepted.`,
+      `${label} does not have a usable macOS publisher identity.`,
     );
   }
 
-  return { bundleIdentifier, teamIdentifier };
+  return {
+    bundleIdentifier,
+    teamIdentifier: teamIdentifier && !unusableIdentity.test(teamIdentifier) ? teamIdentifier : undefined,
+    adHoc,
+  };
 }
 
 async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
@@ -339,13 +340,44 @@ async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: stri
   await verifyMacAppSignature(sourceAppPath, 'Downloaded update app');
   const sourceIdentity = await getMacAppPublisherIdentity(sourceAppPath, 'Downloaded update app');
 
-  if (
-    sourceIdentity.bundleIdentifier !== runningIdentity.bundleIdentifier
-    || sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier
-  ) {
+  if (sourceIdentity.bundleIdentifier !== runningIdentity.bundleIdentifier) {
     throw new Error(
-      `Downloaded update publisher identity does not match the installed LoomTV app (bundle identifier ${sourceIdentity.bundleIdentifier} vs ${runningIdentity.bundleIdentifier}; TeamIdentifier ${sourceIdentity.teamIdentifier} vs ${runningIdentity.teamIdentifier}).`,
+      `Downloaded update bundle identifier ${sourceIdentity.bundleIdentifier} does not match the installed LoomTV app (${runningIdentity.bundleIdentifier}).`,
     );
+  }
+
+  if (runningIdentity.teamIdentifier) {
+    if (sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier) {
+      throw new Error('Downloaded update publisher does not match the installed LoomTV app.');
+    }
+    return;
+  }
+
+  // Older LoomTV releases were distributed with a consistent ad-hoc
+  // signature. They have no TeamIdentifier to compare, so preserve the
+  // bundle-id + signed-archive trust boundary until a Developer ID build is
+  // installed. Never allow an ad-hoc update to replace a Developer ID build.
+  if (!runningIdentity.adHoc || (!sourceIdentity.adHoc && !sourceIdentity.teamIdentifier)) {
+    throw new Error('Downloaded update signing type does not match this LoomTV installation.');
+  }
+  console.warn(
+    sourceIdentity.teamIdentifier
+      ? '[updates] Migrating a legacy ad-hoc-signed LoomTV build to a Developer ID release.'
+      : '[updates] Installing an update over a legacy ad-hoc-signed LoomTV build.',
+  );
+}
+
+async function removeUpdateHelperDirectory(helperDir: string): Promise<void> {
+  try {
+    await fs.promises.rm(helperDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 4,
+      retryDelay: 100,
+    });
+  } catch (cleanupError) {
+    // Cleanup must never replace the actionable extraction/signature error.
+    console.warn(`[updates] Could not remove temporary update directory ${helperDir}:`, cleanupError);
   }
 }
 
@@ -404,7 +436,7 @@ async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
     // be shown instead of silently quitting and stranding the update.
     await fs.promises.access(path.dirname(targetAppPath), fs.constants.W_OK);
   } catch (error) {
-    await fs.promises.rm(helperDir, { recursive: true, force: true });
+    await removeUpdateHelperDirectory(helperDir);
     throw error;
   }
 
@@ -481,7 +513,7 @@ echo "Finished LoomTV macOS update install at $(date)"
     });
     await waitForChildToSpawn(child);
   } catch (error) {
-    await fs.promises.rm(helperDir, { recursive: true, force: true });
+    await removeUpdateHelperDirectory(helperDir);
     throw error;
   }
   child.unref();
