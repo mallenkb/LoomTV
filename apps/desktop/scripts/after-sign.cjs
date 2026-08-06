@@ -39,7 +39,7 @@ exports.default = async function afterSign(context) {
   // identities. Re-sign the complete fallback bundle without hardened runtime
   // so local/test releases can launch when no Developer ID is configured.
   await execFileAsync('/usr/bin/codesign', [
-    '--force', '--deep', '--options', 'none', '--sign', '-', appPath,
+    '--force', '--deep', '--sign', '-', appPath,
   ]);
   await execFileAsync('/usr/bin/codesign', [
     '--verify', '--deep', '--strict', '--verbose=2', appPath,
