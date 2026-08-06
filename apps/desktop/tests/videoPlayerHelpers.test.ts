@@ -41,6 +41,7 @@ class MockInputElement extends MockElement {}
 class MockTextAreaElement extends MockElement {}
 class MockSelectElement extends MockElement {}
 
+globalThis.Element = MockElement as unknown as typeof Element;
 globalThis.HTMLElement = MockElement as unknown as typeof HTMLElement;
 globalThis.HTMLInputElement = MockInputElement as unknown as typeof HTMLInputElement;
 globalThis.HTMLTextAreaElement = MockTextAreaElement as unknown as typeof HTMLTextAreaElement;
