@@ -528,8 +528,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     if (pending) return pending;
 
     const requestGeneration = detailGenerationRef.current;
-    let request: Promise<MediaItem | null>;
-    request = desktopApi.getLibraryItem(mediaId)
+    const request: Promise<MediaItem | null> = desktopApi.getLibraryItem(mediaId)
       .then(async (payload) => {
         if (requestGeneration !== detailGenerationRef.current) return null;
         if (!payload) {

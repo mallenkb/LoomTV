@@ -24,7 +24,6 @@ import type {
   LocalSegmentAnalysisStatus,
   MpvAvailability,
   MpvCommand,
-  MpvPlaybackDiagnostics,
   MpvPlaybackState,
   MpvStartOptions,
   ManualMediaSegmentInput,

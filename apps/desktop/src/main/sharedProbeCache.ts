@@ -26,7 +26,9 @@ let sharedProbeCacheBytes = 0;
 export function makeProbeCacheKey(filePath: string, size: number, modifiedAtMs: number): string {
   // JSON tuple encoding avoids collisions with valid paths that themselves
   // contain colons or numeric suffixes.
-  return JSON.stringify([path.resolve(filePath), size, Math.round(modifiedAtMs)])!;
+  const key = JSON.stringify([path.resolve(filePath), size, Math.round(modifiedAtMs)]);
+  if (key === undefined) throw new TypeError('Failed to serialize probe cache key');
+  return key;
 }
 
 function estimateProbeValueBytes(value: unknown): number {
