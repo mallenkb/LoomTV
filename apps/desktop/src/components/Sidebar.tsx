@@ -424,6 +424,10 @@ export default function Sidebar() {
   const updateDownloadPercent = updateState?.status === 'downloading'
     ? Math.max(0, Math.min(100, Math.round(updateState.downloadPercent || 0)))
     : 0;
+  const scanProgress = Math.max(0, Math.min(100, Math.round(state.scanProgress || 0)));
+  const scanButtonLabel = state.isScanning
+    ? `Refreshing library ${scanProgress}%`
+    : 'Refresh library';
 
   const isModern = theme.homeStyle === 'modern';
 
@@ -471,6 +475,25 @@ export default function Sidebar() {
               })}
             </SharedListHighlight>
           </nav>
+          {state.isScanning && (
+            <div
+              className="loom-modern-sidebar-action relative mb-3 grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--loom-surface-2)] text-[var(--loom-text)]"
+              title={scanButtonLabel}
+              aria-label={scanButtonLabel}
+              role="status"
+              aria-live="polite"
+            >
+              <span
+                className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)]/35 transition-[height] duration-300"
+                style={{ height: `${scanProgress}%` }}
+                aria-hidden="true"
+              />
+              <span className="relative z-10 flex flex-col items-center leading-none">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span className="mt-1 text-[9px] font-semibold tabular-nums">{scanProgress}%</span>
+              </span>
+            </div>
+          )}
           {showUpdateButton && (
             <button
               type="button"
@@ -593,10 +616,23 @@ export default function Sidebar() {
             onClick={() => void scanLibrary()}
             disabled={state.isScanning}
             aria-label="Refresh library"
-            title="Refresh library"
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:cursor-wait disabled:opacity-60"
+            title={scanButtonLabel}
+            className={cn(
+              'relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-lg text-[var(--loom-muted)] transition-colors hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)] disabled:cursor-wait disabled:opacity-60',
+              state.isScanning && 'bg-[var(--loom-surface-2)] text-[var(--loom-text)]',
+            )}
           >
-            <RefreshCw className={cn('h-5 w-5', state.isScanning && 'animate-spin')} />
+            {state.isScanning && (
+              <span
+                className="pointer-events-none absolute inset-x-0 bottom-0 bg-[var(--loom-accent)]/35 transition-[height] duration-300"
+                style={{ height: `${scanProgress}%` }}
+                aria-hidden="true"
+              />
+            )}
+            <span className="relative z-10 flex flex-col items-center leading-none">
+              <RefreshCw className={cn('h-5 w-5', state.isScanning && 'animate-spin')} />
+              {state.isScanning && <span className="mt-0.5 text-[8px] font-semibold tabular-nums">{scanProgress}%</span>}
+            </span>
           </button>
         </div>
       </nav>
