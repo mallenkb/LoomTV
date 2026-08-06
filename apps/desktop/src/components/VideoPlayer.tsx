@@ -2845,7 +2845,7 @@ export default function VideoPlayer({
     if (event.detail > 1) {
       restorePlaybackStateAfterSurfaceDoubleClick();
       cancelPendingSurfaceClick();
-      if (event.detail === 2 && playerState !== 'error') {
+      if (event.detail === 2) {
         toggleFullscreen();
         surfaceDoubleClickGuardUntilMsRef.current = Date.now() + SURFACE_DOUBLE_CLICK_WINDOW_MS;
       }
