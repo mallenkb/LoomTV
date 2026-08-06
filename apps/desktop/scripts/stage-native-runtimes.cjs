@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 
 const DESKTOP_ROOT = path.resolve(__dirname, '..');
 const RESOURCES_ROOT = path.join(DESKTOP_ROOT, 'resources');
+const RUNTIME_PROVENANCE_PATH = path.join(RESOURCES_ROOT, 'ffmpeg', 'runtime-provenance.json');
 const ENGINES = ['libvlc', 'mpv'];
 const MARKER_NAME = '.loomtv-native-runtime-staging.json';
 const SUPPORTED_PLATFORMS = new Set(['darwin', 'win32', 'linux']);
@@ -231,6 +232,26 @@ function enginesForTarget(target) {
   return target.platform === 'darwin' ? ENGINES : ['mpv'];
 }
 
+function bundledTargetsByEngine() {
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(RUNTIME_PROVENANCE_PATH, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read native runtime distribution policy: ${RUNTIME_PROVENANCE_PATH}`, { cause: error });
+  }
+
+  const configured = manifest?.distributionPolicy?.bundledNativePlaybackTargets;
+  const result = new Map();
+  for (const engine of ENGINES) {
+    const targets = configured?.[engine];
+    if (!Array.isArray(targets) || targets.some((target) => typeof target !== 'string')) {
+      throw new Error(`Native runtime distribution policy must declare bundledNativePlaybackTargets.${engine} as an array.`);
+    }
+    result.set(engine, new Set(targets.map((target) => normalizeTarget(target).label)));
+  }
+  return result;
+}
+
 function directSources(targets) {
   const libvlc = valueFromEnvironment('LOOMTV_LIBVLC_SOURCE_DIR');
   const mpv = valueFromEnvironment('LOOMTV_MPV_SOURCE_DIR');
@@ -344,9 +365,13 @@ function main() {
       return;
     }
 
+    const bundledTargets = bundledTargetsByEngine();
     const missing = [];
+    const requiredPayloads = [];
     for (const target of targets) {
       for (const engine of enginesForTarget(target)) {
+        if (!bundledTargets.get(engine)?.has(target.label)) continue;
+        requiredPayloads.push(`${engine}/${target.label}`);
         const destination = path.join(RESOURCES_ROOT, engine, target.platform, target.arch);
         try {
           existingGeneratedDestination(destination, engine, target);
@@ -361,7 +386,11 @@ function main() {
     if (missing.length > 0) {
       throw new Error(`Native runtime sources are required for packaging, and no generated staged payload exists for:\n${missing.join('\n')}\n${USAGE.trim()}`);
     }
-    console.log(`No native runtime sources configured; using existing staged payloads for ${targets.map((target) => target.label).join(', ')}.`);
+    if (requiredPayloads.length === 0) {
+      console.log(`No bundled native playback payload is configured for ${targets.map((target) => target.label).join(', ')}; packaging the authorized browser fallback.`);
+      return;
+    }
+    console.log(`No native runtime sources configured; using existing staged payloads for ${requiredPayloads.join(', ')}.`);
     return;
   }
 

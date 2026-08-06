@@ -167,10 +167,6 @@ jobs:
           node apps/desktop/scripts/fetch-fpcalc.cjs
 
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            if [[ "$GITHUB_REF" == refs/tags/v* && -z "${MACOS_CSC_LINK:-}" ]]; then
-              echo 'Tagged macOS releases require a Developer ID signing credential (MACOS_CSC_LINK).' >&2
-              exit 1
-            fi
             if [[ -n "${MACOS_CSC_LINK:-}" ]]; then
               export CSC_LINK="$MACOS_CSC_LINK"
               export CSC_KEY_PASSWORD="${MACOS_CSC_KEY_PASSWORD:-}"

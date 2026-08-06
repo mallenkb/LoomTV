@@ -31,6 +31,8 @@ if (
   || runtimeManifest.application?.license !== 'MIT'
   || runtimeManifest.pathsAreRelativeTo !== 'resources'
   || runtimeManifest.distributionPolicy?.mpvBundled !== true
+  || !Array.isArray(runtimeManifest.distributionPolicy?.bundledNativePlaybackTargets?.libvlc)
+  || !Array.isArray(runtimeManifest.distributionPolicy?.bundledNativePlaybackTargets?.mpv)
   || runtimeManifest.distributionPolicy?.mpvDownloadedByLoomTV !== false
   || runtimeManifest.distributionPolicy?.mpvLinkedByLoomTV !== false
   || !Array.isArray(runtimeManifest.components)

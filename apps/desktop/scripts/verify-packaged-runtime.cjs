@@ -494,6 +494,8 @@ if (
   || runtimeManifest.application?.license !== 'MIT'
   || runtimeManifest.pathsAreRelativeTo !== 'resources'
   || runtimeManifest.distributionPolicy?.mpvBundled !== true
+  || !Array.isArray(runtimeManifest.distributionPolicy?.bundledNativePlaybackTargets?.libvlc)
+  || !Array.isArray(runtimeManifest.distributionPolicy?.bundledNativePlaybackTargets?.mpv)
   || runtimeManifest.distributionPolicy?.mpvDownloadedByLoomTV !== false
   || runtimeManifest.distributionPolicy?.mpvLinkedByLoomTV !== false
   || manifestComponents.length === 0
@@ -551,8 +553,14 @@ if (!exists(mpvNotice)) {
 // Native payload verification is intentionally filesystem-only. It checks the
 // selected platform/architecture, file formats, plugin layout, and optional
 // hashes; it never requires, dlopens, or launches LibVLC or MPV.
-if (targetPlatform === 'darwin') verifyLibVlcPayload(targetPlatform, targetArch);
-verifyMpvPayload(targetPlatform, targetArch);
+const selectedNativeRuntimeTarget = `${targetPlatform}-${targetArch}`;
+const bundledNativePlaybackTargets = runtimeManifest?.distributionPolicy?.bundledNativePlaybackTargets;
+if (bundledNativePlaybackTargets?.libvlc.includes(selectedNativeRuntimeTarget)) {
+  verifyLibVlcPayload(targetPlatform, targetArch);
+}
+if (bundledNativePlaybackTargets?.mpv.includes(selectedNativeRuntimeTarget)) {
+  verifyMpvPayload(targetPlatform, targetArch);
+}
 
 // When these are absent the tray silently falls back to the full-colour app
 // icon, which macOS then renders as a solid rounded square because a template

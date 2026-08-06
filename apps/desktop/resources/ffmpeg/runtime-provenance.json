@@ -8,6 +8,10 @@
   "distributionPolicy": {
     "ffmpegInvocation": "separate-command-line-executable",
     "mpvBundled": true,
+    "bundledNativePlaybackTargets": {
+      "libvlc": ["darwin-arm64"],
+      "mpv": ["darwin-arm64"]
+    },
     "mpvDownloadedByLoomTV": false,
     "mpvLinkedByLoomTV": false
   },
