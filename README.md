@@ -371,6 +371,8 @@ SOFTWARE.
 ```
 
 Bundled third-party tools and dependencies remain under their own licenses. In particular, bundled FFmpeg/FFprobe builds are covered by their applicable FFmpeg and GPL notices as described above.
+- [LoomTV 1.0.107](docs/releases/v1.0.107.md): speeds up library-refresh feedback with a dedicated desktop scan spinner.
+- [LoomTV 1.0.106](docs/releases/v1.0.106.md): makes library refresh activity visible in the sidebar.
 - [LoomTV 1.0.105](docs/releases/v1.0.105.md): bundles native playback runtimes, improves desktop playback and memory behavior, and refreshes mobile/server release configuration.
 - [LoomTV 1.0.104](docs/releases/v1.0.104.md): fixes Home personal-list placement and hardens desktop release asset publishing.
 - [LoomTV 1.0.103](docs/releases/v1.0.103.md): completes mixed-video library handling, expands the mobile companion, and adds release-configuration safeguards.

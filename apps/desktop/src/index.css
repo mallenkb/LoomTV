@@ -317,6 +317,18 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   }
 }
 
+/* Library refresh feedback should feel active while the scanner is working.
+   Keep this separate from the general one-second utility spin so scan controls
+   communicate progress immediately without changing any scan scheduling. */
+@keyframes loom-scan-spin {
+  to { transform: rotate(360deg); }
+}
+
+.loom-scan-spinner {
+  animation: loom-scan-spin 520ms linear infinite;
+  transform-origin: center;
+}
+
 @keyframes player-flash {
   0%   { opacity: 0; transform: scale(0.7); }
   20%  { opacity: 1; transform: scale(1.05); }

@@ -247,7 +247,7 @@ export default function LibrarySettingsSection({
             )}
             <div className="flex flex-wrap gap-2">
               <Button onClick={scanLibrary} disabled={isScanning} className="gap-2">
-                <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 ${isScanning ? 'loom-scan-spinner' : ''}`} />
                 {isScanning ? 'Syncing...' : problemCount > 0 ? 'Retry Incomplete Folders' : 'Quick Sync'}
               </Button>
               <Button onClick={refreshMetadata} disabled={isScanning} variant="outline" className="gap-2">

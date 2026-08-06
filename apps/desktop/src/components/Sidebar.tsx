@@ -489,7 +489,7 @@ export default function Sidebar() {
                 aria-hidden="true"
               />
               <span className="relative z-10 flex flex-col items-center leading-none">
-                <RefreshCw className="h-4 w-4 animate-spin" />
+                <RefreshCw className="loom-scan-spinner h-4 w-4" />
                 <span className="mt-1 text-[9px] font-semibold tabular-nums">{scanProgress}%</span>
               </span>
             </div>
@@ -630,7 +630,7 @@ export default function Sidebar() {
               />
             )}
             <span className="relative z-10 flex flex-col items-center leading-none">
-              <RefreshCw className={cn('h-5 w-5', state.isScanning && 'animate-spin')} />
+              <RefreshCw className={cn('h-5 w-5', state.isScanning && 'loom-scan-spinner')} />
               {state.isScanning && <span className="mt-0.5 text-[8px] font-semibold tabular-nums">{scanProgress}%</span>}
             </span>
           </button>
