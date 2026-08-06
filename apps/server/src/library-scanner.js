@@ -145,29 +145,36 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
 
     const current = await loadState();
     if (current.scan?.id === scanId) {
-      current.catalog = nextCatalog;
-      current.roots = current.roots.map((root) => {
-        if (!selectedRootIds.has(root.id)) return root;
-        const wasOffline = offlineRoots.includes(root.id);
-        return wasOffline ? root : { ...root, lastScanAt: Date.now() };
-      });
-      current.scan = {
-        ...current.scan,
-        state: 'completed',
-        completedAt: Date.now(),
-        scannedFiles,
-        indexedFiles: nextCatalog.length,
-        offlineRoots,
-        errors: errors.slice(0, 100),
-        warning: [
-          offlineRoots.length || errors.length ? 'Some files or roots were unavailable. Existing records were preserved.' : null,
-          // Classification (movie/episode structure, series grouping) is the
-          // metadata this runtime can derive today. Online provider
-          // enrichment is still desktop-only, and the scan must say so.
-          mode === 'metadata' ? 'File classification was refreshed. Online metadata providers are not available on the headless server yet.' : null,
-        ].filter(Boolean).join(' ') || undefined,
+      const completedState = {
+        ...current,
+        catalog: nextCatalog,
+        roots: current.roots.map((root) => {
+          if (!selectedRootIds.has(root.id)) return root;
+          const wasOffline = offlineRoots.includes(root.id);
+          return wasOffline ? root : { ...root, lastScanAt: Date.now() };
+        }),
+        scan: {
+          ...current.scan,
+          state: 'completed',
+          completedAt: Date.now(),
+          scannedFiles,
+          indexedFiles: nextCatalog.length,
+          offlineRoots,
+          errors: errors.slice(0, 100),
+          warning: [
+            offlineRoots.length || errors.length ? 'Some files or roots were unavailable. Existing records were preserved.' : null,
+            // Classification (movie/episode structure, series grouping) is the
+            // metadata this runtime can derive today. Online provider
+            // enrichment is still desktop-only, and the scan must say so.
+            mode === 'metadata' ? 'File classification was refreshed. Online metadata providers are not available on the headless server yet.' : null,
+          ].filter(Boolean).join(' ') || undefined,
+        },
       };
-      await saveState(current);
+      // Do not expose a completed scan through the shared in-memory state
+      // until its catalog has reached disk. Slower Windows filesystem writes
+      // otherwise let status observers race ahead of durable persistence.
+      await saveState(completedState);
+      Object.assign(current, completedState);
     }
     await appendLog(
       errors.length ? 'warn' : 'info',
