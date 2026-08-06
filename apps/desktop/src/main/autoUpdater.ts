@@ -129,6 +129,26 @@ function showUpdateDialog(message: string, detail: string, type: 'info' | 'warni
   });
 }
 
+type UpdateFailureStage = 'check' | 'download' | 'install';
+
+function updateFailureMessage(error: unknown, stage: UpdateFailureStage): string {
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  console.error(`[updates] ${stage} failed:`, error);
+
+  if (/ENOTEMPTY|directory not empty|loomtv-update-install/i.test(rawMessage)) {
+    return 'LoomTV couldn’t prepare the downloaded update. Please try again.';
+  }
+  if (/code.?sign|signature|publisher|checksum|sha512/i.test(rawMessage)) {
+    return 'The downloaded update could not be verified and was not installed.';
+  }
+  if (/EACCES|EPERM|permission denied|not permitted/i.test(rawMessage)) {
+    return 'LoomTV does not have permission to install the update. Reinstall it from an administrator account.';
+  }
+  if (stage === 'install') return 'LoomTV couldn’t install the update. Please try again.';
+  if (stage === 'download') return 'LoomTV couldn’t download the update. Check your connection and try again.';
+  return 'LoomTV couldn’t check for updates. Check your connection and try again.';
+}
+
 function normalizeReleaseVersion(value?: string): string {
   return String(value || '').trim().replace(/^v/i, '');
 }
@@ -178,7 +198,7 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
   } catch (error) {
     return setUpdateState({
       status: 'error',
-      message: error instanceof Error ? error.message : String(error),
+      message: updateFailureMessage(error, 'check'),
       checkedAt: new Date().toISOString(),
     });
   }
@@ -726,7 +746,7 @@ export async function installDownloadedUpdate() {
       updateInstallStarted = false;
       setUpdateState({
         status: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: updateFailureMessage(error, 'install'),
         checkedAt: new Date().toISOString(),
       });
     }
@@ -750,7 +770,7 @@ export async function installDownloadedUpdate() {
       updateInstallStarted = false;
       setUpdateState({
         status: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: updateFailureMessage(error, 'install'),
         checkedAt: new Date().toISOString(),
       });
     }
@@ -835,13 +855,18 @@ function configureAutoUpdater() {
   });
 
   autoUpdater.on('error', (error) => {
-    if (updateState.status === 'installing') {
+    const failureStage: UpdateFailureStage = updateState.status === 'installing'
+      ? 'install'
+      : updateState.status === 'available' || updateState.status === 'downloading'
+        ? 'download'
+        : 'check';
+    if (failureStage === 'install') {
       updateInstallStarted = false;
       clearUpdateQuitFallback();
     }
     setUpdateState({
       status: 'error',
-      message: error instanceof Error ? error.message : String(error),
+      message: updateFailureMessage(error, failureStage),
       checkedAt: new Date().toISOString(),
     });
   });
@@ -876,7 +901,7 @@ export async function checkForUpdates(): Promise<UpdateState> {
     .catch((error) => {
       setUpdateState({
         status: 'error',
-        message: error instanceof Error ? error.message : String(error),
+        message: updateFailureMessage(error, 'check'),
         checkedAt: new Date().toISOString(),
       });
       return updateState;
