@@ -23,6 +23,11 @@ MPV's license mode and linked FFmpeg/codec libraries can change the obligations;
 stock MPV is ordinarily GPL-2.0-or-later, while a particular build must be
 represented by its own upstream license inventory.
 
+The source-stage runtime manifest records the reviewed upstream file hashes.
+macOS packaging re-signs Mach-O files and therefore changes those bytes; the
+packaged manifest records the verified runtime layout instead of claiming that
+the pre-signing hashes still describe the signed application bundle.
+
 Do not describe a stock GPL MPV payload as MIT or LGPL merely because LoomTV
 itself is MIT. If a separately built LGPL-compatible variant is selected, keep
 the build configuration, source, notices, and relinking/source-offer materials

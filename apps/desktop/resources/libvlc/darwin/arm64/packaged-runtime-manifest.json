@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "engine": "libvlc",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "sourceLayout": "VLC 3.0.23 macOS runtime libraries and plugins",
+  "files": [
+    {
+      "path": "lib/libvlc.dylib"
+    },
+    {
+      "path": "lib/libvlccore.dylib"
+    },
+    {
+      "path": "plugins/plugins.dat"
+    }
+  ]
+}

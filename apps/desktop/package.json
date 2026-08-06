@@ -140,12 +140,16 @@
         "to": "trayIcon@2x.png"
       },
       {
-        "from": "resources/libvlc",
-        "to": "libvlc"
+        "from": "resources/libvlc/NOTICE.md",
+        "to": "libvlc/NOTICE.md"
       },
       {
-        "from": "resources/mpv",
-        "to": "mpv"
+        "from": "resources/mpv/NOTICE.md",
+        "to": "mpv/NOTICE.md"
+      },
+      {
+        "from": "resources/mpv/README.md",
+        "to": "mpv/README.md"
       },
       {
         "from": "resources/ffmpeg/runtime-provenance.json",
@@ -188,6 +192,40 @@
       "category": "public.app-category.entertainment",
       "icon": "resources/icon.icns",
       "extraResources": [
+        {
+          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/lib",
+          "to": "libvlc/darwin/arm64/lib"
+        },
+        {
+          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/plugins",
+          "to": "libvlc/darwin/arm64/plugins",
+          "filter": [
+            "**/*",
+            "!libmacosx_plugin.dylib"
+          ]
+        },
+        {
+          "from": "resources/libvlc/darwin/arm64/VLC.app/Contents/MacOS/share",
+          "to": "libvlc/darwin/arm64/share"
+        },
+        {
+          "from": "resources/libvlc/darwin/arm64/packaged-runtime-manifest.json",
+          "to": "libvlc/darwin/arm64/runtime-manifest.json"
+        },
+        {
+          "from": "resources/mpv/darwin/arm64",
+          "to": "mpv/darwin/arm64",
+          "filter": [
+            "**/*",
+            "!runtime-manifest.json",
+            "!packaged-runtime-manifest.json",
+            "!.loomtv-native-runtime-staging.json"
+          ]
+        },
+        {
+          "from": "resources/mpv/darwin/arm64/packaged-runtime-manifest.json",
+          "to": "mpv/darwin/arm64/runtime-manifest.json"
+        },
         {
           "from": "resources/ffmpeg/mac",
           "to": "ffmpeg/mac"

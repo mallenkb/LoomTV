@@ -13,7 +13,10 @@ Source: <https://download.videolan.org/vlc/last/macosx/vlc-3.0.23-arm64.dmg>
 Archive SHA-256: `fc6fac08d87f538517d44aca0c5e7a244b67c8c4cb589bf478363a7315fd5e0d`
 
 The staging manifest under each target payload records SHA-256 values for the
-files copied into the application resources.
+reviewed upstream files. Packaged macOS binaries are re-signed as part of the
+application bundle, which changes their bytes; the packaged manifest therefore
+records the verified runtime layout while the source-stage manifest retains the
+pre-signing hashes.
 
 The canonical staged layout is:
 
