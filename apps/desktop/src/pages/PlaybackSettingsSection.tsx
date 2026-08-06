@@ -158,7 +158,7 @@ export default function PlaybackSettingsSection({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <span className="font-medium text-white">
                 {mpvAvailability === null
-                  ? 'Checking mpv…'
+                  ? 'Not checked'
                   : mpvAvailability.available
                     ? `Available${mpvAvailability.version ? ` · ${mpvAvailability.version}` : ''}`
                     : 'Not detected'}
@@ -168,7 +168,7 @@ export default function PlaybackSettingsSection({
               </span>
             </div>
             <p className="mt-2 break-all text-xs text-[var(--loom-muted)]">
-              {mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason || 'The desktop app is checking for an external runtime.'}
+              {mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason || 'MPV is optional. Use Refresh only if you want to configure it as a fallback.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

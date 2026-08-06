@@ -371,6 +371,7 @@ SOFTWARE.
 ```
 
 Bundled third-party tools and dependencies remain under their own licenses. In particular, bundled FFmpeg/FFprobe builds are covered by their applicable FFmpeg and GPL notices as described above.
+- [LoomTV 1.0.110](docs/releases/v1.0.110.md): improves macOS MPV compatibility and avoids unnecessary fallback-runtime checks during playback.
 - [LoomTV 1.0.109](docs/releases/v1.0.109.md): replaces raw updater filesystem errors with concise, actionable status messages.
 - [LoomTV 1.0.108](docs/releases/v1.0.108.md): hardens macOS update signing compatibility and clears the production audit gate.
 - [LoomTV 1.0.107](docs/releases/v1.0.107.md): speeds up library-refresh feedback with a dedicated desktop scan spinner.

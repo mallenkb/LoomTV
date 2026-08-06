@@ -1468,7 +1468,12 @@ export default function VideoPlayer({
 
         const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath);
         const libVlcAvailable = isLocalFile && await LibVlcPlaybackEngine.available().catch(() => false);
-        const mpvAvailable = isLocalFile && await MpvPlaybackEngine.available().catch(() => false);
+        // MPV is an optional fallback. Do not execute it just to probe its
+        // version when LibVLC can already handle this file. If LibVLC later
+        // fails, handleNativePlaybackState performs the MPV check on demand.
+        const mpvAvailable = isLocalFile
+          && !libVlcAvailable
+          && await MpvPlaybackEngine.available().catch(() => false);
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         const allSubtitleFiles = visibleSubtitles.flatMap((subtitle) => {
           try {

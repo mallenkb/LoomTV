@@ -62,7 +62,7 @@ import {
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
 import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
-import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
+import { stopAllMpvPlayback } from './main/mpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
@@ -1642,9 +1642,6 @@ async function startBackgroundServices(): Promise<void> {
       port: getMediaServerPort(),
     });
   }
-  // Playback engine selection is not a user setting, so the resolved runtime is
-  // reported here instead: it is the first thing needed to triage a playback bug.
-  console.log(mpvRuntimeSummary());
   console.log(libVlcRuntimeSummary());
   initAutoUpdater({
     getMainWindow,

@@ -326,11 +326,6 @@ export default function Settings() {
   }, [activeSection, analysisIsActive]);
 
   useEffect(() => {
-    if (activeSection !== 'playback' || isRemoteLibraryMode) return;
-    void refreshMpvAvailability();
-  }, [activeSection, isRemoteLibraryMode, refreshMpvAvailability]);
-
-  useEffect(() => {
     if (activeSection !== 'playback') return undefined;
     let cancelled = false;
     void desktopApi.libvlc.availability().then((availability) => {
