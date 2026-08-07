@@ -18,6 +18,10 @@ import {
   normalizeMpvTracks,
   unexpectedMpvExitMessage,
 } from './mpvPlaybackHelpers.ts';
+import {
+  releaseNativePlaybackDisplaySleep,
+  syncNativePlaybackDisplaySleep,
+} from './nativePlaybackPower';
 import { loadSettings } from './settings.ts';
 
 type MpvJsonMessage = {
@@ -525,6 +529,7 @@ class MpvPlaybackSession {
 
   private emit(patch: Partial<MpvPlaybackState>): void {
     this.state = { ...this.state, ...patch, sessionId: this.id };
+    syncNativePlaybackDisplaySleep(this.id, this.state);
     if (!this.owner.isDestroyed()) {
       this.owner.send('mpv:state', {
         ...patch,
@@ -605,6 +610,7 @@ class MpvPlaybackSession {
   }
 
   private cleanup(): void {
+    releaseNativePlaybackDisplaySleep(this.id);
     if (this.geometryTimer) clearTimeout(this.geometryTimer);
     this.geometryTimer = null;
     if (this.diagnosticsTimer) clearTimeout(this.diagnosticsTimer);

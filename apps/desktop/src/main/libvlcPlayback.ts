@@ -4,6 +4,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackState, PlaybackViewport } from '../shared/playbackProtocol';
+import {
+  releaseNativePlaybackDisplaySleep,
+  syncNativePlaybackDisplaySleep,
+} from './nativePlaybackPower';
 
 /**
  * A koffi type descriptor. `koffi.struct(...)` returns one of these opaque
@@ -1278,6 +1282,7 @@ class LibVlcPlaybackSession {
 
   private emit(patch: Partial<LibVlcPlaybackState>): void {
     this.state = { ...this.state, ...patch };
+    syncNativePlaybackDisplaySleep(this.id, this.state);
     if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', this.state);
   }
 
@@ -1321,6 +1326,7 @@ class LibVlcPlaybackSession {
         case 'set-paused':
           this.requestedPaused = command.paused;
           api.playerSetPause(this.player, command.paused ? 1 : 0);
+          this.emit({ paused: command.paused });
           return true;
         case 'seek': api.playerSetTime(this.player, Math.round(Math.max(0, finite(command.position, 0)) * 1_000)); return true;
         case 'set-volume': {
@@ -1383,6 +1389,7 @@ class LibVlcPlaybackSession {
   private finish(finalStatus?: 'ended' | 'error' | 'closed', error?: string): void {
     if (this.stopped) return;
     this.stopped = true;
+    releaseNativePlaybackDisplaySleep(this.id);
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
     this.clearWindowListeners();
