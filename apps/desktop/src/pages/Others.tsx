@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { FolderPlus } from 'lucide-react';
-import { useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary, MediaItem, TVShow } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
@@ -22,6 +22,7 @@ export default function Others() {
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const [libraryActionError, setLibraryActionError] = useState('');
   const progress = useProgressSnapshot();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
@@ -35,6 +36,14 @@ export default function Others() {
       .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)),
     [activeFilter, items, listState, normalizedQuery, progress],
   );
+  const handleAddFolder = async () => {
+    setLibraryActionError('');
+    try {
+      await addLibraryFolder('others');
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+    }
+  };
 
   return (
     <LibraryPageLayout
@@ -55,7 +64,7 @@ export default function Others() {
             ))}
           </div>
         ) : othersFolders.length === 0 ? (
-          <EmptyOthersState onAddFolder={() => addLibraryFolder('others')} />
+          <EmptyOthersState error={libraryActionError} onAddFolder={handleAddFolder} />
         ) : (
           <>
             <VirtualPosterGrid
@@ -80,7 +89,7 @@ export default function Others() {
   );
 }
 
-function EmptyOthersState({ onAddFolder }: { onAddFolder: () => Promise<void> }) {
+function EmptyOthersState({ error, onAddFolder }: { error?: string; onAddFolder: () => Promise<void> }) {
   return (
     <div className="flex min-h-[calc(100vh-260px)] items-center justify-center px-4">
       <div className="w-full max-w-[520px] text-center">
@@ -91,6 +100,7 @@ function EmptyOthersState({ onAddFolder }: { onAddFolder: () => Promise<void> })
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
           Use Others for mixed folders. LoomTV will scan the files and sort detected movies, TV shows, and anime automatically.
         </p>
+        {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <Button onClick={onAddFolder} className="mt-8 h-12 gap-2 px-5">
           <FolderPlus className="h-4 w-4" />
           Add Others Folder

@@ -28,7 +28,7 @@ export function LoomLogo({
   );
 }
 
-// Loom Media Player brand play-mark, taken verbatim from the desktop LoomPlayMark SVG
+// LoomTV brand play-mark, taken verbatim from the desktop LoomPlayMark SVG
 // (apps/desktop/src/components/LoomPlayMark.tsx). Single source of brand truth.
 export function PlayMark({ size = 24, color = '#ffffff' }: IconProps) {
   return (

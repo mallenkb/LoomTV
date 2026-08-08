@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import { Film, FolderPlus, Tv } from 'lucide-react';
-import { useLibrary, MediaItem } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import MediaRail from '@/components/MediaRail';
@@ -28,6 +28,7 @@ function DefaultHome() {
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const [libraryActionError, setLibraryActionError] = useState('');
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const hasLibraryItems = movies.length > 0 || tvShows.length > 0 || animeShows.length > 0;
@@ -94,6 +95,14 @@ function DefaultHome() {
   const showAnimeSection = isLoading || filteredAnime.length > 0;
   const showTVSection = isLoading || filteredTVShows.length > 0;
   const showMoviesSection = isLoading || filteredMovies.length > 0;
+  const handleAddFolder = async (kind?: 'movies' | 'tvShows' | 'anime' | 'others') => {
+    setLibraryActionError('');
+    try {
+      await addLibraryFolder(kind);
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+    }
+  };
 
   return (
     <div className="loom-page h-full overflow-y-auto">
@@ -105,7 +114,7 @@ function DefaultHome() {
       />
       <div className="loom-frame page-bottom-safe pt-24">
         {!normalizedQuery && activeFilter === 'all' && !isLoading && !hasLibraryItems && (
-          <HomeEmptyState isScanning={isScanning} onAddFolder={addLibraryFolder} />
+          <HomeEmptyState error={libraryActionError} isScanning={isScanning} onAddFolder={handleAddFolder} />
         )}
 
         {!normalizedQuery && visibleContinueWatching.length > 0 && (
@@ -180,9 +189,11 @@ function PosterCards({ items, from, isLoading = false }: { items: MediaItem[]; f
 }
 
 function HomeEmptyState({
+  error,
   isScanning,
   onAddFolder,
 }: {
+  error?: string;
   isScanning: boolean;
   onAddFolder: (kind?: 'movies' | 'tvShows' | 'anime' | 'others') => Promise<void>;
 }) {
@@ -196,6 +207,7 @@ function HomeEmptyState({
         <p className="mx-auto mt-3 max-w-[460px] text-sm leading-6 text-[var(--loom-muted)]">
           Choose where LoomTV should look for your movies, TV shows, or anime. The folder will be scanned right away.
         </p>
+        {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <div className="mt-8 grid gap-3 sm:grid-cols-3">
           <Button onClick={() => onAddFolder('movies')} disabled={isScanning} className="h-12 gap-2">
             <Film className="h-4 w-4" />

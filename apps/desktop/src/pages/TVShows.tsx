@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { FolderPlus, Tv } from 'lucide-react';
-import { useLibrary } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
@@ -27,12 +27,21 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const [libraryActionError, setLibraryActionError] = useState('');
   const progress = useProgressSnapshot();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const filteredShows = useMemo(() => tvShows
     .filter((item) => matchesMediaItem(item, normalizedQuery))
     .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)), [activeFilter, listState, normalizedQuery, progress, tvShows]);
+  const handleAddFolder = async () => {
+    setLibraryActionError('');
+    try {
+      await addLibraryFolder(kind === 'anime' ? 'anime' : 'tvShows');
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+    }
+  };
 
   return (
     <LibraryPageLayout
@@ -61,9 +70,10 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
         )}
         {tvShows.length === 0 && !isLoading && (
           <EmptyShowsState
+            error={libraryActionError}
             kind={kind}
             isScanning={isScanning}
-            onAddFolder={() => addLibraryFolder(kind === 'anime' ? 'anime' : 'tvShows')}
+            onAddFolder={handleAddFolder}
           />
         )}
         {tvShows.length > 0 && filteredShows.length === 0 && !isLoading && (
@@ -76,10 +86,12 @@ export default function TVShows({ kind = 'series' }: TVShowsProps) {
 }
 
 function EmptyShowsState({
+  error,
   kind,
   isScanning,
   onAddFolder,
 }: {
+  error?: string;
   kind: 'series' | 'anime';
   isScanning: boolean;
   onAddFolder: () => Promise<void>;
@@ -102,6 +114,7 @@ function EmptyShowsState({
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
           {description}
         </p>
+        {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <Button onClick={onAddFolder} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">
           <Icon className="h-4 w-4" />
           {buttonLabel}

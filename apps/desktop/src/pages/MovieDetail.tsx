@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Bookmark, Play, Star, Clock, ArrowLeft } from 'lucide-react';
-import { useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -100,6 +100,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const progressTick = useProgressRefreshRevision();
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
+  const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
 
   useEffect(() => {
@@ -169,7 +170,13 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   // newly applied poster or cover appear immediately instead of only after
   // reopening the title.
   const handleArtworkSaved = useCallback(async () => {
-    await refreshLibrary();
+    setLibraryActionError('');
+    try {
+      await refreshLibrary();
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+      return;
+    }
     const routeState = (location.state || {}) as Record<string, unknown>;
     if (!routeState.artwork) return;
     const { artwork: _staleArtwork, ...rest } = routeState;
@@ -244,6 +251,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           />
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
+        {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
         {canManageProfiles && <ArtworkEditorControls
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}

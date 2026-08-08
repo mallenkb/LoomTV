@@ -5,6 +5,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import {
   ActivityIndicator,
   AccessibilityInfo,
+  Alert,
   Animated,
   AppState,
   type AppStateStatus,
@@ -181,6 +182,7 @@ type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
 type PlayerRotation = 0 | 90 | 180 | 270;
+type MobileProfilePickerMode = 'startup' | 'lock' | 'profile-required' | 'voluntary';
 
 type MobileFocusableRef = RefObject<{ focus?: () => void } | null>;
 
@@ -189,18 +191,35 @@ type MobileModalLayer = {
   priority: number;
   sequence: number;
   onBack: () => void;
-  restoreFocusRef?: MobileFocusableRef;
-  restoreFocusNode?: number | null;
+  restoreFocusTarget?: MobileFocusTarget;
 };
 
 const mobileModalLayers: MobileModalLayer[] = [];
 let mobileModalSequence = 0;
-let lastMobileFocusedNode: number | null = null;
+let pendingMobileFocusTarget: MobileFocusTarget | null = null;
 
-function rememberMobileFocus(event: { currentTarget?: unknown }): void {
+type MobileFocusTarget = {
+  node: number;
+  invoker?: unknown;
+  ref?: MobileFocusableRef;
+};
+
+function captureMobileFocus(event: { currentTarget?: unknown }): void {
   if (event.currentTarget === undefined) return;
   const node = findNodeHandle(event.currentTarget as Parameters<typeof findNodeHandle>[0]);
-  if (node !== null) lastMobileFocusedNode = node;
+  if (node !== null) pendingMobileFocusTarget = { invoker: event.currentTarget, node };
+}
+
+function takeMobileFocusTarget(): MobileFocusTarget | undefined {
+  const target = pendingMobileFocusTarget || undefined;
+  pendingMobileFocusTarget = null;
+  return target;
+}
+
+function focusTargetFromRef(ref?: MobileFocusableRef): MobileFocusTarget | undefined {
+  if (!ref?.current) return undefined;
+  const node = findNodeHandle(ref.current as Parameters<typeof findNodeHandle>[0]);
+  return node === null ? undefined : { node, ref };
 }
 
 function topMobileModalLayer(): MobileModalLayer | null {
@@ -212,12 +231,16 @@ function topMobileModalLayer(): MobileModalLayer | null {
   }, null);
 }
 
-function restoreMobileFocus(target?: MobileFocusableRef, savedNode?: number | null): void {
-  const focusable = target?.current;
+function restoreMobileFocus(target?: MobileFocusTarget): void {
+  const focusable = target?.ref?.current;
   focusable?.focus?.();
-  const node = savedNode ?? (focusable
+  const node = focusable
     ? findNodeHandle(focusable as Parameters<typeof findNodeHandle>[0])
-    : null);
+    : target?.invoker !== undefined
+      ? findNodeHandle(target.invoker as Parameters<typeof findNodeHandle>[0])
+      : target?.ref
+        ? null
+        : target?.node ?? null;
   if (node === null) return;
   setTimeout(() => {
     try {
@@ -247,38 +270,29 @@ function useMobileModalLayer({
   const idRef = useRef<string | null>(null);
   if (!idRef.current) idRef.current = `mobile-modal-${++mobileModalSequence}`;
   const callbackRef = useRef(onBack);
-  const focusRef = useRef(restoreFocusRef);
-  const restoreNodeRef = useRef<number | null>(null);
-  const restoreNodeInitializedRef = useRef(false);
-  if (!restoreNodeInitializedRef.current) {
-    restoreNodeRef.current = restoreFocusRef?.current
-      ? findNodeHandle(restoreFocusRef.current as Parameters<typeof findNodeHandle>[0])
-      : lastMobileFocusedNode;
-    restoreNodeInitializedRef.current = true;
+  const wasOpenRef = useRef(false);
+  const restoreTargetRef = useRef<MobileFocusTarget | undefined>(undefined);
+  if (open && !wasOpenRef.current) {
+    restoreTargetRef.current = focusTargetFromRef(restoreFocusRef);
   }
-  if (!open) {
-    restoreNodeRef.current = restoreFocusRef?.current
-      ? findNodeHandle(restoreFocusRef.current as Parameters<typeof findNodeHandle>[0])
-      : lastMobileFocusedNode;
-  }
+  wasOpenRef.current = open;
   callbackRef.current = onBack;
-  focusRef.current = restoreFocusRef;
 
   useEffect(() => {
     if (!open || !idRef.current) return undefined;
+    const restoreFocusTarget = restoreTargetRef.current || takeMobileFocusTarget();
     const layer: MobileModalLayer = {
       id: idRef.current,
       priority,
       sequence: ++mobileModalSequence,
       onBack: () => callbackRef.current(),
-      restoreFocusRef: focusRef.current,
-      restoreFocusNode: restoreNodeRef.current,
+      restoreFocusTarget,
     };
     mobileModalLayers.push(layer);
     return () => {
       const index = mobileModalLayers.findIndex((candidate) => candidate.id === layer.id);
       if (index >= 0) mobileModalLayers.splice(index, 1);
-      restoreMobileFocus(layer.restoreFocusRef, layer.restoreFocusNode);
+      restoreMobileFocus(layer.restoreFocusTarget);
     };
   }, [open, priority]);
 }
@@ -658,6 +672,12 @@ function formatClock(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function mobileSeekAccessibilityText(position: number, duration: number): string {
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const safePosition = Math.max(0, Math.min(position, safeDuration || Math.max(0, position)));
+  return `Elapsed ${formatClock(safePosition)}; remaining -${formatClock(Math.max(0, safeDuration - safePosition))}; total ${formatClock(safeDuration)}`;
+}
+
 function seasonCountLabel(item: MediaItem): string {
   const seasons = new Set((item.episodeFiles || []).map((ep) => ep.season)).size;
   if (seasons > 0) return `${seasons} ${seasons === 1 ? 'season' : 'seasons'}`;
@@ -899,7 +919,7 @@ function PressableScale({
   children: ReactNode;
   disabled?: boolean;
   onFocus?: PressableProps['onFocus'];
-  onPress?: () => void;
+  onPress?: PressableProps['onPress'];
   scaleTo?: number;
   style?: StyleProp<ViewStyle>;
 }) {
@@ -929,11 +949,11 @@ function PressableScale({
       accessibilityRole={accessibilityRole}
       accessibilityState={accessibilityState}
       disabled={disabled}
-      onFocus={(event) => {
-        rememberMobileFocus(event);
-        onFocus?.(event);
+      onFocus={onFocus}
+      onPress={(event) => {
+        captureMobileFocus(event);
+        onPress?.(event);
       }}
-      onPress={onPress}
       onPressIn={() => springTo(scaleTo)}
       onPressOut={() => springTo(1)}
       style={[style, { transform: [{ scale }] }]}
@@ -1076,6 +1096,7 @@ function SubpageBackButton({
 function MobileProfilePicker({
   activeProfile,
   error,
+  mode,
   onSelect,
   onClose,
   pin,
@@ -1086,6 +1107,7 @@ function MobileProfilePicker({
 }: {
   activeProfile: MobileProfile | null;
   error: string;
+  mode: MobileProfilePickerMode;
   onSelect: (profile: MobileProfile, pin?: string) => void;
   onClose?: () => void;
   pin: string;
@@ -1096,6 +1118,7 @@ function MobileProfilePicker({
 }) {
   const { colors } = useMobileTheme();
   const insets = useSafeAreaInsets();
+  const isDismissible = mode === 'voluntary';
   useMobileModalLayer({
     priority: 70,
     onBack: () => {
@@ -1104,7 +1127,7 @@ function MobileProfilePicker({
         setPin('');
         return;
       }
-      onClose?.();
+      if (isDismissible) onClose?.();
     },
   });
   if (pinTarget) {
@@ -1121,7 +1144,10 @@ function MobileProfilePicker({
       >
         <SubpageBackButton
           accessibilityLabel="Back to profiles"
-          onPress={() => setPinTarget(null)}
+          onPress={() => {
+            setPinTarget(null);
+            setPin('');
+          }}
           style={[mobileProfileStyles.pinBackButton, { top: insets.top + 12 }]}
         />
         <Text style={[mobileProfileStyles.title, { color: colors.text }]}>Enter PIN</Text>
@@ -1152,6 +1178,11 @@ function MobileProfilePicker({
     >
       <LoomLogo width={132} height={44} wordColor={colors.text} />
       <Text style={[mobileProfileStyles.title, { color: colors.text }]}>Who’s watching?</Text>
+      {isDismissible ? null : (
+        <Text accessibilityRole="text" style={{ color: colors.muted, textAlign: 'center' }}>
+          Choose a profile to continue.
+        </Text>
+      )}
       <View style={mobileProfileStyles.grid}>
         {profiles.map((profile) => (
           <Pressable
@@ -1272,12 +1303,33 @@ function AppRoot() {
   const [profiles, setProfiles] = useState<MobileProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<MobileProfile | null>(null);
   const [automaticProfileSignIn, setAutomaticProfileSignIn] = useState(false);
-  const [showProfilePicker, setShowProfilePicker] = useState(false);
+  const [profilePickerMode, setProfilePickerMode] = useState<MobileProfilePickerMode | null>(null);
+  const showProfilePicker = profilePickerMode !== null;
   const [profilePinTarget, setProfilePinTarget] = useState<MobileProfile | null>(null);
   const [profilePin, setProfilePin] = useState('');
   const [profileError, setProfileError] = useState('');
   const [profileLists, setProfileLists] = useState<MobileProfileListEntry[]>([]);
   const profileHydrationGenerationRef = useRef(0);
+  const enterProfilePicker = (mode: MobileProfilePickerMode, nextConnection?: Connection, selectionRevision?: number) => {
+    profileHydrationGenerationRef.current += 1;
+    setProfilePinTarget(null);
+    setProfilePin('');
+    setProfileError('');
+    if (mode !== 'voluntary') {
+      pendingMobileFocusTarget = null;
+      setActiveProfile(null);
+      setAutomaticProfileSignIn(false);
+      setProfileLists([]);
+      setProgress({});
+      setConnection((current) => {
+        const base = nextConnection || current;
+        return base
+          ? { ...base, library: {}, libraryEtag: '', selectionRevision: selectionRevision ?? base.selectionRevision }
+          : current;
+      });
+    }
+    setProfilePickerMode(mode);
+  };
   const [savedConnection, setSavedConnection] = useState<SavedConnection | null>(null);
   const [discoveredHosts, setDiscoveredHosts] = useState<DiscoveredHost[]>([]);
   const [isDiscoveringHosts, setIsDiscoveringHosts] = useState(true);
@@ -2399,6 +2451,7 @@ function AppRoot() {
   type MobileCatalogFetchResult =
     | { status: 'not-modified' }
     | { status: 'unauthorized' }
+    | { status: 'profile-required' }
     | {
         status: 'ok';
         library: LibraryPayload;
@@ -2419,6 +2472,10 @@ function AppRoot() {
       );
       if (response.status === 304) return { status: 'not-modified' };
       if (response.status === 401) return { status: 'unauthorized' };
+      if (response.status === 409) {
+        const payload = await response.clone().json().catch(() => null) as { error?: string; status?: string } | null;
+        if (payload?.error === 'profile_required' || payload?.status === 'profile_required') return { status: 'profile-required' };
+      }
       if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
       return {
         status: 'ok',
@@ -2437,6 +2494,10 @@ function AppRoot() {
     );
     if (response.status === 304) return { status: 'not-modified' };
     if (response.status === 401) return { status: 'unauthorized' };
+    if (response.status === 409) {
+      const payload = await response.clone().json().catch(() => null) as { error?: string; status?: string } | null;
+      if (payload?.error === 'profile_required' || payload?.status === 'profile_required') return { status: 'profile-required' };
+    }
     let unsupportedCompactPayload = false;
     if (response.ok) {
       const index = await response.json() as MobileLibraryIndexPayload;
@@ -2460,16 +2521,33 @@ function AppRoot() {
     return readLegacy();
   }
 
-  async function hydrateSelectedProfile(nextConnection: Connection, profile: MobileProfile, activeState?: MobileActiveProfile): Promise<void> {
-    const generation = ++profileHydrationGenerationRef.current;
+  async function hydrateSelectedProfile(
+    nextConnection: Connection,
+    profile: MobileProfile,
+    activeState?: MobileActiveProfile,
+    selectionGeneration?: number,
+  ): Promise<boolean> {
+    const generation = selectionGeneration ?? ++profileHydrationGenerationRef.current;
     const [catalog, progressResponse, preferencesResponse, listsResponse] = await Promise.all([
       fetchMobileCatalog(nextConnection),
       mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfilePreferences(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfileLists(nextConnection.baseUrl, nextConnection.deviceToken),
     ]);
-    if (generation !== profileHydrationGenerationRef.current) return;
-    if (catalog.status !== 'ok') throw new Error('Desktop sharing is unavailable.');
+    const nextProgress = progressResponse.ok ? await progressResponse.json() as Record<string, StoredProgress> : {};
+    const nextPreferences = preferencesResponse.ok ? await preferencesResponse.json() as MobileProfilePreferences : null;
+    const nextLists = listsResponse.ok ? await listsResponse.json() as MobileProfileListEntry[] : [];
+    if (generation !== profileHydrationGenerationRef.current) return false;
+    if (catalog.status !== 'ok') {
+      if (catalog.status === 'profile-required') {
+        enterProfilePicker('profile-required', nextConnection, activeState?.selectionRevision);
+        setError('Choose a profile to continue.');
+        setIsOnboarding(false);
+        setIsServerOffline(false);
+        return false;
+      }
+      throw new Error('Desktop sharing is unavailable.');
+    }
     const hydratedConnection = {
       ...nextConnection,
       library: catalog.library,
@@ -2483,22 +2561,25 @@ function AppRoot() {
     setIsServerOffline(false);
     setOfflineSnapshotSavedAt(null);
     setActiveProfile(profile);
-    setShowProfilePicker(false);
+    setAutomaticProfileSignIn(Boolean(activeState?.automaticSignIn));
+    setProfilePickerMode(null);
     setProfilePinTarget(null);
     setProfilePin('');
     setProfileError('');
-    setProgress(progressResponse.ok ? await progressResponse.json() as Record<string, StoredProgress> : {});
-    if (preferencesResponse.ok) {
-      const preferences = await preferencesResponse.json() as MobileProfilePreferences;
+    setProgress(nextProgress);
+    if (nextPreferences) {
+      const preferences = nextPreferences;
       if (preferences.appThemeMode) setMobileThemeMode(preferences.appThemeMode);
       if (preferences.appThemeColor && MOBILE_THEME_COLOR_OPTIONS.some((option) => option.value === preferences.appThemeColor)) {
         setMobileThemeColor(preferences.appThemeColor as MobileThemeColor);
       }
     }
-    setProfileLists(listsResponse.ok ? await listsResponse.json() as MobileProfileListEntry[] : []);
+    setProfileLists(nextLists);
+    return true;
   }
 
   async function selectMobileProfile(nextConnection: Connection, profile: MobileProfile, pin?: string): Promise<void> {
+    const selectionGeneration = ++profileHydrationGenerationRef.current;
     setProfileError('');
     const response = await mobileLanClient.selectProfile(nextConnection.baseUrl, nextConnection.deviceToken, {
       profileId: profile.id,
@@ -2513,8 +2594,8 @@ function AppRoot() {
       throw new Error('That profile could not be selected.');
     }
     const payload = await response.json() as { profile: MobileProfile; active: MobileActiveProfile };
-    setAutomaticProfileSignIn(payload.active.automaticSignIn);
-    await hydrateSelectedProfile(nextConnection, payload.profile, payload.active);
+    if (selectionGeneration !== profileHydrationGenerationRef.current) return;
+    await hydrateSelectedProfile(nextConnection, payload.profile, payload.active, selectionGeneration);
   }
 
   async function initializeProfiles(nextConnection: Connection): Promise<boolean> {
@@ -2526,15 +2607,12 @@ function AppRoot() {
     setProfiles(payload.profiles);
     const activeResponse = await mobileLanClient.getActiveProfile(nextConnection.baseUrl, nextConnection.deviceToken);
     const activeState = activeResponse.ok ? await activeResponse.json() as MobileActiveProfile : null;
-    setAutomaticProfileSignIn(Boolean(activeState?.automaticSignIn));
     const selected = payload.profiles.find((profile) => profile.id === activeState?.profileId);
     if (selected && activeState?.automaticSignIn) {
       await hydrateSelectedProfile(nextConnection, selected, activeState || undefined);
       return true;
     }
-    setConnection({ ...nextConnection, library: {}, libraryEtag: '', selectionRevision: activeState?.selectionRevision });
-    setActiveProfile(selected || null);
-    setShowProfilePicker(true);
+    enterProfilePicker('startup', nextConnection, activeState?.selectionRevision);
     return true;
   }
 
@@ -2577,7 +2655,7 @@ function AppRoot() {
     setAutomaticProfileSignIn(snapshot.automaticProfileSignIn);
     setProfileLists(snapshot.profileLists);
     setProgress(snapshot.progress);
-    setShowProfilePicker(false);
+    setProfilePickerMode(null);
     setIsOnboarding(false);
     setBaseUrl(saved.baseUrl);
     setOfflineSnapshotSavedAt(snapshot.savedAt);
@@ -2628,6 +2706,14 @@ function AppRoot() {
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
         setError('This device is no longer authorized. Select the desktop and enter its current 6-digit pairing PIN.');
+        return true;
+      }
+      if (catalog.status === 'profile-required') {
+        enterProfilePicker('profile-required', baseConnection);
+        setBaseUrl(baseConnection.baseUrl);
+        setError('Choose a profile to continue.');
+        setIsOnboarding(false);
+        setIsServerOffline(false);
         return true;
       }
       if (catalog.status !== 'ok') throw new Error('Desktop sharing is unavailable.');
@@ -2747,7 +2833,7 @@ function AppRoot() {
         refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
         certFingerprint,
         hostDeviceId: payload.hostDeviceId || discoveredPairHost?.deviceId || '',
-        hostDeviceName: payload.hostDeviceName || 'Loom Media Player Desktop',
+        hostDeviceName: payload.hostDeviceName || 'LoomTV desktop',
         clientDeviceName: mobileDeviceName(),
         library: payload.library || {},
         libraryEtag: payload.libraryEtag,
@@ -2869,6 +2955,12 @@ function AppRoot() {
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
+      if (catalog.status === 'profile-required') {
+        enterProfilePicker('profile-required', activeConnection);
+        setError('Choose a profile to continue.');
+        setIsServerOffline(false);
+        return;
+      }
       const nextLibrary = catalog.library;
       const libraryEtag = catalog.etag;
       setIsRefreshing(false);
@@ -2940,6 +3032,12 @@ function AppRoot() {
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
+        return;
+      }
+      if (catalog.status === 'profile-required') {
+        enterProfilePicker('profile-required', activeConnection);
+        setError('Choose a profile to continue.');
+        setIsServerOffline(false);
         return;
       }
       if (catalog.status === 'not-modified') {
@@ -3038,11 +3136,51 @@ function AppRoot() {
     setIsOnboarding(true);
     setIsServerOffline(false);
     setOfflineSnapshotSavedAt(null);
-    setShowProfilePicker(false);
+    setProfilePickerMode(null);
     setPlayTarget(null);
     setMiniPlayerTarget(null);
     setPlaybackUrl(null);
     setStreamOptions({});
+  }
+
+  function disconnectFromDesktop(): void {
+    const hostDeviceId = connection?.hostDeviceId;
+    profileHydrationGenerationRef.current += 1;
+    invalidateCredentialRefresh();
+    void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
+    if (hostDeviceId) void clearMobileOfflineSnapshot(hostDeviceId);
+    setSavedConnection(null);
+    setConnection(null);
+    setBaseUrl('');
+    setShareCode('');
+    setDetailItem(null);
+    detailItemCacheRef.current.clear();
+    lastDetailByKindRef.current.clear();
+    setPlayTarget(null);
+    setMiniPlayerTarget(null);
+    playerReturnItemRef.current = null;
+    setPlaybackUrl(null);
+    setStreamOptions({});
+    setProfilePickerMode(null);
+    setSearchOpen(false);
+    setQuery('');
+    setSearchScope('all');
+    setActiveKind('home');
+    setArtworkCacheBusters({});
+    setError('');
+    setIsServerOffline(false);
+    setOfflineSnapshotSavedAt(null);
+  }
+
+  function confirmDisconnectFromDesktop(): void {
+    Alert.alert(
+      'Disconnect this desktop?',
+      'You will need to pair again to use this desktop. The saved connection and offline library data will be removed from this device; media files on the desktop will not be deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: disconnectFromDesktop },
+      ],
+    );
   }
 
   async function syncLibraryAfterArtworkChange(itemId: string, appliedCandidate?: OfficialMetadataCandidate): Promise<void> {
@@ -3156,6 +3294,13 @@ function AppRoot() {
   );
   const showHomeRails = activeKind === 'home' && !query && !searchOpen && !hasActiveFilters;
   const showSearchEmpty = Boolean(query.trim());
+  const topMobileSurface: 'detail' | 'poster' | 'player' | null = playTarget
+    ? 'player'
+    : posterCandidateSheet
+      ? 'poster'
+      : detailItem
+        ? 'detail'
+        : null;
 
   return (
     <MobileThemeProvider value={themeContextValue}>
@@ -3193,7 +3338,8 @@ function AppRoot() {
         <MobileProfilePicker
           activeProfile={activeProfile}
           error={profileError}
-          onClose={() => setShowProfilePicker(false)}
+          mode={profilePickerMode || 'startup'}
+          onClose={profilePickerMode === 'voluntary' ? () => setProfilePickerMode(null) : undefined}
           pin={profilePin}
           pinTarget={profilePinTarget}
           profiles={profiles}
@@ -3208,8 +3354,8 @@ function AppRoot() {
         />
       ) : (
         <View
-          accessibilityElementsHidden={Boolean(detailItem || playTarget || posterCandidateSheet)}
-          importantForAccessibility={detailItem || playTarget || posterCandidateSheet ? 'no-hide-descendants' : 'auto'}
+          accessibilityElementsHidden={topMobileSurface !== null}
+          importantForAccessibility={topMobileSurface !== null ? 'no-hide-descendants' : 'auto'}
           style={styles.shell}
         >
           <View style={styles.main}>
@@ -3264,13 +3410,7 @@ function AppRoot() {
                   mobileThemeMode={mobileThemeMode}
                   onLockProfile={() => {
                     void clearMobileOfflineSnapshot(connection.hostDeviceId);
-                    profileHydrationGenerationRef.current += 1;
-                    setActiveProfile(null);
-                    setAutomaticProfileSignIn(false);
-                    setProfileLists([]);
-                    setProgress({});
-                    setConnection((current) => current ? { ...current, library: {} } : current);
-                    setShowProfilePicker(true);
+                    enterProfilePicker('lock', connection);
                     void mobileLanClient.lockProfile(connection.baseUrl, connection.deviceToken).catch(() => {});
                   }}
                   onSetAutomaticSignIn={(enabled) => {
@@ -3287,33 +3427,8 @@ function AppRoot() {
                       setError('Automatic sign-in could not be updated while the desktop is offline.');
                     });
                   }}
-                  onSwitchProfile={() => setShowProfilePicker(true)}
-                  onDisconnect={() => {
-                    profileHydrationGenerationRef.current += 1;
-                    invalidateCredentialRefresh();
-                    void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
-                    void clearMobileOfflineSnapshot(connection.hostDeviceId);
-                    setSavedConnection(null);
-                    setConnection(null);
-                    setBaseUrl('');
-                    setShareCode('');
-                    setDetailItem(null);
-                    detailItemCacheRef.current.clear();
-                    lastDetailByKindRef.current.clear();
-                    setPlayTarget(null);
-                    setMiniPlayerTarget(null);
-                    playerReturnItemRef.current = null;
-                    setPlaybackUrl(null);
-                    setStreamOptions({});
-                    setSearchOpen(false);
-                    setQuery('');
-                    setSearchScope('all');
-                    setActiveKind('home');
-                    setArtworkCacheBusters({});
-                    setError('');
-                    setIsServerOffline(false);
-                    setOfflineSnapshotSavedAt(null);
-                  }}
+                  onSwitchProfile={() => enterProfilePicker('voluntary')}
+                  onDisconnect={confirmDisconnectFromDesktop}
                   onRefresh={refreshLibrary}
                   onSelectTheme={selectMobileTheme}
                   onSelectThemeColor={selectMobileThemeColor}
@@ -3423,7 +3538,8 @@ function AppRoot() {
                     accessibilityRole="button"
                     accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
                     accessibilityState={{ expanded: filterOpen }}
-                    onPress={() => {
+                    onPress={(event) => {
+                      captureMobileFocus(event);
                       const nextOpen = !filterOpen;
                       setFilterOpen(nextOpen);
                       if (nextOpen) libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -3435,7 +3551,8 @@ function AppRoot() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Search"
-                    onPress={() => {
+                    onPress={(event) => {
+                      captureMobileFocus(event);
                       setFilterOpen(false);
                       setLibraryFilter('all');
                       setSearchScope('all');
@@ -3465,6 +3582,7 @@ function AppRoot() {
         artworkCacheBusters={artworkCacheBusters}
         baseUrl={connection?.baseUrl || ''}
         hasMiniPlayer={Boolean(miniPlayerTarget)}
+        accessibilityHidden={topMobileSurface !== 'detail'}
         isTablet={isTablet}
         item={detailItem}
         isWatchlisted={Boolean(detailItem && profileLists.some((entry) => entry.mediaId === detailItem.id && (entry.kind === 'watchlist' || entry.kind === 'favorite')))}
@@ -3508,6 +3626,7 @@ function AppRoot() {
       />
       <PosterCandidateSheet
         applyingCandidateId={applyingPosterCandidateId}
+        accessibilityHidden={topMobileSurface !== 'poster'}
         baseUrl={connection?.baseUrl || ''}
         candidates={posterCandidateSheet?.candidates || []}
         error={artworkRefreshError}
@@ -3520,6 +3639,7 @@ function AppRoot() {
       />
       {activeKind !== 'settings' ? (
         <MiniPlayerStrip
+          accessibilityHidden={topMobileSurface !== null}
           baseUrl={connection?.baseUrl || ''}
           cacheBust={miniPlayerTarget?.mediaId ? artworkCacheBusters[miniPlayerTarget.mediaId] : undefined}
           target={miniPlayerTarget}
@@ -3960,7 +4080,10 @@ function Header({
         <View style={styles.headerActions}>
           {canFilter ? (
             <Pressable
-              onPress={() => setFilterOpen(!filterOpen)}
+              onPress={(event) => {
+                captureMobileFocus(event);
+                setFilterOpen(!filterOpen);
+              }}
               accessibilityRole="button"
               accessibilityLabel={filterOpen ? 'Close filters' : 'Open filters'}
               accessibilityState={{ expanded: filterOpen }}
@@ -4162,6 +4285,7 @@ function BottomNav({
 }
 
 function MiniPlayerStrip({
+  accessibilityHidden,
   baseUrl,
   bottomOffset,
   cacheBust,
@@ -4169,6 +4293,7 @@ function MiniPlayerStrip({
   onOpen,
   target,
 }: {
+  accessibilityHidden?: boolean;
   baseUrl: string;
   bottomOffset: number;
   cacheBust?: string;
@@ -4208,8 +4333,10 @@ function MiniPlayerStrip({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Resume ${target.title}`}
-        onFocus={rememberMobileFocus}
-        onPress={onOpen}
+        onPress={(event) => {
+          captureMobileFocus(event);
+          onOpen();
+        }}
         style={({ pressed }) => [styles.miniPlayerMain, pressed && styles.pressed]}
       >
         <View style={styles.miniPlayerThumb}>
@@ -4247,7 +4374,11 @@ function MiniPlayerStrip({
   );
 
   return (
-    <View style={[styles.miniPlayerWrap, { bottom: bottomOffset }]}>
+    <View
+      accessibilityElementsHidden={accessibilityHidden}
+      importantForAccessibility={accessibilityHidden ? 'no-hide-descendants' : 'auto'}
+      style={[styles.miniPlayerWrap, { bottom: bottomOffset }]}
+    >
       <BlurView
         experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
         intensity={46}
@@ -4267,6 +4398,7 @@ function DetailModal({
   artworkRefreshError,
   baseUrl,
   hasMiniPlayer,
+  accessibilityHidden,
   isRefreshingArtwork,
   isTablet,
   item,
@@ -4284,6 +4416,7 @@ function DetailModal({
   artworkRefreshError: string;
   baseUrl: string;
   hasMiniPlayer: boolean;
+  accessibilityHidden?: boolean;
   isRefreshingArtwork: boolean;
   isTablet: boolean;
   item: MediaItem | null;
@@ -4306,6 +4439,7 @@ function DetailModal({
       artworkRefreshError={artworkRefreshError}
       baseUrl={baseUrl}
       hasMiniPlayer={hasMiniPlayer}
+      accessibilityHidden={accessibilityHidden}
       isRefreshingArtwork={isRefreshingArtwork}
       isTablet={isTablet}
       item={item}
@@ -4343,6 +4477,7 @@ function DetailContent({
   artworkRefreshError,
   baseUrl,
   hasMiniPlayer,
+  accessibilityHidden,
   isRefreshingArtwork,
   isTablet,
   item,
@@ -4360,6 +4495,7 @@ function DetailContent({
   artworkRefreshError: string;
   baseUrl: string;
   hasMiniPlayer: boolean;
+  accessibilityHidden?: boolean;
   isRefreshingArtwork: boolean;
   isTablet: boolean;
   item: MediaItem;
@@ -4473,7 +4609,8 @@ function DetailContent({
   return (
     <Animated.View
       accessibilityViewIsModal
-      importantForAccessibility="yes"
+      accessibilityElementsHidden={accessibilityHidden}
+      importantForAccessibility={accessibilityHidden ? 'no-hide-descendants' : 'yes'}
       onTouchStart={() => {
         if (seasonPickerOpen) setSeasonPickerOpen(false);
       }}
@@ -4675,8 +4812,10 @@ function DetailContent({
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.detailTopAction, isRefreshingArtwork && styles.disabledButton, pressed && styles.pressed]}
-            onFocus={rememberMobileFocus}
-            onPress={() => onRefreshArtwork(item)}
+            onPress={(event) => {
+              captureMobileFocus(event);
+              onRefreshArtwork(item);
+            }}
             disabled={isRefreshingArtwork}
             accessibilityRole="button"
             accessibilityLabel={`Refresh poster for ${item.title}`}
@@ -4772,6 +4911,7 @@ function DetailInfo({
 
 function PosterCandidateSheet({
   applyingCandidateId,
+  accessibilityHidden,
   baseUrl,
   candidates,
   error,
@@ -4780,6 +4920,7 @@ function PosterCandidateSheet({
   onClose,
 }: {
   applyingCandidateId: string;
+  accessibilityHidden?: boolean;
   baseUrl: string;
   candidates: OfficialMetadataCandidate[];
   error: string;
@@ -4802,7 +4943,8 @@ function PosterCandidateSheet({
   return (
     <View
       accessibilityViewIsModal
-      importantForAccessibility="yes"
+      accessibilityElementsHidden={accessibilityHidden}
+      importantForAccessibility={accessibilityHidden ? 'no-hide-descendants' : 'yes'}
       style={styles.posterSheetOverlay}
     >
       <Pressable
@@ -5158,6 +5300,11 @@ function PlayerContent({
   const [trackWidth, setTrackWidth] = useState(0);
   const [interactionTick, setInteractionTick] = useState(0);
   const [menu, setMenu] = useState<'none' | 'video' | 'speed' | 'audio' | 'subtitles'>('none');
+  const playerMenuOpen = menu !== 'none';
+  const playerUnderlayAccessibilityProps = {
+    accessibilityElementsHidden: playerMenuOpen,
+    importantForAccessibility: playerMenuOpen ? 'no-hide-descendants' as const : 'auto' as const,
+  };
   useMobileModalLayer({
     priority: 50,
     onBack: () => {
@@ -5729,6 +5876,7 @@ function PlayerContent({
       {playbackUrl ? (
         <>
           <View
+            {...playerUnderlayAccessibilityProps}
             style={[
               styles.playerVideoFrame,
               videoFrameRatio ? { aspectRatio: videoFrameRatio, maxHeight: '100%', width: '100%' } : styles.playerVideoFrameFill,
@@ -5742,13 +5890,14 @@ function PlayerContent({
             />
           </View>
           <Pressable
+            {...playerUnderlayAccessibilityProps}
             style={StyleSheet.absoluteFill}
             onPress={() => setControlsVisible((visible) => !visible)}
             accessibilityLabel={controlsVisible ? 'Hide player controls' : 'Show player controls'}
             {...playerPanResponder.panHandlers}
           />
           {gestureLevel ? (
-            <View style={styles.playerGestureHint} pointerEvents="none">
+            <View {...playerUnderlayAccessibilityProps} style={styles.playerGestureHint} pointerEvents="none">
               <Text style={styles.playerGestureTitle}>
                 {gestureLevel.kind === 'brightness' ? 'Brightness' : 'Volume'}
               </Text>
@@ -5760,6 +5909,7 @@ function PlayerContent({
           ) : null}
           {activeMediaSegment ? (
             <Pressable
+              {...playerUnderlayAccessibilityProps}
               onPress={() => seekToSeconds(activeMediaSegment.endMs === null
                 ? Math.max(activeMediaSegment.startMs / 1000, activeMediaSegment.mediaDurationMs / 1000 - 1)
                 : activeMediaSegment.endMs / 1000)}
@@ -5787,6 +5937,10 @@ function PlayerContent({
               pointerEvents="box-none"
             >
               <View
+                {...playerUnderlayAccessibilityProps}
+                pointerEvents="box-none"
+              >
+              <View
                 style={[
                   styles.playerTopRow,
                   {
@@ -5808,7 +5962,10 @@ function PlayerContent({
                 </Text>
                 <View style={styles.playerOptionsPill}>
                   <Pressable
-                    onPress={() => toggleMenu('video')}
+                    onPress={(event) => {
+                      captureMobileFocus(event);
+                      toggleMenu('video');
+                    }}
                     style={({ pressed }) => [styles.playerFitButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Video framing settings"
@@ -5819,7 +5976,10 @@ function PlayerContent({
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={() => toggleMenu('subtitles')}
+                    onPress={(event) => {
+                      captureMobileFocus(event);
+                      toggleMenu('subtitles');
+                    }}
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Subtitles"
@@ -5828,7 +5988,10 @@ function PlayerContent({
                     <SubtitlesIcon size={22} color={menu === 'subtitles' ? accent : '#ffffff'} />
                   </Pressable>
                   <Pressable
-                    onPress={() => toggleMenu('audio')}
+                    onPress={(event) => {
+                      captureMobileFocus(event);
+                      toggleMenu('audio');
+                    }}
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Audio tracks"
@@ -5837,7 +6000,10 @@ function PlayerContent({
                     <AudioTracksIcon size={22} color={menu === 'audio' ? accent : '#ffffff'} />
                   </Pressable>
                   <Pressable
-                    onPress={() => toggleMenu('speed')}
+                    onPress={(event) => {
+                      captureMobileFocus(event);
+                      toggleMenu('speed');
+                    }}
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Playback speed"
@@ -5889,7 +6055,7 @@ function PlayerContent({
                     min: 0,
                     max: duration,
                     now: Math.min(position, duration || 0),
-                    text: `${formatClock(position)} of ${formatClock(duration)}`,
+                    text: mobileSeekAccessibilityText(position, duration),
                   }}
                   accessibilityActions={[
                     { name: 'decrement', label: 'Seek backward 10 seconds' },
@@ -5907,8 +6073,10 @@ function PlayerContent({
                 </Pressable>
                 <View style={styles.playerTimesRow}>
                   <Text style={styles.playerTime}>{formatClock(position)}</Text>
+                  <Text style={styles.playerTime}>{formatClock(duration)}</Text>
                   <Text style={styles.playerTime}>-{formatClock(Math.max(0, duration - position))}</Text>
                 </View>
+              </View>
               </View>
 
               {menu !== 'none' ? (
@@ -6218,7 +6386,7 @@ function SettingsRow({
   label: string;
   value?: string;
   right?: ReactElement;
-  onPress?: () => void;
+  onPress?: PressableProps['onPress'];
   danger?: boolean;
   last?: boolean;
 }) {
@@ -6241,7 +6409,10 @@ function SettingsRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      onPress={onPress}
+      onPress={(event) => {
+        if (label === 'Switch profile') captureMobileFocus(event);
+        onPress(event);
+      }}
       style={({ pressed }) => [styles.settingsGroupRow, last && styles.settingsGroupRowLast, pressed && styles.pressed]}
     >
       {content}
@@ -6625,58 +6796,70 @@ function HeroCard({
   const rating = item.rating && item.rating > 0 ? item.rating : null;
 
   return (
-    <PressableScale
-      accessibilityLabel={`Open ${item.title}`}
-      accessibilityRole="button"
-      onPress={onSelect}
-      scaleTo={0.98}
-      style={[styles.heroCard, { height, width }]}
-    >
-      <FallbackImage
-        sources={sources}
-        style={styles.heroCardImage}
-        resizeMode="cover"
-        altFallback={(
-          <View style={[styles.heroCardImage, styles.posterFallback]}>
-            <PlayMark size={40} color={accent} />
-          </View>
-        )}
-      />
-      <Svg pointerEvents="none" style={styles.heroCardShade} viewBox="0 0 1 1" preserveAspectRatio="none">
-        <Defs>
-          <SvgLinearGradient id="heroCardBottomFade" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0.28" stopColor="#050505" stopOpacity={0.12} />
-            <Stop offset="0.50" stopColor="#050505" stopOpacity={0.68} />
-            <Stop offset="0.74" stopColor="#050505" stopOpacity={0.9} />
-            <Stop offset="1" stopColor="#050505" stopOpacity={0.98} />
-          </SvgLinearGradient>
-        </Defs>
-        <SvgRect x="0" y="0" width="1" height="1" fill="url(#heroCardBottomFade)" />
-      </Svg>
-      <View style={styles.heroCardFooter}>
-        <Text numberOfLines={2} style={styles.heroCardTitle}>{item.title}</Text>
-        {(meta || rating !== null) ? (
-          <View style={styles.heroCardMetaRow}>
-            {meta ? <Text numberOfLines={1} style={styles.heroCardMeta}>{meta}</Text> : null}
-            {rating !== null ? (
-              <View accessibilityLabel={`Rated ${rating.toFixed(1)} out of 10`} style={styles.heroCardRating}>
-                <StarIcon size={13} color="#f5c451" />
-                <Text style={styles.heroCardRatingText}>{rating.toFixed(1)}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-        <Pressable
-          accessibilityLabel={`${resume ? 'Resume' : 'Play'} ${item.title}`}
-          accessibilityRole="button"
-          onPress={onPlay}
-          style={({ pressed }) => [styles.heroPlayButton, pressed && styles.heroPlayButtonPressed]}
-        >
-          <PlayIcon size={22} color={accentForeground} />
-          <Text style={styles.heroPlayButtonText}>{resume ? 'Resume' : 'Play'}</Text>
-        </Pressable>
+    <View style={[styles.heroCard, { height, width }]}>
+      <PressableScale
+        accessibilityLabel={`Open ${item.title}`}
+        accessibilityRole="button"
+        onPress={onSelect}
+        scaleTo={0.98}
+        style={StyleSheet.absoluteFill}
+      >
+        <View pointerEvents="none" style={StyleSheet.absoluteFill} />
+      </PressableScale>
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <FallbackImage
+          sources={sources}
+          style={styles.heroCardImage}
+          resizeMode="cover"
+          altFallback={(
+            <View style={[styles.heroCardImage, styles.posterFallback]}>
+              <PlayMark size={40} color={accent} />
+            </View>
+          )}
+        />
+        <Svg pointerEvents="none" style={styles.heroCardShade} viewBox="0 0 1 1" preserveAspectRatio="none">
+          <Defs>
+            <SvgLinearGradient id="heroCardBottomFade" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0.28" stopColor="#050505" stopOpacity={0.12} />
+              <Stop offset="0.50" stopColor="#050505" stopOpacity={0.68} />
+              <Stop offset="0.74" stopColor="#050505" stopOpacity={0.9} />
+              <Stop offset="1" stopColor="#050505" stopOpacity={0.98} />
+            </SvgLinearGradient>
+          </Defs>
+          <SvgRect x="0" y="0" width="1" height="1" fill="url(#heroCardBottomFade)" />
+        </Svg>
+        <View style={[styles.heroCardFooter, { paddingBottom: 84 }]}>
+          <Text numberOfLines={2} style={styles.heroCardTitle}>{item.title}</Text>
+          {(meta || rating !== null) ? (
+            <View style={styles.heroCardMetaRow}>
+              {meta ? <Text numberOfLines={1} style={styles.heroCardMeta}>{meta}</Text> : null}
+              {rating !== null ? (
+                <View accessibilityLabel={`Rated ${rating.toFixed(1)} out of 10`} style={styles.heroCardRating}>
+                  <StarIcon size={13} color="#f5c451" />
+                  <Text style={styles.heroCardRatingText}>{rating.toFixed(1)}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
       </View>
-    </PressableScale>
+      <Pressable
+        accessibilityLabel={`${resume ? 'Resume' : 'Play'} ${item.title}`}
+        accessibilityRole="button"
+        onPress={(event) => {
+          captureMobileFocus(event);
+          onPlay();
+        }}
+        style={({ pressed }) => [
+          styles.heroPlayButton,
+          { bottom: 16, left: 16, position: 'absolute', right: 16, width: undefined, zIndex: 3 },
+          pressed && styles.heroPlayButtonPressed,
+        ]}
+      >
+        <PlayIcon size={22} color={accentForeground} />
+        <Text style={styles.heroPlayButtonText}>{resume ? 'Resume' : 'Play'}</Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -6900,7 +7083,7 @@ function EmptyLibrary({ isTablet }: { isTablet: boolean }) {
       </View>
       <Text selectable style={styles.emptyTitle}>Add your first library folder on desktop</Text>
       <Text selectable style={styles.emptyCopy}>
-        Pairing worked. Add movies, TV shows, or anime folders in Loom Media Player desktop, then refresh here.
+        Pairing worked. Add movies, TV shows, or anime folders in LoomTV desktop, then refresh here.
       </Text>
     </View>
   );

@@ -63,6 +63,7 @@ import {
   firstSubtitleTrackIndex,
   firstTrackIndex,
   formatTime,
+  seekAccessibilityText,
   getStoredDuration,
   hlsErrorSummary,
   isBitmapSubtitleCodec,
@@ -454,10 +455,7 @@ export default function VideoPlayer({
       seekSliderRef.current.setAttribute('aria-disabled', safeDuration <= 0 ? 'true' : 'false');
       seekSliderRef.current.setAttribute('aria-valuemax', String(safeDuration || 0));
       seekSliderRef.current.setAttribute('aria-valuenow', String(Math.min(safePosition, safeDuration || 0)));
-      const displayTime = showRemainingTimeRef.current
-        ? `-${formatTime(Math.max(0, safeDuration - safePosition))}`
-        : formatTime(safePosition);
-      seekSliderRef.current.setAttribute('aria-valuetext', `${displayTime} of ${formatTime(safeDuration)}`);
+      seekSliderRef.current.setAttribute('aria-valuetext', seekAccessibilityText(safePosition, safeDuration));
     }
   }, []);
 
