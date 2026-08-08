@@ -114,7 +114,11 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     }
 
     if (isExternalArtworkUrl(durableSource)) {
-      const params = addLocalAccessToken(new URLSearchParams({ source: durableSource }), localAccessToken);
+      // Provider URLs are host-only state. The renderer receives a loopback
+      // cache capability keyed by an opaque resource ID, never the upstream
+      // URL that the host will fetch.
+      const resourceId = registerRemoteResource('external-artwork', durableSource);
+      const params = addLocalAccessToken(new URLSearchParams({ resourceId }), localAccessToken);
       return `http://127.0.0.1:${getMediaServerPort()}/api/cached-artwork?${params.toString()}`;
     }
 

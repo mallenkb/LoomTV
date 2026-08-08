@@ -614,6 +614,7 @@ export interface StremioPluginSummary {
   manifestUrlRedacted: string;
   state: StremioPluginState;
   trusted: boolean;
+  configurationRequired: boolean;
   resources: readonly string[];
   types: readonly string[];
   catalogs: readonly StremioPluginCatalogDefinition[];
@@ -643,15 +644,33 @@ export interface StremioPluginCatalogRequest {
 
 export interface StremioPluginMetaRequest {
   type: string;
+  /** A stable, host-issued item key. Provider IDs never cross this boundary. */
   id: string;
   extra?: Readonly<Record<string, string | number | boolean>>;
 }
 
+export interface StremioPluginArtworkReferences {
+  /** Host-controlled artwork delivery URLs backed by opaque resource IDs. */
+  poster?: string;
+  background?: string;
+  logo?: string;
+}
+
+export interface StremioPluginCastMember {
+  name: string;
+  character?: string;
+  /** Host-controlled artwork delivery URL; upstream cast URLs never cross IPC. */
+  image?: string;
+}
+
 export interface StremioPluginCatalogItem {
+  /** Stable addon/type/provider-namespaced item key. */
   id: string;
   type: string;
   title: string;
   genres: readonly string[];
+  artwork?: StremioPluginArtworkReferences;
+  cast?: readonly StremioPluginCastMember[];
   description?: string;
   releaseInfo?: string;
   released?: string;
@@ -670,3 +689,20 @@ export interface StremioPluginMetaResult {
   addonId: string;
   item: StremioPluginCatalogItem | null;
 }
+
+export interface StremioPluginIpcIssue {
+  path: string;
+  code: string;
+  message: string;
+}
+
+export interface StremioPluginIpcError {
+  code: string;
+  message: string;
+  retryable: boolean;
+  issues?: readonly StremioPluginIpcIssue[];
+}
+
+export type StremioPluginIpcResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: StremioPluginIpcError };

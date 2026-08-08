@@ -191,6 +191,12 @@ export interface LoomStremioVideoCandidate {
   embeddedSources?: readonly LoomStremioSourceCandidate[];
 }
 
+export interface LoomStremioCastMember {
+  name: string;
+  character?: string;
+  imageUrl?: string;
+}
+
 export interface LoomStremioMetaCandidate {
   id: string;
   type: string;
@@ -209,6 +215,7 @@ export interface LoomStremioMetaCandidate {
   language?: string;
   country?: string;
   websiteUrl?: string;
+  cast?: readonly LoomStremioCastMember[];
   videos?: readonly LoomStremioVideoCandidate[];
 }
 
