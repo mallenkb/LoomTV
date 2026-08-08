@@ -1,3 +1,30 @@
 {
-  "advisories": {}
+  "advisories": {
+    "GHSA-w3rx-r6r6-pgpr": {
+      "module": "image-size",
+      "reviewedOn": "2026-08-08",
+      "expires": "2026-11-06",
+      "owner": "@mallenkb",
+      "reason": "Build-time denial of service only; there is no fixed published image-size version, and this is a Metro-only production dependency path. Follow up when Expo or Metro publishes a compatible fix, and remove this waiver when the advisory disappears or any path no longer stays within the documented mobile Metro scope.",
+      "allowedPathPrefixes": [
+        "apps__mobile>"
+      ],
+      "requiredPathMarkers": [
+        ">metro>image-size"
+      ]
+    },
+    "GHSA-5p2g-fcmc-qvqq": {
+      "module": "image-size",
+      "reviewedOn": "2026-08-08",
+      "expires": "2026-11-06",
+      "owner": "@mallenkb",
+      "reason": "Build-time denial of service only; there is no fixed published image-size version, and this is a Metro-only production dependency path. Follow up when Expo or Metro publishes a compatible fix, and remove this waiver when the advisory disappears or any path no longer stays within the documented mobile Metro scope.",
+      "allowedPathPrefixes": [
+        "apps__mobile>"
+      ],
+      "requiredPathMarkers": [
+        ">metro>image-size"
+      ]
+    }
+  }
 }
