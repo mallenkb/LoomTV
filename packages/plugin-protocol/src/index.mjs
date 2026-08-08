@@ -401,3 +401,4 @@ export class PluginManifestValidationError extends Error {
 }
 
 export * from './stremio-adapter.mjs';
+export * from './downstream.mjs';
