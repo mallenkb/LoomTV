@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loomtv.app/schemas/plugin-downstream.v2.schema.json",
+  "title": "LoomTV plugin downstream pre-phase wire contracts",
+  "description": "Untrusted wire DTOs and renderer-safe projections. Host-only Verified and Authorized brands are implemented in JavaScript and are intentionally not representable by this schema.",
+  "oneOf": [
+    { "$ref": "#/$defs/searchRequest" },
+    { "$ref": "#/$defs/subtitleRequest" },
+    { "$ref": "#/$defs/playbackRequest" },
+    { "$ref": "#/$defs/catalogResult" },
+    { "$ref": "#/$defs/signedCatalog" },
+    { "$ref": "#/$defs/marketplaceIndex" },
+    { "$ref": "#/$defs/pluginUpdate" },
+    { "$ref": "#/$defs/rendererSignedCatalog" },
+    { "$ref": "#/$defs/rendererMarketplaceIndex" },
+    { "$ref": "#/$defs/rendererPluginUpdate" },
+    { "$ref": "#/$defs/hostParity" }
+  ],
+  "$defs": {
+    "addonId": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$",
+      "maxLength": 128
+    },
+    "text": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "opaqueRef": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$" },
+    "origin": { "type": "string", "pattern": "^https://[^/?#]+$", "maxLength": 512 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" },
+    "semver": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$" },
+    "transport": { "const": "host-mediated" },
+    "itemIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "addonId", "type", "providerId"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "plugin-item-identity" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "type": { "$ref": "#/$defs/text" },
+        "providerId": { "$ref": "#/$defs/text" }
+      }
+    },
+    "membership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "catalogType", "catalogId"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "catalog-membership" },
+        "catalogType": { "$ref": "#/$defs/text" },
+        "catalogId": { "$ref": "#/$defs/text" }
+      }
+    },
+    "catalogItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "membership", "title"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/itemIdentity" },
+        "membership": { "$ref": "#/$defs/membership" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "releaseInfo": { "type": "string", "maxLength": 128 },
+        "released": { "type": "string", "maxLength": 128 },
+        "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+        "runtime": { "type": "string", "maxLength": 64 },
+        "year": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "genres": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/text" } },
+        "artworkRef": { "$ref": "#/$defs/opaqueRef" }
+      }
+    },
+    "searchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "transport", "addonId", "catalogType", "catalogId", "query", "page", "limit"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "plugin-search-request" },
+        "transport": { "$ref": "#/$defs/transport" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "catalogType": { "$ref": "#/$defs/text" },
+        "catalogId": { "$ref": "#/$defs/text" },
+        "query": { "type": "string", "maxLength": 200 },
+        "page": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+      }
+    },
+    "subtitleRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "transport", "addonId", "requestRef", "mediaRef", "subtitleRef"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "subtitle-attachment-request" },
+        "transport": { "$ref": "#/$defs/transport" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "requestRef": { "$ref": "#/$defs/opaqueRef" },
+        "mediaRef": { "$ref": "#/$defs/opaqueRef" },
+        "subtitleRef": { "$ref": "#/$defs/opaqueRef" },
+        "language": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "format": { "$ref": "#/$defs/opaqueRef" }
+      }
+    },
+    "playbackRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "transport", "addonId", "requestRef", "mediaRef", "sourceRef", "sourceKind", "requestedModes"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "playback-ticket-request" },
+        "transport": { "$ref": "#/$defs/transport" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "requestRef": { "$ref": "#/$defs/opaqueRef" },
+        "mediaRef": { "$ref": "#/$defs/opaqueRef" },
+        "sourceRef": { "$ref": "#/$defs/opaqueRef" },
+        "sourceKind": { "enum": ["https-media", "hls"] },
+        "requestedModes": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "enum": ["direct-proxy", "hls-proxy"] } }
+      }
+    },
+    "catalogResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "addonId", "catalogType", "catalogId", "revision", "items"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "plugin-catalog-result" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "catalogType": { "$ref": "#/$defs/text" },
+        "catalogId": { "$ref": "#/$defs/text" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "items": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/catalogItem" } }
+      }
+    },
+    "rendererCatalogItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "membership", "itemKey", "title"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/itemIdentity" },
+        "membership": { "$ref": "#/$defs/membership" },
+        "itemKey": { "type": "string", "pattern": "^loom-plugin:item:v1:" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "releaseInfo": { "type": "string", "maxLength": 128 },
+        "released": { "type": "string", "maxLength": 128 },
+        "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+        "runtime": { "type": "string", "maxLength": 64 },
+        "year": { "type": "integer", "minimum": 0, "maximum": 100000 },
+        "genres": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/text" } },
+        "artworkRef": { "$ref": "#/$defs/opaqueRef" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["unreviewed", "pending", "approved", "rejected", "expired"] },
+        "reviewedAt": { "type": "integer", "minimum": 0 },
+        "reviewerRef": { "$ref": "#/$defs/opaqueRef" },
+        "expiresAt": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["active", "revoked"] },
+        "effectiveAt": { "type": "integer", "minimum": 0 },
+        "reasonCode": { "$ref": "#/$defs/opaqueRef" },
+        "sequence": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "network", "metadata", "subtitle", "playback", "artwork", "profile", "executable", "updates"],
+      "properties": {
+        "level": { "enum": ["low", "medium", "high", "critical"] },
+        "network": { "type": "boolean" },
+        "metadata": { "type": "boolean" },
+        "subtitle": { "type": "boolean" },
+        "playback": { "type": "boolean" },
+        "artwork": { "type": "boolean" },
+        "profile": { "type": "boolean" },
+        "executable": { "type": "boolean" },
+        "updates": { "type": "boolean" }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "minimumSequence", "requiresHostApproval"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "minimumSequence": { "type": "integer", "minimum": 0 },
+        "maximumVersion": { "$ref": "#/$defs/semver" },
+        "requiresHostApproval": { "type": "boolean" }
+      }
+    },
+    "keyTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromKeyId", "toKeyId", "validFrom", "graceUntil", "proofSignature"],
+      "properties": {
+        "fromKeyId": { "$ref": "#/$defs/opaqueRef" },
+        "toKeyId": { "$ref": "#/$defs/opaqueRef" },
+        "validFrom": { "type": "integer", "minimum": 0 },
+        "graceUntil": { "type": "integer", "minimum": 0 },
+        "proofSignature": { "$ref": "#/$defs/signature" }
+      }
+    },
+    "marketplaceCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "name"],
+      "properties": {
+        "type": { "$ref": "#/$defs/text" },
+        "id": { "$ref": "#/$defs/text" },
+        "name": { "$ref": "#/$defs/text" }
+      }
+    },
+    "marketplaceAddon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["addonId", "publisherId", "name", "version", "manifestOrigin", "capabilities", "catalogs", "risk", "review", "revocation", "rollback"],
+      "properties": {
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "publisherId": { "$ref": "#/$defs/addonId" },
+        "name": { "$ref": "#/$defs/text" },
+        "version": { "$ref": "#/$defs/semver" },
+        "manifestOrigin": { "$ref": "#/$defs/origin" },
+        "capabilities": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "enum": ["metadata.catalog", "subtitle.provider", "playback.provider"] } },
+        "catalogs": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/marketplaceCatalog" } },
+        "risk": { "$ref": "#/$defs/risk" },
+        "review": { "$ref": "#/$defs/review" },
+        "revocation": { "$ref": "#/$defs/revocation" },
+        "keyTransition": { "$ref": "#/$defs/keyTransition" },
+        "rollback": { "$ref": "#/$defs/rollback" }
+      }
+    },
+    "marketplaceIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "indexId", "sequence", "issuedAt", "expiresAt", "publisherId", "publisherKeyId", "rollback", "addons", "signatureAlgorithm", "signature"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "plugin-marketplace-index" },
+        "indexId": { "$ref": "#/$defs/opaqueRef" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "publisherId": { "$ref": "#/$defs/addonId" },
+        "publisherKeyId": { "$ref": "#/$defs/opaqueRef" },
+        "keyTransition": { "$ref": "#/$defs/keyTransition" },
+        "rollback": { "$ref": "#/$defs/rollback" },
+        "addons": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/marketplaceAddon" } },
+        "signatureAlgorithm": { "const": "ed25519" },
+        "signature": { "$ref": "#/$defs/signature" }
+      }
+    },
+    "signedCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "publisherId", "addonId", "keyId", "sequence", "issuedAt", "expiresAt", "signatureAlgorithm", "signature", "rollback", "payload"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "signed-catalog" },
+        "publisherId": { "$ref": "#/$defs/addonId" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "keyId": { "$ref": "#/$defs/opaqueRef" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "signatureAlgorithm": { "const": "ed25519" },
+        "signature": { "$ref": "#/$defs/signature" },
+        "rollback": { "$ref": "#/$defs/rollback" },
+        "payload": { "$ref": "#/$defs/catalogResult" }
+      }
+    },
+    "pluginUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "publisherId", "addonId", "version", "channel", "artifactKind", "artifactRef", "artifactSha256", "artifactSize", "manifestOrigin", "keyId", "sequence", "issuedAt", "expiresAt", "hostApiRange", "requiresRestart", "rollback", "review", "revocation", "signatureAlgorithm", "signature"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "plugin-update" },
+        "publisherId": { "$ref": "#/$defs/addonId" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "channel": { "enum": ["stable", "beta", "canary"] },
+        "artifactKind": { "enum": ["declarative-index", "executable-plugin"] },
+        "artifactRef": { "$ref": "#/$defs/opaqueRef" },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "artifactSize": { "type": "integer", "minimum": 1, "maximum": 2000000000 },
+        "manifestOrigin": { "$ref": "#/$defs/origin" },
+        "keyId": { "$ref": "#/$defs/opaqueRef" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "hostApiRange": { "$ref": "#/$defs/text" },
+        "requiresRestart": { "type": "boolean" },
+        "rollback": { "$ref": "#/$defs/rollback" },
+        "review": { "$ref": "#/$defs/review" },
+        "revocation": { "$ref": "#/$defs/revocation" },
+        "signatureAlgorithm": { "const": "ed25519" },
+        "signature": { "$ref": "#/$defs/signature" }
+      }
+    },
+    "rendererSignedCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "addonId", "catalogType", "catalogId", "revision", "items"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "signed-catalog-renderer" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "catalogType": { "$ref": "#/$defs/text" },
+        "catalogId": { "$ref": "#/$defs/text" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "items": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/rendererCatalogItem" } }
+      }
+    },
+    "rendererMarketplaceIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "indexId", "sequence", "expiresAt", "addons"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "marketplace-index-renderer" },
+        "indexId": { "$ref": "#/$defs/opaqueRef" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 0 },
+        "addons": { "type": "array", "items": { "$ref": "#/$defs/rendererMarketplaceAddon" } }
+      }
+    },
+    "rendererMarketplaceAddon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["addonId", "name", "version", "capabilities", "catalogs", "risk", "review", "revocation", "executableStatus"],
+      "properties": {
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "name": { "$ref": "#/$defs/text" },
+        "version": { "$ref": "#/$defs/semver" },
+        "capabilities": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "enum": ["metadata.catalog", "subtitle.provider", "playback.provider"] } },
+        "catalogs": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/marketplaceCatalog" } },
+        "risk": { "$ref": "#/$defs/risk" },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": {
+            "state": { "enum": ["unreviewed", "pending", "approved", "rejected", "expired"] },
+            "expiresAt": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "revocation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "properties": {
+            "state": { "enum": ["active", "revoked"] },
+            "effectiveAt": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "executableStatus": { "enum": ["quarantined-phase9", "declarative-only"] }
+      }
+    },
+    "rendererPluginUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "addonId", "version", "channel", "artifactKind", "status", "installable", "reasonCode"],
+      "properties": {
+        "wireVersion": { "const": 1 },
+        "kind": { "const": "plugin-update-renderer" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "channel": { "enum": ["stable", "beta", "canary"] },
+        "artifactKind": { "enum": ["declarative-index", "executable-plugin"] },
+        "status": { "enum": ["verified", "quarantined-phase9"] },
+        "installable": { "const": false },
+        "reasonCode": { "enum": ["PHASE9_SANDBOX_REQUIRED", "HOST_STAGING_REQUIRED"] }
+      }
+    },
+    "hostSurface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "state"],
+      "properties": {
+        "id": { "enum": ["catalog.read", "catalog.search", "metadata.read", "subtitle.attachment", "playback.ticket", "catalog.signature", "update.signature", "executable.sandbox"] },
+        "state": { "enum": ["available", "scaffolded", "blocked"] },
+        "gate": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "hostParity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "transport", "runtime", "hostApiVersion", "surfaces", "scope", "prohibited"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "plugin-host-parity" },
+        "transport": { "$ref": "#/$defs/transport" },
+        "runtime": { "enum": ["desktop", "headless"] },
+        "hostApiVersion": { "$ref": "#/$defs/semver" },
+        "surfaces": { "type": "array", "minItems": 8, "maxItems": 8, "items": { "$ref": "#/$defs/hostSurface" } },
+        "scope": { "const": "pre-phase-scaffold" },
+        "prohibited": { "const": ["raw-url-playback", "raw-url-subtitles", "executable-plugin-code"] }
+      }
+    }
+  }
+}

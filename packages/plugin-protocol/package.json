@@ -12,7 +12,23 @@
       "import": "./src/index.mjs"
     },
     "./schema": "./schema/plugin-manifest.v1.schema.json",
-    "./downstream-schema": "./schema/plugin-downstream.v1.schema.json",
+    "./downstream-schema": "./schema/plugin-downstream.v2.schema.json",
+    "./identity": {
+      "types": "./src/identity.d.ts",
+      "import": "./src/identity.mjs"
+    },
+    "./marketplace": {
+      "types": "./src/marketplace.d.ts",
+      "import": "./src/marketplace.mjs"
+    },
+    "./runtime-lifecycle": {
+      "types": "./src/runtime-lifecycle.d.ts",
+      "import": "./src/runtime-lifecycle.mjs"
+    },
+    "./signed-bytes": {
+      "types": "./src/signed-bytes.d.ts",
+      "import": "./src/signed-bytes.mjs"
+    },
     "./stremio-schema": "./schema/stremio-addon-manifest.v3.schema.json",
     "./stremio-adapter": {
       "types": "./src/stremio-adapter.d.ts",
