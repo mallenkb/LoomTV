@@ -146,7 +146,10 @@ function permissionForRoute(pathname, method, prefix) {
   if (pathname === `${prefix}/backup/restore`) return 'backup.create';
   if (pathname === `${prefix}/backup`) return method === 'GET' ? 'backup.read' : 'backup.create';
   if (pathname === `${prefix}/users` || pathname.startsWith(`${prefix}/users/`)) return method === 'GET' ? 'users.read' : 'users.manage';
-  if (pathname === `${prefix}/account/password`) return 'account.password';
+  // Credential changes are authorized by the shared service policy. Keeping
+  // this route authentication-only makes self-service behavior identical to
+  // the public API, including for accounts with a custom permission set.
+  if (pathname === `${prefix}/account/password`) return undefined;
   return undefined;
 }
 

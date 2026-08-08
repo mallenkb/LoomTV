@@ -204,6 +204,94 @@ test('revoked and garbage tokens do not authenticate', async () => {
   assert.equal(await service.authenticateRequest({ headers: {} }), null);
 });
 
+test('credential resets enforce privilege scope, verify self-service, revoke sessions, and write safe audit details', async () => {
+  const { service, dataDir, principal: owner } = await onboardedService();
+  const managerPassword = 'manager-password-1';
+  const limitedAdminPassword = 'limited-admin-password-1';
+  const broadAdminPassword = 'broad-admin-password-1';
+  const viewerPassword = 'viewer-password-1';
+
+  const manager = await service.createUser({
+    name: 'Manager',
+    password: managerPassword,
+    role: 'user',
+    permissions: ['users.manage', 'account.password'],
+    rootIds: null,
+  }, owner);
+  const limitedAdmin = await service.createUser({
+    name: 'Limited admin',
+    password: limitedAdminPassword,
+    role: 'admin',
+    permissions: ['users.manage', 'account.password'],
+    rootIds: null,
+  }, owner);
+  const broadAdmin = await service.createUser({
+    name: 'Broad admin',
+    password: broadAdminPassword,
+    role: 'admin',
+    permissions: ['users.manage', 'account.password', 'logs.read'],
+    rootIds: null,
+  }, owner);
+  const viewer = await service.createUser({
+    name: 'Viewer',
+    password: viewerPassword,
+    role: 'viewer',
+    rootIds: null,
+  }, owner);
+
+  const managerSession = await service.createSession({ username: manager.name, password: managerPassword });
+  const managerPrincipal = await service.authenticateRequest(bearer(managerSession.adminToken));
+  const limitedAdminSession = await service.createSession({ username: limitedAdmin.name, password: limitedAdminPassword });
+  const limitedAdminPrincipal = await service.authenticateRequest(bearer(limitedAdminSession.adminToken));
+  const viewerSession = await service.createSession({ username: viewer.name, password: viewerPassword });
+
+  await assert.rejects(
+    () => service.changePassword({ userId: broadAdmin.id, newPassword: 'stolen-admin-password-1' }, managerPrincipal),
+    (error) => error.status === 403 && error.code === 'permission_denied',
+  );
+  await assert.rejects(
+    () => service.changePassword({ userId: broadAdmin.id, newPassword: 'stolen-peer-password-1' }, limitedAdminPrincipal),
+    (error) => error.status === 403 && error.code === 'permission_denied',
+  );
+  await assert.rejects(
+    () => service.changePassword({ userId: owner.id, newPassword: 'stolen-owner-password-1' }, managerPrincipal),
+    (error) => error.status === 403 && error.code === 'permission_denied',
+  );
+
+  await assert.rejects(
+    () => service.changePassword({ newPassword: 'manager-password-2' }, managerPrincipal),
+    (error) => error.status === 400 && /current password is required/i.test(error.message),
+  );
+  await assert.rejects(
+    () => service.changePassword({ currentPassword: 'incorrect-password', newPassword: 'manager-password-2' }, managerPrincipal),
+    (error) => error.status === 401 && /current password is incorrect/i.test(error.message),
+  );
+  const changedSelf = await service.changePassword({
+    currentPassword: managerPassword,
+    newPassword: 'manager-password-2',
+  }, managerPrincipal);
+  assert.equal(await service.authenticateRequest(bearer(managerSession.adminToken)), null, 'self-change revokes the old session');
+  assert.equal((await service.authenticateRequest(bearer(changedSelf.adminToken))).id, manager.id, 'self-change issues one replacement session');
+
+  assert.deepEqual(await service.changePassword({ userId: viewer.id, newPassword: 'viewer-password-2' }, owner), { changed: true });
+  assert.equal(await service.authenticateRequest(bearer(viewerSession.adminToken)), null, 'an owner reset revokes target sessions');
+  const viewerAfterReset = await service.createSession({ username: viewer.name, password: 'viewer-password-2' });
+  assert.equal((await service.authenticateRequest(bearer(viewerAfterReset.adminToken))).id, viewer.id);
+
+  const state = JSON.parse(await fs.readFile(path.join(dataDir, headlessAdminStateFilename), 'utf8'));
+  const policyLogs = state.logs.filter((entry) => entry.message === 'Credential-reset policy evaluated.');
+  assert.ok(policyLogs.some((entry) => entry.details?.actorId === manager.id
+    && entry.details?.targetId === broadAdmin.id
+    && entry.details?.policyResult === 'denied'));
+  assert.ok(policyLogs.some((entry) => entry.details?.actorId === owner.id
+    && entry.details?.targetId === viewer.id
+    && entry.details?.policyResult === 'allowed'));
+  const serializedLogs = JSON.stringify(state.logs);
+  for (const password of [managerPassword, limitedAdminPassword, broadAdminPassword, viewerPassword, 'viewer-password-2']) {
+    assert.equal(serializedLogs.includes(password), false, 'security logs must not record credentials');
+  }
+});
+
 test('library roots resolve to absolute paths and unauthenticated principals cannot manage them', async () => {
   const { service, principal } = await onboardedService();
   const mediaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-media-'));

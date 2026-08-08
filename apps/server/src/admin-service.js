@@ -13,6 +13,7 @@ import {
   AUTH_PERMISSIONS,
   USER_ROLES,
   canAccessRoot,
+  canResetCredentials,
   hasPermission,
   isOwnerPrincipal,
   MAX_DEVICE_IDS,
@@ -1022,12 +1023,15 @@ export function createHeadlessAdminService(options) {
         : state.users.find((entry) => entry.id === targetId);
       if (!target) throw Object.assign(new Error('Account was not found.'), { status: 404 });
       const changingAnother = targetId !== principal.id;
-      if (changingAnother && !hasPermission(principal, 'users.manage')) throw permissionDenied('Only an account administrator can reset another password.');
       const targetIsOwner = state.owner?.id === targetId;
-      if (changingAnother && targetIsOwner && !isOwnerPrincipal(principal)) {
-        throw permissionDenied('Only the owner can reset the owner password.');
-      }
-      if (changingAnother && !targetIsOwner && !isOwnerPrincipal(principal)) ensureUserScope(principal, target);
+      const targetPrincipal = targetIsOwner ? publicOwnerPrincipal(target) : publicUserPrincipal(target);
+      const policyAllowed = canResetCredentials(principal, targetPrincipal);
+      await appendLog(policyAllowed ? 'info' : 'warn', 'Credential-reset policy evaluated.', {
+        actorId: principal.id,
+        targetId,
+        policyResult: policyAllowed ? 'allowed' : 'denied',
+      });
+      if (!policyAllowed) throw permissionDenied('This account cannot reset credentials for the selected account.');
       if (!changingAnother && typeof input.currentPassword !== 'string') throw Object.assign(new Error('The current password is required.'), { status: 400 });
       if (!changingAnother && !(await verifyPassword(input.currentPassword, target.salt, target.hash))) {
         throw Object.assign(new Error('The current password is incorrect.'), { status: 401 });
@@ -1041,7 +1045,11 @@ export function createHeadlessAdminService(options) {
       Object.assign(target, await hashPassword(input.newPassword), { updatedAt: Date.now() });
       state.sessions = state.sessions.filter((session) => session.userId !== targetId);
       await saveState(state);
-      await appendLog('info', `Password changed for ${target.name}.`, { userId: targetId });
+      await appendLog('info', `Password changed for ${target.name}.`, {
+        actorId: principal.id,
+        targetId,
+        policyResult: 'allowed',
+      });
       if (targetId === principal.id) return issueToken(state, target === state.owner ? publicOwnerPrincipal(state.owner) : publicUserPrincipal(target));
       return { changed: true };
     },

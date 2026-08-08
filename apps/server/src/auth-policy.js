@@ -55,6 +55,34 @@ export function isOwnerPrincipal(principal) {
   return principal?.type === 'owner' || principal?.role === 'owner';
 }
 
+const ROLE_RANK = Object.freeze({
+  viewer: 0,
+  user: 1,
+  admin: 2,
+  owner: 3,
+});
+
+/**
+ * Decide whether one account may replace another account's credentials.
+ * Password verification for self-service changes remains the caller's
+ * responsibility; this function only compares authorization scope.
+ */
+export function canResetCredentials(actor, target) {
+  if (!actor?.id || !target?.id) return false;
+  if (isOwnerPrincipal(actor)) return true;
+  if (actor.id === target.id) return true;
+  if (isOwnerPrincipal(target) || !hasPermission(actor, 'users.manage')) return false;
+
+  const actorRank = ROLE_RANK[actor.role] ?? -1;
+  const targetRank = ROLE_RANK[target.role] ?? -1;
+  if (targetRank > actorRank) return false;
+  if ((target.permissions || []).some((permission) => !hasPermission(actor, permission))) return false;
+
+  if (actor.rootIds === null) return true;
+  if (target.rootIds === null || !Array.isArray(actor.rootIds) || !Array.isArray(target.rootIds)) return false;
+  return target.rootIds.every((rootId) => actor.rootIds.includes(rootId));
+}
+
 export function normalizeRootIds(value) {
   if (value === null || value === undefined) return null;
   if (!Array.isArray(value)) return [];
