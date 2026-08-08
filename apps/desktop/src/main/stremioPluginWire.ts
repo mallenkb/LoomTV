@@ -12,6 +12,7 @@ import type {
   StremioPluginCastMember,
   StremioPluginIpcError,
   StremioPluginArtworkReferences,
+  StremioPluginConfigurationState,
   StremioPluginMetaResult,
   StremioPluginReview,
   StremioPluginSummary,
@@ -102,7 +103,16 @@ function uniqueWarnings(record: StremioInstallRecord, reviewWarnings: readonly s
   ])];
 }
 
-export function stremioPluginSummary(record: StremioInstallRecord): StremioPluginSummary {
+export function stremioPluginSummary(record: StremioInstallRecord, configurationState?: StremioPluginConfigurationState): StremioPluginSummary {
+  const configurationRequired = record.manifest.behaviorHints.configurationRequired
+    || record.manifest.config?.some((field) => field.required) === true;
+  const configuration = (record.manifest.config || []).map((field) => ({
+    key: field.key,
+    type: field.type,
+    required: field.required,
+    ...(field.title ? { title: field.title } : {}),
+    ...(field.options ? { options: [...field.options] } : {}),
+  }));
   return {
     addonId: record.addonId,
     name: record.manifest.name,
@@ -112,8 +122,10 @@ export function stremioPluginSummary(record: StremioInstallRecord): StremioPlugi
     manifestUrlRedacted: record.manifestUrlRedacted,
     state: record.state,
     trusted: record.trusted,
-    configurationRequired: record.manifest.behaviorHints.configurationRequired
-      || record.manifest.config?.some((field) => field.required) === true,
+    configurationRequired,
+    configuration,
+    configured: configurationState?.configured ?? !configurationRequired,
+    configurationRevision: configurationState?.revision ?? 0,
     resources: record.manifest.resources.map(({ name }) => name),
     types: [...record.manifest.types],
     catalogs: record.manifest.catalogs.map((catalog) => ({
@@ -130,12 +142,15 @@ export function stremioPluginSummary(record: StremioInstallRecord): StremioPlugi
     warnings: uniqueWarnings(record),
     reviewedAt: record.reviewedAt,
     ...(record.approvedAt === undefined ? {} : { approvedAt: record.approvedAt }),
+    failureCount: record.failureCount || 0,
+    ...(record.lastFailureAt === undefined ? {} : { lastFailureAt: record.lastFailureAt }),
+    ...(record.nextRetryAt === undefined ? {} : { nextRetryAt: record.nextRetryAt }),
   };
 }
 
-export function stremioPluginReview(review: StremioManifestReview): StremioPluginReview {
+export function stremioPluginReview(review: StremioManifestReview, configurationState?: StremioPluginConfigurationState): StremioPluginReview {
   return {
-    ...stremioPluginSummary(review),
+    ...stremioPluginSummary(review, configurationState),
     warnings: uniqueWarnings(review, review.reviewWarnings),
     reviewToken: review.reviewToken,
     approvalRequired: true,

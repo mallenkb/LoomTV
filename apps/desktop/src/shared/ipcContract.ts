@@ -45,6 +45,8 @@ import type {
   StoredProgress,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
+  StremioPluginConfigurationState,
+  StremioPluginAuditEntry,
   StremioPluginIpcResult,
   StremioPluginMetaRequest,
   StremioPluginMetaResult,
@@ -158,6 +160,10 @@ export interface IpcContract {
   'plugins:stremio:set-profile-access': { args: [profileId: string, addonId: string, enabled: boolean]; result: StremioPluginIpcResult<boolean> };
   'plugins:stremio:catalog': { args: [addonId: string, request: StremioPluginCatalogRequest]; result: StremioPluginIpcResult<StremioPluginCatalogResult> };
   'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
+  'plugins:stremio:meta-item': { args: [request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
+  'plugins:stremio:configuration': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginConfigurationState> };
+  'plugins:stremio:save-configuration': { args: [addonId: string, values: Record<string, unknown>]; result: StremioPluginIpcResult<StremioPluginConfigurationState> };
+  'plugins:stremio:audit': { args: [addonId: string, limit?: number]; result: StremioPluginIpcResult<readonly StremioPluginAuditEntry[]> };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };

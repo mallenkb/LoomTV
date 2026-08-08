@@ -442,7 +442,6 @@ function AppShell() {
             <Route path="/others" element={<Others />} />
             <Route path="/tv" element={<TVShows kind="series" />} />
             <Route path="/anime" element={<TVShows kind="anime" />} />
-            <Route path="/discover/:addonId/:type/:itemId" element={<PluginDiscover />} />
             <Route path="/discover" element={<PluginDiscover />} />
             <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
             <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />

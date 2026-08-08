@@ -37,6 +37,10 @@ test('database migrations create the complete schema and remain idempotent', () 
       'device_profile_selection_revisions',
       'stremio_addons',
       'profile_stremio_access',
+      'plugin_secret_revisions',
+      'plugin_secret_store_keys',
+      'plugin_secrets',
+      'stremio_plugin_audit',
     ]) {
       assert.equal(tables.has(table), true, `Expected ${table} to exist.`);
     }
@@ -53,6 +57,7 @@ test('database migrations create the complete schema and remain idempotent', () 
     assert.equal(columns(database, 'media_items').includes('content_ratings_json'), true);
     assert.equal(columns(database, 'device_profile_selections').includes('automatic_sign_in'), true);
     assert.equal(columns(database, 'device_profile_selections').includes('selection_revision'), true);
+    assert.equal(columns(database, 'artwork_cache').includes('content_hash'), true);
   } finally {
     database.close();
   }
@@ -185,7 +190,7 @@ test('the profiles migration backfills legacy viewer state onto the Owner exactl
     assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n, 2);
 
     const ledger = database.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
-    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   } finally {
     database.close();
   }
@@ -197,7 +202,7 @@ test('mandatory LAN profile migration clears network selections and advances the
   try {
     migrateDatabase(database);
     const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string };
-    database.prepare('DELETE FROM schema_migrations WHERE version = 9').run();
+    database.prepare('DELETE FROM schema_migrations WHERE version = 10').run();
     database.prepare(`
       INSERT INTO device_profile_selection_revisions (device_id, revision)
       VALUES ('desktop-primary', 3), ('paired-phone', 7)

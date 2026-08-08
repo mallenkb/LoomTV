@@ -11,7 +11,9 @@ export const PROFILE_GLYPH_AVATAR_MIGRATION_VERSION = 5;
 export const PROFILE_AUTOMATIC_SIGN_IN_MIGRATION_VERSION = 6;
 export const OUTRO_SEGMENT_MIGRATION_VERSION = 7;
 export const STREMIO_PLUGIN_STATE_MIGRATION_VERSION = 8;
-export const LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION = 9;
+/** v9 is the transactional host secret/audit store migration. */
+export const PLUGIN_SECRET_STORE_MIGRATION_VERSION = 9;
+export const LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION = 10;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -268,6 +270,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   ensureColumn(database, 'scan_cache', 'subtitle_profile', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'media_segment_candidates', 'analysis_metadata_json', 'TEXT');
   migrateArtworkCacheColumns(database);
+  ensureColumn(database, 'artwork_cache', 'content_hash', "TEXT NOT NULL DEFAULT ''");
   migrateLibraryFoldersKind(database);
   migrateMediaSegmentsPrimaryKey(database);
   makeProviderSegmentsDurable(database);
@@ -279,7 +282,62 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateProfileAutomaticSignIn(database);
   migrateOutroSegments(database);
   migrateStremioPluginState(database);
+  migratePluginSecretStore(database);
   migrateLanProfileSelections(database);
+}
+
+function migratePluginSecretStore(database: BetterSqlite3.Database): void {
+  const requiredTables = ['plugin_secret_revisions', 'plugin_secret_store_keys', 'plugin_secrets', 'stremio_plugin_audit'];
+  const existingTables = new Set((database.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('plugin_secret_revisions', 'plugin_secret_store_keys', 'plugin_secrets', 'stremio_plugin_audit')",
+  ).all() as Array<{ name: string }>).map(({ name }) => name));
+  if (requiredTables.every((table) => existingTables.has(table))) {
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(PLUGIN_SECRET_STORE_MIGRATION_VERSION, Date.now());
+    return;
+  }
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS plugin_secret_revisions (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        revision INTEGER NOT NULL CHECK (revision >= 0)
+      );
+      INSERT OR IGNORE INTO plugin_secret_revisions (id, revision) VALUES (1, 0);
+
+      CREATE TABLE IF NOT EXISTS plugin_secret_store_keys (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        ciphertext TEXT NOT NULL CHECK (length(ciphertext) <= 4096),
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS plugin_secrets (
+        ref TEXT PRIMARY KEY CHECK (length(ref) BETWEEN 24 AND 160),
+        addon_id TEXT NOT NULL REFERENCES stremio_addons(addon_id) ON DELETE CASCADE,
+        field_key TEXT NOT NULL CHECK (length(field_key) BETWEEN 1 AND 128),
+        ciphertext TEXT NOT NULL CHECK (length(ciphertext) <= 1048576),
+        revision INTEGER NOT NULL CHECK (revision >= 0),
+        integrity_mac TEXT NOT NULL CHECK (length(integrity_mac) = 64),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (addon_id, field_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_plugin_secrets_addon ON plugin_secrets(addon_id);
+
+      CREATE TABLE IF NOT EXISTS stremio_plugin_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        addon_id TEXT NOT NULL,
+        event_type TEXT NOT NULL CHECK (length(event_type) BETWEEN 1 AND 64),
+        detail_json TEXT NOT NULL CHECK (length(detail_json) <= 16384),
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_stremio_plugin_audit_addon
+        ON stremio_plugin_audit(addon_id, id DESC);
+    `);
+    database.prepare('INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(PLUGIN_SECRET_STORE_MIGRATION_VERSION, Date.now());
+  })();
 }
 
 /**
@@ -315,7 +373,7 @@ function migrateStremioPluginState(database: BetterSqlite3.Database): void {
       CREATE TABLE IF NOT EXISTS stremio_addons (
         addon_id TEXT PRIMARY KEY CHECK (length(addon_id) BETWEEN 1 AND 240),
         record_json TEXT NOT NULL CHECK (length(record_json) <= 1048576),
-        state TEXT NOT NULL CHECK (state IN ('pending-review', 'enabled', 'disabled')),
+        state TEXT NOT NULL CHECK (state IN ('pending-review', 'enabled', 'disabled', 'broken')),
         updated_at INTEGER NOT NULL
       );
 

@@ -129,6 +129,14 @@ const desktopApi = {
     ipcRenderer.invoke('plugins:stremio:catalog', addonId, request),
   getStremioMeta: (addonId: string, request: StremioPluginMetaRequest) =>
     ipcRenderer.invoke('plugins:stremio:meta', addonId, request),
+  getStremioMetaByItem: (request: StremioPluginMetaRequest) =>
+    ipcRenderer.invoke('plugins:stremio:meta-item', request),
+  getStremioAddonConfiguration: (addonId: string) =>
+    ipcRenderer.invoke('plugins:stremio:configuration', addonId),
+  saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) =>
+    ipcRenderer.invoke('plugins:stremio:save-configuration', addonId, values),
+  listStremioPluginAudit: (addonId: string, limit?: number) =>
+    ipcRenderer.invoke('plugins:stremio:audit', addonId, limit),
   saveSettings: (settings: {
     omdbApiKey?: string;
     tmdbApiKey?: string;

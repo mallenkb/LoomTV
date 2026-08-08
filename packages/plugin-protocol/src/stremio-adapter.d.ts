@@ -1,7 +1,7 @@
 export const STREMIO_ADAPTER_PROTOCOL_VERSION: 1;
 export const STREMIO_INSTALL_STATE_VERSION: 1;
 export const STREMIO_RESOURCES: readonly ['catalog', 'meta', 'stream', 'subtitles'];
-export const STREMIO_INSTALL_STATES: readonly ['pending-review', 'enabled', 'disabled'];
+export const STREMIO_INSTALL_STATES: readonly ['pending-review', 'enabled', 'disabled', 'broken'];
 export const STREMIO_DEFAULT_LIMITS: Readonly<StremioAdapterLimits>;
 export const STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON: string;
 
@@ -97,6 +97,9 @@ export interface StremioInstallRecord {
   reviewedAt: number;
   approvedAt?: number;
   disabledAt?: number;
+  failureCount: number;
+  lastFailureAt?: number;
+  nextRetryAt?: number;
 }
 
 export interface StremioManifestReview extends StremioInstallRecord {
@@ -132,6 +135,9 @@ export interface StremioPersistedInstallRecord {
   reviewedAt: number;
   approvedAt?: number;
   disabledAt?: number;
+  failureCount?: number;
+  lastFailureAt?: number;
+  nextRetryAt?: number;
 }
 
 export interface StremioAddonStateSnapshot {
@@ -222,6 +228,11 @@ export interface LoomStremioMetaCandidate {
 export interface StremioCatalogRequest {
   type: string;
   catalogId: string;
+  filters?: {
+    query?: string;
+    genre?: string;
+    year?: string;
+  };
   extra?: Readonly<Record<string, StremioExtraValue>>;
 }
 
@@ -287,6 +298,8 @@ export type StremioFetchImplementation = (url: string, init?: unknown) => Promis
 export interface StremioAddonRegistryOptions extends Partial<StremioAdapterLimits> {
   fetchImpl?: StremioFetchImplementation;
   requestGuard?: (url: string) => void | Promise<void>;
+  isAddonConfigured?: (record: StremioInstallRecord) => boolean;
+  getConfiguration?: (addonId: string) => Readonly<Record<string, StremioExtraValue>>;
   now?: () => number;
 }
 
@@ -318,16 +331,18 @@ export class StremioAddonRegistry {
   reviewManifestUrl(manifestUrl: string): Promise<StremioManifestReview>;
   approve(addonId: string, approval: StremioAddonApproval): StremioInstallRecord;
   disable(addonId: string): StremioInstallRecord;
+  recordFailure(addonId: string, options?: { retryable?: boolean }): StremioInstallRecord | undefined;
+  recordSuccess(addonId: string): StremioInstallRecord | undefined;
   remove(addonId: string): boolean;
   get(addonId: string): StremioInstallRecord | undefined;
   list(): readonly StremioInstallRecord[];
   toJSON(): StremioAddonStateSnapshot;
   loadPersistedState(snapshot: unknown): readonly StremioInstallRecord[];
   requireEnabledRecord(addonId: string): StremioInstallRecord;
-  fetchCatalog(addonId: string, request: StremioCatalogRequest): Promise<StremioCatalogResult>;
-  fetchMeta(addonId: string, request: StremioMetaRequest): Promise<StremioMetaResult>;
-  fetchStreams(addonId: string, request: StremioVideoRequest): Promise<StremioStreamResult>;
-  fetchSubtitles(addonId: string, request: StremioVideoRequest): Promise<StremioSubtitleResult>;
+  fetchCatalog(addonId: string, request: StremioCatalogRequest, signal?: unknown): Promise<StremioCatalogResult>;
+  fetchMeta(addonId: string, request: StremioMetaRequest, signal?: unknown): Promise<StremioMetaResult>;
+  fetchStreams(addonId: string, request: StremioVideoRequest, signal?: unknown): Promise<StremioStreamResult>;
+  fetchSubtitles(addonId: string, request: StremioVideoRequest, signal?: unknown): Promise<StremioSubtitleResult>;
 }
 
 export function createStremioAddonRegistry(options?: StremioAddonRegistryOptions): StremioAddonRegistry;

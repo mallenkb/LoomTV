@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, PackagePlus, Plug, ShieldCheck, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, KeyRound, PackagePlus, Plug, ShieldCheck, Trash2 } from 'lucide-react';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,7 @@ import {
   type ProfileSummary,
   type StremioPluginReview,
   type StremioPluginSummary,
+  type StremioPluginAuditEntry,
 } from '@/lib/desktopApi';
 
 function errorMessage(error: unknown): string {
@@ -18,6 +19,7 @@ function errorMessage(error: unknown): string {
 function stateLabel(plugin: StremioPluginSummary): string {
   if (plugin.state === 'enabled' && plugin.trusted) return 'Enabled';
   if (plugin.state === 'pending-review') return 'Review required';
+  if (plugin.state === 'broken') return 'Needs review';
   return 'Disabled';
 }
 
@@ -32,6 +34,8 @@ export default function PluginsSettingsSection() {
   const [reviewConfirmed, setReviewConfirmed] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>('load');
   const [error, setError] = useState<string | null>(null);
+  const [configurationValues, setConfigurationValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [auditByAddon, setAuditByAddon] = useState<Record<string, readonly StremioPluginAuditEntry[]>>({});
 
   const refresh = useCallback(async () => {
     const [nextInstalled, nextOfficial, nextProfiles] = await Promise.all([
@@ -43,10 +47,14 @@ export default function PluginsSettingsSection() {
     const accessEntries = await Promise.all(grantableProfiles.map(async (profile) => (
       [profile.id, await desktopApi.listStremioProfileAccess(profile.id)] as const
     )));
+    const auditEntries = await Promise.all(nextInstalled.map(async (plugin) => {
+      try { return [plugin.addonId, await desktopApi.listStremioPluginAudit(plugin.addonId, 8)] as const; } catch { return [plugin.addonId, []] as const; }
+    }));
     setInstalled(nextInstalled);
     setOfficial(nextOfficial);
     setProfiles(grantableProfiles);
     setProfileAccess(Object.fromEntries(accessEntries));
+    setAuditByAddon(Object.fromEntries(auditEntries));
   }, []);
 
   useEffect(() => {
@@ -145,6 +153,32 @@ export default function PluginsSettingsSection() {
     } finally {
       setBusyKey(null);
     }
+  };
+
+  const saveConfiguration = async (plugin: StremioPluginSummary) => {
+    const key = `config:${plugin.addonId}`;
+    setBusyKey(key);
+    setError(null);
+    try {
+      await desktopApi.saveStremioAddonConfiguration(plugin.addonId, configurationValues[plugin.addonId] || {});
+      setConfigurationValues((current) => {
+        const next = { ...current };
+        delete next[plugin.addonId];
+        return next;
+      });
+      await refresh();
+    } catch (configurationError) {
+      setError(errorMessage(configurationError));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const setConfigurationValue = (pluginId: string, fieldKey: string, value: unknown) => {
+    setConfigurationValues((current) => ({
+      ...current,
+      [pluginId]: { ...(current[pluginId] || {}), [fieldKey]: value },
+    }));
   };
 
   return (
@@ -301,7 +335,85 @@ export default function PluginsSettingsSection() {
                 <p className="mt-1 text-sm text-[var(--loom-muted)]">{plugin.description}</p>
                 <p className="mt-2 break-all text-xs text-[var(--loom-faint)]">{plugin.manifestUrlRedacted}</p>
                 {plugin.state !== 'enabled' && (
-                  <p className="mt-2 text-xs text-yellow-200">Review this provider again before enabling it.</p>
+                  <p className="mt-2 text-xs text-yellow-200">{plugin.state === 'broken' ? 'Provider health failed repeatedly. Review the manifest again before enabling it.' : 'Review this provider again before enabling it.'}</p>
+                )}
+                {plugin.failureCount > 0 && (
+                  <p className="mt-2 text-xs text-[var(--loom-faint)]">
+                    {plugin.failureCount} recent provider failure{plugin.failureCount === 1 ? '' : 's'}
+                    {plugin.nextRetryAt ? ` · backoff until ${new Date(plugin.nextRetryAt).toLocaleTimeString()}` : ''}
+                  </p>
+                )}
+                {(plugin.configuration.length > 0 || plugin.configurationRequired) && (
+                  <div className="mt-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-3">
+                    <p className="flex items-center gap-2 text-xs font-medium text-[var(--loom-text)]"><KeyRound className="h-3.5 w-3.5" /> Host configuration</p>
+                    <p className="mt-1 text-xs leading-5 text-[var(--loom-faint)]">Values are stored by the desktop host and are never returned to the renderer after saving.</p>
+                    {plugin.configuration.length > 0 ? (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {plugin.configuration.map((field) => {
+                          const value = configurationValues[plugin.addonId]?.[field.key];
+                          const label = field.title || field.key;
+                          if (field.type === 'checkbox' || field.type === 'boolean') {
+                            return (
+                              <label key={field.key} className="flex min-h-9 items-center gap-2 text-xs text-[var(--loom-muted)]">
+                                <input
+                                  type="checkbox"
+                                  checked={value === true}
+                                  onChange={(event) => setConfigurationValue(plugin.addonId, field.key, event.target.checked)}
+                                  className="h-4 w-4 accent-[var(--loom-accent)]"
+                                />
+                                {label}{field.required ? ' *' : ''}
+                              </label>
+                            );
+                          }
+                          if (field.type === 'select' && field.options?.length) {
+                            return (
+                              <label key={field.key} className="grid gap-1 text-xs text-[var(--loom-muted)]">
+                                <span>{label}{field.required ? ' *' : ''}</span>
+                                <select
+                                  value={typeof value === 'string' ? value : ''}
+                                  onChange={(event) => setConfigurationValue(plugin.addonId, field.key, event.target.value)}
+                                  className="h-9 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-2 text-sm text-white"
+                                >
+                                  <option value="">Select…</option>
+                                  {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                                </select>
+                              </label>
+                            );
+                          }
+                          return (
+                            <label key={field.key} className="grid gap-1 text-xs text-[var(--loom-muted)]">
+                              <span>{label}{field.required ? ' *' : ''}</span>
+                              <input
+                                type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+                                value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
+                                onChange={(event) => setConfigurationValue(plugin.addonId, field.key, field.type === 'number' ? event.target.value : event.target.value)}
+                                className="h-9 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-2 text-sm text-white outline-none focus:border-[var(--loom-accent)]"
+                              />
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : <p className="mt-2 text-xs text-yellow-200">This provider requires configuration but did not declare host-renderable fields.</p>}
+                    <div className="mt-3 flex items-center gap-2">
+                      <Button size="sm" variant="outline" disabled={busyKey !== null || plugin.state === 'disabled'} onClick={() => void saveConfiguration(plugin)}>
+                        {busyKey === `config:${plugin.addonId}` ? 'Saving…' : plugin.configured ? 'Update configuration' : 'Save configuration'}
+                      </Button>
+                      {plugin.configured && <span className="text-xs text-emerald-300">Configured</span>}
+                    </div>
+                  </div>
+                )}
+                {(auditByAddon[plugin.addonId]?.length || 0) > 0 && (
+                  <details className="mt-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-3">
+                    <summary className="cursor-pointer text-xs font-medium text-[var(--loom-text)]">Host history</summary>
+                    <ul className="mt-2 space-y-1 text-xs text-[var(--loom-faint)]">
+                      {auditByAddon[plugin.addonId].map((entry) => (
+                        <li key={entry.id} className="flex flex-wrap justify-between gap-2">
+                          <span>{entry.eventType}</span>
+                          <time dateTime={new Date(entry.createdAt).toISOString()}>{new Date(entry.createdAt).toLocaleString()}</time>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
                 {plugin.state === 'enabled' && profiles.length > 0 && (
                   <fieldset className="mt-3">

@@ -4,9 +4,9 @@ const STREMIO_STATE_VERSION = 1;
 const MAX_STREMIO_ADDONS = 64;
 const MAX_STORED_RECORD_BYTES = 1024 * 1024;
 const MAX_ADDON_ID_LENGTH = 240;
-const INSTALL_STATES = new Set(['pending-review', 'enabled', 'disabled']);
+const INSTALL_STATES = new Set(['pending-review', 'enabled', 'disabled', 'broken']);
 
-export type PersistedStremioInstallState = 'pending-review' | 'enabled' | 'disabled';
+export type PersistedStremioInstallState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
 
 export type PersistedStremioAddonRecord = {
   addonId: string;
@@ -116,7 +116,8 @@ export function loadStremioAddonState(database: BetterSqlite3.Database): Persist
       throw new StremioPluginStorageError('A persisted Stremio add-on record contains invalid JSON.', { cause: error });
     }
     const record = validateRecord(parsed);
-    if (record.addonId !== row.addon_id || record.state !== row.state) {
+    const legacyBrokenState = record.state === 'broken' && row.state === 'disabled';
+    if (record.addonId !== row.addon_id || (!legacyBrokenState && record.state !== row.state)) {
       throw new StremioPluginStorageError('A persisted Stremio add-on record does not match its storage identity.');
     }
     return record;
@@ -129,7 +130,9 @@ export function saveStremioAddonState(database: BetterSqlite3.Database, value: u
   const snapshot = validateSnapshot(value);
   const stored = snapshot.addons.map((record) => ({
     addonId: record.addonId,
-    state: record.state,
+    // v8 databases used a CHECK constraint without `broken`. The record JSON
+    // remains authoritative while the legacy index column uses disabled.
+    state: record.state === 'broken' ? 'disabled' : record.state,
     record,
     recordJson: serializedRecord(record),
   }));
