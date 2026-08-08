@@ -2,6 +2,8 @@ import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { windowChromeOptions } from './windowChrome';
+import { pathToFileURL } from 'node:url';
+import { isExpectedAppUrl } from './trustedIpcSender';
 
 const MAIN_WINDOW_DEV_SERVER_URL =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
@@ -9,6 +11,20 @@ const MAIN_WINDOW_NAME =
   typeof MAIN_WINDOW_VITE_NAME === 'string' && MAIN_WINDOW_VITE_NAME ? MAIN_WINDOW_VITE_NAME : 'main_window';
 
 let mainWindow: BrowserWindow | null = null;
+export type MainWindowIpcIdentity = Readonly<{
+  webContentsId: number;
+  expectedAppUrl: string;
+}>;
+let mainWindowIpcIdentity: MainWindowIpcIdentity | null = null;
+
+function packagedRendererFilePath(): string {
+  return path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`);
+}
+
+function expectedRendererAppUrl(): string {
+  if (MAIN_WINDOW_DEV_SERVER_URL) return new URL(MAIN_WINDOW_DEV_SERVER_URL).origin;
+  return pathToFileURL(path.resolve(packagedRendererFilePath())).toString();
+}
 
 function presentMainWindow(window: BrowserWindow): void {
   if (process.platform === 'darwin') {
@@ -24,6 +40,10 @@ function presentMainWindow(window: BrowserWindow): void {
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
+}
+
+export function getMainWindowIpcIdentity(): MainWindowIpcIdentity | null {
+  return mainWindowIpcIdentity;
 }
 
 export function getWindowIconPath(): string | null {
@@ -89,6 +109,11 @@ export function createWindow(): void {
   }
 
   mainWindow = new BrowserWindow(windowOptions);
+  const expectedAppUrl = expectedRendererAppUrl();
+  mainWindowIpcIdentity = Object.freeze({
+    webContentsId: mainWindow.webContents.id,
+    expectedAppUrl,
+  });
 
   // `ready-to-show` is not guaranteed for every transparent/accelerated
   // renderer startup (especially after a Vite reload). Keep it as the fast
@@ -101,11 +126,12 @@ export function createWindow(): void {
   };
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
-    const expectedUrl = MAIN_WINDOW_DEV_SERVER_URL
-      || new URL(`file://${path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`)}`).toString();
-    if (targetUrl !== expectedUrl) event.preventDefault();
-  });
+  const rejectUnexpectedNavigation = (details: { preventDefault: () => void; url: string; isMainFrame: boolean }): void => {
+    if (!details.isMainFrame || !isExpectedAppUrl(details.url, expectedAppUrl)) details.preventDefault();
+  };
+  mainWindow.webContents.on('will-navigate', rejectUnexpectedNavigation);
+  mainWindow.webContents.on('will-redirect', rejectUnexpectedNavigation);
+  mainWindow.webContents.on('will-frame-navigate', rejectUnexpectedNavigation);
 
   mainWindow.on('ready-to-show', () => {
     revealWindow();
@@ -121,7 +147,7 @@ export function createWindow(): void {
     }
     mainWindow.loadURL(rendererUrl.toString());
   } else {
-    mainWindow.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`));
+    mainWindow.loadFile(packagedRendererFilePath());
   }
 
   mainWindow.webContents.on('did-finish-load', () => {
@@ -133,5 +159,10 @@ export function createWindow(): void {
     );
   });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  const createdWindow = mainWindow;
+  mainWindow.on('closed', () => {
+    if (mainWindow !== createdWindow) return;
+    mainWindow = null;
+    mainWindowIpcIdentity = null;
+  });
 }

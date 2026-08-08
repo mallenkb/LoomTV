@@ -14,6 +14,8 @@ import {
   saveSettings,
 } from '../src/main/databasePlaybackRepository.ts';
 import {
+  clearAllGuestProfiles,
+  clearDeviceProfileSelection,
   createProfile,
   createGuestProfile,
   deleteProfile,
@@ -172,6 +174,51 @@ test('profiles keep viewer state isolated and cascade on delete', () => {
     assert.equal(getDeviceProfileSelection(database, 'tablet-1'), null);
     assert.equal(getDeviceSelectionRevision(database, 'tablet-1'), revisionBeforeDelete + 1);
     assert.equal(getAllProgress(database, owner.id)['/library/movie.mkv'].position, 30);
+  } finally {
+    database.close();
+  }
+});
+
+test('Guest cleanup removes profiles and advances each device revision exactly once', () => {
+  const database = createDatabase();
+  try {
+    const owner = getOwnerProfile(database);
+    assert.ok(owner);
+    selectDeviceProfile(database, 'desktop-primary', owner.id);
+    const desktopRevision = getDeviceSelectionRevision(database, 'desktop-primary');
+
+    const singleGuest = createGuestProfile(database, 'tablet-guest');
+    const singleRevision = getDeviceSelectionRevision(database, 'tablet-guest');
+
+    clearDeviceProfileSelection(database, 'tablet-guest');
+    assert.equal(getDeviceProfileSelection(database, 'tablet-guest'), null);
+    assert.equal(database.prepare('SELECT id FROM profiles WHERE id = ?').get(singleGuest.id), undefined);
+    assert.equal(getDeviceSelectionRevision(database, 'tablet-guest'), singleRevision + 1);
+
+    // A repeated clear is a no-op and cannot invalidate the same selection twice.
+    clearDeviceProfileSelection(database, 'tablet-guest');
+    assert.equal(getDeviceSelectionRevision(database, 'tablet-guest'), singleRevision + 1);
+
+    createGuestProfile(database, 'phone-guest');
+    createGuestProfile(database, 'laptop-guest');
+    const revisionsBeforeAll = new Map([
+      ['phone-guest', getDeviceSelectionRevision(database, 'phone-guest')],
+      ['laptop-guest', getDeviceSelectionRevision(database, 'laptop-guest')],
+    ]);
+
+    clearAllGuestProfiles(database);
+    assert.equal((database.prepare('SELECT COUNT(*) AS n FROM profiles WHERE is_guest = 1').get() as { n: number }).n, 0);
+    for (const [deviceId, revision] of revisionsBeforeAll) {
+      assert.equal(getDeviceProfileSelection(database, deviceId), null);
+      assert.equal(getDeviceSelectionRevision(database, deviceId), revision + 1, deviceId);
+    }
+    assert.equal(getDeviceProfileSelection(database, 'desktop-primary'), owner.id);
+    assert.equal(getDeviceSelectionRevision(database, 'desktop-primary'), desktopRevision);
+
+    clearAllGuestProfiles(database);
+    for (const [deviceId, revision] of revisionsBeforeAll) {
+      assert.equal(getDeviceSelectionRevision(database, deviceId), revision + 1, deviceId);
+    }
   } finally {
     database.close();
   }
