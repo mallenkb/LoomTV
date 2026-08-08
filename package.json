@@ -16,6 +16,7 @@
     "mobile:verify-release-config": "node scripts/verify-mobile-release-config.cjs",
     "release:verify-identity": "node scripts/verify-release-identity.cjs",
     "release:evidence": "node scripts/release-evidence.cjs",
+    "test:release-safety": "node --test scripts/release-identity.test.cjs scripts/release-evidence.test.cjs scripts/verify-workflow-policy.test.cjs",
     "verify:workflow-policy": "node scripts/verify-workflow-policy.cjs",
     "test:workflow-policy": "node --test scripts/verify-workflow-policy.test.cjs",
     "verify:test-workspaces": "node scripts/verify-test-workspaces.cjs",
@@ -37,7 +38,7 @@
     "mobile:web": "pnpm --filter @loom-media-server/mobile web",
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs && pnpm run container:verify && pnpm run container:policy:test",
+    "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs && pnpm run container:verify && pnpm run container:policy:test && pnpm run test:release-safety",
     "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
   },
   "devDependencies": {

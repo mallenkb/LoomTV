@@ -1,7 +1,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const RELEASE_TAG_PATTERN = /^v([0-9]+\.[0-9]+\.[0-9]+(?:[+-][0-9A-Za-z.-]+)?)$/;
+// Releases intentionally use stable SemVer tags only.  There is one updater
+// channel today, so prerelease/build tags must not enter the production feed.
+const RELEASE_TAG_PATTERN = /^v([0-9]+\.[0-9]+\.[0-9]+)$/;
 const UPDATE_CONFIG = [
   'provider: github',
   'owner: mallenkb',
@@ -16,7 +18,7 @@ function parseReleaseTag(releaseTag) {
   }
   const match = releaseTag.match(RELEASE_TAG_PATTERN);
   if (!match) {
-    throw new Error(`Release tag must match vMAJOR.MINOR.PATCH[-prerelease][+build]: ${releaseTag}`);
+    throw new Error(`Release tag must match stable vMAJOR.MINOR.PATCH (prerelease tags are forbidden): ${releaseTag}`);
   }
   return { tag: releaseTag, version: match[1] };
 }

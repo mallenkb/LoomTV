@@ -8,6 +8,7 @@ const workspaceRoot = path.resolve(__dirname, '..');
 const workflowsDirectory = path.join(workspaceRoot, '.github', 'workflows');
 const WRITE_PERMISSION = /^(?:write|write-all)$/i;
 const SHA_PIN = /^[0-9a-f]{40}$/i;
+const ATTEST_ACTION = 'actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6';
 const UNTRUSTED_TRIGGERS = new Set([
   'issue_comment',
   'pull_request',
@@ -111,6 +112,94 @@ function actionPinViolations(workflow, fileName) {
   return violations;
 }
 
+function releaseWorkflowViolations(workflow, source, fileName = 'release.yml') {
+  const violations = [];
+  const triggers = workflow?.on && typeof workflow.on === 'object' ? workflow.on : {};
+  const pushTags = triggers.push?.tags;
+  if (!Array.isArray(pushTags) || !pushTags.includes('v*')) {
+    violations.push(`${fileName}: release workflow must trigger on push tags: v*.`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(triggers, 'workflow_dispatch')) {
+    violations.push(`${fileName}: release workflow must support workflow_dispatch for a selected tag ref.`);
+  }
+  if (triggers.workflow_dispatch?.inputs?.release_tag || /\binputs\.release_tag\b/.test(source)) {
+    violations.push(`${fileName}: workflow_dispatch must derive the tag from github.ref_name; free-form release_tag input is prohibited.`);
+  }
+  if (!source.includes('github.ref_name')
+    || !source.includes('github.ref_type')
+    || !source.includes('refs/tags/$RELEASE_TAG')) {
+    violations.push(`${fileName}: manual release runs must validate github.ref_name, github.ref_type, and the actual refs/tags ref.`);
+  }
+  if (!source.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+$') || !source.includes('prerelease tags are forbidden')) {
+    violations.push(`${fileName}: release tags must be stable vMAJOR.MINOR.PATCH values.`);
+  }
+  if (/--publish(?:=|\s+)always\b/i.test(source)) {
+    violations.push(`${fileName}: direct electron-builder publishing is prohibited.`);
+  }
+  if (source.includes('release-provenance')) {
+    violations.push(`${fileName}: self-authored release provenance is prohibited; use GitHub/SLSA attestations.`);
+  }
+
+  const makeJob = workflow.jobs?.make;
+  const makePermissions = makeJob?.permissions || {};
+  if (makeJob?.environment !== 'production-release') {
+    violations.push(`${fileName}: jobs.make must use the production-release environment.`);
+  }
+  for (const [scope, expected] of Object.entries({
+    contents: 'read',
+    'id-token': 'write',
+    attestations: 'write',
+    'artifact-metadata': 'write',
+  })) {
+    if (makePermissions[scope] !== expected) {
+      violations.push(`${fileName}: jobs.make.permissions.${scope} must be ${expected}.`);
+    }
+  }
+  const matrix = makeJob?.strategy?.matrix?.include;
+  const actualMatrix = Array.isArray(matrix)
+    ? matrix.map((row) => `${row.platform}|${row.os}|${row.artifact}`).sort()
+    : [];
+  const expectedMatrix = [
+    'Linux|ubuntu-latest|loomtv-linux',
+    'Windows|windows-latest|loomtv-windows',
+    'macOS|macos-26|loomtv-macos',
+  ].sort();
+  if (JSON.stringify(actualMatrix) !== JSON.stringify(expectedMatrix)) {
+    violations.push(`${fileName}: jobs.make matrix must exactly cover macOS, Windows, and Linux release builders.`);
+  }
+  if (!jobSteps(makeJob).some((step) => step?.uses === ATTEST_ACTION)) {
+    violations.push(`${fileName}: jobs.make must use the full-SHA-pinned actions/attest action.`);
+  }
+
+  const publishJob = workflow.jobs?.['publish-release'];
+  if (publishJob?.environment !== 'production-release') {
+    violations.push(`${fileName}: jobs.publish-release must use the production-release environment.`);
+  }
+  if (publishJob?.permissions?.contents !== 'write' || publishJob?.permissions?.attestations !== 'read') {
+    violations.push(`${fileName}: jobs.publish-release must limit write access to contents and read access to attestations.`);
+  }
+  for (const [jobName, job] of Object.entries(workflow.jobs || {})) {
+    if (jobName !== 'publish-release' && job?.permissions?.contents === 'write') {
+      violations.push(`${fileName}: only jobs.publish-release may receive contents: write.`);
+    }
+  }
+  if ((source.match(/git cat-file -t "refs\/tags\/\$RELEASE_TAG"/g) || []).length < 3
+    || (source.match(/refs\/tags\/\$RELEASE_TAG\^\{commit\}/g) || []).length < 3
+    || !source.includes('immediately before draft creation')
+    || !source.includes('immediately before publication')) {
+    violations.push(`${fileName}: tag type, tag object OID, and peeled commit must be revalidated immediately before draft creation and publication.`);
+  }
+  if (!source.includes('only a confirmed 404 permits replacement')
+    || !source.includes('Archive prior draft evidence before deletion')
+    || !source.includes('Upload prior draft evidence archive before deletion')) {
+    violations.push(`${fileName}: draft lookup errors and prior evidence archival must fail closed before deletion.`);
+  }
+  if (!source.includes('verify-release-attestations.cjs') || !source.includes('--draft=false')) {
+    violations.push(`${fileName}: every uploaded subject must be attested before the draft is published.`);
+  }
+  return violations;
+}
+
 function containsSecretsExpression(value) {
   if (typeof value === 'string') {
     return /\$\{\{[\s\S]*?\bsecrets\b[\s\S]*?\}\}/i.test(value);
@@ -130,6 +219,7 @@ function findPolicyViolations(fileName, source) {
   if (!workflow || typeof workflow !== 'object') return [`${fileName}: workflow must be a YAML object.`];
 
   const violations = actionPinViolations(workflow, fileName);
+  if (fileName === 'release.yml') violations.push(...releaseWorkflowViolations(workflow, source, fileName));
   if (workflow.permissions === undefined) {
     violations.push(`${fileName}: workflow must declare explicit permissions.`);
   }
@@ -188,13 +278,24 @@ function findPolicyViolations(fileName, source) {
 }
 
 function desktopPackagingViolations(packageDocument, fileName = 'apps/desktop/package.json') {
-  const distScript = packageDocument?.scripts?.dist;
+  const scripts = packageDocument?.scripts || {};
+  const distScript = scripts.dist;
   if (typeof distScript !== 'string'
     || !/\belectron-builder\b/.test(distScript)
     || !/--publish(?:=|\s+)never\b/.test(distScript)) {
     return [`${fileName}: scripts.dist must invoke electron-builder with --publish=never.`];
   }
-  return [];
+  const violations = [];
+  for (const [scriptName, script] of Object.entries(scripts)) {
+    if (typeof script !== 'string') continue;
+    if (/\belectron-builder\b[^\n]*--publish(?:=|\s+)(?!never\b)/i.test(script)) {
+      violations.push(`${fileName}: scripts.${scriptName} must not invoke electron-builder with a publishing mode.`);
+    }
+    if (/^(?:publish|release|release:all-platforms)$/.test(scriptName)) {
+      violations.push(`${fileName}: scripts.${scriptName} is a direct release entrypoint and is prohibited.`);
+    }
+  }
+  return violations;
 }
 
 function verifyWorkflowDirectory(directory = workflowsDirectory) {
@@ -228,5 +329,6 @@ if (require.main === module) {
 module.exports = {
   desktopPackagingViolations,
   findPolicyViolations,
+  releaseWorkflowViolations,
   verifyWorkflowDirectory,
 };

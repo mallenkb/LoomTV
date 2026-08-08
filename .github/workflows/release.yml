@@ -4,18 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  # The manual-run UI must select an existing refs/tags/vMAJOR.MINOR.PATCH ref.
+  # There is deliberately no free-form tag input to trust.
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: Existing protected v* tag to build and publish
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.release_tag || github.ref_name }}
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -31,14 +28,21 @@ jobs:
       release_tag_oid: ${{ steps.release-target.outputs.release_tag_oid }}
 
     steps:
-      - name: Validate release tag input
+      - name: Derive and validate the actual release ref
         id: release-context
         env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_REF: ${{ github.ref }}
+          RELEASE_REF_NAME: ${{ github.ref_name }}
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
         shell: bash
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release ref must be an existing v* version tag." >&2
+          RELEASE_TAG="$RELEASE_REF_NAME"
+          if [[ "$RELEASE_REF_TYPE" != "tag" || "$RELEASE_REF" != "refs/tags/$RELEASE_TAG" ]]; then
+            echo "Release workflow must run from an actual refs/tags/vMAJOR.MINOR.PATCH ref." >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable vMAJOR.MINOR.PATCH release tags are required; prerelease tags are forbidden." >&2
             exit 1
           fi
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
@@ -86,6 +90,9 @@ jobs:
     environment: production-release
     permissions:
       contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -185,6 +192,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           MACOS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: corepack pnpm --filter loom-media-server-desktop run verify:mac-release
 
       - name: Verify final Windows signatures
@@ -205,6 +213,20 @@ jobs:
 
       - name: Verify packaged runtime dependencies
         run: corepack pnpm --filter loom-media-server-desktop run verify:runtime
+
+      - name: Generate GitHub/SLSA attestations for every final artifact
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            apps/desktop/out/builder/**/*.dmg
+            apps/desktop/out/builder/**/*.zip
+            apps/desktop/out/builder/**/*.exe
+            apps/desktop/out/builder/**/*.deb
+            apps/desktop/out/builder/**/*.rpm
+            apps/desktop/out/builder/**/*.AppImage
+            apps/desktop/out/builder/**/*.blockmap
+            apps/desktop/out/builder/**/*.yml
+            apps/desktop/out/builder/**/*.yaml
 
       - name: Upload installers
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -232,6 +254,7 @@ jobs:
     environment: production-release
     permissions:
       contents: write
+      attestations: read
 
     steps:
       - name: Check out verified release commit
@@ -263,7 +286,7 @@ jobs:
           name: loomtv-linux-${{ github.run_attempt }}
           path: release-assets
 
-      - name: Re-verify release tag still targets prepared commit
+      - name: Initial re-verification of release tag type, object, and peeled commit
         env:
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
@@ -292,7 +315,7 @@ jobs:
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: node scripts/verify-release-identity.cjs "$RELEASE_TAG"
 
-      - name: Prepare release checksums, manifest, and provenance
+      - name: Prepare release checksums and exact target manifest
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
@@ -306,37 +329,122 @@ jobs:
           RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
         run: node scripts/release-evidence.cjs --verify --assets release-assets --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --tag-oid "$RELEASE_TAG_OID"
 
-      - name: Recreate replacement draft release
+      - name: Inspect existing release state with explicit 404 handling
+        id: release-state
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         shell: bash
         run: |
-          version="${RELEASE_TAG#v}"
-          notes="docs/releases/v${version}.md"
-          if [[ ! -s "$notes" ]]; then
-            echo "Deterministic release notes are missing: $notes" >&2
-            exit 1
-          fi
-
-          existing_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
-          if [[ -n "$existing_draft" ]]; then
-            if [[ "$existing_draft" != "true" ]]; then
+          response_file="$(mktemp)"
+          error_file="$(mktemp)"
+          metadata_file="$RUNNER_TEMP/loomtv-prior-release.json"
+          if gh api --include "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" >"$response_file" 2>"$error_file"; then
+            status="$(awk '/^HTTP\/[0-9.]+ [0-9]+/{code=$2} END{print code}' "$response_file")"
+            if [[ "$status" == "404" ]]; then
+              echo 'existing_draft=false' >>"$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ "$status" != 2* ]]; then
+              echo "GitHub API returned an unexpected success status while looking up $RELEASE_TAG: ${status:-unknown}." >&2
+              cat "$error_file" >&2
+              exit 1
+            fi
+            body_line="$(grep -n -m1 -E '^\{' "$response_file" | cut -d: -f1)"
+            if [[ -z "$body_line" ]]; then
+              echo "GitHub API returned no release JSON for $RELEASE_TAG." >&2
+              exit 1
+            fi
+            tail -n "+$body_line" "$response_file" >"$metadata_file"
+            if ! jq -e '.draft | type == "boolean"' "$metadata_file" >/dev/null; then
+              echo "GitHub API release response for $RELEASE_TAG is missing a boolean draft state." >&2
+              exit 1
+            fi
+            if [[ "$(jq -r '.draft' "$metadata_file")" != "true" ]]; then
               echo "Refusing to replace already-published release $RELEASE_TAG." >&2
               exit 1
             fi
-            gh release delete "$RELEASE_TAG" --yes
+            echo 'existing_draft=true' >>"$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          status="$(awk '/^HTTP\/[0-9.]+ [0-9]+/{code=$2} END{print code}' "$response_file")"
+          if [[ "$status" == "404" ]]; then
+            echo 'existing_draft=false' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "GitHub API release lookup failed for $RELEASE_TAG (HTTP ${status:-unknown}); only a confirmed 404 permits replacement." >&2
+          cat "$error_file" >&2
+          exit 1
+
+      - name: Archive prior draft evidence before deletion
+        if: steps.release-state.outputs.existing_draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        shell: bash
+        run: |
+          archive_dir="$RUNNER_TEMP/loomtv-prior-draft-evidence-${GITHUB_RUN_ATTEMPT}"
+          archive_path="$RUNNER_TEMP/loomtv-prior-draft-evidence-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          rm -rf "$archive_dir"
+          mkdir -p "$archive_dir/assets"
+          cp "$RUNNER_TEMP/loomtv-prior-release.json" "$archive_dir/release.json"
+          asset_count="$(jq '.assets | length' "$archive_dir/release.json")"
+          if (( asset_count > 0 )); then
+            gh release download "$RELEASE_TAG" --dir "$archive_dir/assets" --pattern '*'
+          else
+            touch "$archive_dir/assets/NO_ASSETS_IN_PRIOR_DRAFT"
+          fi
+          tar -czf "$archive_path" -C "$archive_dir" .
+          test -s "$archive_path"
+
+      - name: Upload prior draft evidence archive before deletion
+        if: steps.release-state.outputs.existing_draft == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: loomtv-prior-draft-evidence-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/loomtv-prior-draft-evidence-${{ github.run_attempt }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Delete prior draft only after evidence archive succeeds
+        if: steps.release-state.outputs.existing_draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: gh release delete "$RELEASE_TAG" --yes
+
+      - name: Revalidate tag type, object, and peeled commit immediately before draft creation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
+        shell: bash
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          tag_type="$(git cat-file -t "refs/tags/$RELEASE_TAG")"
+          [[ "$tag_type" == "tag" ]] || { echo "Release tag $RELEASE_TAG is no longer annotated." >&2; exit 1; }
+          current_tag_oid="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          [[ "$current_tag_oid" == "$RELEASE_TAG_OID" ]] || { echo "Release tag object changed before draft creation: expected $RELEASE_TAG_OID, found $current_tag_oid." >&2; exit 1; }
+          current_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          [[ "$current_sha" == "$RELEASE_SHA" ]] || { echo "Release peeled commit changed before draft creation: expected $RELEASE_SHA, found $current_sha." >&2; exit 1; }
+          version="${RELEASE_TAG#v}"
+          notes="docs/releases/v${version}.md"
+          [[ -s "$notes" ]] || { echo "Deterministic release notes are missing: $notes" >&2; exit 1; }
           gh release create "$RELEASE_TAG" \
             --draft \
             --verify-tag \
             --title "LoomTV ${version}" \
             --notes-file "$notes"
 
-          mapfile -d '' assets < <(
-            find release-assets -type f -print0 | sort -z
-          )
+      - name: Upload replacement draft assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        shell: bash
+        run: |
+          mapfile -d '' assets < <(find release-assets -type f -print0 | sort -z)
           if (( ${#assets[@]} == 0 )); then
             echo 'No release evidence files were prepared.' >&2
             exit 1
@@ -365,8 +473,28 @@ jobs:
           gh release download "$RELEASE_TAG" --dir "$remote_dir" --pattern '*'
           node scripts/release-evidence.cjs --verify --assets "$remote_dir" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --tag-oid "$RELEASE_TAG_OID"
 
-      - name: Publish verified draft release
+      - name: Verify GitHub/SLSA subjects for every uploaded artifact
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --latest
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        run: node scripts/verify-release-attestations.cjs --assets release-assets --repository "$GITHUB_REPOSITORY" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA"
+
+      - name: Revalidate tag type, object, and peeled commit immediately before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
+        shell: bash
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          tag_type="$(git cat-file -t "refs/tags/$RELEASE_TAG")"
+          [[ "$tag_type" == "tag" ]] || { echo "Release tag $RELEASE_TAG is no longer annotated." >&2; exit 1; }
+          current_tag_oid="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          [[ "$current_tag_oid" == "$RELEASE_TAG_OID" ]] || { echo "Release tag object changed before publication: expected $RELEASE_TAG_OID, found $current_tag_oid." >&2; exit 1; }
+          current_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          [[ "$current_sha" == "$RELEASE_SHA" ]] || { echo "Release peeled commit changed before publication: expected $RELEASE_SHA, found $current_sha." >&2; exit 1; }
+          draft_state="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft')"
+          [[ "$draft_state" == "true" ]] || { echo "Release $RELEASE_TAG is not a draft at publication time." >&2; exit 1; }
+          gh release edit "$RELEASE_TAG" --draft=false --latest
