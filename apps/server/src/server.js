@@ -7,13 +7,15 @@ import { createAdminApiHandler, createAdminPage } from './admin-page.js';
 import { createHeadlessAdminService } from './admin-service.js';
 import { createHeadlessClientState } from './client-state.js';
 import { createHeadlessMediaService } from './media-service.js';
-import { createPublicApiHandler } from './public-api.js';
+import { createPublicApiHandler, publicHealthSummary } from './public-api.js';
 import { createHeadlessTranscoder } from './transcoder.js';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import { createWebAppPage } from './web-app.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
 const CONTRACT_VERSION = 1;
+const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+const DEFAULT_TERM_GRACE_MS = 2_000;
 
 function jsonResponse(res, status, payload, method = 'GET') {
   const body = JSON.stringify(payload);
@@ -72,6 +74,7 @@ export function createHeadlessServer(options) {
   const startedAtMs = Date.now();
   let server;
   let stopPromise;
+  let draining = false;
   const transcoder = createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath });
   let mediaService;
   const clientState = createHeadlessClientState({ dataDir: options.paths.dataDir });
@@ -80,9 +83,10 @@ export function createHeadlessServer(options) {
     const address = formatAddress(server, options.host);
     const port = address.port || options.port;
     const transcoderHealth = transcoder.getHealth();
+    const admission = mediaService?.getAdmissionHealth?.();
     return {
       ok: true,
-      status: 'ready',
+      status: draining ? 'draining' : 'ready',
       service: SERVICE_NAME,
       contractVersion: CONTRACT_VERSION,
       mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
@@ -119,7 +123,7 @@ export function createHeadlessServer(options) {
         transcoding: transcoderHealth.available,
         hardwareAcceleration: transcoderHealth.hardwareAcceleration,
       },
-      transcoder: transcoderHealth,
+      transcoder: { ...transcoderHealth, ...(admission ? { admission } : {}) },
     };
   };
 
@@ -132,12 +136,21 @@ export function createHeadlessServer(options) {
     getSessions: () => mediaService?.listSessions() || [],
     getClientState: () => clientState.exportState(),
     replaceClientState: (snapshot) => clientState.importState(snapshot),
+    onPlaybackSessionsRevoked: (principalId, reason) => mediaService?.revokePrincipal?.(principalId, reason),
+    onPlaybackSessionsRevokedForItem: (itemId, reason) => mediaService?.revokeItem?.(itemId, reason),
+    onAllPlaybackSessionsRevoked: (reason) => mediaService?.revokeAllPlaybackSessions?.(reason),
   });
   mediaService = createHeadlessMediaService({
     adminService,
     transcoder,
     cacheDir: options.paths.cacheDir,
     authorize: adminService.authorizeRequest,
+    clock: options.clock,
+    playbackSessionRegistry: options.playbackSessionRegistry,
+    playbackSessionOptions: options.playbackSessionOptions,
+    transcodeAdmission: options.transcodeAdmission,
+    transcodeAdmissionOptions: options.transcodeAdmissionOptions,
+    spawnProcess: options.spawnProcess,
   });
   const adminPage = createAdminPage({ htmlPath: options.adminHtmlPath });
   const adminApi = createAdminApiHandler({
@@ -158,9 +171,46 @@ export function createHeadlessServer(options) {
     proxyPolicy,
   });
 
+  const sockets = new Set();
+  const shutdownTimeoutMs = Number.isFinite(options.shutdownTimeoutMs)
+    ? Math.max(100, Math.min(60_000, Math.trunc(options.shutdownTimeoutMs)))
+    : DEFAULT_SHUTDOWN_TIMEOUT_MS;
+  const termGraceMs = Number.isFinite(options.termGraceMs)
+    ? Math.max(0, Math.min(30_000, Math.trunc(options.termGraceMs)))
+    : DEFAULT_TERM_GRACE_MS;
+  let closeListenerPromise;
+
+  function delay(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, Math.max(0, milliseconds)));
+  }
+
+  function closeListener() {
+    if (closeListenerPromise) return closeListenerPromise;
+    if (!server.listening) {
+      closeListenerPromise = Promise.resolve();
+      return closeListenerPromise;
+    }
+    closeListenerPromise = new Promise((resolve) => {
+      try {
+        server.close((error) => {
+          if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') console.error('[loomtv-server] listener close failed:', error);
+          resolve();
+        });
+      } catch (error) {
+        if (error?.code !== 'ERR_SERVER_NOT_RUNNING') console.error('[loomtv-server] listener close failed:', error);
+        resolve();
+      }
+    });
+    return closeListenerPromise;
+  }
+
   server = http.createServer(async (req, res) => {
     try {
       applySecurityHeaders(res);
+      if (draining) {
+        jsonResponse(res, 503, { ok: false, error: 'server_draining' }, req.method);
+        return;
+      }
       const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
       if (await webApp(req, res)) return;
       if (await adminPage(req, res)) return;
@@ -173,10 +223,26 @@ export function createHeadlessServer(options) {
         || requestUrl.pathname === '/api/health'
         || requestUrl.pathname === '/api/ping';
       if (isHealth && (req.method === 'GET' || req.method === 'HEAD')) {
-        jsonResponse(res, 200, await healthPayload(), req.method);
+        const health = await healthPayload();
+        jsonResponse(res, 200, {
+          ok: true,
+          service: SERVICE_NAME,
+          contractVersion: CONTRACT_VERSION,
+          mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
+          ...publicHealthSummary(health),
+        }, req.method);
         return;
       }
       if (requestUrl.pathname === '/api/transcoder/capabilities' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const principal = await adminService.authenticateRequest(req);
+        if (!principal) {
+          jsonResponse(res, 401, { ok: false, error: 'admin_auth_required' }, req.method);
+          return;
+        }
+        if (!await adminService.authorizePrincipal(principal, 'admin.read')) {
+          jsonResponse(res, 403, { ok: false, error: 'permission_denied' }, req.method);
+          return;
+        }
         jsonResponse(res, 200, { ok: true, data: transcoder.getHealth() }, req.method);
         return;
       }
@@ -209,12 +275,18 @@ export function createHeadlessServer(options) {
       else res.destroy();
     }
   });
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    if (draining) socket.end();
+  });
 
   return {
     address() {
       return formatAddress(server, options.host);
     },
     async start() {
+      if (draining) throw Object.assign(new Error('The server is shutting down.'), { code: 'server_draining' });
       if (server.listening) return this.address();
       await new Promise((resolve, reject) => {
         const onError = (error) => {
@@ -233,19 +305,26 @@ export function createHeadlessServer(options) {
     },
     async stop() {
       if (stopPromise) return stopPromise;
-      stopPromise = new Promise((resolve, reject) => {
-        if (!server.listening) {
-          resolve();
-          return;
-        }
-        // Stop accepting new work and release keep-alive sockets while the
-        // close callback waits for any request already in flight.
+      draining = true;
+      stopPromise = (async () => {
+        // Mark the service draining before closing the listener so requests
+        // already queued by a keep-alive connection cannot start new work.
         server.closeIdleConnections?.();
-        server.close((error) => {
-          if (error) { reject(error); return; }
-          void mediaService.stop().finally(resolve);
-        });
-      });
+        const listenerClosed = closeListener();
+        const servicesStopped = Promise.allSettled([
+          adminService.stop?.(),
+          mediaService.stop({ termGraceMs }),
+        ]);
+        await Promise.race([
+          Promise.all([listenerClosed, servicesStopped]),
+          delay(shutdownTimeoutMs),
+        ]);
+        if (sockets.size) {
+          for (const socket of sockets) socket.destroy();
+          server.closeAllConnections?.();
+        }
+        await Promise.race([listenerClosed, delay(250)]);
+      })();
       return stopPromise;
     },
   };
