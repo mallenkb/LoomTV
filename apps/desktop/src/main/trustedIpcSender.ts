@@ -15,6 +15,8 @@ export interface IpcSenderIdentity {
   mainWindowDestroyed: boolean;
 }
 
+const TRUSTED_APPLICATION_PROTOCOLS = new Set(['file:', 'http:', 'https:']);
+
 /**
  * Whether an IPC invocation came from the application's own main window frame.
  *
@@ -42,8 +44,11 @@ export function isTrustedIpcSender(identity: IpcSenderIdentity): boolean {
   try {
     const senderUrl = new URL(senderFrameUrl);
     const applicationUrl = new URL(mainWindowUrl);
+    if (!TRUSTED_APPLICATION_PROTOCOLS.has(applicationUrl.protocol)
+      || !TRUSTED_APPLICATION_PROTOCOLS.has(senderUrl.protocol)
+      || senderUrl.protocol !== applicationUrl.protocol) return false;
     if (applicationUrl.protocol === 'file:') {
-      return senderUrl.protocol === 'file:' && senderUrl.pathname === applicationUrl.pathname;
+      return senderUrl.hostname === applicationUrl.hostname && senderUrl.pathname === applicationUrl.pathname;
     }
     return senderUrl.origin === applicationUrl.origin;
   } catch {

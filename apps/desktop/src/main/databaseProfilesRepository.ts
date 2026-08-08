@@ -272,12 +272,26 @@ export function createGuestProfile(database: BetterSqlite3.Database, deviceId: s
 }
 
 export function clearAllGuestProfiles(database: BetterSqlite3.Database): void {
-  database.prepare('DELETE FROM profiles WHERE is_guest = 1').run();
+  database.transaction(() => {
+    const affectedDevices = database.prepare(`
+      SELECT selections.device_id
+      FROM device_profile_selections AS selections
+      JOIN profiles ON profiles.id = selections.profile_id
+      WHERE profiles.is_guest = 1
+    `).all() as Array<{ device_id: string }>;
+    const advanceRevision = database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision) VALUES (?, 1)
+      ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
+    `);
+    affectedDevices.forEach(({ device_id: deviceId }) => advanceRevision.run(deviceId));
+    database.prepare('DELETE FROM profiles WHERE is_guest = 1').run();
+  })();
 }
 
 export function clearDeviceProfileSelection(database: BetterSqlite3.Database, deviceId: string): void {
-  const selection = getDeviceProfileSelectionState(database, deviceId);
-  if (selection) {
+  database.transaction(() => {
+    const selection = getDeviceProfileSelectionState(database, deviceId);
+    if (!selection) return;
     const profile = getProfile(database, selection.profileId);
     database.prepare('DELETE FROM device_profile_selections WHERE device_id = ?').run(deviceId);
     database.prepare(`
@@ -285,7 +299,7 @@ export function clearDeviceProfileSelection(database: BetterSqlite3.Database, de
       ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
     `).run(deviceId);
     if (profile?.isGuest) database.prepare('DELETE FROM profiles WHERE id = ?').run(profile.id);
-  }
+  })();
 }
 
 export function setDeviceAutomaticSignIn(database: BetterSqlite3.Database, deviceId: string, enabled: boolean): DeviceProfileSelection {
