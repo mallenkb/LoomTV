@@ -84,3 +84,4 @@ export function loadPluginManifest(
 ): LoomPluginManifest;
 
 export * from './stremio-adapter';
+export * from './downstream';
