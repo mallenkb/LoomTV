@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLocation } from 'react-router';
 import { Film } from 'lucide-react';
-import { useLibrary } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
@@ -20,12 +20,21 @@ export default function Movies() {
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
+  const [libraryActionError, setLibraryActionError] = useState('');
   const progress = useProgressSnapshot();
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const normalizedQuery = searchQuery(query);
   const filteredMovies = useMemo(() => movies
     .filter((item) => matchesMediaItem(item, normalizedQuery))
     .filter((item) => matchesLibraryFilter(item, activeFilter, progress, listState)), [activeFilter, listState, movies, normalizedQuery, progress]);
+  const handleAddFolder = async () => {
+    setLibraryActionError('');
+    try {
+      await addLibraryFolder('movies');
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+    }
+  };
 
   return (
     <LibraryPageLayout
@@ -56,7 +65,7 @@ export default function Movies() {
           />
         )}
         {movies.length === 0 && !isLoading && (
-          <EmptyMoviesState isScanning={isScanning} onAddFolder={() => addLibraryFolder('movies')} />
+          <EmptyMoviesState error={libraryActionError} isScanning={isScanning} onAddFolder={handleAddFolder} />
         )}
         {movies.length > 0 && filteredMovies.length === 0 && !isLoading && (
           <div className="py-12 text-center text-[var(--loom-muted)]">
@@ -68,9 +77,11 @@ export default function Movies() {
 }
 
 function EmptyMoviesState({
+  error,
   isScanning,
   onAddFolder,
 }: {
+  error?: string;
   isScanning: boolean;
   onAddFolder: () => Promise<void>;
 }) {
@@ -84,6 +95,7 @@ function EmptyMoviesState({
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
           Choose a folder containing your films. LoomTV will scan it and build your movie library.
         </p>
+        {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <Button onClick={onAddFolder} disabled={isScanning} className="mt-8 h-12 gap-2 px-5">
           <Film className="h-4 w-4" />
           Add Movies Folder

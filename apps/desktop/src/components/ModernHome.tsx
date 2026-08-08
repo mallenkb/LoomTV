@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Check, FolderPlus, Play, Plus, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { type MediaItem, type TVShow, useLibrary } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, type MediaItem, type TVShow, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import MediaPosterCard from '@/components/MediaPosterCard';
@@ -31,6 +31,7 @@ export default function ModernHome() {
   const [activeFilter, setActiveFilter] = useState<LibraryFilter>('all');
   const [activeHeroIndex, setActiveHeroIndex] = useState(0);
   const [heroHovered, setHeroHovered] = useState(false);
+  const [libraryActionError, setLibraryActionError] = useState('');
   const prefersReducedMotion = useReducedMotion();
   const searchControlRef = useRef<HTMLDivElement | null>(null);
   const searchOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -98,6 +99,14 @@ export default function ModernHome() {
   const heroItems = usesContinueWatchingHero ? continueWatching.slice(0, 1) : featuredHeroItems;
   const hero = heroItems[activeHeroIndex] || heroItems[0];
   const myListIds = listState.myListIds;
+  const handleAddFolder = async () => {
+    setLibraryActionError('');
+    try {
+      await addLibraryFolder('anime');
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+    }
+  };
 
   useEffect(() => {
     if (activeHeroIndex < heroItems.length) return;
@@ -254,7 +263,8 @@ export default function ModernHome() {
             <div className="mx-auto grid h-20 w-20 place-items-center rounded-3xl border border-[var(--loom-border)] bg-[var(--loom-surface)]"><FolderPlus className="h-9 w-9 text-[var(--loom-accent)]" /></div>
             <h1 className="mt-6 text-3xl font-bold">Build your cinematic library</h1>
             <p className="mt-3 text-sm leading-6 text-[var(--loom-muted)]">Add anime, TV shows, or movies and LoomTV will turn your collection into a Modern home.</p>
-            <Button disabled={isScanning} onClick={() => void addLibraryFolder('anime')} className="mt-7 gap-2 rounded-full px-6"><FolderPlus className="h-4 w-4" /> Add a folder</Button>
+            {libraryActionError ? <p role="alert" className="mt-4 text-sm text-red-200">{libraryActionError}</p> : null}
+            <Button disabled={isScanning} onClick={() => void handleAddFolder()} className="mt-7 gap-2 rounded-full px-6"><FolderPlus className="h-4 w-4" /> Add a folder</Button>
           </div>
         </div>
       ) : null}

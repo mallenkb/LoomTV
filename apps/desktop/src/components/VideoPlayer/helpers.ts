@@ -42,6 +42,12 @@ export function formatTime(secs: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+export function seekAccessibilityText(position: number, duration: number): string {
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const safePosition = Math.max(0, Math.min(position, safeDuration || Math.max(0, position)));
+  return `Elapsed ${formatTime(safePosition)}; remaining -${formatTime(Math.max(0, safeDuration - safePosition))}; total ${formatTime(safeDuration)}`;
+}
+
 export function probeDurationSeconds(value: unknown): number {
   const duration = (value as ProbeData | undefined)?.durationSeconds;
   return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : 0;

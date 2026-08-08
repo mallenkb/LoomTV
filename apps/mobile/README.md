@@ -1,12 +1,12 @@
 # LoomTV Mobile
 
-LoomTV Mobile is the Expo React Native companion for browsing and playing a paired Loom Media Player desktop library from an iPhone, iPad, Android phone, or Android tablet.
+LoomTV Mobile is the Expo React Native companion for browsing and playing a paired LoomTV desktop library from an iPhone, iPad, Android phone, or Android tablet.
 
-The supported target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in Loom Media Player desktop settings. Internet remote streaming is not supported and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
+The supported target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in LoomTV desktop settings. Internet remote streaming is not supported and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
 
 ## Supported Capabilities
 
-- Pair with a Loom Media Player desktop host using a desktop base URL and 6-digit pairing code.
+- Pair with a LoomTV desktop host using a desktop base URL and 6-digit pairing code.
 - Browse Home, Movies, TV Shows, Anime, Settings, detail pages, and episode lists.
 - Load the paired desktop library over the local network.
 - Play direct mobile-compatible streams with `expo-video`.
@@ -93,7 +93,7 @@ Before submission, complete every platform and scenario in [`RELEASE_CHECKLIST.m
 
 ## Pairing Flow
 
-1. Start Loom Media Player desktop.
+1. Start LoomTV desktop.
 2. Enable local network sharing in desktop Settings.
 3. Open LoomTV Mobile on a device connected to the same network.
 4. Tap **Connect** beside the discovered desktop.

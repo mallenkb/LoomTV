@@ -88,17 +88,57 @@ export type LibraryMutationOperation =
   | 'full-rescan'
   | 'add-folder'
   | 'remove-folder'
+  | 'rename-folder'
   | 'clear-data'
   | 'auto-sync';
 
+export type LibraryMutationKind = 'catalog' | 'scan' | 'folder' | 'data' | 'settings';
+export type LibraryMutationCode =
+  | 'LIBRARY_REFRESH_FAILED'
+  | 'LIBRARY_SCAN_FAILED'
+  | 'LIBRARY_METADATA_REFRESH_FAILED'
+  | 'LIBRARY_FULL_RESCAN_FAILED'
+  | 'LIBRARY_FOLDER_ADD_FAILED'
+  | 'LIBRARY_FOLDER_REMOVE_FAILED'
+  | 'LIBRARY_FOLDER_RENAME_FAILED'
+  | 'LIBRARY_DATA_CLEAR_FAILED'
+  | 'LIBRARY_AUTOSYNC_UPDATE_FAILED';
+
+interface LibraryMutationMetadata {
+  code: LibraryMutationCode;
+  kind: LibraryMutationKind;
+  retryable: boolean;
+  message: string;
+}
+
+const LIBRARY_MUTATION_METADATA: Record<LibraryMutationOperation, LibraryMutationMetadata> = {
+  refresh: { code: 'LIBRARY_REFRESH_FAILED', kind: 'catalog', retryable: true, message: 'The library could not be refreshed.' },
+  scan: { code: 'LIBRARY_SCAN_FAILED', kind: 'scan', retryable: true, message: 'The library scan could not be completed.' },
+  'metadata-refresh': { code: 'LIBRARY_METADATA_REFRESH_FAILED', kind: 'scan', retryable: true, message: 'The metadata refresh could not be completed.' },
+  'full-rescan': { code: 'LIBRARY_FULL_RESCAN_FAILED', kind: 'scan', retryable: true, message: 'The full library rescan could not be completed.' },
+  'add-folder': { code: 'LIBRARY_FOLDER_ADD_FAILED', kind: 'folder', retryable: true, message: 'The library folder could not be added.' },
+  'remove-folder': { code: 'LIBRARY_FOLDER_REMOVE_FAILED', kind: 'folder', retryable: true, message: 'The library folder could not be removed.' },
+  'rename-folder': { code: 'LIBRARY_FOLDER_RENAME_FAILED', kind: 'folder', retryable: true, message: 'The library folder name could not be saved.' },
+  'clear-data': { code: 'LIBRARY_DATA_CLEAR_FAILED', kind: 'data', retryable: false, message: 'The library data could not be cleared.' },
+  'auto-sync': { code: 'LIBRARY_AUTOSYNC_UPDATE_FAILED', kind: 'settings', retryable: true, message: 'The automatic sync setting could not be saved.' },
+};
+
 export class LibraryMutationError extends Error {
   readonly operation: LibraryMutationOperation;
+  readonly code: LibraryMutationCode;
+  readonly kind: LibraryMutationKind;
+  readonly retryable: boolean;
+  readonly sanitizedMessage: string;
   readonly cause?: unknown;
 
-  constructor(operation: LibraryMutationOperation, message: string, cause?: unknown) {
-    super(message);
+  constructor(operation: LibraryMutationOperation, metadata: LibraryMutationMetadata, cause?: unknown) {
+    super(metadata.message);
     this.name = 'LibraryMutationError';
     this.operation = operation;
+    this.code = metadata.code;
+    this.kind = metadata.kind;
+    this.retryable = metadata.retryable;
+    this.sanitizedMessage = metadata.message;
     this.cause = cause;
   }
 }
@@ -312,13 +352,15 @@ interface LibraryContextType {
   hydrateLibraryItem: (mediaId: string) => Promise<MediaItem | null>;
 }
 
-function toLibraryMutationError(operation: LibraryMutationOperation, error: unknown): LibraryMutationError {
+export function toLibraryMutationError(operation: LibraryMutationOperation, error: unknown): LibraryMutationError {
   if (error instanceof LibraryMutationError) return error;
-  return new LibraryMutationError(
-    operation,
-    error instanceof Error ? error.message : 'The library could not be updated.',
-    error,
-  );
+  return new LibraryMutationError(operation, LIBRARY_MUTATION_METADATA[operation], error);
+}
+
+export function libraryMutationMessage(error: unknown): string {
+  return error instanceof LibraryMutationError
+    ? error.sanitizedMessage
+    : 'The library could not be updated.';
 }
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
@@ -439,9 +481,12 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const detailScopeRef = useRef<string | null>(null);
   const detailGenerationRef = useRef(0);
   const legacyFallbackCountRef = useRef(0);
+  const libraryMutationGenerationRef = useRef(0);
+  const autoSyncHoursRef = useRef(state.autoSyncIntervalHours);
 
   stateRef.current = state;
   activeProfileIdRef.current = activeProfileId;
+  autoSyncHoursRef.current = state.autoSyncIntervalHours;
 
   const clearDetailStateIfScopeChanged = useCallback((catalogRevision: number | null) => {
     const nextScope = `${activeProfileId}:${catalogRevision ?? 'legacy'}`;
@@ -461,8 +506,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     libraryFolderStatuses?: LibraryFolderStatus[];
     catalogRevision?: number | null;
     catalogTransport?: 'compact' | 'legacy';
-  }) => {
+  }, mutationGeneration?: number) => {
     if (activeProfileIdRef.current !== activeProfileId) return false;
+    if (mutationGeneration !== undefined && mutationGeneration !== libraryMutationGenerationRef.current) return false;
     const nextCatalogRevision = data.catalogRevision === undefined
       ? stateRef.current.catalogRevision
       : data.catalogRevision;
@@ -489,26 +535,28 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return true;
   }, [activeProfileId, clearDetailStateIfScopeChanged]);
 
-  const applyCompactIndex = useCallback((index: LibraryIndexPayload) => {
+  const applyCompactIndex = useCallback((index: LibraryIndexPayload, mutationGeneration?: number) => {
     if (activeProfileIdRef.current !== activeProfileId) return null;
     const compact = libraryDataFromIndex(index);
-    return applyLibraryData(compact) ? compact : null;
+    return applyLibraryData(compact, mutationGeneration) ? compact : null;
   }, [activeProfileId, applyLibraryData]);
 
-  const loadPrimaryCatalog = useCallback(async () => {
+  const loadPrimaryCatalog = useCallback(async (mutationGeneration?: number) => {
     const requestProfileId = activeProfileId;
     const index = await desktopApi.getLibraryIndex();
     if (activeProfileIdRef.current !== requestProfileId) return null;
+    if (mutationGeneration !== undefined && mutationGeneration !== libraryMutationGenerationRef.current) return null;
     if (index?.catalogVersion === 1) {
-      return applyCompactIndex(index);
+      return applyCompactIndex(index, mutationGeneration);
     }
 
     legacyFallbackCountRef.current += 1;
     console.warn(`[catalog] Compact index unavailable; using legacy library payload (fallback ${legacyFallbackCountRef.current}).`);
     const legacy = await desktopApi.getLibrary();
     if (activeProfileIdRef.current !== requestProfileId) return null;
+    if (mutationGeneration !== undefined && mutationGeneration !== libraryMutationGenerationRef.current) return null;
     const fallback = { ...legacy, catalogRevision: null, catalogTransport: 'legacy' as const };
-    return applyLibraryData(fallback) ? fallback : null;
+    return applyLibraryData(fallback, mutationGeneration) ? fallback : null;
   }, [activeProfileId, applyCompactIndex, applyLibraryData]);
 
   const applyScanProgress = useCallback((progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
@@ -526,8 +574,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshLibrary = async () => {
+    const mutationGeneration = ++libraryMutationGenerationRef.current;
     try {
-      await loadPrimaryCatalog();
+      await loadPrimaryCatalog(mutationGeneration);
     } catch (error) {
       console.error('Failed to load library:', error);
       throw toLibraryMutationError('refresh', error);
@@ -591,13 +640,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const runLibraryScan = async (mode: 'quick' | 'metadata' | 'full') => {
     if (isScanningRef.current) return;
+    const mutationGeneration = ++libraryMutationGenerationRef.current;
     isScanningRef.current = true;
     dispatch({ type: 'SET_SCANNING', payload: true });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
       const index = await desktopApi.scanLibrary(mode);
-      if (index?.catalogVersion === 1) applyCompactIndex(index);
-      else await loadPrimaryCatalog();
+      if (index?.catalogVersion === 1) applyCompactIndex(index, mutationGeneration);
+      else await loadPrimaryCatalog(mutationGeneration);
     } catch (error) {
       console.error('Failed to scan library:', error);
       const operation = mode === 'quick' ? 'scan' : mode === 'metadata' ? 'metadata-refresh' : 'full-rescan';
@@ -614,9 +664,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const fullRescanLibrary = () => runLibraryScan('full');
 
   const addLibraryFolder = async (kind: LibraryFolderKind = 'movies') => {
+    const mutationGeneration = ++libraryMutationGenerationRef.current;
     try {
       const index = await desktopApi.addLibraryFolder(kind);
-      if (index?.catalogVersion === 1) applyCompactIndex(index);
+      if (index?.catalogVersion === 1) applyCompactIndex(index, mutationGeneration);
     } catch (error) {
       console.error('Failed to add library folder:', error);
       throw toLibraryMutationError('add-folder', error);
@@ -626,9 +677,10 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   };
 
   const removeLibraryFolder = async (folder: string) => {
+    const mutationGeneration = ++libraryMutationGenerationRef.current;
     try {
       const index = await desktopApi.removeLibraryFolder(folder);
-      applyCompactIndex(index);
+      applyCompactIndex(index, mutationGeneration);
     } catch (error) {
       console.error('Failed to remove library folder:', error);
       throw toLibraryMutationError('remove-folder', error);
@@ -636,13 +688,17 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   };
 
   const clearAppData = async () => {
+    const mutationGeneration = ++libraryMutationGenerationRef.current;
     dispatch({ type: 'SET_LOADING', payload: true });
     dispatch({ type: 'SET_SCANNING', payload: false });
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
       const index = await desktopApi.clearAppData();
-      applyCompactIndex(index);
-      dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: initialState.autoSyncIntervalHours });
+      applyCompactIndex(index, mutationGeneration);
+      if (mutationGeneration === libraryMutationGenerationRef.current) {
+        dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: initialState.autoSyncIntervalHours });
+        autoSyncHoursRef.current = initialState.autoSyncIntervalHours;
+      }
     } catch (error) {
       console.error('Failed to clear app data:', error);
       throw toLibraryMutationError('clear-data', error);
@@ -653,13 +709,18 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const setAutoSyncIntervalHours = async (hours: number) => {
     const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 12;
-    const previousHours = stateRef.current.autoSyncIntervalHours;
+    const mutationGeneration = ++libraryMutationGenerationRef.current;
+    const previousHours = autoSyncHoursRef.current;
+    autoSyncHoursRef.current = normalizedHours;
     dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: normalizedHours });
     try {
       await desktopApi.saveSettings({ autoSyncIntervalHours: normalizedHours });
     } catch (error) {
       console.error('Failed to save auto sync interval:', error);
-      dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: previousHours });
+      if (mutationGeneration === libraryMutationGenerationRef.current) {
+        autoSyncHoursRef.current = previousHours;
+        dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: previousHours });
+      }
       throw toLibraryMutationError('auto-sync', error);
     }
   };
@@ -682,11 +743,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_STARTUP_PREPARED', payload: false });
       let cached: Awaited<ReturnType<typeof loadPrimaryCatalog>> | null = null;
+      const startupMutationGeneration = libraryMutationGenerationRef.current;
       try {
-        cached = await loadPrimaryCatalog();
+        cached = await loadPrimaryCatalog(startupMutationGeneration);
         if (cancelled) return;
       } catch (error) {
-        console.error('Failed to load library:', error);
+        const mutationError = toLibraryMutationError('refresh', error);
+        console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
       }
 
       // The cached library is the small startup slice. It is sufficient to
@@ -722,11 +785,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           isScanningRef.current = true;
           dispatch({ type: 'SET_SCANNING', payload: true });
           dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
+          const mutationGeneration = ++libraryMutationGenerationRef.current;
           try {
             const index = await desktopApi.scanLibrary('quick');
-            if (!cancelled && index?.catalogVersion === 1) applyCompactIndex(index);
+            if (!cancelled && index?.catalogVersion === 1) applyCompactIndex(index, mutationGeneration);
           } catch (error) {
-            console.error('Failed to scan library:', error);
+            const mutationError = toLibraryMutationError('scan', error);
+            console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
           }
         }
       } finally {
@@ -752,11 +817,13 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         isScanningRef.current = true;
         dispatch({ type: 'SET_SCANNING', payload: true });
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
+        const mutationGeneration = ++libraryMutationGenerationRef.current;
         try {
           const index = await desktopApi.scanLibrary('quick');
-          if (index?.catalogVersion === 1) applyCompactIndex(index);
+          if (index?.catalogVersion === 1) applyCompactIndex(index, mutationGeneration);
         } catch (error) {
-          console.error('Failed to auto sync library:', error);
+          const mutationError = toLibraryMutationError('scan', error);
+          console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
         } finally {
           isScanningRef.current = false;
           dispatch({ type: 'SET_SCANNING', payload: false });
@@ -770,8 +837,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;
-    const refreshRemote = () => void loadPrimaryCatalog()
-      .catch((error) => console.warn('Shared library refresh failed:', error));
+    const refreshRemote = () => void loadPrimaryCatalog(libraryMutationGenerationRef.current)
+      .catch((error) => {
+        const mutationError = toLibraryMutationError('refresh', error);
+        console.warn(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
+      });
     const intervalId = window.setInterval(refreshRemote, 30_000);
     return () => window.clearInterval(intervalId);
   }, [activeProfile, loadPrimaryCatalog]);

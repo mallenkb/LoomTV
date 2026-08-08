@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Bookmark, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
-import { useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -71,6 +71,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const progressTick = useProgressRefreshRevision();
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
+  const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('episodes');
 
@@ -192,7 +193,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   // newly applied poster or cover appear immediately instead of only after
   // reopening the title.
   const handleArtworkSaved = useCallback(async () => {
-    await refreshLibrary();
+    setLibraryActionError('');
+    try {
+      await refreshLibrary();
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+      return;
+    }
     const routeState = (location.state || {}) as Record<string, unknown>;
     if (!routeState.artwork) return;
     const { artwork: _staleArtwork, ...rest } = routeState;
@@ -413,6 +420,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           />
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
+        {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
         {canManageProfiles && <ArtworkEditorControls
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}

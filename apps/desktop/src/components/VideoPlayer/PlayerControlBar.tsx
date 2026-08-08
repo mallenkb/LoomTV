@@ -14,7 +14,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatTime } from './helpers';
+import { formatTime, seekAccessibilityText } from './helpers';
 import type { ControlTab } from './types';
 
 const VOLUME_ACK_TIMEOUT_MS = 1_200;
@@ -210,7 +210,7 @@ export default function PlayerControlBar({
           aria-valuemin={0}
           aria-valuemax={duration || 0}
           aria-valuenow={Math.min(position, duration || 0)}
-          aria-valuetext={`${showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)} of ${formatTime(duration)}`}
+          aria-valuetext={seekAccessibilityText(position, duration)}
           aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End"
           onPointerDown={handleProgressPointerDown}
           onKeyDown={handleProgressKeyDown}

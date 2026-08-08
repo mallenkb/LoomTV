@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Check, Compass, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
-import { useLibrary } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, UpdateState } from '@/lib/desktopApi';
 import { cn } from '@/lib/utils';
@@ -350,6 +350,16 @@ export default function Sidebar() {
   const sourceRoute = (location.state as { from?: string } | null)?.from;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
+  const [libraryActionError, setLibraryActionError] = useState('');
+
+  const handleScanLibrary = async () => {
+    setLibraryActionError('');
+    try {
+      await scanLibrary();
+    } catch (error) {
+      setLibraryActionError(libraryMutationMessage(error));
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -540,6 +550,7 @@ export default function Sidebar() {
         </Link>
       </div>
       <nav className="flex-1 p-3 pt-0 flex flex-col">
+        {libraryActionError ? <span role="alert" className="sr-only">{libraryActionError}</span> : null}
         <SharedListHighlight activeId={activeNavItemId} className="loom-shared-highlight-sidebar relative">
           {navItems.map((item) => {
             const isActive = activeNavItemId === item.id;
@@ -617,7 +628,7 @@ export default function Sidebar() {
           <SidebarProfileSwitcher />
           <button
             type="button"
-            onClick={() => void scanLibrary()}
+            onClick={() => void handleScanLibrary()}
             disabled={state.isScanning}
             aria-label="Refresh library"
             title={scanButtonLabel}

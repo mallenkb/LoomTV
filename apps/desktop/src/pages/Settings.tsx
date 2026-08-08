@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { LibraryMutationError, useLibrary, type LibraryFolderKind } from '@/contexts/LibraryContext';
+import { LibraryMutationError, toLibraryMutationError, useLibrary, type LibraryFolderKind, type LibraryMutationOperation } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LibVlcAvailability, type LocalSegmentAnalysisStatus, type MpvAvailability, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useConfirm } from '@/components/ConfirmProvider';
@@ -59,7 +59,10 @@ type SavedPlaybackSettings = {
   skipForwardSeconds: number;
 };
 
-type LibraryAction = () => Promise<void>;
+type LibraryAction = {
+  operation: LibraryMutationOperation;
+  run: () => Promise<void>;
+};
 
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
   return [
@@ -181,7 +184,7 @@ export default function Settings() {
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
-  const [libraryActionError, setLibraryActionError] = useState<{ message: string; action: LibraryAction } | null>(null);
+  const [libraryActionError, setLibraryActionError] = useState<{ error: LibraryMutationError; action: LibraryAction } | null>(null);
   const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
   const [isTogglingNetworkSharing, setIsTogglingNetworkSharing] = useState(false);
@@ -207,6 +210,7 @@ export default function Settings() {
     [activeProfile?.type, isRemoteLibraryMode],
   );
   const peerScanInFlightRef = useRef(false);
+  const renameGenerationRef = useRef(new Map<string, number>());
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
   const { theme, setTheme } = useTheme();
   const openExternal = useCallback((url: string) => {
@@ -232,23 +236,24 @@ export default function Settings() {
   const runLibraryAction = useCallback(async (action: LibraryAction) => {
     setLibraryActionError(null);
     try {
-      await action();
+      await action.run();
     } catch (error) {
+      const typedError = error instanceof LibraryMutationError
+        ? error
+        : toLibraryMutationError(action.operation, error);
       setLibraryActionError({
-        message: error instanceof LibraryMutationError
-          ? error.message
-          : error instanceof Error ? error.message : 'The library could not be updated.',
+        error: typedError,
         action,
       });
     }
   }, []);
 
   const retryLibraryAction = useCallback(() => {
-    if (libraryActionError) void runLibraryAction(libraryActionError.action);
+    if (libraryActionError?.error.retryable) void runLibraryAction(libraryActionError.action);
   }, [libraryActionError, runLibraryAction]);
 
   const handleAddLibraryFolder = useCallback((kind: LibraryFolderKind) => {
-    void runLibraryAction(() => addLibraryFolder(kind));
+    void runLibraryAction({ operation: 'add-folder', run: () => addLibraryFolder(kind) });
   }, [addLibraryFolder, runLibraryAction]);
 
   const handleRemoveLibraryFolder = useCallback(async (folder: string) => {
@@ -259,27 +264,27 @@ export default function Settings() {
       destructive: true,
     });
     if (!confirmed) return;
-    void runLibraryAction(() => removeLibraryFolder(folder));
+    void runLibraryAction({ operation: 'remove-folder', run: () => removeLibraryFolder(folder) });
   }, [confirm, removeLibraryFolder, runLibraryAction]);
 
   const handleScanLibrary = useCallback(() => {
-    void runLibraryAction(scanLibrary);
+    void runLibraryAction({ operation: 'scan', run: scanLibrary });
   }, [runLibraryAction, scanLibrary]);
 
   const handleRefreshMetadata = useCallback(() => {
-    void runLibraryAction(refreshMetadata);
+    void runLibraryAction({ operation: 'metadata-refresh', run: refreshMetadata });
   }, [refreshMetadata, runLibraryAction]);
 
   const handleFullRescanLibrary = useCallback(() => {
-    void runLibraryAction(fullRescanLibrary);
+    void runLibraryAction({ operation: 'full-rescan', run: fullRescanLibrary });
   }, [fullRescanLibrary, runLibraryAction]);
 
   const handleRefreshLibrary = useCallback(() => {
-    void runLibraryAction(refreshLibrary);
+    void runLibraryAction({ operation: 'refresh', run: refreshLibrary });
   }, [refreshLibrary, runLibraryAction]);
 
   const handleAutoSyncIntervalChange = useCallback((hours: number) => {
-    void runLibraryAction(() => setAutoSyncIntervalHours(hours));
+    void runLibraryAction({ operation: 'auto-sync', run: () => setAutoSyncIntervalHours(hours) });
   }, [runLibraryAction, setAutoSyncIntervalHours]);
 
   const refreshMpvAvailability = useCallback(async () => {
@@ -399,11 +404,30 @@ export default function Settings() {
     const next = { ...customFolderNames };
     if (trimmed && trimmed !== folder) next[folder] = trimmed;
     else delete next[folder];
+    const generation = (renameGenerationRef.current.get(folder) || 0) + 1;
+    renameGenerationRef.current.set(folder, generation);
     setCustomFolderNames(next);
-    void persistSettings({ customFolderNames: next }).then((saved) => {
-      if (!saved) setCustomFolderNames(previous);
-    });
-  }, [customFolderNames, persistSettings]);
+    const action: LibraryAction = {
+      operation: 'rename-folder',
+      run: async () => {
+        if (renameGenerationRef.current.get(folder) !== generation) return;
+        setCustomFolderNames(next);
+        try {
+          await desktopApi.saveSettings({ customFolderNames: next });
+        } catch (error) {
+          if (renameGenerationRef.current.get(folder) !== generation) return;
+          setCustomFolderNames((current) => {
+            const restored = { ...current };
+            if (previous[folder]) restored[folder] = previous[folder];
+            else delete restored[folder];
+            return restored;
+          });
+          throw error;
+        }
+      },
+    };
+    void runLibraryAction(action);
+  }, [customFolderNames, runLibraryAction]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
@@ -619,10 +643,18 @@ export default function Settings() {
     setClearDataStatus('');
     try {
       await clearAppData();
+      setLibraryActionError(null);
       setClearDataStatus('App data cleared. Add a library folder to start fresh.');
     } catch (error) {
       console.error('Failed to clear app data:', error);
-      setClearDataStatus('Clear failed. Close playback and try again.');
+      const typedError = error instanceof LibraryMutationError
+        ? error
+        : toLibraryMutationError('clear-data', error);
+      setLibraryActionError({
+        error: typedError,
+        action: { operation: 'clear-data', run: clearAppData },
+      });
+      setClearDataStatus(typedError.sanitizedMessage);
     } finally {
       setIsClearingData(false);
     }
@@ -1004,8 +1036,8 @@ export default function Settings() {
             backupStatus={backupStatus}
             clearDataStatus={clearDataStatus}
             isClearingData={isClearingData}
-            libraryActionError={libraryActionError?.message}
-            onRetryLibraryAction={libraryActionError ? retryLibraryAction : undefined}
+            libraryActionError={libraryActionError?.error.sanitizedMessage}
+            onRetryLibraryAction={libraryActionError?.error.retryable ? retryLibraryAction : undefined}
             onBackupDatabase={() => void handleBackupDatabase()}
             onClearAppData={() => void handleClearAppData()}
           />
