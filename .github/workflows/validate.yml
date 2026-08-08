@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -69,6 +71,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -113,6 +117,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -145,12 +151,95 @@ jobs:
       - name: Validate generated Android project
         run: corepack pnpm mobile:verify-android-config -- --require-generated
 
+      - name: Compile Android debug native target
+        working-directory: apps/mobile/android
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]]; then
+            echo 'Android SDK environment is unavailable on the runner.' >&2
+            exit 1
+          fi
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+  mobile-ios-native:
+    name: Compile iOS Simulator native target
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.20.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Validate mobile release configuration
+        run: corepack pnpm mobile:verify-release-config
+
+      - name: Regenerate iOS project from tracked Expo configuration
+        run: corepack pnpm --filter @loom-media-server/mobile exec expo prebuild --clean --platform ios --no-install
+
+      - name: Install CocoaPods dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pod >/dev/null 2>&1 || { echo 'CocoaPods is unavailable on the runner.' >&2; exit 1; }
+          pod install --project-directory=apps/mobile/ios
+
+      - name: Compile iOS Simulator native target
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$(find apps/mobile/ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          if [[ -z "$workspace" ]]; then
+            echo 'Expo prebuild did not generate an iOS workspace.' >&2
+            exit 1
+          fi
+          scheme="$(xcodebuild -workspace "$workspace" -list | awk '/Schemes:/{found=1; next} found && NF {print $1; exit}')"
+          if [[ -z "$scheme" ]]; then
+            echo "No Xcode scheme found in $workspace" >&2
+            exit 1
+          fi
+          xcodebuild \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/loomtv-ios-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
   unsigned-package:
     name: Unsigned package smoke (${{ matrix.platform }})
     needs:
       - code
       - supply-chain
       - mobile-android-config
+      - mobile-ios-native
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     permissions:
@@ -172,6 +261,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6

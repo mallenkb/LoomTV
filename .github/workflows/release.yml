@@ -28,6 +28,7 @@ jobs:
     outputs:
       release_tag: ${{ steps.release-context.outputs.release_tag }}
       release_sha: ${{ steps.release-target.outputs.release_sha }}
+      release_tag_oid: ${{ steps.release-target.outputs.release_tag_oid }}
 
     steps:
       - name: Validate release tag input
@@ -59,12 +60,23 @@ jobs:
             echo "$RELEASE_TAG is not an existing tag." >&2
             exit 1
           fi
+          if [[ "$(git cat-file -t "$tag_ref")" != "tag" ]]; then
+            echo "$RELEASE_TAG must be an annotated protected tag." >&2
+            exit 1
+          fi
           tag_commit="$(git rev-parse "$tag_ref^{commit}")"
+          tag_oid="$(git rev-parse "$tag_ref")"
           if [[ "$tag_commit" != "$(git rev-parse HEAD)" ]]; then
             echo "Checked-out commit does not match exact tag $RELEASE_TAG." >&2
             exit 1
           fi
           echo "release_sha=$tag_commit" >> "$GITHUB_OUTPUT"
+          echo "release_tag_oid=$tag_oid" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deterministic tag, package, notes, and updater identity
+        env:
+          RELEASE_TAG: ${{ steps.release-context.outputs.release_tag }}
+        run: node scripts/verify-release-identity.cjs "$RELEASE_TAG"
 
   make:
     name: Sign and package ${{ matrix.platform }}
@@ -93,6 +105,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.prepare.outputs.release_sha }}
+
+      - name: Verify checked-out source identity
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -147,10 +165,11 @@ jobs:
         env:
           WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          WINDOWS_SIGNER_THUMBPRINT: ${{ secrets.WINDOWS_SIGNER_THUMBPRINT }}
         shell: bash
         run: |
           missing=()
-          for name in WINDOWS_CSC_LINK WINDOWS_CSC_KEY_PASSWORD; do
+          for name in WINDOWS_CSC_LINK WINDOWS_CSC_KEY_PASSWORD WINDOWS_SIGNER_THUMBPRINT; do
             [[ -n "${!name:-}" ]] || missing+=("$name")
           done
           if (( ${#missing[@]} > 0 )); then
@@ -161,6 +180,19 @@ jobs:
           export CSC_LINK="$WINDOWS_CSC_LINK"
           export CSC_KEY_PASSWORD="$WINDOWS_CSC_KEY_PASSWORD"
           corepack pnpm --filter loom-media-server-desktop run dist
+
+      - name: Verify final macOS signature and notarization
+        if: runner.os == 'macOS'
+        env:
+          MACOS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: corepack pnpm --filter loom-media-server-desktop run verify:mac-release
+
+      - name: Verify final Windows signatures
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_SIGNER_THUMBPRINT: ${{ secrets.WINDOWS_SIGNER_THUMBPRINT }}
+        shell: pwsh
+        run: corepack pnpm --filter loom-media-server-desktop run verify:windows-release
 
       - name: Build Linux installers
         if: runner.os == 'Linux'
@@ -207,6 +239,12 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.release_sha }}
 
+      - name: Verify checked-out source identity
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+
       - name: Download macOS installers
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
@@ -229,16 +267,46 @@ jobs:
         env:
           RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
         shell: bash
         run: |
           git fetch --no-tags --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          tag_type="$(git cat-file -t "refs/tags/$RELEASE_TAG")"
+          if [[ "$tag_type" != "tag" ]]; then
+            echo "Release tag $RELEASE_TAG changed from an annotated tag." >&2
+            exit 1
+          fi
+          current_tag_oid="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          if [[ "$current_tag_oid" != "$RELEASE_TAG_OID" ]]; then
+            echo "Release tag $RELEASE_TAG object moved after prepare: expected $RELEASE_TAG_OID, found $current_tag_oid." >&2
+            exit 1
+          fi
           current_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
           if [[ "$current_sha" != "$RELEASE_SHA" ]]; then
             echo "Release tag $RELEASE_TAG moved after prepare: expected $RELEASE_SHA, found $current_sha." >&2
             exit 1
           fi
 
-      - name: Create or update GitHub release
+      - name: Re-verify deterministic release identity
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: node scripts/verify-release-identity.cjs "$RELEASE_TAG"
+
+      - name: Prepare release checksums, manifest, and provenance
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
+        run: node scripts/release-evidence.cjs --assets release-assets --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --tag-oid "$RELEASE_TAG_OID"
+
+      - name: Verify release evidence before publication
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
+        run: node scripts/release-evidence.cjs --verify --assets release-assets --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --tag-oid "$RELEASE_TAG_OID"
+
+      - name: Recreate replacement draft release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
@@ -246,47 +314,59 @@ jobs:
         run: |
           version="${RELEASE_TAG#v}"
           notes="docs/releases/v${version}.md"
-
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            if [[ -f "$notes" ]]; then
-              gh release edit "$RELEASE_TAG" \
-                --title "LoomTV ${version}" \
-                --notes-file "$notes"
-            fi
-          elif [[ -f "$notes" ]]; then
-            gh release create "$RELEASE_TAG" \
-              --verify-tag \
-              --title "LoomTV ${version}" \
-              --notes-file "$notes"
-          else
-            gh release create "$RELEASE_TAG" \
-              --verify-tag \
-              --title "LoomTV ${version}" \
-              --generate-notes
-          fi
-
-          mapfile -d '' assets < <(
-            find release-assets -type f \( \
-              -name 'LoomTV-*.dmg' -o \
-              -name 'LoomTV-*.zip' -o \
-              -name 'LoomTV-*.exe' -o \
-              -name 'LoomTV-*.deb' -o \
-              -name 'LoomTV-*.rpm' -o \
-              -name 'LoomTV-*.AppImage' -o \
-              -name 'LoomTV-*.blockmap' -o \
-              -name 'latest*.yml' \
-            \) -print0
-          )
-          if (( ${#assets[@]} == 0 )); then
-            echo 'No release files were downloaded.' >&2
+          if [[ ! -s "$notes" ]]; then
+            echo "Deterministic release notes are missing: $notes" >&2
             exit 1
           fi
-          existing_assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
-          for asset in "${assets[@]}"; do
-            asset_name="$(basename "$asset")"
-            if grep -Fqx "$asset_name" <<< "$existing_assets"; then
-              echo "Keeping existing release asset: $asset_name"
-              continue
+
+          existing_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [[ -n "$existing_draft" ]]; then
+            if [[ "$existing_draft" != "true" ]]; then
+              echo "Refusing to replace already-published release $RELEASE_TAG." >&2
+              exit 1
             fi
-            gh release upload "$RELEASE_TAG" "$asset"
-          done
+            gh release delete "$RELEASE_TAG" --yes
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --verify-tag \
+            --title "LoomTV ${version}" \
+            --notes-file "$notes"
+
+          mapfile -d '' assets < <(
+            find release-assets -type f -print0 | sort -z
+          )
+          if (( ${#assets[@]} == 0 )); then
+            echo 'No release evidence files were prepared.' >&2
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+
+      - name: Verify complete draft asset inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        shell: bash
+        run: |
+          expected="$(find release-assets -type f -exec basename {} \; | sort)"
+          actual="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' | sort)"
+          diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$actual")
+
+      - name: Download and verify uploaded draft bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG_OID: ${{ needs.prepare.outputs.release_tag_oid }}
+        shell: bash
+        run: |
+          remote_dir="$(mktemp -d)"
+          gh release download "$RELEASE_TAG" --dir "$remote_dir" --pattern '*'
+          node scripts/release-evidence.cjs --verify --assets "$remote_dir" --tag "$RELEASE_TAG" --sha "$RELEASE_SHA" --tag-oid "$RELEASE_TAG_OID"
+
+      - name: Publish verified draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --latest

@@ -1,13 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
-
-const UPDATE_CONFIG = [
-  'provider: github',
-  'owner: mallenkb',
-  'repo: LoomTV',
-  'releaseType: release',
-  '',
-].join('\n');
+const { UPDATE_CONFIG } = require('../../../scripts/release-identity.cjs');
 
 function resourcesPath(appOutDir, platform) {
   if (platform === 'darwin') {
@@ -24,5 +17,13 @@ exports.default = async function ensureUpdateConfig(context) {
   if (!fs.existsSync(target)) {
     fs.writeFileSync(target, UPDATE_CONFIG, 'utf8');
     console.log(`[updates] Wrote packaged update configuration to ${target}`);
+    return;
+  }
+
+  const actual = fs.readFileSync(target, 'utf8');
+  if (actual !== UPDATE_CONFIG) {
+    throw new Error(
+      `Packaged updater configuration is not the canonical LoomTV GitHub release identity: ${target}`,
+    );
   }
 };

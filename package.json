@@ -14,6 +14,8 @@
     "container:policy:test": "node scripts/verify-container-policy.test.cjs",
     "mobile:verify-android-config": "node scripts/verify-mobile-android-config.cjs",
     "mobile:verify-release-config": "node scripts/verify-mobile-release-config.cjs",
+    "release:verify-identity": "node scripts/verify-release-identity.cjs",
+    "release:evidence": "node scripts/release-evidence.cjs",
     "verify:workflow-policy": "node scripts/verify-workflow-policy.cjs",
     "test:workflow-policy": "node --test scripts/verify-workflow-policy.test.cjs",
     "verify:test-workspaces": "node scripts/verify-test-workspaces.cjs",
