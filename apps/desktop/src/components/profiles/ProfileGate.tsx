@@ -7,6 +7,7 @@ import { desktopApi, type ProfileSummary } from '@/lib/desktopApi';
 import ProfileAvatar, { PROFILE_AVATAR_KEYS, PROFILE_COLOR_KEYS, PROFILE_COLOR_PRESETS } from './ProfileAvatar';
 import PinDigitInput from './PinDigitInput';
 import LoomLogo from '@/components/LoomLogo';
+import { useModalLayer } from '@/components/ui/dialog';
 
 type GateMode = 'select' | 'edit';
 type EditorTarget = ProfileSummary | 'new';
@@ -31,6 +32,7 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
   const [transferMessage, setTransferMessage] = useState<string | null>(null);
   const [returnTo, setReturnTo] = useState<string | null>(null);
   const focusRestoreId = useRef<string | null>(null);
+  const gateRef = useRef<HTMLDivElement | null>(null);
   const canManage = canManageProfiles;
 
   const closeAndReturn = useCallback(() => {
@@ -48,15 +50,20 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
     if (editorOrigin === 'source') closeAndReturn();
   }, [closeAndReturn, editorOrigin]);
 
+  const handleGateEscape = useCallback(() => {
+    if (pinTarget) setPinTarget(null);
+    else if (editorTarget) closeEditor();
+    else if (mode === 'edit') setMode('select');
+    else if (activeProfile) closeAndReturn();
+  }, [activeProfile, closeAndReturn, closeEditor, editorTarget, mode, pinTarget]);
+
+  useModalLayer({
+    contentRef: gateRef,
+    onEscape: handleGateEscape,
+  });
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        if (pinTarget) setPinTarget(null);
-        else if (editorTarget) closeEditor();
-        else if (mode === 'edit') setMode('select');
-        else if (activeProfile) closeAndReturn();
-        return;
-      }
       if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
       const activeElement = document.activeElement;
       if (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLSelectElement) return;
@@ -167,7 +174,18 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
   }, [initialSetup, activeProfile, profiles]);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
+    <div
+      ref={gateRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="profile-gate-title"
+      aria-describedby="profile-gate-description"
+      tabIndex={-1}
+      data-modal-layer="profile-gate"
+      className="loom-no-drag fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]"
+    >
+      <h1 id="profile-gate-title" className="sr-only">Profile selection</h1>
+      <p id="profile-gate-description" className="sr-only">Choose or manage the profile that is watching on this device.</p>
       {!editorTarget && <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
         {mode === 'select' && activeProfile && !editorTarget && !pinTarget ? (
           <button

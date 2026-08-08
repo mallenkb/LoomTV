@@ -7,7 +7,7 @@ import PinDigitInput from '@/components/profiles/PinDigitInput';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import MediaRail from '@/components/MediaRail';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export default function ProfilesSettingsSection() {
   const {
@@ -158,7 +158,7 @@ export default function ProfilesSettingsSection() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Set a profile PIN</DialogTitle>
-            <p className="text-sm text-[var(--loom-muted)]">Enter four digits to protect {activeProfile.name}. Automatic sign-in will be turned off.</p>
+            <DialogDescription className="text-[var(--loom-muted)]">Enter four digits to protect {activeProfile.name}. Automatic sign-in will be turned off.</DialogDescription>
           </DialogHeader>
           <form className="mt-6 space-y-5" onSubmit={(event) => { event.preventDefault(); void savePinAndLock(); }}>
             <div className="flex flex-col gap-1.5 text-sm">
@@ -195,7 +195,7 @@ export default function ProfilesSettingsSection() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Remove profile PIN?</DialogTitle>
-            <p className="text-sm text-[var(--loom-muted)]">{activeProfile.name} will no longer require a PIN to enter on this device.</p>
+            <DialogDescription className="text-[var(--loom-muted)]">{activeProfile.name} will no longer require a PIN to enter on this device.</DialogDescription>
           </DialogHeader>
           {pinError && <p role="alert" className="mt-4 text-sm text-red-400">{pinError}</p>}
           <div className="mt-6 flex justify-end gap-3">

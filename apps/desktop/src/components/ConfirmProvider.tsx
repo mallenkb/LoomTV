@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 export type ConfirmOptions = {
   title: string;
@@ -65,7 +65,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                 )}
                 <div className="min-w-0">
                   <DialogTitle className="text-base font-semibold text-[var(--loom-text)]">{request.title}</DialogTitle>
-                  <p className="mt-2 text-sm leading-6 text-[var(--loom-muted)]">{request.description}</p>
+                  <DialogDescription className="mt-2 leading-6 text-[var(--loom-muted)]">{request.description}</DialogDescription>
                 </div>
               </div>
             </DialogHeader>

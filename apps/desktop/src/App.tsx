@@ -322,6 +322,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 
 function AppShell() {
   const { state: libraryState, hydrateLibraryItem } = useLibrary();
+  const { gateOpen } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
@@ -334,6 +335,7 @@ function AppShell() {
   const showLibraryFilter = !nowPlaying && isLibraryFilterPath(location.pathname);
   const hideContinueBar = Boolean(nowPlaying) || isSettingsRoute;
   const reserveContinueBarSpace = !hideContinueBar;
+  const appUnderlayHidden = Boolean(nowPlaying || gateOpen);
   const markHomeReady = useCallback(() => {
     setHomeReady(true);
     markAppReady();
@@ -413,7 +415,7 @@ function AppShell() {
     <div className="loom-app-shell flex h-screen text-[var(--loom-text)]">
       <StartupReadySignal ready={libraryState.isStartupPrepared} onReady={markHomeReady} />
       {appStartupReady && !homeReady && <StartupSplash />}
-      <div className="loom-app-underlay contents">
+      <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
       <Sidebar />
       <div
         className={`loom-main-drag-region${isSettingsRoute ? ' loom-main-drag-region-settings' : ''}`}
@@ -473,7 +475,7 @@ function AppShell() {
           />
         </ErrorBoundary>
       )}
-      <div className="loom-app-underlay contents">
+      <div className="loom-app-underlay contents" aria-hidden={appUnderlayHidden ? 'true' : undefined}>
         <ContinueWatchingBar isHidden={hideContinueBar} onPlay={handlePlayMedia} />
       </div>
     </div>

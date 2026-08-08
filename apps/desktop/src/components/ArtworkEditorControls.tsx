@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Image, ImageUp, Loader2, MoreHorizontal, PanelsTopLeft, Search, Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
 import { useToast } from '@/components/ToastProvider';
 import type { OfficialArtworkRefreshTarget, OfficialMetadataApplyTarget, OfficialMetadataCandidate } from '@/lib/desktopApi';
@@ -517,6 +517,7 @@ export default function ArtworkEditorControls({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{previewConfig.label}</DialogTitle>
+            <DialogDescription className="sr-only">Preview and adjust the selected artwork before saving it.</DialogDescription>
           </DialogHeader>
           <div className="mt-5 space-y-5">
             {artworkPreview ? (
@@ -656,9 +657,9 @@ export default function ArtworkEditorControls({
             </Button>
           </DialogHeader>
           <div className="space-y-4 p-5">
-            <p className="text-sm text-[var(--loom-muted)]">
+            <DialogDescription className="text-[var(--loom-muted)]">
               {metadataDialogDescription}
-            </p>
+            </DialogDescription>
             {visibleMetadataCandidates.length === 0 ? (
               <div className="rounded-lg bg-[var(--loom-surface-2)] p-6 text-sm text-[var(--loom-muted)]">
                 {isCoverTarget
