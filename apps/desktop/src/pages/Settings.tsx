@@ -24,6 +24,7 @@ import LibrarySettingsSection from './LibrarySettingsSection';
 import MetadataSettingsSection from './MetadataSettingsSection';
 import NetworkSettingsSection from './NetworkSettingsSection';
 import PlaybackSettingsSection from './PlaybackSettingsSection';
+import PluginsSettingsSection from './PluginsSettingsSection';
 import ProfilesSettingsSection from './ProfilesSettingsSection';
 import SettingsTabs from './SettingsTabs';
 import ThemeSettingsSection from './ThemeSettingsSection';
@@ -891,6 +892,7 @@ export default function Settings() {
                 </div>
               )}
               {activeSection === 'profiles' && <ProfilesSettingsSection />}
+              {activeSection === 'plugins' && <PluginsSettingsSection />}
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
                   showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}

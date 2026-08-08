@@ -163,6 +163,18 @@ export interface IpcHandlerDependencies<
   updateManagedMediaSegment: (candidateId: string, patch: IpcContract['playback:segments:manage-update']['args'][1]) => boolean;
   eraseManagedMediaSegments: (request: MediaSegmentRequest) => IpcResult<'playback:segments:manage-erase'>;
   setPlaybackActivityLease: (key: string, active: boolean, label?: string) => void;
+  listStremioPlugins: () => IpcResult<'plugins:stremio:list'>;
+  listAvailableStremioPlugins: () => IpcResult<'plugins:stremio:available'>;
+  listOfficialStremioAddons: () => IpcResult<'plugins:stremio:official'>;
+  reviewOfficialStremioAddon: (officialId: IpcContract['plugins:stremio:review-official']['args'][0]) => Promise<IpcResult<'plugins:stremio:review-official'>>;
+  reviewStremioManifestUrl: (manifestUrl: string) => Promise<IpcResult<'plugins:stremio:review-url'>>;
+  approveStremioAddon: (addonId: string, reviewToken: string) => Promise<IpcResult<'plugins:stremio:approve'>>;
+  disableStremioAddon: (addonId: string) => Promise<IpcResult<'plugins:stremio:disable'>>;
+  removeStremioAddon: (addonId: string) => Promise<boolean>;
+  listStremioProfileAccess: (profileId: string) => IpcResult<'plugins:stremio:profile-access'>;
+  setStremioProfileAccess: (profileId: string, addonId: string, enabled: boolean) => Promise<IpcResult<'plugins:stremio:set-profile-access'>>;
+  fetchStremioCatalog: (addonId: string, request: IpcContract['plugins:stremio:catalog']['args'][1]) => Promise<IpcResult<'plugins:stremio:catalog'>>;
+  fetchStremioMeta: (addonId: string, request: IpcContract['plugins:stremio:meta']['args'][1]) => Promise<IpcResult<'plugins:stremio:meta'>>;
   getLocalSegmentAnalysisStatus: () => IpcResult<'playback:analysis:status'>;
   analyzeLocalSegmentSeason: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
   runLocalSegmentAnalysis: (scope?: IpcContract['playback:analysis:run']['args'][0]) => IpcResult<'playback:analysis:run'>;
@@ -456,6 +468,23 @@ export function registerIpcHandlers<
   });
 
   handle('settings:get', () => deps.settingsForRenderer());
+
+  handle('plugins:stremio:list', () => deps.listStremioPlugins());
+  handle('plugins:stremio:available', () => deps.listAvailableStremioPlugins());
+  handle('plugins:stremio:official', () => deps.listOfficialStremioAddons());
+  handle('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId));
+  handle('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')));
+  handle('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')));
+  handle('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')));
+  handle('plugins:stremio:remove', (_event, addonId) => deps.removeStremioAddon(String(addonId || '')));
+  handle('plugins:stremio:profile-access', (_event, profileId) => deps.listStremioProfileAccess(String(profileId || '')));
+  handle('plugins:stremio:set-profile-access', (_event, profileId, addonId, enabled) => deps.setStremioProfileAccess(
+    String(profileId || ''),
+    String(addonId || ''),
+    enabled === true,
+  ));
+  handle('plugins:stremio:catalog', (_event, addonId, request) => deps.fetchStremioCatalog(String(addonId || ''), request));
+  handle('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request));
 
   handle('settings:save', (_event, settings) => {
     deps.authorizeSettingsWrite();

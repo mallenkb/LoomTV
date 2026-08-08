@@ -20,6 +20,7 @@ import type {
   OfficialMetadataCandidate,
   OfficialMetadataApplyTarget,
   OfficialArtworkRefreshTarget,
+  OfficialStremioAddon,
   PlaybackTrackPreferences,
   ProfileListKind,
   ProfilePreferences,
@@ -28,6 +29,8 @@ import type {
   ProfileCreateInput,
   ProfileUpdateInput,
   RemoteLibraryRequest,
+  StremioPluginCatalogRequest,
+  StremioPluginMetaRequest,
   SubtitleStyleOptions,
   TranscodeOptions,
   UpdateState,
@@ -105,6 +108,27 @@ const desktopApi = {
   },
   checkFFmpeg: () => ipcRenderer.invoke('media:ffmpeg-available'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  listStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:list'),
+  listAvailableStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:available'),
+  listOfficialStremioAddons: () => ipcRenderer.invoke('plugins:stremio:official'),
+  reviewOfficialStremioAddon: (officialId: OfficialStremioAddon['id']) =>
+    ipcRenderer.invoke('plugins:stremio:review-official', officialId),
+  reviewStremioManifestUrl: (manifestUrl: string) =>
+    ipcRenderer.invoke('plugins:stremio:review-url', manifestUrl),
+  approveStremioAddon: (addonId: string, reviewToken: string) =>
+    ipcRenderer.invoke('plugins:stremio:approve', addonId, reviewToken),
+  disableStremioAddon: (addonId: string) =>
+    ipcRenderer.invoke('plugins:stremio:disable', addonId),
+  removeStremioAddon: (addonId: string) =>
+    ipcRenderer.invoke('plugins:stremio:remove', addonId),
+  listStremioProfileAccess: (profileId: string) =>
+    ipcRenderer.invoke('plugins:stremio:profile-access', profileId),
+  setStremioProfileAccess: (profileId: string, addonId: string, enabled: boolean) =>
+    ipcRenderer.invoke('plugins:stremio:set-profile-access', profileId, addonId, enabled),
+  getStremioCatalog: (addonId: string, request: StremioPluginCatalogRequest) =>
+    ipcRenderer.invoke('plugins:stremio:catalog', addonId, request),
+  getStremioMeta: (addonId: string, request: StremioPluginMetaRequest) =>
+    ipcRenderer.invoke('plugins:stremio:meta', addonId, request),
   saveSettings: (settings: {
     omdbApiKey?: string;
     tmdbApiKey?: string;

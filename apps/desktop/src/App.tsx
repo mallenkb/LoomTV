@@ -12,6 +12,7 @@ import TVShows from './pages/TVShows';
 import MovieDetail from './pages/MovieDetail';
 import TVDetail from './pages/TVDetail';
 import Settings from './pages/Settings';
+import PluginDiscover from './pages/PluginDiscover';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer/LazyVideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
@@ -441,6 +442,7 @@ function AppShell() {
             <Route path="/others" element={<Others />} />
             <Route path="/tv" element={<TVShows kind="series" />} />
             <Route path="/anime" element={<TVShows kind="anime" />} />
+            <Route path="/discover" element={<PluginDiscover />} />
             <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
             <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
             <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />

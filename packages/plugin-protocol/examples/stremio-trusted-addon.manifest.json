@@ -1,0 +1,46 @@
+{
+  "id": "org.example.loom.https",
+  "version": "1.0.0",
+  "name": "Example HTTPS media add-on",
+  "description": "A safe example manifest for a user-reviewed HTTPS Stremio-compatible add-on.",
+  "resources": [
+    {
+      "name": "catalog",
+      "types": ["movie"],
+      "idPrefixes": ["example:"]
+    },
+    {
+      "name": "meta",
+      "types": ["movie"],
+      "idPrefixes": ["example:"]
+    },
+    {
+      "name": "stream",
+      "types": ["movie"],
+      "idPrefixes": ["example:"]
+    },
+    {
+      "name": "subtitles",
+      "types": ["movie"],
+      "idPrefixes": ["example:"]
+    }
+  ],
+  "types": ["movie"],
+  "idPrefixes": ["example:"],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "example-movies",
+      "name": "Example Movies",
+      "extra": [
+        {
+          "name": "search",
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "behaviorHints": {
+    "p2p": false
+  }
+}

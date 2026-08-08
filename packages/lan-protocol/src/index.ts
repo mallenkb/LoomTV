@@ -155,6 +155,37 @@ export type LanApiResult<T> = {
 
 export type LanHlsSession = { playlistUrl: string };
 
+/**
+ * Profile selection is mandatory for every network device.
+ *
+ * A paired device is authorized for exactly the profile it has explicitly
+ * selected. The host never picks one on a device's behalf, so a device that has
+ * not selected a profile — or whose selected profile was deleted or revoked —
+ * gets `409 { error: 'profile_required' }` from every profile-sensitive route
+ * (catalog, item, artwork, subtitle, playback, transcode, preferences, lists,
+ * progress). The desktop's own local requests continue to use the active
+ * desktop profile.
+ *
+ * `X-Loom-Profile-Api-Version: 1` is representation negotiation only. It never
+ * selects an authorization branch, so omitting it cannot obtain a weaker check
+ * or wider access than sending it. It stays accepted for clients that send it.
+ *
+ * Reachable without a selection, so a client can always bootstrap and show its
+ * picker: `GET /api/v2/client-config` (no profile-specific preferences until a
+ * profile is selected), `GET /api/v2/profiles`, `GET /api/v2/profiles/active`,
+ * and `POST /api/v2/profiles/select`. Pairing responses carry an empty library
+ * for every client, because a device that just paired has selected nothing yet.
+ *
+ * Client compatibility: builds that read {@link LanActiveProfile} treat
+ * `profileId: null` / `selectionRequired: true` as "show the profile picker",
+ * which is the supported path. A build old enough to omit the version header
+ * and expect library content from pairing will see `409 profile_required` on
+ * its first catalog request instead of Owner-scoped data, and must be updated.
+ *
+ * Every mutating profile-scoped request carries `selectionRevision`; the host
+ * rejects a stale value with `409 { error: 'stale_profile_selection' }`
+ * regardless of which headers the client sends.
+ */
 export type LanProfileType = 'owner' | 'standard' | 'kid' | 'guest';
 
 export type LanProfileSummary = {

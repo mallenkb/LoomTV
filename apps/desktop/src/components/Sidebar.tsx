@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
+import { Check, Compass, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -12,7 +12,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
-type NavItemId = 'home' | SidebarNavItemId | 'settings';
+type NavItemId = 'home' | 'discover' | SidebarNavItemId | 'settings';
 type SidebarIcon = React.ComponentType<{ className?: string }>;
 type SidebarNavItem = { id: NavItemId; path: string; label: string; icon: SidebarIcon; activeIcon?: SidebarIcon };
 
@@ -26,6 +26,7 @@ const modernCategoryItems = [
 ] as const;
 
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
+const discoverNavItem: SidebarNavItem = { id: 'discover', path: '/discover', label: 'Discover', icon: Compass };
 const settingsNavItem: SidebarNavItem = { id: 'settings', path: '/settings', label: 'Settings', icon: SettingsNavExactIcon, activeIcon: SettingsNavSolidExactIcon };
 
 const sidebarNavItems: Record<SidebarNavItemId, SidebarNavItem> = {
@@ -44,6 +45,7 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   const activePath = detailRoute && fromPath ? fromPath : pathname;
 
   if (activePath === '/' || activePath.startsWith('/?')) return 'home';
+  if (activePath === '/discover' || activePath.startsWith('/discover/')) return 'discover';
   if (activePath === '/movies' || activePath.startsWith('/movies/') || activePath.startsWith('/movie/')) return 'movies';
   if (activePath === '/tv' || activePath.startsWith('/tv/')) return 'tv';
   if (activePath === '/anime' || activePath.startsWith('/anime/')) return 'anime';
@@ -374,6 +376,7 @@ export default function Sidebar() {
   const navItems = useMemo(
     () => [
       homeNavItem,
+      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder)
         .map((itemId) => sidebarNavItems[itemId])
         .filter((item) => {
@@ -387,6 +390,7 @@ export default function Sidebar() {
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
+      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies, sidebarNavItems.others] as SidebarNavItem[]).filter((item) => {
         if (desktopApi.isRemoteLibraryMode()) return true;
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;

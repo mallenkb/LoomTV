@@ -1,13 +1,14 @@
 import type { AppLoaderStyle } from '@/lib/theme';
 import type { UpdateState } from '@/lib/desktopApi';
 
-export type SettingsSection = 'profiles' | 'library' | 'playback' | 'network' | 'metadata' | 'theme' | 'about';
+export type SettingsSection = 'profiles' | 'library' | 'playback' | 'plugins' | 'network' | 'metadata' | 'theme' | 'about';
 export type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'profiles', label: 'Profiles' },
   { id: 'library', label: 'Library' },
   { id: 'playback', label: 'Playback' },
+  { id: 'plugins', label: 'Plugins' },
   { id: 'network', label: 'Network' },
   { id: 'metadata', label: 'Metadata API Keys' },
   { id: 'theme', label: 'Theme' },

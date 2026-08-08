@@ -37,6 +37,7 @@ import type {
   OfficialArtworkRefreshTarget,
   OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
+  OfficialStremioAddon,
   PlaybackLogoResult,
   PlaybackCapabilities,
   PlaybackPlanResponse,
@@ -52,6 +53,14 @@ import type {
   StoredProgress,
   StreamUrlOptions,
   StreamUrlResult,
+  StremioPluginCatalogDefinition,
+  StremioPluginCatalogItem,
+  StremioPluginCatalogRequest,
+  StremioPluginCatalogResult,
+  StremioPluginMetaRequest,
+  StremioPluginMetaResult,
+  StremioPluginReview,
+  StremioPluginSummary,
   TranscodeOptions,
   TranscodeSession,
   UpdateState,
@@ -97,6 +106,7 @@ export type {
   OfficialArtworkRefreshTarget,
   OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
+  OfficialStremioAddon,
   PlaybackLogoResult,
   PlaybackCapabilities,
   PlaybackPlanResponse,
@@ -118,6 +128,14 @@ export type {
   StoredProgress,
   StreamUrlOptions,
   StreamUrlResult,
+  StremioPluginCatalogDefinition,
+  StremioPluginCatalogItem,
+  StremioPluginCatalogRequest,
+  StremioPluginCatalogResult,
+  StremioPluginMetaRequest,
+  StremioPluginMetaResult,
+  StremioPluginReview,
+  StremioPluginSummary,
   SubtitleStyleOptions,
   TranscodeOptions,
   TranscodeSession,
@@ -170,6 +188,18 @@ export type DesktopBridgeApi = {
       checkFFmpeg: () => Promise<FFmpegStatus>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
+      listStremioPlugins?: () => Promise<StremioPluginSummary[]>;
+      listAvailableStremioPlugins?: () => Promise<StremioPluginSummary[]>;
+      listOfficialStremioAddons?: () => Promise<OfficialStremioAddon[]>;
+      reviewOfficialStremioAddon?: (officialId: OfficialStremioAddon['id']) => Promise<StremioPluginReview>;
+      reviewStremioManifestUrl?: (manifestUrl: string) => Promise<StremioPluginReview>;
+      approveStremioAddon?: (addonId: string, reviewToken: string) => Promise<StremioPluginSummary>;
+      disableStremioAddon?: (addonId: string) => Promise<StremioPluginSummary>;
+      removeStremioAddon?: (addonId: string) => Promise<boolean>;
+      listStremioProfileAccess?: (profileId: string) => Promise<string[]>;
+      setStremioProfileAccess?: (profileId: string, addonId: string, enabled: boolean) => Promise<boolean>;
+      getStremioCatalog?: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginCatalogResult>;
+      getStremioMeta?: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
       testMetadataKeys?: (keys: MetadataApiKeys) => Promise<MetadataKeyTestResult[]>;
       getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
       discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
@@ -978,6 +1008,66 @@ export const desktopApi = {
   async getSettings(): Promise<SettingsPayload> {
     if (window.desktopApi) return window.desktopApi.getSettings();
     return fetchJson<SettingsPayload>('/api/renderer/settings');
+  },
+
+  async listStremioPlugins(): Promise<StremioPluginSummary[]> {
+    if (window.desktopApi?.listStremioPlugins) return window.desktopApi.listStremioPlugins();
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async listAvailableStremioPlugins(): Promise<StremioPluginSummary[]> {
+    if (window.desktopApi?.listAvailableStremioPlugins) return window.desktopApi.listAvailableStremioPlugins();
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async listOfficialStremioAddons(): Promise<OfficialStremioAddon[]> {
+    if (window.desktopApi?.listOfficialStremioAddons) return window.desktopApi.listOfficialStremioAddons();
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async reviewOfficialStremioAddon(officialId: OfficialStremioAddon['id']): Promise<StremioPluginReview> {
+    if (window.desktopApi?.reviewOfficialStremioAddon) return window.desktopApi.reviewOfficialStremioAddon(officialId);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async reviewStremioManifestUrl(manifestUrl: string): Promise<StremioPluginReview> {
+    if (window.desktopApi?.reviewStremioManifestUrl) return window.desktopApi.reviewStremioManifestUrl(manifestUrl);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async approveStremioAddon(addonId: string, reviewToken: string): Promise<StremioPluginSummary> {
+    if (window.desktopApi?.approveStremioAddon) return window.desktopApi.approveStremioAddon(addonId, reviewToken);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async disableStremioAddon(addonId: string): Promise<StremioPluginSummary> {
+    if (window.desktopApi?.disableStremioAddon) return window.desktopApi.disableStremioAddon(addonId);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async removeStremioAddon(addonId: string): Promise<boolean> {
+    if (window.desktopApi?.removeStremioAddon) return window.desktopApi.removeStremioAddon(addonId);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async listStremioProfileAccess(profileId: string): Promise<string[]> {
+    if (window.desktopApi?.listStremioProfileAccess) return window.desktopApi.listStremioProfileAccess(profileId);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async setStremioProfileAccess(profileId: string, addonId: string, enabled: boolean): Promise<boolean> {
+    if (window.desktopApi?.setStremioProfileAccess) return window.desktopApi.setStremioProfileAccess(profileId, addonId, enabled);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async getStremioCatalog(addonId: string, request: StremioPluginCatalogRequest): Promise<StremioPluginCatalogResult> {
+    if (window.desktopApi?.getStremioCatalog) return window.desktopApi.getStremioCatalog(addonId, request);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async getStremioMeta(addonId: string, request: StremioPluginMetaRequest): Promise<StremioPluginMetaResult> {
+    if (window.desktopApi?.getStremioMeta) return window.desktopApi.getStremioMeta(addonId, request);
+    throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
   },
 
   async saveSettings(settings: SettingsPayload): Promise<boolean> {

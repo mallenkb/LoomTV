@@ -181,6 +181,16 @@ import {
   setDesktopAutomaticSignIn,
   selectDesktopProfile,
 } from './main/profileService';
+import { createDesktopStremioPluginService } from './main/stremioPluginServiceDesktop.ts';
+import {
+  OFFICIAL_STREMIO_ADDONS,
+  officialStremioAddonId,
+  officialStremioManifestUrl,
+  stremioCatalogResult,
+  stremioMetaResult,
+  stremioPluginReview,
+  stremioPluginSummary,
+} from './main/stremioPluginWire.ts';
 import {
   assertProfileCanAccessPath,
   assertSubtitleCanAccessMediaPath,
@@ -379,7 +389,6 @@ const {
   loadSettings,
   saveSettings,
   localAccessToken: LOCAL_ACCESS_TOKEN,
-  libraryForLocalNetwork,
   requestPairingApproval: requestLanPairingApproval,
 });
 
@@ -987,7 +996,7 @@ function localMetadataWithTracks(filePath: string, metadata: MediaItem['localMet
 function libraryForLocalNetwork(profileId?: string, deviceId?: string): LibraryData {
   const base = getLanServerBase() || `http://127.0.0.1:${getMediaServerPort()}`;
   const data = loadLibrary();
-  const resolvedProfileId = profileId || resolveLanProfileId(deviceId || null, false);
+  const resolvedProfileId = profileId || resolveLanProfileId(deviceId || null);
   const state = deviceId ? getActiveProfileState(deviceId) : null;
   return projectLibraryForLocalNetwork(
     filterLibraryForProfile(data, resolvedProfileId),
@@ -1264,6 +1273,7 @@ const analysisCoordinator = createAnalysisCoordinator({
 });
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
+const stremioPluginService = createDesktopStremioPluginService();
 
 registerIpcHandlers<LibraryData, AppSettings>({
   getMediaServerPort: () => getMediaServerPort(),
@@ -1475,6 +1485,42 @@ registerIpcHandlers<LibraryData, AppSettings>({
     return profileId ? getPlaybackTrackPreferences(profileId, scope) : {};
   },
   savePlaybackTrackPreferences: (scope, preferences, expectedProfileId) => savePlaybackTrackPreferences(requireDesktopProfileId(expectedProfileId), scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[2]),
+  listStremioPlugins: () => stremioPluginService.listManaged().map(stremioPluginSummary),
+  listAvailableStremioPlugins: () => stremioPluginService
+    .listForProfile(requireDesktopProfileId())
+    .map(stremioPluginSummary),
+  listOfficialStremioAddons: () => [...OFFICIAL_STREMIO_ADDONS],
+  reviewOfficialStremioAddon: async (officialId) => stremioPluginReview(
+    await stremioPluginService.reviewManifestUrl(
+      officialStremioManifestUrl(officialId),
+      officialStremioAddonId(officialId),
+    ),
+  ),
+  reviewStremioManifestUrl: async (manifestUrl) => stremioPluginReview(
+    await stremioPluginService.reviewManifestUrl(manifestUrl),
+  ),
+  approveStremioAddon: async (addonId, reviewToken) => stremioPluginSummary(
+    await stremioPluginService.approve(addonId, reviewToken),
+  ),
+  disableStremioAddon: async (addonId) => stremioPluginSummary(
+    await stremioPluginService.disable(addonId),
+  ),
+  removeStremioAddon: (addonId) => stremioPluginService.remove(addonId),
+  listStremioProfileAccess: (profileId) => [...stremioPluginService.listManagedProfileAccess(profileId)],
+  setStremioProfileAccess: (profileId, addonId, enabled) => stremioPluginService.setProfileAccess(
+    profileId,
+    addonId,
+    enabled,
+  ),
+  fetchStremioCatalog: async (addonId, request) => stremioCatalogResult(
+    addonId,
+    request,
+    await stremioPluginService.fetchCatalog(requireDesktopProfileId(), addonId, request),
+  ),
+  fetchStremioMeta: async (addonId, request) => stremioMetaResult(
+    addonId,
+    await stremioPluginService.fetchMeta(requireDesktopProfileId(), addonId, request),
+  ),
   getMediaSegments: skipSegmentService.getSegments,
   saveManualMediaSegment: skipSegmentService.saveManualSegment,
   deleteManualMediaSegment: skipSegmentService.deleteManualSegment,
@@ -1609,6 +1655,9 @@ export const mediaServerDeps = {
   libraryEtagFor,
   compactLibraryIndexForLocalNetwork,
   compactLibraryItemForLocalNetwork,
+  canProfileAccessMediaId: (profileId: string, mediaId: string) => (
+    findLibraryItem(filterLibraryForProfile(loadLibrary(), profileId), mediaId) !== null
+  ),
   compactLibraryIndexForRenderer,
   compactLibraryItemForRenderer,
   getRendererCatalogIdentity,

@@ -43,6 +43,13 @@ import type {
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
+  StremioPluginCatalogRequest,
+  StremioPluginCatalogResult,
+  StremioPluginMetaRequest,
+  StremioPluginMetaResult,
+  StremioPluginReview,
+  StremioPluginSummary,
+  OfficialStremioAddon,
   StreamUrlOptions,
   StreamUrlResult,
   TranscodeOptions,
@@ -138,6 +145,18 @@ export interface IpcContract {
   'progress:import': { args: [progress: ImportedProgress, expectedProfileId?: string]; result: boolean };
   'progress:save': { args: [filePath: string, position: number, duration: number, expectedProfileId?: string]; result: StoredProgress };
   'renderer:session': { args: []; result: RendererSession };
+  'plugins:stremio:list': { args: []; result: StremioPluginSummary[] };
+  'plugins:stremio:available': { args: []; result: StremioPluginSummary[] };
+  'plugins:stremio:official': { args: []; result: OfficialStremioAddon[] };
+  'plugins:stremio:review-official': { args: [officialId: OfficialStremioAddon['id']]; result: StremioPluginReview };
+  'plugins:stremio:review-url': { args: [manifestUrl: string]; result: StremioPluginReview };
+  'plugins:stremio:approve': { args: [addonId: string, reviewToken: string]; result: StremioPluginSummary };
+  'plugins:stremio:disable': { args: [addonId: string]; result: StremioPluginSummary };
+  'plugins:stremio:remove': { args: [addonId: string]; result: boolean };
+  'plugins:stremio:profile-access': { args: [profileId: string]; result: string[] };
+  'plugins:stremio:set-profile-access': { args: [profileId: string, addonId: string, enabled: boolean]; result: boolean };
+  'plugins:stremio:catalog': { args: [addonId: string, request: StremioPluginCatalogRequest]; result: StremioPluginCatalogResult };
+  'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginMetaResult };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };

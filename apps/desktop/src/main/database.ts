@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
-import { safeFetch } from './safeFetch';
+import { safeFetch } from './safeFetch.ts';
 import type { LibraryData } from './appContracts.ts';
 import type { ProfileExportV1 } from '../shared/desktopProtocol.ts';
 import {
@@ -32,6 +32,14 @@ import {
   type SegmentAnalysisInventory,
   type StoredMediaFingerprint,
 } from './databaseSegmentsRepository.ts';
+import {
+  hasProfileStremioAccess as hasProfileStremioAccessRecord,
+  listProfileStremioAccess as listProfileStremioAccessRecords,
+  loadStremioAddonState as loadStremioAddonStateRecord,
+  saveStremioAddonState as saveStremioAddonStateRecord,
+  setProfileStremioAccess as setProfileStremioAccessRecord,
+  type PersistedStremioAddonSnapshot,
+} from './databasePluginRepository.ts';
 import type { SegmentAnalysisJob, SegmentAnalysisJobState } from './skipSegments/analysisJobs.ts';
 import type {
   MediaSegment,
@@ -39,7 +47,7 @@ import type {
   MediaSegmentSource,
   ProviderCacheEntry,
 } from './skipSegments/types';
-import { migrateDatabase, profilesMigrationPending } from './databaseMigrations';
+import { migrateDatabase, profilesMigrationPending } from './databaseMigrations.ts';
 import {
   clearDeviceProfileSelection as clearDeviceProfileSelectionRecord,
   clearAllGuestProfiles as clearAllGuestProfilesRecord,
@@ -90,6 +98,11 @@ export type {
 } from './databaseProfilesRepository.ts';
 export type { CachedArtwork } from './databaseArtworkRepository.ts';
 export type { StoredMediaFingerprint } from './databaseSegmentsRepository.ts';
+export type {
+  PersistedStremioAddonRecord,
+  PersistedStremioAddonSnapshot,
+  PersistedStremioInstallState,
+} from './databasePluginRepository.ts';
 
 let db: BetterSqlite3.Database | null = null;
 let artworkRepository: ReturnType<typeof createDatabaseArtworkRepository> | null = null;
@@ -175,6 +188,26 @@ export function loadSettingsFromDatabase(): SettingsData | null {
 
 export function saveSettingsToDatabase(settings: SettingsData): void {
   saveSettingsRecord(getDb(), settings);
+}
+
+export function loadStremioAddonState(): PersistedStremioAddonSnapshot | null {
+  return loadStremioAddonStateRecord(getDb());
+}
+
+export function saveStremioAddonState(snapshot: unknown): PersistedStremioAddonSnapshot {
+  return saveStremioAddonStateRecord(getDb(), snapshot);
+}
+
+export function listProfileStremioAccess(profileId: string): string[] {
+  return listProfileStremioAccessRecords(getDb(), profileId);
+}
+
+export function hasProfileStremioAccess(profileId: string, addonId: string): boolean {
+  return hasProfileStremioAccessRecord(getDb(), profileId, addonId);
+}
+
+export function setProfileStremioAccess(profileId: string, addonId: string, enabled: boolean): boolean {
+  return setProfileStremioAccessRecord(getDb(), profileId, addonId, enabled);
 }
 
 export function getProgress(profileId: string, filePath: string): StoredProgress | null {
@@ -764,6 +797,7 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM custom_artwork;
     DELETE FROM playback_progress;
     DELETE FROM playback_track_preferences;
+    DELETE FROM profile_stremio_access;
     DELETE FROM profile_media_lists;
     DELETE FROM profile_library_access;
     DELETE FROM profile_restrictions;
@@ -771,6 +805,7 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM device_profile_selections;
     DELETE FROM device_profile_selection_revisions;
     DELETE FROM profiles;
+    DELETE FROM stremio_addons;
     DELETE FROM episode_files;
     DELETE FROM episodes;
     DELETE FROM seasons;

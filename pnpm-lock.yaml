@@ -47,6 +47,9 @@ importers:
       '@loom-media-server/media-core':
         specifier: workspace:*
         version: link:../../packages/media-core
+      '@loom-media-server/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
       '@loom-media-server/transcode-capabilities':
         specifier: workspace:*
         version: link:../../packages/transcode-capabilities
@@ -289,6 +292,12 @@ importers:
         version: 5.7.3
 
   packages/media-core: {}
+
+  packages/plugin-protocol:
+    devDependencies:
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
 
   packages/runtime-paths: {}
 
