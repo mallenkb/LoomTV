@@ -14,6 +14,7 @@ function TopPlayerControls({ visible, label, onBack, onClose }: TopPlayerControl
   return (
     <>
       <button
+        type="button"
         onClick={(event) => {
           event.stopPropagation();
           onBack();
@@ -33,6 +34,7 @@ function TopPlayerControls({ visible, label, onBack, onClose }: TopPlayerControl
       </div>
 
       <button
+        type="button"
         onClick={(event) => {
           event.stopPropagation();
           onClose();

@@ -44,6 +44,8 @@ type LibrarySettingsSectionProps = {
   backupStatus: string;
   clearDataStatus: string;
   isClearingData: boolean;
+  libraryActionError?: string;
+  onRetryLibraryAction?: () => void;
   onBackupDatabase: () => void;
   onClearAppData: () => void;
 };
@@ -74,6 +76,8 @@ export default function LibrarySettingsSection({
   backupStatus,
   clearDataStatus,
   isClearingData,
+  libraryActionError,
+  onRetryLibraryAction,
   onBackupDatabase,
   onClearAppData,
 }: LibrarySettingsSectionProps) {
@@ -94,6 +98,22 @@ export default function LibrarySettingsSection({
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {libraryActionError ? (
+            <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-3 text-sm text-red-100">
+              <div className="flex min-w-0 items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-300" />
+                <div className="min-w-0">
+                  <p className="font-semibold">Library update failed</p>
+                  <p className="mt-1 break-words text-red-100/85">{libraryActionError}</p>
+                </div>
+              </div>
+              {onRetryLibraryAction ? (
+                <Button type="button" variant="outline" onClick={onRetryLibraryAction} className="shrink-0 border-red-300/40 text-red-50 hover:bg-red-500/15">
+                  Try again
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           {(networkFolderCount > 0 || problemCount > 0) && (
             <div className={`mb-4 rounded-lg border p-3 text-sm ${
               problemCount > 0
@@ -125,7 +145,7 @@ export default function LibrarySettingsSection({
                   </div>
                   <Button variant="outline" onClick={() => addLibraryFolder(section.key)} className="gap-2 shrink-0">
                     <FolderPlus className="w-4 h-4" />
-                    Add
+                    Add folder
                   </Button>
                 </div>
 
@@ -148,7 +168,8 @@ export default function LibrarySettingsSection({
                         <button
                           type="button"
                           onClick={() => removeLibraryFolder(folder)}
-                          aria-label={`Remove ${folder}`}
+                          aria-label={`Remove ${customFolderNames[folder] || folder}`}
+                          title="Remove folder"
                           className="text-red-500 hover:text-red-400 p-1 shrink-0"
                         >
                           <X className="w-4 h-4" />
@@ -242,22 +263,22 @@ export default function LibrarySettingsSection({
                     style={{ width: `${Math.max(4, scanProgress)}%` }}
                   />
                 </div>
-                <p className="text-xs text-[var(--loom-muted)]">Syncing library progressively... {scanProgress}%</p>
+                <p className="text-xs text-[var(--loom-muted)]">Syncing library… {scanProgress}%</p>
               </div>
             )}
             <div className="flex flex-wrap gap-2">
               <Button onClick={scanLibrary} disabled={isScanning} className="gap-2">
                 <RefreshCw className={`w-4 h-4 ${isScanning ? 'loom-scan-spinner' : ''}`} />
-                {isScanning ? 'Syncing...' : problemCount > 0 ? 'Retry Incomplete Folders' : 'Quick Sync'}
+                {isScanning ? 'Syncing…' : problemCount > 0 ? 'Retry incomplete folders' : 'Quick sync'}
               </Button>
               <Button onClick={refreshMetadata} disabled={isScanning} variant="outline" className="gap-2">
-                Refresh Metadata
+                Refresh metadata
               </Button>
               <Button onClick={fullRescanLibrary} disabled={isScanning} variant="outline" className="gap-2">
-                Full Rescan
+                Full rescan
               </Button>
               <Button onClick={refreshLibrary} variant="outline" className="gap-2">
-                Refresh
+                Refresh library
               </Button>
             </div>
           </div>
@@ -368,7 +389,7 @@ export default function LibrarySettingsSection({
                 <div>
                   <p className="settings-destructive-title flex items-center gap-2 text-sm font-semibold text-white">
                     <Trash2 className="h-4 w-4 text-red-400" />
-                    Clear App Data
+                    Clear local app data
                   </p>
                   <p className="mt-1 text-xs text-[var(--loom-muted)]">
                     Removes saved library folders, scanned metadata, artwork, watch progress, and settings.
@@ -382,10 +403,17 @@ export default function LibrarySettingsSection({
                   className="settings-destructive-button gap-2 border-red-500/25 bg-red-500/10 text-red-100 hover:border-red-400/40 hover:bg-red-500/20 hover:text-red-50"
                 >
                   <Trash2 className="h-4 w-4" />
-                  {isClearingData ? 'Clearing...' : 'Clear Data'}
+                  {isClearingData ? 'Clearing…' : 'Clear data'}
                 </Button>
               </div>
-              {clearDataStatus && <p className="mt-3 text-sm text-[var(--loom-muted)]">{clearDataStatus}</p>}
+              {clearDataStatus && (
+                <p
+                  className={`mt-3 text-sm ${clearDataStatus.startsWith('Clear failed') ? 'text-red-200' : 'text-[var(--loom-muted)]'}`}
+                  role={clearDataStatus.startsWith('Clear failed') ? 'alert' : 'status'}
+                >
+                  {clearDataStatus}
+                </p>
+              )}
             </div>
           </div>
         </CardContent>

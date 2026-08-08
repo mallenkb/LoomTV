@@ -81,6 +81,28 @@ export interface TVShow extends MediaItem {
 
 export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 
+export type LibraryMutationOperation =
+  | 'refresh'
+  | 'scan'
+  | 'metadata-refresh'
+  | 'full-rescan'
+  | 'add-folder'
+  | 'remove-folder'
+  | 'clear-data'
+  | 'auto-sync';
+
+export class LibraryMutationError extends Error {
+  readonly operation: LibraryMutationOperation;
+  readonly cause?: unknown;
+
+  constructor(operation: LibraryMutationOperation, message: string, cause?: unknown) {
+    super(message);
+    this.name = 'LibraryMutationError';
+    this.operation = operation;
+    this.cause = cause;
+  }
+}
+
 export interface LibraryFolderGroups {
   movies: string[];
   tvShows: string[];
@@ -288,6 +310,15 @@ interface LibraryContextType {
   clearAppData: () => Promise<void>;
   setAutoSyncIntervalHours: (hours: number) => Promise<void>;
   hydrateLibraryItem: (mediaId: string) => Promise<MediaItem | null>;
+}
+
+function toLibraryMutationError(operation: LibraryMutationOperation, error: unknown): LibraryMutationError {
+  if (error instanceof LibraryMutationError) return error;
+  return new LibraryMutationError(
+    operation,
+    error instanceof Error ? error.message : 'The library could not be updated.',
+    error,
+  );
 }
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
@@ -499,6 +530,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       await loadPrimaryCatalog();
     } catch (error) {
       console.error('Failed to load library:', error);
+      throw toLibraryMutationError('refresh', error);
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
@@ -568,6 +600,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       else await loadPrimaryCatalog();
     } catch (error) {
       console.error('Failed to scan library:', error);
+      const operation = mode === 'quick' ? 'scan' : mode === 'metadata' ? 'metadata-refresh' : 'full-rescan';
+      throw toLibraryMutationError(operation, error);
     } finally {
       isScanningRef.current = false;
       dispatch({ type: 'SET_SCANNING', payload: false });
@@ -585,6 +619,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       if (index?.catalogVersion === 1) applyCompactIndex(index);
     } catch (error) {
       console.error('Failed to add library folder:', error);
+      throw toLibraryMutationError('add-folder', error);
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
@@ -596,6 +631,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       applyCompactIndex(index);
     } catch (error) {
       console.error('Failed to remove library folder:', error);
+      throw toLibraryMutationError('remove-folder', error);
     }
   };
 
@@ -609,7 +645,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: initialState.autoSyncIntervalHours });
     } catch (error) {
       console.error('Failed to clear app data:', error);
-      throw error;
+      throw toLibraryMutationError('clear-data', error);
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
@@ -617,11 +653,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const setAutoSyncIntervalHours = async (hours: number) => {
     const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 12;
+    const previousHours = stateRef.current.autoSyncIntervalHours;
     dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: normalizedHours });
     try {
       await desktopApi.saveSettings({ autoSyncIntervalHours: normalizedHours });
     } catch (error) {
       console.error('Failed to save auto sync interval:', error);
+      dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: previousHours });
+      throw toLibraryMutationError('auto-sync', error);
     }
   };
 

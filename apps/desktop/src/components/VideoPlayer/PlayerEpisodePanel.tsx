@@ -145,8 +145,10 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
   return (
     <button
       ref={buttonRef}
+      type="button"
       disabled={!file}
       onClick={() => file && goToEpisode(episode.season, episode.number)}
+      aria-label={`${isCurrent ? 'Now playing. ' : ''}${code}: ${episodeTitle}${watched ? '. Watched.' : inProgress ? '. In progress.' : ''}${!file ? '. File unavailable.' : ''}`}
       aria-current={isCurrent ? 'true' : undefined}
       data-shared-highlight-item
       data-shared-highlight-id={`${episode.season}-${episode.number}`}
@@ -292,6 +294,7 @@ export default function PlayerEpisodePanel({
 
   return (
     <aside
+      aria-label={`${title} episodes`}
       className="loom-no-drag player-side-panel absolute inset-y-0 right-0 z-50 flex flex-col bg-neutral-950 shadow-2xl"
       style={{ width: clampSidePanelWidth(episodePanelWidth), maxWidth: '40vw' }}
       onClick={(event) => event.stopPropagation()}
@@ -313,6 +316,7 @@ export default function PlayerEpisodePanel({
           </p>
         </div>
         <button
+          type="button"
           onClick={onClose}
           className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--loom-muted)] transition-colors hover:bg-white/10 hover:text-white"
           aria-label="Close episode panel"
@@ -359,7 +363,7 @@ export default function PlayerEpisodePanel({
                   <span>{seasonCode(season)}</span>
                   <span
                     className={`inline-flex min-w-[19px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none tabular-nums
-                      ${isActive ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/55'}`}
+                      ${isActive ? 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]' : 'bg-white/10 text-white/70'}`}
                   >
                     {seasonEpisodeCount}
                   </span>

@@ -214,6 +214,7 @@ export default function PlayerSettingsPanel({
           <p className="text-[10px] uppercase tracking-widest text-[var(--loom-accent)]/75">Subtitles, Audio, Video</p>
         </div>
         <button
+          type="button"
           onClick={onClose}
           className="text-[var(--loom-muted)] hover:text-white ml-2 shrink-0"
           aria-label="Close playback settings"
@@ -222,11 +223,14 @@ export default function PlayerSettingsPanel({
         </button>
       </div>
 
-      <div className="grid grid-cols-3 border-b border-white/10 text-xs font-bold uppercase tracking-wide text-white/55">
+      <div className="grid grid-cols-3 border-b border-white/10 text-xs font-bold uppercase tracking-wide text-white/75" role="tablist" aria-label="Playback settings sections">
         {(['subtitles', 'audio', 'video'] as ControlTab[]).map((tab) => (
           <button
             key={tab}
+            type="button"
             onClick={() => setMediaPanelTab(tab)}
+            role="tab"
+            aria-selected={mediaPanelTab === tab}
             className={`px-3 py-4 transition-colors ${mediaPanelTab === tab ? 'bg-white/5 text-white' : 'hover:bg-white/5 hover:text-white/80'}`}
           >
             {tab}
@@ -241,11 +245,13 @@ export default function PlayerSettingsPanel({
               <div>
                 <p className="mb-2 text-xs font-semibold text-white">Video track</p>
                 <div className="overflow-hidden rounded-lg bg-white/10">
-                  {videoTracks.length === 0 && <p className="px-3 py-2 text-white/50">No video tracks found</p>}
+                  {videoTracks.length === 0 && <p className="px-3 py-2 text-white/70">No video tracks found</p>}
                   {videoTracks.map((track, index) => (
                     <button
                       key={track.index}
+                      type="button"
                       onClick={() => selectVideoTrack(track.index)}
+                      aria-pressed={selectedVideoTrackIndex === track.index}
                       className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedVideoTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full ${selectedVideoTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
@@ -284,9 +290,14 @@ export default function PlayerSettingsPanel({
                   step={0.05}
                   value={playbackRate}
                   onChange={(event) => setPlaybackRate(Number(event.target.value))}
+                  aria-label="Playback speed"
+                  aria-valuemin={0.25}
+                  aria-valuemax={4}
+                  aria-valuenow={playbackRate}
+                  aria-valuetext={`${playbackRate.toFixed(2)} times speed`}
                   className="w-full accent-[var(--loom-accent)]"
                 />
-                <div className="mt-1 flex justify-between text-[10px] text-white/45">
+                <div className="mt-1 flex justify-between text-[10px] text-white/70">
                   <span>0.25x</span>
                   <span>1x</span>
                   <span>4x</span>
@@ -297,7 +308,7 @@ export default function PlayerSettingsPanel({
                 className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2"
                 aria-labelledby="advanced-settings-heading"
               >
-                <h3 id="advanced-settings-heading" className="text-xs font-semibold text-white/55">Advanced</h3>
+                <h3 id="advanced-settings-heading" className="text-xs font-semibold text-white/75">Advanced</h3>
                 <button
                   type="button"
                   onClick={onCorrectSkipTiming}
@@ -310,7 +321,7 @@ export default function PlayerSettingsPanel({
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 id="playback-information-heading" className="text-xs font-semibold text-white">Playback Information</h3>
-                      <p className="mt-1 text-[10px] text-white/45">Current engine and stream details</p>
+                      <p className="mt-1 text-[10px] text-white/70">Current engine and stream details</p>
                     </div>
                   </div>
                   <dl className="mt-3 space-y-2 text-xs">
@@ -324,13 +335,13 @@ export default function PlayerSettingsPanel({
                       ['Encode backend', playbackInformation.encodeBackend],
                     ].map(([label, value]) => (
                       <div key={label} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
-                        <dt className="text-white/55">{label}</dt>
+                        <dt className="text-white/70">{label}</dt>
                         <dd className="min-w-0 break-words text-right text-white/85">{value}</dd>
                       </div>
                     ))}
                   </dl>
                   {playbackInformation.note && (
-                    <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-white/45">
+                    <p className="mt-3 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-white/70">
                       {playbackInformation.note}
                     </p>
                   )}
@@ -345,7 +356,9 @@ export default function PlayerSettingsPanel({
                 <p className="mb-2 text-xs font-semibold text-white">Audio track</p>
                 <div className="overflow-hidden rounded-lg bg-white/10">
                   <button
+                    type="button"
                     onClick={() => selectAudioTrack(-1)}
+                    aria-pressed={selectedAudioTrackIndex === -1}
                     className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedAudioTrackIndex === -1 ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                   >
                     <span className={`h-2.5 w-2.5 rounded-full ${selectedAudioTrackIndex === -1 ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
@@ -354,7 +367,9 @@ export default function PlayerSettingsPanel({
                   {audioTracks.map((track, index) => (
                     <button
                       key={track.index}
+                      type="button"
                       onClick={() => selectAudioTrack(track.index)}
+                      aria-pressed={selectedAudioTrackIndex === track.index}
                       className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedAudioTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full ${selectedAudioTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
@@ -368,7 +383,7 @@ export default function PlayerSettingsPanel({
                 <p className="mb-2 text-xs font-semibold text-white">Audio delay</p>
                 {audioDelayAvailable ? (
                   <div className="rounded-lg bg-white/10 px-3 py-3">
-                    <div className="mb-2 flex items-center justify-between text-xs text-white/65">
+                    <div className="mb-2 flex items-center justify-between text-xs text-white/75">
                       <span>Sync</span>
                       <span className="text-[var(--loom-accent)]">{audioDelay.toFixed(2)}s</span>
                     </div>
@@ -379,18 +394,23 @@ export default function PlayerSettingsPanel({
                       step={0.05}
                       value={audioDelay}
                       onChange={(event) => updateAudioDelay(Number(event.target.value))}
+                      aria-label="Audio delay"
+                      aria-valuemin={-5}
+                      aria-valuemax={5}
+                      aria-valuenow={audioDelay}
+                      aria-valuetext={`${audioDelay.toFixed(2)} seconds`}
                       className="w-full accent-[var(--loom-accent)]"
                     />
                     <button
                       type="button"
                       onClick={() => updateAudioDelay(0)}
-                      className="mt-2 text-xs text-white/55 hover:text-white"
+                      className="mt-2 text-xs text-white/70 hover:text-white"
                     >
                       Reset delay
                     </button>
                   </div>
                 ) : (
-                  <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/55">
+                  <p className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/70">
                     Delay controls are available with native mpv playback.
                   </p>
                 )}
@@ -403,22 +423,24 @@ export default function PlayerSettingsPanel({
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold text-white">Subtitle</p>
-                  <p className="text-[10px] uppercase tracking-wide text-white/45">
+                  <p className="text-[10px] uppercase tracking-wide text-white/70">
                     Default {subtitlesDefaultEnabled ? 'on' : 'off'}
                   </p>
                 </div>
                 <div className="overflow-hidden rounded-lg bg-white/10">
                   <button
+                    type="button"
                     onClick={() => selectSubtitleTrack(-1)}
+                    aria-pressed={selectedSubtitleTrackIndex === -1}
                     className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                   >
                     <span className={`h-2.5 w-2.5 rounded-full ${selectedSubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
                     <span>Off</span>
                   </button>
-                  {subtitleTracks.length === 0 && <p className="px-3 py-2 text-xs text-white/50">No subtitle tracks found</p>}
+                  {subtitleTracks.length === 0 && <p className="px-3 py-2 text-xs text-white/70">No subtitle tracks found</p>}
                   {subtitleGroups.map((group) => (
                     <div key={group.key} className="border-t border-white/10 first:border-t-0">
-                      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/45">
+                      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/70">
                         {group.label}
                       </p>
                       {group.tracks.map((track) => {
@@ -426,7 +448,9 @@ export default function PlayerSettingsPanel({
                         return (
                           <button
                             key={track.index}
+                            type="button"
                             onClick={() => selectSubtitleTrack(track.index)}
+                            aria-pressed={selectedSubtitleTrackIndex === track.index}
                             className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                           >
                             <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${selectedSubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
@@ -443,11 +467,13 @@ export default function PlayerSettingsPanel({
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold text-white">Secondary subtitle</p>
-                    <p className="text-[10px] uppercase tracking-wide text-white/45">mpv</p>
+                    <p className="text-[10px] uppercase tracking-wide text-white/70">mpv</p>
                   </div>
                   <div className="max-h-48 overflow-y-auto rounded-lg bg-white/10">
                     <button
+                      type="button"
                       onClick={() => selectSecondarySubtitleTrack(-1)}
+                      aria-pressed={selectedSecondarySubtitleTrackIndex === -1}
                       className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSecondarySubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                     >
                       <span className={`h-2.5 w-2.5 rounded-full ${selectedSecondarySubtitleTrackIndex === -1 ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
@@ -456,7 +482,9 @@ export default function PlayerSettingsPanel({
                     {subtitleTracks.map((track, index) => (
                       <button
                         key={`secondary-${track.index}`}
+                        type="button"
                         onClick={() => selectSecondarySubtitleTrack(track.index)}
+                        aria-pressed={selectedSecondarySubtitleTrackIndex === track.index}
                         className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${selectedSecondarySubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]/25 text-white' : 'hover:bg-white/10'}`}
                       >
                         <span className={`h-2.5 w-2.5 rounded-full ${selectedSecondarySubtitleTrackIndex === track.index ? 'bg-[var(--loom-accent)]' : 'bg-white/60'}`} />
@@ -470,7 +498,7 @@ export default function PlayerSettingsPanel({
               {subtitleStyleCompatibilityMessage ? (
                 <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.08] p-4" role="status">
                   <p className="text-xs font-semibold text-white">Visual styling unavailable for this track</p>
-                  <p className="mt-1 text-xs leading-relaxed text-white/60">{subtitleStyleCompatibilityMessage}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-white/75">{subtitleStyleCompatibilityMessage}</p>
                 </div>
               ) : (
                 <div className="space-y-5 rounded-xl bg-white/[0.06] p-4">
@@ -486,6 +514,11 @@ export default function PlayerSettingsPanel({
                     step={1}
                     value={subtitleStyle.position}
                     onChange={(event) => updateSubtitleStyle('position', Number(event.target.value))}
+                    aria-label="Subtitle position"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={subtitleStyle.position}
+                    aria-valuetext={`${Math.round(subtitleStyle.position)} percent`}
                     className="w-full accent-[var(--loom-accent)]"
                   />
                 </div>
@@ -502,6 +535,11 @@ export default function PlayerSettingsPanel({
                     step={1}
                     value={subtitleStyle.fontSize}
                     onChange={(event) => updateSubtitleStyle('fontSize', Number(event.target.value))}
+                    aria-label="Subtitle size"
+                    aria-valuemin={24}
+                    aria-valuemax={96}
+                    aria-valuenow={subtitleStyle.fontSize}
+                    aria-valuetext={`${subtitleSizePercent(subtitleStyle.fontSize)} percent`}
                     className="w-full accent-[var(--loom-accent)]"
                   />
                 </div>
@@ -518,6 +556,11 @@ export default function PlayerSettingsPanel({
                     step={1}
                     value={subtitleStyle.borderWidth}
                     onChange={(event) => updateSubtitleStyle('borderWidth', Number(event.target.value))}
+                    aria-label="Subtitle outline"
+                    aria-valuemin={0}
+                    aria-valuemax={10}
+                    aria-valuenow={subtitleStyle.borderWidth}
+                    aria-valuetext={`${subtitleOutlinePercent(subtitleStyle.borderWidth)} percent`}
                     className="w-full accent-[var(--loom-accent)]"
                   />
                 </div>
