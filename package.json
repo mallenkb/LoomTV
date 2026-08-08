@@ -30,6 +30,7 @@
     "mobile:web": "pnpm --filter @loom-media-server/mobile web",
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
+    "pretest": "node --test scripts/production-audit-waiver-policy.test.cjs",
     "test": "pnpm -r --if-present test"
   },
   "devDependencies": {

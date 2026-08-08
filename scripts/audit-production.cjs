@@ -2,10 +2,22 @@ const { spawnSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 
+const {
+  orphanedWaiverIds,
+  plainRecord,
+  validateAuditInvocation,
+  validateAuditReport,
+  validateWaiver,
+} = require('./production-audit-waiver-policy.cjs')
+
 const workspaceRoot = path.resolve(__dirname, '..')
 const waiverPath = path.join(workspaceRoot, 'security', 'production-audit-waivers.json')
 const waiverDocument = JSON.parse(fs.readFileSync(waiverPath, 'utf8'))
-const waivers = waiverDocument.advisories || {}
+if (!plainRecord(waiverDocument.advisories)) {
+  console.error('Production-audit waiver document must contain an advisories object')
+  process.exit(1)
+}
+const waivers = waiverDocument.advisories
 
 const audit = spawnSync('corepack', ['pnpm', 'audit', '--prod', '--json'], {
   cwd: workspaceRoot,
@@ -15,6 +27,12 @@ const audit = spawnSync('corepack', ['pnpm', 'audit', '--prod', '--json'], {
 
 if (audit.error) {
   throw audit.error
+}
+
+const invocationError = validateAuditInvocation(audit.status, audit.signal)
+if (invocationError) {
+  process.stderr.write(audit.stderr || `${invocationError}\n`)
+  process.exit(1)
 }
 
 let report
@@ -30,80 +48,31 @@ if (report.error) {
   process.exit(1)
 }
 
-function listSourceFiles(sourceRoot) {
-  const files = []
-  const pending = [sourceRoot]
-
-  while (pending.length > 0) {
-    const current = pending.pop()
-    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      const entryPath = path.join(current, entry.name)
-      if (entry.isDirectory()) {
-        pending.push(entryPath)
-      } else if (/\.[cm]?[jt]sx?$/.test(entry.name)) {
-        files.push(entryPath)
-      }
-    }
-  }
-
-  return files
+const reportError = validateAuditReport(report)
+if (reportError) {
+  console.error(reportError)
+  process.exit(1)
 }
 
-function validateWaiver(advisory, waiver) {
-  if (waiver.module !== advisory.module_name) {
-    return `module changed from ${waiver.module} to ${advisory.module_name}`
-  }
-
-  const expiry = Date.parse(`${waiver.expires}T23:59:59Z`)
-  if (!Number.isFinite(expiry) || Date.now() > expiry) {
-    return `waiver expired on ${waiver.expires}`
-  }
-
-  const paths = (advisory.findings || []).flatMap((finding) => finding.paths || [])
-  if (
-    paths.length === 0 ||
-    paths.some(
-      (dependencyPath) =>
-        !waiver.allowedPathPrefixes.some((prefix) => dependencyPath.startsWith(prefix)),
-    )
-  ) {
-    return 'dependency path escaped the documented scope'
-  }
-
-  if (
-    waiver.requiredPathMarkers &&
-    paths.some(
-      (dependencyPath) =>
-        !waiver.requiredPathMarkers.some((marker) => dependencyPath.includes(marker)),
-    )
-  ) {
-    return 'dependency path is no longer confined to the documented non-runtime tooling'
-  }
-
-  if (waiver.sourceRoot && waiver.sourceAbsenceMarkers) {
-    const sourceRoot = path.join(workspaceRoot, waiver.sourceRoot)
-    const source = listSourceFiles(sourceRoot)
-      .map((filePath) => fs.readFileSync(filePath, 'utf8'))
-      .join('\n')
-    const detectedMarker = waiver.sourceAbsenceMarkers.find((marker) => source.includes(marker))
-    if (detectedMarker) {
-      return `excluded feature marker is now present: ${detectedMarker}`
-    }
-  }
-
-  return null
+function escapeWorkflowCommand(value) {
+  return value.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')
 }
 
 const advisories = Object.values(report.advisories || {})
 const gatedSeverities = new Set(['moderate', 'high', 'critical'])
+const gatedAdvisories = advisories.filter((advisory) => gatedSeverities.has(advisory.severity))
 const actionable = []
 const acceptedWaivers = []
 
-for (const advisory of advisories) {
-  if (!gatedSeverities.has(advisory.severity)) {
-    continue
-  }
+const staleWaiverIds = orphanedWaiverIds(advisories, waivers)
+if (staleWaiverIds.length > 0) {
+  console.error(
+    `Remove stale production-audit waiver(s) no longer reported by pnpm: ${staleWaiverIds.join(', ')}`,
+  )
+  process.exit(1)
+}
 
+for (const advisory of gatedAdvisories) {
   const advisoryId = advisory.github_advisory_id
   const waiver = waivers[advisoryId]
   if (!waiver) {
@@ -121,16 +90,20 @@ for (const advisory of advisories) {
 }
 
 for (const { advisory, waiver } of acceptedWaivers) {
-  console.warn(
+  const message =
     `WAIVED until ${waiver.expires}: ${advisory.github_advisory_id} ` +
-      `(${advisory.module_name}) — ${waiver.reason}`,
-  )
+    `(${advisory.module_name}, owner ${waiver.owner}) — ${waiver.reason}`
+  console.warn(message)
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    console.log(`::warning::${escapeWorkflowCommand(message)}`)
+  }
 }
 
 if (actionable.length === 0) {
   console.log(
-    `Workspace production audit passed: ${advisories.length - acceptedWaivers.length} ` +
-      `actionable advisories, ${acceptedWaivers.length} narrowly scoped waiver(s).`,
+    `Workspace production audit passed: 0 actionable moderate-or-higher advisories, ` +
+      `${acceptedWaivers.length} narrowly scoped waiver(s), ${advisories.length} total ` +
+      `advisory record(s).`,
   )
   process.exit(0)
 }
