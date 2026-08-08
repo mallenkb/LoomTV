@@ -10,6 +10,7 @@ import {
   DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS,
 } from './playback-session-registry.js';
 import { createTranscodeAdmission } from './transcode-admission.js';
+import { createTranscodeCacheQuota } from './transcode-cache-quota.js';
 
 const MIME_TYPES = {
   '.mp4': 'video/mp4',
@@ -25,6 +26,7 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const MEDIA_TOKEN_TTL_MS = 5 * 60 * 1000;
 const PLAYLIST_WAIT_MS = 20_000;
 const HLS_ABSOLUTE_TIMEOUT_MS = Math.max(DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS, SESSION_TTL_MS * 2);
+const HLS_NO_CLIENT_GRACE_MS = 30 * 1000;
 const PROCESS_TERM_GRACE_MS = 2_000;
 
 function json(res, status, payload) {
@@ -161,7 +163,7 @@ async function waitForFile(rootPath, filePath, timeoutMs, options = {}) {
   return false;
 }
 
-function terminateChild(child, graceMs = PROCESS_TERM_GRACE_MS) {
+export function terminateChild(child, graceMs = PROCESS_TERM_GRACE_MS) {
   if (!child || child.exitCode != null || child.signalCode) return Promise.resolve();
   return new Promise((resolve) => {
     let settled = false;
@@ -306,6 +308,9 @@ export function createHeadlessMediaService({
   playbackSessionOptions = {},
   transcodeAdmission,
   transcodeAdmissionOptions = {},
+  cacheQuotaOptions = {},
+  transcodeQuotaOptions = {},
+  cacheFileSystem,
   spawnProcess = spawn,
 } = {}) {
   const sessions = new Map();
@@ -314,12 +319,23 @@ export function createHeadlessMediaService({
   const now = typeof clock.now === 'function' ? clock.now : () => Date.now();
   const setTimeoutFn = typeof clock.setTimeout === 'function' ? clock.setTimeout : setTimeout;
   const clearTimeoutFn = typeof clock.clearTimeout === 'function' ? clock.clearTimeout : clearTimeout;
+  const setIntervalFn = typeof clock.setInterval === 'function' ? clock.setInterval : setInterval;
+  const clearIntervalFn = typeof clock.clearInterval === 'function' ? clock.clearInterval : clearInterval;
   const ownsPlaybackRegistry = !playbackSessionRegistry;
   const ownsAdmission = !transcodeAdmission;
   const cleanupTasks = new Set();
   let stopping = false;
   let stopPromise;
   let reconciliationPromise = null;
+  let quotaSweepPromise = null;
+  const cacheQuota = createTranscodeCacheQuota({
+    ...transcodeQuotaOptions,
+    ...cacheQuotaOptions,
+    rootPath: root,
+    now,
+    ...(cacheFileSystem ? { fileSystem: cacheFileSystem } : {}),
+  });
+  let quotaSweepTimer = null;
 
   function trackCleanup(task) {
     if (!task || typeof task.then !== 'function') return task;
@@ -385,7 +401,62 @@ export function createHeadlessMediaService({
     return reconciliationPromise;
   }
 
+  async function enforceCacheQuota() {
+    if (stopping) return null;
+    if (quotaSweepPromise) return quotaSweepPromise;
+    quotaSweepPromise = (async () => {
+      await reconcileOrphanedTranscodes();
+      const current = await cacheQuota.status();
+      const sessionsByAge = [...sessions.values()]
+        .filter((session) => !session.cleaned)
+        .sort((left, right) => left.lastActivityAt - right.lastActivityAt);
+      const oversized = sessionsByAge.filter((session) => (current.sessionBytes.get(session.id) || 0) > cacheQuota.maxSessionBytes);
+      const cleanup = new Set(oversized);
+      if (current.totalBytes + current.reservedBytes >= cacheQuota.maxTotalBytes
+        || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes)
+        || (current.freeBytes === null && cacheQuota.minFreeBytes > 0)) {
+        for (const session of sessionsByAge) cleanup.add(session);
+      }
+      for (const session of cleanup) {
+        trackCleanup(cleanupSession(session, { reason: 'transcode_quota_exceeded' }));
+      }
+      return current;
+    })().catch(() => null).finally(() => { quotaSweepPromise = null; });
+    return quotaSweepPromise;
+  }
+
+  async function enforceSessionQuota(session) {
+    try {
+      const current = await cacheQuota.sessionBytes(session.id);
+      const exceeded = current.bytes > cacheQuota.maxSessionBytes
+        || current.totalBytes + (cacheQuota.snapshot().reservedBytes || 0) >= cacheQuota.maxTotalBytes
+        || (current.freeBytes !== null && current.freeBytes < cacheQuota.minFreeBytes)
+        || (current.freeBytes === null && cacheQuota.minFreeBytes > 0);
+      if (!exceeded) return true;
+    } catch {
+      // A quota check that cannot inspect the cache is a failed admission, not
+      // permission to continue serving an unbounded output directory.
+    }
+    trackCleanup(cleanupSession(session, { reason: 'transcode_quota_exceeded' }));
+    return false;
+  }
+
+  function startQuotaSweeper() {
+    if (cacheQuota.sweepIntervalMs <= 0) return;
+    quotaSweepTimer = setIntervalFn(() => { void enforceCacheQuota(); }, cacheQuota.sweepIntervalMs);
+    quotaSweepTimer?.unref?.();
+  }
+
+  function touchTranscodeSession(session, touchOptions = {}) {
+    const touched = playbackRegistry.touch(session.registryId || session.id, now(), touchOptions);
+    if (touched) session.lastActivityAt = touched.lastActivityAt;
+    return touched;
+  }
+
+  startQuotaSweeper();
+
   function issuePlaybackToken(itemId, userId, action) {
+    if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
     const session = playbackRegistry.create({
       itemId,
       principalId: userId,
@@ -452,17 +523,21 @@ export function createHeadlessMediaService({
       session.cleanupStarting = false;
     }
     session.cleanupPromise = Promise.resolve().then(async () => {
-      await terminateChild(session.process, termGraceMs);
-      sessions.delete(session.id);
-      const permit = session.permit;
-      session.permit = null;
-      permit?.release?.();
-      // Never let a replaced session directory redefine the deletion root.
-      // Resolve it against the configured cache immediately before removal; an
-      // escaped or already-missing path is deliberately left alone.
-      await resolveContainedPath(configuredCacheDir, session.outputDir)
-        .then(({ realPath }) => fsPromises.rm(realPath, { recursive: true, force: true }))
-        .catch(() => undefined);
+      try {
+        await terminateChild(session.process, termGraceMs);
+        sessions.delete(session.id);
+        const permit = session.permit;
+        session.permit = null;
+        permit?.release?.();
+        // Never let a replaced session directory redefine the deletion root.
+        // Resolve it against the configured cache immediately before removal; an
+        // escaped or already-missing path is deliberately left alone.
+        await resolveContainedPath(configuredCacheDir, session.outputDir)
+          .then(({ realPath }) => fsPromises.rm(realPath, { recursive: true, force: true }))
+          .catch(() => undefined);
+      } finally {
+        cacheQuota.release(session.quotaReservationId || session.id);
+      }
     });
     return session.cleanupPromise;
   }
@@ -506,9 +581,17 @@ export function createHeadlessMediaService({
         session.fallbackAttempted = true;
         void resolveContainedPath(configuredCacheDir, session.outputDir)
           .then(({ realPath }) => fsPromises.rm(realPath, { recursive: true, force: true }))
-          .then(() => resolveContainedPath(configuredCacheDir, session.outputDir, { allowMissing: true }))
-          .then(() => fsPromises.mkdir(session.outputDir, { recursive: true }))
-          .then(() => resolveContainedPath(configuredCacheDir, session.outputDir))
+          .then(async () => {
+            if (session.cleaned || stopping) throw cancelledError();
+            await resolveContainedPath(configuredCacheDir, session.outputDir, { allowMissing: true });
+            await fsPromises.mkdir(session.outputDir, { recursive: true });
+            const containedOutput = (await resolveContainedPath(configuredCacheDir, session.outputDir)).realPath;
+            if (session.cleaned || stopping) {
+              await fsPromises.rm(containedOutput, { recursive: true, force: true }).catch(() => undefined);
+              throw cancelledError();
+            }
+            session.outputDir = containedOutput;
+          })
           .then(() => startProcess(session, { ...profile, backend: 'software', hardware: false }))
           .catch((error) => {
             session.error = error instanceof Error ? error.message : String(error);
@@ -540,18 +623,18 @@ export function createHeadlessMediaService({
     const transcodeRoot = await ensureTranscodeRoot();
     const health = transcoder.getHealth();
     const profile = normalizeProfile(requestedProfile, health);
+    await cacheQuota.checkAdmission();
     const permit = await admission.acquire(principal, { signal: requestSignal });
     let session;
     let createdOutputDir = null;
+    let quotaReservationId = null;
     let detachRequestAbort = null;
     try {
       if (stopping || requestSignal?.aborted) throw cancelledError();
       const id = randomUUID();
+      quotaReservationId = id;
+      await cacheQuota.reserve(id, principal.id);
       const outputDir = path.join(transcodeRoot, id);
-      await resolveContainedPath(configuredCacheDir, outputDir, { allowMissing: true });
-      await fsPromises.mkdir(outputDir, { recursive: true });
-      const containedOutputDir = (await resolveContainedPath(configuredCacheDir, outputDir)).realPath;
-      createdOutputDir = containedOutputDir;
       const registrySession = playbackRegistry.create({
         id,
         principalId: principal.id,
@@ -559,7 +642,8 @@ export function createHeadlessMediaService({
         itemId,
         action: 'hls',
         profile,
-        idleTimeoutMs: SESSION_TTL_MS,
+        idleTimeoutMs: HLS_NO_CLIENT_GRACE_MS,
+        activeIdleTimeoutMs: SESSION_TTL_MS,
         absoluteTimeoutMs: HLS_ABSOLUTE_TIMEOUT_MS,
       });
       session = {
@@ -570,7 +654,7 @@ export function createHeadlessMediaService({
         mediaRootPath: verified.rootRealPath,
         filePath: verified.realPath,
         fileId: verified.fileId,
-        outputDir: containedOutputDir,
+        outputDir,
         backend: profile.backend,
         profile,
         token: registrySession.token,
@@ -580,6 +664,7 @@ export function createHeadlessMediaService({
         fallbackAttempted: false,
         cleaned: false,
         permit,
+        quotaReservationId,
         abortController: new AbortController(),
       };
       if (requestSignal) {
@@ -589,6 +674,19 @@ export function createHeadlessMediaService({
         detachRequestAbort = () => requestSignal.removeEventListener('abort', onAbort);
       }
       sessions.set(id, session);
+      if (session.cleaned || stopping) throw cancelledError();
+      await resolveContainedPath(configuredCacheDir, outputDir, { allowMissing: true });
+      await fsPromises.mkdir(outputDir, { recursive: true });
+      const containedOutputDir = (await resolveContainedPath(configuredCacheDir, outputDir)).realPath;
+      createdOutputDir = containedOutputDir;
+      session.outputDir = containedOutputDir;
+      if (session.cleaned || stopping) {
+        // Shutdown/revocation can win the race with mkdir. Cleanup may already
+        // have completed before the directory became visible, so remove this
+        // newly-created path at the same boundary before reporting cancellation.
+        await fsPromises.rm(containedOutputDir, { recursive: true, force: true }).catch(() => undefined);
+        throw cancelledError();
+      }
       await startProcess(session, profile);
       const playlistPath = path.join(session.outputDir, 'index.m3u8');
       if (!await waitForFile(configuredCacheDir, playlistPath, PLAYLIST_WAIT_MS, {
@@ -615,6 +713,7 @@ export function createHeadlessMediaService({
       if (session) await cleanupSession(session, { reason: 'transcode_failed' });
       else {
         permit.release();
+        cacheQuota.release(quotaReservationId);
         if (createdOutputDir) await fsPromises.rm(createdOutputDir, { recursive: true, force: true }).catch(() => undefined);
       }
       if (['operation_cancelled', 'transcode_request_cancelled', 'transcode_admission_closed', 'server_draining'].includes(error?.code)) admission.recordCancelled?.();
@@ -690,7 +789,9 @@ export function createHeadlessMediaService({
       })
       .catch(() => null);
     if (source === null) return json(res, 404, { ok: false, error: 'playlist_not_ready' });
-    playbackRegistry.touch(session.registryId || session.id, now());
+    if (!touchTranscodeSession(session, { activate: true })) {
+      return json(res, 401, { ok: false, error: 'stream_token_invalid' });
+    }
     const token = encodeURIComponent(session.token);
     const playlist = source.replace(/^(segment-\d+\.ts)$/gm, `$1?token=${token}`);
     res.writeHead(200, {
@@ -748,7 +849,10 @@ export function createHeadlessMediaService({
     }
     const transcodeMatch = pathname.match(/^\/api\/media\/transcode\/([0-9a-f-]{36})\/(index\.m3u8|segment-\d{5}\.ts)$/i);
     if (transcodeMatch && (req.method === 'GET' || req.method === 'HEAD')) {
-      const token = url.searchParams.get('token') || '';
+      // Hls.js refreshes its loader headers when a lease rotates, which lets
+      // the client hand off the new capability without rebuilding the media
+      // source. Native HLS still uses the short-lived URL overlap below.
+      const token = tokenFromRequest(req, url);
       const playback = playbackRegistry.authorize(token, { action: 'hls' });
       const session = playback && playback.id === transcodeMatch[1] ? sessions.get(playback.id) : null;
       if (!session || session.cleaned) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
@@ -773,6 +877,7 @@ export function createHeadlessMediaService({
           return json(res, 409, { ok: false, error: 'stream_source_revoked' });
         }
       }
+      if (!await enforceSessionQuota(session)) return json(res, 507, { ok: false, error: 'transcode_cache_quota' });
       const filePath = path.join(session.outputDir, transcodeMatch[2]);
       if (transcodeMatch[2] === 'index.m3u8') {
         const result = await servePlaylist(req, res, session);
@@ -780,7 +885,7 @@ export function createHeadlessMediaService({
         return result;
       }
       return serveFile(req, res, configuredCacheDir, filePath, mimeFor(filePath), false, {}, null, () => {
-        playbackRegistry.touch(session.registryId || session.id, now());
+        touchTranscodeSession(session, { activate: true });
       });
     }
     const itemMatch = pathname.match(/^\/api\/media\/items\/([a-f0-9]{32})(?:\/(download))?$/i);
@@ -823,19 +928,22 @@ export function createHeadlessMediaService({
     issuePlaybackToken,
     async renewPlaybackSession(identifier, principal, itemId, action = undefined) {
       const current = playbackRegistry.authorize(identifier, {
-        ...(principal?.id ? { principalId: principal.id } : {}),
         ...(itemId ? { itemId } : {}),
         ...(action ? { action } : {}),
       }, now());
       if (!current) return null;
+      if (playbackRegistry.isSessionIdentifier?.(identifier) && !principal) return null;
       const resolvedPrincipal = principal || await adminService.getPrincipalById?.(current.principalId);
       if (!resolvedPrincipal) return null;
+      const owner = resolvedPrincipal.type === 'owner' || resolvedPrincipal.role === 'owner';
       const permitted = typeof adminService.authorizePrincipal !== 'function'
+        || owner
         || await adminService.authorizePrincipal(resolvedPrincipal, 'stream');
-      if (!permitted || resolvedPrincipal.id !== current.principalId) return null;
+      if (!permitted || (!owner && resolvedPrincipal.id !== current.principalId)) return null;
+      const targetItemId = itemId || current.itemId;
       if (typeof adminService.resolveMediaPath === 'function') {
         try {
-          const source = await adminService.resolveMediaPath(itemId, resolvedPrincipal);
+          const source = await adminService.resolveMediaPath(targetItemId, resolvedPrincipal);
           const session = sessions.get(current.id);
           const sameHlsFile = current.action !== 'hls' || (
             session && source.rootPath === session.mediaRootPath
@@ -848,14 +956,31 @@ export function createHeadlessMediaService({
         }
       }
       const renewed = playbackRegistry.renew(identifier, {
-        principalId: resolvedPrincipal.id,
-        ...(itemId ? { itemId } : {}),
+        ...(!owner ? { principalId: resolvedPrincipal.id } : {}),
+        itemId: targetItemId,
         ...(action ? { action } : {}),
       }, now());
       if (!renewed) return null;
       const session = sessions.get(renewed.id);
       if (session) session.token = renewed.token;
       return renewed;
+    },
+    async stopPlaybackSession(identifier, principal, itemId) {
+      const current = playbackRegistry.authorize(identifier, {
+        ...(itemId ? { itemId } : {}),
+        action: ['direct', 'hls'],
+      }, now());
+      if (!current) return null;
+      const owner = principal?.type === 'owner' || principal?.role === 'owner';
+      if (playbackRegistry.isSessionIdentifier?.(identifier) && !principal) return null;
+      if (principal && principal.id !== current.principalId && !owner) return null;
+      if (principal && !owner
+        && typeof adminService.authorizePrincipal === 'function'
+        && !await adminService.authorizePrincipal(principal, 'stream')) return null;
+      const session = sessions.get(current.id);
+      if (session) trackCleanup(cleanupSession(session, { reason: 'user_stopped' }));
+      else playbackRegistry.revoke(identifier, 'user_stopped', now());
+      return { id: current.id, action: current.action, stopped: true };
     },
     revokePlaybackSession(identifier, reason = 'user_revoked') {
       return playbackRegistry.revoke(identifier, reason, now());
@@ -870,7 +995,11 @@ export function createHeadlessMediaService({
       return playbackRegistry.revokeAll(reason, now());
     },
     getAdmissionHealth() {
-      return admission.stats();
+      return { ...admission.stats(), quota: cacheQuota.snapshot() };
+    },
+    async getCacheQuotaHealth() {
+      await cacheQuota.status();
+      return cacheQuota.snapshot();
     },
     async listSessions() {
       return playbackRegistry.list(now()).filter((entry) => entry.action === 'direct' || entry.action === 'hls').map((entry) => {
@@ -899,11 +1028,15 @@ export function createHeadlessMediaService({
         ? Math.max(0, Math.min(30_000, Math.trunc(options.termGraceMs)))
         : PROCESS_TERM_GRACE_MS;
       stopPromise = (async () => {
+        if (quotaSweepTimer) clearIntervalFn(quotaSweepTimer);
+        quotaSweepTimer = null;
+        if (quotaSweepPromise) await Promise.allSettled([quotaSweepPromise]);
         if (ownsAdmission) admission.close();
         const activeSessions = [...sessions.values()];
         await Promise.all(activeSessions.map((session) => trackCleanup(cleanupSession(session, { reason: 'shutdown', termGraceMs }))));
         if (cleanupTasks.size) await Promise.allSettled([...cleanupTasks]);
         if (ownsPlaybackRegistry) playbackRegistry.close('shutdown');
+        else playbackRegistry.revokeAll?.('shutdown', now());
         await reconcileOrphanedTranscodes();
       })();
       return stopPromise;

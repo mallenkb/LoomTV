@@ -84,6 +84,11 @@ export function createHeadlessServer(options) {
     const port = address.port || options.port;
     const transcoderHealth = transcoder.getHealth();
     const admission = mediaService?.getAdmissionHealth?.();
+    const quotaPromise = mediaService?.getCacheQuotaHealth?.();
+    const quota = quotaPromise ? await Promise.resolve(quotaPromise).catch(() => null) : null;
+    const admissionHealth = admission
+      ? { ...admission, ...(quota ? { quota } : {}) }
+      : quota ? { quota } : null;
     return {
       ok: true,
       status: draining ? 'draining' : 'ready',
@@ -123,7 +128,7 @@ export function createHeadlessServer(options) {
         transcoding: transcoderHealth.available,
         hardwareAcceleration: transcoderHealth.hardwareAcceleration,
       },
-      transcoder: { ...transcoderHealth, ...(admission ? { admission } : {}) },
+      transcoder: { ...transcoderHealth, ...(admissionHealth ? { admission: admissionHealth } : {}) },
     };
   };
 
@@ -150,6 +155,9 @@ export function createHeadlessServer(options) {
     playbackSessionOptions: options.playbackSessionOptions,
     transcodeAdmission: options.transcodeAdmission,
     transcodeAdmissionOptions: options.transcodeAdmissionOptions,
+    cacheQuotaOptions: options.cacheQuotaOptions,
+    transcodeQuotaOptions: options.transcodeQuotaOptions,
+    cacheFileSystem: options.cacheFileSystem,
     spawnProcess: options.spawnProcess,
   });
   const adminPage = createAdminPage({ htmlPath: options.adminHtmlPath });
