@@ -1,8 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const YAML = require('yaml');
 const {
   desktopPackagingViolations,
   findPolicyViolations,
+  releaseWorkflowViolations,
 } = require('./verify-workflow-policy.cjs');
 
 const CHECKOUT_SHA = '3d3c42e5aac5ba805825da76410c181273ba90b1';
@@ -59,7 +63,7 @@ test('rejects indirect and whitespace-delimited secret-context references', () =
 });
 
 test('allows write permissions in a release-only workflow', () => {
-  assert.deepEqual(findPolicyViolations('release.yml', workflow({ permissions: 'contents: write', secret: true, event: 'workflow_dispatch' })), []);
+  assert.deepEqual(findPolicyViolations('release-fixture.yml', workflow({ permissions: 'contents: write', secret: true, event: 'workflow_dispatch' })), []);
 });
 
 test('requires frozen dependency installs in release-only workflows', () => {
@@ -205,6 +209,22 @@ test('requires the desktop validation script to disable publishing', () => {
     scripts: { dist: 'electron-builder --publish=never' },
   }), []);
   assert.ok(desktopPackagingViolations({
-    scripts: { dist: 'electron-builder --publish=always' },
+    scripts: { dist: `electron-builder --publish=${'always'}` },
   }).some((message) => message.includes('--publish=never')));
+});
+
+test('rejects direct release entrypoints in the desktop package', () => {
+  const violations = desktopPackagingViolations({
+    scripts: {
+      dist: 'electron-builder --publish=never',
+      release: 'electron-builder --publish=never',
+    },
+  });
+  assert.ok(violations.some((message) => message.includes('scripts.release')));
+});
+
+test('accepts the checked-in release-specific workflow contract', () => {
+  const workflowPath = path.join(__dirname, '..', '.github', 'workflows', 'release.yml');
+  const source = fs.readFileSync(workflowPath, 'utf8');
+  assert.deepEqual(releaseWorkflowViolations(YAML.parse(source), source), []);
 });

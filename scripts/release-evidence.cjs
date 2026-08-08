@@ -6,9 +6,51 @@ const path = require('node:path');
 const { parseReleaseTag } = require('./release-identity.cjs');
 
 const MANIFEST_NAME = 'release-manifest.json';
-const PROVENANCE_NAME = 'release-provenance.json';
 const CHECKSUMS_NAME = 'SHA256SUMS';
-const EVIDENCE_NAMES = new Set([MANIFEST_NAME, PROVENANCE_NAME, CHECKSUMS_NAME]);
+const ATTESTATION_PREDICATE = 'https://slsa.dev/provenance/v1';
+const EVIDENCE_NAMES = new Set([MANIFEST_NAME, CHECKSUMS_NAME]);
+
+// This is the production release contract.  Keep this list in lockstep with
+// apps/desktop/package.json so a new platform or architecture cannot silently
+// enter the updater feed without changing the manifest contract.
+const TARGET_MATRIX = Object.freeze([
+  Object.freeze({
+    id: 'mac-arm64',
+    platform: 'macOS',
+    arch: 'arm64',
+    stem: 'mac-arm64',
+    installerExtensions: Object.freeze(['dmg', 'zip']),
+    updaterMetadata: 'latest-mac.yml',
+    updaterExtensions: Object.freeze(['zip']),
+  }),
+  Object.freeze({
+    id: 'mac-x64',
+    platform: 'macOS',
+    arch: 'x64',
+    stem: 'mac-x64',
+    installerExtensions: Object.freeze(['dmg', 'zip']),
+    updaterMetadata: 'latest-mac.yml',
+    updaterExtensions: Object.freeze(['zip']),
+  }),
+  Object.freeze({
+    id: 'win-x64',
+    platform: 'Windows',
+    arch: 'x64',
+    stem: 'win-x64',
+    installerExtensions: Object.freeze(['exe']),
+    updaterMetadata: 'latest.yml',
+    updaterExtensions: Object.freeze(['exe']),
+  }),
+  Object.freeze({
+    id: 'linux-x64',
+    platform: 'Linux',
+    arch: 'x64',
+    stem: 'linux-x64',
+    installerExtensions: Object.freeze(['deb', 'rpm', 'AppImage']),
+    updaterMetadata: 'latest-linux.yml',
+    updaterExtensions: Object.freeze(['AppImage']),
+  }),
+]);
 
 function parseArguments(argv) {
   const values = { verify: false };
@@ -85,6 +127,64 @@ function artifactKind(name) {
   return 'updater-metadata';
 }
 
+function expectedTargetMatrix(version) {
+  return TARGET_MATRIX.map((target) => ({
+    id: target.id,
+    platform: target.platform,
+    arch: target.arch,
+    artifacts: target.installerExtensions.map((extension) => `LoomTV-${version}-${target.stem}.${extension}`),
+    updaterMetadata: target.updaterMetadata,
+  }));
+}
+
+function expectedUpdaterCoverage(version) {
+  return [...new Set(TARGET_MATRIX.map((target) => target.updaterMetadata))].map((metadata) => {
+    const targets = TARGET_MATRIX.filter((target) => target.updaterMetadata === metadata);
+    return {
+      metadata,
+      targetIds: targets.map((target) => target.id),
+      requiredAssets: [...new Set(targets.flatMap((target) => target.updaterExtensions
+        .map((extension) => `LoomTV-${version}-${target.stem}.${extension}`)))],
+    };
+  });
+}
+
+function metadataTarget(metadataName) {
+  const targets = TARGET_MATRIX.filter((target) => target.updaterMetadata === metadataName);
+  if (targets.length === 0) return undefined;
+  return {
+    metadata: metadataName,
+    targetIds: targets.map((target) => target.id),
+  };
+}
+
+function artifactDescriptor(name, version) {
+  for (const target of TARGET_MATRIX) {
+    for (const extension of target.installerExtensions) {
+      const artifactName = `LoomTV-${version}-${target.stem}.${extension}`;
+      if (name === artifactName) {
+        return {
+          targetId: target.id,
+          platform: target.platform,
+          arch: target.arch,
+          extension,
+          blockmap: false,
+        };
+      }
+      if (name === `${artifactName}.blockmap`) {
+        return {
+          targetId: target.id,
+          platform: target.platform,
+          arch: target.arch,
+          extension,
+          blockmap: true,
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
 function assetMap(files, rootPath) {
   const map = new Map();
   for (const filePath of files) {
@@ -112,41 +212,80 @@ function validateArtifactSet(assetEntries, version) {
   const assetNames = assetEntries
     .filter((entry) => isReleaseArtifact(entry.name))
     .map((entry) => entry.name);
+  const expectedMatrix = expectedTargetMatrix(version);
+  const requiredArtifacts = expectedMatrix.flatMap((target) => target.artifacts);
 
-  if (!assetNames.some((name) => /\.dmg$/i.test(name))) failures.push('macOS DMG is missing.');
-  if (!assetNames.some((name) => /\.zip$/i.test(name))) failures.push('macOS ZIP is missing.');
-  if (!assetNames.some((name) => /\.exe$/i.test(name))) failures.push('Windows installer is missing.');
-  if (!assetNames.some((name) => /\.deb$/i.test(name))) failures.push('Linux DEB package is missing.');
-  if (!assetNames.some((name) => /\.rpm$/i.test(name))) failures.push('Linux RPM package is missing.');
-  if (!assetNames.some((name) => /\.AppImage$/i.test(name))) failures.push('Linux AppImage is missing.');
-  for (const metadataName of ['latest-mac.yml', 'latest.yml', 'latest-linux.yml']) {
-    if (!names.has(metadataName)) failures.push(`${metadataName} updater metadata is missing.`);
+  for (const name of requiredArtifacts) {
+    if (!names.has(name)) failures.push(`Required ${name} release target is missing.`);
   }
 
   for (const name of assetNames) {
-    if (!/^latest/i.test(name) && !name.includes(`-${version}-`)) {
-      failures.push(`Release artifact ${name} does not carry release version ${version}.`);
+    if (/^latest/i.test(name)) {
+      if (!expectedUpdaterCoverage(version).some((coverage) => coverage.metadata === name)) {
+        failures.push(`Unsupported updater metadata is present: ${name}.`);
+      }
+      continue;
+    }
+    if (!artifactDescriptor(name, version)) {
+      failures.push(`Unsupported or stale release artifact name: ${name}.`);
     }
   }
 
-  for (const entry of assetEntries.filter((candidate) => /^latest/i.test(candidate.name))) {
-    if (!entry.filePath || !fs.existsSync(entry.filePath)) {
-      failures.push(`${entry.name} is missing from the release asset directory.`);
+  for (const coverage of expectedUpdaterCoverage(version)) {
+    const entry = assetEntries.find((candidate) => candidate.name === coverage.metadata);
+    if (!entry?.filePath || !fs.existsSync(entry.filePath)) {
+      failures.push(`${coverage.metadata} updater metadata is missing.`);
       continue;
     }
     const source = fs.readFileSync(entry.filePath, 'utf8');
-    const versionLine = new RegExp(`^version:\\s*${version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'mi');
+    const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const versionLine = new RegExp(`^version:\\s*${escapedVersion}\\s*$`, 'mi');
     if (!versionLine.test(source)) {
       failures.push(`${entry.name} does not identify updater version ${version}.`);
     }
     const references = updaterReferences(source);
     if (references.length === 0) failures.push(`${entry.name} does not reference an installer asset.`);
+    const allowedReferences = new Set([
+      ...coverage.requiredAssets,
+      ...coverage.requiredAssets.map((name) => `${name}.blockmap`),
+    ]);
     for (const reference of references) {
       if (!names.has(reference)) failures.push(`${entry.name} references missing asset ${reference}.`);
-      if (!reference.includes(`-${version}-`)) failures.push(`${entry.name} references stale asset ${reference}.`);
+      if (!allowedReferences.has(reference)) {
+        failures.push(`${entry.name} references asset outside its exact target coverage: ${reference}.`);
+      }
+      if (!artifactDescriptor(reference, version)) {
+        failures.push(`${entry.name} references stale or unsupported asset ${reference}.`);
+      }
+    }
+    for (const requiredAsset of coverage.requiredAssets) {
+      if (!references.includes(requiredAsset)) {
+        failures.push(`${entry.name} does not cover required updater asset ${requiredAsset}.`);
+      }
     }
   }
 
+  return failures;
+}
+
+function validateManifestPolicy(manifest, version) {
+  const failures = [];
+  if (JSON.stringify(manifest.targetMatrix) !== JSON.stringify(expectedTargetMatrix(version))) {
+    failures.push('Release manifest targetMatrix does not equal the exact production platform/architecture matrix.');
+  }
+  if (JSON.stringify(manifest.updaterCoverage) !== JSON.stringify(expectedUpdaterCoverage(version))) {
+    failures.push('Release manifest updaterCoverage does not equal the exact updater target coverage.');
+  }
+  const expectedEvidence = {
+    checksums: CHECKSUMS_NAME,
+    attestations: {
+      provider: 'GitHub artifact attestations',
+      predicateType: ATTESTATION_PREDICATE,
+    },
+  };
+  if (JSON.stringify(manifest.evidence) !== JSON.stringify(expectedEvidence)) {
+    failures.push('Release manifest evidence must point to checksums and GitHub/SLSA attestations.');
+  }
   return failures;
 }
 
@@ -182,57 +321,40 @@ function createEvidence(values) {
   if (failures.length > 0) throw new Error(`Release artifact validation failed:\n- ${failures.join('\n- ')}`);
 
   const manifest = {
-    manifestVersion: 1,
+    manifestVersion: 2,
     release: {
       tag,
       version,
       commit,
       tagObject,
     },
+    targetMatrix: expectedTargetMatrix(version),
+    updaterCoverage: expectedUpdaterCoverage(version),
     assets: entries.map((entry) => ({
       name: entry.name,
       path: entry.path,
       kind: artifactKind(entry.name),
+      target: artifactDescriptor(entry.name, version) || metadataTarget(entry.name),
       size: fs.statSync(entry.filePath).size,
       sha256: sha256File(entry.filePath),
     })),
     evidence: {
       checksums: CHECKSUMS_NAME,
-      provenance: PROVENANCE_NAME,
+      attestations: {
+        provider: 'GitHub artifact attestations',
+        predicateType: ATTESTATION_PREDICATE,
+      },
     },
   };
-  const manifestSource = writeJson(path.join(rootPath, MANIFEST_NAME), manifest);
-  const provenance = {
-    provenanceVersion: 1,
-    release: {
-      tag,
-      version,
-      commit,
-      tagObject,
-      ref: `refs/tags/${tag}`,
-    },
-    source: {
-      repository: process.env.GITHUB_REPOSITORY || 'mallenkb/LoomTV',
-      workflow: process.env.GITHUB_WORKFLOW || 'Release',
-      runId: process.env.GITHUB_RUN_ID || 'local',
-      runAttempt: process.env.GITHUB_RUN_ATTEMPT || 'local',
-    },
-    builder: {
-      node: process.version,
-      packageManager: 'pnpm@11.20.0',
-      runner: process.env.RUNNER_OS || process.platform,
-    },
-    manifestSha256: sha256Buffer(manifestSource),
-  };
-  writeJson(path.join(rootPath, PROVENANCE_NAME), provenance);
+  writeJson(path.join(rootPath, MANIFEST_NAME), manifest);
 
-  const checksumEntries = [...entries, ...[MANIFEST_NAME, PROVENANCE_NAME].map((name) => ({
-    filePath: path.join(rootPath, name),
-    name,
-  }))].sort((left, right) => left.name.localeCompare(right.name));
+  const checksumEntries = [...entries, {
+    filePath: path.join(rootPath, MANIFEST_NAME),
+    name: MANIFEST_NAME,
+  }].sort((left, right) => left.name.localeCompare(right.name));
   const checksums = `${checksumEntries.map((entry) => `${sha256File(entry.filePath)}  ${entry.name}`).join('\n')}\n`;
   fs.writeFileSync(path.join(rootPath, CHECKSUMS_NAME), checksums, 'utf8');
-  console.log(`Prepared ${entries.length} release assets plus checksums, manifest, and provenance evidence.`);
+  console.log(`Prepared ${entries.length} release assets plus checksums, manifest, and GitHub/SLSA attestation requirements.`);
 }
 
 function resolveNamedFile(fileMap, rootPath, manifestEntry) {
@@ -241,7 +363,9 @@ function resolveNamedFile(fileMap, rootPath, manifestEntry) {
   }
   const direct = path.resolve(rootPath, manifestEntry.path);
   const relative = path.relative(rootPath, direct);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || path.basename(direct) !== manifestEntry.name) {
+    return undefined;
+  }
   if (fs.existsSync(direct)) return direct;
   return fileMap.get(manifestEntry.name)?.filePath;
 }
@@ -256,36 +380,27 @@ function verifyEvidence(values) {
   const files = collectFiles(rootPath);
   const map = assetMap(files, rootPath);
   const manifestPath = path.join(rootPath, MANIFEST_NAME);
-  const provenancePath = path.join(rootPath, PROVENANCE_NAME);
   const checksumsPath = path.join(rootPath, CHECKSUMS_NAME);
-  for (const filePath of [manifestPath, provenancePath, checksumsPath]) {
+  for (const filePath of [manifestPath, checksumsPath]) {
     if (!fs.existsSync(filePath)) throw new Error(`Missing release evidence file: ${path.basename(filePath)}`);
   }
 
   let manifest;
-  let provenance;
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    provenance = JSON.parse(fs.readFileSync(provenancePath, 'utf8'));
   } catch (error) {
-    throw new Error(`Release evidence JSON is invalid: ${String(error)}`);
+    throw new Error(`Release manifest JSON is invalid: ${String(error)}`);
   }
-  if (manifest.manifestVersion !== 1) throw new Error('Unsupported release manifest version.');
+  if (manifest.manifestVersion !== 2) throw new Error('Unsupported release manifest version.');
   if (manifest.release?.tag !== tag
     || manifest.release?.version !== version
     || manifest.release?.commit !== commit
     || manifest.release?.tagObject !== tagObject) {
     throw new Error('Release manifest identity does not match the protected release ref.');
   }
-  if (provenance.provenanceVersion !== 1
-    || provenance.release?.tag !== tag
-    || provenance.release?.version !== version
-    || provenance.release?.commit !== commit
-    || provenance.release?.tagObject !== tagObject) {
-    throw new Error('Release provenance identity does not match the protected release ref.');
-  }
-  if (provenance.manifestSha256 !== sha256File(manifestPath)) {
-    throw new Error('Release provenance does not cover the exact release manifest.');
+  const manifestPolicyFailures = validateManifestPolicy(manifest, version);
+  if (manifestPolicyFailures.length > 0) {
+    throw new Error(`Release manifest policy validation failed:\n- ${manifestPolicyFailures.join('\n- ')}`);
   }
 
   const manifestEntries = Array.isArray(manifest.assets) ? manifest.assets : [];
@@ -298,7 +413,14 @@ function verifyEvidence(values) {
     throw new Error(`Release manifest validation failed:\n- ${manifestFailures.join('\n- ')}`);
   }
 
-  const expectedNames = new Set([...manifestEntries.map((entry) => entry.name), MANIFEST_NAME, PROVENANCE_NAME, CHECKSUMS_NAME]);
+  for (const entry of manifestEntries) {
+    const expectedTarget = artifactDescriptor(entry.name, version) || metadataTarget(entry.name);
+    if (JSON.stringify(entry.target) !== JSON.stringify(expectedTarget)) {
+      throw new Error(`Release manifest target identity mismatch for ${entry.name}.`);
+    }
+  }
+
+  const expectedNames = new Set([...manifestEntries.map((entry) => entry.name), MANIFEST_NAME, CHECKSUMS_NAME]);
   const actualNames = new Set(map.keys());
   for (const name of expectedNames) if (!actualNames.has(name)) throw new Error(`Release evidence is missing ${name}.`);
   for (const name of actualNames) if (!expectedNames.has(name)) throw new Error(`Release evidence contains unexpected file ${name}.`);
@@ -331,7 +453,7 @@ function verifyEvidence(values) {
       throw new Error(`SHA256SUMS mismatch for ${name}.`);
     }
   }
-  console.log(`Verified ${manifestEntries.length} release assets, checksums, manifest, and provenance.`);
+  console.log(`Verified ${manifestEntries.length} release assets, checksums, exact target matrix, and GitHub/SLSA subjects.`);
 }
 
 if (require.main === module) {
@@ -346,9 +468,17 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ATTESTATION_PREDICATE,
   CHECKSUMS_NAME,
+  createEvidence,
+  EVIDENCE_NAMES,
   MANIFEST_NAME,
-  PROVENANCE_NAME,
+  TARGET_MATRIX,
+  artifactDescriptor,
+  expectedTargetMatrix,
+  expectedUpdaterCoverage,
   isReleaseArtifact,
   validateArtifactSet,
+  validateManifestPolicy,
+  verifyEvidence,
 };
