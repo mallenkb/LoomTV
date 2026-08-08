@@ -1830,7 +1830,7 @@ export function createStyles(theme: MobileThemeColors) {
     borderColor: accent,
   },
   playerStatusButtonPrimaryText: {
-    color: '#000000',
+    color: accentForeground,
     fontSize: 14,
     fontWeight: '800',
   },

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { useLibrary } from '@/contexts/LibraryContext';
+import { LibraryMutationError, useLibrary, type LibraryFolderKind } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LibVlcAvailability, type LocalSegmentAnalysisStatus, type MpvAvailability, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useConfirm } from '@/components/ConfirmProvider';
@@ -58,6 +58,8 @@ type SavedPlaybackSettings = {
   skipBackSeconds: number;
   skipForwardSeconds: number;
 };
+
+type LibraryAction = () => Promise<void>;
 
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
   return [
@@ -179,6 +181,7 @@ export default function Settings() {
   const [backupStatus, setBackupStatus] = useState('');
   const [clearDataStatus, setClearDataStatus] = useState('');
   const [isClearingData, setIsClearingData] = useState(false);
+  const [libraryActionError, setLibraryActionError] = useState<{ message: string; action: LibraryAction } | null>(null);
   const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
   const [isTogglingNetworkSharing, setIsTogglingNetworkSharing] = useState(false);
@@ -225,6 +228,59 @@ export default function Settings() {
       return false;
     }
   }, []);
+
+  const runLibraryAction = useCallback(async (action: LibraryAction) => {
+    setLibraryActionError(null);
+    try {
+      await action();
+    } catch (error) {
+      setLibraryActionError({
+        message: error instanceof LibraryMutationError
+          ? error.message
+          : error instanceof Error ? error.message : 'The library could not be updated.',
+        action,
+      });
+    }
+  }, []);
+
+  const retryLibraryAction = useCallback(() => {
+    if (libraryActionError) void runLibraryAction(libraryActionError.action);
+  }, [libraryActionError, runLibraryAction]);
+
+  const handleAddLibraryFolder = useCallback((kind: LibraryFolderKind) => {
+    void runLibraryAction(() => addLibraryFolder(kind));
+  }, [addLibraryFolder, runLibraryAction]);
+
+  const handleRemoveLibraryFolder = useCallback(async (folder: string) => {
+    const confirmed = await confirm({
+      title: 'Remove this library folder?',
+      description: `LoomTV will stop scanning “${folder}”. Existing media files will not be deleted, but the folder will disappear from the library after the next successful sync.`,
+      confirmLabel: 'Remove folder',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    void runLibraryAction(() => removeLibraryFolder(folder));
+  }, [confirm, removeLibraryFolder, runLibraryAction]);
+
+  const handleScanLibrary = useCallback(() => {
+    void runLibraryAction(scanLibrary);
+  }, [runLibraryAction, scanLibrary]);
+
+  const handleRefreshMetadata = useCallback(() => {
+    void runLibraryAction(refreshMetadata);
+  }, [refreshMetadata, runLibraryAction]);
+
+  const handleFullRescanLibrary = useCallback(() => {
+    void runLibraryAction(fullRescanLibrary);
+  }, [fullRescanLibrary, runLibraryAction]);
+
+  const handleRefreshLibrary = useCallback(() => {
+    void runLibraryAction(refreshLibrary);
+  }, [refreshLibrary, runLibraryAction]);
+
+  const handleAutoSyncIntervalChange = useCallback((hours: number) => {
+    void runLibraryAction(() => setAutoSyncIntervalHours(hours));
+  }, [runLibraryAction, setAutoSyncIntervalHours]);
 
   const refreshMpvAvailability = useCallback(async () => {
     if (isRemoteLibraryMode) {
@@ -339,11 +395,14 @@ export default function Settings() {
 
   const renameFolder = useCallback((folder: string, name: string) => {
     const trimmed = name.trim();
+    const previous = customFolderNames;
     const next = { ...customFolderNames };
     if (trimmed && trimmed !== folder) next[folder] = trimmed;
     else delete next[folder];
     setCustomFolderNames(next);
-    void persistSettings({ customFolderNames: next });
+    void persistSettings({ customFolderNames: next }).then((saved) => {
+      if (!saved) setCustomFolderNames(previous);
+    });
   }, [customFolderNames, persistSettings]);
 
   useEffect(() => {
@@ -922,8 +981,8 @@ export default function Settings() {
           <LibrarySettingsSection
             folderSections={folderSections}
             folderStatuses={libraryFolderStatuses}
-            addLibraryFolder={addLibraryFolder}
-            removeLibraryFolder={removeLibraryFolder}
+            addLibraryFolder={handleAddLibraryFolder}
+            removeLibraryFolder={handleRemoveLibraryFolder}
             customFolderNames={customFolderNames}
             onRenameFolder={renameFolder}
             sidebarNavOrder={sidebarNavOrder}
@@ -936,15 +995,17 @@ export default function Settings() {
             movieCount={movies.length}
             tvShowCount={tvShows.length}
             animeCount={animeShows.length}
-            scanLibrary={scanLibrary}
-            refreshMetadata={refreshMetadata}
-            fullRescanLibrary={fullRescanLibrary}
-            refreshLibrary={refreshLibrary}
+            scanLibrary={handleScanLibrary}
+            refreshMetadata={handleRefreshMetadata}
+            fullRescanLibrary={handleFullRescanLibrary}
+            refreshLibrary={handleRefreshLibrary}
             autoSyncIntervalHours={autoSyncIntervalHours}
-            setAutoSyncIntervalHours={setAutoSyncIntervalHours}
+            setAutoSyncIntervalHours={handleAutoSyncIntervalChange}
             backupStatus={backupStatus}
             clearDataStatus={clearDataStatus}
             isClearingData={isClearingData}
+            libraryActionError={libraryActionError?.message}
+            onRetryLibraryAction={libraryActionError ? retryLibraryAction : undefined}
             onBackupDatabase={() => void handleBackupDatabase()}
             onClearAppData={() => void handleClearAppData()}
           />

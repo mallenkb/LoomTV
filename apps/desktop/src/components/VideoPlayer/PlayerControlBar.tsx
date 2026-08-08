@@ -205,10 +205,12 @@ export default function PlayerControlBar({
           role="slider"
           tabIndex={0}
           aria-label="Seek"
+          aria-orientation="horizontal"
+          aria-disabled={duration <= 0}
           aria-valuemin={0}
           aria-valuemax={duration || 0}
-          aria-valuenow={Math.min(position, duration || position)}
-          aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
+          aria-valuenow={Math.min(position, duration || 0)}
+          aria-valuetext={`${showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)} of ${formatTime(duration)}`}
           aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End"
           onPointerDown={handleProgressPointerDown}
           onKeyDown={handleProgressKeyDown}
@@ -291,6 +293,9 @@ export default function PlayerControlBar({
             onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
             aria-label="Volume"
+            aria-valuemin={0}
+            aria-valuemax={1}
+            aria-valuenow={visibleVolume}
             aria-valuetext={`${Math.round(visibleVolume * 100)}%${volumeIsMuted ? ' (muted)' : ''}`}
             style={{ '--loom-volume-pct': `${Math.round(visibleVolume * 100)}%` } as React.CSSProperties}
             className="loom-volume-slider w-24 outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"

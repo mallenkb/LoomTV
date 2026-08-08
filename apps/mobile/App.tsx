@@ -1,21 +1,24 @@
 import { StatusBar } from 'expo-status-bar';
 import * as Brightness from 'expo-brightness';
 import * as Device from 'expo-device';
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref, type RefObject } from 'react';
 import {
   ActivityIndicator,
+  AccessibilityInfo,
   Animated,
   AppState,
   type AppStateStatus,
   BackHandler,
   Easing,
   FlatList,
+  findNodeHandle,
   type ImageStyle,
   Keyboard,
   KeyboardAvoidingView,
   PanResponder,
   Platform,
   Pressable,
+  type PressableProps,
   RefreshControl,
   type RefreshControlProps,
   type NativeScrollEvent,
@@ -178,6 +181,107 @@ type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
 type PlayerRotation = 0 | 90 | 180 | 270;
+
+type MobileFocusableRef = RefObject<{ focus?: () => void } | null>;
+
+type MobileModalLayer = {
+  id: string;
+  priority: number;
+  sequence: number;
+  onBack: () => void;
+  restoreFocusRef?: MobileFocusableRef;
+  restoreFocusNode?: number | null;
+};
+
+const mobileModalLayers: MobileModalLayer[] = [];
+let mobileModalSequence = 0;
+let lastMobileFocusedNode: number | null = null;
+
+function rememberMobileFocus(event: { currentTarget?: unknown }): void {
+  if (event.currentTarget === undefined) return;
+  const node = findNodeHandle(event.currentTarget as Parameters<typeof findNodeHandle>[0]);
+  if (node !== null) lastMobileFocusedNode = node;
+}
+
+function topMobileModalLayer(): MobileModalLayer | null {
+  return mobileModalLayers.reduce<MobileModalLayer | null>((top, layer) => {
+    if (!top || layer.priority > top.priority || (layer.priority === top.priority && layer.sequence > top.sequence)) {
+      return layer;
+    }
+    return top;
+  }, null);
+}
+
+function restoreMobileFocus(target?: MobileFocusableRef, savedNode?: number | null): void {
+  const focusable = target?.current;
+  focusable?.focus?.();
+  const node = savedNode ?? (focusable
+    ? findNodeHandle(focusable as Parameters<typeof findNodeHandle>[0])
+    : null);
+  if (node === null) return;
+  setTimeout(() => {
+    try {
+      AccessibilityInfo.setAccessibilityFocus(node);
+    } catch {
+      // The native focus target may disappear during a transition.
+    }
+  }, 0);
+}
+
+/**
+ * React Native dispatches hardware Back to subscriptions rather than to the
+ * visual z-order of overlays. Keep one explicit stack so a season picker,
+ * player menu, or artwork sheet always closes before its parent surface.
+ */
+function useMobileModalLayer({
+  open = true,
+  onBack,
+  priority = 10,
+  restoreFocusRef,
+}: {
+  open?: boolean;
+  onBack: () => void;
+  priority?: number;
+  restoreFocusRef?: MobileFocusableRef;
+}): void {
+  const idRef = useRef<string | null>(null);
+  if (!idRef.current) idRef.current = `mobile-modal-${++mobileModalSequence}`;
+  const callbackRef = useRef(onBack);
+  const focusRef = useRef(restoreFocusRef);
+  const restoreNodeRef = useRef<number | null>(null);
+  const restoreNodeInitializedRef = useRef(false);
+  if (!restoreNodeInitializedRef.current) {
+    restoreNodeRef.current = restoreFocusRef?.current
+      ? findNodeHandle(restoreFocusRef.current as Parameters<typeof findNodeHandle>[0])
+      : lastMobileFocusedNode;
+    restoreNodeInitializedRef.current = true;
+  }
+  if (!open) {
+    restoreNodeRef.current = restoreFocusRef?.current
+      ? findNodeHandle(restoreFocusRef.current as Parameters<typeof findNodeHandle>[0])
+      : lastMobileFocusedNode;
+  }
+  callbackRef.current = onBack;
+  focusRef.current = restoreFocusRef;
+
+  useEffect(() => {
+    if (!open || !idRef.current) return undefined;
+    const layer: MobileModalLayer = {
+      id: idRef.current,
+      priority,
+      sequence: ++mobileModalSequence,
+      onBack: () => callbackRef.current(),
+      restoreFocusRef: focusRef.current,
+      restoreFocusNode: restoreNodeRef.current,
+    };
+    mobileModalLayers.push(layer);
+    return () => {
+      const index = mobileModalLayers.findIndex((candidate) => candidate.id === layer.id);
+      if (index >= 0) mobileModalLayers.splice(index, 1);
+      restoreMobileFocus(layer.restoreFocusRef, layer.restoreFocusNode);
+    };
+  }, [open, priority]);
+}
 
 const PLAYER_ASPECT_OPTIONS: { value: PlayerAspectRatio; label: string }[] = [
   { value: 'default', label: 'Default' },
@@ -784,6 +888,7 @@ function PressableScale({
   accessibilityState,
   children,
   disabled,
+  onFocus,
   onPress,
   scaleTo = 0.96,
   style,
@@ -793,6 +898,7 @@ function PressableScale({
   accessibilityState?: { selected?: boolean; disabled?: boolean };
   children: ReactNode;
   disabled?: boolean;
+  onFocus?: PressableProps['onFocus'];
   onPress?: () => void;
   scaleTo?: number;
   style?: StyleProp<ViewStyle>;
@@ -823,6 +929,10 @@ function PressableScale({
       accessibilityRole={accessibilityRole}
       accessibilityState={accessibilityState}
       disabled={disabled}
+      onFocus={(event) => {
+        rememberMobileFocus(event);
+        onFocus?.(event);
+      }}
       onPress={onPress}
       onPressIn={() => springTo(scaleTo)}
       onPressOut={() => springTo(1)}
@@ -967,6 +1077,7 @@ function MobileProfilePicker({
   activeProfile,
   error,
   onSelect,
+  onClose,
   pin,
   pinTarget,
   profiles,
@@ -976,6 +1087,7 @@ function MobileProfilePicker({
   activeProfile: MobileProfile | null;
   error: string;
   onSelect: (profile: MobileProfile, pin?: string) => void;
+  onClose?: () => void;
   pin: string;
   pinTarget: MobileProfile | null;
   profiles: MobileProfile[];
@@ -984,6 +1096,17 @@ function MobileProfilePicker({
 }) {
   const { colors } = useMobileTheme();
   const insets = useSafeAreaInsets();
+  useMobileModalLayer({
+    priority: 70,
+    onBack: () => {
+      if (pinTarget) {
+        setPinTarget(null);
+        setPin('');
+        return;
+      }
+      onClose?.();
+    },
+  });
   if (pinTarget) {
     const append = (digit: string) => {
       const next = `${pin}${digit}`.slice(0, 4);
@@ -991,7 +1114,11 @@ function MobileProfilePicker({
       if (next.length === 4) onSelect(pinTarget, next);
     };
     return (
-      <View style={[mobileProfileStyles.screen, { backgroundColor: colors.bg }]}>
+      <View
+        accessibilityViewIsModal
+        importantForAccessibility="yes"
+        style={[mobileProfileStyles.screen, { backgroundColor: colors.bg }]}
+      >
         <SubpageBackButton
           accessibilityLabel="Back to profiles"
           onPress={() => setPinTarget(null)}
@@ -1018,7 +1145,11 @@ function MobileProfilePicker({
   }
 
   return (
-    <ScrollView contentContainerStyle={[mobileProfileStyles.screen, { backgroundColor: colors.bg }]}>
+    <ScrollView
+      accessibilityViewIsModal
+      importantForAccessibility="yes"
+      contentContainerStyle={[mobileProfileStyles.screen, { backgroundColor: colors.bg }]}
+    >
       <LoomLogo width={132} height={44} wordColor={colors.text} />
       <Text style={[mobileProfileStyles.title, { color: colors.text }]}>Who’s watching?</Text>
       <View style={mobileProfileStyles.grid}>
@@ -1226,6 +1357,16 @@ function AppRoot() {
   const [mobileThemeMode, setMobileThemeMode] = useState<MobileThemeMode>('dark');
   const [mobileThemeColor, setMobileThemeColor] = useState<MobileThemeColor>('yellow');
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  useMobileModalLayer({
+    open: filterOpen,
+    priority: 10,
+    onBack: () => setFilterOpen(false),
+  });
+  useMobileModalLayer({
+    open: activeKind === 'settings' && settingsSection !== null,
+    priority: 12,
+    onBack: () => setSettingsSection(null),
+  });
   const resolvedMobileThemeMode: ResolvedMobileThemeMode = mobileThemeMode === 'auto'
     ? (systemColorScheme === 'light' ? 'light' : 'dark')
     : mobileThemeMode;
@@ -2168,22 +2309,17 @@ function AppRoot() {
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const topModal = topMobileModalLayer();
+      if (topModal) {
+        topModal.onBack();
+        return true;
+      }
       if (playTarget) {
         void closePlayer();
         return true;
       }
       if (detailItem) {
         closeDetail();
-        return true;
-      }
-      if (filterOpen) {
-        setFilterOpen(false);
-        return true;
-      }
-      if (searchOpen) {
-        setSearchOpen(false);
-        setQuery('');
-        setSearchScope('all');
         return true;
       }
       if (activeKind !== 'home') {
@@ -2194,7 +2330,7 @@ function AppRoot() {
     });
 
     return () => subscription.remove();
-  }, [activeKind, closeDetail, closePlayer, detailItem, filterOpen, playTarget, searchOpen]);
+  }, [activeKind, closeDetail, closePlayer, detailItem, playTarget]);
 
   useEffect(() => {
     if (!playTarget || !playbackUrl) return undefined;
@@ -3057,6 +3193,7 @@ function AppRoot() {
         <MobileProfilePicker
           activeProfile={activeProfile}
           error={profileError}
+          onClose={() => setShowProfilePicker(false)}
           pin={profilePin}
           pinTarget={profilePinTarget}
           profiles={profiles}
@@ -3070,7 +3207,11 @@ function AppRoot() {
           }}
         />
       ) : (
-        <View style={styles.shell}>
+        <View
+          accessibilityElementsHidden={Boolean(detailItem || playTarget || posterCandidateSheet)}
+          importantForAccessibility={detailItem || playTarget || posterCandidateSheet ? 'no-hide-descendants' : 'auto'}
+          style={styles.shell}
+        >
           <View style={styles.main}>
             {activeKind === 'settings' ? (
               <ScrollView
@@ -3753,6 +3894,17 @@ function Header({
 }) {
   const { colors: { accent, faint, muted, text }, styles } = useMobileTheme();
   const canFilter = activeKind !== 'settings';
+  const searchTriggerRef = useRef<View | null>(null);
+  useMobileModalLayer({
+    open: searchOpen,
+    priority: 11,
+    onBack: () => {
+      setSearchOpen(false);
+      setQuery('');
+      setSearchScope('all');
+    },
+    restoreFocusRef: searchTriggerRef,
+  });
   if (searchOpen) {
     return (
       <View style={styles.searchHeader}>
@@ -3818,6 +3970,7 @@ function Header({
             </Pressable>
           ) : null}
           <Pressable
+            ref={searchTriggerRef}
             onPress={() => setSearchOpen(true)}
             accessibilityRole="button"
             accessibilityLabel="Search"
@@ -4055,6 +4208,7 @@ function MiniPlayerStrip({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Resume ${target.title}`}
+        onFocus={rememberMobileFocus}
         onPress={onOpen}
         style={({ pressed }) => [styles.miniPlayerMain, pressed && styles.pressed]}
       >
@@ -4251,14 +4405,15 @@ function DetailContent({
   const [seasonPickerOpen, setSeasonPickerOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<'episodes' | 'details'>(hasEpisodeTab ? 'episodes' : 'details');
   const seasonEpisodes = episodes.filter((ep) => ep.season === selectedSeason);
-
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [onClose]);
+  useMobileModalLayer({
+    priority: 20,
+    onBack: onClose,
+  });
+  useMobileModalLayer({
+    open: seasonPickerOpen,
+    priority: 30,
+    onBack: () => setSeasonPickerOpen(false),
+  });
 
   // Plex-style "on deck": first unwatched episode; resume it if in progress.
   const nextUp = useMemo(() => {
@@ -4317,6 +4472,8 @@ function DetailContent({
 
   return (
     <Animated.View
+      accessibilityViewIsModal
+      importantForAccessibility="yes"
       onTouchStart={() => {
         if (seasonPickerOpen) setSeasonPickerOpen(false);
       }}
@@ -4518,6 +4675,7 @@ function DetailContent({
           </Pressable>
           <Pressable
             style={({ pressed }) => [styles.detailTopAction, isRefreshingArtwork && styles.disabledButton, pressed && styles.pressed]}
+            onFocus={rememberMobileFocus}
             onPress={() => onRefreshArtwork(item)}
             disabled={isRefreshingArtwork}
             accessibilityRole="button"
@@ -4632,11 +4790,28 @@ function PosterCandidateSheet({
   const { colors: { accent, accentForeground, text }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const entrance = useEntrance(22);
+  useMobileModalLayer({
+    open: Boolean(item),
+    priority: 40,
+    onBack: () => {
+      if (!applyingCandidateId) onClose();
+    },
+  });
   if (!item) return null;
 
   return (
-    <View style={styles.posterSheetOverlay}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close poster choices" />
+    <View
+      accessibilityViewIsModal
+      importantForAccessibility="yes"
+      style={styles.posterSheetOverlay}
+    >
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={() => {
+          if (!applyingCandidateId) onClose();
+        }}
+        accessibilityLabel="Close poster choices"
+      />
       <Animated.View style={[styles.posterSheet, { paddingBottom: Math.max(insets.bottom, 14) + 8 }, entrance]}>
         <View style={styles.posterSheetHandle} />
         <View style={styles.posterSheetHeader}>
@@ -4892,6 +5067,7 @@ function PlayerMenuRow({ label, selected, onPress }: { label: string; selected: 
       onPress={onPress}
       style={({ pressed }) => [styles.playerMenuRow, pressed && styles.pressed]}
       accessibilityRole="menuitem"
+      accessibilityLabel={label}
       accessibilityState={{ selected }}
     >
       <Text numberOfLines={2} style={[styles.playerMenuRowText, selected && styles.playerMenuRowTextActive]}>{label}</Text>
@@ -4928,6 +5104,7 @@ function PlayerSegmentedControl<T extends string | number>({
                 pressed && styles.pressed,
               ]}
               accessibilityRole="radio"
+              accessibilityLabel={option.label}
               accessibilityState={{ selected: value === option.value }}
             >
               <Text style={[styles.playerSegmentText, value === option.value && styles.playerSegmentTextActive]}>
@@ -4981,6 +5158,18 @@ function PlayerContent({
   const [trackWidth, setTrackWidth] = useState(0);
   const [interactionTick, setInteractionTick] = useState(0);
   const [menu, setMenu] = useState<'none' | 'video' | 'speed' | 'audio' | 'subtitles'>('none');
+  useMobileModalLayer({
+    priority: 50,
+    onBack: () => {
+      if (menu !== 'none') setMenu('none');
+      else onClose();
+    },
+  });
+  useMobileModalLayer({
+    open: menu !== 'none',
+    priority: 60,
+    onBack: () => setMenu('none'),
+  });
   const [playbackRate, setPlaybackRate] = useState(1);
   const [nativeAudioTracks, setNativeAudioTracks] = useState<AudioTrack[]>([]);
   const [nativeSubtitleTracks, setNativeSubtitleTracks] = useState<SubtitleTrack[]>([]);
@@ -5019,14 +5208,6 @@ function PlayerContent({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5539,7 +5720,11 @@ function PlayerContent({
   );
 
   return (
-    <Animated.View style={[styles.overlay, styles.playerRoot, entrance]}>
+    <Animated.View
+      accessibilityViewIsModal
+      importantForAccessibility="yes"
+      style={[styles.overlay, styles.playerRoot, entrance]}
+    >
       <StatusBar style="light" hidden />
       {playbackUrl ? (
         <>
@@ -5627,6 +5812,7 @@ function PlayerContent({
                     style={({ pressed }) => [styles.playerFitButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Video framing settings"
+                    accessibilityState={{ expanded: menu === 'video' }}
                   >
                     <Text style={[styles.playerFitLabel, (menu === 'video' || cropMode !== 'none') && styles.playerFitLabelActive]}>
                       {cropMode === 'none' ? 'Fit' : 'Crop'}
@@ -5637,6 +5823,7 @@ function PlayerContent({
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Subtitles"
+                    accessibilityState={{ expanded: menu === 'subtitles' }}
                   >
                     <SubtitlesIcon size={22} color={menu === 'subtitles' ? accent : '#ffffff'} />
                   </Pressable>
@@ -5645,6 +5832,7 @@ function PlayerContent({
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Audio tracks"
+                    accessibilityState={{ expanded: menu === 'audio' }}
                   >
                     <AudioTracksIcon size={22} color={menu === 'audio' ? accent : '#ffffff'} />
                   </Pressable>
@@ -5653,6 +5841,7 @@ function PlayerContent({
                     style={({ pressed }) => [styles.playerIconButton, pressed && styles.pressed]}
                     accessibilityRole="button"
                     accessibilityLabel="Playback speed"
+                    accessibilityState={{ expanded: menu === 'speed' }}
                   >
                     <SpeedIcon size={22} color={menu === 'speed' ? accent : '#ffffff'} />
                   </Pressable>
@@ -5696,6 +5885,20 @@ function PlayerContent({
                   }}
                   accessibilityRole="adjustable"
                   accessibilityLabel="Seek"
+                  accessibilityValue={{
+                    min: 0,
+                    max: duration,
+                    now: Math.min(position, duration || 0),
+                    text: `${formatClock(position)} of ${formatClock(duration)}`,
+                  }}
+                  accessibilityActions={[
+                    { name: 'decrement', label: 'Seek backward 10 seconds' },
+                    { name: 'increment', label: 'Seek forward 10 seconds' },
+                  ]}
+                  onAccessibilityAction={({ nativeEvent }) => {
+                    if (nativeEvent.actionName === 'decrement') seekToSeconds(position - 10);
+                    if (nativeEvent.actionName === 'increment') seekToSeconds(position + 10);
+                  }}
                 >
                   <View style={styles.playerSeekTrack}>
                     <View style={[styles.playerSeekFill, { width: `${progressFractionValue * 100}%` }]} />
@@ -5715,11 +5918,17 @@ function PlayerContent({
                     menu === 'video' && { width: menuWidth },
                     { right: Math.max(insets.right, 20), top: Math.max(insets.top, 16) + 56 },
                   ]}
+                  accessibilityViewIsModal
+                  importantForAccessibility="yes"
                 >
                   <Text style={styles.playerMenuTitle}>
                     {menu === 'video' ? 'Video' : menu === 'speed' ? 'Playback Speed' : menu === 'audio' ? 'Audio' : 'Subtitles'}
                   </Text>
-                  <ScrollView style={styles.playerMenuScroll}>
+                  <ScrollView
+                    accessibilityLabel={`${menu === 'video' ? 'Video' : menu === 'speed' ? 'Playback speed' : menu === 'audio' ? 'Audio' : 'Subtitles'} options`}
+                    accessibilityRole="menu"
+                    style={styles.playerMenuScroll}
+                  >
                     {menu === 'video' ? (
                       <View style={styles.playerVideoSettings}>
                         <View style={styles.playerSettingBlock}>
