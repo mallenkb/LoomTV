@@ -1,112 +1,140 @@
-# Plugin Phase 4–9 contract and dependency gates
+# Plugin Phase 4–9 contract: pre-phase design scaffolding
 
-This document records the boundary reviewed before extending the plugin
-foundation. Phase 4–9 work in this branch is contract scaffolding only: it
-does not fetch a provider source, expose a raw URL, launch a process, install
-an artifact, or bypass the existing profile/artwork/network gates.
+This worktree records safe downstream contracts after reviewing the Phase 0–3
+foundation at `4e0093b` (parent of `017ae94`). It is a design and validation
+layer, not Phase 4–8 completion: no provider runtime, proxy route, artifact
+fetch, install, profile mutation, artwork mutation, or executable enablement is
+implemented here.
 
-## Phase 0–3 contract reviewed
+## Phase 0–3 dependency gates
 
-The current foundation at `4e0093b` provides the following host boundary:
-
-| Boundary | Existing contract | Phase 4–9 consequence |
+| Gate | Evidence reviewed | Status for downstream enablement |
 | --- | --- | --- |
-| Manifest identity | `plugin-manifest.v1` requires a reverse-DNS ID, compatible Loom API range, and an explicit capability allowlist. | Downstream objects retain the plugin ID and reject unknown fields. |
-| Install and trust | `StremioAddonRegistry` reviews a declaration into `pending-review`; only an explicit current review-token approval creates an enabled/trusted record. | No downstream object changes install state or trust. |
-| Provider egress | The Stremio adapter accepts bounded HTTPS JSON responses, rejects private/local/single-label hosts, bounds response size/time, and delegates desktop requests to `safeFetch`. | New contracts carry opaque references only. A host must resolve a reference through the already-reviewed egress policy. |
-| Provider behavior | Add-on code is not loaded. Stremio resources are read as JSON declarations/responses; torrent and peer-to-peer stream candidates are rejected. | Playback contracts allow only `https-media` and `hls` source kinds, with no P2P or executable source. |
-| Profile authorization | Desktop management is Owner-only; standard profiles need an explicit grant; Kids and Guest profiles are denied; desktop requests re-check profile selection revision after the provider request. | Subtitle and playback contracts require a profile binding and mandate selection, pairing, and approval revalidation. |
-| Renderer boundary | The desktop renderer receives validated IPC methods, not a provider runtime. Discovery is metadata/catalog preview only. | Search namespaces and host tickets are safe data contracts, not renderer-controlled transport endpoints. |
-| Persistence | Add-on state and profile access are revalidated when loaded; disabling/removing/replacing an add-on revokes profile grants. | Signed sequence numbers and expiry are included for future catalog/update consumers. |
+| G0 — declaration identity and explicit approval | `plugin-manifest.v1`, reverse-DNS add-on IDs, capability allowlist, `StremioAddonRegistry`, pending-review state, and explicit review-token approval | Met in the existing foundation |
+| G1 — provider egress | Bounded HTTPS adapter responses and host `safeFetch` guard exist; complete origin, redirect, DNS/rebinding, and per-surface policy is not a settled shared contract | Open; raw source resolution and proxying remain blocked |
+| G2 — profile/pairing revocation | Owner-only management, explicit standard-profile grants, Kids/Guest denial, selection-revision checks, and persisted-state revalidation exist; signed capability revocation and every in-flight sharing path still need review | Open; wire callers cannot supply profile or revalidation claims |
+| G3 — artwork/metadata boundary | Artwork and shared-library mutations remain owner-only; artwork routes need their separate restriction/LAN review | Open; only opaque `artworkRef` crosses a downstream contract |
+| G4 — subtitle attachment | Wire, verified, authorized, plan, and receipt shapes exist | Blocked until a host-owned bounded fetch/cache/attachment path is reviewed |
+| G5 — playback ticket/proxy | Wire, verified, authorized, proxy-plan, and future ticket shapes exist; no destination resolver or proxy route exists | Blocked until G1–G3 and a media proxy policy are complete |
+| G6 — discovery/search | Add-on/type/provider item identity and catalog-only membership are defined with a legacy migration | Scaffolded; no library import or runtime search adapter exists |
+| G7 — Desktop/Headless parity | A descriptor covers the same host surfaces and explicitly marks scaffolded/blocked states | Design-only; neither runtime is made to execute plugins |
+| G8 — signed marketplace/catalog/update trust | JCS-compatible domain-separated bytes, exact Ed25519 lengths, publisher/key lifecycle fields, sequence/rollback/review/revocation, and renderer-safe projections are modeled | Design-only; host key storage, network retrieval, and staging are absent |
+| G9 — executable sandbox | Threat model, evidence checklist, runtime lifecycle vocabulary, and update quarantine are recorded | Blocked; no executable artifact may be enabled |
 
-The current adapter still has internal normalized source/subtitle candidates
-that contain provider HTTPS URLs. Those values remain an implementation detail
-of the Phase 0–3 adapter and are deliberately not accepted by the downstream
-constructors in `packages/plugin-protocol/src/downstream.mjs`.
+The current Phase 0–3 adapter may normalize provider HTTPS candidates
+internally. Those values remain behind its reviewed host boundary and are not
+accepted by these downstream DTOs.
 
-## Dependency gates
+## Trust pipeline
 
-These are the gates that must be satisfied before a downstream surface becomes
-an enabled host feature. “Scaffolded” means the data shape exists; it is not a
-claim that the runtime is safe or complete.
+Every downstream request follows this one-way shape:
 
-| Gate | Status | Evidence or blocker |
-| --- | --- | --- |
-| G0 — declaration validation and explicit approval | Met for the current foundation | `plugin-manifest.v1`, `StremioAddonRegistry`, persisted-state validation, and review-token approval are present. |
-| G1 — complete provider egress policy | Open | The current adapter has bounded HTTPS checks and a host fetch guard, but the full origin/redirect/DNS policy is not a settled contract for every provider. Do not widen fetch or proxy behavior from this branch. |
-| G2 — profile and pairing revocation | Open | Selection revision checks exist in the desktop plugin service, but the broader LAN audit still identifies signed capability revocation and in-flight sharing/profile enforcement work. A downstream ticket must not be treated as authorization by itself. |
-| G3 — artwork and metadata boundary | Open | Artwork/metadata edits are shared-library mutations and remain owner-only. Existing artwork routes still require their separate restriction and LAN review; downstream contracts expose only an `artworkRef`, never an image URL or file path. |
-| G4 — host-mediated subtitle attachment | Scaffolded, blocked for enablement | `subtitle-attachment-request` and `subtitle-attachment-receipt` exist. A host still needs a profile-bound, size-bounded subtitle fetch/cache path and a local attachment resolver before UI or playback wiring. |
-| G5 — host-mediated playback proxy | Scaffolded, blocked for enablement | `playback-ticket-request` and `playback-ticket` describe opaque, short-lived, range-capable tickets. No proxy route, raw URL resolver, HLS segment policy, or media IPC is added here. G1–G3 remain prerequisites. |
-| G6 — discovery/search namespacing | Scaffolded | Catalog/search keys use a `loom-plugin:` namespace and carry provider identity. No catalog item is merged into the local library identity space by these helpers. |
-| G7 — headless parity | Scaffolded | `plugin-host-parity` describes the same host surfaces for Desktop and Headless runtimes. The headless server is not made to fetch or execute plugins by this branch. |
-| G8 — signed catalog/update trust | Design-only | Ed25519-shaped envelopes, canonical JSON, expiry, digest, sequence, and pinned-publisher requirements are specified. Key distribution, rotation, revocation, and host artifact retrieval are not implemented. |
-| G9 — executable plugin sandbox | Blocked | The repository has no plugin executable runtime. The threat model below requires a separate process, package verification, capability broker, resource limits, and kill/revoke semantics before implementation can be considered. |
+```text
+untrusted wire DTO
+    -> strict parser (no profile/authorization/revalidation/raw transport fields)
+    -> host verification against a verified marketplace add-on
+    -> host authorization snapshot (mandatory for search, subtitle, playback)
+    -> host-only plan or future runtime ticket
+```
 
-## Safe downstream surfaces in this branch
+`parseWire*` functions produce frozen data-shaped values. Verification and
+authorization are branded with private `WeakMap` records; copying their
+properties cannot manufacture a host value. The host authorization context is
+created from the host’s current device/profile/selection/authorization snapshot
+and add-on capability grants. A renderer or provider cannot provide those
+claims. Authorization output contains a host binding and epoch, not booleans
+such as `profileBound` or `pairingRevalidated`.
+
+## Safe downstream surfaces
 
 ### Subtitle attachment
 
-`createSubtitleAttachmentRequest` names a plugin, media, subtitle candidate,
-paired-device/profile binding, selection revision, and short validity window.
-The candidate is an opaque `subtitleRef`; there is no `url`, path, or host
-filesystem location.
-The receipt returns either an opaque `attachmentRef` or a bounded reason code.
-The host remains responsible for source resolution, content limits, caching,
-format handling, profile checks, and revocation.
+`parseWireSubtitleAttachmentRequest` accepts only an add-on ID, opaque media and
+subtitle references, a correlation reference, and bounded presentation data.
+The host verifies the add-on’s subtitle capability and then authorizes it with a
+mandatory host context. The resulting plan still says
+`host-resolution-required`; a receipt can carry only an opaque attachment
+reference or reason code. No subtitle URL, path, caller profile, or caller
+revalidation claim is admitted.
 
 ### Playback ticket/proxy
 
-`createPlaybackTicketRequest` accepts only an opaque `sourceRef`, a
-paired-device/profile binding, and the two source kinds already recognized by
-the adapter: `https-media` and `hls`.
-`createPlaybackTicket` describes host-controlled GET/HEAD range delivery with
-redirect denial, no-store caching, and profile/pairing/approval revalidation.
-It does not produce a proxy URL or a playable source. A later implementation
-must resolve the source inside the host and keep that resolution out of the
-renderer/client contract.
+`parseWirePlaybackTicketRequest` accepts only opaque references and the already
+reviewed `https-media`/`hls` source kinds. An authorized request can become a
+`playback-proxy-plan`, never a playable URL. The future host ticket requires a
+branded runtime lease in `ready` state, is short-lived, denies redirects, and
+requires authorization re-check at use. There is no proxy implementation in
+this phase.
 
-### Discovery/search namespacing
+### Discovery/search and identity
 
-`createPluginSearchNamespace`, `namespacePluginCatalogItem`, and
-`createPluginSearchRequest` make provider/catalog identity part of every
-discovery key. The namespace is intentionally separate from local media IDs;
-catalog results are still remote metadata until a future, separately gated
-import contract exists.
+Search namespaces identify an add-on and catalog membership. Catalog item keys
+are derived only from the Plugin 0–3-compatible tuple
+`(addonId, type, providerId)`. The catalog is represented separately as
+membership, so the same provider item has one canonical key across catalogs.
+`migrateLegacyCatalogItemIdentity` maps the prior catalog-scoped key and keeps
+the old catalog membership for persistence migration; it does not silently
+merge unrelated provider IDs.
 
-### Headless parity
+### Marketplace, catalogs, and updates
 
-`createPluginHostParityDescriptor` requires all eight declared surfaces and
-records `available`, `scaffolded`, or `blocked` plus an optional gate. It is a
-portable descriptor for future Desktop/Headless adapters, not a registration
-mechanism and not an assertion that both runtimes currently implement a
-surface.
+The signed host marketplace/index models publisher and key IDs, add-on identity,
+manifest origin, declared capabilities, risk flags, review state, revocation,
+key transitions, sequence rollback, and catalog memberships. Verification is
+host-owned and checks publisher trust, exact Ed25519 material, expiry, sequence,
+rollback approval, and key-transition proof. Renderer projections omit
+publisher keys, signatures, manifest origins, transition proof, rollback
+internals, and artifact references.
 
-### Signed catalogs and updates
+Signed catalogs bind a verified publisher/add-on to the catalog identity and
+the canonical catalog payload; the derived `itemKey` is recomputed after
+validation and is not an unsigned wire field. Signed updates carry an opaque artifact
+reference, digest, size, review/revocation/rollback metadata, and an explicit
+artifact kind. `executable-plugin` updates verify only into
+`quarantined-phase9` with `installable: false` and
+`PHASE9_SANDBOX_REQUIRED`; no authorization function can stage them.
 
-The signed envelopes use canonical JSON as the input to a future signature
-implementation, include SHA-256 payload/artifact digests, bounded expiry, a
-monotonic sequence, a key ID, and a pinned-publisher requirement. Catalog
-artwork is an opaque `artworkRef`; update payloads use an opaque `artifactRef`.
-The host must obtain bytes through its own reviewed transport and verify the
-publisher and digest before staging anything.
+Signing bytes are normative: UTF-8 of
+`LoomTV-Plugin-Signature/v1\0<domain>\0` followed by the reviewed
+JCS/RFC8785-compatible canonical JSON payload. Domains are separate for the
+marketplace index, catalog, and update. Signatures decode from canonical
+unpadded base64url and must be exactly 64 bytes; public keys must be exactly 32
+bytes. Fixed vectors live in `src/signed-bytes.mjs` and semantic checks live in
+the test source, but tests are intentionally not run in this worktree pass.
+
+### Headless parity and runtime lifecycle
+
+`plugin-host-parity` is a portable description, not a runtime assertion. Every
+surface must be marked `available`, `scaffolded`, or `blocked`, and the
+descriptor is scoped as `pre-phase-scaffold`.
+
+The future Phase 5 implementation must reuse the corrected lifecycle in
+`runtime-lifecycle.mjs`:
+
+```text
+absent -> starting -> ready -> draining -> stopped
+             |          |         |
+             v          v         v
+           failed     failed    revoked
+```
+
+`ready` is the only state eligible for future ticket issuance. Selection or
+authorization revocation must force draining/revoked behavior, stale epochs
+must fail closed, and a restart/update must not bypass the lifecycle. No Phase
+5 runtime is claimed here.
 
 ## Explicitly out of scope
 
-- direct provider URLs in IPC, LAN payloads, renderer state, or client-facing
-  tickets;
-- remote artwork fetch/cache changes or shared-library metadata mutation;
-- subtitle URL attachment, raw subtitle file paths, or subtitle download
-  routes;
-- direct playback, HLS segment proxying, redirects, or raw source enablement;
-- manifest configuration pages, arbitrary provider JavaScript, or executable
-  plugin packages;
-- update key discovery, key rotation, artifact download, installation, or
-  restart behavior;
-- changes to the existing LAN pairing, profile, artwork, or Electron updater
-  security implementations.
+- raw provider, subtitle, artwork, playback, proxy, manifest, or artifact URLs;
+- filesystem paths, commands, executable entrypoints, install scripts, or
+  arbitrary provider JavaScript/native modules;
+- renderer-controlled profile, pairing, approval, or revalidation claims;
+- provider fetch, DNS resolution, redirects, HLS segment routing, or media IPC;
+- catalog import into local library identity or shared metadata mutation;
+- publisher-key discovery, artifact download, package installation, or restart;
+- Desktop/Headless runtime integration and Phase 4–8 feature completion;
+- moving `executable.sandbox` out of `blocked` before the Phase 9 evidence gate.
 
-The executable-plugin threat model is recorded separately in
-`docs/plugin-sandbox-threat-model.md` and
-`security/plugin-sandbox-threat-model.json` so that a future implementation
-has reviewable evidence requirements instead of an implicit trust boundary.
+The executable threat model and machine-readable evidence ledger are maintained
+in `docs/plugin-sandbox-threat-model.md` and
+`security/plugin-sandbox-threat-model.json`.

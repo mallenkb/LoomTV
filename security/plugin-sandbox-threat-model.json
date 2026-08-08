@@ -1,40 +1,92 @@
 {
-  "artifactVersion": 1,
-  "status": "design-only",
-  "scope": "future executable plugin provider runtime",
+  "artifactVersion": 2,
+  "status": "blocked-design-only",
+  "scope": "future Phase 9 executable plugin provider runtime",
   "currentRuntime": "declaration-only-host-mediated",
+  "phase4to8Status": "pre-phase-contract-scaffolding-only",
   "assets": [
     "library-paths-and-media-bytes",
     "profile-identity-and-selection-revisions",
     "pairing-credentials-and-session-capabilities",
     "artwork-and-metadata-cache",
     "provider-credentials",
+    "marketplace-publisher-keys",
     "catalog-and-update-signing-keys",
     "host-process-integrity-and-availability"
   ],
   "trustBoundaries": [
     "renderer-to-host-ipc",
+    "headless-api-to-host-policy",
+    "wire-dto-to-host-parser",
+    "verified-value-to-host-authorization",
+    "marketplace-to-publisher-key-store",
     "plugin-process-to-host-rpc",
     "host-to-provider-egress",
     "host-to-filesystem-and-media",
     "host-to-update-staging",
     "desktop-to-headless-parity-adapter"
   ],
+  "normativeContracts": {
+    "wireToHostPipeline": ["untrusted-wire-dto", "verified-host-value", "authorized-host-value", "host-plan-or-future-ticket"],
+    "itemIdentity": ["addonId", "type", "providerId"],
+    "catalogRole": "membership-only",
+    "signedDomains": ["marketplace-index", "catalog", "update"],
+    "canonicalization": "reviewed-JCS-RFC8785-compatible",
+    "signatureAlgorithm": "ed25519",
+    "signatureBytes": 64,
+    "publicKeyBytes": 32,
+    "executableUpdateStatus": "quarantined-phase9"
+  },
   "requiredControls": [
     {
+      "id": "CTRL-PLUGIN-001",
+      "name": "wire-dto-separation",
+      "requirement": "Parse untrusted wire DTOs separately from private branded Verified and Authorized values; reject caller profile, authorization, revalidation, and raw transport fields."
+    },
+    {
+      "id": "CTRL-PLUGIN-002",
+      "name": "mandatory-host-authorization",
+      "requirement": "Require a host-owned device/profile/selection/authorization snapshot and add-on capability grant for search, subtitle, and playback authorization."
+    },
+    {
+      "id": "CTRL-PLUGIN-003",
+      "name": "stable-item-identity",
+      "requirement": "Use addonId/type/providerId as identity, keep catalog as membership, and migrate the legacy catalog-scoped key without accidental collisions."
+    },
+    {
+      "id": "CTRL-PLUGIN-004",
+      "name": "marketplace-trust-record",
+      "requirement": "Bind publisher, add-on, manifest origin, capabilities, risk, review, revocation, key transition, sequence, rollback, and renderer-safe projection to the signed marketplace/index."
+    },
+    {
+      "id": "CTRL-PLUGIN-005",
+      "name": "normative-signed-bytes",
+      "requirement": "Use domain-separated UTF-8 plus reviewed JCS/RFC8785-compatible canonical JSON, exact 64-byte Ed25519 signatures, exact 32-byte public keys, and fixed vectors."
+    },
+    {
+      "id": "CTRL-PLUGIN-006",
+      "name": "executable-update-quarantine",
+      "requirement": "Keep executable-plugin updates quarantined with installable false and reject authorization until the Phase 9 sandbox gate is approved."
+    },
+    {
+      "id": "CTRL-PLUGIN-007",
+      "name": "projection-allowlist",
+      "requirement": "Renderer projections omit signatures, key IDs, manifest origins, transition proofs, rollback internals, artifact refs, and raw transport details."
+    },
+    {
       "id": "CTRL-EXE-001",
-      "name": "pinned-publisher-verification",
-      "requirement": "Verify publisher continuity, artifact digest, signature, expiry, and monotonic sequence before staging or enabling a package."
+      "name": "pinned-publisher-and-key-lifecycle",
+      "requirement": "Verify publisher continuity, key transition proof, revocation, expiry, sequence, and approved rollback before any artifact is staged."
     },
     {
       "id": "CTRL-EXE-002",
       "name": "separate-process-isolation",
-      "requirement": "Run hostile provider code outside the LoomTV process with platform-specific isolation and no renderer privileges."
+      "requirement": "Run hostile provider code outside the LoomTV process with platform-specific isolation, no renderer privileges, and a kill/revoke path."
     },
     {
       "id": "CTRL-EXE-003",
       "name": "default-deny-egress",
-      "requirement": "Broker every network request through an origin, DNS, redirect, byte, rate, and timeout policy."
+      "requirement": "Broker every network request through origin, DNS, redirect, byte, rate, and timeout policy."
     },
     {
       "id": "CTRL-EXE-004",
@@ -43,61 +95,113 @@
     },
     {
       "id": "CTRL-EXE-005",
-      "name": "profile-and-pairing-revalidation",
-      "requirement": "Revalidate profile selection, pairing, approval, and revocation for every attachment and playback capability."
+      "name": "profile-pairing-revalidation",
+      "requirement": "Revalidate profile selection, pairing, approval, authorization epoch, and revocation for every attachment and playback use."
     },
     {
       "id": "CTRL-EXE-006",
       "name": "resource-and-lifecycle-quotas",
-      "requirement": "Bound CPU, memory, process count, queue depth, response size, duration, cancellation, crash cleanup, and stale capability lifetime."
+      "requirement": "Bound CPU, memory, process count, queue depth, response size, duration, cancellation, crash cleanup, and stale lease lifetime."
     },
     {
       "id": "CTRL-EXE-007",
+      "name": "safe-package-extraction",
+      "requirement": "Enforce archive size/count/depth limits, canonical path containment, no symlinks/device files, and atomic quarantine cleanup."
+    },
+    {
+      "id": "CTRL-EXE-008",
       "name": "no-install-hooks",
-      "requirement": "Package staging and update installation must be host-controlled with atomic rollback and no arbitrary scripts or child processes."
+      "requirement": "Package staging and rollback are host-controlled with no arbitrary scripts, shell commands, child processes, or dynamic install hooks."
+    },
+    {
+      "id": "CTRL-EXE-009",
+      "name": "desktop-headless-parity",
+      "requirement": "Use one host policy contract with explicit parity descriptors and identical authorization semantics in Desktop and Headless runtimes."
     }
   ],
   "threats": [
     {
+      "id": "THREAT-PLUGIN-001",
+      "category": "wire-confusion",
+      "scenario": "A renderer or provider supplies profile, authorization, revalidation, URL, path, or executable fields and is treated as a host decision.",
+      "controlIds": ["CTRL-PLUGIN-001", "CTRL-PLUGIN-002", "CTRL-EXE-004"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-PLUGIN-002",
+      "category": "identity-collision",
+      "scenario": "The same provider item receives different identities across catalogs or unrelated provider IDs are merged during migration.",
+      "controlIds": ["CTRL-PLUGIN-003"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-PLUGIN-003",
+      "category": "signed-data-confusion",
+      "scenario": "Different domains, JSON serializers, key lengths, or base64 representations verify different bytes or accept malformed signatures.",
+      "controlIds": ["CTRL-PLUGIN-005", "CTRL-EXE-001"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-PLUGIN-004",
+      "category": "marketplace-supply-chain",
+      "scenario": "An attacker replaces an index, rotates a publisher key without proof, replays a sequence, abuses rollback, or revokes an add-on after authorization.",
+      "controlIds": ["CTRL-PLUGIN-004", "CTRL-EXE-001", "CTRL-EXE-005"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-PLUGIN-005",
+      "category": "renderer-leakage",
+      "scenario": "Renderer projection reveals publisher keys, origins, signed bytes, artifact references, or rollback details that enable tracking or bypass.",
+      "controlIds": ["CTRL-PLUGIN-007"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-PLUGIN-006",
+      "category": "executable-update-bypass",
+      "scenario": "A validly signed executable artifact is treated as installable before a sandbox review or is enabled through an update path.",
+      "controlIds": ["CTRL-PLUGIN-006", "CTRL-EXE-008"],
+      "status": "blocked"
+    },
+    {
       "id": "THREAT-EXE-001",
-      "category": "supply-chain",
-      "scenario": "An attacker replaces a plugin package or impersonates its publisher.",
-      "controlIds": ["CTRL-EXE-001", "CTRL-EXE-007"],
+      "category": "sandbox-escape",
+      "scenario": "Provider code uses a parser, native module, package traversal, or host interface to escape into the LoomTV process.",
+      "controlIds": ["CTRL-EXE-002", "CTRL-EXE-004", "CTRL-EXE-006", "CTRL-EXE-007"],
       "status": "blocked"
     },
     {
       "id": "THREAT-EXE-002",
-      "category": "sandbox-escape",
-      "scenario": "Provider code uses a parser, native module, or host interface to escape into the LoomTV process.",
-      "controlIds": ["CTRL-EXE-002", "CTRL-EXE-004", "CTRL-EXE-006"],
-      "status": "blocked"
-    },
-    {
-      "id": "THREAT-EXE-003",
       "category": "ssrf-exfiltration",
-      "scenario": "Provider code reaches loopback, private services, metadata endpoints, or unapproved Internet destinations.",
+      "scenario": "Provider code reaches loopback, private services, metadata endpoints, or unapproved Internet destinations through redirects or DNS rebinding.",
       "controlIds": ["CTRL-EXE-003", "CTRL-EXE-004"],
       "status": "blocked"
     },
     {
-      "id": "THREAT-EXE-004",
+      "id": "THREAT-EXE-003",
       "category": "confused-deputy",
-      "scenario": "A plugin reuses a stale profile, pairing, artwork, or playback capability after the user changes authorization.",
-      "controlIds": ["CTRL-EXE-004", "CTRL-EXE-005"],
+      "scenario": "A plugin reuses a stale profile, pairing, artwork, subtitle, playback, or runtime capability after selection or approval changes.",
+      "controlIds": ["CTRL-PLUGIN-002", "CTRL-EXE-005", "CTRL-EXE-009"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-EXE-004",
+      "category": "archive-and-resource-exhaustion",
+      "scenario": "A package or provider floods the host with compressed data, requests, output, processes, or unbounded work.",
+      "controlIds": ["CTRL-EXE-006", "CTRL-EXE-007"],
       "status": "blocked"
     },
     {
       "id": "THREAT-EXE-005",
-      "category": "resource-exhaustion",
-      "scenario": "A provider floods the host with requests, output, processes, or unbounded work.",
-      "controlIds": ["CTRL-EXE-006"],
+      "category": "persistence-and-rollback",
+      "scenario": "An update or package hook installs arbitrary code, survives disable/removal, or restores a revoked version.",
+      "controlIds": ["CTRL-PLUGIN-006", "CTRL-EXE-001", "CTRL-EXE-008"],
       "status": "blocked"
     },
     {
       "id": "THREAT-EXE-006",
-      "category": "persistence",
-      "scenario": "An update or package hook installs arbitrary code or survives disable/removal.",
-      "controlIds": ["CTRL-EXE-001", "CTRL-EXE-006", "CTRL-EXE-007"],
+      "category": "runtime-race",
+      "scenario": "A ticket is issued while a runtime is starting, draining, revoked, or using a stale selection epoch.",
+      "controlIds": ["CTRL-PLUGIN-002", "CTRL-EXE-005", "CTRL-EXE-006"],
       "status": "blocked"
     }
   ],
@@ -108,28 +212,35 @@
     "plugin-controlled-network-sockets",
     "plugin-controlled-redirects-or-dns",
     "raw-url-or-filesystem-path-exposure",
-    "profile-pairing-provider-or-update-key-exposure",
-    "arbitrary-install-scripts"
+    "profile-pairing-provider-publisher-or-update-key-exposure",
+    "unsafe-archive-extraction",
+    "arbitrary-install-scripts",
+    "executable-update-staging-before-phase9"
   ],
   "enablementGates": [
     {
       "id": "GATE-EXE-001",
-      "requirement": "Attach evidence for publisher verification and key lifecycle.",
+      "requirement": "Attach publisher trust-store, key transition, revocation, sequence, rollback, and audit evidence.",
       "status": "blocked"
     },
     {
       "id": "GATE-EXE-002",
-      "requirement": "Attach platform isolation design and escape testing.",
+      "requirement": "Attach canonicalization vectors, semantic parser tests, package extraction limits, platform isolation design, and escape testing.",
       "status": "blocked"
     },
     {
       "id": "GATE-EXE-003",
-      "requirement": "Attach egress broker and profile/pairing authorization evidence.",
+      "requirement": "Attach deny-by-default egress broker, redirect/DNS policy, profile/pairing/artwork/subtitle/playback authorization evidence.",
       "status": "blocked"
     },
     {
       "id": "GATE-EXE-004",
-      "requirement": "Attach quota, revocation, rollback, and red-team evidence.",
+      "requirement": "Attach lifecycle, quota, cancellation, crash recovery, stale-capability revocation, rollback, and red-team evidence.",
+      "status": "blocked"
+    },
+    {
+      "id": "GATE-EXE-005",
+      "requirement": "Attach an explicit Phase 9 release decision; valid signatures alone must not change executable quarantine.",
       "status": "blocked"
     }
   ]

@@ -85,3 +85,7 @@ export function loadPluginManifest(
 
 export * from './stremio-adapter';
 export * from './downstream';
+export * from './identity';
+export * from './marketplace';
+export * from './runtime-lifecycle';
+export * from './signed-bytes';

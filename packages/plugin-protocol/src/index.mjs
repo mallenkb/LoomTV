@@ -402,3 +402,7 @@ export class PluginManifestValidationError extends Error {
 
 export * from './stremio-adapter.mjs';
 export * from './downstream.mjs';
+export * from './identity.mjs';
+export * from './marketplace.mjs';
+export * from './runtime-lifecycle.mjs';
+export * from './signed-bytes.mjs';
