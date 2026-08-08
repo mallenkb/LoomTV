@@ -5,6 +5,11 @@ import { promisify } from 'node:util';
 import { createHeadlessLibraryScanner } from './library-scanner.js';
 import { normalizeIpAddress } from './trusted-proxy.js';
 import {
+  containedRelativePath,
+  isPathWithin,
+  statContainedFile,
+} from './media-path-guard.js';
+import {
   AUTH_PERMISSIONS,
   USER_ROLES,
   canAccessRoot,
@@ -280,12 +285,6 @@ function isNetworkLikePath(rootPath) {
     || normalized.startsWith('/mnt/')
     || normalized.startsWith('/media/')
     || /^\/\/[^/]+\/[^/]+/.test(normalized);
-}
-
-function isPathWithin(parentPath, candidatePath) {
-  const parent = path.resolve(parentPath);
-  const candidate = path.resolve(candidatePath);
-  return candidate === parent || candidate.startsWith(`${parent}${path.sep}`);
 }
 
 function defaultState() {
@@ -1182,12 +1181,18 @@ export function createHeadlessAdminService(options) {
       if (principal && !canAccessRoot(principal, item.rootId)) throw permissionDenied('This account cannot access that library.');
       const root = (await loadState()).roots.find((entry) => entry.id === item.rootId);
       if (!root) throw Object.assign(new Error('Media root was removed.'), { status: 404 });
-      const resolvedRoot = path.resolve(root.path);
-      const resolvedPath = path.resolve(item.path);
-      if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}${path.sep}`)) {
-        throw Object.assign(new Error('Media path is outside its configured root.'), { status: 403 });
-      }
-      return { ...item, path: resolvedPath, rootPath: resolvedRoot };
+      // Containment is decided on canonical real paths, not on the recorded
+      // strings: a catalog entry can point at a symlink, a dangling link, or a
+      // path whose type changed since it was indexed. `fileId` lets the caller
+      // that finally opens the file prove it is still the same file.
+      const verified = await statContainedFile(root.path, item.path);
+      return {
+        ...item,
+        path: verified.realPath,
+        rootPath: verified.rootRealPath,
+        fileId: verified.fileId,
+        sizeBytes: verified.stats.size,
+      };
     },
 
     async deleteLibraryItem(itemId, principal) {
@@ -1199,23 +1204,18 @@ export function createHeadlessAdminService(options) {
       const root = state.roots.find((entry) => entry.id === item.rootId);
       if (!root) throw Object.assign(new Error('Media root was removed.'), { status: 404 });
 
-      const rootRealPath = await fs.realpath(root.path).catch(() => path.resolve(root.path));
-      const fileRealPath = await fs.realpath(item.path).catch((error) => {
-        throw Object.assign(new Error('The media file is unavailable.'), { status: error?.code === 'EACCES' ? 403 : 409 });
-      });
-      if (!isPathWithin(rootRealPath, fileRealPath)) {
-        throw Object.assign(new Error('Media path is outside its configured root.'), { status: 403 });
-      }
-      const stats = await fs.stat(fileRealPath).catch((error) => {
-        throw Object.assign(new Error('The media file is unavailable.'), { status: error?.code === 'EACCES' ? 403 : 409 });
-      });
-      if (!stats.isFile()) throw Object.assign(new Error('The media path is not a file.'), { status: 409 });
-      await fs.unlink(fileRealPath).catch((error) => {
+      const verified = await statContainedFile(root.path, item.path);
+      // unlink never follows a final-component symlink, so a link substituted
+      // after verification removes the link itself and cannot reach outside.
+      await fs.unlink(verified.realPath).catch((error) => {
         throw Object.assign(new Error('The media file could not be deleted.'), { status: error?.code === 'EACCES' ? 403 : 500 });
       });
       state.catalog = state.catalog.filter((entry) => entry.id !== itemId);
       await saveState(state);
-      await appendLog('info', `Media file deleted: ${item.relativePath || item.path}`, { itemId, userId: principal.id });
+      // Logs are readable by any account holding logs.read, including a
+      // root-scoped administrator, so record the path below the root rather
+      // than the absolute path the catalog stored.
+      await appendLog('info', `Media file deleted: ${containedRelativePath(verified.rootRealPath, verified.realPath)}`, { itemId, userId: principal.id });
       return { id: itemId, deleted: true };
     },
 
