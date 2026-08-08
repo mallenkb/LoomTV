@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -44,6 +45,184 @@ async function waitForScan(service, principal, timeoutMs = 5000) {
     await new Promise((resolve) => { setTimeout(resolve, 25); });
   }
 }
+
+function fileSystemError(code) {
+  return Object.assign(new Error(code), { code });
+}
+
+function storageCheck(health) {
+  return health.checks.find((entry) => entry.name === 'Persistent storage');
+}
+
+test('admin storage health verifies a writable directory and removes its probe file', async () => {
+  const { service, dataDir } = await makeService({
+    options: {
+      storageFileSystem: {
+        statfs: async () => ({ blocks: 1_000_000, bsize: 1_024, bavail: 900_000 }),
+      },
+    },
+  });
+
+  const health = await service.getHealth(null);
+  assert.deepEqual(health.storage, {
+    path: dataDir,
+    available: true,
+    writable: true,
+    state: 'writable',
+    totalBytes: 1_024_000_000,
+    freeBytes: 921_600_000,
+  });
+  assert.equal(storageCheck(health)?.state, 'pass');
+  assert.equal((await fs.readdir(dataDir)).some((name) => name.startsWith('.loomtv-storage-probe-')), false);
+
+  const publicSummary = await service.getHealth(null, { summary: true });
+  assert.equal(Object.hasOwn(publicSummary, 'storage'), false);
+  assert.equal(storageCheck(publicSummary), undefined);
+});
+
+test('admin storage health distinguishes permission-denied and read-only directories from missing paths', async (t) => {
+  for (const [errorCode, expectedState] of [['EACCES', 'permission-denied'], ['EROFS', 'read-only']]) {
+    await t.test(errorCode, async () => {
+      let accessMode;
+      let probeCalled = false;
+      const { service } = await makeService({
+        options: {
+          storageFileSystem: {
+            access: async (_targetPath, mode) => {
+              accessMode = mode;
+              throw fileSystemError(errorCode);
+            },
+            statfs: async () => ({ blocks: 100, bsize: 4_096, bavail: 50 }),
+          },
+          storageWriteProbe: async () => { probeCalled = true; },
+        },
+      });
+
+      const health = await service.getHealth(null);
+      assert.equal(accessMode, fsConstants.W_OK);
+      assert.equal(probeCalled, false);
+      assert.equal(health.storage.available, true);
+      assert.equal(health.storage.writable, false);
+      assert.equal(health.storage.state, expectedState);
+      assert.equal(storageCheck(health)?.state, 'warn');
+    });
+  }
+
+  await t.test('ENOENT', async () => {
+    let postStatCall = false;
+    const { service } = await makeService({
+      options: {
+        storageFileSystem: {
+          stat: async () => { throw fileSystemError('ENOENT'); },
+          statfs: async () => { postStatCall = true; },
+          access: async () => { postStatCall = true; },
+        },
+        storageWriteProbe: async () => { postStatCall = true; },
+      },
+    });
+
+    const health = await service.getHealth(null);
+    assert.equal(postStatCall, false);
+    assert.deepEqual(health.storage, {
+      path: health.storage.path,
+      available: false,
+      writable: false,
+      state: 'missing',
+    });
+    assert.equal(storageCheck(health)?.message, 'Data directory is missing.');
+  });
+});
+
+test('admin storage health reports a mocked disk write error after closing and cleaning the probe', async () => {
+  const calls = [];
+  const { service } = await makeService({
+    options: {
+      storageFileSystem: {
+        statfs: async () => ({ blocks: 100, bsize: 4_096, bavail: 50 }),
+        open: async (probePath, flags, mode) => {
+          calls.push(['open', path.basename(probePath), flags, mode]);
+          return {
+            writeFile: async () => {
+              calls.push(['write']);
+              throw fileSystemError('ENOSPC');
+            },
+            sync: async () => { calls.push(['sync']); },
+            close: async () => { calls.push(['close']); },
+          };
+        },
+        rm: async (probePath, options) => { calls.push(['rm', path.basename(probePath), options]); },
+      },
+    },
+  });
+
+  const health = await service.getHealth(null);
+  assert.equal(health.storage.available, true);
+  assert.equal(health.storage.writable, false);
+  assert.equal(health.storage.state, 'write-failed');
+  assert.deepEqual(calls.map(([operation]) => operation), ['open', 'write', 'close', 'rm']);
+  assert.equal(calls[0][2], 'wx');
+  assert.equal(calls[0][3], 0o600);
+  assert.deepEqual(calls[3][2], { force: true });
+});
+
+test('admin storage health bounds an injected hanging write probe', async () => {
+  let probeCalls = 0;
+  const { service } = await makeService({
+    options: {
+      storageFileSystem: {
+        statfs: async () => ({ blocks: 100, bsize: 4_096, bavail: 50 }),
+      },
+      storageProbeTimeoutMs: 20,
+      storageWriteProbe: async () => {
+        probeCalls += 1;
+        return new Promise(() => {});
+      },
+    },
+  });
+
+  const startedAt = Date.now();
+  const health = await service.getHealth(null);
+  assert.ok(Date.now() - startedAt < 500, 'storage health must return instead of waiting on the hanging probe');
+  assert.equal(health.storage.available, true);
+  assert.equal(health.storage.writable, false);
+  assert.equal(health.storage.state, 'probe-timeout');
+  assert.equal(storageCheck(health)?.message, 'Data directory write probe timed out.');
+
+  const repeatedHealth = await service.getHealth(null);
+  assert.equal(repeatedHealth.storage.state, 'probe-timeout');
+  assert.equal(probeCalls, 1, 'repeated health checks must share a still-running filesystem probe');
+});
+
+test('admin storage health surfaces cleanup failure after always attempting rm and unlink', async () => {
+  const calls = [];
+  const { service } = await makeService({
+    options: {
+      storageFileSystem: {
+        statfs: async () => ({ blocks: 100, bsize: 4_096, bavail: 50 }),
+        open: async () => ({
+          writeFile: async () => { calls.push('write'); },
+          sync: async () => { calls.push('sync'); },
+          close: async () => { calls.push('close'); },
+        }),
+        rm: async () => {
+          calls.push('rm');
+          throw fileSystemError('EBUSY');
+        },
+        unlink: async () => {
+          calls.push('unlink');
+          throw fileSystemError('EBUSY');
+        },
+      },
+    },
+  });
+
+  const health = await service.getHealth(null);
+  assert.equal(health.storage.available, true);
+  assert.equal(health.storage.writable, false);
+  assert.equal(health.storage.state, 'cleanup-failed');
+  assert.deepEqual(calls, ['write', 'sync', 'close', 'rm', 'unlink']);
+  assert.equal(storageCheck(health)?.message, 'Data directory write probe could not clean up its temporary file.');
+});
 
 test('owner onboarding issues a usable session and cannot run twice', async () => {
   const { service } = await makeService();

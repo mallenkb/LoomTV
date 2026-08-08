@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if [ "$(id -u)" -eq 0 ] || [ "$(id -g)" -eq 0 ]; then
+  printf '%s\n' 'LoomTV refuses to run with a root UID or GID; set non-zero PUID and PGID values.' >&2
+  exit 77
+fi
+
 # A bind mount created by Docker may be owned by root.  Do not try to chown it
 # from a non-root container; fail with a useful message instead of silently
 # losing library state or cache writes.

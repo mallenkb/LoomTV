@@ -169,7 +169,11 @@ checksum, writes an automatic pre-restore rollback snapshot, replaces both
 state stores, and revokes active sessions. Raw state files from the first
 headless release are accepted as a one-time legacy restore format.
 
-Health now includes storage writability/free space, verified-backup readiness,
-transcoder details, and operational checks. Logs support `level`, `source`,
-`search`, `before`, `after`, `limit`, and `offset` filters and are retained for
-30 days (up to 250 entries).
+Authenticated admin health reports persistent-storage `available` and
+`writable` separately. Its typed `state` distinguishes missing, non-directory,
+permission-denied, read-only, write, cleanup, and timeout failures after a
+bounded exclusive-create/write/fsync/close/remove probe. Storage paths remain
+absent from the public health summary. Health also includes free space,
+verified-backup readiness, transcoder details, and operational checks. Logs
+support `level`, `source`, `search`, `before`, `after`, `limit`, and `offset`
+filters and are retained for 30 days (up to 250 entries).

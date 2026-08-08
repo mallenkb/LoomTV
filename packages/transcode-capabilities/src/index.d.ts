@@ -43,6 +43,12 @@ export interface ProbeOptions {
   skipSmokeTest?: boolean;
   probeTimeoutMs?: number;
   cacheMs?: number;
+  /** Override command execution for deterministic probes or embedded runtimes. */
+  commandRunner?: (
+    command: string,
+    args: readonly string[],
+    options: Record<string, unknown>,
+  ) => string | Buffer | void;
 }
 
 export const TRANSCODE_BACKENDS: readonly TranscodeBackend[];

@@ -3,9 +3,10 @@
 # The headless runtime is deliberately kept independent from Electron.  The
 # server package currently ships JavaScript directly, so this image does not
 # need a desktop build or a display server.
-ARG NODE_IMAGE=node:22-bookworm-slim
-
-FROM ${NODE_IMAGE} AS dependencies
+# Docker Hub multi-platform OCI index for node:22-bookworm-slim, resolved
+# 2026-08-08. Refresh both FROM lines and the 20260806T000000Z Debian snapshot
+# together so amd64 and arm64 select platform manifests from the same index.
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS dependencies
 
 WORKDIR /workspace
 ENV COREPACK_HOME=/tmp/corepack
@@ -31,7 +32,7 @@ COPY packages/transcode-capabilities/src packages/transcode-capabilities/src
 RUN pnpm install --filter ./apps/server... --prod --frozen-lockfile
 RUN pnpm --config.inject-workspace-packages=true --filter ./apps/server deploy --prod /opt/loomtv
 
-FROM ${NODE_IMAGE} AS runtime
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS runtime
 
 ARG LOOMTV_UID=1000
 ARG LOOMTV_GID=1000
@@ -43,10 +44,27 @@ ENV NODE_ENV=production \
     CACHE_DIR=/cache \
     MEDIA_DIR=/media
 
-# ffmpeg is installed from Debian's multi-architecture repositories.  It is
-# intentionally available in the image, but hardware acceleration remains an
-# opt-in host/device configuration (see docs/nas-deployment.md).
-RUN apt-get update \
+# ffmpeg is installed from one immutable Debian snapshot for both supported
+# architectures. The snapshot is updated only alongside the base digest in a
+# reviewed image rebuild; unattended rebuilds must not pick up new apt inputs.
+# Hardware acceleration remains opt-in (see docs/nas-deployment.md).
+RUN if [ "${LOOMTV_UID}" = '0' ] || [ "${LOOMTV_GID}" = '0' ]; then echo 'LOOMTV_UID and LOOMTV_GID must be non-zero.' >&2; exit 64; fi \
+  && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
+  && printf '%s\n' \
+    'Types: deb' \
+    'URIs: http://snapshot.debian.org/archive/debian/20260806T000000Z/' \
+    'Suites: bookworm bookworm-updates' \
+    'Components: main' \
+    'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+    '' \
+    'Types: deb' \
+    'URIs: http://snapshot.debian.org/archive/debian-security/20260806T000000Z/' \
+    'Suites: bookworm-security' \
+    'Components: main' \
+    'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+    > /etc/apt/sources.list.d/debian.sources \
+  && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99snapshot \
+  && apt-get update \
   && apt-get install --no-install-recommends --yes ca-certificates ffmpeg tini \
   && rm -rf /var/lib/apt/lists/* \
   && (getent group "${LOOMTV_GID}" >/dev/null || groupadd --gid "${LOOMTV_GID}" loomtv) \

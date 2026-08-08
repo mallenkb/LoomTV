@@ -2,9 +2,10 @@ name: loomtv
 
 services:
   loomtv:
-    # Pin this to a release tag or digest in production.  The build block is
-    # useful for local development and for NAS hosts that build on-device.
-    image: ghcr.io/mallenkb/loomtv:latest
+    # The checked-in deployment builds this release locally. Registry-based
+    # deployments must replace it with a publisher-verified release or digest;
+    # never use latest (see docs/nas-deployment.md).
+    image: loomtv:1.0.111
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile

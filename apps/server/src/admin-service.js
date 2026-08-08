@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -44,6 +45,129 @@ const BACKUP_VERSION = 1;
 const MAX_BACKUP_HISTORY = 24;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const STORAGE_PROBE_TIMEOUT_MS = 1_000;
+const STORAGE_PROBE_PREFIX = '.loomtv-storage-probe-';
+
+/**
+ * @typedef {'writable' | 'missing' | 'not-directory' | 'permission-denied' | 'read-only' | 'write-failed' | 'cleanup-failed' | 'probe-timeout' | 'unavailable'} StorageHealthState
+ * @typedef {{
+ *   path: string,
+ *   available: boolean,
+ *   writable: boolean,
+ *   state: StorageHealthState,
+ *   totalBytes?: number,
+ *   freeBytes?: number,
+ * }} StorageHealthStatus
+ */
+
+function storageStateForError(error, fallback) {
+  if (error?.storageState) return error.storageState;
+  switch (error?.code) {
+    case 'ENOENT': return 'missing';
+    case 'ENOTDIR': return 'not-directory';
+    case 'EACCES':
+    case 'EPERM': return 'permission-denied';
+    case 'EROFS': return 'read-only';
+    case 'ETIMEDOUT': return 'probe-timeout';
+    default: return fallback;
+  }
+}
+
+function storageProbeTimeoutError() {
+  return Object.assign(new Error('Persistent storage health probe timed out.'), {
+    code: 'ETIMEDOUT',
+    storageState: 'probe-timeout',
+  });
+}
+
+function createStorageDeadline(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  return async function withinStorageDeadline(operation) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw storageProbeTimeoutError();
+    let timeout;
+    try {
+      return await Promise.race([
+        Promise.resolve().then(operation),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(storageProbeTimeoutError()), remainingMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+}
+
+async function removeStorageProbe(fileSystem, probePath) {
+  try {
+    await fileSystem.rm(probePath, { force: true });
+  } catch (rmError) {
+    try {
+      await fileSystem.unlink(probePath);
+    } catch (unlinkError) {
+      if (unlinkError?.code === 'ENOENT') return;
+      throw Object.assign(new Error('Persistent storage probe file could not be removed.'), {
+        storageState: 'cleanup-failed',
+        cause: unlinkError,
+        rmCause: rmError,
+      });
+    }
+  }
+}
+
+async function atomicStorageWriteProbe(_targetPath, { fileSystem, probePath }) {
+  let handle;
+  let operationError;
+  try {
+    handle = await fileSystem.open(probePath, 'wx', 0o600);
+    await handle.writeFile('loomtv-storage-health\n', 'utf8');
+    await handle.sync();
+  } catch (error) {
+    operationError = error;
+  }
+
+  if (!handle) throw operationError;
+
+  try {
+    await handle.close();
+  } catch (error) {
+    operationError ||= error;
+  }
+
+  // Cleanup is attempted after every successful exclusive create, including
+  // write, fsync, and close failures. A failed rm gets an unlink fallback.
+  await removeStorageProbe(fileSystem, probePath);
+  if (operationError) throw operationError;
+}
+
+function storageCapacity(stats) {
+  const blockSize = Number(stats?.bsize);
+  const blocks = Number(stats?.blocks);
+  const availableBlocks = Number(stats?.bavail);
+  const totalBytes = blocks * blockSize;
+  const freeBytes = availableBlocks * blockSize;
+  return {
+    ...(Number.isFinite(totalBytes) && totalBytes >= 0 ? { totalBytes } : {}),
+    ...(Number.isFinite(freeBytes) && freeBytes >= 0 ? { freeBytes } : {}),
+  };
+}
+
+function storageCheckMessage(storage) {
+  if (storage.writable) {
+    return `${storage.freeBytes == null ? 'Available' : `${Math.round(storage.freeBytes / 1024 / 1024)} MB free`}.`;
+  }
+  switch (storage.state) {
+    case 'missing': return 'Data directory is missing.';
+    case 'not-directory': return 'Configured data path is not a directory.';
+    case 'permission-denied': return 'Data directory is available, but write permission was denied.';
+    case 'read-only': return 'Data directory is available on a read-only filesystem.';
+    case 'cleanup-failed': return 'Data directory write probe could not clean up its temporary file.';
+    case 'probe-timeout': return 'Data directory write probe timed out.';
+    case 'write-failed': return 'Data directory did not accept a verified write.';
+    default: return 'Data directory is unavailable.';
+  }
+}
 
 function invalidInput(message) {
   return Object.assign(new Error(message), { status: 400, code: 'invalid_request' });
@@ -440,6 +564,14 @@ export function createHeadlessAdminService(options) {
   const getClientState = options.getClientState || (async () => null);
   const replaceClientState = options.replaceClientState || (async () => undefined);
   const loginDelay = options.loginDelay || wait;
+  const storageFileSystem = options.storageFileSystem
+    ? { ...fs, ...options.storageFileSystem }
+    : fs;
+  const storageWriteProbe = options.storageWriteProbe || atomicStorageWriteProbe;
+  const storageProbeTimeoutMs = Number.isFinite(options.storageProbeTimeoutMs)
+    ? Math.max(10, Math.min(10_000, Math.trunc(options.storageProbeTimeoutMs)))
+    : STORAGE_PROBE_TIMEOUT_MS;
+  const storageOperations = new Map();
   let statePromise;
   let writeQueue = Promise.resolve();
   let ownerCreationPromise = null;
@@ -471,21 +603,76 @@ export function createHeadlessAdminService(options) {
     return { sizeBytes: stats.size, checksum: envelope.checksum };
   }
 
+  function sharedStorageOperation(operationName, targetPath, operation) {
+    const key = `${operationName}:${targetPath}`;
+    const existing = storageOperations.get(key);
+    if (existing) return existing;
+    const pending = Promise.resolve().then(operation);
+    storageOperations.set(key, pending);
+    const clear = () => {
+      if (storageOperations.get(key) === pending) storageOperations.delete(key);
+    };
+    pending.then(clear, clear);
+    return pending;
+  }
+
+  /** @returns {Promise<StorageHealthStatus>} */
   async function storageStatus(targetPath) {
+    const withinDeadline = createStorageDeadline(storageProbeTimeoutMs);
+    let stats;
     try {
-      const [stats, writable] = await Promise.all([
-        fs.statfs(targetPath),
-        fs.access(targetPath).then(() => true).catch(() => false),
-      ]);
+      stats = await withinDeadline(() => sharedStorageOperation('stat', targetPath, () => storageFileSystem.stat(targetPath)));
+    } catch (error) {
       return {
         path: targetPath,
-        writable,
-        totalBytes: Number(stats.blocks) * Number(stats.bsize),
-        freeBytes: Number(stats.bavail) * Number(stats.bsize),
+        available: false,
+        writable: false,
+        state: storageStateForError(error, 'unavailable'),
       };
-    } catch (error) {
-      return { path: targetPath, writable: false, state: error?.code || 'unavailable' };
     }
+    if (!stats.isDirectory()) {
+      return { path: targetPath, available: false, writable: false, state: 'not-directory' };
+    }
+
+    const capacityPromise = withinDeadline(() => sharedStorageOperation('statfs', targetPath, () => storageFileSystem.statfs(targetPath)))
+      .then(storageCapacity)
+      .catch(() => ({}));
+    try {
+      await withinDeadline(() => sharedStorageOperation('access', targetPath, () => storageFileSystem.access(targetPath, fsConstants.W_OK)));
+    } catch (error) {
+      const state = storageStateForError(error, 'write-failed');
+      return {
+        path: targetPath,
+        available: !['missing', 'not-directory'].includes(state),
+        writable: false,
+        state,
+        ...await capacityPromise,
+      };
+    }
+
+    const probePath = path.join(targetPath, `${STORAGE_PROBE_PREFIX}${process.pid}-${randomUUID()}.tmp`);
+    try {
+      await withinDeadline(() => sharedStorageOperation('write-probe', targetPath, () => storageWriteProbe(targetPath, {
+        fileSystem: storageFileSystem,
+        probePath,
+      })));
+    } catch (error) {
+      const state = storageStateForError(error, 'write-failed');
+      return {
+        path: targetPath,
+        available: !['missing', 'not-directory'].includes(state),
+        writable: false,
+        state,
+        ...await capacityPromise,
+      };
+    }
+    return {
+      path: targetPath,
+      available: true,
+      writable: true,
+      state: 'writable',
+      ...await capacityPromise,
+    };
   }
 
   function pruneLogs(state, now = Date.now()) {
@@ -1236,7 +1423,7 @@ export function createHeadlessAdminService(options) {
       const transcoderState = transcoderHealth.available
         ? (transcoderHealth.hardwareAcceleration ? 'available' : 'limited')
         : 'unavailable';
-      const state = mediaState !== 'online'
+      const runtimeState = mediaState !== 'online'
         ? 'offline'
         : transcoderState === 'unavailable' ? 'degraded' : 'healthy';
       const backendLabel = transcoderHealth.recommendedBackend && transcoderHealth.recommendedBackend !== 'software'
@@ -1245,6 +1432,9 @@ export function createHeadlessAdminService(options) {
       const currentState = await loadState();
       const catalogCount = Array.isArray(currentState.catalog) ? currentState.catalog.length : 0;
       const storage = summaryOnly ? null : await storageStatus(dataDir);
+      const state = !summaryOnly && storage && !storage.writable && runtimeState === 'healthy'
+        ? 'degraded'
+        : runtimeState;
       const latestBackup = normalizeBackupHistory(currentState.backup?.history).find((entry) => entry.kind === 'backup' && entry.status === 'completed');
       const checks = [
         { name: 'Headless runtime', state: 'pass', message: 'The server is running without Electron.' },
@@ -1253,7 +1443,7 @@ export function createHeadlessAdminService(options) {
         { name: 'FFmpeg transcoder', state: transcoderState === 'available' ? 'pass' : transcoderState === 'limited' ? 'warn' : 'fail', message: transcoderHealth.available ? `FFmpeg is available.${backendLabel}` : 'FFmpeg is not available on this host.' },
       ];
       if (!summaryOnly) {
-        checks.push({ name: 'Persistent storage', state: storage?.writable && (storage.freeBytes === undefined || storage.freeBytes > 64 * 1024 * 1024) ? 'pass' : 'warn', message: storage?.writable ? `${storage.freeBytes == null ? 'Available' : `${Math.round(storage.freeBytes / 1024 / 1024)} MB free`}.` : 'Data directory is not writable.' });
+        checks.push({ name: 'Persistent storage', state: storage.writable && (storage.freeBytes === undefined || storage.freeBytes > 64 * 1024 * 1024) ? 'pass' : 'warn', message: storageCheckMessage(storage) });
         checks.push({ name: 'Latest backup', state: latestBackup ? 'pass' : 'warn', message: latestBackup ? `Last verified snapshot ${new Date(latestBackup.createdAt).toISOString()}.` : 'No verified backup has been recorded.' });
       }
       const safeTranscoder = {

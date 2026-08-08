@@ -39,7 +39,9 @@ LoomTV UID/GID, and run a scan again.
 ## Docker Compose
 
 Create directories owned by the account that will run the container. The
-default UID/GID is `1000:1000`; NAS images commonly use a different pair.
+default UID/GID is `1000:1000`; NAS images commonly use a different pair. Both
+values must be non-zero: the image build and runtime entrypoint reject a root
+UID or GID instead of starting with elevated filesystem access.
 
 ```sh
 mkdir -p /srv/loomtv/config /srv/loomtv/cache
@@ -71,10 +73,12 @@ LOOMTV_MEDIA_DIR=/srv/loomtv/media
 TZ=UTC
 ```
 
-Start and inspect the service:
+The checked-in Compose file builds the current checkout and names the local
+image `loomtv:1.0.111`. The version is deliberate: update it only when the
+checkout and the intended LoomTV release agree. Start and inspect the service:
 
 ```sh
-docker compose up -d
+docker compose up -d --build
 docker compose ps
 docker compose logs --follow loomtv
 curl --fail http://127.0.0.1:3847/healthz
@@ -83,11 +87,20 @@ curl --fail http://127.0.0.1:3847/healthz
 # http://127.0.0.1:3847/admin/
 ```
 
-The Compose file builds locally by default and also names the published image.
-For a release image, pin `image:` to a version or digest and remove `build:`.
-Do not publish port 3847 directly to the public Internet; use a VPN or a
-carefully configured reverse proxy after authentication and remote-access
-policy are in place.
+For a registry deployment, remove `build:` and replace `image:` with either an
+explicit publisher release version or, preferably, the verified multi-platform
+index digest returned by the registry. Resolve that digest from the exact
+release first; never substitute `latest`, a shortened digest, or a digest copied
+from an untrusted release note:
+
+```sh
+docker buildx imagetools inspect registry.example/owner/loomtv:1.0.111
+# Then set image: to registry.example/owner/loomtv@sha256:<verified-64-hex-digest>
+```
+
+The placeholder above is documentation, not a usable digest. Do not publish
+port 3847 directly to the public Internet; use a VPN or a carefully configured
+reverse proxy after authentication and remote-access policy are in place.
 
 ### Permissions
 
@@ -104,18 +117,49 @@ would be unsafe on NAS volumes.
 
 ## Building for NAS architectures
 
-The base image and Debian FFmpeg packages support both common Linux targets:
+The Dockerfile pins the Docker Hub multi-platform index for the readable
+`node:22-bookworm-slim` base. It also replaces live Debian mirrors with one
+timestamped snapshot, so `ca-certificates`, FFmpeg, Tini, and their transitive
+apt dependencies cannot change during an otherwise identical rebuild. The
+snapshot uses signed Debian `InRelease` metadata; HTTP is intentional because
+the slim base may not have a CA bundle until this apt transaction installs it.
+
+The base and Debian packages support both common Linux targets:
 
 ```sh
+LOOMTV_IMAGE=registry.example/owner/loomtv:1.0.111
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -f deploy/docker/Dockerfile \
-  -t ghcr.io/mallenkb/loomtv:latest \
+  -t "$LOOMTV_IMAGE" \
   --push .
+docker buildx imagetools inspect "$LOOMTV_IMAGE"
 ```
 
 On a NAS that cannot build images, build and push from a workstation, then
 `docker compose pull` on the NAS. Pin a digest for repeatable upgrades.
+
+### Base image and apt rebuild policy
+
+Pinned packages do not receive fixes by themselves. Review the container inputs
+at least monthly, before a production release when practical, and immediately
+when a relevant critical or high-severity Node, Debian, FFmpeg, Tini, or CA
+certificate advisory is published. In one focused change:
+
+1. Resolve the current `node:22-bookworm-slim` multi-platform index from Docker
+   Hub and confirm it still contains both `linux/amd64` and `linux/arm64`.
+2. Choose a UTC Debian snapshot at or after that base image's publication and
+   verify both the `debian` and `debian-security` snapshot `InRelease` files.
+3. Update both pinned `FROM` references and both Debian snapshot URLs together,
+   review the apt package delta, run `corepack pnpm run container:verify` and
+   `corepack pnpm run container:policy:test`, then build both target platforms.
+4. Publish a new LoomTV release image; resolve its registry digest and update
+   production Compose deployments to that digest. Keep the previous digest for
+   rollback.
+
+Do not replace the literal pins with build arguments or live mirror URLs. If
+either registry or snapshot metadata cannot be verified, postpone the rebuild
+rather than guessing.
 
 ## Hardware transcoding (opt-in)
 
@@ -254,8 +298,11 @@ headless release are accepted as a legacy migration format.
 
 1. Take a config backup.
 2. Pin or record the current image digest/version.
-3. Pull/build the new image and run `docker compose up -d` (or restart the
-   systemd unit after replacing `/opt/loomtv`).
+3. For the checked-in local-build path, check out the intended release, update
+   the explicit `image:` version, and rebuild. For a registry deployment,
+   resolve and set the new release digest before pulling it. Run
+   `docker compose up -d` (or restart the systemd unit after replacing
+   `/opt/loomtv`).
 4. Confirm `/healthz`, the web client, library count, and one direct/transcoded
    playback before removing the old image.
 
