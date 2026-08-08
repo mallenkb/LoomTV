@@ -1,0 +1,169 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const {
+  desktopPackagingViolations,
+  findPolicyViolations,
+} = require('./verify-workflow-policy.cjs');
+
+const CHECKOUT_SHA = '3d3c42e5aac5ba805825da76410c181273ba90b1';
+
+function workflow({ permissions = 'contents: read', secret = false, event = 'pull_request' } = {}) {
+  return `
+name: Fixture
+on:
+  ${event}:
+permissions:
+  ${permissions}
+jobs:
+  verify:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@${CHECKOUT_SHA}
+      - run: corepack pnpm install --frozen-lockfile${secret ? `\n        env:\n          VALUE: \${{ secrets.PROTECTED_VALUE }}` : ''}
+`;
+}
+
+test('accepts an explicitly read-only pull-request workflow', () => {
+  assert.deepEqual(findPolicyViolations('fixture.yml', workflow()), []);
+});
+
+test('rejects write permissions in a pull-request workflow', () => {
+  const violations = findPolicyViolations('fixture.yml', workflow({ permissions: 'contents: write' }));
+  assert.ok(violations.some((message) => message.includes('grants write')));
+});
+
+test('rejects protected secret references in a pull-request workflow', () => {
+  const violations = findPolicyViolations('fixture.yml', workflow({ secret: true }));
+  assert.ok(violations.some((message) => message.includes('secrets context')));
+});
+
+test('rejects indirect and whitespace-delimited secret-context references', () => {
+  for (const expression of ['${{ toJSON(secrets) }}', "${{ secrets ['PROTECTED_VALUE'] }}"]) {
+    const source = workflow().replace(
+      'corepack pnpm install --frozen-lockfile',
+      `corepack pnpm install --frozen-lockfile\n        env:\n          VALUE: ${expression}`,
+    );
+    const violations = findPolicyViolations('fixture.yml', source);
+    assert.ok(violations.some((message) => message.includes('secrets context')));
+  }
+});
+
+test('allows write permissions in a release-only workflow', () => {
+  assert.deepEqual(findPolicyViolations('release.yml', workflow({ permissions: 'contents: write', secret: true, event: 'workflow_dispatch' })), []);
+});
+
+test('requires frozen dependency installs in release-only workflows', () => {
+  const source = workflow({ event: 'workflow_dispatch' }).replace(' --frozen-lockfile', '');
+  const violations = findPolicyViolations('release.yml', source);
+  assert.ok(violations.some((message) => message.includes('dependency install must use --frozen-lockfile')));
+});
+
+test('rejects pull_request_target even when its token is read-only', () => {
+  const violations = findPolicyViolations('fixture.yml', workflow({ event: 'pull_request_target' }));
+  assert.ok(violations.some((message) => message.includes('pull_request_target is prohibited')));
+});
+
+test('rejects publishing commands in pull-request jobs', () => {
+  const source = workflow().replace(
+    'corepack pnpm install --frozen-lockfile',
+    'corepack pnpm install --frozen-lockfile\n      - run: gh release create v1.2.3',
+  );
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('publishing command')));
+});
+
+test('rejects publishing hidden behind a package script in pull-request jobs', () => {
+  for (const command of [
+    'corepack pnpm --filter loom-media-server-desktop run release',
+    'npm run publish',
+    'yarn run release:all-platforms',
+  ]) {
+    const source = workflow().replace(
+      'corepack pnpm install --frozen-lockfile',
+      `corepack pnpm install --frozen-lockfile\n      - run: ${command}`,
+    );
+    const violations = findPolicyViolations('fixture.yml', source);
+    assert.ok(
+      violations.some((message) => message.includes('publishing command')),
+      `expected ${command} to be rejected`,
+    );
+  }
+});
+
+test('rejects inherited secrets on reusable pull-request jobs', () => {
+  const source = `
+name: Reusable fixture
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: example/workflows/.github/workflows/validate.yml@${CHECKOUT_SHA}
+    secrets: inherit
+`;
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('jobs.verify.secrets')));
+  assert.ok(violations.some((message) => message.includes('secrets context')));
+});
+
+test('requires reusable workflows to use a full commit SHA', () => {
+  const source = `
+name: Reusable fixture
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: example/workflows/.github/workflows/validate.yml@main
+`;
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('jobs.verify.uses is not pinned')));
+});
+
+test('applies the untrusted-input boundary to workflow_run', () => {
+  const source = workflow({
+    event: 'workflow_run',
+    permissions: 'contents: write',
+    secret: true,
+  }).replace(
+    'corepack pnpm install --frozen-lockfile',
+    'corepack pnpm install --frozen-lockfile\n      - run: gh release create v1.2.3',
+  );
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('grants write')));
+  assert.ok(violations.some((message) => message.includes('secrets context')));
+  assert.ok(violations.some((message) => message.includes('publishing command')));
+});
+
+test('accepts explicit deny-all permissions for untrusted triggers', () => {
+  const source = workflow({ permissions: '{}' }).replace(
+    '    permissions:\n      contents: read\n',
+    '',
+  );
+  assert.deepEqual(findPolicyViolations('fixture.yml', source), []);
+});
+
+test('handles an empty job body without throwing', () => {
+  const source = `
+name: Empty job fixture
+on:
+  pull_request:
+permissions: {}
+jobs:
+  verify:
+`;
+  assert.deepEqual(findPolicyViolations('fixture.yml', source), []);
+});
+
+test('requires the desktop validation script to disable publishing', () => {
+  assert.deepEqual(desktopPackagingViolations({
+    scripts: { dist: 'electron-builder --publish=never' },
+  }), []);
+  assert.ok(desktopPackagingViolations({
+    scripts: { dist: 'electron-builder --publish=always' },
+  }).some((message) => message.includes('--publish=never')));
+});

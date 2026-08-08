@@ -1,0 +1,292 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing protected v* tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Verify protected release ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      release_tag: ${{ steps.release-context.outputs.release_tag }}
+      release_sha: ${{ steps.release-target.outputs.release_sha }}
+
+    steps:
+      - name: Validate release tag input
+        id: release-context
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release ref must be an existing v* version tag." >&2
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: refs/tags/${{ steps.release-context.outputs.release_tag }}
+
+      - name: Verify immutable release tag target
+        id: release-target
+        env:
+          RELEASE_TAG: ${{ steps.release-context.outputs.release_tag }}
+        shell: bash
+        run: |
+          tag_ref="refs/tags/$RELEASE_TAG"
+          if ! git show-ref --verify --quiet "$tag_ref"; then
+            echo "$RELEASE_TAG is not an existing tag." >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-parse "$tag_ref^{commit}")"
+          if [[ "$tag_commit" != "$(git rev-parse HEAD)" ]]; then
+            echo "Checked-out commit does not match exact tag $RELEASE_TAG." >&2
+            exit 1
+          fi
+          echo "release_sha=$tag_commit" >> "$GITHUB_OUTPUT"
+
+  make:
+    name: Sign and package ${{ matrix.platform }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    environment: production-release
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-26
+            artifact: loomtv-macos
+          - platform: Windows
+            os: windows-latest
+            artifact: loomtv-windows
+          - platform: Linux
+            os: ubuntu-latest
+            artifact: loomtv-linux
+
+    steps:
+      - name: Check out verified release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 11.20.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install Linux maker dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Install dependencies
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Build signed macOS installers
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          MACOS_CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        shell: bash
+        run: |
+          missing=()
+          for name in MACOS_CSC_LINK MACOS_CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Production macOS release is missing required credential: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          node apps/desktop/scripts/fetch-fpcalc.cjs
+          export CSC_LINK="$MACOS_CSC_LINK"
+          export CSC_KEY_PASSWORD="$MACOS_CSC_KEY_PASSWORD"
+          corepack pnpm --filter loom-media-server-desktop run dist
+
+      - name: Build signed Windows installers
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          missing=()
+          for name in WINDOWS_CSC_LINK WINDOWS_CSC_KEY_PASSWORD; do
+            [[ -n "${!name:-}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Production Windows release is missing required credential: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          node apps/desktop/scripts/fetch-fpcalc.cjs
+          export CSC_LINK="$WINDOWS_CSC_LINK"
+          export CSC_KEY_PASSWORD="$WINDOWS_CSC_KEY_PASSWORD"
+          corepack pnpm --filter loom-media-server-desktop run dist
+
+      - name: Build Linux installers
+        if: runner.os == 'Linux'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        shell: bash
+        run: |
+          node apps/desktop/scripts/fetch-fpcalc.cjs
+          corepack pnpm --filter loom-media-server-desktop run dist
+
+      - name: Verify packaged runtime dependencies
+        run: corepack pnpm --filter loom-media-server-desktop run verify:runtime
+
+      - name: Upload installers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.artifact }}-${{ github.run_attempt }}
+          path: |
+            apps/desktop/out/builder/**/*.dmg
+            apps/desktop/out/builder/**/*.zip
+            apps/desktop/out/builder/**/*.exe
+            apps/desktop/out/builder/**/*.deb
+            apps/desktop/out/builder/**/*.rpm
+            apps/desktop/out/builder/**/*.AppImage
+            apps/desktop/out/builder/**/*.blockmap
+            apps/desktop/out/builder/**/*.yml
+            apps/desktop/out/builder/**/*.yaml
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    needs:
+      - prepare
+      - make
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production-release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out verified release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+
+      - name: Download macOS installers
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: loomtv-macos-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download Windows installers
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: loomtv-windows-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Download Linux installers
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: loomtv-linux-${{ github.run_attempt }}
+          path: release-assets
+
+      - name: Re-verify release tag still targets prepared commit
+        env:
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        shell: bash
+        run: |
+          git fetch --no-tags --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          current_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          if [[ "$current_sha" != "$RELEASE_SHA" ]]; then
+            echo "Release tag $RELEASE_TAG moved after prepare: expected $RELEASE_SHA, found $current_sha." >&2
+            exit 1
+          fi
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          notes="docs/releases/v${version}.md"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [[ -f "$notes" ]]; then
+              gh release edit "$RELEASE_TAG" \
+                --title "LoomTV ${version}" \
+                --notes-file "$notes"
+            fi
+          elif [[ -f "$notes" ]]; then
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "LoomTV ${version}" \
+              --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "LoomTV ${version}" \
+              --generate-notes
+          fi
+
+          mapfile -d '' assets < <(
+            find release-assets -type f \( \
+              -name 'LoomTV-*.dmg' -o \
+              -name 'LoomTV-*.zip' -o \
+              -name 'LoomTV-*.exe' -o \
+              -name 'LoomTV-*.deb' -o \
+              -name 'LoomTV-*.rpm' -o \
+              -name 'LoomTV-*.AppImage' -o \
+              -name 'LoomTV-*.blockmap' -o \
+              -name 'latest*.yml' \
+            \) -print0
+          )
+          if (( ${#assets[@]} == 0 )); then
+            echo 'No release files were downloaded.' >&2
+            exit 1
+          fi
+          existing_assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          for asset in "${assets[@]}"; do
+            asset_name="$(basename "$asset")"
+            if grep -Fqx "$asset_name" <<< "$existing_assets"; then
+              echo "Keeping existing release asset: $asset_name"
+              continue
+            fi
+            gh release upload "$RELEASE_TAG" "$asset"
+          done

@@ -226,7 +226,7 @@ For release automation:
    git push origin v1.0.12
    ```
 
-3. The workflow in `.github/workflows/build-installers.yml` runs on tag pushes. Electron Builder creates and uploads macOS/Windows/Linux installers plus updater metadata (`latest*.yml`, `.blockmap`) to the GitHub release.
+3. The release workflow in `.github/workflows/release.yml` runs on version-tag pushes or a manual dispatch gated by the protected `production-release` environment. It creates macOS/Windows/Linux installers with Electron Builder and uploads them with updater metadata (`latest*.yml`, `.blockmap`) to the GitHub release. Pull-request events and `main`-branch pushes run only `.github/workflows/validate.yml`, which has a read-only token and no signing or publishing secrets.
 
 ### Auto-update behavior
 

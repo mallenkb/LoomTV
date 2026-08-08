@@ -12,6 +12,8 @@
     "audit:prod": "node scripts/audit-production.cjs",
     "mobile:verify-android-config": "node scripts/verify-mobile-android-config.cjs",
     "mobile:verify-release-config": "node scripts/verify-mobile-release-config.cjs",
+    "verify:workflow-policy": "node scripts/verify-workflow-policy.cjs",
+    "test:workflow-policy": "node --test scripts/verify-workflow-policy.test.cjs",
     "sbom": "node scripts/generate-sbom.cjs",
     "dev": "pnpm desktop:start",
     "start": "pnpm desktop:start",
