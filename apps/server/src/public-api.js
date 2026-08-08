@@ -106,33 +106,65 @@ function authTokenPresent(req, url) {
   return Boolean(req.headers.authorization || req.headers['x-loom-admin-token'] || url.searchParams.get('token'));
 }
 
-function publicHealthSummary(health) {
+export function publicHealthSummary(health) {
   const media = health?.media || {};
   const transcoder = health?.transcoder || {};
+  const mediaStates = new Set(['unconfigured', 'online', 'offline', 'not-directory', 'permission-denied']);
+  const transcoderStates = new Set(['available', 'limited', 'unavailable']);
+  const publicStatuses = new Set(['ready', 'draining']);
   return {
-    status: health?.status,
+    status: publicStatuses.has(health?.status) ? health.status : 'unknown',
     media: {
       configured: Boolean(media.configured),
-      state: media.state || 'unknown',
+      state: mediaStates.has(media.state) ? media.state : 'unknown',
       readable: media.readable === true,
     },
     transcoder: {
       available: transcoder.available === true,
       hardwareAcceleration: transcoder.hardwareAcceleration === true,
-      recommendedBackend: transcoder.recommendedBackend || 'software',
+      recommendedBackend: typeof transcoder.recommendedBackend === 'string'
+        ? transcoder.recommendedBackend.slice(0, 32)
+        : 'software',
+      state: transcoderStates.has(transcoder.state) ? transcoder.state : 'unavailable',
     },
   };
 }
 
 function publicLibraryItem(item) {
   if (!item || typeof item !== 'object') return item;
-  const { path: _path, ...safeItem } = item;
+  const safeItem = {};
+  for (const field of ['id', 'rootId', 'type', 'title', 'kind', 'extension']) {
+    if (typeof item[field] === 'string' && item[field].length <= 4_096 && !item[field].includes('\u0000')) safeItem[field] = item[field];
+  }
+  for (const field of ['year', 'sizeBytes', 'modifiedAtMs', 'indexedAt']) {
+    if (Number.isFinite(item[field])) safeItem[field] = Number(item[field]);
+  }
+  if (typeof item.available === 'boolean') safeItem.available = item.available;
+  if (typeof item.relativePath === 'string' && item.relativePath.length <= 4_096
+    && !path.isAbsolute(item.relativePath) && !path.win32.isAbsolute(item.relativePath)
+    && !item.relativePath.includes('\u0000')) safeItem.relativePath = item.relativePath;
+  if (item.animeLikely === true) safeItem.animeLikely = true;
+  if (item.series && typeof item.series === 'object' && typeof item.series.title === 'string') {
+    safeItem.series = {
+      title: item.series.title.slice(0, 500),
+      ...(Number.isSafeInteger(item.series.season) ? { season: item.series.season } : {}),
+      ...(Number.isSafeInteger(item.series.episode) ? { episode: item.series.episode } : {}),
+    };
+  }
   return safeItem;
 }
 
 function publicLibraryRoot(root) {
   if (!root || typeof root !== 'object') return root;
-  const { path: _path, ...safeRoot } = root;
+  const safeRoot = {};
+  for (const field of ['id', 'kind', 'state']) {
+    if (typeof root[field] === 'string' && root[field].length <= 128 && !root[field].includes('\u0000')) safeRoot[field] = root[field];
+  }
+  for (const field of ['createdAt', 'lastScanAt']) {
+    if (Number.isFinite(root[field])) safeRoot[field] = Number(root[field]);
+  }
+  if (typeof root.isNetworkLike === 'boolean') safeRoot.isNetworkLike = root.isNetworkLike;
+  if (typeof root.message === 'string') safeRoot.message = root.message.slice(0, 500);
   return safeRoot;
 }
 
@@ -140,7 +172,6 @@ function mediaPlaybackFacts(item) {
   const metadata = item?.localMetadata || item?.metadata || {};
   const filePath = item?.path || item?.filePath || '';
   return {
-    ...item,
     container: metadata.container || item?.container || path.extname(filePath).replace(/^\./, ''),
     videoCodec: metadata.videoCodec || item?.videoCodec,
     audioCodec: metadata.audioCodec || item?.audioCodec,
@@ -233,9 +264,12 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/profiles/{profileId}/progress/{mediaId}': { get: { summary: 'Read progress' }, put: { summary: 'Save progress' } },
     '/api/v1/media/{mediaId}': { get: { summary: 'Read media playback links' } },
     '/api/v1/media/{mediaId}/direct': { get: { summary: 'Stream a browser-compatible file' } },
+    '/api/v1/media/{mediaId}/direct/renew': { post: { summary: 'Renew a direct playback lease before idle expiry' } },
     '/api/v1/media/{mediaId}/download': { get: { summary: 'Download the original media file' } },
     '/api/v1/media/{mediaId}/playback-plan': { post: { summary: 'Choose direct playback or an HLS transcode for a client profile' } },
     '/api/v1/media/{mediaId}/transcode': { post: { summary: 'Start an HLS transcode' } },
+    '/api/v1/media/{mediaId}/transcode/renew': { post: { summary: 'Renew an HLS playback lease before idle expiry' } },
+    '/api/v1/media/{mediaId}/playback-session/renew': { post: { summary: 'Renew a direct or HLS playback lease' } },
     '/api/v1/users': { get: { summary: 'List scoped user accounts' }, post: { summary: 'Create a user account' } },
     '/api/v1/users/{userId}': { patch: { summary: 'Update a user account' }, delete: { summary: 'Remove a user account' } },
     '/api/v1/account/password': { post: { summary: 'Change or reset an account password' } },
@@ -369,8 +403,9 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         return true;
       }
       if (resource === 'auth' && segments[1] === 'session' && req.method === 'DELETE') {
-        await requirePrincipal(req);
+        const principal = await requirePrincipal(req);
         await service.revokeRequest(req);
+        await mediaService.revokePrincipal?.(principal.id, 'auth_session_revoked');
         res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
         res.end();
         return true;
@@ -493,9 +528,10 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const mediaId = decodeSegment(segments[1], 'mediaId');
         const item = await service.getLibraryItem(mediaId, principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
-        const directToken = typeof mediaService.issuePlaybackToken === 'function'
-          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')?.token
+        const directLease = typeof mediaService.issuePlaybackToken === 'function'
+          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')
           : null;
+        const directToken = directLease?.token || null;
         const downloadToken = typeof mediaService.issuePlaybackToken === 'function'
           ? mediaService.issuePlaybackToken(mediaId, principal.id, 'download')?.token
           : null;
@@ -503,8 +539,10 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeData(res, 200, {
           item: publicLibraryItem(item),
           directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`,
+          directRenewUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct/renew`,
           downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download${tokenQuery(downloadToken)}`,
           transcodeUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode`,
+          ...(directLease?.expiresAt ? { directExpiresAt: directLease.expiresAt } : {}),
         });
         return true;
       }
@@ -518,9 +556,10 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const facts = mediaPlaybackFacts(item);
         const plan = playbackPlanForMedia(facts, capabilities);
         const tokenQuery = (token) => token ? `?token=${encodeURIComponent(token)}` : '';
-        const directToken = plan.sourceAction === 'direct' && typeof mediaService.issuePlaybackToken === 'function'
-          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')?.token
+        const directLease = plan.sourceAction === 'direct' && typeof mediaService.issuePlaybackToken === 'function'
+          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')
           : null;
+        const directToken = directLease?.token || null;
         const profileQuery = new URLSearchParams({
           codec: plan.codec || 'h264',
           backend: 'auto',
@@ -537,9 +576,46 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           directUrl: plan.sourceAction === 'direct'
             ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`
             : null,
+          ...(directLease ? {
+            directRenewUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct/renew`,
+            directExpiresAt: directLease.expiresAt,
+          } : {}),
           transcodeUrl: plan.sourceAction === 'transcode'
             ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode?${profileQuery.toString()}`
             : null,
+        });
+        return true;
+      }
+      if (resource === 'media' && segments.length === 4
+        && ((segments[2] === 'direct' && segments[3] === 'renew')
+          || (segments[2] === 'transcode' && segments[3] === 'renew')
+          || (segments[2] === 'playback-session' && segments[3] === 'renew'))
+        && req.method === 'POST') {
+        const mediaId = decodeSegment(segments[1], 'mediaId');
+        let action = segments[2] === 'direct' ? 'direct' : 'hls';
+        const body = await readJsonBody(req);
+        if (segments[2] === 'playback-session') {
+          action = body.action === 'direct' ? 'direct' : 'hls';
+        }
+        const permission = 'stream';
+        const principal = authTokenPresent(req, url) && !url.searchParams.get('token')
+          ? await requirePrincipal(req, permission)
+          : null;
+        const identifier = url.searchParams.get('token') || url.searchParams.get('sessionId') || body.token || body.sessionId;
+        if (!identifier) throw requestError(400, 'playback_session_required', 'A playback session token or id is required.');
+        const renewed = await mediaService.renewPlaybackSession?.(identifier, principal, mediaId, action);
+        if (!renewed) throw requestError(401, 'playback_session_invalid', 'The playback session is expired, revoked, or not bound to this media item.');
+        const tokenQuery = `?token=${encodeURIComponent(renewed.token)}`;
+        writeData(res, 200, {
+          sessionId: renewed.id,
+          token: renewed.token,
+          action,
+          expiresAt: renewed.expiresAt,
+          idleExpiresAt: renewed.idleExpiresAt,
+          absoluteExpiresAt: renewed.absoluteExpiresAt,
+          ...(action === 'hls'
+            ? { playlistUrl: `/api/media/transcode/${encodeURIComponent(renewed.id)}/index.m3u8${tokenQuery}` }
+            : { directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery}` }),
         });
         return true;
       }

@@ -545,6 +545,14 @@ function normalizeState(raw) {
     }
   }
   if (raw.scan && typeof raw.scan === 'object') state.scan = { ...state.scan, ...raw.scan };
+  if (state.scan.state === 'scanning') {
+    state.scan = {
+      ...state.scan,
+      state: 'interrupted',
+      interruptedAt: Date.now(),
+      warning: 'The previous scan was interrupted before shutdown; the existing catalog was preserved.',
+    };
+  }
   state.backup = normalizeBackupStatus(raw.backup);
   if (Array.isArray(raw.logs)) {
     const cutoff = Date.now() - LOG_RETENTION_MS;
@@ -563,6 +571,15 @@ export function createHeadlessAdminService(options) {
   const getSessions = options.getSessions || (async () => []);
   const getClientState = options.getClientState || (async () => null);
   const replaceClientState = options.replaceClientState || (async () => undefined);
+  const onPlaybackSessionsRevoked = typeof options.onPlaybackSessionsRevoked === 'function'
+    ? options.onPlaybackSessionsRevoked
+    : null;
+  const onPlaybackSessionsRevokedForItem = typeof options.onPlaybackSessionsRevokedForItem === 'function'
+    ? options.onPlaybackSessionsRevokedForItem
+    : null;
+  const onAllPlaybackSessionsRevoked = typeof options.onAllPlaybackSessionsRevoked === 'function'
+    ? options.onAllPlaybackSessionsRevoked
+    : null;
   const loginDelay = options.loginDelay || wait;
   const storageFileSystem = options.storageFileSystem
     ? { ...fs, ...options.storageFileSystem }
@@ -576,6 +593,21 @@ export function createHeadlessAdminService(options) {
   let writeQueue = Promise.resolve();
   let ownerCreationPromise = null;
   let backupPromise = null;
+
+  async function notifyPlaybackSessionsRevoked(principalId, reason) {
+    if (!onPlaybackSessionsRevoked || !principalId) return;
+    try { await onPlaybackSessionsRevoked(principalId, reason); } catch { /* playback cleanup is best effort */ }
+  }
+
+  async function notifyPlaybackSessionsRevokedForItem(itemId, reason) {
+    if (!onPlaybackSessionsRevokedForItem || !itemId) return;
+    try { await onPlaybackSessionsRevokedForItem(itemId, reason); } catch { /* playback cleanup is best effort */ }
+  }
+
+  async function notifyAllPlaybackSessionsRevoked(reason) {
+    if (!onAllPlaybackSessionsRevoked) return;
+    try { await onAllPlaybackSessionsRevoked(reason); } catch { /* playback cleanup is best effort */ }
+  }
 
   async function saveState(state) {
     writeQueue = writeQueue.catch(() => undefined).then(async () => {
@@ -955,10 +987,16 @@ export function createHeadlessAdminService(options) {
       const token = tokenFromRequest(req);
       if (!token) return false;
       const state = await loadState();
+      const tokenHash = hashToken(token);
+      const revokedPrincipalIds = [...new Set(state.sessions
+        .filter((entry) => timingSafeStringEqual(entry.tokenHash, tokenHash))
+        .map((entry) => entry.userId)
+        .filter(Boolean))];
       const before = state.sessions.length;
-      state.sessions = state.sessions.filter((entry) => !timingSafeStringEqual(entry.tokenHash, hashToken(token)));
+      state.sessions = state.sessions.filter((entry) => !timingSafeStringEqual(entry.tokenHash, tokenHash));
       if (state.sessions.length === before) return false;
       await saveState(state);
+      await Promise.all(revokedPrincipalIds.map((userId) => notifyPlaybackSessionsRevoked(userId, 'auth_session_revoked')));
       return true;
     },
 
@@ -1186,6 +1224,10 @@ export function createHeadlessAdminService(options) {
       if (user.disabled) state.sessions = state.sessions.filter((session) => session.userId !== user.id);
       await saveState(state);
       await appendLog('info', `User account updated: ${user.name}`, { userId: user.id });
+      if (user.disabled) await notifyPlaybackSessionsRevoked(user.id, 'principal_disabled');
+      else if (roleChanged || input.permissions !== undefined || input.rootIds !== undefined) {
+        await notifyPlaybackSessionsRevoked(user.id, 'permissions_changed');
+      }
       return userView(user);
     },
 
@@ -1199,6 +1241,7 @@ export function createHeadlessAdminService(options) {
       state.sessions = state.sessions.filter((session) => session.userId !== userId);
       await saveState(state);
       await appendLog('info', `User account removed: ${user.name}`, { userId });
+      await notifyPlaybackSessionsRevoked(userId, 'principal_removed');
     },
 
     async changePassword(input, principal) {
@@ -1232,6 +1275,7 @@ export function createHeadlessAdminService(options) {
       Object.assign(target, await hashPassword(input.newPassword), { updatedAt: Date.now() });
       state.sessions = state.sessions.filter((session) => session.userId !== targetId);
       await saveState(state);
+      await notifyPlaybackSessionsRevoked(targetId, 'credentials_changed');
       await appendLog('info', `Password changed for ${target.name}.`, {
         actorId: principal.id,
         targetId,
@@ -1350,6 +1394,10 @@ export function createHeadlessAdminService(options) {
       return scanner.start(input);
     },
 
+    async stop() {
+      return scanner.stop();
+    },
+
     async listLibraryItems(principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
       const items = await scanner.listItems();
@@ -1411,6 +1459,7 @@ export function createHeadlessAdminService(options) {
       // root-scoped administrator, so record the path below the root rather
       // than the absolute path the catalog stored.
       await appendLog('info', `Media file deleted: ${containedRelativePath(verified.rootRealPath, verified.realPath)}`, { itemId, userId: principal.id });
+      await notifyPlaybackSessionsRevokedForItem(itemId, 'item_removed');
       return { id: itemId, deleted: true };
     },
 
@@ -1456,6 +1505,15 @@ export function createHeadlessAdminService(options) {
         softwareFallback: transcoderHealth.softwareFallback,
         toneMapping: transcoderHealth.toneMapping,
         mediaStreaming: transcoderHealth.mediaStreaming,
+        ...(transcoderHealth.admission && typeof transcoderHealth.admission === 'object'
+          ? {
+            admission: Object.fromEntries(
+              ['active', 'queued', 'globalLimit', 'principalLimit', 'queueLimit', 'principalQueueLimit', 'failed', 'canceled']
+                .filter((field) => Number.isFinite(transcoderHealth.admission[field]))
+                .map((field) => [field, transcoderHealth.admission[field]]),
+            ),
+          }
+          : {}),
       };
       return {
         state,
@@ -1605,6 +1663,7 @@ export function createHeadlessAdminService(options) {
       }
       Object.keys(current).forEach((key) => { delete current[key]; });
       Object.assign(current, replacement);
+      await notifyAllPlaybackSessionsRevoked('backup_restored');
       await appendLog('warn', 'Headless admin state restored from backup.', { source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, rollbackSizeBytes: rollbackArtifact.sizeBytes });
       return { restored: true, source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, backup: current.backup };
     },

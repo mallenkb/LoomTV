@@ -5,6 +5,14 @@ import { classifyVideoFile, createMediaItemId, isVideoFilePath } from '@loom-med
 import { isPathWithin } from './media-path-guard.js';
 const CHECKPOINT_EVERY_FILES = 50;
 
+function scanCancelledError() {
+  return Object.assign(new Error('The library scan was cancelled.'), { code: 'scan_cancelled' });
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw scanCancelledError();
+}
+
 function mediaRecord(root, filePath, stats) {
   const relativePath = path.relative(root.path, filePath);
   // Shared classification keeps the headless catalog structurally identical
@@ -44,9 +52,10 @@ function mediaRecord(root, filePath, stats) {
  * against the root's canonical path, so a directory replaced mid-scan cannot
  * smuggle an entry into the catalog either.
  */
-async function walkVideoFiles(rootPath, containmentRoot, onFile, onError) {
+async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { signal } = {}) {
   const pending = [rootPath];
   while (pending.length > 0) {
+    throwIfAborted(signal);
     const current = pending.pop();
     // One canonicalization per directory rather than per file: the Dirent
     // filter already rules out symlinked files, so a directory that resolves
@@ -65,6 +74,7 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError) {
     }
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
+      throwIfAborted(signal);
       const fullPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
         pending.push(fullPath);
@@ -72,8 +82,10 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError) {
       }
       if (!entry.isFile() || !isVideoFilePath(entry.name)) continue;
       try {
+        throwIfAborted(signal);
         await onFile(fullPath, await fs.stat(fullPath));
       } catch (error) {
+        if (error?.code === 'scan_cancelled') throw error;
         onError(fullPath, error);
       }
     }
@@ -91,7 +103,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
     return state.scan;
   }
 
-  async function runScan(scanId, mode, roots) {
+  async function runScan(scanId, mode, roots, signal) {
     const state = await loadState();
     const discoveredByRoot = new Map();
     const errors = [];
@@ -99,6 +111,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
     let scannedFiles = 0;
 
     for (const root of roots) {
+      throwIfAborted(signal);
       let rootReal;
       try {
         rootReal = await fs.realpath(root.path);
@@ -120,6 +133,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         root.path,
         rootReal,
         async (filePath, stats) => {
+          throwIfAborted(signal);
           discovered.push(mediaRecord(root, filePath, stats));
           scannedFiles += 1;
           if (scannedFiles % CHECKPOINT_EVERY_FILES === 0) {
@@ -131,6 +145,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
           }
         },
         (failedPath, error) => {
+          if (error?.code === 'scan_cancelled') return;
           rootHadTraversalErrors = true;
           const relative = path.relative(root.path, failedPath);
           errors.push({
@@ -140,7 +155,9 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
             message: 'A folder or file could not be read; existing records were preserved for that root.',
           });
         },
+        { signal },
       );
+      throwIfAborted(signal);
       discoveredByRoot.set(root.id, { records: discovered, preserveExisting: rootHadTraversalErrors });
     }
 
@@ -174,6 +191,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
     }
 
     const current = await loadState();
+    throwIfAborted(signal);
     if (current.scan?.id === scanId) {
       const completedState = {
         ...current,
@@ -243,19 +261,29 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         indexedFiles: Array.isArray(state.catalog) ? state.catalog.length : 0,
       };
       await saveState(state);
-      activeScan = runScan(scanId, mode, roots)
+      const controller = new AbortController();
+      const promise = runScan(scanId, mode, roots, controller.signal)
         .catch(async (error) => {
+          if (error?.code === 'scan_cancelled') {
+            await finish(scanId, { state: 'interrupted', completedAt: Date.now(), warning: 'The scan was interrupted during server shutdown; the existing catalog was preserved.' });
+            return (await loadState()).scan;
+          }
           await finish(scanId, { state: 'failed', completedAt: Date.now(), error: 'Library scan failed before completion.' });
           await appendLog('error', 'Headless library scan failed.', { error: error instanceof Error ? error.message : String(error) });
           return (await loadState()).scan;
         })
-        .finally(() => { activeScan = null; });
+        .finally(() => {
+          if (activeScan?.promise === promise) activeScan = null;
+        });
+      activeScan = { controller, promise };
       return state.scan;
     },
 
     async stop() {
-      // A scan is deliberately not force-killed: the checkpointed state remains
-      // valid and the next scan can safely reconcile the affected roots.
+      if (activeScan) {
+        activeScan.controller.abort();
+        await activeScan.promise;
+      }
       return (await loadState()).scan;
     },
   };
