@@ -9,7 +9,7 @@ import {
   RENDERER_SESSION_ROUTE,
 } from '../src/main/rendererHttpAccess.ts';
 import { describeErrorForLog, redactRequestSecrets } from '../src/main/serverSecurity.ts';
-import { isTrustedIpcSender } from '../src/main/trustedIpcSender.ts';
+import { isExpectedAppUrl, isTrustedIpcSender } from '../src/main/trustedIpcSender.ts';
 
 const LOOPBACK_PORT = 3847;
 const DEV_ORIGIN = 'http://localhost:5173';
@@ -126,7 +126,7 @@ test('the media server no longer holds the local access token it used to disclos
 test('IPC delivery accepts the main window frame and rejects every other sender', () => {
   const mainWindow = {
     mainWindowWebContentsId: 7,
-    mainWindowUrl: 'http://localhost:5173/index.html',
+    expectedAppUrl: 'http://localhost:5173',
     mainWindowDestroyed: false,
     senderFrameIsMainFrame: true,
   };
@@ -144,7 +144,7 @@ test('IPC delivery accepts the main window frame and rejects every other sender'
     senderFrameIsMainFrame: true,
     senderFrameUrl: 'file:///Applications/LoomTV.app/renderer/index.html',
     mainWindowWebContentsId: 7,
-    mainWindowUrl: 'file:///Applications/LoomTV.app/renderer/index.html',
+    expectedAppUrl: 'file:///Applications/LoomTV.app/renderer/index.html',
     mainWindowDestroyed: false,
   }), true);
 
@@ -163,7 +163,7 @@ test('IPC delivery accepts the main window frame and rejects every other sender'
       senderFrameIsMainFrame: true,
       senderFrameUrl: 'http://localhost:5173/index.html',
       mainWindowWebContentsId: null,
-      mainWindowUrl: null,
+      expectedAppUrl: null,
       mainWindowDestroyed: true,
     }],
     ['a different packaged document', {
@@ -171,7 +171,7 @@ test('IPC delivery accepts the main window frame and rejects every other sender'
       senderFrameIsMainFrame: true,
       senderFrameUrl: 'file:///tmp/attacker/index.html',
       mainWindowWebContentsId: 7,
-      mainWindowUrl: 'file:///Applications/LoomTV.app/renderer/index.html',
+      expectedAppUrl: 'file:///Applications/LoomTV.app/renderer/index.html',
       mainWindowDestroyed: false,
     }],
     ['an unparseable frame URL', { senderWebContentsId: 7, senderFrameUrl: 'not a url', ...mainWindow }],
@@ -180,6 +180,45 @@ test('IPC delivery accepts the main window frame and rejects every other sender'
   for (const [label, identity] of rejected) {
     assert.equal(isTrustedIpcSender(identity), false, label);
   }
+});
+
+test('IPC trust stays bound to the captured app identity after navigation', () => {
+  const packagedAppUrl = 'file:///Applications/LoomTV.app/renderer/index.html';
+  const attackerUrl = 'https://evil.example/index.html';
+  const currentWindowUrl = attackerUrl;
+  const currentSenderUrl = attackerUrl;
+
+  // The old rule trusted this pair because the mutable BrowserWindow URL and
+  // sender URL agreed. The expected packaged identity remains independent.
+  assert.equal(currentWindowUrl, currentSenderUrl);
+  assert.equal(isTrustedIpcSender({
+    senderWebContentsId: 7,
+    senderFrameIsMainFrame: true,
+    senderFrameUrl: currentSenderUrl,
+    mainWindowWebContentsId: 7,
+    expectedAppUrl: packagedAppUrl,
+    mainWindowDestroyed: false,
+  }), false);
+
+  assert.equal(isExpectedAppUrl(packagedAppUrl, packagedAppUrl), true);
+  assert.equal(isExpectedAppUrl('loomtv://app/index.html', 'loomtv://app/index.html'), false);
+  assert.equal(isExpectedAppUrl(
+    'file://attacker.example/Applications/LoomTV.app/renderer/index.html',
+    packagedAppUrl,
+  ), false);
+});
+
+test('window navigation guards use the immutable identity for navigations and redirects', () => {
+  const windowManagerSource = fs.readFileSync(new URL('../src/main/windowManager.ts', import.meta.url), 'utf8');
+  const mainSource = fs.readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+
+  assert.match(windowManagerSource, /will-navigate/);
+  assert.match(windowManagerSource, /will-redirect/);
+  assert.match(windowManagerSource, /will-frame-navigate/);
+  assert.match(windowManagerSource, /expectedAppUrl/);
+  assert.match(windowManagerSource, /pathToFileURL/);
+  assert.match(windowManagerSource, /MAIN_WINDOW_DEV_SERVER_URL\)\.origin/);
+  assert.doesNotMatch(mainSource, /webContents\.getURL\(\)/);
 });
 
 test('logged request URLs and errors never carry a replayable credential', () => {

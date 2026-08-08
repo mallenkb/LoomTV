@@ -62,7 +62,13 @@ import {
   isLikelyAnimePath,
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
-import { createWindow, getMainWindow, getTrayIconPath, getWindowIconPath } from './main/windowManager';
+import {
+  createWindow,
+  getMainWindow,
+  getMainWindowIpcIdentity,
+  getTrayIconPath,
+  getWindowIconPath,
+} from './main/windowManager';
 import { stopAllMpvPlayback } from './main/mpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
@@ -1583,15 +1589,12 @@ registerIpcHandlers<LibraryData, AppSettings>({
   isTrustedSender: (event) => {
     const window = getMainWindow();
     const activeWindow = window && !window.isDestroyed() ? window : null;
-    // Electron throws when a frame or window disappears mid-invocation. A read
-    // that fails resolves to null, which the rule treats as untrusted.
-    const readUrl = (read: () => string | null | undefined): string | null => {
-      try {
-        return read() ?? null;
-      } catch {
-        return null;
-      }
-    };
+    const windowIdentity = getMainWindowIpcIdentity();
+    const identityMatchesWindow = Boolean(
+      activeWindow
+      && windowIdentity
+      && activeWindow.webContents.id === windowIdentity.webContentsId,
+    );
     const readBoolean = (read: () => boolean | null | undefined): boolean => {
       try {
         return read() === true;
@@ -1604,10 +1607,16 @@ registerIpcHandlers<LibraryData, AppSettings>({
       senderFrameIsMainFrame: readBoolean(() => (
         event.senderFrame?.frameTreeNodeId === event.sender.mainFrame.frameTreeNodeId
       )),
-      senderFrameUrl: readUrl(() => event.senderFrame?.url),
-      mainWindowWebContentsId: activeWindow ? activeWindow.webContents.id : null,
-      mainWindowUrl: readUrl(() => activeWindow?.webContents.getURL()),
-      mainWindowDestroyed: !activeWindow,
+      senderFrameUrl: (() => {
+        try {
+          return event.senderFrame?.url ?? null;
+        } catch {
+          return null;
+        }
+      })(),
+      mainWindowWebContentsId: identityMatchesWindow && windowIdentity ? windowIdentity.webContentsId : null,
+      expectedAppUrl: identityMatchesWindow && windowIdentity ? windowIdentity.expectedAppUrl : null,
+      mainWindowDestroyed: !identityMatchesWindow,
     });
   },
 });
