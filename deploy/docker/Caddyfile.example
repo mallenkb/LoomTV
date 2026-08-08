@@ -1,0 +1,11 @@
+# Copy this file into the TLS reverse-proxy container/host and replace the
+# hostname and certificate paths. The backend must be reachable only by this
+# proxy (use `expose:`, not a host-published LoomTV port).
+loomtv.example.com {
+	tls /certs/fullchain.pem /certs/privkey.pem
+	reverse_proxy loomtv:3847 {
+		# Replace any client-supplied value. LoomTV rejects comma-separated
+		# chains and trusts this signal only from an allowlisted proxy peer.
+		header_up X-Forwarded-Proto https
+	}
+}

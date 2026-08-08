@@ -9,7 +9,7 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 
 const HELP = `Usage: loomtv-server [options]
 
-Starts the LoomTV headless HTTP service. The service exposes the runtime
+Starts the LoomTV headless HTTP(S) service. The service exposes the runtime
 health contract, authenticated administration, catalog scanning, direct media
 delivery, and on-demand HLS transcoding without Electron.
 
@@ -20,16 +20,25 @@ Options:
   --cache-dir <path>     Cache directory
   --media-dir <path>     Optional media root (may be offline at startup)
   --ffmpeg-path <path>   FFmpeg executable used for transcoding probes
+  --bootstrap-secret-file <path>  Read the one-time owner bootstrap secret from a file
+  --tls-cert-file <path> TLS certificate chain for direct HTTPS
+  --tls-key-file <path>  TLS private key for direct HTTPS
   --require-secure-transport  Reject admin and credential requests over HTTP
   --trusted-proxies <list>  Comma-separated trusted proxy IPs/CIDRs
+  --development-allow-insecure-non-loopback
+                          Allow cleartext LAN binding for isolated development only
   --help                 Show this help
 
 Environment aliases:
   HOST / LOOMTV_HOST, PORT / LOOMTV_PORT,
   DATA_DIR / LOOMTV_DATA_DIR, CACHE_DIR / LOOMTV_CACHE_DIR,
   MEDIA_DIR / LOOMTV_MEDIA_DIR, FFMPEG_PATH / LOOMTV_FFMPEG_PATH,
+  BOOTSTRAP_SECRET / LOOMTV_BOOTSTRAP_SECRET,
+  BOOTSTRAP_SECRET_FILE / LOOMTV_BOOTSTRAP_SECRET_FILE,
+  TLS_CERT_FILE / LOOMTV_TLS_CERT_FILE, TLS_KEY_FILE / LOOMTV_TLS_KEY_FILE,
   REQUIRE_SECURE_TRANSPORT / LOOMTV_REQUIRE_SECURE_TRANSPORT,
-  TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES
+  TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES,
+  LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK
 `;
 
 function usageError(message) {
@@ -69,14 +78,20 @@ function parseBoolean(value, source) {
 
 function parseArgs(args) {
   const values = {};
-  const booleanOptions = new Set(['--require-secure-transport']);
+  const booleanOptions = new Set([
+    '--require-secure-transport',
+    '--development-allow-insecure-non-loopback',
+  ]);
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') return { help: true };
     const equalsIndex = argument.indexOf('=');
     const name = equalsIndex >= 0 ? argument.slice(0, equalsIndex) : argument;
     const inlineValue = equalsIndex >= 0 ? argument.slice(equalsIndex + 1) : undefined;
-    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', '--trusted-proxies', ...booleanOptions ].includes(name)) {
+    if (![
+      '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path',
+      '--bootstrap-secret-file', '--tls-cert-file', '--tls-key-file', '--trusted-proxies', ...booleanOptions,
+    ].includes(name)) {
       throw usageError(`Unknown option: ${argument}`);
     }
     if (booleanOptions.has(name)) {
@@ -120,7 +135,35 @@ function buildConfig(cliValues) {
   const trustedProxies = cliValues.trustedproxies
     || readEnvironmentValue('TRUSTED_PROXIES', 'LOOMTV_TRUSTED_PROXIES')
     || '';
-  return { host, port, paths, ffmpegPath, requireSecureTransport, trustedProxies };
+  const developmentAllowInsecureNonLoopback = cliValues.developmentallowinsecurenonloopback !== undefined
+    ? cliValues.developmentallowinsecurenonloopback
+    : parseBoolean(process.env.LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK?.trim() || 'false', 'LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK');
+  return {
+    host,
+    port,
+    paths,
+    ffmpegPath,
+    requireSecureTransport,
+    trustedProxies,
+    developmentAllowInsecureNonLoopback,
+    bootstrapSecret: readEnvironmentValue('BOOTSTRAP_SECRET', 'LOOMTV_BOOTSTRAP_SECRET'),
+    bootstrapSecretFile: cliValues.bootstrapsecretfile
+      || readEnvironmentValue('BOOTSTRAP_SECRET_FILE', 'LOOMTV_BOOTSTRAP_SECRET_FILE'),
+    tlsCertFile: cliValues.tlscertfile || readEnvironmentValue('TLS_CERT_FILE', 'LOOMTV_TLS_CERT_FILE'),
+    tlsKeyFile: cliValues.tlskeyfile || readEnvironmentValue('TLS_KEY_FILE', 'LOOMTV_TLS_KEY_FILE'),
+  };
+}
+
+async function loadTls(config) {
+  if (!config.tlsCertFile && !config.tlsKeyFile) return undefined;
+  if (!config.tlsCertFile || !config.tlsKeyFile) {
+    throw usageError('Direct TLS requires both --tls-cert-file and --tls-key-file.');
+  }
+  const [cert, key] = await Promise.all([
+    fs.readFile(config.tlsCertFile),
+    fs.readFile(config.tlsKeyFile),
+  ]);
+  return { cert, key };
 }
 
 async function run() {
@@ -131,8 +174,18 @@ async function run() {
   }
   const config = buildConfig(cliValues);
   await ensureRuntimeDirectories(config.paths);
+  const tls = await loadTls(config);
   const version = await readServerVersion(PACKAGE_ROOT);
-  const service = createHeadlessServer({ ...config, version });
+  const service = createHeadlessServer({
+    ...config,
+    tls,
+    version,
+    onBootstrapSecretGenerated: ({ secret, file }) => {
+      process.stdout.write(`[loomtv-server] one-time owner bootstrap secret: ${secret}\n`);
+      process.stdout.write(`[loomtv-server] stored at ${file}; it will be removed after owner creation\n`);
+    },
+    onBootstrapWarning: (message, error) => console.error(`[loomtv-server] ${message}`, error),
+  });
   let stopping = false;
 
   const stop = async (signal) => {
@@ -152,7 +205,7 @@ async function run() {
 
   await service.start();
   const address = service.address();
-  process.stdout.write(`[loomtv-server] listening on http://${address.host}:${address.port}\n`);
+  process.stdout.write(`[loomtv-server] listening on ${tls ? 'https' : 'http'}://${address.host}:${address.port}\n`);
   process.stdout.write(`[loomtv-server] data=${config.paths.dataDir} cache=${config.paths.cacheDir}`
     + `${config.paths.mediaDir ? ` media=${config.paths.mediaDir}` : ''}\n`);
 }
