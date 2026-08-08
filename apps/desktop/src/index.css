@@ -1607,6 +1607,14 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   box-shadow: 0 0 0 2px var(--loom-focus-ring);
 }
 
+/* VirtualPosterGrid owns each card's width. This more-specific rule keeps the
+   responsive rail-card !important widths below from overflowing narrow grid
+   columns, while leaving Home's horizontal rails unchanged. */
+.loom-poster-link.loom-virtual-poster-card {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 :root[data-theme="dark"] .loom-chip,
 :root[data-theme="light"] .loom-chip,
 :root:not([data-theme]) .loom-chip {

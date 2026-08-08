@@ -17,17 +17,16 @@ interface MediaPosterCardProps {
   metaLine?: string;
 }
 
-/* Poster frame is 200x300 and the title block below it adds ~40px, matching the
-   340px row height VirtualPosterGrid reserves. contain-intrinsic-size takes
-   width then height, so these must stay in that order or skipped cards
-   under-reserve space and the scroll position drifts as they render. */
+/* Home rail cards are approximately 200x340. VirtualPosterGrid gives library
+   cards an explicit height, which their h-full root inherits even when content
+   visibility skips their internals. contain-intrinsic-size takes width first. */
 const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_340px] [content-visibility:auto]';
 
 const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
   home: `loom-poster-link group block w-[200px] flex-none ${SKIPPED_CARD_SIZE}`,
-  movies: `loom-poster-link group block w-full max-w-[200px] ${SKIPPED_CARD_SIZE}`,
-  tv: `loom-poster-link group block w-full max-w-[200px] ${SKIPPED_CARD_SIZE}`,
-  others: `loom-poster-link group block w-full max-w-[200px] ${SKIPPED_CARD_SIZE}`,
+  movies: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
+  tv: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
+  others: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
 };
 
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
@@ -106,7 +105,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
       state={{ from, artwork: routeArtwork }}
       className={ROOT_CLASS[variant]}
     >
-      <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
+      <div className="loom-poster-frame relative aspect-[2/3] min-h-0 shrink overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
           src={cardSources}
           alt={item.title}
@@ -125,9 +124,9 @@ const MediaPosterCard = memo(function MediaPosterCard({
           <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
         </div>
       </div>
-      <div className="mt-2">
-        <h4 className="truncate text-sm font-semibold text-[var(--loom-text)]">{item.title}</h4>
-        {metaLine && <p className="text-xs text-[var(--loom-muted)]">{metaLine}</p>}
+      <div className="mt-2 shrink-0 overflow-hidden">
+        <h4 className="line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]">{item.title}</h4>
+        {metaLine && <p className="truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
       </div>
     </Link>
   );
