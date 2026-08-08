@@ -826,6 +826,28 @@ function normalizeVideo(value, context, limits) {
   return video;
 }
 
+function normalizeCast(value, limits) {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > Math.min(limits.maxItems, 64)) {
+    throw new StremioAdapterError('INVALID_RESPONSE_SHAPE', 'The metadata cast field is invalid.', { retryable: false });
+  }
+  const cast = [];
+  for (const entry of value) {
+    const person = typeof entry === 'string' ? { name: entry } : entry;
+    if (!isRecord(person)) continue;
+    const name = responseString(person.name, 256);
+    if (!name) continue;
+    const character = responseString(person.character || person.role, 256);
+    const imageUrl = optionalRemoteHttpsUrl(person.photo || person.image || person.profile, limits);
+    cast.push({
+      name,
+      ...(character === undefined ? {} : { character }),
+      ...(imageUrl === undefined ? {} : { imageUrl }),
+    });
+  }
+  return cast;
+}
+
 function normalizeMetaCandidate(value, context, limits, { expectedType, expectedId } = {}) {
   if (!isRecord(value)) {
     throw new StremioAdapterError('INVALID_RESPONSE_SHAPE', 'The add-on returned a malformed metadata object.', { retryable: false });
@@ -853,6 +875,7 @@ function normalizeMetaCandidate(value, context, limits, { expectedType, expected
   if (!Array.isArray(videos) || videos.length > limits.maxItems) {
     throw new StremioAdapterError('INVALID_RESPONSE_SHAPE', 'The metadata videos field is invalid.', { retryable: false });
   }
+  const cast = normalizeCast(value.cast, limits);
   return {
     id,
     type,
@@ -871,6 +894,7 @@ function normalizeMetaCandidate(value, context, limits, { expectedType, expected
     ...(responseString(value.language, 64) === undefined ? {} : { language: responseString(value.language, 64) }),
     ...(responseString(value.country, 64) === undefined ? {} : { country: responseString(value.country, 64) }),
     ...(optionalRemoteHttpsUrl(value.website, limits) === undefined ? {} : { websiteUrl: optionalRemoteHttpsUrl(value.website, limits) }),
+    ...(cast === undefined || cast.length === 0 ? {} : { cast }),
     ...(videos.length === 0 ? {} : { videos: videos.map((video) => normalizeVideo(video, context, limits)) }),
   };
 }
@@ -1132,6 +1156,13 @@ function requireEnabled(record) {
   if (!record || record.state !== 'enabled' || record.trusted !== true) {
     throw new StremioAdapterError('ADDON_NOT_ENABLED', 'The Stremio add-on is not enabled by explicit user approval.', { retryable: false });
   }
+  if (record.manifest.behaviorHints.configurationRequired || record.manifest.config?.some((field) => field.required)) {
+    throw new StremioAdapterError(
+      'CONFIGURATION_REQUIRED',
+      'This Stremio add-on requires configuration that LoomTV cannot collect or submit.',
+      { retryable: false },
+    );
+  }
 }
 
 function normalizePersistedTimestamp(value, path, issues, required = true) {
@@ -1299,6 +1330,13 @@ export class StremioAddonRegistry {
     const id = requireRecordId(addonId);
     const record = this.records.get(id);
     if (!record) throw new StremioAdapterError('ADDON_NOT_FOUND', 'The Stremio add-on is not installed.', { retryable: false });
+    if (record.manifest.behaviorHints.configurationRequired || record.manifest.config?.some((field) => field.required)) {
+      throw new StremioAdapterError(
+        'CONFIGURATION_REQUIRED',
+        'This Stremio add-on cannot be enabled because it requires configuration that LoomTV cannot collect or submit.',
+        { retryable: false },
+      );
+    }
     if (record.state === 'enabled' && record.trusted === true) return publicRecord(record);
     if (!isRecord(approval) || approval.confirmed !== true || approval.reviewToken !== record.reviewToken) {
       throw new StremioAdapterError('APPROVAL_REQUIRED', 'Explicit approval for the current reviewed manifest is required before enabling this Stremio add-on.', { retryable: false });

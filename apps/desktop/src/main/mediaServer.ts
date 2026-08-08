@@ -1574,13 +1574,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
 
       if (reqUrl.pathname === '/api/cached-artwork') {
-        let sourceUrl = reqUrl.searchParams.get('source') || '';
-        if (!loopbackRequest) {
-          try {
-            sourceUrl = resolveExternalArtworkResource(resourceId);
-          } catch {
-            sourceUrl = '';
-          }
+        let sourceUrl: string | null;
+        try {
+          // External artwork is always resolved from the host registry. Raw
+          // provider URLs are deliberately not accepted on this route, so a
+          // renderer or paired client can only use a host-issued capability.
+          sourceUrl = resolveExternalArtworkResource(resourceId);
+        } catch {
+          sourceUrl = '';
         }
         if (!sourceUrl || !isExternalArtworkUrl(sourceUrl)) {
           res.writeHead(400);

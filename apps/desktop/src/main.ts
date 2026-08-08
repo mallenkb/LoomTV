@@ -187,11 +187,15 @@ import {
   setDesktopAutomaticSignIn,
   selectDesktopProfile,
 } from './main/profileService';
-import { createDesktopStremioPluginService } from './main/stremioPluginServiceDesktop.ts';
+import {
+  createDesktopStremioPluginService,
+} from './main/stremioPluginServiceDesktop.ts';
+import { StremioPluginServiceError } from './main/stremioPluginService.ts';
 import {
   OFFICIAL_STREMIO_ADDONS,
   officialStremioAddonId,
   officialStremioManifestUrl,
+  parseStremioItemId,
   stremioCatalogResult,
   stremioMetaResult,
   stremioPluginReview,
@@ -1522,11 +1526,25 @@ registerIpcHandlers<LibraryData, AppSettings>({
     addonId,
     request,
     await stremioPluginService.fetchCatalog(requireDesktopProfileId(), addonId, request),
+    artworkDeliveryUrl,
   ),
-  fetchStremioMeta: async (addonId, request) => stremioMetaResult(
-    addonId,
-    await stremioPluginService.fetchMeta(requireDesktopProfileId(), addonId, request),
-  ),
+  fetchStremioMeta: async (addonId, request) => {
+    const itemIdentity = parseStremioItemId(request?.id);
+    if (!itemIdentity || itemIdentity.addonId !== addonId || itemIdentity.type !== request?.type) {
+      throw new StremioPluginServiceError(
+        'STREMIO_PLUGIN_INVALID_ITEM_ID',
+        'The requested Discover item does not belong to this add-on and content type.',
+      );
+    }
+    return stremioMetaResult(
+      addonId,
+      await stremioPluginService.fetchMeta(requireDesktopProfileId(), addonId, {
+        ...request,
+        id: itemIdentity.providerId,
+      }),
+      artworkDeliveryUrl,
+    );
+  },
   getMediaSegments: skipSegmentService.getSegments,
   saveManualMediaSegment: skipSegmentService.saveManualSegment,
   deleteManualMediaSegment: skipSegmentService.deleteManualSegment,

@@ -45,6 +45,7 @@ import type {
   StoredProgress,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
+  StremioPluginIpcResult,
   StremioPluginMetaRequest,
   StremioPluginMetaResult,
   StremioPluginReview,
@@ -145,18 +146,18 @@ export interface IpcContract {
   'progress:import': { args: [progress: ImportedProgress, expectedProfileId?: string]; result: boolean };
   'progress:save': { args: [filePath: string, position: number, duration: number, expectedProfileId?: string]; result: StoredProgress };
   'renderer:session': { args: []; result: RendererSession };
-  'plugins:stremio:list': { args: []; result: StremioPluginSummary[] };
-  'plugins:stremio:available': { args: []; result: StremioPluginSummary[] };
-  'plugins:stremio:official': { args: []; result: OfficialStremioAddon[] };
-  'plugins:stremio:review-official': { args: [officialId: OfficialStremioAddon['id']]; result: StremioPluginReview };
-  'plugins:stremio:review-url': { args: [manifestUrl: string]; result: StremioPluginReview };
-  'plugins:stremio:approve': { args: [addonId: string, reviewToken: string]; result: StremioPluginSummary };
-  'plugins:stremio:disable': { args: [addonId: string]; result: StremioPluginSummary };
-  'plugins:stremio:remove': { args: [addonId: string]; result: boolean };
-  'plugins:stremio:profile-access': { args: [profileId: string]; result: string[] };
-  'plugins:stremio:set-profile-access': { args: [profileId: string, addonId: string, enabled: boolean]; result: boolean };
-  'plugins:stremio:catalog': { args: [addonId: string, request: StremioPluginCatalogRequest]; result: StremioPluginCatalogResult };
-  'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginMetaResult };
+  'plugins:stremio:list': { args: []; result: StremioPluginIpcResult<StremioPluginSummary[]> };
+  'plugins:stremio:available': { args: []; result: StremioPluginIpcResult<StremioPluginSummary[]> };
+  'plugins:stremio:official': { args: []; result: StremioPluginIpcResult<OfficialStremioAddon[]> };
+  'plugins:stremio:review-official': { args: [officialId: OfficialStremioAddon['id']]; result: StremioPluginIpcResult<StremioPluginReview> };
+  'plugins:stremio:review-url': { args: [manifestUrl: string]; result: StremioPluginIpcResult<StremioPluginReview> };
+  'plugins:stremio:approve': { args: [addonId: string, reviewToken: string]; result: StremioPluginIpcResult<StremioPluginSummary> };
+  'plugins:stremio:disable': { args: [addonId: string]; result: StremioPluginIpcResult<StremioPluginSummary> };
+  'plugins:stremio:remove': { args: [addonId: string]; result: StremioPluginIpcResult<boolean> };
+  'plugins:stremio:profile-access': { args: [profileId: string]; result: StremioPluginIpcResult<string[]> };
+  'plugins:stremio:set-profile-access': { args: [profileId: string, addonId: string, enabled: boolean]; result: StremioPluginIpcResult<boolean> };
+  'plugins:stremio:catalog': { args: [addonId: string, request: StremioPluginCatalogRequest]; result: StremioPluginIpcResult<StremioPluginCatalogResult> };
+  'plugins:stremio:meta': { args: [addonId: string, request: StremioPluginMetaRequest]; result: StremioPluginIpcResult<StremioPluginMetaResult> };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };

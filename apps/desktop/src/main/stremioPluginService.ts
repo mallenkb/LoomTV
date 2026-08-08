@@ -24,6 +24,7 @@ export type StremioPluginServiceErrorCode =
   | 'STREMIO_PLUGIN_PROFILE_NOT_ALLOWED'
   | 'STREMIO_PLUGIN_ACCESS_DENIED'
   | 'STREMIO_PLUGIN_OFFICIAL_ID_MISMATCH'
+  | 'STREMIO_PLUGIN_INVALID_ITEM_ID'
   | 'STREMIO_PLUGIN_PROVIDER_BUSY'
   | 'STREMIO_PLUGIN_RESULT_STALE';
 
@@ -139,6 +140,11 @@ function profileNotAllowed(): StremioPluginServiceError {
   );
 }
 
+function requiresConfiguration(record: StremioInstallRecord): boolean {
+  return record.manifest.behaviorHints.configurationRequired
+    || record.manifest.config?.some((field) => field.required) === true;
+}
+
 export class StremioPluginService {
   private registry: StremioAddonRegistry | null = null;
   private initializationError: StremioPluginServiceError | null = null;
@@ -160,7 +166,7 @@ export class StremioPluginService {
       return {
         available: true,
         installedCount: records.length,
-        enabledCount: records.filter(({ state, trusted }) => state === 'enabled' && trusted).length,
+        enabledCount: records.filter((record) => record.state === 'enabled' && record.trusted && !requiresConfiguration(record)).length,
       };
     } catch (error) {
       return { available: false, error: error instanceof StremioPluginServiceError ? error : storageUnavailable(error) };
@@ -179,10 +185,15 @@ export class StremioPluginService {
     if (profile.isGuest || profile.type === 'guest' || profile.type === 'kid') return [];
     if (profile.type === 'owner') {
       return this.getRegistry().list()
-        .filter(({ state, trusted }) => state === 'enabled' && trusted)
+        .filter((record) => record.state === 'enabled' && record.trusted && !requiresConfiguration(record))
         .map(({ addonId }) => addonId);
     }
-    return this.deps.listProfileAccess(profile.id);
+    const configurableAddonIds = new Set(
+      this.getRegistry().list()
+        .filter(requiresConfiguration)
+        .map(({ addonId }) => addonId),
+    );
+    return this.deps.listProfileAccess(profile.id).filter((addonId) => !configurableAddonIds.has(addonId));
   }
 
   listForProfile(profileId: string): readonly StremioInstallRecord[] {
@@ -193,6 +204,7 @@ export class StremioPluginService {
     return this.getRegistry().list().filter((record) => (
       record.state === 'enabled'
       && record.trusted
+      && !requiresConfiguration(record)
       && (grants === null || grants.has(record.addonId))
     ));
   }
