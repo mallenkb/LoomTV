@@ -4,11 +4,17 @@ export const PLAYBACK_SESSION_ACTIONS = Object.freeze(['direct', 'hls', 'downloa
 export const DEFAULT_PLAYBACK_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 export const DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_MAX_PLAYBACK_SESSIONS = 4_096;
-export const DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS = 60 * 1000;
+export const DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS = 5 * 1000;
+export const DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS = 15 * 1000;
 
 function positiveInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(1, Math.min(maximum, Math.trunc(value)));
+}
+
+function nonNegativeInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(maximum, Math.trunc(value)));
 }
 
 function sessionError(status, code, message) {
@@ -69,6 +75,8 @@ export function createPlaybackSessionRegistry(options = {}) {
   const sweepIntervalMs = Number.isFinite(options.sweepIntervalMs)
     ? Math.max(0, Math.trunc(options.sweepIntervalMs))
     : DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS;
+  const tokenOverlapMs = nonNegativeInteger(options.tokenOverlapMs, DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS, 60 * 1000);
+  const maxTokenAliases = positiveInteger(options.maxTokenAliases, 4, 32);
   const onRevoke = typeof options.onRevoke === 'function' ? options.onRevoke : null;
   const sessions = new Map();
   const tokenToId = new Map();
@@ -78,17 +86,37 @@ export function createPlaybackSessionRegistry(options = {}) {
   function expiryFor(createdAt, lastActivityAt, entryOptions = {}) {
     const entryIdle = positiveInteger(entryOptions.idleTimeoutMs, idleTimeoutMs);
     const entryAbsolute = positiveInteger(entryOptions.absoluteTimeoutMs, absoluteTimeoutMs);
+    const activeIdle = positiveInteger(entryOptions.activeIdleTimeoutMs, entryIdle);
     const absoluteExpiresAt = Number.isFinite(entryOptions.absoluteExpiresAt)
       ? Math.max(createdAt, Math.trunc(entryOptions.absoluteExpiresAt))
       : createdAt + entryAbsolute;
     const idleExpiresAt = Math.min(lastActivityAt + entryIdle, absoluteExpiresAt);
-    return { idleExpiresAt, absoluteExpiresAt, idleTimeoutMs: entryIdle };
+    return { idleExpiresAt, absoluteExpiresAt, idleTimeoutMs: entryIdle, activeIdleTimeoutMs: activeIdle, absoluteTimeoutMs: entryAbsolute };
   }
 
-  function resolve(identifier) {
+  function pruneTokenAliases(currentTime = now()) {
+    for (const entry of sessions.values()) {
+      for (const [token, expiresAt] of entry.tokenAliases) {
+        if (expiresAt <= currentTime) {
+          entry.tokenAliases.delete(token);
+          if (tokenToId.get(token) === entry.id) tokenToId.delete(token);
+        }
+      }
+    }
+  }
+
+  function resolve(identifier, currentTime = now()) {
     if (!identifier) return null;
     const id = sessions.has(identifier) ? identifier : tokenToId.get(identifier);
-    return id ? sessions.get(id) || null : null;
+    const entry = id ? sessions.get(id) || null : null;
+    if (!entry) return null;
+    const aliasExpiresAt = entry.tokenAliases.get(identifier);
+    if (aliasExpiresAt !== undefined && aliasExpiresAt <= currentTime) {
+      entry.tokenAliases.delete(identifier);
+      if (tokenToId.get(identifier) === entry.id) tokenToId.delete(identifier);
+      return null;
+    }
+    return entry;
   }
 
   function matches(entry, expected = {}) {
@@ -121,6 +149,10 @@ export function createPlaybackSessionRegistry(options = {}) {
     if (!entry || !sessions.has(entry.id)) return false;
     sessions.delete(entry.id);
     tokenToId.delete(entry.token);
+    for (const token of entry.tokenAliases.keys()) {
+      if (tokenToId.get(token) === entry.id) tokenToId.delete(token);
+    }
+    entry.tokenAliases.clear();
     entry.revokedAt = currentTime;
     entry.revokeReason = String(reason).slice(0, 64);
     notifyRevoked(entry, entry.revokeReason);
@@ -141,6 +173,7 @@ export function createPlaybackSessionRegistry(options = {}) {
 
   function sweep(currentTime = now()) {
     let removed = 0;
+    pruneTokenAliases(currentTime);
     for (const entry of [...sessions.values()]) {
       if (expire(entry, currentTime)) removed += revokeEntry(entry, 'expired', currentTime) ? 1 : 0;
     }
@@ -185,6 +218,10 @@ export function createPlaybackSessionRegistry(options = {}) {
       idleExpiresAt: expiry.idleExpiresAt,
       absoluteExpiresAt: expiry.absoluteExpiresAt,
       idleTimeoutMs: expiry.idleTimeoutMs,
+      activeIdleTimeoutMs: expiry.activeIdleTimeoutMs,
+      absoluteTimeoutMs: expiry.absoluteTimeoutMs,
+      tokenOverlapMs: nonNegativeInteger(input.tokenOverlapMs, tokenOverlapMs, 60 * 1000),
+      tokenAliases: new Map(),
       renewedAt: undefined,
       revokedAt: undefined,
       revokeReason: undefined,
@@ -196,7 +233,7 @@ export function createPlaybackSessionRegistry(options = {}) {
   }
 
   function authorize(identifier, expected = {}, currentTime = now()) {
-    const entry = resolve(identifier);
+    const entry = resolve(identifier, currentTime);
     if (!entry || !matches(entry, expected)) return null;
     if (expire(entry, currentTime)) {
       revokeEntry(entry, 'expired', currentTime);
@@ -205,11 +242,15 @@ export function createPlaybackSessionRegistry(options = {}) {
     return { ...snapshot(entry), token: entry.token };
   }
 
-  function touch(identifier, currentTime = now()) {
-    const entry = resolve(identifier);
+  function touch(identifier, currentTime = now(), touchOptions = {}) {
+    const entry = resolve(identifier, currentTime);
     if (!entry || expire(entry, currentTime)) {
       if (entry) revokeEntry(entry, 'expired', currentTime);
       return null;
+    }
+    if (touchOptions.activate && entry.activeIdleTimeoutMs) entry.idleTimeoutMs = entry.activeIdleTimeoutMs;
+    if (Number.isFinite(touchOptions.idleTimeoutMs)) {
+      entry.idleTimeoutMs = positiveInteger(touchOptions.idleTimeoutMs, entry.idleTimeoutMs);
     }
     entry.lastActivityAt = currentTime;
     entry.idleExpiresAt = Math.min(currentTime + entry.idleTimeoutMs, entry.absoluteExpiresAt);
@@ -218,7 +259,7 @@ export function createPlaybackSessionRegistry(options = {}) {
 
   function renew(identifier, expected = {}, currentTime = now()) {
     ensureOpen();
-    const entry = resolve(identifier);
+    const entry = resolve(identifier, currentTime);
     if (!entry || !matches(entry, expected) || expire(entry, currentTime)) {
       if (entry && expire(entry, currentTime)) revokeEntry(entry, 'expired', currentTime);
       return null;
@@ -226,17 +267,27 @@ export function createPlaybackSessionRegistry(options = {}) {
     const previousToken = entry.token;
     let nextToken = randomBytes(24).toString('base64url');
     while (tokenToId.has(nextToken)) nextToken = randomBytes(24).toString('base64url');
-    tokenToId.delete(previousToken);
+    const overlap = nonNegativeInteger(entry.tokenOverlapMs, tokenOverlapMs, 60 * 1000);
+    if (overlap > 0) {
+      entry.tokenAliases.set(previousToken, currentTime + overlap);
+      while (entry.tokenAliases.size > maxTokenAliases) {
+        const oldestToken = entry.tokenAliases.keys().next().value;
+        entry.tokenAliases.delete(oldestToken);
+        if (tokenToId.get(oldestToken) === entry.id) tokenToId.delete(oldestToken);
+      }
+    } else tokenToId.delete(previousToken);
     entry.token = nextToken;
     tokenToId.set(nextToken, entry.id);
+    entry.idleTimeoutMs = entry.activeIdleTimeoutMs || entry.idleTimeoutMs;
     entry.lastActivityAt = currentTime;
+    entry.absoluteExpiresAt = currentTime + entry.absoluteTimeoutMs;
     entry.idleExpiresAt = Math.min(currentTime + entry.idleTimeoutMs, entry.absoluteExpiresAt);
     entry.renewedAt = currentTime;
     return snapshot(entry, true);
   }
 
   function revoke(identifier, reason = 'revoked', currentTime = now()) {
-    return revokeEntry(resolve(identifier), reason, currentTime);
+    return revokeEntry(resolve(identifier, currentTime), reason, currentTime);
   }
 
   function remove(identifier) {
@@ -244,6 +295,10 @@ export function createPlaybackSessionRegistry(options = {}) {
     if (!entry) return false;
     sessions.delete(entry.id);
     tokenToId.delete(entry.token);
+    for (const token of entry.tokenAliases.keys()) {
+      if (tokenToId.get(token) === entry.id) tokenToId.delete(token);
+    }
+    entry.tokenAliases.clear();
     return true;
   }
 
@@ -271,6 +326,10 @@ export function createPlaybackSessionRegistry(options = {}) {
 
   function get(identifier) {
     return snapshot(resolve(identifier));
+  }
+
+  function isSessionIdentifier(identifier) {
+    return typeof identifier === 'string' && sessions.has(identifier);
   }
 
   function list(currentTime = now()) {
@@ -315,6 +374,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     list,
     sweep,
     stats,
+    isSessionIdentifier,
     size: () => sessions.size,
     isClosed: () => closed,
     close,

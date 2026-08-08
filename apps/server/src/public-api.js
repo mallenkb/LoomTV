@@ -270,6 +270,7 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/media/{mediaId}/transcode': { post: { summary: 'Start an HLS transcode' } },
     '/api/v1/media/{mediaId}/transcode/renew': { post: { summary: 'Renew an HLS playback lease before idle expiry' } },
     '/api/v1/media/{mediaId}/playback-session/renew': { post: { summary: 'Renew a direct or HLS playback lease' } },
+    '/api/v1/media/{mediaId}/playback-session': { delete: { summary: 'Stop a direct or HLS playback lease' } },
     '/api/v1/users': { get: { summary: 'List scoped user accounts' }, post: { summary: 'Create a user account' } },
     '/api/v1/users/{userId}': { patch: { summary: 'Update a user account' }, delete: { summary: 'Remove a user account' } },
     '/api/v1/account/password': { post: { summary: 'Change or reset an account password' } },
@@ -540,6 +541,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           item: publicLibraryItem(item),
           directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`,
           directRenewUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct/renew`,
+          ...(directLease?.sessionId ? { directSessionId: directLease.sessionId } : {}),
           downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download${tokenQuery(downloadToken)}`,
           transcodeUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode`,
           ...(directLease?.expiresAt ? { directExpiresAt: directLease.expiresAt } : {}),
@@ -579,6 +581,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           ...(directLease ? {
             directRenewUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct/renew`,
             directExpiresAt: directLease.expiresAt,
+            ...(directLease.sessionId ? { directSessionId: directLease.sessionId } : {}),
           } : {}),
           transcodeUrl: plan.sourceAction === 'transcode'
             ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode?${profileQuery.toString()}`
@@ -598,10 +601,24 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           action = body.action === 'direct' ? 'direct' : 'hls';
         }
         const permission = 'stream';
-        const principal = authTokenPresent(req, url) && !url.searchParams.get('token')
-          ? await requirePrincipal(req, permission)
-          : null;
-        const identifier = url.searchParams.get('token') || url.searchParams.get('sessionId') || body.token || body.sessionId;
+        const hasAuthenticatedBearer = Boolean(req.headers.authorization || req.headers['x-loom-admin-token']);
+        const sessionIdentifier = url.searchParams.get('sessionId') || body.sessionId;
+        let capabilityToken = url.searchParams.get('token') || body.token;
+        let principal = null;
+        if (hasAuthenticatedBearer) {
+          try {
+            principal = await requirePrincipal(req, permission);
+          } catch (error) {
+            if (!capabilityToken) capabilityToken = req.headers.authorization?.startsWith('Bearer ')
+              ? req.headers.authorization.slice(7).trim()
+              : req.headers['x-loom-admin-token'];
+            if (!capabilityToken) throw error;
+          }
+        }
+        if (!principal && !capabilityToken && sessionIdentifier) principal = await requirePrincipal(req, permission);
+        const identifier = principal && sessionIdentifier
+          ? sessionIdentifier
+          : capabilityToken || sessionIdentifier;
         if (!identifier) throw requestError(400, 'playback_session_required', 'A playback session token or id is required.');
         const renewed = await mediaService.renewPlaybackSession?.(identifier, principal, mediaId, action);
         if (!renewed) throw requestError(401, 'playback_session_invalid', 'The playback session is expired, revoked, or not bound to this media item.');
@@ -617,6 +634,33 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
             ? { playlistUrl: `/api/media/transcode/${encodeURIComponent(renewed.id)}/index.m3u8${tokenQuery}` }
             : { directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery}` }),
         });
+        return true;
+      }
+      if (resource === 'media' && segments.length === 3 && segments[2] === 'playback-session' && req.method === 'DELETE') {
+        const mediaId = decodeSegment(segments[1], 'mediaId');
+        const body = await readJsonBody(req);
+        const hasAuthenticatedBearer = Boolean(req.headers.authorization || req.headers['x-loom-admin-token']);
+        const sessionIdentifier = url.searchParams.get('sessionId') || body.sessionId;
+        let capabilityToken = url.searchParams.get('token') || body.token;
+        let principal = null;
+        if (hasAuthenticatedBearer) {
+          try {
+            principal = await requirePrincipal(req, 'stream');
+          } catch (error) {
+            if (!capabilityToken) capabilityToken = req.headers.authorization?.startsWith('Bearer ')
+              ? req.headers.authorization.slice(7).trim()
+              : req.headers['x-loom-admin-token'];
+            if (!capabilityToken) throw error;
+          }
+        }
+        if (!principal && !capabilityToken && sessionIdentifier) principal = await requirePrincipal(req, 'stream');
+        const identifier = principal && sessionIdentifier
+          ? sessionIdentifier
+          : capabilityToken || sessionIdentifier;
+        if (!identifier) throw requestError(400, 'playback_session_required', 'A playback session token or id is required.');
+        const stopped = await mediaService.stopPlaybackSession?.(identifier, principal, mediaId);
+        if (!stopped) throw requestError(401, 'playback_session_invalid', 'The playback session is expired, revoked, or not owned by this account.');
+        writeData(res, 200, stopped);
         return true;
       }
       if (resource === 'media' && segments.length === 3 && (segments[2] === 'direct' || segments[2] === 'download' || segments[2] === 'transcode')) {
