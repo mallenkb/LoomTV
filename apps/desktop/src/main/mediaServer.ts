@@ -56,6 +56,7 @@ import { browserPlaybackPlan } from './transcodeDecision';
 import { probeMedia } from './mediaProbe';
 import { isSubtitleFileName, isVideoFileName } from './fileClassification';
 import { streamStartFailure } from './streamStartErrors';
+import { authorizeRendererHttpRequest, isTrustedRendererHttpOrigin } from './rendererHttpAccess.ts';
 import { parseHttpByteRange } from './httpByteRange';
 import {
   bindHlsProfile,
@@ -106,7 +107,10 @@ import type {
 export interface MediaServerDependencies {
   ALLOWED_CORS_ORIGINS: ReadonlySet<string>;
   LOCAL_ACCESS_HEADER: string;
-  LOCAL_ACCESS_TOKEN: string;
+  // The raw local access token is deliberately absent. The HTTP server
+  // authorizes through the injected `authorizeLocalRequest` /
+  // `requireLocalOrLanAccess` closures and never holds a value it could
+  // serialize into a response (audit A.2).
   allowedCorsOrigin: (origin: string | undefined, allowedOrigins: ReadonlySet<string>) => string | null;
   authorizeLanRequest: (reqUrl: URL, req: http.IncomingMessage) => { ok: boolean; device?: LanPairedDevice };
   authorizeLocalRequest: (reqUrl: URL, req: http.IncomingMessage) => boolean;
@@ -419,48 +423,8 @@ function listenWithPortRetries(
   });
 }
 
-function rendererRequestOrigin(req: http.IncomingMessage): string | null {
-  const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
-  if (origin) return origin;
-
-  // Same-origin GET requests may omit Origin. Accept the referrer only when
-  // Chromium also identifies the request as same-origin; this keeps ordinary
-  // originless localhost clients outside the renderer compatibility surface.
-  if (req.headers['sec-fetch-site'] !== 'same-origin') return null;
-  const referer = Array.isArray(req.headers.referer) ? req.headers.referer[0] : req.headers.referer;
-  if (!referer) return null;
-  try {
-    return new URL(referer).origin;
-  } catch {
-    return null;
-  }
-}
-
-function isTrustedRendererHttpOrigin(
-  req: http.IncomingMessage,
-  deps: MediaServerDependencies,
-): boolean {
-  const origin = rendererRequestOrigin(req);
-  if (!origin) return false;
-  if (deps.allowedCorsOrigin(origin, deps.ALLOWED_CORS_ORIGINS)) return true;
-
-  // The optional /app/ browser renderer is served by this process. Its port is
-  // selected at runtime, so admit only the exact loopback media-server origin.
-  try {
-    const parsed = new URL(origin);
-    const host = parsed.hostname.toLowerCase();
-    const isLoopbackHost = host === '127.0.0.1' || host === 'localhost' || host === '[::1]';
-    return parsed.protocol === 'http:'
-      && isLoopbackHost
-      && parsed.port === String(mediaServerPort);
-  } catch {
-    return false;
-  }
-}
-
 export async function startMediaServer(deps: MediaServerDependencies): Promise<number> {
   const {
-    LOCAL_ACCESS_TOKEN,
     authorizeLanRequest,
     authorizeLocalRequest,
     assertProfileCanAccessPath,
@@ -727,16 +691,6 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           transport: loopbackRequest ? 'loopback-http' : 'tls',
           ...(!loopbackRequest ? { certFingerprint: lanCertificateFingerprint } : {}),
         });
-        return;
-      }
-
-      if (reqUrl.pathname === '/api/renderer/session' && req.method === 'POST') {
-        if (!loopbackRequest || !isTrustedRendererHttpOrigin(req, deps)) {
-          writeJson(res, 403, { error: 'A trusted renderer origin is required.' });
-          return;
-        }
-        res.setHeader('Cache-Control', 'no-store');
-        writeJson(res, 200, { localAccessToken: LOCAL_ACCESS_TOKEN });
         return;
       }
 
@@ -1077,9 +1031,20 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       // Browser-rendered development sessions do not have Electron's preload
       // bridge. Keep their read/write surface narrowly scoped, authenticated,
       // and local-only so they render the same library and preferences as the
-      // desktop window without exposing IPC administration routes.
-      if (reqUrl.pathname.startsWith('/api/renderer/') && !isTrustedRendererHttpOrigin(req, deps)) {
-        writeJson(res, 403, { error: 'A trusted renderer origin is required.' });
+      // desktop window without exposing IPC administration routes. The origin
+      // check below narrows an already token-authorized request; it never
+      // authorizes one, and it never gates a credential-bearing response.
+      const rendererDecision = authorizeRendererHttpRequest({
+        pathname: reqUrl.pathname,
+        loopbackRequest,
+        trustedOrigin: () => isTrustedRendererHttpOrigin({
+          headers: req.headers,
+          allowedOrigins: deps.ALLOWED_CORS_ORIGINS,
+          loopbackServerPort: mediaServerPort,
+        }),
+      });
+      if (!rendererDecision.allowed) {
+        writeJson(res, rendererDecision.status, { error: rendererDecision.error });
         return;
       }
 

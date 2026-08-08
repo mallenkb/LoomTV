@@ -39,6 +39,7 @@ import type {
   RemoteLibraryRequest,
   RemoteLibraryResponse,
   RemoteLibrarySessionState,
+  RendererSession,
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
@@ -136,6 +137,7 @@ export interface IpcContract {
   'progress:get': { args: [filePath?: string]; result: Record<string, StoredProgress> | StoredProgress | null };
   'progress:import': { args: [progress: ImportedProgress, expectedProfileId?: string]; result: boolean };
   'progress:save': { args: [filePath: string, position: number, duration: number, expectedProfileId?: string]; result: StoredProgress };
+  'renderer:session': { args: []; result: RendererSession };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };

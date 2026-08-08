@@ -9,6 +9,7 @@ import { createHeadlessClientState } from './client-state.js';
 import { createHeadlessMediaService } from './media-service.js';
 import { createPublicApiHandler } from './public-api.js';
 import { createHeadlessTranscoder } from './transcoder.js';
+import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import { createWebAppPage } from './web-app.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
@@ -62,8 +63,11 @@ async function inspectMediaPath(mediaDir) {
   }
 }
 
-/** @param {{ host: string, port: number, paths: import('@loom-media-server/runtime-paths').RuntimePaths, version: string }} options */
+/** @param {{ host: string, port: number, paths: import('@loom-media-server/runtime-paths').RuntimePaths, version: string, trustedProxies?: string | string[] }} options */
 export function createHeadlessServer(options) {
+  // Parse before constructing services so malformed trust configuration fails
+  // startup without opening a listener or silently falling back to broad trust.
+  const proxyPolicy = createTrustedProxyPolicy(options.trustedProxies);
   const startedAt = new Date().toISOString();
   const startedAtMs = Date.now();
   let server;
@@ -141,7 +145,7 @@ export function createHeadlessServer(options) {
     authorize: adminService.authorizeRequest,
     ownerConfigured: adminService.isOwnerConfigured,
     requireSecureTransport: options.requireSecureTransport === true,
-    trustProxy: options.trustProxy === true,
+    proxyPolicy,
   });
   const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath });
   const publicApi = createPublicApiHandler({
@@ -151,7 +155,7 @@ export function createHeadlessServer(options) {
     getRuntimeHealth: healthPayload,
     version: options.version,
     requireSecureTransport: options.requireSecureTransport === true,
-    trustProxy: options.trustProxy === true,
+    proxyPolicy,
   });
 
   server = http.createServer(async (req, res) => {

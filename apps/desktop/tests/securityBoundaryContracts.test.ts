@@ -27,7 +27,7 @@ test('HTTP authorization keeps public, renderer, desktop, and paired-device boun
   assert.equal(allowedCorsOrigin('http://localhost:5174', new Set(['http://localhost:5173'])), null);
 
   assert.deepEqual(mediaServerRouteAccess('/api/ping', 'GET'), { kind: 'public' });
-  assert.deepEqual(mediaServerRouteAccess('/api/renderer/session', 'POST'), { kind: 'public' });
+  assert.deepEqual(mediaServerRouteAccess('/api/renderer/session', 'POST'), { kind: 'ipc-only' });
   assert.deepEqual(mediaServerRouteAccess('/api/renderer/settings', 'GET'), { kind: 'desktop' });
   assert.deepEqual(mediaServerRouteAccess('/api/settings', 'GET'), { kind: 'ipc-only' });
   assert.deepEqual(mediaServerRouteAccess('/api/v2/profiles', 'POST'), { kind: 'scoped', scope: 'playback:write' });

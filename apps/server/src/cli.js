@@ -21,7 +21,7 @@ Options:
   --media-dir <path>     Optional media root (may be offline at startup)
   --ffmpeg-path <path>   FFmpeg executable used for transcoding probes
   --require-secure-transport  Reject admin and credential requests over HTTP
-  --trust-proxy           Trust X-Forwarded-Proto from a TLS reverse proxy
+  --trusted-proxies <list>  Comma-separated trusted proxy IPs/CIDRs
   --help                 Show this help
 
 Environment aliases:
@@ -29,7 +29,7 @@ Environment aliases:
   DATA_DIR / LOOMTV_DATA_DIR, CACHE_DIR / LOOMTV_CACHE_DIR,
   MEDIA_DIR / LOOMTV_MEDIA_DIR, FFMPEG_PATH / LOOMTV_FFMPEG_PATH,
   REQUIRE_SECURE_TRANSPORT / LOOMTV_REQUIRE_SECURE_TRANSPORT,
-  TRUST_PROXY / LOOMTV_TRUST_PROXY
+  TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES
 `;
 
 function usageError(message) {
@@ -69,14 +69,14 @@ function parseBoolean(value, source) {
 
 function parseArgs(args) {
   const values = {};
-  const booleanOptions = new Set(['--require-secure-transport', '--trust-proxy']);
+  const booleanOptions = new Set(['--require-secure-transport']);
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') return { help: true };
     const equalsIndex = argument.indexOf('=');
     const name = equalsIndex >= 0 ? argument.slice(0, equalsIndex) : argument;
     const inlineValue = equalsIndex >= 0 ? argument.slice(equalsIndex + 1) : undefined;
-    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', ...booleanOptions ].includes(name)) {
+    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', '--trusted-proxies', ...booleanOptions ].includes(name)) {
       throw usageError(`Unknown option: ${argument}`);
     }
     if (booleanOptions.has(name)) {
@@ -113,10 +113,14 @@ function buildConfig(cliValues) {
   const requireSecureTransport = cliValues.requiresecuretransport !== undefined
     ? cliValues.requiresecuretransport
     : ['1', 'true', 'yes'].includes((readEnvironmentValue('REQUIRE_SECURE_TRANSPORT', 'LOOMTV_REQUIRE_SECURE_TRANSPORT') || '').toLowerCase());
-  const trustProxy = cliValues.trustproxy !== undefined
-    ? cliValues.trustproxy
-    : ['1', 'true', 'yes'].includes((readEnvironmentValue('TRUST_PROXY', 'LOOMTV_TRUST_PROXY') || '').toLowerCase());
-  return { host, port, paths, ffmpegPath, requireSecureTransport, trustProxy };
+  const legacyTrustProxy = readEnvironmentValue('TRUST_PROXY', 'LOOMTV_TRUST_PROXY');
+  if (legacyTrustProxy && parseBoolean(legacyTrustProxy, 'TRUST_PROXY')) {
+    throw usageError('TRUST_PROXY=true is no longer supported; configure an explicit TRUSTED_PROXIES allowlist.');
+  }
+  const trustedProxies = cliValues.trustedproxies
+    || readEnvironmentValue('TRUSTED_PROXIES', 'LOOMTV_TRUSTED_PROXIES')
+    || '';
+  return { host, port, paths, ffmpegPath, requireSecureTransport, trustedProxies };
 }
 
 async function run() {

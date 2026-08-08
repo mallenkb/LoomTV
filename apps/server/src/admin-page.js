@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createTrustedProxyPolicy } from './trusted-proxy.js';
 
 /**
  * Server-native admin UI asset loader.
@@ -212,13 +213,10 @@ export function createAdminApiHandler(options = {}) {
   const maxBodyBytes = options.maxBodyBytes || 128 * 1024;
   const log = options.log || ((message, error) => console.error(`[headless-admin] ${message}`, error || ''));
   const requireSecureTransport = options.requireSecureTransport === true;
-  const trustProxy = options.trustProxy === true;
+  const proxyPolicy = options.proxyPolicy || createTrustedProxyPolicy();
 
   function isSecureRequest(req) {
-    if (req.socket?.encrypted) return true;
-    if (!trustProxy) return false;
-    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
-    return forwardedProto === 'https';
+    return proxyPolicy.isSecureRequest(req);
   }
 
   return async function handleAdminApi(req, res) {
@@ -302,7 +300,7 @@ export function createAdminApiHandler(options = {}) {
         writeJson(res, 200, await service.createSession({
           username: optionalString(body.username, 'username', 80),
           password: requiredString(body.password, 'password', 256),
-          address: req.socket?.remoteAddress,
+          address: proxyPolicy.clientAddress(req),
           deviceId: optionalString(req.headers['x-loom-device-id'], 'deviceId', 128),
         }));
         return true;

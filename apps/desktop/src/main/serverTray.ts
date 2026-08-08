@@ -10,7 +10,6 @@ type ServerTrayOptions = {
    */
   iconIsTemplate: boolean;
   onOpen: () => void;
-  onOpenWeb: () => void;
   onQuit: () => void;
   port: number;
 };
@@ -45,10 +44,6 @@ export function createServerTray(options: ServerTrayOptions): Tray | null {
     {
       label: 'Open LoomTV',
       click: options.onOpen,
-    },
-    {
-      label: 'Open in Web',
-      click: options.onOpenWeb,
     },
     { type: 'separator' },
     {

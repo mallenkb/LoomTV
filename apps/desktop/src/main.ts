@@ -6,7 +6,6 @@ import {
   protocol,
   net,
   session,
-  shell,
 } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
@@ -18,7 +17,9 @@ import {
   LOCAL_ACCESS_QUERY_PARAM,
   allowedCorsOrigin,
   createLocalAccessToken,
+  describeErrorForLog,
 } from './main/serverSecurity';
+import { isTrustedIpcSender } from './main/trustedIpcSender.ts';
 import {
   destroyLanDiscovery,
   discoverLanPeers,
@@ -1535,19 +1536,33 @@ registerIpcHandlers<LibraryData, AppSettings>({
   stopTranscode,
   isTrustedSender: (event) => {
     const window = getMainWindow();
-    if (!window || window.isDestroyed() || event.sender.id !== window.webContents.id) return false;
-    try {
-      const senderFrame = event.senderFrame;
-      if (!senderFrame) return false;
-      const senderUrl = new URL(senderFrame.url);
-      const applicationUrl = new URL(window.webContents.getURL());
-      if (applicationUrl.protocol === 'file:') {
-        return senderUrl.protocol === 'file:' && senderUrl.pathname === applicationUrl.pathname;
+    const activeWindow = window && !window.isDestroyed() ? window : null;
+    // Electron throws when a frame or window disappears mid-invocation. A read
+    // that fails resolves to null, which the rule treats as untrusted.
+    const readUrl = (read: () => string | null | undefined): string | null => {
+      try {
+        return read() ?? null;
+      } catch {
+        return null;
       }
-      return senderUrl.origin === applicationUrl.origin;
-    } catch {
-      return false;
-    }
+    };
+    const readBoolean = (read: () => boolean | null | undefined): boolean => {
+      try {
+        return read() === true;
+      } catch {
+        return false;
+      }
+    };
+    return isTrustedIpcSender({
+      senderWebContentsId: event.sender.id,
+      senderFrameIsMainFrame: readBoolean(() => (
+        event.senderFrame?.frameTreeNodeId === event.sender.mainFrame.frameTreeNodeId
+      )),
+      senderFrameUrl: readUrl(() => event.senderFrame?.url),
+      mainWindowWebContentsId: activeWindow ? activeWindow.webContents.id : null,
+      mainWindowUrl: readUrl(() => activeWindow?.webContents.getURL()),
+      mainWindowDestroyed: !activeWindow,
+    });
   },
 });
 
@@ -1559,7 +1574,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
 export const mediaServerDeps = {
   ALLOWED_CORS_ORIGINS,
   LOCAL_ACCESS_HEADER,
-  LOCAL_ACCESS_TOKEN,
+  // LOCAL_ACCESS_TOKEN is intentionally not passed. The media server authorizes
+  // through the closures below and never holds a credential it could serialize
+  // into an HTTP response (audit A.2).
   allowedCorsOrigin,
   authorizeLanRequest,
   authorizeLocalRequest,
@@ -1627,17 +1644,6 @@ async function startBackgroundServices(): Promise<void> {
         if (isUpdateInstalling() || isAppShuttingDown) return;
         createWindow();
       },
-      onOpenWeb: () => {
-        const webUrl = `http://127.0.0.1:${getMediaServerPort()}/app/`;
-        if (!MAIN_WINDOW_DEV_SERVER_URL && !fs.existsSync(path.join(__dirname, '../renderer/main_window/index.html'))) {
-          dialog.showErrorBox(
-            'LoomTV Web is unavailable',
-            'The local web client could not be found. Reinstall LoomTV, then try again.',
-          );
-          return;
-        }
-        void shell.openExternal(webUrl);
-      },
       onQuit: () => app.quit(),
       port: getMediaServerPort(),
     });
@@ -1692,7 +1698,9 @@ app.whenReady().then(async () => {
       const targetUrl = `http://127.0.0.1:${getMediaServerPort()}${parsed.pathname}${parsed.search}`;
       return net.fetch(targetUrl, { headers, redirect: 'error' });
     } catch (err) {
-      console.error('[plexserver protocol] fetch error:', err);
+      // The forwarded URL carries the local access token as a query parameter,
+      // and fetch failures embed that URL in their message.
+      console.error('[plexserver protocol] fetch error:', describeErrorForLog(err));
       return new Response('Internal Server Error', { status: 500 });
     }
   });
