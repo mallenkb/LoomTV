@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@${CHECKOUT_SHA}
+        with:
+          persist-credentials: false
       - run: corepack pnpm install --frozen-lockfile${secret ? `\n        env:\n          VALUE: \${{ secrets.PROTECTED_VALUE }}` : ''}
 `;
 }
@@ -32,6 +34,12 @@ test('accepts an explicitly read-only pull-request workflow', () => {
 test('rejects write permissions in a pull-request workflow', () => {
   const violations = findPolicyViolations('fixture.yml', workflow({ permissions: 'contents: write' }));
   assert.ok(violations.some((message) => message.includes('grants write')));
+});
+
+test('requires explicit workflow permissions', () => {
+  const source = workflow().replace('permissions:\n  contents: read\n', '');
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('explicit permissions')));
 });
 
 test('rejects protected secret references in a pull-request workflow', () => {
@@ -136,6 +144,39 @@ test('applies the untrusted-input boundary to workflow_run', () => {
   const violations = findPolicyViolations('fixture.yml', source);
   assert.ok(violations.some((message) => message.includes('grants write')));
   assert.ok(violations.some((message) => message.includes('secrets context')));
+  assert.ok(violations.some((message) => message.includes('publishing command')));
+});
+
+test('rejects an untrusted workflow environment even without a secret expression', () => {
+  const source = workflow().replace(
+    '  verify:\n    permissions:',
+    '  verify:\n    environment: production-release\n    permissions:',
+  );
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('environment is prohibited')));
+});
+
+test('rejects an untrusted workflow that keeps checkout credentials', () => {
+  const source = workflow().replace('          persist-credentials: false\n', '');
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('persist-credentials: false')));
+});
+
+test('rejects repository mutation through gh api in an untrusted workflow', () => {
+  const source = workflow().replace(
+    'corepack pnpm install --frozen-lockfile',
+    'corepack pnpm install --frozen-lockfile\n      - run: gh api --method POST repos/example/example/releases',
+  );
+  const violations = findPolicyViolations('fixture.yml', source);
+  assert.ok(violations.some((message) => message.includes('publishing command')));
+});
+
+test('rejects a release action in an untrusted workflow', () => {
+  const source = workflow().replace(
+    'corepack pnpm install --frozen-lockfile',
+    `corepack pnpm install --frozen-lockfile\n      - uses: actions/create-release@${CHECKOUT_SHA}`,
+  );
+  const violations = findPolicyViolations('fixture.yml', source);
   assert.ok(violations.some((message) => message.includes('publishing command')));
 });
 

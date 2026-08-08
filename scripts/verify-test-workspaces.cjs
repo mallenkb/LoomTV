@@ -9,6 +9,7 @@ const EXPECTED_TEST_WORKSPACES = Object.freeze([
   'apps/mobile',
   'apps/server',
   'packages/media-core',
+  'packages/plugin-protocol',
   'packages/runtime-paths',
   'packages/transcode-capabilities',
 ]);

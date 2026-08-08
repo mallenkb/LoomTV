@@ -20,11 +20,19 @@ const PUBLISH_COMMANDS = [
   /\b(?:npm|pnpm|yarn)\s+publish\b/i,
   /\b(?:npm|pnpm|yarn)\b[^\n;&|]*\brun\s+(?:publish|release(?:[:][^\s;&|]+)?)(?:\s|$)/i,
   /\bgh\s+release\s+(?:create|delete|edit|upload)\b/i,
+  /\bgh\s+api\b/i,
   /\bgit\s+push\b/i,
   /\bdocker\s+push\b/i,
   /\bdocker\s+buildx\s+build\b[^\n]*\s--push(?:\s|$)/i,
   /\b(?:cargo|twine)\s+publish\b/i,
   /\belectron-builder\b[^\n]*--publish(?:\s+|=)(?!never\b)/i,
+];
+const PUBLISHING_ACTIONS = [
+  /(?:^|[\/._-])(?:create-release|publish-release)(?:[\/._@-]|$)/i,
+  /action-gh-release/i,
+  /action-automatic-releases/i,
+  /upload-release-asset/i,
+  /docker\/build-push-action/i,
 ];
 
 function triggerNames(workflow) {
@@ -49,6 +57,31 @@ function permissionViolations(value, location) {
 
 function jobSteps(job) {
   return Array.isArray(job?.steps) ? job.steps : [];
+}
+
+function hasSelfHostedRunner(value) {
+  if (typeof value === 'string') return /\bself-hosted\b/i.test(value);
+  if (Array.isArray(value)) return value.some(hasSelfHostedRunner);
+  return false;
+}
+
+function publishingStep(job) {
+  return jobSteps(job).find((step) => (
+    step && (
+      (typeof step.run === 'string' && PUBLISH_COMMANDS.some((pattern) => pattern.test(step.run)))
+      || (typeof step.uses === 'string' && PUBLISHING_ACTIONS.some((pattern) => pattern.test(step.uses)))
+    )
+  ));
+}
+
+function checkoutCredentialViolations(job, fileName, jobName) {
+  return jobSteps(job)
+    .flatMap((step, stepIndex) => {
+      if (!step || typeof step.uses !== 'string' || !/^actions\/checkout@/i.test(step.uses)) return [];
+      const persistCredentials = step.with?.['persist-credentials'];
+      if (persistCredentials === false || String(persistCredentials).toLowerCase() === 'false') return [];
+      return [`${fileName}: jobs.${jobName}.steps[${stepIndex}] checkout must set persist-credentials: false for untrusted code.`];
+    });
 }
 
 function hasExplicitReadOnlyPermissions(value) {
@@ -97,9 +130,21 @@ function findPolicyViolations(fileName, source) {
   if (!workflow || typeof workflow !== 'object') return [`${fileName}: workflow must be a YAML object.`];
 
   const violations = actionPinViolations(workflow, fileName);
+  if (workflow.permissions === undefined) {
+    violations.push(`${fileName}: workflow must declare explicit permissions.`);
+  }
   for (const [lineIndex, line] of source.split(/\r?\n/).entries()) {
     if (/\b(?:pnpm|npm|yarn)\s+install\b/.test(line) && !line.includes('--frozen-lockfile')) {
       violations.push(`${fileName}:${lineIndex + 1}: dependency install must use --frozen-lockfile.`);
+    }
+  }
+  for (const [jobName, job] of Object.entries(workflow.jobs || {})) {
+    if (hasSelfHostedRunner(job?.['runs-on'])) {
+      violations.push(`${fileName}: jobs.${jobName} must not use a self-hosted runner.`);
+    }
+    const publishing = publishingStep(job);
+    if (publishing && job?.environment === undefined) {
+      violations.push(`${fileName}: jobs.${jobName} contains a publishing command but has no protected environment.`);
     }
   }
   const triggers = triggerNames(workflow);
@@ -109,19 +154,30 @@ function findPolicyViolations(fileName, source) {
   if (triggers.includes('pull_request_target')) {
     violations.push(`${fileName}: pull_request_target is prohibited for repository-code validation.`);
   }
+  if (triggers.includes('workflow_run')) {
+    violations.push(`${fileName}: workflow_run is prohibited for repository-code validation.`);
+  }
   if (!hasExplicitReadOnlyPermissions(workflow.permissions)) {
     violations.push(`${fileName}: untrusted-trigger workflows must declare explicit deny-all or contents: read permissions.`);
   }
   violations.push(...permissionViolations(workflow.permissions, `${fileName}: permissions`));
   for (const [jobName, job] of Object.entries(workflow.jobs || {})) {
     violations.push(...permissionViolations(job?.permissions, `${fileName}: jobs.${jobName}.permissions`));
+    if (job?.environment !== undefined) {
+      violations.push(`${fileName}: jobs.${jobName}.environment is prohibited in untrusted-trigger workflows.`);
+    }
+    violations.push(...checkoutCredentialViolations(job, fileName, jobName));
     if (job?.secrets !== undefined) {
       violations.push(`${fileName}: jobs.${jobName}.secrets is prohibited in untrusted-trigger workflows.`);
     }
     for (const [stepIndex, step] of jobSteps(job).entries()) {
-      if (!step || typeof step.run !== 'string') continue;
-      if (PUBLISH_COMMANDS.some((pattern) => pattern.test(step.run))) {
-        violations.push(`${fileName}: jobs.${jobName}.steps[${stepIndex}].run contains a publishing command.`);
+      if (!step) continue;
+      const hasPublishingCommand = typeof step.run === 'string'
+        && PUBLISH_COMMANDS.some((pattern) => pattern.test(step.run));
+      const hasPublishingAction = typeof step.uses === 'string'
+        && PUBLISHING_ACTIONS.some((pattern) => pattern.test(step.uses));
+      if (hasPublishingCommand || hasPublishingAction) {
+        violations.push(`${fileName}: jobs.${jobName}.steps[${stepIndex}] contains a publishing command or action.`);
       }
     }
   }
