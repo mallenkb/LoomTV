@@ -145,6 +145,7 @@ import {
   getProfileLists,
   getProfilePreferences,
   getProfileRestrictions,
+  getStremioAddonConfigurationState,
   importCustomArtwork,
   importProfileData,
   importProgress,
@@ -1097,6 +1098,12 @@ function saveLibraryMutation(data: LibraryData): void {
   if (saveLibrary(data)) reconcileSkipAnalysisAfterScan(previous, data);
 }
 
+function stremioTypesMatch(requestedType: unknown, itemType: string): boolean {
+  if (requestedType === itemType) return true;
+  return (requestedType === 'series' || requestedType === 'tv')
+    && (itemType === 'series' || itemType === 'tv');
+}
+
 let warmSkipSegmentsAfterScan: (data: LibraryData) => void = () => undefined;
 let reconcileSkipAnalysisAfterScan: (previous: LibraryData, next: LibraryData) => void = () => undefined;
 
@@ -1284,6 +1291,14 @@ const analysisCoordinator = createAnalysisCoordinator({
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
 const stremioPluginService = createDesktopStremioPluginService();
+
+const stremioPluginSummaryForRenderer = (record: Parameters<typeof stremioPluginSummary>[0]) => (
+  stremioPluginSummary(record, getStremioAddonConfigurationState(record.addonId))
+);
+
+const stremioPluginReviewForRenderer = (review: Parameters<typeof stremioPluginReview>[0]) => (
+  stremioPluginReview(review, getStremioAddonConfigurationState(review.addonId))
+);
 
 registerIpcHandlers<LibraryData, AppSettings>({
   getMediaServerPort: () => getMediaServerPort(),
@@ -1495,24 +1510,24 @@ registerIpcHandlers<LibraryData, AppSettings>({
     return profileId ? getPlaybackTrackPreferences(profileId, scope) : {};
   },
   savePlaybackTrackPreferences: (scope, preferences, expectedProfileId) => savePlaybackTrackPreferences(requireDesktopProfileId(expectedProfileId), scope, preferences as Parameters<typeof savePlaybackTrackPreferences>[2]),
-  listStremioPlugins: () => stremioPluginService.listManaged().map(stremioPluginSummary),
+  listStremioPlugins: () => stremioPluginService.listManaged().map(stremioPluginSummaryForRenderer),
   listAvailableStremioPlugins: () => stremioPluginService
     .listForProfile(requireDesktopProfileId())
-    .map(stremioPluginSummary),
+    .map(stremioPluginSummaryForRenderer),
   listOfficialStremioAddons: () => [...OFFICIAL_STREMIO_ADDONS],
-  reviewOfficialStremioAddon: async (officialId) => stremioPluginReview(
+  reviewOfficialStremioAddon: async (officialId) => stremioPluginReviewForRenderer(
     await stremioPluginService.reviewManifestUrl(
       officialStremioManifestUrl(officialId),
       officialStremioAddonId(officialId),
     ),
   ),
-  reviewStremioManifestUrl: async (manifestUrl) => stremioPluginReview(
+  reviewStremioManifestUrl: async (manifestUrl) => stremioPluginReviewForRenderer(
     await stremioPluginService.reviewManifestUrl(manifestUrl),
   ),
-  approveStremioAddon: async (addonId, reviewToken) => stremioPluginSummary(
+  approveStremioAddon: async (addonId, reviewToken) => stremioPluginSummaryForRenderer(
     await stremioPluginService.approve(addonId, reviewToken),
   ),
-  disableStremioAddon: async (addonId) => stremioPluginSummary(
+  disableStremioAddon: async (addonId) => stremioPluginSummaryForRenderer(
     await stremioPluginService.disable(addonId),
   ),
   removeStremioAddon: (addonId) => stremioPluginService.remove(addonId),
@@ -1522,15 +1537,18 @@ registerIpcHandlers<LibraryData, AppSettings>({
     addonId,
     enabled,
   ),
+  getStremioAddonConfiguration: (addonId) => stremioPluginService.getConfigurationState(addonId),
+  saveStremioAddonConfiguration: (addonId, values) => stremioPluginService.saveConfiguration(addonId, values),
+  listStremioPluginAudit: (addonId, limit) => stremioPluginService.listAudit(addonId, limit),
   fetchStremioCatalog: async (addonId, request) => stremioCatalogResult(
     addonId,
     request,
-    await stremioPluginService.fetchCatalog(requireDesktopProfileId(), addonId, request),
+    await stremioPluginService.fetchCatalogComplete(requireDesktopProfileId(), addonId, request),
     artworkDeliveryUrl,
   ),
   fetchStremioMeta: async (addonId, request) => {
     const itemIdentity = parseStremioItemId(request?.id);
-    if (!itemIdentity || itemIdentity.addonId !== addonId || itemIdentity.type !== request?.type) {
+    if (!itemIdentity || itemIdentity.addonId !== addonId || !stremioTypesMatch(request?.type, itemIdentity.type)) {
       throw new StremioPluginServiceError(
         'STREMIO_PLUGIN_INVALID_ITEM_ID',
         'The requested Discover item does not belong to this add-on and content type.',
@@ -1540,6 +1558,25 @@ registerIpcHandlers<LibraryData, AppSettings>({
       addonId,
       await stremioPluginService.fetchMeta(requireDesktopProfileId(), addonId, {
         ...request,
+        type: itemIdentity.type,
+        id: itemIdentity.providerId,
+      }),
+      artworkDeliveryUrl,
+    );
+  },
+  fetchStremioMetaByItem: async (request) => {
+    const itemIdentity = parseStremioItemId(request?.id);
+    if (!itemIdentity || !stremioTypesMatch(request?.type, itemIdentity.type)) {
+      throw new StremioPluginServiceError(
+        'STREMIO_PLUGIN_INVALID_ITEM_ID',
+        'The requested Discover item is not a valid host-issued item key.',
+      );
+    }
+    return stremioMetaResult(
+      itemIdentity.addonId,
+      await stremioPluginService.fetchMeta(requireDesktopProfileId(), itemIdentity.addonId, {
+        ...request,
+        type: itemIdentity.type,
         id: itemIdentity.providerId,
       }),
       artworkDeliveryUrl,

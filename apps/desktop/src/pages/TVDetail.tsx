@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Bookmark, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
@@ -16,6 +16,8 @@ import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkE
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
+import { getCachedDiscoverReturnRoute } from '@/lib/discoverNavigation';
+import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -57,8 +59,86 @@ function formatThumbnailTime(seconds: number, duration = 0): string {
 const CUSTOM_ARTWORK_KEY = 'loomtvCustomShowArtwork';
 type DetailTab = 'episodes' | 'details';
 
+type TVDetailRouteState = {
+  from?: string;
+  fromDiscover?: boolean;
+  addonId?: string;
+  stremioCatalogItem?: StremioPluginCatalogItem;
+  artwork?: RouteArtworkState;
+};
+
+function normalizeRouteYear(releaseInfo?: string, released?: string): number {
+  const match = `${releaseInfo || ''} ${released || ''}`.match(/\b(19|20)\d{2}\b/);
+  return match ? Number(match[0]) : 0;
+}
+
+function normalizeMediaTitle(value: string): string {
+  return value.normalize('NFKD').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function isCatalogTypeForKind(kind: 'series' | 'anime', type: string): boolean {
+  return kind === 'anime' ? type === 'anime' : type === 'series' || type === 'tv';
+}
+
+function showFromStremioCatalogItem(
+  kind: 'series' | 'anime',
+  item: StremioPluginCatalogItem | null | undefined,
+): TVShow | null {
+  if (!item || !isCatalogTypeForKind(kind, item.type)) return null;
+  const poster = item.artwork?.poster || '';
+  const backdrop = item.artwork?.background || poster;
+  return {
+    id: item.id,
+    type: item.type === 'anime' ? 'anime' : 'tv',
+    title: item.title,
+    year: normalizeRouteYear(item.releaseInfo, item.released),
+    poster,
+    backdrop,
+    logo: item.artwork?.logo || '',
+    summary: item.description || '',
+    rating: item.rating || 0,
+    genres: [...item.genres],
+    cast: (item.cast || []).map((person) => ({
+      name: person.name,
+      character: person.character || '',
+      image: person.image || '',
+    })),
+    filePath: '',
+    seasons: [],
+    subtitles: [],
+    episodes: [],
+    episodeFiles: [],
+    posterCandidates: poster ? [poster] : [],
+    backdropCandidates: backdrop ? [backdrop] : [],
+    logoCandidates: item.artwork?.logo ? [item.artwork.logo] : [],
+  };
+}
+
+function isSameShowByTitleAndYear(localShow: TVShow, catalogShow: TVShow | null): boolean {
+  if (!catalogShow?.title || normalizeMediaTitle(localShow.title) !== normalizeMediaTitle(catalogShow.title)) return false;
+  return catalogShow.year <= 0 || localShow.year <= 0 || localShow.year === catalogShow.year;
+}
+
+function findLocalShowMatch(shows: readonly TVShow[], mediaId: string | undefined, fallback: TVShow | null): TVShow | null {
+  const exact = mediaId ? shows.find((item) => item.id === mediaId) : null;
+  if (exact) return exact;
+  return fallback ? shows.find((item) => isSameShowByTitleAndYear(item, fallback)) || null : null;
+}
+
+function mergeDiscoverPosterFallback(show: TVShow, fallback: TVShow): TVShow {
+  return {
+    ...show,
+    poster: show.poster || fallback.poster,
+    backdrop: show.backdrop || fallback.backdrop,
+    logo: show.logo || fallback.logo,
+    posterCandidates: uniqueArtworkSources(fallback.posterCandidates, fallback.poster, show.posterCandidates, show.poster),
+    backdropCandidates: uniqueArtworkSources(fallback.backdropCandidates, fallback.backdrop, show.backdropCandidates, show.backdrop),
+    logoCandidates: uniqueArtworkSources(fallback.logoCandidates, fallback.logo, show.logoCandidates, show.logo),
+  };
+}
+
 export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
-  const { id } = useParams<{ id: string }>();
+  const { id: mediaId } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
@@ -73,41 +153,80 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
-  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>('episodes');
+  const routeState = (location.state as TVDetailRouteState | null) || null;
+  const routeFallbackShow = useMemo(
+    () => showFromStremioCatalogItem(kind, routeState?.stremioCatalogItem),
+    [kind, routeState?.stremioCatalogItem],
+  );
+  const routeAddonId = routeState?.addonId;
+  const routeAddonType = kind === 'anime'
+    ? 'anime'
+    : routeState?.stremioCatalogItem?.type === 'tv' ? 'tv' : 'series';
+  const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover'));
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(shouldOpenDetailsFirst ? 'details' : 'episodes');
+  const metadataFetchKeyRef = useRef('');
 
   useEffect(() => {
     let cancelled = false;
-    const pageKey = `${kind}:${id || ''}`;
+    const pageKey = `${kind}:${mediaId || ''}`;
     if (accordionPageKeyRef.current !== pageKey) {
       accordionPageKeyRef.current = pageKey;
       accordionWasToggledRef.current = false;
     }
 
     const collection = kind === 'anime' ? state.animeShows : state.tvShows;
-    const found = collection.find((s) => s.id === id);
-    setShow(found || null);
+    const routeMetadata = routeFallbackShow || collection.find((item) => item.id === mediaId) || null;
+    const found = findLocalShowMatch(collection, mediaId, routeMetadata);
+    const nextShow = found && shouldOpenDetailsFirst && routeFallbackShow
+      ? mergeDiscoverPosterFallback(found, routeFallbackShow)
+      : found || routeFallbackShow;
+    setShow(nextShow);
+    const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|${routeAddonType}|${mediaId}` : '';
+    if (!nextShow && mediaId && metadataFetchKeyRef.current !== fetchKey) {
+      metadataFetchKeyRef.current = fetchKey;
+      const metadataRequest = routeAddonId
+        ? desktopApi.getStremioMeta(routeAddonId, { type: routeAddonType, id: mediaId })
+        : desktopApi.getStremioMetaByItem({ type: routeAddonType, id: mediaId });
+      void metadataRequest
+        .then((result) => {
+          if (cancelled) return;
+          const remoteShow = showFromStremioCatalogItem(kind, result.item);
+          if (remoteShow) setShow(shouldOpenDetailsFirst && routeFallbackShow
+            ? mergeDiscoverPosterFallback(remoteShow, routeFallbackShow)
+            : remoteShow);
+        })
+        .catch((error) => {
+          if (!cancelled) console.warn('Could not load Discover series metadata:', error);
+          metadataFetchKeyRef.current = '';
+        });
+    } else if (!fetchKey) {
+      metadataFetchKeyRef.current = '';
+    }
     if (found?.catalogRevision !== undefined) {
       void hydrateLibraryItem(found.id)
         .then((details) => {
-          if (!cancelled && details) setShow(details as TVShow);
+          if (cancelled || !details) return;
+          setShow(shouldOpenDetailsFirst && routeFallbackShow
+            ? mergeDiscoverPosterFallback(details as TVShow, routeFallbackShow)
+            : details as TVShow);
         })
         .catch((error) => console.warn('Could not hydrate series details:', error));
     }
-    if (found && !accordionWasToggledRef.current) {
-      const firstVisibleSeason = (found.seasons || []).find((season) =>
-        (found.episodeFiles?.some((ef) => ef.season === season.number) || false)
-        || (found.episodes?.some((ep) => ep.season === season.number) || false),
+    if (nextShow && !accordionWasToggledRef.current) {
+      const firstVisibleSeason = (nextShow.seasons || []).find((season) =>
+        (nextShow.episodeFiles?.some((ef) => ef.season === season.number) || false)
+        || (nextShow.episodes?.some((ep) => ep.season === season.number) || false),
       );
-      const resumeEpisode = found.episodeFiles?.find((file) =>
+      const resumeEpisode = nextShow.episodeFiles?.find((file) =>
         getProgressState(file.filePath, file.localMetadata?.durationSeconds).inProgress,
       );
-      const nextEpisode = found.episodeFiles?.find((file) =>
+      const nextEpisode = nextShow.episodeFiles?.find((file) =>
         !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched,
       );
       setExpandedSeason(resumeEpisode?.season ?? nextEpisode?.season ?? firstVisibleSeason?.number ?? null);
     }
     return () => { cancelled = true; };
-  }, [hydrateLibraryItem, id, kind, progressTick, state.animeShows, state.catalogRevision, state.tvShows]);
+  }, [hydrateLibraryItem, kind, mediaId, progressTick, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
 
   const toggleSeason = (seasonNumber: number) => {
     accordionWasToggledRef.current = true;
@@ -116,10 +235,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
   useEffect(() => {
     setDetailsReady(false);
-    setActiveDetailTab('episodes');
+    setActiveDetailTab(shouldOpenDetailsFirst ? 'details' : 'episodes');
     const frame = window.requestAnimationFrame(() => setDetailsReady(true));
     return () => window.cancelAnimationFrame(frame);
-  }, [show?.id]);
+  }, [show?.id, shouldOpenDetailsFirst]);
 
   // Custom artwork is keyed by media id, so it reloads only when the title
   // changes. Reloading it whenever an artwork field changes would blank the
@@ -293,6 +412,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     .find((file) => !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
 
   const heroEpisode = resumeEpisode || nextEpisode || firstPlayableEpisode || null;
+  const canPlayShow = Boolean(onPlay && heroEpisode?.filePath);
   const inMyList = lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
   const heroIsResume = Boolean(resumeEpisode);
   const heroProgress = heroEpisode
@@ -305,7 +425,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     : '';
   const firstEpisodeStill = show.episodes
     ?.find((episode) => Boolean(episode.still))?.still || '';
-  const sourceArtwork = (location.state as { artwork?: RouteArtworkState } | null)?.artwork;
+  const sourceArtwork = routeState?.artwork;
   const generatedArtwork = uniqueArtworkSources(firstEpisodeStill, fallbackThumbnails);
   const heroArtwork = uniqueArtworkSources(
     customArtwork.cover || '',
@@ -398,7 +518,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     );
   };
 
-  const sourceRoute = (location.state as { from?: string } | null)?.from;
+  const sourceRoute = routeState?.from?.startsWith('/discover')
+    ? routeState.from
+    : routeState?.fromDiscover
+      ? getCachedDiscoverReturnRoute()
+      : routeState?.from;
   const fallbackRoute = kind === 'anime' ? '/anime' : '/tv';
   const backTarget = sourceRoute && !sourceRoute.startsWith('/anime/') && !sourceRoute.startsWith('/tv/')
     ? sourceRoute
@@ -421,7 +545,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
         {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
-        {canManageProfiles && <ArtworkEditorControls
+        {canManageProfiles && !routeState?.stremioCatalogItem && <ArtworkEditorControls
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
@@ -468,7 +592,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             </div>
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
-          {heroEpisode && (
+          {canPlayShow && (
             <Button
               onClick={handlePlayShow}
               className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"

@@ -126,7 +126,10 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       return getLocalImageUrl(durableSource);
     }
 
-    return durableSource;
+    // Do not let an unrecognised provider or file URL cross the renderer IPC
+    // boundary. Callers can fall back to another artwork candidate while the
+    // host-owned resource registry remains the only delivery path.
+    return '';
   }
 
   function signedArtworkUrlForRemote(base: string, pathname: string, params: URLSearchParams): string {

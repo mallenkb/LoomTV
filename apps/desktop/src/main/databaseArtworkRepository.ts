@@ -3,18 +3,21 @@ import path from 'node:path';
 import type BetterSqlite3 from 'better-sqlite3';
 import type { LibraryData } from './appContracts.ts';
 import { artworkCacheFileName, collectArtworkSourcesForCache } from './artworkCache.ts';
+import { sanitizeArtworkBytes } from './artworkSecurity.ts';
 
 export type CachedArtwork = {
   dataUrl?: string;
   cachePath?: string;
   mimeType: string;
   byteLength: number;
+  contentHash?: string;
 };
 
 export type FetchedArtworkBytes = {
   bytes: Buffer;
   mimeType: string;
   byteLength: number;
+  contentHash: string;
 };
 
 type ArtworkRepositoryDependencies = {
@@ -75,15 +78,67 @@ export function createDatabaseArtworkRepository(
   }
 
   function getCachedArtwork(sourceUrl: string): CachedArtwork | null {
-    const row = database.prepare('SELECT data_url, cache_path, mime_type, byte_length FROM artwork_cache WHERE source_url = ?').get(sourceUrl) as
-      | { data_url: string; cache_path?: string | null; mime_type: string; byte_length: number }
+    const row = database.prepare('SELECT data_url, cache_path, mime_type, byte_length, content_hash FROM artwork_cache WHERE source_url = ?').get(sourceUrl) as
+      | { data_url: string; cache_path?: string | null; mime_type: string; byte_length: number; content_hash?: string | null }
       | undefined;
     if (!row) return null;
     const cachePath = row.cache_path || undefined;
+    let bytes: Buffer;
     if (cachePath && fs.existsSync(cachePath)) {
-      return { cachePath, mimeType: row.mime_type, byteLength: row.byte_length };
+      bytes = fs.readFileSync(cachePath);
+    } else if (row.data_url) {
+      const encoded = row.data_url.includes(',') ? row.data_url.slice(row.data_url.indexOf(',') + 1) : '';
+      if (!encoded) return null;
+      bytes = Buffer.from(encoded, 'base64');
+    } else {
+      return null;
     }
-    return row.data_url ? { dataUrl: row.data_url, mimeType: row.mime_type, byteLength: row.byte_length } : null;
+
+    try {
+      const normalized = sanitizeArtworkBytes(bytes, row.mime_type);
+      const needsRewrite = row.content_hash !== normalized.contentHash
+        || row.mime_type !== normalized.mimeType
+        || row.byte_length !== normalized.byteLength;
+      const update = database.prepare(`
+        UPDATE artwork_cache
+        SET data_url = ?, cache_path = ?, mime_type = ?, byte_length = ?, content_hash = ?, updated_at = ?
+        WHERE source_url = ?
+      `);
+      if (cachePath && fs.existsSync(cachePath)) {
+        if (needsRewrite) fs.writeFileSync(cachePath, normalized.bytes);
+        if (needsRewrite) update.run('', cachePath, normalized.mimeType, normalized.byteLength, normalized.contentHash, Date.now(), sourceUrl);
+        return { cachePath, mimeType: normalized.mimeType, byteLength: normalized.byteLength, contentHash: normalized.contentHash };
+      }
+      const dataUrl = `data:${normalized.mimeType};base64,${normalized.bytes.toString('base64')}`;
+      if (needsRewrite || row.data_url !== dataUrl) update.run(dataUrl, null, normalized.mimeType, normalized.byteLength, normalized.contentHash, Date.now(), sourceUrl);
+      return { dataUrl, mimeType: normalized.mimeType, byteLength: normalized.byteLength, contentHash: normalized.contentHash };
+    } catch {
+      if (cachePath) {
+        try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch { /* best effort */ }
+      }
+      database.prepare('DELETE FROM artwork_cache WHERE source_url = ?').run(sourceUrl);
+      return null;
+    }
+  }
+
+  function enforceQuota(incomingBytes: number, sourceUrl: string): void {
+    const MAX_ENTRIES = 4_096;
+    const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+    const current = database.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(byte_length), 0) AS bytes FROM artwork_cache WHERE source_url <> ?').get(sourceUrl) as { count: number; bytes: number };
+    if (current.count + 1 <= MAX_ENTRIES && current.bytes + incomingBytes <= MAX_TOTAL_BYTES) return;
+    const rows = database.prepare('SELECT source_url, cache_path, byte_length FROM artwork_cache WHERE source_url <> ? ORDER BY updated_at ASC').all(sourceUrl) as Array<{ source_url: string; cache_path?: string | null; byte_length: number }>;
+    let count = current.count;
+    let bytes = current.bytes;
+    const remove = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
+    for (const row of rows) {
+      if (count + 1 <= MAX_ENTRIES && bytes + incomingBytes <= MAX_TOTAL_BYTES) break;
+      if (row.cache_path) {
+        try { if (fs.existsSync(row.cache_path)) fs.unlinkSync(row.cache_path); } catch { /* best effort */ }
+      }
+      remove.run(row.source_url);
+      count -= 1;
+      bytes -= row.byte_length;
+    }
   }
 
   // The desktop is the LAN artwork source. When an older library entry has not
@@ -99,18 +154,20 @@ export function createDatabaseArtworkRepository(
       const cached = await deps.fetchArtworkBytes(sourceUrl);
       if (!cached) return null;
 
+      enforceQuota(cached.byteLength, sourceUrl);
       const cachePath = path.join(deps.cacheDirectory, artworkCacheFileName(sourceUrl, cached.mimeType));
       fs.mkdirSync(path.dirname(cachePath), { recursive: true });
       fs.writeFileSync(cachePath, cached.bytes);
       database.prepare(`
-        INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(sourceUrl, '', cachePath, cached.mimeType, cached.byteLength, Date.now());
+        INSERT OR REPLACE INTO artwork_cache (source_url, data_url, cache_path, mime_type, byte_length, content_hash, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(sourceUrl, '', cachePath, cached.mimeType, cached.byteLength, cached.contentHash, Date.now());
 
       return {
         cachePath,
         mimeType: cached.mimeType,
         byteLength: cached.byteLength,
+        contentHash: cached.contentHash,
       };
     })().finally(() => {
       pendingArtwork.delete(sourceUrl);
@@ -145,7 +202,10 @@ export function createDatabaseArtworkRepository(
 
     if (sources.length === 0) return;
 
-    const existing = new Set(rows.map((row) => row.source_url).filter((source) => sourceSet.has(source)));
+    const existing = new Set<string>();
+    for (const row of rows) {
+      if (sourceSet.has(row.source_url) && getCachedArtwork(row.source_url)) existing.add(row.source_url);
+    }
     const pending = sources.filter((source) => !existing.has(source));
     let index = 0;
     const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {

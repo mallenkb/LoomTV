@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 import { Bookmark, Play, Star, Clock, ArrowLeft } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
@@ -11,9 +11,19 @@ import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
+import { getCachedDiscoverReturnRoute } from '@/lib/discoverNavigation';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { useTheme } from '@/components/ThemeProvider';
+import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
+
+type MovieDetailRouteState = {
+  from?: string;
+  fromDiscover?: boolean;
+  addonId?: string;
+  stremioCatalogItem?: StremioPluginCatalogItem;
+  artwork?: RouteArtworkState;
+};
 
 interface MovieDetailProps {
   onPlay?: (
@@ -89,8 +99,68 @@ function formatThumbnailTime(seconds: number, duration = 0): string {
   return [hours, minutes, secs].map((part) => String(part).padStart(2, '0')).join(':');
 }
 
+function normalizeRouteYear(releaseInfo?: string, released?: string): number {
+  const match = `${releaseInfo || ''} ${released || ''}`.match(/\b(19|20)\d{2}\b/);
+  return match ? Number(match[0]) : 0;
+}
+
+function normalizeMediaTitle(value: string): string {
+  return value.normalize('NFKD').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | undefined): MediaItem | null {
+  if (!item || item.type !== 'movie') return null;
+  const poster = item.artwork?.poster || '';
+  const backdrop = item.artwork?.background || poster;
+  return {
+    id: item.id,
+    type: 'movie',
+    title: item.title,
+    year: normalizeRouteYear(item.releaseInfo, item.released),
+    poster,
+    backdrop,
+    logo: item.artwork?.logo || '',
+    summary: item.description || '',
+    rating: item.rating || 0,
+    genres: [...item.genres],
+    cast: (item.cast || []).map((person) => ({
+      name: person.name,
+      character: person.character || '',
+      image: person.image || '',
+    })),
+    filePath: '',
+    subtitles: [],
+    posterCandidates: poster ? [poster] : [],
+    backdropCandidates: backdrop ? [backdrop] : [],
+    logoCandidates: item.artwork?.logo ? [item.artwork.logo] : [],
+  };
+}
+
+function mergeDiscoverPosterFallback(movie: MediaItem, fallback: MediaItem): MediaItem {
+  return {
+    ...movie,
+    poster: movie.poster || fallback.poster,
+    backdrop: movie.backdrop || fallback.backdrop,
+    logo: movie.logo || fallback.logo,
+    posterCandidates: uniqueArtworkSources(fallback.posterCandidates, fallback.poster, movie.posterCandidates, movie.poster),
+    backdropCandidates: uniqueArtworkSources(fallback.backdropCandidates, fallback.backdrop, movie.backdropCandidates, movie.backdrop),
+    logoCandidates: uniqueArtworkSources(fallback.logoCandidates, fallback.logo, movie.logoCandidates, movie.logo),
+  };
+}
+
+function isSameMovieByTitleAndYear(localMovie: MediaItem, catalogMovie: MediaItem | null): boolean {
+  if (!catalogMovie?.title || normalizeMediaTitle(localMovie.title) !== normalizeMediaTitle(catalogMovie.title)) return false;
+  return catalogMovie.year <= 0 || localMovie.year <= 0 || localMovie.year === catalogMovie.year;
+}
+
+function findLocalMovieMatch(movies: readonly MediaItem[], mediaId: string | undefined, fallback: MediaItem | null): MediaItem | null {
+  const exact = mediaId ? movies.find((item) => item.id === mediaId) : null;
+  if (exact) return exact;
+  return fallback ? movies.find((item) => isSameMovieByTitleAndYear(item, fallback)) || null : null;
+}
+
 export default function MovieDetail({ onPlay }: MovieDetailProps) {
-  const { id } = useParams<{ id: string }>();
+  const { id: mediaId } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
@@ -102,20 +172,57 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
+  const metadataFetchKeyRef = useRef('');
+  const routeState = (location.state as MovieDetailRouteState | null) || null;
+  const routeFallbackMovie = useMemo(
+    () => mediaFromStremioCatalogItem(routeState?.stremioCatalogItem),
+    [routeState?.stremioCatalogItem],
+  );
+  const routeAddonId = routeState?.addonId;
+  const isRemoteStremioMovie = Boolean(routeState?.stremioCatalogItem);
 
   useEffect(() => {
     let cancelled = false;
-    const found = state.movies.find((m) => m.id === id);
-    setMovie(found || null);
+    const shouldUseDiscoverFallback = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover'));
+    const routeMetadata = routeFallbackMovie || state.movies.find((item) => item.id === mediaId) || null;
+    const found = findLocalMovieMatch(state.movies, mediaId, routeMetadata);
+    const nextMovie = found && shouldUseDiscoverFallback && routeFallbackMovie
+      ? mergeDiscoverPosterFallback(found, routeFallbackMovie)
+      : found || routeFallbackMovie;
+    setMovie(nextMovie);
+    const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|movie|${mediaId}` : '';
+    if (!nextMovie && mediaId && metadataFetchKeyRef.current !== fetchKey) {
+      metadataFetchKeyRef.current = fetchKey;
+      const metadataRequest = routeAddonId
+        ? desktopApi.getStremioMeta(routeAddonId, { type: 'movie', id: mediaId })
+        : desktopApi.getStremioMetaByItem({ type: 'movie', id: mediaId });
+      void metadataRequest
+        .then((result) => {
+          if (cancelled) return;
+          const remoteMovie = mediaFromStremioCatalogItem(result.item);
+          if (remoteMovie) setMovie(shouldUseDiscoverFallback && routeFallbackMovie
+            ? mergeDiscoverPosterFallback(remoteMovie, routeFallbackMovie)
+            : remoteMovie);
+        })
+        .catch((error) => {
+          if (!cancelled) console.warn('Could not load Discover movie metadata:', error);
+          metadataFetchKeyRef.current = '';
+        });
+    } else if (!fetchKey) {
+      metadataFetchKeyRef.current = '';
+    }
     if (found?.catalogRevision !== undefined) {
       void hydrateLibraryItem(found.id)
         .then((details) => {
-          if (!cancelled && details) setMovie(details);
+          if (cancelled || !details) return;
+          setMovie(shouldUseDiscoverFallback && routeFallbackMovie
+            ? mergeDiscoverPosterFallback(details, routeFallbackMovie)
+            : details);
         })
         .catch((error) => console.warn('Could not hydrate movie details:', error));
     }
     return () => { cancelled = true; };
-  }, [hydrateLibraryItem, id, state.catalogRevision, state.movies]);
+  }, [hydrateLibraryItem, mediaId, routeAddonId, routeFallbackMovie, routeState?.from, routeState?.fromDiscover, state.catalogRevision, state.movies]);
 
   useEffect(() => {
     setDetailsReady(false);
@@ -199,7 +306,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
   const localSpecs = formatLocalSpecs(movie.localMetadata);
   const inMyList = lists.some((entry) => entry.mediaId === movie.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
-  const sourceArtwork = (location.state as { artwork?: RouteArtworkState } | null)?.artwork;
+  const sourceArtwork = routeState?.artwork;
   const { heroArtwork, posterArtwork, heroKey, posterKey } = resolveMovieArtwork(
     customArtwork,
     movie,
@@ -224,15 +331,20 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const progressCopy = progress.duration > 0
     ? `${formatShortMinutes(progress.position)} of ${formatShortMinutes(progress.duration)}`
     : null;
+  const canPlayMovie = Boolean(onPlay && movie.filePath);
   void progressTick;
 
   const handlePlay = async () => {
-    if (onPlay) {
+    if (canPlayMovie && onPlay) {
       onPlay(movie.filePath, movie.title, movie.subtitles, undefined, undefined, undefined, undefined, movie.id, playerArtwork);
     }
   };
 
-  const sourceRoute = (location.state as { from?: string } | null)?.from;
+  const sourceRoute = routeState?.from?.startsWith('/discover')
+    ? routeState.from
+    : routeState?.fromDiscover
+      ? getCachedDiscoverReturnRoute()
+      : routeState?.from;
   const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/') ? sourceRoute : '/movies';
   const handleBack = () => navigate(backTarget);
 
@@ -252,7 +364,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
         {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
-        {canManageProfiles && <ArtworkEditorControls
+        {canManageProfiles && !isRemoteStremioMovie && <ArtworkEditorControls
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
@@ -323,7 +435,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             {movie.summary && <p className="loom-detail-hero-summary">{movie.summary}</p>}
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
-          <Button
+          {canPlayMovie && <Button
             onClick={handlePlay}
             className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
           >
@@ -342,7 +454,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
                 )}
               </span>
             </span>
-          </Button>
+          </Button>}
           <div className="loom-detail-hero-actions flex shrink-0 gap-2">
             <button
               type="button"

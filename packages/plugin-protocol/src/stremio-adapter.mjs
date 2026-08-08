@@ -20,6 +20,7 @@ export const STREMIO_INSTALL_STATES = Object.freeze([
   'pending-review',
   'enabled',
   'disabled',
+  'broken',
 ]);
 
 export const STREMIO_DEFAULT_LIMITS = Object.freeze({
@@ -319,6 +320,7 @@ async function fetchJson(url, {
   limits,
   maxBytes,
   label,
+  signal,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     throw new StremioAdapterError('FETCH_UNAVAILABLE', 'No HTTPS fetch implementation is available for the Stremio adapter.', { retryable: false });
@@ -328,6 +330,17 @@ async function fetchJson(url, {
   }
 
   const controller = new AbortController();
+  const abortExternal = () => controller.abort();
+  signal?.addEventListener?.('abort', abortExternal, { once: true });
+  if (signal?.aborted) controller.abort();
+  let cancelExternal;
+  const cancellation = signal
+    ? new Promise((_, reject) => {
+      cancelExternal = () => reject(new StremioAdapterError('REQUEST_CANCELLED', `The ${label} request was cancelled.`, { retryable: true }));
+      if (signal.aborted) cancelExternal();
+      else signal.addEventListener('abort', cancelExternal, { once: true });
+    })
+    : null;
   let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => {
@@ -355,6 +368,9 @@ async function fetchJson(url, {
         signal: controller.signal,
       });
     } catch (error) {
+      if (signal?.aborted) {
+        throw new StremioAdapterError('REQUEST_CANCELLED', `The ${label} request was cancelled.`, { retryable: true });
+      }
       if (controller.signal.aborted) {
         throw new StremioAdapterError('NETWORK_TIMEOUT', `The ${label} request timed out.`, { retryable: true });
       }
@@ -387,9 +403,17 @@ async function fetchJson(url, {
   };
 
   try {
-    return await Promise.race([request(), timeout]);
+    const races = [request(), timeout];
+    if (cancellation) races.push(cancellation);
+    const result = await Promise.race(races);
+    if (signal?.aborted) {
+      throw new StremioAdapterError('REQUEST_CANCELLED', `The ${label} request was cancelled.`, { retryable: true });
+    }
+    return result;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener?.('abort', abortExternal);
+    if (signal && cancelExternal) signal.removeEventListener('abort', cancelExternal);
   }
 }
 
@@ -686,11 +710,6 @@ export function normalizeStremioManifest(input, manifestUrl, options = {}) {
       code: 'addon_catalogs_ignored',
       path: '$.addonCatalogs',
       message: 'Add-on discovery catalogs are not imported by LoomTV.',
-    }] : []),
-    ...(config.length > 0 ? [{
-      code: 'configuration_ui_unavailable',
-      path: '$.config',
-      message: 'Configuration fields are declared, but LoomTV does not render or submit remote add-on configuration forms.',
     }] : []),
   ];
   return deepFreeze({
@@ -1121,6 +1140,9 @@ function makeRecord(input) {
     trusted: input.trusted,
     installedAt: input.installedAt,
     reviewedAt: input.reviewedAt,
+    failureCount: input.failureCount || 0,
+    ...(input.lastFailureAt === undefined ? {} : { lastFailureAt: input.lastFailureAt }),
+    ...(input.nextRetryAt === undefined ? {} : { nextRetryAt: input.nextRetryAt }),
     ...(input.approvedAt === undefined ? {} : { approvedAt: input.approvedAt }),
     ...(input.disabledAt === undefined ? {} : { disabledAt: input.disabledAt }),
   });
@@ -1152,11 +1174,19 @@ function requireRecordId(value) {
   return value.trim();
 }
 
-function requireEnabled(record) {
+function requireEnabled(record, isAddonConfigured, now = Date.now) {
   if (!record || record.state !== 'enabled' || record.trusted !== true) {
     throw new StremioAdapterError('ADDON_NOT_ENABLED', 'The Stremio add-on is not enabled by explicit user approval.', { retryable: false });
   }
-  if (record.manifest.behaviorHints.configurationRequired || record.manifest.config?.some((field) => field.required)) {
+  if (record.nextRetryAt !== undefined && record.nextRetryAt > now()) {
+    throw new StremioAdapterError(
+      'ADDON_BACKOFF',
+      'This Stremio add-on is temporarily backing off after provider failures.',
+      { retryable: true },
+    );
+  }
+  if ((record.manifest.behaviorHints.configurationRequired || record.manifest.config?.some((field) => field.required))
+    && isAddonConfigured?.(record) !== true) {
     throw new StremioAdapterError(
       'CONFIGURATION_REQUIRED',
       'This Stremio add-on requires configuration that LoomTV cannot collect or submit.',
@@ -1213,7 +1243,7 @@ function normalizePersistedRecord(value, path, options) {
   if (!isRecord(value)) {
     throw new StremioAdapterError('INVALID_PERSISTED_STATE', 'A persisted Stremio add-on record must be an object.', { retryable: false });
   }
-  addUnknownKeys(value, new Set(['installStateVersion', 'addonId', 'manifestUrl', 'manifest', 'reviewToken', 'state', 'trusted', 'installedAt', 'reviewedAt', 'approvedAt', 'disabledAt']), path, issues);
+  addUnknownKeys(value, new Set(['installStateVersion', 'addonId', 'manifestUrl', 'manifest', 'reviewToken', 'state', 'trusted', 'installedAt', 'reviewedAt', 'approvedAt', 'disabledAt', 'failureCount', 'lastFailureAt', 'nextRetryAt']), path, issues);
   if (value.installStateVersion !== STREMIO_INSTALL_STATE_VERSION) issues.push(createIssue(`${path}.installStateVersion`, 'unsupported_version', 'Unsupported Stremio install state version.'));
   const addonId = addIssueIfInvalidString(value.addonId, `${path}.addonId`, issues, { required: true, maxLength: 128, pattern: manifestIdPattern, message: 'Expected a Stremio add-on ID.' });
   const reviewToken = addIssueIfInvalidString(value.reviewToken, `${path}.reviewToken`, issues, { required: true, maxLength: 128, message: 'Expected a persisted review token.' });
@@ -1231,20 +1261,25 @@ function normalizePersistedRecord(value, path, options) {
   if (!installStateSet.has(value.state)) issues.push(createIssue(`${path}.state`, 'invalid_value', 'Unsupported persisted install state.'));
   if (typeof value.trusted !== 'boolean') issues.push(createIssue(`${path}.trusted`, 'invalid_type', 'Persisted trust state must be boolean.'));
   if (value.state === 'enabled' && value.trusted !== true) issues.push(createIssue(`${path}.trusted`, 'inconsistent_state', 'Enabled add-ons must have explicit trusted state.'));
-  if (value.state !== 'enabled' && value.trusted === true) issues.push(createIssue(`${path}.trusted`, 'inconsistent_state', 'Pending or disabled add-ons cannot remain trusted.'));
+  if (value.state !== 'enabled' && value.trusted === true) issues.push(createIssue(`${path}.trusted`, 'inconsistent_state', 'Pending, disabled, or broken add-ons cannot remain trusted.'));
   const installedAt = normalizePersistedTimestamp(value.installedAt, `${path}.installedAt`, issues);
   const reviewedAt = normalizePersistedTimestamp(value.reviewedAt, `${path}.reviewedAt`, issues);
   const approvedAt = normalizePersistedTimestamp(value.approvedAt, `${path}.approvedAt`, issues, false);
   const disabledAt = normalizePersistedTimestamp(value.disabledAt, `${path}.disabledAt`, issues, false);
+  const failureCount = value.failureCount === undefined ? 0 : value.failureCount;
+  if (!Number.isSafeInteger(failureCount) || failureCount < 0 || failureCount > 1000) issues.push(createIssue(`${path}.failureCount`, 'invalid_value', 'Failure count must be a bounded non-negative integer.'));
+  const lastFailureAt = normalizePersistedTimestamp(value.lastFailureAt, `${path}.lastFailureAt`, issues, false);
+  const nextRetryAt = normalizePersistedTimestamp(value.nextRetryAt, `${path}.nextRetryAt`, issues, false);
   if (value.state === 'enabled' && approvedAt === undefined) issues.push(createIssue(`${path}.approvedAt`, 'missing', 'Enabled add-ons must retain an approval timestamp.'));
   if (value.state === 'enabled' && disabledAt !== undefined) issues.push(createIssue(`${path}.disabledAt`, 'inconsistent_state', 'Enabled add-ons cannot retain a disabled timestamp.'));
   if (value.state === 'pending-review' && approvedAt !== undefined) issues.push(createIssue(`${path}.approvedAt`, 'inconsistent_state', 'Pending reviews cannot retain an approval timestamp.'));
   if (value.state === 'pending-review' && disabledAt !== undefined) issues.push(createIssue(`${path}.disabledAt`, 'inconsistent_state', 'Pending reviews cannot retain a disabled timestamp.'));
   if (value.state === 'disabled' && disabledAt === undefined) issues.push(createIssue(`${path}.disabledAt`, 'missing', 'Disabled add-ons must retain a disabled timestamp.'));
+  if ((value.state === 'pending-review' || value.state === 'disabled') && (lastFailureAt !== undefined || nextRetryAt !== undefined)) issues.push(createIssue(`${path}.health`, 'inconsistent_state', 'Pending and disabled add-ons cannot retain failure backoff timestamps.'));
   if (issues.length > 0 || !manifest || !manifestUrl || !addonId || !reviewToken) {
     throw new StremioAdapterError('INVALID_PERSISTED_STATE', 'Persisted Stremio add-on state failed validation.', { issues, retryable: false });
   }
-  return makeRecord({ addonId, manifestUrl, manifest, reviewToken, state: value.state, trusted: value.trusted, installedAt, reviewedAt, approvedAt, disabledAt });
+  return makeRecord({ addonId, manifestUrl, manifest, reviewToken, state: value.state, trusted: value.trusted, installedAt, reviewedAt, approvedAt, disabledAt, failureCount, lastFailureAt, nextRetryAt });
 }
 
 function serializeRecord(record) {
@@ -1275,6 +1310,8 @@ export class StremioAddonRegistry {
     this.options = Object.freeze({
       fetchImpl: options.fetchImpl || globalThis.fetch,
       requestGuard: typeof options.requestGuard === 'function' ? options.requestGuard : undefined,
+      isAddonConfigured: typeof options.isAddonConfigured === 'function' ? options.isAddonConfigured : undefined,
+      getConfiguration: typeof options.getConfiguration === 'function' ? options.getConfiguration : undefined,
       limits: normalizeLimits(options),
       now: typeof options.now === 'function' ? options.now : Date.now,
     });
@@ -1300,7 +1337,15 @@ export class StremioAddonRegistry {
     const timestamp = nowTimestamp(this.options.now);
     for (const [id, existing] of this.records.entries()) {
       if (existing.manifestUrl === safeManifestUrl && id !== manifest.id) {
-        this.records.set(id, makeRecord({ ...existing, state: 'disabled', trusted: false, disabledAt: timestamp }));
+        this.records.set(id, makeRecord({
+          ...existing,
+          state: 'disabled',
+          trusted: false,
+          failureCount: 0,
+          lastFailureAt: undefined,
+          nextRetryAt: undefined,
+          disabledAt: timestamp,
+        }));
       }
     }
     const existing = this.records.get(manifest.id);
@@ -1321,7 +1366,7 @@ export class StremioAddonRegistry {
       reviewWarnings: Object.freeze([
         ...manifest.compatibilityWarnings.map((warning) => warning.message),
         ...(manifest.peerToPeerDeclared ? [STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON] : []),
-        ...(manifest.behaviorHints.configurationRequired ? ['This add-on declares required configuration; LoomTV does not fetch remote configuration pages.'] : []),
+        ...(manifest.behaviorHints.configurationRequired ? ['This add-on declares required host configuration; provide its fields before enabling it.'] : []),
       ]),
     });
   }
@@ -1330,7 +1375,8 @@ export class StremioAddonRegistry {
     const id = requireRecordId(addonId);
     const record = this.records.get(id);
     if (!record) throw new StremioAdapterError('ADDON_NOT_FOUND', 'The Stremio add-on is not installed.', { retryable: false });
-    if (record.manifest.behaviorHints.configurationRequired || record.manifest.config?.some((field) => field.required)) {
+    if ((record.manifest.behaviorHints.configurationRequired || record.manifest.config?.some((field) => field.required))
+      && this.options.isAddonConfigured?.(record) !== true) {
       throw new StremioAdapterError(
         'CONFIGURATION_REQUIRED',
         'This Stremio add-on cannot be enabled because it requires configuration that LoomTV cannot collect or submit.',
@@ -1342,7 +1388,7 @@ export class StremioAddonRegistry {
       throw new StremioAdapterError('APPROVAL_REQUIRED', 'Explicit approval for the current reviewed manifest is required before enabling this Stremio add-on.', { retryable: false });
     }
     const timestamp = nowTimestamp(this.options.now);
-    const enabled = makeRecord({ ...record, state: 'enabled', trusted: true, approvedAt: timestamp, disabledAt: undefined });
+    const enabled = makeRecord({ ...record, state: 'enabled', trusted: true, approvedAt: timestamp, disabledAt: undefined, failureCount: 0, lastFailureAt: undefined, nextRetryAt: undefined });
     this.records.set(id, enabled);
     return publicRecord(enabled);
   }
@@ -1351,9 +1397,47 @@ export class StremioAddonRegistry {
     const id = requireRecordId(addonId);
     const record = this.records.get(id);
     if (!record) throw new StremioAdapterError('ADDON_NOT_FOUND', 'The Stremio add-on is not installed.', { retryable: false });
-    const disabled = makeRecord({ ...record, state: 'disabled', trusted: false, disabledAt: nowTimestamp(this.options.now) });
+    const disabled = makeRecord({
+      ...record,
+      state: 'disabled',
+      trusted: false,
+      failureCount: 0,
+      lastFailureAt: undefined,
+      nextRetryAt: undefined,
+      disabledAt: nowTimestamp(this.options.now),
+    });
     this.records.set(id, disabled);
     return publicRecord(disabled);
+  }
+
+  recordFailure(addonId, { retryable = true } = {}) {
+    const id = requireRecordId(addonId);
+    const record = this.records.get(id);
+    if (!record || record.state !== 'enabled') return record ? publicRecord(record) : undefined;
+    const failureCount = Math.min(1000, (record.failureCount || 0) + 1);
+    const timestamp = nowTimestamp(this.options.now);
+    const delay = Math.min(15 * 60 * 1000, 1_000 * (2 ** Math.min(failureCount - 1, 10)));
+    const broken = retryable && failureCount >= 3;
+    const next = makeRecord({
+      ...record,
+      state: broken ? 'broken' : 'enabled',
+      trusted: broken ? false : true,
+      failureCount,
+      lastFailureAt: timestamp,
+      nextRetryAt: timestamp + delay,
+      ...(broken ? { approvedAt: undefined } : {}),
+    });
+    this.records.set(id, next);
+    return publicRecord(next);
+  }
+
+  recordSuccess(addonId) {
+    const id = requireRecordId(addonId);
+    const record = this.records.get(id);
+    if (!record || record.state !== 'enabled' || (record.failureCount || 0) === 0) return record ? publicRecord(record) : undefined;
+    const healthy = makeRecord({ ...record, failureCount: 0, lastFailureAt: undefined, nextRetryAt: undefined });
+    this.records.set(id, healthy);
+    return publicRecord(healthy);
   }
 
   remove(addonId) {
@@ -1399,45 +1483,45 @@ export class StremioAddonRegistry {
 
   requireEnabledInternalRecord(addonId) {
     const record = this.records.get(requireRecordId(addonId));
-    requireEnabled(record);
+    requireEnabled(record, this.options.isAddonConfigured, this.options.now);
     return record;
   }
 
-  async fetchCatalog(addonId, { type, catalogId, extra } = {}) {
+  async fetchCatalog(addonId, { type, catalogId, extra } = {}, signal) {
     const record = this.requireEnabledInternalRecord(addonId);
     const normalizedType = requestToken(type, 'type');
     const normalizedCatalogId = requestId(catalogId, 'catalogId');
     if (!catalogIsDeclared(record.manifest, normalizedType, normalizedCatalogId) || !supportsResource(record.manifest, 'catalog', normalizedType, normalizedCatalogId)) {
       throw new StremioAdapterError('RESOURCE_NOT_DECLARED', 'The installed add-on does not declare this catalog resource.', { retryable: false });
     }
-    const normalizedExtra = normalizeExtra(extra, this.options.limits);
+    const normalizedExtra = normalizeExtra({ ...extra, ...this.options.getConfiguration?.(record.addonId) }, this.options.limits);
     const url = buildResourceUrl(record.manifestUrl, 'catalog', normalizedType, normalizedCatalogId, normalizedExtra, this.options.limits);
-    const payload = await fetchJson(url, { fetchImpl: this.options.fetchImpl, requestGuard: this.options.requestGuard, limits: this.options.limits, maxBytes: this.options.limits.maxResponseBytes, label: 'catalog' });
+    const payload = await fetchJson(url, { fetchImpl: this.options.fetchImpl, requestGuard: this.options.requestGuard, limits: this.options.limits, maxBytes: this.options.limits.maxResponseBytes, label: 'catalog', signal });
     return normalizeCatalogResponse(payload, requestSource(record, normalizedType, normalizedCatalogId), this.options.limits);
   }
 
-  async fetchMeta(addonId, { type, id, extra } = {}) {
-    return this.fetchResource(addonId, 'meta', type, id, extra, (payload, context) => normalizeMetaResponse(payload, context, this.options.limits));
+  async fetchMeta(addonId, { type, id, extra } = {}, signal) {
+    return this.fetchResource(addonId, 'meta', type, id, extra, (payload, context) => normalizeMetaResponse(payload, context, this.options.limits), signal);
   }
 
-  async fetchStreams(addonId, { type, videoId, extra } = {}) {
-    return this.fetchResource(addonId, 'stream', type, videoId, extra, (payload, context) => normalizeStreamResponse(payload, context, this.options.limits));
+  async fetchStreams(addonId, { type, videoId, extra } = {}, signal) {
+    return this.fetchResource(addonId, 'stream', type, videoId, extra, (payload, context) => normalizeStreamResponse(payload, context, this.options.limits), signal);
   }
 
-  async fetchSubtitles(addonId, { type, videoId, extra } = {}) {
-    return this.fetchResource(addonId, 'subtitles', type, videoId, extra, (payload, context) => normalizeSubtitlesResponse(payload, context, this.options.limits));
+  async fetchSubtitles(addonId, { type, videoId, extra } = {}, signal) {
+    return this.fetchResource(addonId, 'subtitles', type, videoId, extra, (payload, context) => normalizeSubtitlesResponse(payload, context, this.options.limits), signal);
   }
 
-  async fetchResource(addonId, resource, type, id, extra, normalize) {
+  async fetchResource(addonId, resource, type, id, extra, normalize, signal) {
     const record = this.requireEnabledInternalRecord(addonId);
     const normalizedType = requestToken(type, 'type');
     const normalizedId = requestId(id, resource === 'stream' || resource === 'subtitles' ? 'videoId' : 'id');
     if (!supportsResource(record.manifest, resource, normalizedType, normalizedId)) {
       throw new StremioAdapterError('RESOURCE_NOT_DECLARED', `The installed add-on does not declare the ${resource} resource for this request.`, { retryable: false });
     }
-    const normalizedExtra = normalizeExtra(extra, this.options.limits);
+    const normalizedExtra = normalizeExtra({ ...extra, ...this.options.getConfiguration?.(record.addonId) }, this.options.limits);
     const url = buildResourceUrl(record.manifestUrl, resource, normalizedType, normalizedId, normalizedExtra, this.options.limits);
-    const payload = await fetchJson(url, { fetchImpl: this.options.fetchImpl, requestGuard: this.options.requestGuard, limits: this.options.limits, maxBytes: this.options.limits.maxResponseBytes, label: resource });
+    const payload = await fetchJson(url, { fetchImpl: this.options.fetchImpl, requestGuard: this.options.requestGuard, limits: this.options.limits, maxBytes: this.options.limits.maxResponseBytes, label: resource, signal });
     return normalize(payload, requestSource(record, normalizedType, normalizedId));
   }
 }

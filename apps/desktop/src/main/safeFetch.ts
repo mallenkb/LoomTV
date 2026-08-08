@@ -193,10 +193,44 @@ async function boundedResponse(response: Response, maxBytes: number): Promise<Re
   return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
 
+const REDIRECT_SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'cookie2',
+  'proxy-authorization',
+  'proxy-authenticate',
+  'set-cookie',
+  'x-api-key',
+  'x-api-secret',
+  'x-auth-token',
+  'x-access-token',
+  'x-csrf-token',
+  'x-client-secret',
+  'x-config',
+  'x-credential',
+  'x-forwarded-authorization',
+  'x-forwarded-cookie',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-for',
+  'referer',
+]);
+
+function stripRedirectSensitiveHeaders(headers: HeadersInit | undefined): Headers {
+  const safe = new Headers(headers);
+  for (const name of REDIRECT_SENSITIVE_HEADERS) safe.delete(name);
+  for (const [name] of safe) {
+    const normalized = name.toLowerCase();
+    if (/(?:auth|cookie|secret|token|credential|config|password|signature|session)/i.test(normalized)) safe.delete(name);
+  }
+  return safe;
+}
+
 async function fetchAttempt(input: string | URL, init: RequestInit, options: Required<Omit<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl'>> & Pick<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl'>): Promise<Response> {
   let url = new URL(input.toString());
   let method = (init.method || 'GET').toUpperCase();
   let body = init.body;
+  let headers: HeadersInit | undefined = init.headers;
   for (let redirects = 0; redirects <= options.maxRedirects; redirects += 1) {
     const address = await assertSafeUrl(url, options.allowedHosts, options.lookup || (dns.lookup as LookupImplementation));
     const controller = new AbortController();
@@ -206,7 +240,7 @@ async function fetchAttempt(input: string | URL, init: RequestInit, options: Req
     try {
       const response = await (options.requestImpl || pinnedHttpsRequest)(
         url,
-        { ...init, method, body, redirect: 'manual', signal: controller.signal },
+        { ...init, headers, method, body, redirect: 'manual', signal: controller.signal },
         address,
         options.maxBytes,
       );
@@ -214,7 +248,14 @@ async function fetchAttempt(input: string | URL, init: RequestInit, options: Req
       const location = response.headers.get('location');
       if (!location) return await boundedResponse(response, options.maxBytes);
       if (redirects === options.maxRedirects) throw new Error('Provider redirected too many times.');
-      url = new URL(location, url);
+      const nextUrl = new URL(location, url);
+      if (nextUrl.origin !== url.origin) {
+        // A provider redirect is a new authority. Do not allow credentials,
+        // cookies, config fields, or similarly named secret headers to follow
+        // it even when the caller supplied them on the original request.
+        headers = stripRedirectSensitiveHeaders(headers);
+      }
+      url = nextUrl;
       if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === 'POST')) {
         method = 'GET';
         body = undefined;

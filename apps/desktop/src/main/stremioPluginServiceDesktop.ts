@@ -1,10 +1,16 @@
 import type { StremioFetchImplementation } from '@loom-media-server/plugin-protocol';
 import {
   getProfile,
+  getStremioAddonConfiguration,
+  getStremioAddonConfigurationState,
+  isStremioAddonConfigured,
+  listStremioPluginAudit,
   hasProfileStremioAccess,
   listProfileStremioAccess,
   loadStremioAddonState,
   saveStremioAddonState,
+  saveStremioAddonConfiguration,
+  recordStremioPluginAudit,
   setProfileStremioAccess,
 } from './database.ts';
 import {
@@ -68,6 +74,16 @@ export function createDesktopStremioPluginService(
         );
       }
     },
+    isAddonConfigured: (record) => {
+      const fields = record.manifest.config || [];
+      if (record.manifest.behaviorHints.configurationRequired && fields.length === 0) return false;
+      return isStremioAddonConfigured(record.addonId, fields.filter((field) => field.required).map((field) => field.key));
+    },
+    getAddonConfiguration: getStremioAddonConfiguration,
+    getAddonConfigurationState: getStremioAddonConfigurationState,
+    saveAddonConfiguration: saveStremioAddonConfiguration,
+    recordAudit: recordStremioPluginAudit,
+    listAudit: listStremioPluginAudit,
     fetchImpl: options.fetchImpl || desktopSafeFetch,
     maxConcurrentProviderRequests: options.maxConcurrentProviderRequests,
     maxQueuedProviderRequests: options.maxQueuedProviderRequests,

@@ -589,7 +589,30 @@ export type OfficialMetadataCandidate = OfficialArtworkResult & {
   episodePreview?: string[];
 };
 
-export type StremioPluginState = 'pending-review' | 'enabled' | 'disabled';
+export type StremioPluginState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
+
+export interface StremioPluginConfigurationField {
+  key: string;
+  type: 'text' | 'number' | 'password' | 'checkbox' | 'boolean' | 'select' | 'string';
+  required: boolean;
+  title?: string;
+  options?: readonly string[];
+}
+
+export interface StremioPluginConfigurationState {
+  fields: readonly StremioPluginConfigurationField[];
+  configured: boolean;
+  configuredFields: readonly string[];
+  revision: number;
+}
+
+export interface StremioPluginAuditEntry {
+  id: number;
+  addonId: string;
+  eventType: string;
+  detail: Readonly<Record<string, unknown>>;
+  createdAt: number;
+}
 
 export interface StremioPluginCatalogExtra {
   name: string;
@@ -615,12 +638,18 @@ export interface StremioPluginSummary {
   state: StremioPluginState;
   trusted: boolean;
   configurationRequired: boolean;
+  configuration: readonly StremioPluginConfigurationField[];
+  configured: boolean;
+  configurationRevision: number;
   resources: readonly string[];
   types: readonly string[];
   catalogs: readonly StremioPluginCatalogDefinition[];
   warnings: readonly string[];
   reviewedAt: number;
   approvedAt?: number;
+  failureCount: number;
+  lastFailureAt?: number;
+  nextRetryAt?: number;
 }
 
 export interface StremioPluginReview extends StremioPluginSummary {
@@ -639,6 +668,12 @@ export interface OfficialStremioAddon {
 export interface StremioPluginCatalogRequest {
   type: string;
   catalogId: string;
+  /** Host-side Discover filters; these are never forwarded as provider extras verbatim. */
+  filters?: {
+    query?: string;
+    genre?: string;
+    year?: string;
+  };
   extra?: Readonly<Record<string, string | number | boolean>>;
 }
 

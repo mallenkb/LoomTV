@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ChevronDown, Compass, Info } from 'lucide-react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { ChevronDown, Compass } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
 import LibrarySearch from '@/components/LibrarySearch';
-import SafeArtwork from '@/components/SafeArtwork';
 import StremioPosterCard from '@/components/StremioPosterCard';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
-import { Button } from '@/components/ui/button';
+import { cacheDiscoverReturnRoute } from '@/lib/discoverNavigation';
 import {
   desktopApi,
   type StremioPluginCatalogDefinition,
@@ -18,7 +17,6 @@ import {
 } from '@/lib/desktopApi';
 
 const PROVIDER_SEARCH_DEBOUNCE_MS = 450;
-const DISCOVER_RESULT_LIMIT = 30;
 const DISCOVER_CACHE_STORAGE_KEY = 'loomtv:discover-cache-v3';
 const DISCOVER_VIEW_STATE_STORAGE_KEY = 'loomtv:discover-view-state-v1';
 const DISCOVER_ROUTE = '/discover';
@@ -68,11 +66,25 @@ const DISCOVER_TYPE_LABELS: Record<DiscoverType, string> = {
   anime: 'Anime',
 };
 
-const SECTION_HINTS: Record<DiscoverSection, readonly string[]> = {
-  trending: ['trending', 'trend'],
-  popular: ['popular', 'most popular'],
-  top_rated: ['top_rated', 'top-rated', 'top rated', 'rating', 'imdb', 'top'],
-  new: ['new', 'latest', 'upcoming', 'on the air', 'on_the_air', 'recent'],
+
+// Section selection is intentionally an explicit provider contract. A catalog
+// is never guessed from its display name or silently reused for another
+// section. Providers without a declared mapping keep that control disabled.
+const PROVIDER_SECTION_CATALOGS: Record<string, Partial<Record<DiscoverType, Partial<Record<DiscoverSection, readonly string[]>>>>> = {
+  'com.linvo.cinemeta': {
+    movie: {
+      trending: ['top'],
+      popular: ['popular'],
+      top_rated: ['imdbRating'],
+      new: ['year'],
+    },
+    tv: {
+      trending: ['top'],
+      popular: ['popular'],
+      top_rated: ['imdbRating'],
+      new: ['year'],
+    },
+  },
 };
 
 function parseDiscoverFilterState(search: string): ParsedDiscoverFilterState {
@@ -130,13 +142,6 @@ function catalogKey(catalog: StremioPluginCatalogDefinition): string {
   return `${catalog.type}:${catalog.id}`;
 }
 
-function uiTypeForProviderType(type: string): DiscoverType | null {
-  if (type === 'movie') return 'movie';
-  if (type === 'anime') return 'anime';
-  if (type === 'series' || type === 'tv') return 'tv';
-  return null;
-}
-
 function providerTypesForUiType(type: DiscoverType): readonly string[] {
   if (type === 'movie') return ['movie'];
   if (type === 'anime') return ['anime'];
@@ -159,13 +164,20 @@ function findExtra(catalog: StremioPluginCatalogDefinition | null, names: readon
   return catalog.extra.find((extra) => wanted.has(extra.name.toLowerCase())) || null;
 }
 
-function catalogSupports(catalog: StremioPluginCatalogDefinition | null, names: readonly string[]): boolean {
-  return Boolean(findExtra(catalog, names));
+function explicitSectionCatalogIds(addonId: string, type: DiscoverType, section: DiscoverSection): readonly string[] {
+  const providerMapping = PROVIDER_SECTION_CATALOGS[addonId];
+  const providerType = type === 'tv' ? providerMapping?.tv : providerMapping?.[type];
+  return providerType?.[section] || [];
 }
 
-function catalogMatchesSection(catalog: StremioPluginCatalogDefinition, section: DiscoverSection): boolean {
-  const haystack = `${catalog.id} ${catalog.name}`.toLowerCase().replace(/[_-]+/g, ' ');
-  return SECTION_HINTS[section].some((hint) => haystack.includes(hint.replace(/[_-]+/g, ' ').toLowerCase()));
+function catalogForExplicitSection(
+  addonId: string,
+  type: DiscoverType,
+  section: DiscoverSection,
+  catalogs: readonly StremioPluginCatalogDefinition[],
+): StremioPluginCatalogDefinition | null {
+  const mappedIds = new Set(explicitSectionCatalogIds(addonId, type, section));
+  return catalogs.find((candidate) => mappedIds.has(candidate.id)) || null;
 }
 
 function normalizeGenre(value: string): string {
@@ -205,24 +217,6 @@ function toGenreOptions(items: readonly StremioPluginCatalogItem[]): GenreOption
   return [...values.entries()]
     .map(([value, label]) => ({ value, label }))
     .sort((left, right) => left.label.localeCompare(right.label));
-}
-
-function hasTextMatch(item: StremioPluginCatalogItem, query: string): boolean {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return true;
-  return [item.title, item.description, item.releaseInfo, item.released, ...item.genres]
-    .filter(Boolean)
-    .some((value) => String(value).toLowerCase().includes(normalized));
-}
-
-function hasGenreMatch(item: StremioPluginCatalogItem, genre: string): boolean {
-  const normalized = normalizeGenre(genre);
-  return !normalized || item.genres.some((candidate) => normalizeGenre(candidate) === normalized);
-}
-
-function hasYearMatch(item: StremioPluginCatalogItem, year: string): boolean {
-  const normalized = Number(year);
-  return !Number.isFinite(normalized) || normalized <= 0 || parseYearFromItem(item) === normalized;
 }
 
 function makeCacheId(
@@ -291,7 +285,7 @@ function DiscoverShimmerCard() {
   );
 }
 
-type ThemeDropdownOption = { value: string; label: string };
+type ThemeDropdownOption = { value: string; label: string; disabled?: boolean };
 
 function ThemeDropdown({
   id,
@@ -300,6 +294,7 @@ function ThemeDropdown({
   options,
   onChange,
   buttonClassName,
+  disabled = false,
 }: {
   id: string;
   label: string;
@@ -307,6 +302,7 @@ function ThemeDropdown({
   options: ThemeDropdownOption[];
   onChange: (value: string) => void;
   buttonClassName?: string;
+  disabled?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -356,6 +352,7 @@ function ThemeDropdown({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         ref={buttonRef}
+        disabled={disabled}
         onClick={() => setIsOpen((open) => !open)}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -367,7 +364,7 @@ function ThemeDropdown({
             setIsOpen(true);
           }
         }}
-        className={`relative z-10 inline-flex h-8 min-w-[9rem] items-center rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 pr-10 text-sm font-normal text-[var(--loom-text)] outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] ${buttonClassName || ''}`}
+        className={`relative z-10 inline-flex h-8 min-w-[9rem] items-center rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 pr-10 text-sm font-normal text-[var(--loom-text)] outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] disabled:cursor-not-allowed disabled:opacity-45 ${buttonClassName || ''}`}
       >
         <span className="truncate whitespace-nowrap">{selectedLabel}</span>
         <ChevronDown className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -388,11 +385,12 @@ function ThemeDropdown({
                 type="button"
                 role="option"
                 aria-selected={selected}
+                disabled={option.disabled}
                 onClick={() => {
                   onChange(option.value);
                   setIsOpen(false);
                 }}
-                className={`relative z-10 flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${selected
+                className={`relative z-10 flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-45 ${selected
                   ? 'bg-[var(--loom-active-bg)] text-[var(--loom-text)]'
                   : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]'
                 }`}
@@ -408,111 +406,11 @@ function ThemeDropdown({
   );
 }
 
-function DiscoverDetail({
-  item,
-  loading,
-  error,
-  onBack,
-}: {
-  item: StremioPluginCatalogItem | null;
-  loading: boolean;
-  error: string | null;
-  onBack: () => void;
-}) {
-  if (loading && !item) {
-    return (
-      <div className="mt-8 grid gap-6 rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-panel)] p-6 md:grid-cols-[220px_minmax(0,1fr)]">
-        <DiscoverShimmerCard />
-        <div className="space-y-4 py-2">
-          <div className="h-8 w-2/3 bg-[var(--loom-surface)]" />
-          <div className="h-4 w-1/3 bg-[var(--loom-surface)]" />
-          <div className="h-24 w-full bg-[var(--loom-surface)]" />
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <section className="mt-8 overflow-hidden rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-panel)]" aria-live="polite">
-      <div className="relative min-h-[24rem] overflow-hidden">
-        {item?.artwork?.background && (
-          <SafeArtwork
-            src={item.artwork.background}
-            alt=""
-            className="absolute inset-0 h-full w-full opacity-35"
-            priority
-          />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-r from-[var(--loom-panel)] via-[var(--loom-panel)]/95 to-[var(--loom-panel)]/55" />
-        <div className="relative p-6 md:p-8">
-          <Button type="button" variant="ghost" size="sm" onClick={onBack} className="mb-6 gap-2 text-[var(--loom-text)]">
-            <ArrowLeft className="h-4 w-4" />
-            Back to Discover
-          </Button>
-          {error && !item ? (
-            <div role="alert" className="rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</div>
-          ) : item ? (
-            <div className="grid gap-7 md:grid-cols-[220px_minmax(0,1fr)]">
-              <SafeArtwork
-                src={[item.artwork?.poster, item.artwork?.background, item.artwork?.logo].filter((value): value is string => Boolean(value))}
-                alt={item.title}
-                className="aspect-[2/3] w-full max-w-[220px] rounded-xl shadow-2xl"
-                priority
-              />
-              <div className="min-w-0 self-end">
-                <p className="text-xs uppercase tracking-[0.18em] text-[var(--loom-accent)]">Metadata preview</p>
-                <h2 className="mt-2 text-3xl font-semibold text-[var(--loom-text)] md:text-4xl">{item.title}</h2>
-                <p className="mt-3 text-sm text-[var(--loom-muted)]">{stremioMetaLine(item) || item.type}</p>
-                {item.rating !== undefined && <p className="mt-3 text-sm font-medium text-yellow-200">Rating {item.rating.toFixed(1)}</p>}
-                {item.genres.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {item.genres.map((genre) => <span key={genre} className="rounded-full border border-[var(--loom-border)] px-3 py-1 text-xs text-[var(--loom-muted)]">{genre}</span>)}
-                  </div>
-                )}
-                {item.description && <p className="mt-6 max-w-3xl whitespace-pre-line text-sm leading-7 text-[var(--loom-muted)]">{item.description}</p>}
-                <div className="mt-6 rounded-xl border border-blue-400/25 bg-blue-400/10 p-3 text-sm text-blue-100">
-                  <p className="flex items-start gap-2"><Info className="mt-0.5 h-4 w-4 shrink-0" /> Remote playback and subtitle attachment are not enabled in this foundation release.</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="py-16 text-center text-sm text-[var(--loom-muted)]">No metadata was returned for this title.</div>
-          )}
-        </div>
-      </div>
-      {item?.cast && item.cast.length > 0 && (
-        <div className="border-t border-[var(--loom-border)] p-6 md:p-8">
-          <h3 className="text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
-          <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
-            {item.cast.slice(0, 12).map((actor) => (
-              <div key={`${actor.name}:${actor.character || ''}`} className="w-20 flex-shrink-0 text-center">
-                <SafeArtwork
-                  src={actor.image || ''}
-                  alt={actor.name}
-                  className="mx-auto h-16 w-16 rounded-full"
-                  fallback={<div className="grid h-full w-full place-items-center bg-[var(--loom-surface-3)] text-sm text-[var(--loom-text)]">{actor.name.charAt(0)}</div>}
-                />
-                <p className="mt-2 truncate text-xs font-medium text-[var(--loom-text)]">{actor.name}</p>
-                {actor.character && <p className="truncate text-[10px] text-[var(--loom-muted)]">{actor.character}</p>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 export default function PluginDiscover() {
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
   const location = useLocation();
   const navigate = useNavigate();
-  const { addonId: routeAddonId, type: routeType, itemId: routeItemId } = useParams<{
-    addonId?: string;
-    type?: string;
-    itemId?: string;
-  }>();
   const initialFilterState = useMemo(() => parseDiscoverFilterState(location.search), [location.search]);
   const pageRef = useRef<HTMLDivElement | null>(null);
   const [plugins, setPlugins] = useState<StremioPluginSummary[]>([]);
@@ -528,10 +426,7 @@ export default function PluginDiscover() {
   const [loading, setLoading] = useState(true);
   const [pluginsLoading, setPluginsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedItem, setSelectedItem] = useState<StremioPluginCatalogItem | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
   const catalogRequestRevision = useRef(0);
-  const metaRequestRevision = useRef(0);
   const searchTimer = useRef<number | null>(null);
   const queryRef = useRef(query);
   const genreRef = useRef(genreFilter);
@@ -539,32 +434,33 @@ export default function PluginDiscover() {
   const previousContentType = useRef(contentType);
   const discoverCache = useRef<DiscoverCacheState>(loadDiscoverCacheFromStorage());
 
-  const isDetailRoute = Boolean(routeAddonId && routeType && routeItemId);
-  const routeContentType = routeType ? uiTypeForProviderType(routeType) : null;
   const catalogPlugins = useMemo(
-    () => plugins.filter((plugin) => !plugin.configurationRequired && plugin.catalogs.some(canRequestCatalog)),
+    () => plugins.filter((plugin) => (!plugin.configurationRequired || plugin.configured) && plugin.catalogs.some(canRequestCatalog)),
     [plugins],
   );
   const plugin = useMemo(
-    () => routeAddonId
-      ? catalogPlugins.find((candidate) => candidate.addonId === routeAddonId) || null
-      : catalogPlugins.find((candidate) => candidate.addonId === providerId) || catalogPlugins.find((candidate) => candidate.addonId === 'com.linvo.cinemeta') || catalogPlugins[0] || null,
-    [catalogPlugins, providerId, routeAddonId],
+    () => catalogPlugins.find((candidate) => candidate.addonId === providerId)
+      || catalogPlugins.find((candidate) => candidate.addonId === 'com.linvo.cinemeta')
+      || catalogPlugins[0]
+      || null,
+    [catalogPlugins, providerId],
   );
-  const effectiveContentType = routeContentType || contentType;
   const catalogs = useMemo(
     () => plugin?.catalogs.filter((candidate) => (
-      canRequestCatalog(candidate) && providerTypesForUiType(effectiveContentType).includes(candidate.type)
+      canRequestCatalog(candidate) && providerTypesForUiType(contentType).includes(candidate.type)
     )) || [],
-    [effectiveContentType, plugin],
+    [contentType, plugin],
+  );
+  const sectionCatalog = useMemo(
+    () => plugin ? catalogForExplicitSection(plugin.addonId, contentType, section, catalogs) : null,
+    [catalogs, contentType, plugin, section],
   );
   const catalog = useMemo(() => {
     const exact = catalogs.find((candidate) => catalogKey(candidate) === catalogKeyValue);
-    return exact || catalogs.find((candidate) => catalogMatchesSection(candidate, section)) || catalogs[0] || null;
-  }, [catalogKeyValue, catalogs, section]);
+    return exact || sectionCatalog;
+  }, [catalogKeyValue, catalogs, sectionCatalog]);
   const genreExtra = findExtra(catalog, ['genre', 'genres']);
   const yearExtra = findExtra(catalog, ['year', 'releaseYear', 'release_year']);
-  const searchSupported = catalogSupports(catalog, ['search']);
   const genreOptions = useMemo(() => {
     const manifestOptions = genreExtra?.options?.filter(Boolean).map((value) => ({ label: value, value })) || [];
     return manifestOptions.length > 0 ? manifestOptions : toGenreOptions(items);
@@ -586,7 +482,6 @@ export default function PluginDiscover() {
   }, [location.search]);
 
   useEffect(() => {
-    if (isDetailRoute) return;
     const nextSearch = buildDiscoverSearch({
       contentType,
       section,
@@ -598,7 +493,7 @@ export default function PluginDiscover() {
     });
     if (nextSearch === currentSearch) return;
     void navigate({ pathname: DISCOVER_ROUTE, search: nextSearch ? `?${nextSearch}` : '' }, { replace: true });
-  }, [catalog, catalogKeyValue, contentType, currentSearch, genreFilter, isDetailRoute, navigate, plugin?.addonId, providerId, query, section, yearFilter]);
+  }, [catalog, catalogKeyValue, contentType, currentSearch, genreFilter, navigate, plugin?.addonId, providerId, query, section, yearFilter]);
 
   useEffect(() => {
     let mounted = true;
@@ -608,7 +503,6 @@ export default function PluginDiscover() {
         if (!mounted) return;
         setPlugins(available);
         setProviderId((current) => {
-          if (routeAddonId) return routeAddonId;
           if (available.some((candidate) => candidate.addonId === current)) return current;
           return available.find((candidate) => candidate.addonId === 'com.linvo.cinemeta')?.addonId || available[0]?.addonId || '';
         });
@@ -620,7 +514,7 @@ export default function PluginDiscover() {
         if (mounted) setPluginsLoading(false);
       });
     return () => { mounted = false; };
-  }, [activeProfile?.id, routeAddonId]);
+  }, [activeProfile?.id]);
 
   useEffect(() => {
     if (previousContentType.current === contentType) return;
@@ -637,6 +531,14 @@ export default function PluginDiscover() {
     const nextKey = catalogKey(catalog);
     if (nextKey !== catalogKeyValue) setCatalogKeyValue(nextKey);
   }, [catalog, catalogKeyValue]);
+
+  useEffect(() => {
+    if (catalogs.length === 0 || catalogs.some((candidate) => providerTypesForUiType(contentType).includes(candidate.type))) return;
+    const nextType = (['movie', 'tv', 'anime'] as const).find((candidate) => (
+      catalogs.some((catalogCandidate) => providerTypesForUiType(candidate).includes(catalogCandidate.type))
+    ));
+    if (nextType && nextType !== contentType) setContentType(nextType);
+  }, [catalogs, contentType]);
 
   useEffect(() => {
     queryRef.current = query;
@@ -707,16 +609,9 @@ export default function PluginDiscover() {
     }
   }, []);
 
-  const filterItems = useCallback((source: readonly StremioPluginCatalogItem[], searchValue: string, genre: string, year: string) => {
-    return source
-      .filter((item) => searchSupported || hasTextMatch(item, searchValue))
-      .filter((item) => genreExtra || hasGenreMatch(item, genre))
-      .filter((item) => yearExtra || hasYearMatch(item, year));
-  }, [genreExtra, searchSupported, yearExtra]);
-
   const loadCatalog = useCallback(async (searchValue = query, genre = genreFilter, year = yearFilter) => {
     const requestRevision = ++catalogRequestRevision.current;
-    if (!plugin || !catalog || isDetailRoute) {
+    if (!plugin || !catalog) {
       setItems([]);
       setLoading(false);
       return;
@@ -741,16 +636,19 @@ export default function PluginDiscover() {
     setError(null);
     try {
       const extra: Record<string, string | number | boolean> = requiredCatalogExtra(catalog);
-      const searchDefinition = findExtra(catalog, ['search']);
-      if (trimmedQuery && searchDefinition) extra[searchDefinition.name] = trimmedQuery;
-      if (genre.trim() && genreExtra) extra[genreExtra.name] = genre.trim();
-      if (year.trim() && yearExtra) extra[yearExtra.name] = year.trim();
       const result = await desktopApi.getStremioCatalog(plugin.addonId, {
         type: catalog.type,
         catalogId: catalog.id,
+        filters: {
+          ...(trimmedQuery ? { query: trimmedQuery } : {}),
+          ...(genre.trim() ? { genre: genre.trim() } : {}),
+          ...(year.trim() ? { year: year.trim() } : {}),
+        },
         ...(Object.keys(extra).length > 0 ? { extra } : {}),
       });
-      const nextItems = result.items.slice(0, DISCOVER_RESULT_LIMIT);
+      // The host returns the complete bounded/paginated provider result. The
+      // renderer never truncates it before search, genre, or year handling.
+      const nextItems = result.items;
       const availableYears = toYearFilterOptions(nextItems);
       setYearOptions(availableYears);
       if (requestRevision === catalogRequestRevision.current && year.trim() && !availableYears.includes(year.trim())) setYearFilter('');
@@ -766,10 +664,10 @@ export default function PluginDiscover() {
     } finally {
       if (requestRevision === catalogRequestRevision.current) setLoading(false);
     }
-  }, [catalog, genreExtra, genreFilter, getCachedItems, isDetailRoute, plugin, query, section, setCachedItems, yearExtra, yearFilter]);
+  }, [catalog, genreFilter, getCachedItems, plugin, query, section, setCachedItems, yearFilter]);
 
   useEffect(() => {
-    if (isDetailRoute || !plugin || !catalog) return undefined;
+    if (!plugin || !catalog) return undefined;
     if (searchTimer.current !== null) window.clearTimeout(searchTimer.current);
     searchTimer.current = window.setTimeout(() => {
       searchTimer.current = null;
@@ -781,10 +679,10 @@ export default function PluginDiscover() {
         searchTimer.current = null;
       }
     };
-  }, [catalog, genreFilter, isDetailRoute, loadCatalog, plugin, query, yearFilter]);
+  }, [catalog, genreFilter, loadCatalog, plugin, query, yearFilter]);
 
   useEffect(() => {
-    if (isDetailRoute || !plugin || !catalog) return undefined;
+    if (!plugin || !catalog) return undefined;
     const delay = Math.max(1_000, nextMidnightAt() - Date.now());
     const timer = window.setTimeout(() => {
       discoverCache.current = { date: toLocalDateKey(), entries: {} };
@@ -792,149 +690,131 @@ export default function PluginDiscover() {
       void loadCatalog(queryRef.current, genreRef.current, yearRef.current);
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [catalog, isDetailRoute, loadCatalog, plugin]);
+  }, [catalog, loadCatalog, plugin]);
 
-  useEffect(() => {
-    const requestRevision = ++metaRequestRevision.current;
-    if (!isDetailRoute || !plugin || plugin.addonId !== routeAddonId || !routeType || !routeItemId) {
-      setSelectedItem(null);
-      setDetailLoading(false);
-      return;
-    }
-    const fallback = items.find((item) => item.id === routeItemId && item.type === routeType) || null;
-    setSelectedItem(fallback);
-    setDetailLoading(true);
-    setError(null);
-    void desktopApi.getStremioMeta(plugin.addonId, { type: routeType, id: routeItemId })
-      .then((result) => {
-        if (requestRevision !== metaRequestRevision.current) return;
-        setSelectedItem(result.item || fallback);
-        if (!result.item && !fallback) setError('No metadata was returned for this title.');
-      })
-      .catch((metaError) => {
-        if (requestRevision === metaRequestRevision.current) setError(errorMessage(metaError));
-      })
-      .finally(() => {
-        if (requestRevision === metaRequestRevision.current) setDetailLoading(false);
-      });
-  }, [isDetailRoute, items, plugin, routeAddonId, routeItemId, routeType]);
-
-  const visibleItems = useMemo(
-    () => filterItems(items, query, genreFilter, yearFilter),
-    [filterItems, genreFilter, items, query, yearFilter],
-  );
-
-  const inspectItem = useCallback((item: StremioPluginCatalogItem) => {
+  const openItemDetails = useCallback((item: StremioPluginCatalogItem) => {
     if (!plugin) return;
-    navigate({
-      pathname: `${DISCOVER_ROUTE}/${encodeURIComponent(plugin.addonId)}/${encodeURIComponent(item.type)}/${encodeURIComponent(item.id)}`,
-      search: location.search,
+    const discoverSourceRoute = location.search ? `${DISCOVER_ROUTE}${location.search}` : DISCOVER_ROUTE;
+    cacheDiscoverReturnRoute(discoverSourceRoute);
+    const detailPath = item.type === 'movie'
+      ? `/movie/${encodeURIComponent(item.id)}`
+      : item.type === 'anime'
+        ? `/anime/${encodeURIComponent(item.id)}`
+        : `/tv/${encodeURIComponent(item.id)}`;
+    navigate(detailPath, {
+      state: {
+        from: discoverSourceRoute,
+        fromDiscover: true,
+        addonId: plugin.addonId,
+        stremioCatalogItem: item,
+      },
     });
   }, [location.search, navigate, plugin]);
-
-  const returnToDiscover = useCallback(() => {
-    navigate({ pathname: DISCOVER_ROUTE, search: location.search });
-  }, [location.search, navigate]);
 
   const chipClass = (isActive: boolean) => `h-8 shrink-0 rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isActive
     ? 'border border-[var(--loom-accent)] bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)]'
     : 'border border-[var(--loom-border)] bg-[var(--loom-surface-2)] text-[var(--loom-text)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]'
   }`;
-  const gridEntries = useMemo<GridEntry[]>(() => visibleItems.map((item) => ({ id: item.id, item })), [visibleItems]);
+  const gridEntries = useMemo<GridEntry[]>(() => items.map((item) => ({ id: `${item.type}:${item.id}`, item })), [items]);
   const providerOptions = catalogPlugins.map((candidate) => ({ value: candidate.addonId, label: candidate.name }));
   const catalogOptions = catalogs.map((candidate) => ({ value: catalogKey(candidate), label: `${candidate.name} · ${candidate.type}` }));
   const genreDropdownOptions = [{ value: '', label: 'All Genres' }, ...genreOptions];
   const yearDropdownOptions = [{ value: '', label: 'All Years' }, ...yearOptions.map((year) => ({ value: year, label: year }))];
+  const sectionOptions = DISCOVER_SECTIONS[contentType].map((discoverSection) => ({
+    value: discoverSection,
+    label: DISCOVER_SECTION_LABELS[discoverSection],
+    disabled: !plugin || !catalogForExplicitSection(plugin.addonId, contentType, discoverSection, catalogs),
+  }));
+  const typeHasCatalog = (type: DiscoverType) => Boolean(plugin?.catalogs.some((candidate) => (
+    canRequestCatalog(candidate) && providerTypesForUiType(type).includes(candidate.type)
+  )));
 
   return (
     <div ref={pageRef} className="loom-page loom-library-page h-full overflow-y-auto">
-      {!isDetailRoute && <LibrarySearch value={query} onChange={setQuery} placeholder="Search titles" />}
+      <LibrarySearch value={query} onChange={setQuery} placeholder="Search titles" />
       <div className={`${frameClass} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${topPaddingClass}`}>
         <header className="loom-library-page-heading mb-6 flex min-h-8 flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              {isDetailRoute && <Button type="button" variant="ghost" size="sm" onClick={returnToDiscover} className="gap-2 text-[var(--loom-text)]"><ArrowLeft className="h-4 w-4" />Back</Button>}
-              <div>
-                <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">Discover</h1>
-                <p className="mt-1 text-sm text-[var(--loom-muted)]">Discover new anime, tvshows and movies to watch</p>
-              </div>
-            </div>
+            <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">Discover</h1>
+            <p className="mt-1 text-sm text-[var(--loom-muted)]">Discover new anime, tvshows and movies to watch</p>
           </div>
-          <span className="rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 py-1.5 text-xs text-[var(--loom-muted)]">Catalog &amp; metadata preview</span>
-          {!isDetailRoute && (
-            <div className="w-full">
-              <div className="flex items-center gap-2 overflow-x-auto overflow-y-visible pb-1">
-                {(Object.keys(DISCOVER_SECTIONS) as DiscoverType[]).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setContentType(type)}
-                    aria-pressed={contentType === type}
-                    className={chipClass(contentType === type)}
-                  >
-                    {DISCOVER_TYPE_LABELS[type]}
-                  </button>
-                ))}
-                <span aria-hidden="true" className="mx-1 inline-block h-6 w-px self-center bg-[var(--loom-border)] opacity-90" />
-                {providerOptions.length > 0 && (
-                  <ThemeDropdown
-                    id="discover-provider-select"
-                    label="Discover provider"
-                    value={plugin?.addonId || providerId}
-                    options={providerOptions}
-                    onChange={(value) => {
-                      setProviderId(value);
-                      setCatalogKeyValue('');
-                      setQuery('');
-                      setGenreFilter('');
-                      setYearFilter('');
-                    }}
-                  />
-                )}
+          <div className="w-full">
+            <div className="flex items-center gap-2 overflow-x-auto overflow-y-visible pb-1">
+              {(Object.keys(DISCOVER_SECTIONS) as DiscoverType[]).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setContentType(type)}
+                  aria-pressed={contentType === type}
+                  disabled={!typeHasCatalog(type)}
+                  className={`${chipClass(contentType === type)} disabled:cursor-not-allowed disabled:opacity-45`}
+                >
+                  {DISCOVER_TYPE_LABELS[type]}
+                </button>
+              ))}
+              <span aria-hidden="true" className="mx-1 inline-block h-6 w-px self-center bg-[var(--loom-border)] opacity-90" />
+              {providerOptions.length > 0 && (
                 <ThemeDropdown
-                  id="discover-catalog-select"
-                  label="Discover catalog"
-                  value={catalog ? catalogKey(catalog) : ''}
-                  options={catalogOptions.length > 0 ? catalogOptions : [{ value: '', label: 'No catalogs' }]}
+                  id="discover-provider-select"
+                  label="Discover provider"
+                  value={plugin?.addonId || providerId}
+                  options={providerOptions}
                   onChange={(value) => {
-                    setCatalogKeyValue(value);
-                    setQuery('');
-                  }}
-                />
-                <ThemeDropdown
-                  id="discover-section-select"
-                  label="Discover filter"
-                  value={section}
-                  options={DISCOVER_SECTIONS[contentType].map((discoverSection) => ({ value: discoverSection, label: DISCOVER_SECTION_LABELS[discoverSection] }))}
-                  onChange={(value) => {
-                    setSection(value as DiscoverSection);
+                    setProviderId(value);
                     setCatalogKeyValue('');
+                    setQuery('');
+                    setGenreFilter('');
+                    setYearFilter('');
                   }}
                 />
-                <ThemeDropdown
-                  id="discover-genre-select"
-                  label="Filter genre"
-                  value={genreFilter}
-                  options={genreDropdownOptions}
-                  onChange={setGenreFilter}
-                />
-                <ThemeDropdown
-                  id="discover-year-select"
-                  label="Filter year"
-                  value={yearFilter}
-                  options={yearDropdownOptions}
-                  onChange={setYearFilter}
-                />
-              </div>
+              )}
+              <ThemeDropdown
+                id="discover-catalog-select"
+                label="Discover catalog"
+                value={catalog ? catalogKey(catalog) : ''}
+                options={catalogOptions.length > 0 ? catalogOptions : [{ value: '', label: 'No catalogs', disabled: true }]}
+                disabled={catalogOptions.length === 0}
+                onChange={(value) => {
+                  setCatalogKeyValue(value);
+                  setSection('trending');
+                  setQuery('');
+                  setGenreFilter('');
+                  setYearFilter('');
+                }}
+              />
+              <ThemeDropdown
+                id="discover-section-select"
+                label="Discover filter"
+                value={section}
+                options={sectionOptions}
+                onChange={(value) => {
+                  setSection(value as DiscoverSection);
+                  setCatalogKeyValue('');
+                  setQuery('');
+                  setGenreFilter('');
+                  setYearFilter('');
+                }}
+                disabled={sectionOptions.every((option) => option.disabled)}
+              />
+              <ThemeDropdown
+                id="discover-genre-select"
+                label="Filter genre"
+                value={genreFilter}
+                options={genreDropdownOptions}
+                disabled={!genreExtra}
+                onChange={setGenreFilter}
+              />
+              <ThemeDropdown
+                id="discover-year-select"
+                label="Filter year"
+                value={yearFilter}
+                options={yearDropdownOptions}
+                disabled={!yearExtra}
+                onChange={setYearFilter}
+              />
             </div>
-          )}
-        </header>
-
-        {!isDetailRoute && (
-          <div className="mt-4 rounded-xl border border-blue-400/25 bg-blue-400/10 p-3 text-sm text-blue-100">
-            <p className="flex items-start gap-2"><Info className="mt-0.5 h-4 w-4 shrink-0" />Remote playback and subtitle attachment are not enabled in this foundation release.</p>
           </div>
-        )}
+        </header>
 
         {error && (
           <div role="alert" className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -942,9 +822,7 @@ export default function PluginDiscover() {
           </div>
         )}
 
-        {isDetailRoute ? (
-          <DiscoverDetail item={selectedItem} loading={detailLoading} error={error} onBack={returnToDiscover} />
-        ) : pluginsLoading ? (
+        {pluginsLoading ? (
           <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(140px,200px))] justify-start gap-6">
             {Array.from({ length: 12 }).map((_, index) => <DiscoverShimmerCard key={index} />)}
           </div>
@@ -964,7 +842,7 @@ export default function PluginDiscover() {
           <VirtualPosterGrid
             items={gridEntries}
             renderItem={(entry) => (
-              <StremioPosterCard item={entry.item} metaLine={stremioMetaLine(entry.item)} onSelect={inspectItem} />
+              <StremioPosterCard item={entry.item} metaLine={stremioMetaLine(entry.item)} onSelect={openItemDetails} />
             )}
           />
         )}

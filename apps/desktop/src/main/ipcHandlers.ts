@@ -16,6 +16,8 @@ import type {
   OfficialStremioAddon,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
+  StremioPluginConfigurationState,
+  StremioPluginAuditEntry,
   StremioPluginIpcResult,
   StremioPluginMetaRequest,
   StremioPluginMetaResult,
@@ -186,6 +188,10 @@ export interface IpcHandlerDependencies<
   setStremioProfileAccess: (profileId: string, addonId: string, enabled: boolean) => Promise<boolean>;
   fetchStremioCatalog: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginCatalogResult>;
   fetchStremioMeta: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
+  fetchStremioMetaByItem: (request: StremioPluginMetaRequest) => Promise<StremioPluginMetaResult>;
+  getStremioAddonConfiguration: (addonId: string) => StremioPluginConfigurationState;
+  saveStremioAddonConfiguration: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginConfigurationState>;
+  listStremioPluginAudit: (addonId: string, limit?: number) => readonly StremioPluginAuditEntry[];
   getLocalSegmentAnalysisStatus: () => IpcResult<'playback:analysis:status'>;
   analyzeLocalSegmentSeason: (mediaId: string, season: number) => Promise<MediaSegmentResponse>;
   runLocalSegmentAnalysis: (scope?: IpcContract['playback:analysis:run']['args'][0]) => IpcResult<'playback:analysis:run'>;
@@ -524,6 +530,10 @@ export function registerIpcHandlers<
   ));
   handleStremio('plugins:stremio:catalog', (_event, addonId, request) => deps.fetchStremioCatalog(String(addonId || ''), request));
   handleStremio('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request));
+  handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request));
+  handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')));
+  handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values));
+  handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit));
 
   handle('settings:save', (_event, settings) => {
     deps.authorizeSettingsWrite();

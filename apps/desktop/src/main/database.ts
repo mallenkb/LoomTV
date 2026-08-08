@@ -1,14 +1,21 @@
-import { app, dialog } from 'electron';
+import { app, dialog, safeStorage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch.ts';
+import {
+  artworkNegativeCacheAllows,
+  rememberArtworkFailure,
+  rememberArtworkSuccess,
+  sanitizeArtworkBytes,
+} from './artworkSecurity.ts';
 import type { LibraryData } from './appContracts.ts';
 import type { ProfileExportV1 } from '../shared/desktopProtocol.ts';
 import {
   createDatabaseArtworkRepository,
   type CachedArtwork,
+  type FetchedArtworkBytes,
 } from './databaseArtworkRepository.ts';
 import {
   loadLibrary as loadLibraryRecord,
@@ -40,6 +47,15 @@ import {
   setProfileStremioAccess as setProfileStremioAccessRecord,
   type PersistedStremioAddonSnapshot,
 } from './databasePluginRepository.ts';
+import {
+  listPluginAudit,
+  PluginSecretStore,
+  recordPluginAudit,
+  type PluginAuditEntry,
+  type PluginSecretReference,
+  type SecretCodec,
+} from './pluginSecretStore.ts';
+import type { StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
 import type { SegmentAnalysisJob, SegmentAnalysisJobState } from './skipSegments/analysisJobs.ts';
 import type {
   MediaSegment,
@@ -96,7 +112,7 @@ export type {
   ProfileType,
   ProfileUpdateInput,
 } from './databaseProfilesRepository.ts';
-export type { CachedArtwork } from './databaseArtworkRepository.ts';
+export type { CachedArtwork, FetchedArtworkBytes } from './databaseArtworkRepository.ts';
 export type { StoredMediaFingerprint } from './databaseSegmentsRepository.ts';
 export type {
   PersistedStremioAddonRecord,
@@ -107,6 +123,7 @@ export type {
 let db: BetterSqlite3.Database | null = null;
 let artworkRepository: ReturnType<typeof createDatabaseArtworkRepository> | null = null;
 let segmentRepository: ReturnType<typeof createDatabaseSegmentsRepository> | null = null;
+let pluginSecretStore: PluginSecretStore | null = null;
 
 function databasePath(): string {
   return path.join(app.getPath('userData'), 'loomtv.sqlite');
@@ -162,6 +179,134 @@ function backupBeforeProfilesMigration(database: BetterSqlite3.Database): void {
 function getSegmentRepository(): ReturnType<typeof createDatabaseSegmentsRepository> {
   segmentRepository ||= createDatabaseSegmentsRepository(getDb());
   return segmentRepository;
+}
+
+function getPluginSecretStore(): PluginSecretStore {
+  if (pluginSecretStore) return pluginSecretStore;
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('The operating system secret store is unavailable.');
+  }
+  const database = getDb();
+  let row = database.prepare('SELECT ciphertext FROM plugin_secret_store_keys WHERE id = 1').get() as { ciphertext?: string } | undefined;
+  let macKey: Buffer;
+  if (!row?.ciphertext) {
+    macKey = randomBytes(32);
+    const protectedKey = safeStorage.encryptString(macKey.toString('base64')).toString('base64');
+    database.prepare('INSERT OR REPLACE INTO plugin_secret_store_keys (id, ciphertext, created_at) VALUES (1, ?, ?)')
+      .run(protectedKey, Date.now());
+    row = { ciphertext: protectedKey };
+  } else {
+    try {
+      macKey = Buffer.from(safeStorage.decryptString(Buffer.from(row.ciphertext, 'base64')), 'base64');
+    } catch (error) {
+      throw new Error('The operating system secret store could not recover the LoomTV key.', { cause: error });
+    }
+    if (macKey.length < 32) throw new Error('The recovered LoomTV secret-store key is invalid.');
+  }
+  const codec: SecretCodec = {
+    encrypt: (value) => safeStorage.encryptString(value).toString('base64'),
+    decrypt: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+  };
+  pluginSecretStore = new PluginSecretStore(database, codec, macKey);
+  return pluginSecretStore;
+}
+
+function configFieldsForAddon(addonId: string): readonly StremioPluginConfigurationField[] {
+  const record = loadStremioAddonStateRecord(getDb())?.addons.find((candidate) => candidate.addonId === addonId);
+  const config = (record?.manifest as { config?: readonly StremioPluginConfigurationField[] } | undefined)?.config || [];
+  return config.map((field) => ({
+    key: field.key,
+    type: field.type,
+    required: field.required,
+    ...(field.title ? { title: field.title } : {}),
+    ...(field.options ? { options: [...field.options] } : {}),
+  }));
+}
+
+export function getStremioAddonConfiguration(addonId: string): Readonly<Record<string, string>> {
+  try {
+    const allowedFields = new Set(configFieldsForAddon(addonId).map((field) => field.key));
+    return Object.fromEntries(Object.entries(getPluginSecretStore().values(addonId))
+      .filter(([field]) => allowedFields.has(field)));
+  } catch {
+    return {};
+  }
+}
+
+export function isStremioAddonConfigured(addonId: string, requiredFields?: readonly string[]): boolean {
+  const fields = requiredFields || configFieldsForAddon(addonId).filter((field) => field.required).map((field) => field.key);
+  try {
+    return getPluginSecretStore().hasRequired(addonId, fields);
+  } catch {
+    return fields.length === 0;
+  }
+}
+
+export function getStremioAddonConfigurationState(addonId: string, fields = configFieldsForAddon(addonId)) {
+  const record = loadStremioAddonStateRecord(getDb())?.addons.find((candidate) => candidate.addonId === addonId);
+  const requiresHostConfiguration = Boolean(
+    (record?.manifest as { behaviorHints?: { configurationRequired?: boolean } } | undefined)?.behaviorHints?.configurationRequired
+    || fields.some((field) => field.required),
+  );
+  const references: readonly PluginSecretReference[] = (() => {
+    try { return getPluginSecretStore().list(addonId); } catch { return []; }
+  })();
+  const configuredFields = references
+    .map((reference) => reference.fieldKey)
+    .filter((key) => fields.some((field) => field.key === key));
+  const requiredFields = fields.filter((field) => field.required).map((field) => field.key);
+  return {
+    fields,
+    configured: requiresHostConfiguration
+      && !((record?.manifest as { behaviorHints?: { configurationRequired?: boolean } } | undefined)?.behaviorHints?.configurationRequired && fields.length === 0)
+      ? isStremioAddonConfigured(addonId, requiredFields)
+      : !requiresHostConfiguration,
+    configuredFields,
+    revision: (() => {
+      try { return getPluginSecretStore().getRevision(); } catch { return 0; }
+    })(),
+  };
+}
+
+function normalizeConfigValue(field: StremioPluginConfigurationField, value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (field.type === 'checkbox' || field.type === 'boolean') {
+    if (typeof value !== 'boolean') throw new Error(`Configuration field ${field.key} must be boolean.`);
+    return value ? 'true' : 'false';
+  }
+  if (field.type === 'number') {
+    const number = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(number)) throw new Error(`Configuration field ${field.key} must be numeric.`);
+    return String(number);
+  }
+  const text = typeof value === 'string' ? value : String(value);
+  if (field.options?.length && !field.options.includes(text)) throw new Error(`Configuration field ${field.key} has an unsupported option.`);
+  return text;
+}
+
+export function saveStremioAddonConfiguration(addonId: string, rawValues: Readonly<Record<string, unknown>>) {
+  const fields = configFieldsForAddon(addonId);
+  const definitions = new Map(fields.map((field) => [field.key, field]));
+  const values: Record<string, string> = {};
+  for (const [key, value] of Object.entries(rawValues)) {
+    const field = definitions.get(key);
+    if (!field) throw new Error(`Unknown configuration field ${key}.`);
+    const normalized = normalizeConfigValue(field, value);
+    if (normalized !== undefined) values[key] = normalized;
+  }
+  for (const field of fields) {
+    if (field.required && !values[field.key]) throw new Error(`Configuration field ${field.key} is required.`);
+  }
+  getPluginSecretStore().replace(addonId, values);
+  return getStremioAddonConfigurationState(addonId, fields);
+}
+
+export function listStremioPluginAudit(addonId: string, limit = 100): readonly PluginAuditEntry[] {
+  return listPluginAudit(getDb(), addonId, limit);
+}
+
+export function recordStremioPluginAudit(addonId: string, eventType: string, detail: Record<string, unknown> = {}): void {
+  recordPluginAudit(getDb(), addonId, eventType, detail);
 }
 
 function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkRepository> {
@@ -728,12 +873,14 @@ function getCustomArtworkMap(): Map<string, Map<string, string>> {
 export function getCachedArtwork(sourceUrl: string): CachedArtwork | null {
   return getArtworkRepository().getCachedArtwork(sourceUrl);
 }
-async function fetchArtworkBytes(sourceUrl: string): Promise<{ bytes: Buffer; mimeType: string; byteLength: number } | null> {
+async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes | null> {
+  if (!artworkNegativeCacheAllows(sourceUrl)) return null;
   try {
     const response = await safeFetch(sourceUrl, {}, {
       allowedHosts: [
         '.fanart.tv',
         '.media-amazon.com',
+        '.metahub.space',
         '.myanimelist.net',
         '.themoviedb.org',
         '.tmdb.org',
@@ -743,17 +890,21 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<{ bytes: Buffer; mi
       maxBytes: 5 * 1024 * 1024,
       retries: 2,
     });
-    if (!response.ok) return null;
-    const mimeType = response.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
-    if (!mimeType.startsWith('image/')) return null;
+    if (!response.ok) {
+      rememberArtworkFailure(sourceUrl);
+      return null;
+    }
+    const mimeType = response.headers.get('content-type')?.split(';')[0] || '';
+    if (!mimeType.startsWith('image/')) {
+      rememberArtworkFailure(sourceUrl);
+      return null;
+    }
     const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > 5 * 1024 * 1024) return null;
-    return {
-      bytes,
-      mimeType,
-      byteLength: bytes.byteLength,
-    };
+    const sanitized = sanitizeArtworkBytes(bytes, mimeType);
+    rememberArtworkSuccess(sourceUrl);
+    return sanitized;
   } catch {
+    rememberArtworkFailure(sourceUrl);
     return null;
   }
 }
@@ -806,6 +957,8 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM device_profile_selection_revisions;
     DELETE FROM profiles;
     DELETE FROM stremio_addons;
+    DELETE FROM plugin_secrets;
+    DELETE FROM stremio_plugin_audit;
     DELETE FROM episode_files;
     DELETE FROM episodes;
     DELETE FROM seasons;

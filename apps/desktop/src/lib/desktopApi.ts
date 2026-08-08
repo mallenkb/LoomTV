@@ -55,6 +55,8 @@ import type {
   StreamUrlResult,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
+  StremioPluginConfigurationState,
+  StremioPluginAuditEntry,
   StremioPluginIpcError as StremioPluginIpcErrorPayload,
   StremioPluginIpcIssue,
   StremioPluginIpcResult,
@@ -134,6 +136,8 @@ export type {
   StremioPluginCatalogItem,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
+  StremioPluginConfigurationState,
+  StremioPluginAuditEntry,
   StremioPluginIpcResult,
   StremioPluginMetaRequest,
   StremioPluginMetaResult,
@@ -203,6 +207,10 @@ export type DesktopBridgeApi = {
       setStremioProfileAccess?: (profileId: string, addonId: string, enabled: boolean) => Promise<StremioPluginIpcResult<boolean>>;
       getStremioCatalog?: (addonId: string, request: StremioPluginCatalogRequest) => Promise<StremioPluginIpcResult<StremioPluginCatalogResult>>;
       getStremioMeta?: (addonId: string, request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
+      getStremioMetaByItem?: (request: StremioPluginMetaRequest) => Promise<StremioPluginIpcResult<StremioPluginMetaResult>>;
+      getStremioAddonConfiguration?: (addonId: string) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
+      saveStremioAddonConfiguration?: (addonId: string, values: Record<string, unknown>) => Promise<StremioPluginIpcResult<StremioPluginConfigurationState>>;
+      listStremioPluginAudit?: (addonId: string, limit?: number) => Promise<StremioPluginIpcResult<readonly StremioPluginAuditEntry[]>>;
       testMetadataKeys?: (keys: MetadataApiKeys) => Promise<MetadataKeyTestResult[]>;
       getLocalNetworkStatus?: () => Promise<LocalNetworkStatus>;
       discoverLocalNetworkPeers?: (timeoutMs?: number) => Promise<LocalNetworkPeer[]>;
@@ -1095,6 +1103,26 @@ export const desktopApi = {
   async getStremioMeta(addonId: string, request: StremioPluginMetaRequest): Promise<StremioPluginMetaResult> {
     if (window.desktopApi?.getStremioMeta) return unwrapStremioPluginResult(await window.desktopApi.getStremioMeta(addonId, request));
     throw new Error('Stremio add-ons are currently available only in the LoomTV desktop app.');
+  },
+
+  async getStremioMetaByItem(request: StremioPluginMetaRequest): Promise<StremioPluginMetaResult> {
+    if (window.desktopApi?.getStremioMetaByItem) return unwrapStremioPluginResult(await window.desktopApi.getStremioMetaByItem(request));
+    throw new Error('Stremio metadata is currently available only in the LoomTV desktop app.');
+  },
+
+  async getStremioAddonConfiguration(addonId: string): Promise<StremioPluginConfigurationState> {
+    if (window.desktopApi?.getStremioAddonConfiguration) return unwrapStremioPluginResult(await window.desktopApi.getStremioAddonConfiguration(addonId));
+    throw new Error('Stremio add-on configuration is currently available only in the LoomTV desktop app.');
+  },
+
+  async saveStremioAddonConfiguration(addonId: string, values: Record<string, unknown>): Promise<StremioPluginConfigurationState> {
+    if (window.desktopApi?.saveStremioAddonConfiguration) return unwrapStremioPluginResult(await window.desktopApi.saveStremioAddonConfiguration(addonId, values));
+    throw new Error('Stremio add-on configuration is currently available only in the LoomTV desktop app.');
+  },
+
+  async listStremioPluginAudit(addonId: string, limit?: number): Promise<readonly StremioPluginAuditEntry[]> {
+    if (window.desktopApi?.listStremioPluginAudit) return unwrapStremioPluginResult(await window.desktopApi.listStremioPluginAudit(addonId, limit));
+    throw new Error('Stremio add-on history is currently available only in the LoomTV desktop app.');
   },
 
   async saveSettings(settings: SettingsPayload): Promise<boolean> {
