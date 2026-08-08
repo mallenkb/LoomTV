@@ -1,0 +1,136 @@
+{
+  "artifactVersion": 1,
+  "status": "design-only",
+  "scope": "future executable plugin provider runtime",
+  "currentRuntime": "declaration-only-host-mediated",
+  "assets": [
+    "library-paths-and-media-bytes",
+    "profile-identity-and-selection-revisions",
+    "pairing-credentials-and-session-capabilities",
+    "artwork-and-metadata-cache",
+    "provider-credentials",
+    "catalog-and-update-signing-keys",
+    "host-process-integrity-and-availability"
+  ],
+  "trustBoundaries": [
+    "renderer-to-host-ipc",
+    "plugin-process-to-host-rpc",
+    "host-to-provider-egress",
+    "host-to-filesystem-and-media",
+    "host-to-update-staging",
+    "desktop-to-headless-parity-adapter"
+  ],
+  "requiredControls": [
+    {
+      "id": "CTRL-EXE-001",
+      "name": "pinned-publisher-verification",
+      "requirement": "Verify publisher continuity, artifact digest, signature, expiry, and monotonic sequence before staging or enabling a package."
+    },
+    {
+      "id": "CTRL-EXE-002",
+      "name": "separate-process-isolation",
+      "requirement": "Run hostile provider code outside the LoomTV process with platform-specific isolation and no renderer privileges."
+    },
+    {
+      "id": "CTRL-EXE-003",
+      "name": "default-deny-egress",
+      "requirement": "Broker every network request through an origin, DNS, redirect, byte, rate, and timeout policy."
+    },
+    {
+      "id": "CTRL-EXE-004",
+      "name": "opaque-reference-boundary",
+      "requirement": "Expose only validated opaque references; never pass raw URLs, filesystem paths, credentials, or executable details."
+    },
+    {
+      "id": "CTRL-EXE-005",
+      "name": "profile-and-pairing-revalidation",
+      "requirement": "Revalidate profile selection, pairing, approval, and revocation for every attachment and playback capability."
+    },
+    {
+      "id": "CTRL-EXE-006",
+      "name": "resource-and-lifecycle-quotas",
+      "requirement": "Bound CPU, memory, process count, queue depth, response size, duration, cancellation, crash cleanup, and stale capability lifetime."
+    },
+    {
+      "id": "CTRL-EXE-007",
+      "name": "no-install-hooks",
+      "requirement": "Package staging and update installation must be host-controlled with atomic rollback and no arbitrary scripts or child processes."
+    }
+  ],
+  "threats": [
+    {
+      "id": "THREAT-EXE-001",
+      "category": "supply-chain",
+      "scenario": "An attacker replaces a plugin package or impersonates its publisher.",
+      "controlIds": ["CTRL-EXE-001", "CTRL-EXE-007"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-EXE-002",
+      "category": "sandbox-escape",
+      "scenario": "Provider code uses a parser, native module, or host interface to escape into the LoomTV process.",
+      "controlIds": ["CTRL-EXE-002", "CTRL-EXE-004", "CTRL-EXE-006"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-EXE-003",
+      "category": "ssrf-exfiltration",
+      "scenario": "Provider code reaches loopback, private services, metadata endpoints, or unapproved Internet destinations.",
+      "controlIds": ["CTRL-EXE-003", "CTRL-EXE-004"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-EXE-004",
+      "category": "confused-deputy",
+      "scenario": "A plugin reuses a stale profile, pairing, artwork, or playback capability after the user changes authorization.",
+      "controlIds": ["CTRL-EXE-004", "CTRL-EXE-005"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-EXE-005",
+      "category": "resource-exhaustion",
+      "scenario": "A provider floods the host with requests, output, processes, or unbounded work.",
+      "controlIds": ["CTRL-EXE-006"],
+      "status": "blocked"
+    },
+    {
+      "id": "THREAT-EXE-006",
+      "category": "persistence",
+      "scenario": "An update or package hook installs arbitrary code or survives disable/removal.",
+      "controlIds": ["CTRL-EXE-001", "CTRL-EXE-006", "CTRL-EXE-007"],
+      "status": "blocked"
+    }
+  ],
+  "prohibitedCapabilities": [
+    "arbitrary-plugin-javascript-in-host-process",
+    "native-module-loading",
+    "child-process-and-shell-execution",
+    "plugin-controlled-network-sockets",
+    "plugin-controlled-redirects-or-dns",
+    "raw-url-or-filesystem-path-exposure",
+    "profile-pairing-provider-or-update-key-exposure",
+    "arbitrary-install-scripts"
+  ],
+  "enablementGates": [
+    {
+      "id": "GATE-EXE-001",
+      "requirement": "Attach evidence for publisher verification and key lifecycle.",
+      "status": "blocked"
+    },
+    {
+      "id": "GATE-EXE-002",
+      "requirement": "Attach platform isolation design and escape testing.",
+      "status": "blocked"
+    },
+    {
+      "id": "GATE-EXE-003",
+      "requirement": "Attach egress broker and profile/pairing authorization evidence.",
+      "status": "blocked"
+    },
+    {
+      "id": "GATE-EXE-004",
+      "requirement": "Attach quota, revocation, rollback, and red-team evidence.",
+      "status": "blocked"
+    }
+  ]
+}

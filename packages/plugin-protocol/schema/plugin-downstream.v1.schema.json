@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://loomtv.app/schemas/plugin-downstream.v1.schema.json",
+  "title": "LoomTV Host-Mediated Plugin Downstream Contracts v1",
+  "description": "Opaque-reference contracts for plugin discovery, subtitle attachment, playback tickets, parity descriptors, and signed catalog/update envelopes. These contracts intentionally do not carry URLs, local paths, commands, or executable entrypoints.",
+  "oneOf": [
+    { "$ref": "#/$defs/searchNamespace" },
+    { "$ref": "#/$defs/catalogItemNamespace" },
+    { "$ref": "#/$defs/searchRequest" },
+    { "$ref": "#/$defs/subtitleAttachmentRequest" },
+    { "$ref": "#/$defs/subtitleAttachmentReceipt" },
+    { "$ref": "#/$defs/playbackTicketRequest" },
+    { "$ref": "#/$defs/playbackTicket" },
+    { "$ref": "#/$defs/hostParity" },
+    { "$ref": "#/$defs/signedCatalog" },
+    { "$ref": "#/$defs/signedUpdate" }
+  ],
+  "$defs": {
+    "pluginId": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$"
+    },
+    "opaqueReference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$"
+    },
+    "profileBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deviceRef", "profileId", "selectionRevision"],
+      "properties": {
+        "deviceRef": { "$ref": "#/$defs/opaqueReference" },
+        "profileId": { "$ref": "#/$defs/opaqueReference" },
+        "selectionRevision": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ticketWindow": {
+      "type": "object",
+      "required": ["issuedAt", "expiresAt"],
+      "properties": {
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "searchNamespace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "pluginId", "catalogType", "catalogId", "namespace", "namespaceKey"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "plugin-search-namespace" },
+        "transport": { "const": "host-mediated" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "catalogType": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "catalogId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "namespace": { "type": "string", "pattern": "^loom-plugin:" },
+        "namespaceKey": { "type": "string", "pattern": "^loom-plugin:" }
+      }
+    },
+    "catalogItemNamespace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "pluginId", "catalogType", "catalogId", "namespace", "namespaceKey", "itemId", "itemKey"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "plugin-catalog-item-namespace" },
+        "transport": { "const": "host-mediated" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "catalogType": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "catalogId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "namespace": { "type": "string", "pattern": "^loom-plugin:" },
+        "namespaceKey": { "type": "string", "pattern": "^loom-plugin:" },
+        "itemId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "itemKey": { "type": "string", "pattern": "^loom-plugin:" }
+      }
+    },
+    "searchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "pluginId", "catalogType", "catalogId", "namespace", "namespaceKey", "query", "page", "limit"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "plugin-search-request" },
+        "transport": { "const": "host-mediated" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "catalogType": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "catalogId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "namespace": { "type": "string", "pattern": "^loom-plugin:" },
+        "namespaceKey": { "type": "string", "pattern": "^loom-plugin:" },
+        "query": { "type": "string", "maxLength": 200 },
+        "page": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "profile": { "$ref": "#/$defs/profileBinding" }
+      }
+    },
+    "subtitleAttachmentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "pluginId", "mediaRef", "subtitleRef", "profile", "issuedAt", "expiresAt", "authorization"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "subtitle-attachment-request" },
+        "transport": { "const": "host-mediated" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "mediaRef": { "$ref": "#/$defs/opaqueReference" },
+        "subtitleRef": { "$ref": "#/$defs/opaqueReference" },
+        "language": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "format": { "$ref": "#/$defs/opaqueReference" },
+        "profile": { "$ref": "#/$defs/profileBinding" },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profileBound", "selectionRevisionRequired", "pairingRevalidated", "hostResolvesSource"],
+          "properties": {
+            "profileBound": { "const": true },
+            "selectionRevisionRequired": { "const": true },
+            "pairingRevalidated": { "const": true },
+            "hostResolvesSource": { "const": true }
+          }
+        }
+      }
+    },
+    "subtitleAttachmentReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "requestRef", "pluginId", "mediaRef", "profile", "status", "issuedAt", "expiresAt"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "subtitle-attachment-receipt" },
+        "transport": { "const": "host-mediated" },
+        "requestRef": { "$ref": "#/$defs/opaqueReference" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "mediaRef": { "$ref": "#/$defs/opaqueReference" },
+        "profile": { "$ref": "#/$defs/profileBinding" },
+        "status": { "enum": ["accepted", "rejected"] },
+        "attachmentRef": { "$ref": "#/$defs/opaqueReference" },
+        "reasonCode": { "$ref": "#/$defs/opaqueReference" },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "playbackTicketRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "pluginId", "mediaRef", "sourceRef", "sourceKind", "requestedModes", "profile", "issuedAt", "authorization"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "playback-ticket-request" },
+        "transport": { "const": "host-mediated" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "mediaRef": { "$ref": "#/$defs/opaqueReference" },
+        "sourceRef": { "$ref": "#/$defs/opaqueReference" },
+        "sourceKind": { "enum": ["https-media", "hls"] },
+        "requestedModes": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "enum": ["direct-proxy", "hls-proxy"] } },
+        "profile": { "$ref": "#/$defs/profileBinding" },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["profileBound", "selectionRevisionRequired", "pairingRevalidated", "approvalRevalidated", "sourceResolvedByHost"],
+          "properties": {
+            "profileBound": { "const": true },
+            "selectionRevisionRequired": { "const": true },
+            "pairingRevalidated": { "const": true },
+            "approvalRevalidated": { "const": true },
+            "sourceResolvedByHost": { "const": true }
+          }
+        }
+      }
+    },
+    "playbackTicket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "ticketRef", "requestRef", "pluginId", "mediaRef", "sourceRef", "sourceKind", "profile", "issuedAt", "expiresAt", "proxyPolicy"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "playback-ticket" },
+        "transport": { "const": "host-mediated-proxy" },
+        "ticketRef": { "$ref": "#/$defs/opaqueReference" },
+        "requestRef": { "$ref": "#/$defs/opaqueReference" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "mediaRef": { "$ref": "#/$defs/opaqueReference" },
+        "sourceRef": { "$ref": "#/$defs/opaqueReference" },
+        "sourceKind": { "enum": ["https-media", "hls"] },
+        "profile": { "$ref": "#/$defs/profileBinding" },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "proxyPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["methods", "rangeRequests", "redirects", "cache", "revalidateProfile", "revalidatePairing", "revalidateApproval"],
+          "properties": {
+            "methods": { "const": ["GET", "HEAD"] },
+            "rangeRequests": { "const": true },
+            "redirects": { "const": "deny" },
+            "cache": { "const": "no-store" },
+            "revalidateProfile": { "const": true },
+            "revalidatePairing": { "const": true },
+            "revalidateApproval": { "const": true }
+          }
+        }
+      }
+    },
+    "hostParity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "runtime", "hostApiVersion", "surfaces", "prohibited"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "plugin-host-parity" },
+        "transport": { "const": "host-mediated" },
+        "runtime": { "enum": ["desktop", "headless"] },
+        "hostApiVersion": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$" },
+        "surfaces": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "state"],
+            "properties": {
+              "id": { "enum": ["catalog.read", "catalog.search", "metadata.read", "subtitle.attachment", "playback.ticket", "catalog.signature", "update.signature", "executable.sandbox"] },
+              "state": { "enum": ["available", "scaffolded", "blocked"] },
+              "gate": { "type": "string", "maxLength": 256 }
+            }
+          }
+        },
+        "prohibited": {
+          "const": ["raw-url-playback", "raw-url-subtitles", "executable-plugin-code"]
+        }
+      }
+    },
+    "signedCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "publisherId", "pluginId", "keyId", "signatureAlgorithm", "sequence", "issuedAt", "expiresAt", "payloadDigest", "signature", "payload", "verification"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "signed-catalog" },
+        "transport": { "const": "host-mediated" },
+        "publisherId": { "$ref": "#/$defs/pluginId" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "keyId": { "$ref": "#/$defs/opaqueReference" },
+        "signatureAlgorithm": { "const": "ed25519" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,4096}$" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "catalogType", "catalogId", "revision", "items"],
+          "properties": {
+            "namespace": { "type": "string", "pattern": "^loom-plugin:" },
+            "catalogType": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "catalogId": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "revision": { "type": "integer", "minimum": 0 },
+            "items": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "itemKey", "type", "title"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+                  "itemKey": { "type": "string", "pattern": "^loom-plugin:" },
+                  "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+                  "description": { "type": "string", "maxLength": 2000 },
+                  "releaseInfo": { "type": "string", "maxLength": 128 },
+                  "released": { "type": "string", "maxLength": 128 },
+                  "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+                  "runtime": { "type": "string", "maxLength": 64 },
+                  "year": { "type": "integer", "minimum": 0, "maximum": 100000 },
+                  "genres": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+                  "artworkRef": { "$ref": "#/$defs/opaqueReference" }
+                }
+              }
+            }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["publisherKeyMustBePinned", "digestMustMatchCanonicalPayload", "sequenceMustNotRegress", "expiryMustBeCheckedBeforeUse"],
+          "properties": {
+            "publisherKeyMustBePinned": { "const": true },
+            "digestMustMatchCanonicalPayload": { "const": true },
+            "sequenceMustNotRegress": { "const": true },
+            "expiryMustBeCheckedBeforeUse": { "const": true }
+          }
+        }
+      }
+    },
+    "signedUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion", "kind", "transport", "publisherId", "pluginId", "keyId", "signatureAlgorithm", "sequence", "issuedAt", "expiresAt", "version", "hostApiRange", "channel", "artifactRef", "artifactSha256", "artifactSize", "payloadDigest", "signature", "requiresRestart", "verification"],
+      "properties": {
+        "contractVersion": { "const": 1 },
+        "kind": { "const": "signed-update" },
+        "transport": { "const": "host-mediated" },
+        "publisherId": { "$ref": "#/$defs/pluginId" },
+        "pluginId": { "$ref": "#/$defs/pluginId" },
+        "keyId": { "$ref": "#/$defs/opaqueReference" },
+        "signatureAlgorithm": { "const": "ed25519" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "version": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$" },
+        "hostApiRange": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "channel": { "enum": ["stable", "beta", "canary"] },
+        "artifactRef": { "$ref": "#/$defs/opaqueReference" },
+        "artifactSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "artifactSize": { "type": "integer", "minimum": 1, "maximum": 2000000000 },
+        "payloadDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,4096}$" },
+        "requiresRestart": { "type": "boolean" },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["publisherKeyMustBePinned", "digestMustMatchHostFetchedArtifact", "sequenceMustNotRegress", "expiryMustBeCheckedBeforeStaging", "installMustRemainHostControlled"],
+          "properties": {
+            "publisherKeyMustBePinned": { "const": true },
+            "digestMustMatchHostFetchedArtifact": { "const": true },
+            "sequenceMustNotRegress": { "const": true },
+            "expiryMustBeCheckedBeforeStaging": { "const": true },
+            "installMustRemainHostControlled": { "const": true }
+          }
+        }
+      }
+    }
+  }
+}

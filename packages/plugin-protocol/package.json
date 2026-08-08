@@ -12,6 +12,7 @@
       "import": "./src/index.mjs"
     },
     "./schema": "./schema/plugin-manifest.v1.schema.json",
+    "./downstream-schema": "./schema/plugin-downstream.v1.schema.json",
     "./stremio-schema": "./schema/stremio-addon-manifest.v3.schema.json",
     "./stremio-adapter": {
       "types": "./src/stremio-adapter.d.ts",
