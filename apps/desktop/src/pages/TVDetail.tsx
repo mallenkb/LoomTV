@@ -72,10 +72,6 @@ function normalizeRouteYear(releaseInfo?: string, released?: string): number {
   return match ? Number(match[0]) : 0;
 }
 
-function normalizeMediaTitle(value: string): string {
-  return value.normalize('NFKD').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 function isCatalogTypeForKind(kind: 'series' | 'anime', type: string): boolean {
   return kind === 'anime' ? type === 'anime' : type === 'series' || type === 'tv';
 }
@@ -114,27 +110,8 @@ function showFromStremioCatalogItem(
   };
 }
 
-function isSameShowByTitleAndYear(localShow: TVShow, catalogShow: TVShow | null): boolean {
-  if (!catalogShow?.title || normalizeMediaTitle(localShow.title) !== normalizeMediaTitle(catalogShow.title)) return false;
-  return catalogShow.year <= 0 || localShow.year <= 0 || localShow.year === catalogShow.year;
-}
-
-function findLocalShowMatch(shows: readonly TVShow[], mediaId: string | undefined, fallback: TVShow | null): TVShow | null {
-  const exact = mediaId ? shows.find((item) => item.id === mediaId) : null;
-  if (exact) return exact;
-  return fallback ? shows.find((item) => isSameShowByTitleAndYear(item, fallback)) || null : null;
-}
-
-function mergeDiscoverPosterFallback(show: TVShow, fallback: TVShow): TVShow {
-  return {
-    ...show,
-    poster: show.poster || fallback.poster,
-    backdrop: show.backdrop || fallback.backdrop,
-    logo: show.logo || fallback.logo,
-    posterCandidates: uniqueArtworkSources(fallback.posterCandidates, fallback.poster, show.posterCandidates, show.poster),
-    backdropCandidates: uniqueArtworkSources(fallback.backdropCandidates, fallback.backdrop, show.backdropCandidates, show.backdrop),
-    logoCandidates: uniqueArtworkSources(fallback.logoCandidates, fallback.logo, show.logoCandidates, show.logo),
-  };
+function findLocalShowMatch(shows: readonly TVShow[], mediaId: string | undefined): TVShow | null {
+  return mediaId ? shows.find((item) => item.id === mediaId) || null : null;
 }
 
 export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
@@ -175,11 +152,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     }
 
     const collection = kind === 'anime' ? state.animeShows : state.tvShows;
-    const routeMetadata = routeFallbackShow || collection.find((item) => item.id === mediaId) || null;
-    const found = findLocalShowMatch(collection, mediaId, routeMetadata);
-    const nextShow = found && shouldOpenDetailsFirst && routeFallbackShow
-      ? mergeDiscoverPosterFallback(found, routeFallbackShow)
-      : found || routeFallbackShow;
+    // Remote metadata cannot authorize playback of a same-title local show.
+    // Only an explicit future host binding may connect provider identity to a
+    // local library identity.
+    const found = routeFallbackShow ? null : findLocalShowMatch(collection, mediaId);
+    const nextShow = routeFallbackShow || found;
     setShow(nextShow);
     const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|${routeAddonType}|${mediaId}` : '';
     if (!nextShow && mediaId && metadataFetchKeyRef.current !== fetchKey) {
@@ -191,9 +168,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         .then((result) => {
           if (cancelled) return;
           const remoteShow = showFromStremioCatalogItem(kind, result.item);
-          if (remoteShow) setShow(shouldOpenDetailsFirst && routeFallbackShow
-            ? mergeDiscoverPosterFallback(remoteShow, routeFallbackShow)
-            : remoteShow);
+          if (remoteShow) setShow(remoteShow);
         })
         .catch((error) => {
           if (!cancelled) console.warn('Could not load Discover series metadata:', error);
@@ -206,9 +181,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       void hydrateLibraryItem(found.id)
         .then((details) => {
           if (cancelled || !details) return;
-          setShow(shouldOpenDetailsFirst && routeFallbackShow
-            ? mergeDiscoverPosterFallback(details as TVShow, routeFallbackShow)
-            : details as TVShow);
+          setShow(details as TVShow);
         })
         .catch((error) => console.warn('Could not hydrate series details:', error));
     }

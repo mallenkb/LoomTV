@@ -104,10 +104,6 @@ function normalizeRouteYear(releaseInfo?: string, released?: string): number {
   return match ? Number(match[0]) : 0;
 }
 
-function normalizeMediaTitle(value: string): string {
-  return value.normalize('NFKD').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | undefined): MediaItem | null {
   if (!item || item.type !== 'movie') return null;
   const poster = item.artwork?.poster || '';
@@ -136,27 +132,8 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
   };
 }
 
-function mergeDiscoverPosterFallback(movie: MediaItem, fallback: MediaItem): MediaItem {
-  return {
-    ...movie,
-    poster: movie.poster || fallback.poster,
-    backdrop: movie.backdrop || fallback.backdrop,
-    logo: movie.logo || fallback.logo,
-    posterCandidates: uniqueArtworkSources(fallback.posterCandidates, fallback.poster, movie.posterCandidates, movie.poster),
-    backdropCandidates: uniqueArtworkSources(fallback.backdropCandidates, fallback.backdrop, movie.backdropCandidates, movie.backdrop),
-    logoCandidates: uniqueArtworkSources(fallback.logoCandidates, fallback.logo, movie.logoCandidates, movie.logo),
-  };
-}
-
-function isSameMovieByTitleAndYear(localMovie: MediaItem, catalogMovie: MediaItem | null): boolean {
-  if (!catalogMovie?.title || normalizeMediaTitle(localMovie.title) !== normalizeMediaTitle(catalogMovie.title)) return false;
-  return catalogMovie.year <= 0 || localMovie.year <= 0 || localMovie.year === catalogMovie.year;
-}
-
-function findLocalMovieMatch(movies: readonly MediaItem[], mediaId: string | undefined, fallback: MediaItem | null): MediaItem | null {
-  const exact = mediaId ? movies.find((item) => item.id === mediaId) : null;
-  if (exact) return exact;
-  return fallback ? movies.find((item) => isSameMovieByTitleAndYear(item, fallback)) || null : null;
+function findLocalMovieMatch(movies: readonly MediaItem[], mediaId: string | undefined): MediaItem | null {
+  return mediaId ? movies.find((item) => item.id === mediaId) || null : null;
 }
 
 export default function MovieDetail({ onPlay }: MovieDetailProps) {
@@ -183,12 +160,11 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
   useEffect(() => {
     let cancelled = false;
-    const shouldUseDiscoverFallback = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover'));
-    const routeMetadata = routeFallbackMovie || state.movies.find((item) => item.id === mediaId) || null;
-    const found = findLocalMovieMatch(state.movies, mediaId, routeMetadata);
-    const nextMovie = found && shouldUseDiscoverFallback && routeFallbackMovie
-      ? mergeDiscoverPosterFallback(found, routeFallbackMovie)
-      : found || routeFallbackMovie;
+    // A provider title/year is descriptive metadata, never proof that a
+    // specific local file is the same work. Discover items remain remote-only
+    // until the host supplies an explicit provider-to-library binding.
+    const found = routeFallbackMovie ? null : findLocalMovieMatch(state.movies, mediaId);
+    const nextMovie = routeFallbackMovie || found;
     setMovie(nextMovie);
     const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|movie|${mediaId}` : '';
     if (!nextMovie && mediaId && metadataFetchKeyRef.current !== fetchKey) {
@@ -200,9 +176,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         .then((result) => {
           if (cancelled) return;
           const remoteMovie = mediaFromStremioCatalogItem(result.item);
-          if (remoteMovie) setMovie(shouldUseDiscoverFallback && routeFallbackMovie
-            ? mergeDiscoverPosterFallback(remoteMovie, routeFallbackMovie)
-            : remoteMovie);
+          if (remoteMovie) setMovie(remoteMovie);
         })
         .catch((error) => {
           if (!cancelled) console.warn('Could not load Discover movie metadata:', error);
@@ -215,9 +189,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
       void hydrateLibraryItem(found.id)
         .then((details) => {
           if (cancelled || !details) return;
-          setMovie(shouldUseDiscoverFallback && routeFallbackMovie
-            ? mergeDiscoverPosterFallback(details, routeFallbackMovie)
-            : details);
+          setMovie(details);
         })
         .catch((error) => console.warn('Could not hydrate movie details:', error));
     }
