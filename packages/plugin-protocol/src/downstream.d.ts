@@ -80,6 +80,7 @@ export interface HostAuthorizationBinding {
   profileId: string;
   selectionRevision: number;
   authorizationEpoch: number;
+  revocationEpoch: number;
 }
 
 export interface HostAuthorizationContext {
@@ -91,8 +92,16 @@ export interface HostAuthorizationContextInput {
   profileId: string;
   selectionRevision: number;
   authorizationEpoch: number;
+  revocationEpoch: number;
   now: number;
   allowedAddons: readonly { addonId: string; capabilities: readonly string[] }[];
+  isAuthorizationCurrent(binding: HostAuthorizationBinding): boolean;
+  isAddonCurrentlyAuthorized(input: {
+    addonId: string;
+    capability: string;
+    binding: HostAuthorizationBinding;
+    purpose: 'authorize-request' | 'subtitle-attachment' | 'playback-ticket';
+  }): boolean;
 }
 
 export interface VerifiedPluginSearchRequest {
@@ -199,6 +208,7 @@ export interface PlaybackProxyPlan {
 }
 
 export interface SubtitleAttachmentReceipt {
+  wireVersion: 2;
   kind: 'subtitle-attachment-receipt';
   transport: 'host-mediated';
   addonId: string;
@@ -211,6 +221,7 @@ export interface SubtitleAttachmentReceipt {
 }
 
 export interface PlaybackTicket {
+  wireVersion: 2;
   kind: 'playback-ticket';
   transport: 'host-mediated-proxy';
   ticketRef: string;
@@ -221,6 +232,12 @@ export interface PlaybackTicket {
   issuedAt: number;
   expiresAt: number;
   binding: HostAuthorizationBinding;
+  runtimeBinding: {
+    runtimeId: string;
+    lifecycleEpoch: number;
+    authorizationEpoch: number;
+    revocationEpoch: number;
+  };
   proxyPolicy: {
     methods: readonly ['GET', 'HEAD'];
     rangeRequests: true;

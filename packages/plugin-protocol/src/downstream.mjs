@@ -11,7 +11,7 @@
 import { canonicalizeJcs } from './signed-bytes.mjs';
 import { canonicalPluginItemKey, createPluginItemIdentity } from './identity.mjs';
 import { readVerifiedMarketplaceAddon } from './marketplace.mjs';
-import { isReadyHostRuntimeLease } from './runtime-lifecycle.mjs';
+import { readCurrentReadyHostRuntimeLease } from './runtime-lifecycle.mjs';
 import {
   deepFreeze,
   failWith,
@@ -120,7 +120,7 @@ function requireAddonUsable(addon, context) {
   if (addon.review.state !== 'approved' || (addon.review.expiresAt !== undefined && context.now >= addon.review.expiresAt)) {
     fail('ADDON_REVIEW_REQUIRED', 'The add-on is not currently approved for host-mediated use.', '$.review');
   }
-  if (addon.revocation.state !== 'active' || (addon.revocation.effectiveAt !== undefined && context.now >= addon.revocation.effectiveAt)) {
+  if (addon.revocation.state === 'revoked' && addon.revocation.effectiveAt !== undefined && context.now >= addon.revocation.effectiveAt) {
     fail('ADDON_REVOKED', 'The add-on is revoked for host-mediated use.', '$.revocation');
   }
 }
@@ -144,7 +144,23 @@ function bindingFor(context) {
     profileId: context.profileId,
     selectionRevision: context.selectionRevision,
     authorizationEpoch: context.authorizationEpoch,
+    revocationEpoch: context.revocationEpoch,
   };
+}
+
+function requireCurrentAuthorization(record, purpose) {
+  const binding = bindingFor(record.context);
+  if (record.context.isAuthorizationCurrent(binding) !== true) {
+    fail('AUTHORIZATION_STALE', 'The host authorization binding is no longer current.', '$.binding');
+  }
+  if (record.context.isAddonCurrentlyAuthorized({
+    addonId: record.addon.addonId,
+    capability: record.capability,
+    binding,
+    purpose,
+  }) !== true) {
+    fail('HOST_PERMISSION_REVOKED', 'The host no longer authorizes this add-on capability.', '$.allowedAddons');
+  }
 }
 
 function createVerifiedRequest(kind, wire, addon, extra) {
@@ -166,6 +182,8 @@ function authorizeRequest(verified, capability, outputKind, fields, hostContext)
   requireCapability(record.addon, capability);
   requireAddonUsable(record.addon, context);
   requireAllowedAddon(record.addon, context, capability);
+  const currentRecord = { addon: record.addon, capability, context };
+  requireCurrentAuthorization(currentRecord, 'authorize-request');
   const authorized = Object.freeze({
     wireVersion: PLUGIN_WIRE_VERSION,
     kind: outputKind,
@@ -300,10 +318,22 @@ export function verifyWirePlaybackTicketRequest(input, verifiedAddon) {
 
 export function createHostOnlyAuthorizationContext(input) {
   if (!isRecord(input)) fail('INVALID_TYPE', 'A host authorization context must be an object.');
-  const allowed = new Set(['deviceRef', 'profileId', 'selectionRevision', 'authorizationEpoch', 'now', 'allowedAddons']);
+  const allowed = new Set([
+    'deviceRef',
+    'profileId',
+    'selectionRevision',
+    'authorizationEpoch',
+    'revocationEpoch',
+    'now',
+    'allowedAddons',
+    'isAuthorizationCurrent',
+    'isAddonCurrentlyAuthorized',
+  ]);
   const issues = [];
   for (const key of Object.keys(input)) if (!allowed.has(key)) issues.push(makeIssue(`$.${key}`, 'unknown_field', 'Unknown host authorization fields are not supported.'));
   if (issues.length > 0) throw new PluginDownstreamContractError(issues);
+  if (typeof input.isAuthorizationCurrent !== 'function') fail('INVALID_CONTEXT', 'Host authorization must provide a current-binding decision.', '$.isAuthorizationCurrent');
+  if (typeof input.isAddonCurrentlyAuthorized !== 'function') fail('INVALID_CONTEXT', 'Host authorization must provide a current add-on decision.', '$.isAddonCurrentlyAuthorized');
   if (!Array.isArray(input.allowedAddons) || input.allowedAddons.length > 256) fail('INVALID_ARRAY', 'The host authorization snapshot must contain at most 256 add-ons.', '$.allowedAddons');
   const allowedAddons = input.allowedAddons.map((entry, index) => {
     strictRecord(entry, new Set(['addonId', 'capabilities']), PluginDownstreamContractError, 'A host add-on authorization entry');
@@ -323,8 +353,11 @@ export function createHostOnlyAuthorizationContext(input) {
     profileId: readOpaqueReference(input.profileId, '$.profileId', PluginDownstreamContractError),
     selectionRevision: readInteger(input.selectionRevision, '$.selectionRevision', PluginDownstreamContractError),
     authorizationEpoch: readInteger(input.authorizationEpoch, '$.authorizationEpoch', PluginDownstreamContractError),
+    revocationEpoch: readInteger(input.revocationEpoch, '$.revocationEpoch', PluginDownstreamContractError),
     now: readInteger(input.now, '$.now', PluginDownstreamContractError),
     allowedAddons: Object.freeze(allowedAddons),
+    isAuthorizationCurrent: input.isAuthorizationCurrent,
+    isAddonCurrentlyAuthorized: input.isAddonCurrentlyAuthorized,
   }));
   return context;
 }
@@ -412,6 +445,7 @@ export function createPlaybackProxyPlan(authorized) {
 export function createSubtitleAttachmentReceipt(authorized, input) {
   const record = authorizedRequestRecords.get(authorized);
   if (!record || record.capability !== 'subtitle.provider') fail('AUTHORIZED_REQUEST_REQUIRED', 'An authorized subtitle request is required.');
+  requireCurrentAuthorization(record, 'subtitle-attachment');
   strictRecord(input, new Set(['status', 'attachmentRef', 'reasonCode']), PluginDownstreamContractError, 'A host subtitle attachment result');
   const status = readEnum(input.status, ['accepted', 'rejected'], '$.status', PluginDownstreamContractError, 'subtitle attachment status');
   const attachmentRef = input.attachmentRef === undefined ? undefined : readOpaqueReference(input.attachmentRef, '$.attachmentRef', PluginDownstreamContractError);
@@ -419,6 +453,7 @@ export function createSubtitleAttachmentReceipt(authorized, input) {
   if (status === 'accepted' && (!attachmentRef || reasonCode)) fail('INVALID_RESULT', 'Accepted subtitle results require only an attachmentRef.', '$');
   if (status === 'rejected' && (!reasonCode || attachmentRef)) fail('INVALID_RESULT', 'Rejected subtitle results require only a reasonCode.', '$');
   return deepFreeze({
+    wireVersion: PLUGIN_WIRE_VERSION,
     kind: 'subtitle-attachment-receipt',
     transport: PLUGIN_HOST_TRANSPORT,
     addonId: record.addon.addonId,
@@ -434,10 +469,16 @@ export function createSubtitleAttachmentReceipt(authorized, input) {
 export function createHostPlaybackTicket(authorized, runtimeLease, input) {
   const record = authorizedRequestRecords.get(authorized);
   if (!record || record.capability !== 'playback.provider') fail('AUTHORIZED_REQUEST_REQUIRED', 'An authorized playback request is required.');
-  if (!isReadyHostRuntimeLease(runtimeLease)) fail('RUNTIME_NOT_READY', 'Playback tickets require a host runtime lease in the ready state.');
+  requireCurrentAuthorization(record, 'playback-ticket');
+  const runtime = readCurrentReadyHostRuntimeLease(runtimeLease, {
+    addonId: record.addon.addonId,
+    authorizationEpoch: record.context.authorizationEpoch,
+    revocationEpoch: record.context.revocationEpoch,
+  });
   strictRecord(input, new Set(['ticketRef', 'issuedAt', 'expiresAt']), PluginDownstreamContractError, 'A host playback ticket');
   const window = readTimeWindow(input.issuedAt, input.expiresAt, '$', PluginDownstreamContractError, PLUGIN_TICKET_MAX_LIFETIME_MS);
   return deepFreeze({
+    wireVersion: PLUGIN_WIRE_VERSION,
     kind: 'playback-ticket',
     transport: PLUGIN_PROXY_TRANSPORT,
     ticketRef: readOpaqueReference(input.ticketRef, '$.ticketRef', PluginDownstreamContractError),
@@ -448,6 +489,12 @@ export function createHostPlaybackTicket(authorized, runtimeLease, input) {
     issuedAt: window.issuedAt,
     expiresAt: window.expiresAt,
     binding: authorized.binding,
+    runtimeBinding: {
+      runtimeId: runtime.runtimeId,
+      lifecycleEpoch: runtime.lifecycleEpoch,
+      authorizationEpoch: runtime.authorizationEpoch,
+      revocationEpoch: runtime.revocationEpoch,
+    },
     proxyPolicy: {
       methods: Object.freeze(['GET', 'HEAD']),
       rangeRequests: true,

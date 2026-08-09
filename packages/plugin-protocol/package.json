@@ -13,6 +13,7 @@
     },
     "./schema": "./schema/plugin-manifest.v1.schema.json",
     "./downstream-schema": "./schema/plugin-downstream.v2.schema.json",
+    "./downstream-schema-v2": "./schema/plugin-downstream.v2.schema.json",
     "./identity": {
       "types": "./src/identity.d.ts",
       "import": "./src/identity.mjs"

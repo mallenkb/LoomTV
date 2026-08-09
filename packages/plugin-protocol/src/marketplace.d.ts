@@ -191,6 +191,8 @@ export interface HostMarketplaceVerificationContextInput {
   }): boolean;
   isPublisherTrusted(input: { publisherId: string }): boolean;
   getLastAcceptedSequence?(input: { publisherId: string; addonId?: string; kind: string }): number | undefined;
+  getLastAcceptedPayload?(input: { publisherId: string; addonId?: string; kind: string }): string | undefined;
+  isHostApiRangeSupported(input: { range: string }): boolean;
   approveRollback?(input: { publisherId: string; addonId?: string; kind: string; previousSequence: number; nextSequence: number }): boolean;
 }
 
@@ -253,6 +255,7 @@ export function parseWirePluginUpdate(input: unknown): WirePluginUpdate;
 export function verifyWirePluginUpdate(input: unknown, hostContext: HostMarketplaceVerificationContext, verifiedAddon: VerifiedMarketplaceAddon): VerifiedPluginUpdate;
 export function isVerifiedPluginUpdate(value: unknown): value is VerifiedPluginUpdate;
 export function createHostUpdateAuthorizationContext(input: {
+  now: number;
   approveDeclarativeUpdate(input: { addonId: string; version: string; sequence: number }): boolean;
 }): HostUpdateAuthorizationContext;
 export function authorizeVerifiedPluginUpdate(value: VerifiedPluginUpdate, hostContext: HostUpdateAuthorizationContext): {

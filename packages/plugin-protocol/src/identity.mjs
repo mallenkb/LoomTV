@@ -20,12 +20,14 @@ import {
   rejectForbiddenWireFields,
   strictRecord,
 } from './validation.mjs';
+import { encodeBase64Url } from './signed-bytes.mjs';
 
 export const PLUGIN_ITEM_IDENTITY_VERSION = 1;
 export const PLUGIN_ITEM_IDENTITY_KIND = 'plugin-item-identity';
 export const PLUGIN_CATALOG_MEMBERSHIP_KIND = 'catalog-membership';
 export const PLUGIN_CATALOG_RESULT_KIND = 'plugin-catalog-result';
 export const PLUGIN_ITEM_KEY_PREFIX = 'loom-plugin:item:v1';
+export const LEGACY_STREMIO_ITEM_KEY_PREFIX = 'loomtv-stremio-item-v1';
 
 class PluginIdentityError extends Error {
   constructor(issues) {
@@ -81,9 +83,14 @@ export function createPluginItemIdentity(input) {
 
 export function canonicalPluginItemKey(input) {
   const identity = input?.kind === PLUGIN_ITEM_IDENTITY_KIND ? parseIdentityRecord(input) : createPluginItemIdentity(input);
-  return [PLUGIN_ITEM_KEY_PREFIX, identity.addonId, identity.type, identity.providerId]
+  return `${PLUGIN_ITEM_KEY_PREFIX}:${[identity.addonId, identity.type, identity.providerId]
     .map((part) => encodeURIComponent(part))
-    .join(':');
+    .join(':')}`;
+}
+
+function legacyStremioKey(addonId, type, providerId) {
+  const encodePart = (value) => encodeBase64Url(new TextEncoder().encode(value));
+  return [LEGACY_STREMIO_ITEM_KEY_PREFIX, addonId, type, providerId].map(encodePart).join('.');
 }
 
 function parseMembershipRecord(value, path = '$') {
@@ -185,13 +192,7 @@ export function migrateLegacyCatalogItemIdentity(input) {
     catalogType,
     catalogId,
   });
-  const legacyKey = [
-    'loom-plugin',
-    addonId,
-    'catalog',
-    catalogType,
-    catalogId,
-  ].map((part) => encodeURIComponent(part)).join(':') + `:item:${encodeURIComponent(providerId)}`;
+  const legacyKey = legacyStremioKey(addonId, catalogType, providerId);
   return deepFreeze({
     migrationVersion: 1,
     legacyKey,

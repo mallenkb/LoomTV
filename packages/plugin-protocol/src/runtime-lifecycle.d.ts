@@ -15,6 +15,8 @@ export interface HostRuntimeLease {
   runtimeId: string;
   state: PluginRuntimeState;
   lifecycleEpoch: number;
+  authorizationEpoch: number;
+  revocationEpoch: number;
   reasonCode?: string;
 }
 
@@ -23,8 +25,22 @@ export function createHostRuntimeLease(input: {
   runtimeId: string;
   state: 'absent';
   lifecycleEpoch: number;
+  authorizationEpoch: number;
+  revocationEpoch: number;
   reasonCode?: string;
 }): HostRuntimeLease;
 export function transitionHostRuntimeLease(currentLease: HostRuntimeLease, nextState: PluginRuntimeState, reasonCode?: string): HostRuntimeLease;
 export function isHostRuntimeLease(value: unknown): value is HostRuntimeLease;
 export function isReadyHostRuntimeLease(value: unknown): value is HostRuntimeLease & { state: 'ready' };
+export function readCurrentReadyHostRuntimeLease(value: unknown, expected: {
+  addonId: string;
+  authorizationEpoch: number;
+  revocationEpoch: number;
+}): Readonly<{
+  state: 'ready';
+  addonId: string;
+  runtimeId: string;
+  lifecycleEpoch: number;
+  authorizationEpoch: number;
+  revocationEpoch: number;
+}>;
