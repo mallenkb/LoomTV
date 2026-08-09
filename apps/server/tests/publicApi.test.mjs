@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createHeadlessServer } from '../src/server.js';
 
 const OWNER_PASSWORD = 'public-api-password';
+const BOOTSTRAP_SECRET = 'public-api-bootstrap-secret-32-bytes';
 
 async function startServer() {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-public-api-'));
@@ -16,7 +17,7 @@ async function startServer() {
   };
   await fs.mkdir(paths.dataDir, { recursive: true });
   await fs.mkdir(paths.cacheDir, { recursive: true });
-  const server = createHeadlessServer({ host: '127.0.0.1', port: 0, paths, version: '0.0.0-test' });
+  const server = createHeadlessServer({ host: '127.0.0.1', port: 0, paths, version: '0.0.0-test', bootstrapSecret: BOOTSTRAP_SECRET });
   const address = await server.start();
   const baseUrl = `http://127.0.0.1:${address.port}`;
   return { server, baseUrl };
@@ -74,15 +75,31 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
 
   let token;
   await t.test('owner onboarding issues a session token exactly once', async () => {
-    const rejected = await anonymous('POST', '/api/v1/auth/owner', { name: 'Owner', password: 'short' });
+    const missingSecret = await anonymous('POST', '/api/v1/auth/owner', { name: 'Owner', password: OWNER_PASSWORD });
+    assert.equal(missingSecret.status, 401);
+    assert.equal(missingSecret.payload.error.code, 'bootstrap_secret_invalid');
+
+    const rejected = await anonymous('POST', '/api/v1/auth/owner', {
+      name: 'Owner',
+      password: 'short',
+      bootstrapSecret: BOOTSTRAP_SECRET,
+    });
     assert.equal(rejected.status, 400);
 
-    const created = await anonymous('POST', '/api/v1/auth/owner', { name: 'Owner', password: OWNER_PASSWORD });
+    const created = await anonymous('POST', '/api/v1/auth/owner', {
+      name: 'Owner',
+      password: OWNER_PASSWORD,
+      bootstrapSecret: BOOTSTRAP_SECRET,
+    });
     assert.equal(created.status, 201);
     token = created.payload.data.adminToken;
     assert.equal(typeof token, 'string');
 
-    const again = await anonymous('POST', '/api/v1/auth/owner', { name: 'Owner', password: OWNER_PASSWORD });
+    const again = await anonymous('POST', '/api/v1/auth/owner', {
+      name: 'Owner',
+      password: OWNER_PASSWORD,
+      bootstrapSecret: BOOTSTRAP_SECRET,
+    });
     assert.equal(again.status, 409);
     assert.equal(again.payload.error.code, 'owner_exists');
   });
@@ -195,6 +212,7 @@ test('public and admin password routes share the credential-reset policy', async
   const ownerCreated = await anonymous('POST', '/api/v1/auth/owner', {
     name: 'Owner',
     password: 'route-owner-password-1',
+    bootstrapSecret: BOOTSTRAP_SECRET,
   });
   assert.equal(ownerCreated.status, 201);
   const owner = api(baseUrl, ownerCreated.payload.data.adminToken);

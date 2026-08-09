@@ -124,13 +124,17 @@ function redactAuditValue(value: unknown, key = '', depth = 0): unknown {
 }
 
 export class PluginSecretStore {
+  private readonly database: BetterSqlite3.Database;
+  private readonly codec: SecretCodec;
   private readonly macKey: Buffer;
 
   constructor(
-    private readonly database: BetterSqlite3.Database,
-    private readonly codec: SecretCodec,
+    database: BetterSqlite3.Database,
+    codec: SecretCodec,
     macKey: Buffer | string,
   ) {
+    this.database = database;
+    this.codec = codec;
     this.macKey = Buffer.isBuffer(macKey) ? Buffer.from(macKey) : Buffer.from(macKey, 'utf8');
     if (this.macKey.length < 32) {
       throw new PluginSecretStoreError('PLUGIN_SECRET_STORAGE_UNAVAILABLE', 'The host secret-store integrity key is unavailable.');

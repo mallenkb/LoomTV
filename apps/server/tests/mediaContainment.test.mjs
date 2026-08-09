@@ -5,9 +5,11 @@ import path from 'node:path';
 import test from 'node:test';
 import { createHeadlessAdminService, headlessAdminStateFilename } from '../src/admin-service.js';
 import { createHeadlessMediaService } from '../src/media-service.js';
+import { createBootstrapSecurity } from '../src/secure-bootstrap.js';
 import { createHeadlessServer } from '../src/server.js';
 import { statContainedFile } from '../src/media-path-guard.js';
 
+const BOOTSTRAP_SECRET = 'containment-test-bootstrap-secret-32-bytes';
 const OWNER_PASSWORD = 'containment-test-password';
 const POSIX_ONLY = { skip: process.platform === 'win32' ? 'POSIX-only symlink semantics' : false };
 
@@ -29,9 +31,17 @@ async function serviceWithCatalogPath(hostilePath) {
   await fs.writeFile(path.join(mediaDir, 'inside.mkv'), 'in-root-bytes');
 
   const logs = [];
-  const options = { dataDir, version: '0.0.0-test', getRuntimeHealth: async () => ({ media: { state: 'online' } }), getSessions: async () => [] };
+  const bootstrapSecurity = createBootstrapSecurity({ dataDir, secret: BOOTSTRAP_SECRET });
+  await bootstrapSecurity.initialize({ ownerConfigured: false });
+  const options = {
+    dataDir,
+    version: '0.0.0-test',
+    getRuntimeHealth: async () => ({ media: { state: 'online' } }),
+    getSessions: async () => [],
+    bootstrapSecurity,
+  };
   const service = createHeadlessAdminService(options);
-  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD });
+  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   const principal = await service.authenticateRequest(bearer(session.adminToken));
   await service.addLibraryRoot({ path: mediaDir }, principal);
   await service.startLibraryScan({}, principal);
@@ -257,7 +267,7 @@ test('media routes contain paths end to end and reject encoded traversal at the 
   const paths = { dataDir: path.join(base, 'data'), cacheDir: path.join(base, 'cache'), mediaDir: null };
   await fs.mkdir(paths.dataDir, { recursive: true });
   await fs.mkdir(paths.cacheDir, { recursive: true });
-  const server = createHeadlessServer({ host: '127.0.0.1', port: 0, paths, version: '0.0.0-test' });
+  const server = createHeadlessServer({ host: '127.0.0.1', port: 0, paths, version: '0.0.0-test', bootstrapSecret: BOOTSTRAP_SECRET });
   const address = await server.start();
   const baseUrl = `http://127.0.0.1:${address.port}`;
   t.after(() => server.stop());
@@ -272,7 +282,7 @@ test('media routes contain paths end to end and reject encoded traversal at the 
   const created = await fetch(`${baseUrl}/api/v1/auth/owner`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Owner', password: OWNER_PASSWORD }),
+    body: JSON.stringify({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET }),
   }).then((response) => response.json());
   const token = created.data.adminToken;
   const authed = (method, route, body) => fetch(`${baseUrl}${route}`, {

@@ -74,14 +74,19 @@ export type StremioPluginServiceErrorCode =
   | 'STREMIO_PLUGIN_REQUEST_CANCELLED';
 
 export class StremioPluginServiceError extends Error {
+  public readonly code: StremioPluginServiceErrorCode;
+  public readonly retryable: boolean;
+
   constructor(
-    public readonly code: StremioPluginServiceErrorCode,
+    code: StremioPluginServiceErrorCode,
     message: string,
-    public readonly retryable = false,
+    retryable = false,
     options?: { cause?: unknown },
   ) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = 'StremioPluginServiceError';
+    this.code = code;
+    this.retryable = retryable;
   }
 }
 
@@ -137,12 +142,17 @@ type ProviderGateState = {
 };
 
 class ProviderRequestGate {
+  private readonly maxConcurrent: number;
+  private readonly maxQueued: number;
   private readonly states = new Map<string, ProviderGateState>();
 
   constructor(
-    private readonly maxConcurrent: number,
-    private readonly maxQueued: number,
-  ) {}
+    maxConcurrent: number,
+    maxQueued: number,
+  ) {
+    this.maxConcurrent = maxConcurrent;
+    this.maxQueued = maxQueued;
+  }
 
   async run<T>(key: string, task: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
     const state = this.states.get(key) || { active: 0, waiters: [] };
@@ -240,6 +250,7 @@ function requiresConfiguration(record: StremioInstallRecord): boolean {
 }
 
 export class StremioPluginService {
+  private readonly deps: StremioPluginServiceDependencies;
   private registry: StremioAddonRegistry | null = null;
   private initializationError: StremioPluginServiceError | null = null;
   private mutationQueue: Promise<void> = Promise.resolve();
@@ -248,7 +259,8 @@ export class StremioPluginService {
   private readonly globalProviderGate: ProviderRequestGate;
   private readonly profileAddonProviderGate: ProviderRequestGate;
 
-  constructor(private readonly deps: StremioPluginServiceDependencies) {
+  constructor(deps: StremioPluginServiceDependencies) {
+    this.deps = deps;
     this.registryOptions = {
       fetchImpl: deps.fetchImpl,
       isAddonConfigured: deps.isAddonConfigured,

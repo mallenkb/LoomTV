@@ -16,6 +16,11 @@ import {
 import { fetchAniSkipSegments, fetchTheIntroDbSegments, theIntroDbLookupKey } from '../src/main/skipSegments/providers.ts';
 import type { MediaSegmentCandidate } from '../src/main/skipSegments/types.ts';
 
+const providerNetwork = {
+  lookup: async () => [{ address: '93.184.216.34', family: 4 as const }],
+  requestImpl: async (url: URL, init: RequestInit) => globalThis.fetch(url, init),
+};
+
 function candidate(source: MediaSegmentCandidate['source'], confidence: number): MediaSegmentCandidate {
   return {
     id: source,
@@ -103,12 +108,12 @@ test('TheIntroDB normalization handles open credits and duration mismatch', asyn
     credits: [{ start_ms: 1_300_000, end_ms: null }],
   }), { status: 200, headers: { 'content-type': 'application/json' } });
   try {
-    const result = await fetchTheIntroDbSegments({ ids: { tmdbId: '1399' }, season: 1, episode: 1, durationMs: 1_400_000 });
+    const result = await fetchTheIntroDbSegments({ ...providerNetwork, ids: { tmdbId: '1399' }, season: 1, episode: 1, durationMs: 1_400_000 });
     assert.equal(result.kind, 'success');
     if (result.kind === 'success') assert.equal(result.segments.find((segment) => segment.type === 'credits')?.endMs, null);
 
     globalThis.fetch = async () => new Response(JSON.stringify({ duration_ms: 900_000, intro: [{ start_ms: 0, end_ms: 90_000 }] }), { status: 200 });
-    assert.equal((await fetchTheIntroDbSegments({ ids: { tmdbId: '1399' }, season: 1, episode: 1, durationMs: 1_400_000 })).kind, 'empty');
+    assert.equal((await fetchTheIntroDbSegments({ ...providerNetwork, ids: { tmdbId: '1399' }, season: 1, episode: 1, durationMs: 1_400_000 })).kind, 'empty');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -131,7 +136,7 @@ test('TheIntroDB movie lookup omits episode coordinates and preserves movie segm
   };
   try {
     assert.equal(theIntroDbLookupKey({ tmdbId: '550' }), 'tmdb:550:movie');
-    const result = await fetchTheIntroDbSegments({ ids: { tmdbId: '550' }, durationMs: 8_300_000 });
+    const result = await fetchTheIntroDbSegments({ ...providerNetwork, ids: { tmdbId: '550' }, durationMs: 8_300_000 });
     const url = new URL(requestedUrl);
     assert.equal(url.searchParams.has('season'), false);
     assert.equal(url.searchParams.has('episode'), false);
@@ -153,11 +158,11 @@ test('AniSkip maps OP, ED, mixed markers, recap, and Retry-After', async () => {
     { skipType: 'recap', interval: { startTime: 0, endTime: 45 }, episodeLength: 1400 },
   ] }), { status: 200 });
   try {
-    const result = await fetchAniSkipSegments({ malId: '1', episode: 1, durationMs: 1_400_000 });
+    const result = await fetchAniSkipSegments({ ...providerNetwork, malId: '1', episode: 1, durationMs: 1_400_000 });
     assert.equal(result.kind, 'success');
     if (result.kind === 'success') assert.deepEqual(result.segments.map((segment) => segment.type), ['recap', 'intro', 'outro']);
     globalThis.fetch = async () => new Response('', { status: 429, headers: { 'retry-after': '2' } });
-    assert.deepEqual(await fetchAniSkipSegments({ malId: '1', episode: 1, durationMs: 1_400_000 }), { kind: 'retry', retryAfterMs: 2000 });
+    assert.deepEqual(await fetchAniSkipSegments({ ...providerNetwork, malId: '1', episode: 1, durationMs: 1_400_000 }), { kind: 'retry', retryAfterMs: 2000 });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -169,9 +174,9 @@ test('provider timeout and malformed JSON degrade without a player error', async
     globalThis.fetch = async (_input, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
     });
-    assert.equal((await fetchAniSkipSegments({ malId: '1', episode: 1, durationMs: 1_400_000 })).kind, 'error');
+    assert.equal((await fetchAniSkipSegments({ ...providerNetwork, malId: '1', episode: 1, durationMs: 1_400_000 })).kind, 'error');
     globalThis.fetch = async () => new Response('{bad json', { status: 200 });
-    assert.equal((await fetchTheIntroDbSegments({ ids: { tmdbId: '1' }, season: 1, episode: 1, durationMs: 1_400_000 })).kind, 'error');
+    assert.equal((await fetchTheIntroDbSegments({ ...providerNetwork, ids: { tmdbId: '1' }, season: 1, episode: 1, durationMs: 1_400_000 })).kind, 'error');
   } finally {
     globalThis.fetch = originalFetch;
   }

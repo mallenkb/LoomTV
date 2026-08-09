@@ -12,7 +12,7 @@ import {
   sanitizeArtworkBytesWithDecoder,
 } from './artworkSecurity.ts';
 import type { LibraryData } from './appContracts.ts';
-import type { ProfileExportV1 } from '../shared/desktopProtocol.ts';
+import type { ProfileExportV1, StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
 import {
   createDatabaseArtworkRepository,
   type CachedArtwork,
@@ -59,7 +59,6 @@ import {
   type PluginSecretReference,
   type SecretCodec,
 } from './pluginSecretStore.ts';
-import type { StremioPluginConfigurationField } from '../shared/desktopProtocol.ts';
 import type { SegmentAnalysisJob, SegmentAnalysisJobState } from './skipSegments/analysisJobs.ts';
 import type {
   MediaSegment,

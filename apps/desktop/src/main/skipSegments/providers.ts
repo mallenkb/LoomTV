@@ -1,10 +1,11 @@
 import type { MetadataProviderIds } from '../mediaTags';
 import { deduplicateProviderSegments, durationIsCompatible, normalizeSegment } from './normalize.ts';
 import type { NormalizedSegmentInput } from './types';
-import { safeFetch } from '../safeFetch.ts';
+import { safeFetch, type SafeFetchOptions } from '../safeFetch.ts';
 
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const REQUEST_TIMEOUT_MS = 3000;
+type ProviderNetworkOptions = Pick<SafeFetchOptions, 'lookup' | 'requestImpl'>;
 
 export type ProviderLookupResult =
   | { kind: 'success'; segments: NormalizedSegmentInput[] }
@@ -29,7 +30,7 @@ function retryAfterMs(response: Response): number | undefined {
   return Number.isFinite(at) ? Math.max(0, at - Date.now()) : undefined;
 }
 
-async function providerFetch(url: URL): Promise<{ response: Response; payload?: unknown }> {
+async function providerFetch(url: URL, network: ProviderNetworkOptions = {}): Promise<{ response: Response; payload?: unknown }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
@@ -40,6 +41,8 @@ async function providerFetch(url: URL): Promise<{ response: Response; payload?: 
       allowedHosts: ['api.theintrodb.org', 'api.aniskip.com'],
       timeoutMs: REQUEST_TIMEOUT_MS,
       maxBytes: MAX_RESPONSE_BYTES,
+      lookup: network.lookup,
+      requestImpl: network.requestImpl,
     });
     if (!response.ok) return { response };
     return { response, payload: await responseJson(response) };
@@ -84,6 +87,8 @@ export async function fetchTheIntroDbSegments(input: {
   season?: number;
   episode?: number;
   durationMs: number;
+  lookup?: SafeFetchOptions['lookup'];
+  requestImpl?: SafeFetchOptions['requestImpl'];
 }): Promise<ProviderLookupResult> {
   const lookupKey = theIntroDbLookupKey(input.ids, input.season, input.episode);
   if (!lookupKey) return { kind: 'empty', segments: [] };
@@ -99,7 +104,7 @@ export async function fetchTheIntroDbSegments(input: {
   url.searchParams.set('duration_ms', String(Math.round(input.durationMs)));
 
   try {
-    const { response, payload } = await providerFetch(url);
+    const { response, payload } = await providerFetch(url, input);
     if (response.status === 404 || response.status === 204) return { kind: 'empty', segments: [] };
     if (response.status === 429) return { kind: 'retry', retryAfterMs: retryAfterMs(response) };
     if (!response.ok || payload === undefined) return { kind: 'error' };
@@ -148,6 +153,8 @@ export async function fetchAniSkipSegments(input: {
   malId?: string;
   episode: number;
   durationMs: number;
+  lookup?: SafeFetchOptions['lookup'];
+  requestImpl?: SafeFetchOptions['requestImpl'];
 }): Promise<ProviderLookupResult> {
   const lookupKey = aniSkipLookupKey(input.malId, input.episode);
   if (!lookupKey || !input.malId) return { kind: 'empty', segments: [] };
@@ -157,7 +164,7 @@ export async function fetchAniSkipSegments(input: {
   url.searchParams.set('episodeLength', String(Math.max(1, Math.round(input.durationMs / 1000))));
 
   try {
-    const { response, payload } = await providerFetch(url);
+    const { response, payload } = await providerFetch(url, input);
     if (response.status === 404 || response.status === 204) return { kind: 'empty', segments: [] };
     if (response.status === 429) return { kind: 'retry', retryAfterMs: retryAfterMs(response) };
     if (!response.ok || payload === undefined) return { kind: 'error' };

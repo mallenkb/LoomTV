@@ -10,16 +10,21 @@ import {
   headlessAdminStateFilename,
   loginThrottleDelayMs,
 } from '../src/admin-service.js';
+import { createBootstrapSecurity } from '../src/secure-bootstrap.js';
 
 const OWNER_PASSWORD = 'correct-horse-battery';
+const BOOTSTRAP_SECRET = 'test-bootstrap-secret-32-bytes-minimum';
 
 async function makeService(overrides = {}) {
   const dataDir = overrides.dataDir || await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-admin-'));
+  const bootstrapSecurity = createBootstrapSecurity({ dataDir, secret: BOOTSTRAP_SECRET });
+  await bootstrapSecurity.initialize({ ownerConfigured: false });
   const service = createHeadlessAdminService({
     dataDir,
     version: '0.0.0-test',
     getRuntimeHealth: async () => ({ media: { state: 'online' } }),
     getSessions: async () => [],
+    bootstrapSecurity,
     ...overrides.options,
   });
   return { service, dataDir };
@@ -31,7 +36,7 @@ function bearer(token) {
 
 async function onboardedService(overrides = {}) {
   const { service, dataDir } = await makeService(overrides);
-  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD });
+  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   const principal = await service.authenticateRequest(bearer(session.adminToken));
   return { service, dataDir, token: session.adminToken, principal };
 }
@@ -228,14 +233,21 @@ test('owner onboarding issues a usable session and cannot run twice', async () =
   const { service } = await makeService();
   assert.equal(await service.isOwnerConfigured(), false);
 
-  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD });
+  await assert.rejects(
+    () => service.createOwner({ name: 'Owner', password: OWNER_PASSWORD }),
+    (error) => error.status === 401 && error.code === 'bootstrap_secret_invalid',
+  );
+  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   assert.equal(typeof session.adminToken, 'string');
   assert.equal(session.user.type, 'owner');
   assert.equal(await service.isOwnerConfigured(), true);
 
   const principal = await service.authenticateRequest(bearer(session.adminToken));
   assert.equal(principal.type, 'owner');
-  await assert.rejects(() => service.createOwner({ name: 'Second', password: OWNER_PASSWORD }), (error) => error.status === 409);
+  await assert.rejects(
+    () => service.createOwner({ name: 'Second', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET }),
+    (error) => error.status === 409,
+  );
 });
 
 test('sign-in rejects bad credentials with a generic error and locks out after repeated failures', async () => {
@@ -300,7 +312,7 @@ test('shared address failures throttle without hard-locking another identity', a
 
 test('owner aliases share one per-account lockout bucket', async () => {
   const { service } = await makeService({ options: { loginDelay: async () => {} } });
-  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD });
+  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await assert.rejects(
@@ -320,7 +332,7 @@ test('owner aliases share one per-account lockout bucket', async () => {
 
 test('pre-upgrade owner lockouts remain effective across owner aliases', async () => {
   const { service, dataDir } = await makeService({ options: { loginDelay: async () => {} } });
-  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD });
+  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   const statePath = path.join(dataDir, headlessAdminStateFilename);
   const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
   const now = Date.now();
@@ -345,7 +357,7 @@ test('pre-upgrade owner lockouts remain effective across owner aliases', async (
 
 test('pre-upgrade owner failures contribute to the stable account bucket', async () => {
   const { service, dataDir } = await makeService({ options: { loginDelay: async () => {} } });
-  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD });
+  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   const statePath = path.join(dataDir, headlessAdminStateFilename);
   const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
   const now = Date.now();
