@@ -1302,7 +1302,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       }
       return null;
     }
-    return cached.items;
+    return cached;
   }, []);
 
   const setCachedItems = useCallback((cacheId: CachedCacheId, nextItems: readonly StremioPluginCatalogItem[]) => {

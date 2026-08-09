@@ -202,11 +202,12 @@ jobs:
         run: corepack pnpm --filter @loom-media-server/mobile exec expo prebuild --clean --platform ios --no-install
 
       - name: Install CocoaPods dependencies
+        working-directory: apps/mobile/ios
         shell: bash
         run: |
           set -euo pipefail
           command -v pod >/dev/null 2>&1 || { echo 'CocoaPods is unavailable on the runner.' >&2; exit 1; }
-          pod install --project-directory=apps/mobile/ios
+          pod install
 
       - name: Compile iOS Simulator native target
         shell: bash
