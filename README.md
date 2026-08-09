@@ -374,6 +374,7 @@ Bundled third-party tools and dependencies remain under their own licenses. In p
 - [LoomTV 1.0.111](docs/releases/v1.0.111.md): keeps the display awake during active native playback and releases the blocker reliably when playback stops.
 - [LoomTV 1.0.113](docs/releases/v1.0.113.md): refreshes desktop browsing, metadata, playback, library, and profile experiences.
 - [LoomTV 1.0.114](docs/releases/v1.0.114.md): restores the desktop release fallback when platform signing credentials are not configured, while preserving signed builds when credentials are available.
+- [LoomTV 1.0.115](docs/releases/v1.0.115.md): fixes release attestation inputs and Linux artifact naming for the desktop installers.
 - [LoomTV 1.0.112](docs/releases/v1.0.112.md): refines desktop Discover browsing and enhances anime cast display.
 - [LoomTV 1.0.110](docs/releases/v1.0.110.md): improves macOS MPV compatibility and avoids unnecessary fallback-runtime checks during playback.
 - [LoomTV 1.0.109](docs/releases/v1.0.109.md): replaces raw updater filesystem errors with concise, actionable status messages.

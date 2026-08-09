@@ -257,6 +257,7 @@ jobs:
             apps/desktop/out/builder/**/*.blockmap
             apps/desktop/out/builder/**/*.yml
             apps/desktop/out/builder/**/*.yaml
+            !apps/desktop/out/builder/**/builder-debug.yml
           if-no-files-found: error
 
   attest-macos:

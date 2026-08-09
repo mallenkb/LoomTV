@@ -51,6 +51,11 @@ const TARGET_MATRIX = Object.freeze([
     platform: 'Linux',
     arch: 'x64',
     stem: 'linux-x64',
+    artifactStems: Object.freeze({
+      deb: 'linux-amd64',
+      rpm: 'linux-x86_64',
+      AppImage: 'linux-x86_64',
+    }),
     installerExtensions: Object.freeze(['deb', 'rpm', 'AppImage']),
     updaterMetadata: 'latest-linux.yml',
     updaterExtensions: Object.freeze(['AppImage']),
@@ -137,7 +142,7 @@ function expectedTargetMatrix(version) {
     id: target.id,
     platform: target.platform,
     arch: target.arch,
-    artifacts: target.installerExtensions.map((extension) => `LoomTV-${version}-${target.stem}.${extension}`),
+    artifacts: target.installerExtensions.map((extension) => `LoomTV-${version}-${artifactStem(target, extension)}.${extension}`),
     updaterMetadata: target.updaterMetadata,
     trustedAttestationBuilder: TRUSTED_ATTESTATION_BUILDERS[target.platform],
   }));
@@ -150,7 +155,7 @@ function expectedUpdaterCoverage(version) {
       metadata,
       targetIds: targets.map((target) => target.id),
       requiredAssets: [...new Set(targets.flatMap((target) => target.updaterExtensions
-        .map((extension) => `LoomTV-${version}-${target.stem}.${extension}`)))],
+        .map((extension) => `LoomTV-${version}-${artifactStem(target, extension)}.${extension}`)))],
     };
   });
 }
@@ -166,10 +171,14 @@ function metadataTarget(metadataName) {
   };
 }
 
+function artifactStem(target, extension) {
+  return target.artifactStems?.[extension] || target.stem;
+}
+
 function artifactDescriptor(name, version) {
   for (const target of TARGET_MATRIX) {
     for (const extension of target.installerExtensions) {
-      const artifactName = `LoomTV-${version}-${target.stem}.${extension}`;
+      const artifactName = `LoomTV-${version}-${artifactStem(target, extension)}.${extension}`;
       if (name === artifactName) {
         return {
           targetId: target.id,
