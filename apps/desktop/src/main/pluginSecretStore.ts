@@ -4,6 +4,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 const SECRET_REF_PREFIX = 'loomtv-secret-v1_';
 const MAX_SECRET_BYTES = 64 * 1024;
 const SECRET_REF_PATTERN = /^loomtv-secret-v1_[A-Za-z0-9_-]{32}$/;
+const HOST_SECRET_FIELD_PREFIX = 'loomtvHost_';
 
 export type SecretCodec = {
   encrypt(value: string): string;
@@ -49,7 +50,10 @@ type SecretRow = {
 
 function safeIdentity(value: unknown, label: string, maxLength: number): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
-  if (!normalized || normalized.length > maxLength || /[\u0000-\u001f\u007f]/.test(normalized)) {
+  if (!normalized || normalized.length > maxLength || [...normalized].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  })) {
     throw new PluginSecretStoreError('PLUGIN_SECRET_INVALID', `${label} is invalid.`);
   }
   return normalized;
@@ -94,6 +98,31 @@ function validMac(key: Buffer, row: SecretRow): boolean {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
+function stateMacPayload(addon: string, revision: number, serializedRecord: string): string {
+  return ['stremio-trust-state-v2', addon, String(revision), serializedRecord].join('\u0000');
+}
+
+function redactAuditValue(value: unknown, key = '', depth = 0): unknown {
+  if (depth > 5) return '[REDACTED]';
+  if (/(?:auth|cookie|secret|token|credential|config|password|signature|manifesturl|url)/i.test(key)) {
+    return '[REDACTED]';
+  }
+  if (typeof value === 'string') {
+    if (/https?:\/\//i.test(value) || value.length > 512) return '[REDACTED]';
+    return [...value].filter((character) => {
+      const code = character.charCodeAt(0);
+      return code > 0x1f && code !== 0x7f;
+    }).join('');
+  }
+  if (Array.isArray(value)) return value.slice(0, 100).map((entry) => redactAuditValue(entry, key, depth + 1));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .slice(0, 100)
+      .map(([entryKey, entryValue]) => [entryKey, redactAuditValue(entryValue, entryKey, depth + 1)]));
+  }
+  return value;
+}
+
 export class PluginSecretStore {
   private readonly macKey: Buffer;
 
@@ -113,19 +142,46 @@ export class PluginSecretStore {
     return Number.isSafeInteger(row?.revision) && Number(row?.revision) >= 0 ? Number(row?.revision) : 0;
   }
 
+  signState(addonIdentity: string, revision: number, serializedRecord: string): string {
+    const addon = addonId(addonIdentity);
+    if (!Number.isSafeInteger(revision) || revision < 1 || Buffer.byteLength(serializedRecord, 'utf8') > 1024 * 1024) {
+      throw new PluginSecretStoreError('PLUGIN_SECRET_INVALID', 'The plugin state integrity payload is invalid.');
+    }
+    return createHmac('sha256', this.macKey)
+      .update(stateMacPayload(addon, revision, serializedRecord), 'utf8')
+      .digest('hex');
+  }
+
+  verifyState(addonIdentity: string, revision: number, serializedRecord: string, integrityMac: string): boolean {
+    if (!/^[a-f0-9]{64}$/i.test(integrityMac)) return false;
+    const expected = Buffer.from(this.signState(addonIdentity, revision, serializedRecord), 'hex');
+    const actual = Buffer.from(integrityMac, 'hex');
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
   put(addonIdentity: string, fieldIdentity: string, rawValue: unknown): PluginSecretReference {
     const addon = addonId(addonIdentity);
     const field = fieldKey(fieldIdentity);
     const value = secretValue(rawValue);
     const existing = this.values(addon);
     existing[field] = value;
-    return this.replace(addon, existing).find((reference) => reference.fieldKey === field)!;
+    const reference = this.replace(addon, existing).find((candidate) => candidate.fieldKey === field);
+    if (!reference) throw new PluginSecretStoreError('PLUGIN_SECRET_STORAGE_UNAVAILABLE', 'The protected configuration reference was not persisted.');
+    return reference;
   }
 
   /** Replace one add-on's host-only configuration atomically. */
   replace(addonIdentity: string, rawValues: Readonly<Record<string, unknown>>): readonly PluginSecretReference[] {
     const addon = addonId(addonIdentity);
-    const values = Object.entries(rawValues).map(([rawField, rawValue]) => ({
+    const mergedValues: Record<string, unknown> = { ...rawValues };
+    // Configuration replacement must not erase lifecycle credentials such as
+    // the protected manifest endpoint.
+    for (const reference of this.list(addon)) {
+      if (reference.fieldKey.startsWith(HOST_SECRET_FIELD_PREFIX) && !Object.hasOwn(mergedValues, reference.fieldKey)) {
+        mergedValues[reference.fieldKey] = this.get(addon, reference.ref, reference.fieldKey);
+      }
+    }
+    const values = Object.entries(mergedValues).map(([rawField, rawValue]) => ({
       field: fieldKey(rawField),
       value: secretValue(rawValue),
     }));
@@ -280,30 +336,75 @@ export type PluginAuditEntry = {
   id: number;
   addonId: string;
   eventType: string;
+  actor: string;
+  priorRevision?: number;
+  newRevision?: number;
+  outcome: 'success' | 'failure';
   detail: Readonly<Record<string, unknown>>;
   createdAt: number;
 };
 
-export function recordPluginAudit(database: BetterSqlite3.Database, addonIdentity: string, eventType: string, detail: Record<string, unknown> = {}): void {
+export type PluginAuditWrite = {
+  actor: string;
+  priorRevision?: number;
+  newRevision?: number;
+  outcome?: 'success' | 'failure';
+  detail?: Record<string, unknown>;
+  createdAt?: number;
+};
+
+export function recordPluginAudit(
+  database: BetterSqlite3.Database,
+  addonIdentity: string,
+  eventType: string,
+  write: PluginAuditWrite = { actor: 'host:system' },
+): void {
   const addon = addonId(addonIdentity);
   const event = safeIdentity(eventType, 'The audit event', 64);
-  const detailJson = JSON.stringify(detail);
+  const actor = safeIdentity(write.actor, 'The audit actor', 240);
+  const priorRevision = write.priorRevision;
+  const newRevision = write.newRevision;
+  if (priorRevision !== undefined && (!Number.isSafeInteger(priorRevision) || priorRevision < 0)) {
+    throw new PluginSecretStoreError('PLUGIN_SECRET_INVALID', 'The prior audit revision is invalid.');
+  }
+  if (newRevision !== undefined && (!Number.isSafeInteger(newRevision) || newRevision < 0)) {
+    throw new PluginSecretStoreError('PLUGIN_SECRET_INVALID', 'The new audit revision is invalid.');
+  }
+  const outcome = write.outcome === 'failure' ? 'failure' : 'success';
+  const detailJson = JSON.stringify(redactAuditValue(write.detail || {}));
   if (Buffer.byteLength(detailJson, 'utf8') > 16_384) throw new PluginSecretStoreError('PLUGIN_SECRET_INVALID', 'The audit detail is too large.');
-  database.prepare('INSERT INTO stremio_plugin_audit (addon_id, event_type, detail_json, created_at) VALUES (?, ?, ?, ?)')
-    .run(addon, event, detailJson, Date.now());
+  database.prepare(`
+    INSERT INTO stremio_plugin_audit
+      (addon_id, event_type, actor, prior_revision, new_revision, outcome, detail_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(addon, event, actor, priorRevision ?? null, newRevision ?? null, outcome, detailJson, write.createdAt ?? Date.now());
 }
 
 export function listPluginAudit(database: BetterSqlite3.Database, addonIdentity: string, limit = 100): readonly PluginAuditEntry[] {
   const addon = addonId(addonIdentity);
   const boundedLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
   return (database.prepare(`
-    SELECT id, addon_id, event_type, detail_json, created_at
+    SELECT id, addon_id, event_type, actor, prior_revision, new_revision, outcome, detail_json, created_at
     FROM stremio_plugin_audit WHERE addon_id = ? ORDER BY id DESC LIMIT ?
-  `).all(addon, boundedLimit) as Array<{ id: number; addon_id: string; event_type: string; detail_json: string; created_at: number }>).flatMap((row) => {
+  `).all(addon, boundedLimit) as Array<{
+    id: number; addon_id: string; event_type: string; actor: string;
+    prior_revision: number | null; new_revision: number | null; outcome: 'success' | 'failure';
+    detail_json: string; created_at: number;
+  }>).flatMap((row) => {
     try {
       const detail = JSON.parse(row.detail_json) as unknown;
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return [];
-      return [{ id: row.id, addonId: row.addon_id, eventType: row.event_type, detail: detail as Record<string, unknown>, createdAt: row.created_at }];
+      return [{
+        id: row.id,
+        addonId: row.addon_id,
+        eventType: row.event_type,
+        actor: row.actor,
+        ...(row.prior_revision === null ? {} : { priorRevision: row.prior_revision }),
+        ...(row.new_revision === null ? {} : { newRevision: row.new_revision }),
+        outcome: row.outcome,
+        detail: detail as Record<string, unknown>,
+        createdAt: row.created_at,
+      }];
     } catch {
       return [];
     }
