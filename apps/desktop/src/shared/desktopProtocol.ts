@@ -610,6 +610,10 @@ export interface StremioPluginAuditEntry {
   id: number;
   addonId: string;
   eventType: string;
+  actor: string;
+  priorRevision?: number;
+  newRevision?: number;
+  outcome: 'success' | 'failure';
   detail: Readonly<Record<string, unknown>>;
   createdAt: number;
 }

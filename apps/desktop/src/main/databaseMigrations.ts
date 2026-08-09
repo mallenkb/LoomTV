@@ -14,6 +14,8 @@ export const STREMIO_PLUGIN_STATE_MIGRATION_VERSION = 8;
 /** v9 is the transactional host secret/audit store migration. */
 export const PLUGIN_SECRET_STORE_MIGRATION_VERSION = 9;
 export const LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION = 10;
+/** v11 binds lifecycle state, integrity metadata, and its audit ledger. */
+export const STREMIO_TRUST_STATE_V2_MIGRATION_VERSION = 11;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -305,7 +307,37 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateOutroSegments(database);
   migrateStremioPluginState(database);
   migratePluginSecretStore(database);
+  migrateStremioTrustStateV2(database);
   migrateLanProfileSelections(database);
+}
+
+function migrateStremioTrustStateV2(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(STREMIO_TRUST_STATE_V2_MIGRATION_VERSION)) return;
+  database.transaction(() => {
+    ensureColumn(database, 'stremio_addons', 'record_revision', 'INTEGER NOT NULL DEFAULT 0');
+    ensureColumn(database, 'stremio_addons', 'integrity_mac', "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, 'stremio_addons', 'manifest_secret_ref', 'TEXT');
+    ensureColumn(database, 'stremio_addons', 'manifest_url_redacted', "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(database, 'stremio_addons', 'trust_state', "TEXT NOT NULL DEFAULT 'review-required'");
+    ensureColumn(database, 'stremio_addons', 'last_successful_request', 'INTEGER');
+    ensureColumn(database, 'stremio_addons', 'manifest_last_checked', 'INTEGER');
+    ensureColumn(database, 'stremio_plugin_audit', 'actor', "TEXT NOT NULL DEFAULT 'host:migration'");
+    ensureColumn(database, 'stremio_plugin_audit', 'prior_revision', 'INTEGER');
+    ensureColumn(database, 'stremio_plugin_audit', 'new_revision', 'INTEGER');
+    ensureColumn(database, 'stremio_plugin_audit', 'outcome', "TEXT NOT NULL DEFAULT 'success'");
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS stremio_plugin_state_metadata (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        state_version INTEGER NOT NULL CHECK (state_version = 2),
+        revision INTEGER NOT NULL CHECK (revision >= 0),
+        updated_at INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO stremio_plugin_state_metadata (id, state_version, revision, updated_at)
+      VALUES (1, 2, 0, 0);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(STREMIO_TRUST_STATE_V2_MIGRATION_VERSION, Date.now());
+  })();
 }
 
 function migratePluginSecretStore(database: BetterSqlite3.Database): void {

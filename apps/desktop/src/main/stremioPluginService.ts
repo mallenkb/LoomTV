@@ -22,6 +22,8 @@ import type {
 } from '../shared/desktopProtocol.ts';
 const DEFAULT_PROVIDER_CONCURRENCY = 4;
 const DEFAULT_PROVIDER_QUEUE_LIMIT = 24;
+const DEFAULT_PROFILE_ADDON_CONCURRENCY = 2;
+const DEFAULT_PROFILE_ADDON_QUEUE_LIMIT = 8;
 const MAX_CATALOG_PAGES = 64;
 const MAX_CATALOG_ITEMS = 1_000;
 
@@ -91,7 +93,15 @@ export type StremioHostProfile = {
 
 export interface StremioPluginServiceDependencies {
   loadState: () => unknown | null;
-  saveState: (snapshot: StremioAddonStateSnapshot) => unknown;
+  saveState: (snapshot: StremioAddonStateSnapshot, audit?: {
+    addonId: string;
+    eventType: string;
+    actor: string;
+    outcome?: 'success' | 'failure';
+    detail?: Readonly<Record<string, unknown>>;
+    manifestLastChecked?: number;
+    lastSuccessfulRequest?: number;
+  }) => unknown;
   getProfile: (profileId: string) => StremioHostProfile | null;
   listProfileAccess: (profileId: string) => readonly string[];
   hasProfileAccess: (profileId: string, addonId: string) => boolean;
@@ -108,6 +118,8 @@ export interface StremioPluginServiceDependencies {
   fetchImpl: StremioFetchImplementation;
   maxConcurrentProviderRequests?: number;
   maxQueuedProviderRequests?: number;
+  maxConcurrentProfileAddonRequests?: number;
+  maxQueuedProfileAddonRequests?: number;
 }
 
 export type StremioPluginServiceStatus =
@@ -174,13 +186,13 @@ class ProviderRequestGate {
     } finally {
       const next = state.waiters.shift();
       if (next) {
-        next.signal?.removeEventListener('abort', next.onAbort!);
+        if (next.onAbort) next.signal?.removeEventListener('abort', next.onAbort);
         if (next.signal?.aborted) {
           next.reject(new StremioPluginServiceError('STREMIO_PLUGIN_REQUEST_CANCELLED', 'The provider request was cancelled.', true));
           state.active -= 1;
           const replacement = state.waiters.shift();
           if (replacement) {
-            replacement.signal?.removeEventListener('abort', replacement.onAbort!);
+            if (replacement.onAbort) replacement.signal?.removeEventListener('abort', replacement.onAbort);
             state.active += 1;
             replacement.resolve();
           }
@@ -195,9 +207,9 @@ class ProviderRequestGate {
   }
 }
 
-// This gate is intentionally module-scoped. IPC handlers and any future
-// windows share one bounded provider budget for the whole Electron process.
-const processProviderGate = new ProviderRequestGate(DEFAULT_PROVIDER_CONCURRENCY, DEFAULT_PROVIDER_QUEUE_LIMIT);
+function boundedAdmissionSetting(value: unknown, fallback: number, maximum: number): number {
+  return Number.isSafeInteger(value) ? Math.max(1, Math.min(maximum, Number(value))) : fallback;
+}
 
 function storageUnavailable(cause: unknown): StremioPluginServiceError {
   return new StremioPluginServiceError(
@@ -233,6 +245,8 @@ export class StremioPluginService {
   private mutationQueue: Promise<void> = Promise.resolve();
   private readonly latestProviderRequests = new Map<string, AbortController>();
   private readonly registryOptions: StremioAddonRegistryOptions;
+  private readonly globalProviderGate: ProviderRequestGate;
+  private readonly profileAddonProviderGate: ProviderRequestGate;
 
   constructor(private readonly deps: StremioPluginServiceDependencies) {
     this.registryOptions = {
@@ -240,6 +254,14 @@ export class StremioPluginService {
       isAddonConfigured: deps.isAddonConfigured,
       getConfiguration: deps.getAddonConfiguration,
     };
+    this.globalProviderGate = new ProviderRequestGate(
+      boundedAdmissionSetting(deps.maxConcurrentProviderRequests, DEFAULT_PROVIDER_CONCURRENCY, 32),
+      boundedAdmissionSetting(deps.maxQueuedProviderRequests, DEFAULT_PROVIDER_QUEUE_LIMIT, 256),
+    );
+    this.profileAddonProviderGate = new ProviderRequestGate(
+      boundedAdmissionSetting(deps.maxConcurrentProfileAddonRequests, DEFAULT_PROFILE_ADDON_CONCURRENCY, 8),
+      boundedAdmissionSetting(deps.maxQueuedProfileAddonRequests, DEFAULT_PROFILE_ADDON_QUEUE_LIMIT, 64),
+    );
   }
 
   status(): StremioPluginServiceStatus {
@@ -300,33 +322,35 @@ export class StremioPluginService {
           'The official add-on endpoint returned an unexpected manifest identity.',
         );
       }
-      this.deps.recordAudit?.(review.addonId, 'manifest_reviewed', { origin: review.manifestOrigin });
       return review;
-    });
+    }, (review, actor) => ({
+      addonId: review.addonId,
+      eventType: 'manifest_reviewed',
+      actor,
+      detail: { origin: review.manifestOrigin },
+      manifestLastChecked: Date.now(),
+    }));
   }
 
   approve(addonId: string, reviewToken: string): Promise<StremioInstallRecord> {
-    return this.mutateRegistry((registry) => {
-      const approved = registry.approve(addonId, { confirmed: true, reviewToken });
-      this.deps.recordAudit?.(addonId, 'addon_approved');
-      return approved;
-    });
+    return this.mutateRegistry(
+      (registry) => registry.approve(addonId, { confirmed: true, reviewToken }),
+      (_approved, actor) => ({ addonId, eventType: 'addon_approved', actor }),
+    );
   }
 
   disable(addonId: string): Promise<StremioInstallRecord> {
-    return this.mutateRegistry((registry) => {
-      const disabled = registry.disable(addonId);
-      this.deps.recordAudit?.(addonId, 'addon_disabled');
-      return disabled;
-    });
+    return this.mutateRegistry(
+      (registry) => registry.disable(addonId),
+      (_disabled, actor) => ({ addonId, eventType: 'addon_disabled', actor }),
+    );
   }
 
   remove(addonId: string): Promise<boolean> {
-    return this.mutateRegistry((registry) => {
-      const removed = registry.remove(addonId);
-      if (removed) this.deps.recordAudit?.(addonId, 'addon_removed');
-      return removed;
-    });
+    return this.mutateRegistry(
+      (registry) => registry.remove(addonId),
+      (removed, actor) => removed ? { addonId, eventType: 'addon_removed', actor } : undefined,
+    );
   }
 
   getConfigurationState(addonId: string): StremioPluginConfigurationState {
@@ -493,9 +517,12 @@ export class StremioPluginService {
     return queued;
   }
 
-  private mutateRegistry<T>(operation: (registry: StremioAddonRegistry) => T | Promise<T>): Promise<T> {
+  private mutateRegistry<T>(
+    operation: (registry: StremioAddonRegistry) => T | Promise<T>,
+    auditForResult?: (result: T, actor: string) => Parameters<StremioPluginServiceDependencies['saveState']>[1],
+  ): Promise<T> {
     return this.enqueueMutation(async () => {
-      this.deps.authorizeManagement();
+      const actorProfile = this.deps.authorizeManagement();
       const registry = this.getRegistry();
       const previous = registry.toJSON();
       let result: T;
@@ -506,7 +533,7 @@ export class StremioPluginService {
         throw error;
       }
       try {
-        this.deps.saveState(registry.toJSON());
+        this.deps.saveState(registry.toJSON(), auditForResult?.(result, `profile:${actorProfile.id}`));
       } catch (error) {
         this.restoreRegistry(previous);
         throw storageUnavailable(error);
@@ -542,7 +569,7 @@ export class StremioPluginService {
     const abortExternal = () => controller.abort();
     signal?.addEventListener('abort', abortExternal, { once: true });
     if (signal?.aborted) controller.abort();
-    const request = processProviderGate.run('process', async (requestSignal) => {
+    const request = this.globalProviderGate.run('global', (globalSignal) => this.profileAddonProviderGate.run(requestKey, async (requestSignal) => {
       const profileAuthorization = this.deps.captureProfileAuthorization?.(profileId);
       const before = this.requireProfileAccess(profileId, addonId);
       let providerStarted = false;
@@ -558,7 +585,7 @@ export class StremioPluginService {
             true,
           );
         }
-        if ((before.failureCount || 0) > 0) await this.persistProviderHealth(addonId, true);
+        await this.persistProviderHealth(addonId, true);
         return result;
       } catch (error) {
         const expectedCancellation = (error instanceof StremioPluginServiceError && (error.code === 'STREMIO_PLUGIN_REQUEST_CANCELLED' || error.code === 'STREMIO_PLUGIN_RESULT_STALE'))
@@ -566,7 +593,7 @@ export class StremioPluginService {
         if (providerStarted && !expectedCancellation) await this.persistProviderHealth(addonId, false, error);
         throw error;
       }
-    }, controller.signal);
+    }, globalSignal), controller.signal);
     return request.finally(() => {
       signal?.removeEventListener('abort', abortExternal);
       if (this.latestProviderRequests.get(requestKey) === controller) this.latestProviderRequests.delete(requestKey);
@@ -588,9 +615,20 @@ export class StremioPluginService {
         ? registry.recordSuccess(addonId)
         : registry.recordFailure(addonId, { retryable: error instanceof StremioAdapterError ? error.retryable : true });
       if (!record) return;
-      try { this.deps.saveState(registry.toJSON()); } catch { /* preserve the provider error */ }
-      if (!success && record.state === 'broken') this.deps.recordAudit?.(addonId, 'addon_broken', { failureCount: record.failureCount, nextRetryAt: record.nextRetryAt });
-      if (success) this.deps.recordAudit?.(addonId, 'provider_healthy');
+      try {
+        this.deps.saveState(registry.toJSON(), success ? {
+          addonId,
+          eventType: 'provider_request_succeeded',
+          actor: 'host:provider',
+          lastSuccessfulRequest: Date.now(),
+        } : {
+          addonId,
+          eventType: record.state === 'broken' ? 'addon_broken' : 'provider_request_failed',
+          actor: 'host:provider',
+          outcome: 'failure',
+          detail: { failureCount: record.failureCount, nextRetryAt: record.nextRetryAt },
+        });
+      } catch { /* preserve the provider error */ }
     });
   }
 }

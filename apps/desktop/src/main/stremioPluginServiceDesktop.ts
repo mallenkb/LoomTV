@@ -47,6 +47,8 @@ export type DesktopStremioPluginServiceOptions = {
   fetchImpl?: StremioFetchImplementation;
   maxConcurrentProviderRequests?: number;
   maxQueuedProviderRequests?: number;
+  maxConcurrentProfileAddonRequests?: number;
+  maxQueuedProfileAddonRequests?: number;
 };
 
 export function createDesktopStremioPluginService(
@@ -87,5 +89,7 @@ export function createDesktopStremioPluginService(
     fetchImpl: options.fetchImpl || desktopSafeFetch,
     maxConcurrentProviderRequests: options.maxConcurrentProviderRequests,
     maxQueuedProviderRequests: options.maxQueuedProviderRequests,
+    maxConcurrentProfileAddonRequests: options.maxConcurrentProfileAddonRequests,
+    maxQueuedProfileAddonRequests: options.maxQueuedProfileAddonRequests,
   });
 }

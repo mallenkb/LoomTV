@@ -41,11 +41,14 @@ import {
 } from './databaseSegmentsRepository.ts';
 import {
   hasProfileStremioAccess as hasProfileStremioAccessRecord,
+  hasLegacyStremioAddonState,
   listProfileStremioAccess as listProfileStremioAccessRecords,
   loadStremioAddonState as loadStremioAddonStateRecord,
   saveStremioAddonState as saveStremioAddonStateRecord,
   setProfileStremioAccess as setProfileStremioAccessRecord,
   type PersistedStremioAddonSnapshot,
+  type StremioSecurePersistence,
+  type StremioStateAuditContext,
 } from './databasePluginRepository.ts';
 import {
   listPluginAudit,
@@ -191,14 +194,13 @@ function getPluginSecretStore(): PluginSecretStore {
     throw new Error('The operating system secret store is unavailable.');
   }
   const database = getDb();
-  let row = database.prepare('SELECT ciphertext FROM plugin_secret_store_keys WHERE id = 1').get() as { ciphertext?: string } | undefined;
+  const row = database.prepare('SELECT ciphertext FROM plugin_secret_store_keys WHERE id = 1').get() as { ciphertext?: string } | undefined;
   let macKey: Buffer;
   if (!row?.ciphertext) {
     macKey = randomBytes(32);
     const protectedKey = safeStorage.encryptString(macKey.toString('base64')).toString('base64');
     database.prepare('INSERT OR REPLACE INTO plugin_secret_store_keys (id, ciphertext, created_at) VALUES (1, ?, ?)')
       .run(protectedKey, Date.now());
-    row = { ciphertext: protectedKey };
   } else {
     try {
       macKey = Buffer.from(safeStorage.decryptString(Buffer.from(row.ciphertext, 'base64')), 'base64');
@@ -216,7 +218,7 @@ function getPluginSecretStore(): PluginSecretStore {
 }
 
 function configFieldsForAddon(addonId: string): readonly StremioPluginConfigurationField[] {
-  const record = loadStremioAddonStateRecord(getDb())?.addons.find((candidate) => candidate.addonId === addonId);
+  const record = loadStremioAddonState()?.addons.find((candidate) => candidate.addonId === addonId);
   const config = (record?.manifest as { config?: readonly StremioPluginConfigurationField[] } | undefined)?.config || [];
   return config.map((field) => ({
     key: field.key,
@@ -247,7 +249,7 @@ export function isStremioAddonConfigured(addonId: string, requiredFields?: reado
 }
 
 export function getStremioAddonConfigurationState(addonId: string, fields = configFieldsForAddon(addonId)) {
-  const record = loadStremioAddonStateRecord(getDb())?.addons.find((candidate) => candidate.addonId === addonId);
+  const record = loadStremioAddonState()?.addons.find((candidate) => candidate.addonId === addonId);
   const requiresHostConfiguration = Boolean(
     (record?.manifest as { behaviorHints?: { configurationRequired?: boolean } } | undefined)?.behaviorHints?.configurationRequired
     || fields.some((field) => field.required),
@@ -293,6 +295,7 @@ export function saveStremioAddonConfiguration(addonId: string, rawValues: Readon
   const definitions = new Map(fields.map((field) => [field.key, field]));
   const values: Record<string, string> = {};
   for (const [key, value] of Object.entries(rawValues)) {
+    if (key.startsWith('loomtvHost_')) throw new Error('Host-reserved configuration fields cannot be changed.');
     const field = definitions.get(key);
     if (!field) throw new Error(`Unknown configuration field ${key}.`);
     const normalized = normalizeConfigValue(field, value);
@@ -310,7 +313,7 @@ export function listStremioPluginAudit(addonId: string, limit = 100): readonly P
 }
 
 export function recordStremioPluginAudit(addonId: string, eventType: string, detail: Record<string, unknown> = {}): void {
-  recordPluginAudit(getDb(), addonId, eventType, detail);
+  recordPluginAudit(getDb(), addonId, eventType, { actor: 'host:system', detail });
 }
 
 function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkRepository> {
@@ -339,12 +342,50 @@ export function saveSettingsToDatabase(settings: SettingsData): void {
   saveSettingsRecord(getDb(), settings);
 }
 
-export function loadStremioAddonState(): PersistedStremioAddonSnapshot | null {
-  return loadStremioAddonStateRecord(getDb());
+function stremioSecurePersistence(): StremioSecurePersistence {
+  const database = getDb();
+  const secrets = getPluginSecretStore();
+  return {
+    protectManifestUrl: (addonId, manifestUrl) => secrets.put(addonId, 'loomtvHost_manifestUrl', manifestUrl).ref,
+    resolveManifestUrl: (addonId, secretRef) => secrets.get(addonId, secretRef, 'loomtvHost_manifestUrl'),
+    signState: (addonId, revision, serializedRecord) => secrets.signState(addonId, revision, serializedRecord),
+    verifyState: (addonId, revision, serializedRecord, integrityMac) => secrets.verifyState(addonId, revision, serializedRecord, integrityMac),
+    recordAudit: (context) => recordPluginAudit(database, context.addonId, context.eventType, {
+      actor: context.actor,
+      priorRevision: context.priorRevision,
+      newRevision: context.newRevision,
+      outcome: context.outcome,
+      detail: { ...context.detail },
+      createdAt: context.createdAt,
+    }),
+  };
 }
 
-export function saveStremioAddonState(snapshot: unknown): PersistedStremioAddonSnapshot {
-  return saveStremioAddonStateRecord(getDb(), snapshot);
+export function loadStremioAddonState(): PersistedStremioAddonSnapshot | null {
+  const database = getDb();
+  const secure = stremioSecurePersistence();
+  const snapshot = loadStremioAddonStateRecord(database, secure);
+  if (snapshot && hasLegacyStremioAddonState(database)) {
+    // The outer repository transaction covers URL protection, v2 state, and
+    // the migration audit row. Any encryption or integrity failure rolls all
+    // three back, leaving the v1 row available for a later recovery attempt.
+    const migrationAddon = snapshot.addons[0];
+    if (!migrationAddon) return snapshot;
+    saveStremioAddonStateRecord(database, snapshot, secure, {
+      addonId: migrationAddon.addonId,
+      eventType: 'trust_state_v2_migrated',
+      actor: 'host:migration',
+      detail: { addonCount: snapshot.addons.length },
+    });
+  }
+  return snapshot;
+}
+
+export function saveStremioAddonState(
+  snapshot: unknown,
+  audit?: StremioStateAuditContext,
+): PersistedStremioAddonSnapshot {
+  return saveStremioAddonStateRecord(getDb(), snapshot, stremioSecurePersistence(), audit);
 }
 
 export function listProfileStremioAccess(profileId: string): string[] {
