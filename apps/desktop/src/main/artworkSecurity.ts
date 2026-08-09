@@ -256,7 +256,7 @@ const ARTWORK_WORKER_SOURCE = String.raw`
     const output = Uint8Array.from(normalized);
     parentPort.postMessage({ ok: true, bytes: output, width: size.width, height: size.height }, [output.buffer]);
   } catch (error) {
-    fail(error instanceof Error ? error.message : 'image decoder failed');
+    fail('worker decoder: ' + (error instanceof Error ? error.message : 'image decoder failed'));
   }
 `;
 

@@ -1,4 +1,4 @@
-import { app, dialog, safeStorage } from 'electron';
+import { app, dialog, nativeImage, safeStorage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -9,6 +9,7 @@ import {
   rememberArtworkFailure,
   rememberArtworkSuccess,
   sanitizeArtworkBytes,
+  sanitizeArtworkBytesWithDecoder,
 } from './artworkSecurity.ts';
 import type { LibraryData } from './appContracts.ts';
 import type { ProfileExportV1 } from '../shared/desktopProtocol.ts';
@@ -945,7 +946,21 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
       return null;
     }
     const bytes = Buffer.from(await response.arrayBuffer());
-    const sanitized = await sanitizeArtworkBytes(bytes, mimeType);
+    let sanitized: FetchedArtworkBytes;
+    try {
+      sanitized = await sanitizeArtworkBytes(bytes, mimeType);
+    } catch (error) {
+      // Electron builds differ in whether `nativeImage` is available from a
+      // worker thread. Keep the bounded byte/signature/dimension checks above,
+      // then use the host decoder as a compatibility fallback when the worker
+      // bridge itself cannot load. This restores the release artwork path for
+      // local library posters without exposing provider URLs to the renderer.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/worker|electron|decoder process|decoder failed|time limit/i.test(message)) throw error;
+      sanitized = sanitizeArtworkBytesWithDecoder(bytes, mimeType, {
+        createFromBuffer: (buffer) => nativeImage.createFromBuffer(buffer),
+      });
+    }
     rememberArtworkSuccess(sourceUrl);
     return sanitized;
   } catch {

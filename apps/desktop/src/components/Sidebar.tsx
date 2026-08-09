@@ -449,7 +449,6 @@ export default function Sidebar() {
   const navItems = useMemo(
     () => [
       homeNavItem,
-      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder)
         .map((itemId) => sidebarNavItems[itemId])
         .filter((item) => {
@@ -457,18 +456,19 @@ export default function Sidebar() {
           const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
           return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
         }),
+      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
     ],
     [libraryFolderGroups, navOrder],
   );
   const mobileNavItems = useMemo(
     () => [
       homeNavItem,
-      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies, sidebarNavItems.others] as SidebarNavItem[]).filter((item) => {
         if (desktopApi.isRemoteLibraryMode()) return true;
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
         return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
       }),
+      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       settingsNavItem,
     ],
     [libraryFolderGroups],

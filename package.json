@@ -25,6 +25,7 @@
     "start": "pnpm desktop:start",
     "desktop": "pnpm --filter loom-media-server-desktop",
     "desktop:start": "pnpm --filter loom-media-server-desktop start",
+    "desktop:start:built": "pnpm --filter loom-media-server-desktop start:built",
     "desktop:build": "pnpm --filter loom-media-server-desktop build",
     "desktop:typecheck": "pnpm --filter loom-media-server-desktop typecheck",
     "desktop:test": "pnpm --filter loom-media-server-desktop test",

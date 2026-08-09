@@ -186,7 +186,7 @@ export default function PluginsSettingsSection() {
     <div className="space-y-4">
       <Dialog
         open={Boolean(review)}
-        contentClassName="max-w-[min(92vw,48rem)] border border-[var(--loom-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)]"
+        contentClassName="max-w-[min(92vw,48rem)] border border-[var(--loom-border)] bg-[var(--loom-surface)] p-0 text-[var(--loom-text)] shadow-2xl"
         onOpenChange={(open) => {
           if (open) return;
           setReview(null);
