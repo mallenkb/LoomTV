@@ -188,7 +188,17 @@ export interface WireMediaItem {
   summary: string;
   rating: number;
   genres: string[];
-  cast: { name: string; character: string; image: string }[];
+  cast: {
+    name: string;
+    character: string;
+    image: string;
+    characterName?: string;
+    characterRole?: string;
+    characterImage?: string;
+    voiceActorName?: string;
+    voiceActorImage?: string;
+    voiceActorLanguage?: string;
+  }[];
   filePath: string;
   fileSize?: number;
   lastPlayed?: number;
@@ -702,6 +712,13 @@ export interface StremioPluginCastMember {
   character?: string;
   /** Host-controlled artwork delivery URL; upstream cast URLs never cross IPC. */
   image?: string;
+  /** Optional paired anime credit fields used by the renderer-owned AniList source. */
+  characterName?: string;
+  characterRole?: string;
+  characterImage?: string;
+  voiceActorName?: string;
+  voiceActorImage?: string;
+  voiceActorLanguage?: string;
 }
 
 export interface StremioPluginCatalogItem {

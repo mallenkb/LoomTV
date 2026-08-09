@@ -15,6 +15,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { DiscoverCatalog } from '@/pages/PluginDiscover';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -151,6 +152,7 @@ function DefaultHome() {
             {activeFilter !== 'all' && !normalizedQuery ? 'No titles match this filter' : 'No local matches found'}
           </div>
         )}
+        <DiscoverCatalog mode="home" />
       </div>
     </div>
   );

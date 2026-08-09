@@ -98,6 +98,12 @@ function showFromStremioCatalogItem(
       name: person.name,
       character: person.character || '',
       image: person.image || '',
+      characterName: person.characterName,
+      characterRole: person.characterRole,
+      characterImage: person.characterImage,
+      voiceActorName: person.voiceActorName,
+      voiceActorImage: person.voiceActorImage,
+      voiceActorLanguage: person.voiceActorLanguage,
     })),
     filePath: '',
     seasons: [],
@@ -108,6 +114,64 @@ function showFromStremioCatalogItem(
     backdropCandidates: backdrop ? [backdrop] : [],
     logoCandidates: item.artwork?.logo || item.logoUrl ? [item.artwork?.logo || item.logoUrl || ''] : [],
   };
+}
+
+function AnimeCreditRows({ credits }: { credits: TVShow['cast'] }) {
+  return (
+    <div role="list" aria-label="Anime character and voice actor credits" className="space-y-2">
+      {credits.map((credit, index) => {
+        const characterName = credit.characterName || credit.name || 'Unknown character';
+        const characterRole = credit.characterRole || credit.character || 'Character';
+        const actorName = credit.voiceActorName || '';
+        const actorImage = credit.voiceActorImage || (actorName ? credit.image : '');
+        const voiceLanguage = credit.voiceActorLanguage || '';
+        const accessibleLabel = actorName
+          ? `${characterName} — voiced by ${actorName}${voiceLanguage ? `, ${voiceLanguage}` : ''}`
+          : `${characterName} — no voice actor listed`;
+
+        return (
+          <div
+            key={`${characterName}:${actorName}:${voiceLanguage}:${index}`}
+            role="listitem"
+            aria-label={accessibleLabel}
+            className="rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3"
+          >
+            <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar className="h-12 w-12 shrink-0">
+                  {credit.characterImage ? (
+                    <AvatarImage src={credit.characterImage} alt={`${characterName} character portrait`} />
+                  ) : (
+                    <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{characterName.charAt(0)}</AvatarFallback>
+                  )}
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-[var(--loom-text)]">{characterName}</p>
+                  <p className="truncate text-xs text-[var(--loom-muted)]">{characterRole}</p>
+                </div>
+              </div>
+
+              <span className="text-center text-xs font-medium text-[var(--loom-muted)] sm:px-2">Voiced by</span>
+
+              <div className="flex min-w-0 items-center justify-end gap-3 sm:flex-row-reverse">
+                <Avatar className="h-12 w-12 shrink-0">
+                  {actorImage ? (
+                    <AvatarImage src={actorImage} alt={`${actorName || 'Voice actor'} portrait`} />
+                  ) : (
+                    <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-muted)]">—</AvatarFallback>
+                  )}
+                </Avatar>
+                <div className="min-w-0 text-right sm:text-left">
+                  <p className="truncate text-sm font-semibold text-[var(--loom-text)]">{actorName || 'Voice actor not listed'}</p>
+                  <p className="truncate text-xs text-[var(--loom-muted)]">{voiceLanguage || 'Language unavailable'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function findLocalShowMatch(shows: readonly TVShow[], mediaId: string | undefined): TVShow | null {
@@ -782,17 +846,21 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             {detailsReady && show.cast.length > 0 && (
               <section>
                 <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
-                <div className="flex gap-4 overflow-x-auto pb-2">
-                  {show.cast.slice(0, 12).map((actor) => (
-                    <div key={actor.name} className="w-20 flex-shrink-0 text-center">
-                      <Avatar className="mx-auto mb-2 h-16 w-16">
-                        {actor.image ? <AvatarImage src={actor.image} alt="" /> : <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{actor.name.charAt(0)}</AvatarFallback>}
-                      </Avatar>
-                      <p className="truncate text-xs text-[var(--loom-text)]">{actor.name}</p>
-                      <p className="truncate text-xs text-[var(--loom-muted)]">{actor.character}</p>
-                    </div>
-                  ))}
-                </div>
+                {kind === 'anime' && show.cast.some((credit) => Boolean(credit.characterName || credit.voiceActorName || credit.characterImage)) ? (
+                  <AnimeCreditRows credits={show.cast.slice(0, 20)} />
+                ) : (
+                  <div className="flex gap-4 overflow-x-auto pb-2">
+                    {show.cast.slice(0, 12).map((actor) => (
+                      <div key={actor.name} className="w-20 flex-shrink-0 text-center">
+                        <Avatar className="mx-auto mb-2 h-16 w-16">
+                          {actor.image ? <AvatarImage src={actor.image} alt={actor.name} /> : <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{actor.name.charAt(0)}</AvatarFallback>}
+                        </Avatar>
+                        <p className="truncate text-xs text-[var(--loom-text)]">{actor.name}</p>
+                        <p className="truncate text-xs text-[var(--loom-muted)]">{actor.character}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
             )}
           </div>

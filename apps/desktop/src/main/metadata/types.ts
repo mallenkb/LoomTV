@@ -88,7 +88,17 @@ export interface MediaItem {
   rating: number;
   contentRatings?: Record<string, ContentRating>;
   genres: string[];
-  cast: { name: string; character: string; image: string }[];
+  cast: {
+    name: string;
+    character: string;
+    image: string;
+    characterName?: string;
+    characterRole?: string;
+    characterImage?: string;
+    voiceActorName?: string;
+    voiceActorImage?: string;
+    voiceActorLanguage?: string;
+  }[];
   filePath: string;
   fileSize?: number;
   lastPlayed?: number;

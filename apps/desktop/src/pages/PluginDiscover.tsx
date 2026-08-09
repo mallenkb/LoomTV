@@ -17,15 +17,24 @@ const ANILIST_API_URL = 'https://graphql.anilist.co';
 const DISCOVER_CACHE_STORAGE_KEY = 'loomtv:discover-cache-v2';
 const DISCOVER_VIEW_STATE_STORAGE_KEY = 'loomtv:discover-view-state-v1';
 const DISCOVER_ROUTE = '/discover';
+const DEFAULT_AVAILABILITY_REGION = 'US';
+const AVAILABILITY_REGIONS = ['US', 'GB', 'CA', 'AU'] as const;
+const DISCOVER_MIN_RELEASE_YEAR = 1900;
 
 type DiscoverType = 'movie' | 'tv' | 'anime';
 type DiscoverSection = 'trending' | 'popular' | 'top_rated' | 'new';
-type CachedCacheId = `${DiscoverType}:${DiscoverSection}:${string}:${string}`;
+type AvailabilityRegion = typeof AVAILABILITY_REGIONS[number];
+type CachedCacheId = string;
 type GenreSourceType = Exclude<DiscoverType, 'anime'>;
 
 type GenreOption = {
   label: string;
   value: string;
+};
+
+type ProviderOption = GenreOption & {
+  logoUrl: string;
+  providerId: number;
 };
 
 type GridEntry = { id: string; item: StremioPluginCatalogItem };
@@ -67,6 +76,25 @@ interface TmdbListResponse {
   results?: TmdbListResult[];
 }
 
+interface TmdbProvider {
+  provider_id: number;
+  provider_name: string;
+  logo_path?: string | null;
+  display_priority?: number;
+}
+
+interface TmdbProviderListResponse {
+  results?: TmdbProvider[];
+}
+
+interface TmdbWatchProviderRegion {
+  flatrate?: TmdbProvider[];
+}
+
+interface TmdbWatchProviderDetailResponse {
+  results?: Record<string, TmdbWatchProviderRegion>;
+}
+
 interface TmdbGenre {
   id: number;
   name: string;
@@ -102,14 +130,21 @@ interface AniListPersonImage {
   large?: string | null;
 }
 
-interface AniListCastPerson {
+interface AniListCharacter {
   name?: AniListPersonName | null;
   image?: AniListPersonImage | null;
 }
 
+interface AniListVoiceActor {
+  name?: AniListPersonName | null;
+  image?: AniListPersonImage | null;
+  languageV2?: string | null;
+}
+
 interface AniListCharacterEdge {
-  node?: AniListCastPerson | null;
+  node?: AniListCharacter | null;
   role?: string | null;
+  voiceActors?: AniListVoiceActor[] | null;
 }
 
 interface AniListCoverImage {
@@ -138,6 +173,8 @@ type ParsedDiscoverFilterState = {
   section: DiscoverSection;
   genreFilter: string;
   yearFilter: string;
+  platformFilter: string;
+  region: string;
   query: string;
 };
 
@@ -147,6 +184,8 @@ function parseDiscoverFilterState(search: string): ParsedDiscoverFilterState {
   const sectionParam = params.get('section');
   const genreParam = params.get('genre') ?? '';
   const yearParam = params.get('year') ?? '';
+  const platformParam = params.get('provider') ?? '';
+  const regionParam = params.get('region') ?? '';
   const query = params.get('q') ?? '';
 
   const contentType = (contentTypeParam === 'movie' || contentTypeParam === 'tv' || contentTypeParam === 'anime')
@@ -161,6 +200,8 @@ function parseDiscoverFilterState(search: string): ParsedDiscoverFilterState {
     section,
     genreFilter: genreParam,
     yearFilter: yearParam,
+    platformFilter: platformParam,
+    region: regionParam,
     query,
   };
 }
@@ -171,15 +212,13 @@ function buildDiscoverSearch(state: ParsedDiscoverFilterState): string {
   if (state.section !== 'trending') params.set('section', state.section);
   if (state.genreFilter.trim()) params.set('genre', state.genreFilter.trim());
   if (state.yearFilter.trim()) params.set('year', state.yearFilter.trim());
+  if (state.platformFilter.trim()) params.set('provider', state.platformFilter.trim());
+  if (state.platformFilter.trim() || state.region.trim().toUpperCase() !== DEFAULT_AVAILABILITY_REGION) {
+    params.set('region', state.region.trim().toUpperCase() || DEFAULT_AVAILABILITY_REGION);
+  }
   const query = state.query.trim();
   if (query) params.set('q', query);
   return params.toString();
-}
-
-interface AniListPageResponse {
-  Page?: {
-    media?: AniListMediaResult[];
-  };
 }
 
 interface AniListResponse {
@@ -240,13 +279,15 @@ const ANILIST_SECTION_SORT: Record<DiscoverSection, readonly string[]> = {
 };
 
 const ANILIST_DISCOVER_QUERY = `
-query DiscoverAnime($page: Int, $perPage: Int, $sort: [MediaSort], $search: String) {
+query DiscoverAnime($page: Int, $perPage: Int, $sort: [MediaSort], $search: String, $genre: String, $seasonYear: Int) {
   Page(page: $page, perPage: $perPage) {
     media(
       type: ANIME
       isAdult: false
       sort: $sort
       search: $search
+      genre: $genre
+      seasonYear: $seasonYear
     ) {
       id
       title {
@@ -281,6 +322,16 @@ query DiscoverAnime($page: Int, $perPage: Int, $sort: [MediaSort], $search: Stri
             }
           }
           role
+          voiceActors {
+            name {
+              full
+            }
+            image {
+              medium
+              large
+            }
+            languageV2
+          }
         }
       }
     }
@@ -338,9 +389,41 @@ function stripHtml(value: string): string {
     .trim();
 }
 
-function tmdbImage(path: string | null | undefined, size: 'w185' | 'w300' | 'w500' | 'w1280'): string {
+function tmdbImage(path: string | null | undefined, size: 'w45' | 'w92' | 'w185' | 'w300' | 'w500' | 'w1280'): string {
   if (!path) return '';
   return `${TMDB_IMAGE_BASE}/${size}${path}`;
+}
+
+function normalizeAvailabilityRegion(value: string): AvailabilityRegion {
+  const normalized = value.trim().toUpperCase();
+  return (AVAILABILITY_REGIONS as readonly string[]).includes(normalized)
+    ? normalized as AvailabilityRegion
+    : DEFAULT_AVAILABILITY_REGION;
+}
+
+function releaseYearOptions(): string[] {
+  const currentYear = new Date().getFullYear();
+  return Array.from(
+    { length: Math.max(1, currentYear - DISCOVER_MIN_RELEASE_YEAR + 1) },
+    (_, index) => String(currentYear - index),
+  );
+}
+
+function providerDisplayName(value: string): string {
+  const normalized = value.trim();
+  if (/netflix/i.test(normalized)) return 'Netflix';
+  if (/hulu/i.test(normalized)) return 'Hulu';
+  if (/disney/i.test(normalized)) return 'Disney+';
+  if (/amazon\s+prime|prime\s+video/i.test(normalized)) return 'Prime Video';
+  if (/\b(max|hbo max)\b/i.test(normalized)) return 'Max';
+  return normalized;
+}
+
+function providerPriority(provider: TmdbProvider): number {
+  const label = providerDisplayName(provider.provider_name);
+  const recognized = ['Netflix', 'Hulu', 'Disney+', 'Prime Video', 'Max'];
+  const index = recognized.indexOf(label);
+  return index === -1 ? recognized.length : index;
 }
 
 function yearFromDateValue(value: string | undefined): number {
@@ -364,21 +447,33 @@ function stremioMetaLine(item: StremioPluginCatalogItem): string {
     .join(' · ');
 }
 
-function toYearFilterOptions(items: readonly StremioPluginCatalogItem[]): string[] {
-  const years = new Set<number>();
-  for (const item of items) {
-    const year = parseYearFromItem(item);
-    if (year > 0) years.add(year);
-  }
-  return [...years]
-    .sort((left, right) => right - left)
-    .map((year) => String(year));
+function hasCachedImageCandidate(items: readonly StremioPluginCatalogItem[]): boolean {
+  return items.some((item) => Boolean(
+    (item.posterUrl && item.posterUrl.trim())
+    || (item.backgroundUrl && item.backgroundUrl.trim())
+    || (item.logoUrl && item.logoUrl.trim()),
+  ));
+}
+
+function getValidCachedItems(
+  cache: DiscoverCacheState,
+  cacheId: CachedCacheId,
+  now = Date.now(),
+): readonly StremioPluginCatalogItem[] | null {
+  if (cache.date !== toLocalDateKey()) return null;
+  const cached = cache.entries[cacheId];
+  if (!cached || cached.expiresAt < now || !hasCachedImageCandidate(cached.items)) return null;
+  return cached.items;
 }
 
 function hasYearMatch(item: StremioPluginCatalogItem, yearFilter: string): boolean {
   const normalizedYear = Number(yearFilter);
   if (!Number.isFinite(normalizedYear) || normalizedYear <= 0) return true;
   return parseYearFromItem(item) === normalizedYear;
+}
+
+function voiceActorLanguagePriority(language?: string | null): number {
+  return language?.trim().toLowerCase() === 'japanese' ? 0 : 1;
 }
 
 function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogItem {
@@ -397,6 +492,42 @@ function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogIte
     media.coverImage?.large,
     media.coverImage?.medium,
   );
+  const cast = (media.characters?.edges || [])
+    .filter((entry) => Boolean(entry?.node?.name?.full))
+    .slice(0, 10)
+    .flatMap((entry) => {
+      const characterName = entry.node?.name?.full || 'Unknown character';
+      const characterRole = entry.role || '';
+      const characterImage = pickImageUrl(entry.node?.image?.large, entry.node?.image?.medium);
+      const voiceActors = [...(entry.voiceActors || [])]
+        .filter((voiceActor) => Boolean(voiceActor?.name?.full))
+        .sort((left, right) => (
+          voiceActorLanguagePriority(left.languageV2) - voiceActorLanguagePriority(right.languageV2)
+        ));
+
+      if (voiceActors.length === 0) {
+        return [{
+          name: characterName,
+          character: characterRole,
+          image: '',
+          characterName,
+          characterRole,
+          characterImage,
+        }];
+      }
+
+      return voiceActors.slice(0, 4).map((voiceActor) => ({
+        name: voiceActor.name?.full || 'Unknown voice actor',
+        character: characterRole,
+        image: pickImageUrl(voiceActor.image?.large, voiceActor.image?.medium),
+        characterName,
+        characterRole,
+        characterImage,
+        voiceActorName: voiceActor.name?.full || '',
+        voiceActorImage: pickImageUrl(voiceActor.image?.large, voiceActor.image?.medium),
+        voiceActorLanguage: voiceActor.languageV2 || '',
+      }));
+    });
   return {
     id: String(media.id),
     type: 'anime',
@@ -407,14 +538,7 @@ function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogIte
     released: releaseInfo,
     rating: score,
     runtime: typeof media.episodes === 'number' ? `${media.episodes} eps` : undefined,
-    cast: (media.characters?.edges || [])
-      .filter((entry): entry is { node: AniListCastPerson; role?: string } => Boolean(entry?.node?.name?.full))
-      .slice(0, 10)
-      .map((entry) => ({
-        name: entry.node!.name?.full || '',
-        character: entry.role || '',
-        image: entry.node?.image?.large || entry.node?.image?.medium || '',
-      })),
+    cast,
     posterUrl,
     backgroundUrl,
     logoUrl: '',
@@ -458,8 +582,21 @@ function mapTmdbCredits(media: TmdbCreditsResponse | undefined, existing: Stremi
   };
 }
 
-function makeCacheId(type: DiscoverType, section: DiscoverSection, query: string, genre = ''): CachedCacheId {
-  return `${type}:${section}:${query.trim().toLowerCase()}:${genre.trim().toLowerCase()}` as CachedCacheId;
+function makeCacheId(
+  type: DiscoverType,
+  section: DiscoverSection,
+  query: string,
+  genre = '',
+  year = '',
+  provider = '',
+  region = DEFAULT_AVAILABILITY_REGION,
+): CachedCacheId {
+  if (!year.trim() && !provider.trim() && normalizeAvailabilityRegion(region) === DEFAULT_AVAILABILITY_REGION) {
+    return `${type}:${section}:${query.trim().toLowerCase()}:${genre.trim().toLowerCase()}`;
+  }
+  return [type, section, query, genre, year, provider, region]
+    .map((value) => encodeURIComponent(value.trim().toLowerCase()))
+    .join(':');
 }
 
 function normalizeGenreFilter(value: string): string {
@@ -531,6 +668,29 @@ async function discoverTmdbGenres(type: GenreSourceType, credential: string): Pr
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
+async function discoverTmdbProviders(
+  type: GenreSourceType,
+  region: AvailabilityRegion,
+  credential: string,
+): Promise<ProviderOption[]> {
+  const response = await requestTmdbJson<TmdbProviderListResponse>(`watch/providers/${type}`, credential, {
+    watch_region: region,
+  });
+  return (response.results || [])
+    .filter((provider) => Number.isFinite(provider.provider_id) && Boolean(provider.provider_name?.trim()))
+    .sort((left, right) => (
+      providerPriority(left) - providerPriority(right)
+      || (left.display_priority ?? Number.MAX_SAFE_INTEGER) - (right.display_priority ?? Number.MAX_SAFE_INTEGER)
+      || left.provider_name.localeCompare(right.provider_name)
+    ))
+    .map((provider) => ({
+      providerId: provider.provider_id,
+      value: String(provider.provider_id),
+      label: providerDisplayName(provider.provider_name),
+      logoUrl: tmdbImage(provider.logo_path, 'w92'),
+    }));
+}
+
 async function discoverAniListGenres(): Promise<GenreOption[]> {
   const response = await fetch(ANILIST_API_URL, {
     method: 'POST',
@@ -555,9 +715,41 @@ async function discoverAniListGenres(): Promise<GenreOption[]> {
     .filter((genre): genre is string => typeof genre === 'string' && genre.trim().length > 0)
     .map((genre) => ({
       label: genre.trim(),
-      value: normalizeGenreFilter(genre),
+      value: genre.trim(),
     }))
     .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+type TmdbCatalogFilters = {
+  genre: string;
+  year: string;
+  provider: string;
+  region: AvailabilityRegion;
+};
+
+function tmdbDiscoverySort(type: 'movie' | 'tv', section: DiscoverSection): string {
+  if (section === 'top_rated') return 'vote_average.desc';
+  if (section === 'new') return type === 'movie' ? 'primary_release_date.desc' : 'first_air_date.desc';
+  return 'popularity.desc';
+}
+
+function tmdbUsesDiscoveryFilters(filters: TmdbCatalogFilters): boolean {
+  return Boolean(filters.genre || filters.year || filters.provider);
+}
+
+async function hasTmdbFlatrateProvider(
+  type: 'movie' | 'tv',
+  itemId: string,
+  providerId: string,
+  region: AvailabilityRegion,
+  credential: string,
+): Promise<boolean> {
+  try {
+    const response = await requestTmdbJson<TmdbWatchProviderDetailResponse>(`${type}/${itemId}/watch/providers`, credential);
+    return Boolean(response.results?.[region]?.flatrate?.some((provider) => String(provider.provider_id) === providerId));
+  } catch {
+    return false;
+  }
 }
 
 async function discoverMoviesOrTv(
@@ -565,21 +757,68 @@ async function discoverMoviesOrTv(
   section: DiscoverSection,
   query: string,
   credential: string,
+  filters: TmdbCatalogFilters,
 ): Promise<readonly StremioPluginCatalogItem[]> {
   const normalizedQuery = query.trim();
   const isSearch = normalizedQuery.length > 0;
+  const useDiscoveryEndpoint = !isSearch && tmdbUsesDiscoveryFilters(filters);
   const path = isSearch
     ? `search/${type}`
-    : TMDB_SECTION_ENDPOINTS[type][section];
+    : useDiscoveryEndpoint
+      ? `discover/${type}`
+      : TMDB_SECTION_ENDPOINTS[type][section];
+  const discoveryQuery = useDiscoveryEndpoint
+    ? {
+      include_adult: false,
+      sort_by: tmdbDiscoverySort(type, section),
+      ...(filters.genre ? { with_genres: filters.genre } : {}),
+      ...(filters.year
+        ? type === 'movie'
+          ? {
+            'primary_release_date.gte': `${filters.year}-01-01`,
+            'primary_release_date.lte': `${filters.year}-12-31`,
+          }
+          : {
+            'first_air_date.gte': `${filters.year}-01-01`,
+            'first_air_date.lte': `${filters.year}-12-31`,
+          }
+        : {}),
+      ...(filters.provider
+        ? {
+          watch_region: filters.region,
+          with_watch_providers: filters.provider,
+          with_watch_monetization_types: 'flatrate',
+        }
+        : {}),
+    }
+    : {};
 
   const response = await requestTmdbJson<TmdbListResponse>(path, credential, {
     ...(isSearch ? { query: normalizedQuery, include_adult: false } : {}),
+    ...discoveryQuery,
     page: 1,
   });
-  const items = response.results || [];
-  return items
+  let items = (response.results || [])
     .slice(0, DISCOVER_RESULT_LIMIT)
     .map((item) => mapTmdbToCatalog(item, type));
+
+  if (isSearch) {
+    items = items
+      .filter((item) => hasGenreMatch(item, filters.genre, type))
+      .filter((item) => hasYearMatch(item, filters.year));
+    if (filters.provider) {
+      const providerMatches = await Promise.all(items.map((item) => hasTmdbFlatrateProvider(
+        type,
+        item.id,
+        filters.provider,
+        filters.region,
+        credential,
+      )));
+      items = items.filter((_, index) => providerMatches[index]);
+    }
+  }
+
+  return items;
 }
 
 async function enrichCatalogItemWithTmdbCredits(
@@ -604,7 +843,12 @@ async function enrichCatalogItemWithTmdbCredits(
   });
 }
 
-async function discoverAnime(query: string, section: DiscoverSection): Promise<readonly StremioPluginCatalogItem[]> {
+async function discoverAnime(
+  query: string,
+  section: DiscoverSection,
+  genre = '',
+  year = '',
+): Promise<readonly StremioPluginCatalogItem[]> {
   const response = await fetch(ANILIST_API_URL, {
     method: 'POST',
     headers: {
@@ -618,6 +862,8 @@ async function discoverAnime(query: string, section: DiscoverSection): Promise<r
         perPage: DISCOVER_RESULT_LIMIT,
         sort: ANILIST_SECTION_SORT[section],
         ...(query.trim() ? { search: query.trim() } : {}),
+        ...(genre.trim() ? { genre: genre.trim() } : {}),
+        ...(year.trim() ? { seasonYear: Number(year) } : {}),
       },
     }),
   });
@@ -679,7 +925,35 @@ function DiscoverShimmerCard() {
 type ThemeDropdownOption = {
   value: string;
   label: string;
+  logoUrl?: string;
 };
+
+function ProviderLogo({ src, label }: { src?: string; label: string }) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  useEffect(() => {
+    setFailedSrc(null);
+  }, [src]);
+
+  if (!src || failedSrc === src) {
+    return (
+      <span
+        aria-hidden="true"
+        className="grid h-6 w-6 shrink-0 place-items-center rounded bg-[var(--loom-surface-3)] text-[10px] font-semibold text-[var(--loom-muted)]"
+      >
+        {label.trim().charAt(0).toUpperCase() || '?'}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      className="h-6 w-6 shrink-0 rounded object-contain"
+      onError={() => setFailedSrc(src)}
+    />
+  );
+}
 
 function ThemeDropdown({
   id,
@@ -701,6 +975,7 @@ function ThemeDropdown({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuStyle, setMenuStyle] = useState<{ left: number; top: number; width: number } | null>(null);
+  const selectedOption = options.find((option) => option.value === value);
   const selectedLabel = useMemo(
     () => options.find((option) => option.value === value)?.label || options[0]?.label || 'Select',
     [options, value],
@@ -762,8 +1037,9 @@ function ThemeDropdown({
             setIsOpen(true);
           }
         }}
-        className={`relative z-10 inline-flex h-8 min-w-[9rem] items-center rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 pr-10 text-[var(--loom-text)] text-sm font-normal outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] ${buttonClassName || ''}`}
+        className={`relative z-10 inline-flex h-8 min-w-[9rem] items-center gap-2 rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 pr-10 text-[var(--loom-text)] text-sm font-normal outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] ${buttonClassName || ''}`}
       >
+        {selectedOption?.logoUrl !== undefined && <ProviderLogo src={selectedOption.logoUrl} label={selectedOption.label} />}
         <span className="truncate whitespace-nowrap">{selectedLabel}</span>
         <ChevronDown className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--loom-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -787,12 +1063,13 @@ function ThemeDropdown({
                   onChange(option.value);
                   setIsOpen(false);
                 }}
-        className={`relative z-10 flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${selected
+                className={`relative z-10 flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] ${selected
                   ? 'bg-[var(--loom-active-bg)] text-[var(--loom-text)]'
                   : 'text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]'
                 }`}
               >
-                {option.label}
+                {option.logoUrl !== undefined && <ProviderLogo src={option.logoUrl} label={option.label} />}
+                <span className="truncate">{option.label}</span>
               </button>
             );
           })}
@@ -804,30 +1081,60 @@ function ThemeDropdown({
 }
 
 export default function PluginDiscover() {
+  return <DiscoverCatalog mode="discover" />;
+}
+
+export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'home' }) {
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
   const location = useLocation();
   const initialFilterState = useMemo(() => parseDiscoverFilterState(location.search), [location.search]);
+  const isHome = mode === 'home';
+  const routePath = isHome ? '/' : DISCOVER_ROUTE;
   const pageRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollTopRef = useRef(0);
+  const discoverCache = useRef<DiscoverCacheState>(loadDiscoverCacheFromStorage());
+  const initialRegion = normalizeAvailabilityRegion(initialFilterState.region);
+  const initialYearFilter = initialFilterState.yearFilter.trim();
+  const initialResolvedYearFilter = /^(19|20)\d{2}$/.test(initialYearFilter) ? initialYearFilter : '';
+  const initialCacheId = makeCacheId(
+    initialFilterState.contentType,
+    initialFilterState.section,
+    initialFilterState.query,
+    normalizeGenreFilter(initialFilterState.genreFilter),
+    initialResolvedYearFilter,
+    initialFilterState.platformFilter,
+    initialRegion,
+  );
+  const initialCachedItems = getValidCachedItems(discoverCache.current, initialCacheId);
   const [tmdbCredential, setTmdbCredential] = useState('');
   const [query, setQuery] = useState(initialFilterState.query);
   const [contentType, setContentType] = useState<DiscoverType>(initialFilterState.contentType);
   const [section, setSection] = useState<DiscoverSection>(initialFilterState.section);
   const [genreFilter, setGenreFilter] = useState(initialFilterState.genreFilter);
   const [genreOptions, setGenreOptions] = useState<GenreOption[]>([]);
-  const [yearFilter, setYearFilter] = useState(initialFilterState.yearFilter);
-  const [yearOptions, setYearOptions] = useState<string[]>([]);
-  const [items, setItems] = useState<readonly StremioPluginCatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [yearFilter, setYearFilter] = useState(initialResolvedYearFilter);
+  const [platformFilter, setPlatformFilter] = useState(initialFilterState.platformFilter);
+  const [availabilityRegion, setAvailabilityRegion] = useState<AvailabilityRegion>(initialRegion);
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
+  const [providerOptionsLoading, setProviderOptionsLoading] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [items, setItems] = useState<readonly StremioPluginCatalogItem[]>(() => initialCachedItems
+    ? initialCachedItems.filter((item) => hasYearMatch(item, initialResolvedYearFilter))
+    : []);
+  const [loading, setLoading] = useState(() => !initialCachedItems);
   const [error, setError] = useState<string | null>(null);
   const catalogRequestRevision = useRef(0);
   const searchTimer = useRef<number | null>(null);
   const queryRef = useRef('');
   const genreRef = useRef('');
   const yearRef = useRef('');
+  const platformRef = useRef('');
+  const regionRef = useRef<AvailabilityRegion>(initialRegion);
   const detailsCache = useRef(new Map<string, Promise<StremioPluginCatalogItem>>());
-  const discoverCache = useRef<DiscoverCacheState>(loadDiscoverCacheFromStorage());
+  const providerOptionsCache = useRef<Record<string, ProviderOption[]>>({});
+  const providerLoadTracker = useRef<Record<string, Promise<ProviderOption[]> | null>>({});
+  const regionWasExplicitRef = useRef(Boolean(initialFilterState.region.trim()));
   const genreOptionsCache = useRef<Record<DiscoverType, GenreOption[]>>({
     movie: [],
     tv: [],
@@ -843,10 +1150,12 @@ export default function PluginDiscover() {
   const navigate = useNavigate();
 
   const availableSections = useMemo(() => DISCOVER_SECTIONS[contentType], [contentType]);
+  const yearOptions = useMemo(() => releaseYearOptions(), []);
   const isModern = theme.homeStyle === 'modern';
   const frameClass = isModern ? 'loom-modern-content-frame' : 'loom-frame';
   const topPaddingClass = isModern ? 'pt-28' : 'pt-24';
   const currentSearch = location.search.startsWith('?') ? location.search.slice(1) : location.search;
+  const viewStateStorageKey = isHome ? 'loomtv:home-discover-view-state-v1' : DISCOVER_VIEW_STATE_STORAGE_KEY;
 
   useEffect(() => {
     const nextSearch = buildDiscoverSearch({
@@ -854,17 +1163,19 @@ export default function PluginDiscover() {
       section,
       genreFilter,
       yearFilter,
+      platformFilter,
+      region: availabilityRegion,
       query,
     });
     if (nextSearch === currentSearch) return;
     void navigate(
       {
-        pathname: DISCOVER_ROUTE,
+        pathname: routePath,
         search: nextSearch ? `?${nextSearch}` : '',
       },
       { replace: true },
     );
-  }, [contentType, genreFilter, section, yearFilter, query, currentSearch, navigate]);
+  }, [availabilityRegion, contentType, genreFilter, platformFilter, query, currentSearch, navigate, routePath, section, yearFilter]);
 
   useEffect(() => {
     let isActive = true;
@@ -873,6 +1184,14 @@ export default function PluginDiscover() {
         const settings = await desktopApi.getSettings();
         if (!isActive) return;
         setTmdbCredential(normalizeTmdbCredential(settings.metadataApiKeys?.tmdb || settings.tmdbApiKey || ''));
+        if (!regionWasExplicitRef.current && activeProfile?.id) {
+          try {
+            const restrictions = await desktopApi.getProfileRestrictions(activeProfile.id);
+            if (isActive) setAvailabilityRegion(normalizeAvailabilityRegion(restrictions.country));
+          } catch {
+            // US remains the conservative availability fallback.
+          }
+        }
       } catch (settingsError) {
         if (!isActive) return;
         setError(errorMessage(settingsError));
@@ -886,7 +1205,7 @@ export default function PluginDiscover() {
   useEffect(() => {
     if (!pageRef.current) return;
     try {
-      const raw = sessionStorage.getItem(DISCOVER_VIEW_STATE_STORAGE_KEY);
+      const raw = sessionStorage.getItem(viewStateStorageKey);
       if (!raw) return;
       const saved = JSON.parse(raw) as { search?: string; scrollTop?: number };
       if (saved.search !== location.search || typeof saved.scrollTop !== 'number' || !Number.isFinite(saved.scrollTop) || saved.scrollTop <= 0) {
@@ -896,7 +1215,7 @@ export default function PluginDiscover() {
     } catch {
       // Ignore invalid or unavailable storage state.
     }
-  }, [location.search]);
+  }, [location.search, viewStateStorageKey]);
 
   useEffect(() => {
     if (loading || items.length === 0 || pendingScrollTopRef.current <= 0) return undefined;
@@ -913,19 +1232,19 @@ export default function PluginDiscover() {
     const page = pageRef.current;
     return () => {
       if (!page) return;
-    try {
-      sessionStorage.setItem(
-        DISCOVER_VIEW_STATE_STORAGE_KEY,
-        JSON.stringify({
-          search: location.search,
-          scrollTop: page.scrollTop,
-        }),
-      );
-    } catch {
-      // Ignore storage persistence failures.
-    }
+      try {
+        sessionStorage.setItem(
+          viewStateStorageKey,
+          JSON.stringify({
+            search: location.search,
+            scrollTop: page.scrollTop,
+          }),
+        );
+      } catch {
+        // Ignore storage persistence failures.
+      }
     };
-  }, [location.search]);
+  }, [location.search, viewStateStorageKey]);
 
   useEffect(() => {
     insertShimmerStyle();
@@ -947,6 +1266,14 @@ export default function PluginDiscover() {
     yearRef.current = yearFilter;
   }, [yearFilter]);
 
+  useEffect(() => {
+    platformRef.current = platformFilter;
+  }, [platformFilter]);
+
+  useEffect(() => {
+    regionRef.current = availabilityRegion;
+  }, [availabilityRegion]);
+
   const getCachedItems = useCallback((cacheId: CachedCacheId): readonly StremioPluginCatalogItem[] | null => {
     const now = Date.now();
     const today = toLocalDateKey();
@@ -961,19 +1288,17 @@ export default function PluginDiscover() {
       return null;
     }
 
-    const cached = cache.entries[cacheId];
-    if (!cached || cached.expiresAt < now) return null;
-    const hasImageCandidate = cached.items.some((item) => Boolean(
-      (item.posterUrl && item.posterUrl.trim())
-      || (item.backgroundUrl && item.backgroundUrl.trim())
-      || (item.logoUrl && item.logoUrl.trim()),
-    ));
-    if (!hasImageCandidate) {
-      delete cache.entries[cacheId];
-      try {
-        localStorage.setItem(DISCOVER_CACHE_STORAGE_KEY, JSON.stringify(cache));
-      } catch {
-        // Ignore cache cleanup persistence failures.
+    const cached = getValidCachedItems(cache, cacheId, now);
+    if (!cached) {
+      const entry = cache.entries[cacheId];
+      const shouldCleanEntry = Boolean(entry && entry.expiresAt >= now && !hasCachedImageCandidate(entry.items));
+      if (shouldCleanEntry) {
+        delete cache.entries[cacheId];
+        try {
+          localStorage.setItem(DISCOVER_CACHE_STORAGE_KEY, JSON.stringify(cache));
+        } catch {
+          // Ignore cache cleanup persistence failures.
+        }
       }
       return null;
     }
@@ -1047,6 +1372,55 @@ export default function PluginDiscover() {
     }
   }, [tmdbCredential]);
 
+  const ensureProviderOptions = useCallback(async (type: GenreSourceType, region: AvailabilityRegion) => {
+    const cacheKey = `${type}:${region}`;
+    const cached = providerOptionsCache.current[cacheKey];
+    if (cached) {
+      if (type === activeContentTypeRef.current && region === regionRef.current) setProviderOptions(cached);
+      return;
+    }
+
+    const inFlight = providerLoadTracker.current[cacheKey];
+    if (inFlight) {
+      try {
+        const options = await inFlight;
+        if (type === activeContentTypeRef.current && region === regionRef.current) setProviderOptions(options);
+      } catch {
+        // The original request owns the visible provider error state.
+      }
+      return;
+    }
+
+    if (!tmdbCredential) {
+      if (type === activeContentTypeRef.current && region === regionRef.current) setProviderOptions([]);
+      return;
+    }
+
+    const loader = discoverTmdbProviders(type, region, tmdbCredential);
+    providerLoadTracker.current[cacheKey] = loader;
+    if (type === activeContentTypeRef.current && region === regionRef.current) {
+      setProviderOptionsLoading(true);
+      setProviderError(null);
+    }
+    try {
+      const options = await loader;
+      providerOptionsCache.current[cacheKey] = [...options];
+      if (type === activeContentTypeRef.current && region === regionRef.current) {
+        setProviderOptions(options);
+        setProviderOptionsLoading(false);
+        setPlatformFilter((current) => current && !options.some((option) => option.value === current) ? '' : current);
+      }
+    } catch (loadError) {
+      if (type === activeContentTypeRef.current && region === regionRef.current) {
+        setProviderOptions([]);
+        setProviderOptionsLoading(false);
+        setProviderError(errorMessage(loadError));
+      }
+    } finally {
+      providerLoadTracker.current[cacheKey] = null;
+    }
+  }, [tmdbCredential]);
+
   useEffect(() => {
     const contentTypeChanged = previousContentTypeRef.current !== contentType;
     previousContentTypeRef.current = contentType;
@@ -1054,7 +1428,7 @@ export default function PluginDiscover() {
       setSection('trending');
       setGenreFilter('');
       setYearFilter('');
-      setYearOptions([]);
+      setPlatformFilter('');
       detailsCache.current.clear();
       setError(null);
     }
@@ -1066,31 +1440,52 @@ export default function PluginDiscover() {
   }, [contentType, ensureGenreOptions]);
 
   useEffect(() => {
+    setProviderError(null);
+    if (contentType === 'anime') {
+      setProviderOptions([]);
+      return;
+    }
+    void ensureProviderOptions(contentType, availabilityRegion);
+  }, [availabilityRegion, contentType, ensureProviderOptions]);
+
+  useEffect(() => {
     if (contentType === 'anime') return;
     if (!tmdbCredential) return;
     if (genreOptionsCache.current[contentType].length > 0) return;
     void ensureGenreOptions(contentType);
   }, [contentType, tmdbCredential, ensureGenreOptions]);
 
-  const loadCatalog = useCallback(async (searchValue = '', genre = genreFilter, year = yearFilter) => {
+  const loadCatalog = useCallback(async (
+    searchValue = '',
+    genre = genreFilter,
+    year = yearFilter,
+    provider = platformFilter,
+    region = availabilityRegion,
+  ) => {
     const requestRevision = ++catalogRequestRevision.current;
     const trimmedQuery = searchValue.trim();
     const normalizedGenre = normalizeGenreFilter(genre);
+    const providerGenre = contentType === 'anime'
+      ? genreOptions.find((option) => normalizeGenreFilter(option.value) === normalizedGenre)?.value || genre.trim()
+      : normalizedGenre;
     const normalizedYear = year.trim();
-    const cacheId = makeCacheId(contentType, section, trimmedQuery, normalizedGenre);
+    const normalizedProvider = provider.trim();
+    const normalizedRegion = normalizeAvailabilityRegion(region);
+    const cacheId = makeCacheId(
+      contentType,
+      section,
+      trimmedQuery,
+      normalizedGenre,
+      normalizedYear,
+      normalizedProvider,
+      normalizedRegion,
+    );
     const cached = getCachedItems(cacheId);
     if (cached) {
-      const yearFromItems = toYearFilterOptions(cached);
-      if (normalizedYear && !yearFromItems.includes(normalizedYear)) {
-        setYearFilter('');
-      }
-      setYearOptions(yearFromItems);
-      const filteredItems = cached.filter((item) => hasYearMatch(item, normalizedYear));
-      if (requestRevision === catalogRequestRevision.current) {
-        setItems(filteredItems);
-        setError(null);
-        setLoading(false);
-      }
+      if (requestRevision !== catalogRequestRevision.current) return;
+      setItems(cached);
+      setError(null);
+      setLoading(false);
       return;
     }
 
@@ -1098,40 +1493,27 @@ export default function PluginDiscover() {
     setError(null);
 
     try {
+      let nextItems: readonly StremioPluginCatalogItem[];
       if (contentType === 'anime') {
-        const nextItems = await discoverAnime(trimmedQuery, section);
-        const availableYears = toYearFilterOptions(nextItems);
-        setYearOptions(availableYears);
-        const genreFilteredItems = nextItems
-          .filter((item) => hasGenreMatch(item, normalizedGenre, contentType));
-        if (normalizedYear && !availableYears.includes(normalizedYear)) {
-          setYearFilter('');
-        }
-        const filteredItems = genreFilteredItems
-          .filter((item) => hasYearMatch(item, normalizedYear));
-        if (requestRevision === catalogRequestRevision.current) {
-          setItems(filteredItems);
-          setCachedItems(cacheId, genreFilteredItems);
-        }
+        nextItems = await discoverAnime(trimmedQuery, section, providerGenre, normalizedYear);
       } else {
         if (!tmdbCredential) {
           throw new Error('TMDB API key is missing. Add it in Settings → Metadata API keys before browsing Movies or TV.');
         }
-        const nextItems = await discoverMoviesOrTv(contentType, section, trimmedQuery, tmdbCredential);
-        const availableYears = toYearFilterOptions(nextItems);
-        setYearOptions(availableYears);
-        const genreFilteredItems = nextItems
-          .filter((item) => hasGenreMatch(item, normalizedGenre, contentType));
-        if (normalizedYear && !availableYears.includes(normalizedYear)) {
-          setYearFilter('');
-        }
-        const filteredItems = genreFilteredItems
-          .filter((item) => hasYearMatch(item, normalizedYear));
-        if (requestRevision === catalogRequestRevision.current) {
-          setItems(filteredItems);
-          setCachedItems(cacheId, genreFilteredItems);
-        }
+        nextItems = await discoverMoviesOrTv(contentType, section, trimmedQuery, tmdbCredential, {
+          genre: normalizedGenre,
+          year: normalizedYear,
+          provider: normalizedProvider,
+          region: normalizedRegion,
+        });
       }
+
+      const filteredItems = nextItems
+        .filter((item) => hasGenreMatch(item, normalizedGenre, contentType))
+        .filter((item) => hasYearMatch(item, normalizedYear));
+      if (requestRevision !== catalogRequestRevision.current) return;
+      setItems(filteredItems);
+      setCachedItems(cacheId, filteredItems);
     } catch (loadError) {
       if (requestRevision !== catalogRequestRevision.current) return;
       setItems([]);
@@ -1139,16 +1521,34 @@ export default function PluginDiscover() {
     } finally {
       if (requestRevision === catalogRequestRevision.current) setLoading(false);
     }
-  }, [contentType, genreFilter, getCachedItems, section, setCachedItems, tmdbCredential, yearFilter]);
+  }, [availabilityRegion, contentType, genreFilter, genreOptions, getCachedItems, platformFilter, section, setCachedItems, tmdbCredential, yearFilter]);
 
   useEffect(() => {
     if (searchTimer.current !== null) {
       window.clearTimeout(searchTimer.current);
       searchTimer.current = null;
     }
+    catalogRequestRevision.current += 1;
+    const cacheId = makeCacheId(
+      contentType,
+      section,
+      query,
+      normalizeGenreFilter(genreFilter),
+      yearFilter,
+      platformFilter,
+      availabilityRegion,
+    );
+    if (getCachedItems(cacheId)) {
+      void loadCatalog(query, genreFilter, yearFilter, platformFilter, availabilityRegion);
+      return () => {
+        catalogRequestRevision.current += 1;
+      };
+    }
+
+    setLoading(true);
     searchTimer.current = window.setTimeout(() => {
       searchTimer.current = null;
-      void loadCatalog(query);
+      void loadCatalog(query, genreFilter, yearFilter, platformFilter, availabilityRegion);
     }, PROVIDER_SEARCH_DEBOUNCE_MS);
 
     return () => {
@@ -1156,8 +1556,9 @@ export default function PluginDiscover() {
         window.clearTimeout(searchTimer.current);
         searchTimer.current = null;
       }
+      catalogRequestRevision.current += 1;
     };
-  }, [contentType, section, tmdbCredential, loadCatalog, query, yearFilter]);
+  }, [availabilityRegion, contentType, genreFilter, getCachedItems, loadCatalog, platformFilter, query, section, tmdbCredential, yearFilter]);
 
   useEffect(() => {
     const now = Date.now();
@@ -1169,7 +1570,7 @@ export default function PluginDiscover() {
       } catch {
         // Ignore cache storage failures.
       }
-      void loadCatalog(queryRef.current, genreRef.current, yearRef.current);
+      void loadCatalog(queryRef.current, genreRef.current, yearRef.current, platformRef.current, regionRef.current);
     }, delayMs);
 
     return () => {
@@ -1196,8 +1597,8 @@ export default function PluginDiscover() {
     void (async () => {
       const nextItem = await enrichWithCast(item);
       const discoverSourceRoute = location.search
-        ? `${DISCOVER_ROUTE}${location.search}`
-        : DISCOVER_ROUTE;
+        ? `${routePath}${location.search}`
+        : routePath;
       cacheDiscoverReturnRoute(discoverSourceRoute);
       cacheExploreItem(nextItem);
       const detailPath = nextItem.type === 'movie'
@@ -1213,7 +1614,7 @@ export default function PluginDiscover() {
         },
       });
     })();
-  }, [enrichWithCast, location.search, navigate]);
+  }, [enrichWithCast, location.search, navigate, routePath]);
 
   const chipClass = (isActive: boolean) => `h-8 shrink-0 rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${
     isActive
@@ -1222,20 +1623,47 @@ export default function PluginDiscover() {
   }`;
 
   const gridEntries = useMemo<GridEntry[]>(() => items.map((item) => ({ id: `${item.type}:${item.id}`, item })), [items]);
+  const providerDropdownOptions = useMemo<ThemeDropdownOption[]>(() => [
+    { value: '', label: providerOptionsLoading ? 'Loading platforms…' : 'All platforms' },
+    ...providerOptions.map((provider) => ({
+      value: provider.value,
+      label: provider.label,
+      logoUrl: provider.logoUrl,
+    })),
+  ], [providerOptions, providerOptionsLoading]);
+  const regionDropdownOptions = useMemo<ThemeDropdownOption[]>(() => AVAILABILITY_REGIONS.map((region) => ({
+    value: region,
+    label: region === DEFAULT_AVAILABILITY_REGION ? `${region} · Default` : region,
+  })), []);
+  const activeProviderLabel = providerOptions.find((provider) => provider.value === platformFilter)?.label || 'the selected platform';
+  const emptyStateMessage = yearFilter
+    ? `No ${DISCOVER_TYPE_LABELS[contentType].toLowerCase()} match release year ${yearFilter}${genreFilter ? ' and the selected genre' : ''}${platformFilter ? ` while streaming on ${activeProviderLabel}` : ''}. Try another release year or clear the filters.`
+    : genreFilter
+      ? `No ${DISCOVER_TYPE_LABELS[contentType].toLowerCase()} match the selected genre in this provider catalog.`
+      : platformFilter
+        ? `No ${DISCOVER_TYPE_LABELS[contentType].toLowerCase()} are listed as streaming on ${activeProviderLabel} in ${availabilityRegion}.`
+        : 'No titles returned for this selection.';
+  const historicalTrendingNote = yearFilter && section === 'trending'
+    ? contentType === 'anime'
+      ? 'Release year is applied by AniList; Trending remains the provider’s current ranking, not a historical trend snapshot.'
+      : 'Release year is applied by TMDB; historical Trending is not available, so filtered results use popularity ordering.'
+    : '';
 
   return (
-    <div ref={pageRef} className="loom-page loom-library-page h-full overflow-y-auto">
-      <LibrarySearch
-        value={query}
-        onChange={setQuery}
-        placeholder="Search titles"
-      />
-      <div className={`${frameClass} loom-library-page-frame page-bottom-safe page-list-bottom-safe ${topPaddingClass}`}>
+    <div ref={pageRef} className={isHome ? 'mt-10' : 'loom-page loom-library-page h-full overflow-y-auto'}>
+      {!isHome && (
+        <LibrarySearch
+          value={query}
+          onChange={setQuery}
+          placeholder="Search titles"
+        />
+      )}
+      <div className={`${frameClass} ${isHome ? 'rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-5 sm:p-6' : 'loom-library-page-frame page-bottom-safe page-list-bottom-safe'} ${isHome ? 'pt-0' : topPaddingClass}`}>
         <header className="loom-library-page-heading mb-6 flex min-h-8 flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">Discover</h1>
+            <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">{isHome ? 'Browse more titles' : 'Discover'}</h1>
             <p className="mt-1 text-sm text-[var(--loom-muted)]">
-Discover new anime, tvshows and movies to watch
+              {isHome ? 'Browse provider catalogs without leaving Home.' : 'Discover new anime, TV shows, and movies to watch.'}
             </p>
           </div>
           <div className="w-full">
@@ -1277,11 +1705,40 @@ Discover new anime, tvshows and movies to watch
                 id="discover-year-select"
                 label="Filter year"
                 value={yearFilter}
-                options={[{ value: '', label: 'All Years' }, ...yearOptions.map((year) => ({ value: year, label: year }))]
+                options={[{ value: '', label: 'All release years' }, ...yearOptions.map((year) => ({ value: year, label: year }))]
                 }
                 onChange={setYearFilter}
               />
+              {contentType !== 'anime' ? (
+                <>
+                  <ThemeDropdown
+                    id="discover-platform-select"
+                    label={`Streaming on in ${availabilityRegion}`}
+                    value={platformFilter}
+                    options={providerDropdownOptions}
+                    onChange={setPlatformFilter}
+                  />
+                  <ThemeDropdown
+                    id="discover-region-select"
+                    label="Streaming availability region"
+                    value={availabilityRegion}
+                    options={regionDropdownOptions}
+                    onChange={(value) => {
+                      regionWasExplicitRef.current = true;
+                      setAvailabilityRegion(normalizeAvailabilityRegion(value));
+                    }}
+                  />
+                </>
+              ) : (
+                <span className="inline-flex h-8 items-center rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] px-3 text-xs text-[var(--loom-muted)]" title="AniList does not provide region-aware streaming-provider availability.">
+                  Streaming availability unavailable for Anime
+                </span>
+              )}
             </div>
+            {providerError && contentType !== 'anime' && (
+              <p role="status" className="mt-2 text-xs text-[var(--loom-muted)]">Streaming platforms could not be loaded for {availabilityRegion}; browse filters remain available.</p>
+            )}
+            {historicalTrendingNote && <p className="mt-2 text-xs text-[var(--loom-muted)]">{historicalTrendingNote}</p>}
           </div>
         </header>
 
@@ -1301,7 +1758,7 @@ Discover new anime, tvshows and movies to watch
             ))}
           </div>
         ) : gridEntries.length === 0 ? (
-          <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">No titles returned for this selection.</p>
+          <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">{emptyStateMessage}</p>
         ) : (
           <VirtualPosterGrid
             items={gridEntries}
