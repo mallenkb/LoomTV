@@ -10,6 +10,7 @@ import LoomLogo from '@/components/LoomLogo';
 import ProfileAvatar from '@/components/profiles/ProfileAvatar';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
+import { useToast } from '@/components/ToastProvider';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | 'discover' | SidebarNavItemId | 'settings';
@@ -345,6 +346,7 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const { theme } = useTheme();
   const { activeProfile } = useProfiles();
+  const { showToast } = useToast();
   const { state, scanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
   const sourceRoute = (location.state as { from?: string } | null)?.from;
@@ -357,7 +359,13 @@ export default function Sidebar() {
     try {
       await scanLibrary();
     } catch (error) {
-      setLibraryActionError(libraryMutationMessage(error));
+      const message = libraryMutationMessage(error);
+      setLibraryActionError(message);
+      showToast({
+        title: 'Library refresh failed',
+        description: message,
+        tone: 'error',
+      });
     }
   };
 
@@ -448,6 +456,7 @@ export default function Sidebar() {
   if (isModern) {
     return (
       <>
+        {libraryActionError ? <span role="alert" className="sr-only">{libraryActionError}</span> : null}
         <aside className="loom-modern-sidebar loom-no-drag fixed inset-y-0 left-0 z-50 flex w-20 flex-col items-center py-5">
           <nav className="mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
             <SharedListHighlight
