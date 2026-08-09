@@ -212,7 +212,7 @@ function assetMap(files, rootPath) {
 }
 
 function updaterReferences(source) {
-  return [...source.matchAll(/^\s*(?:url|path):\s*["']?([^"'\s]+)["']?\s*$/gim)]
+  return [...source.matchAll(/^\s*(?:-\s*)?(?:url|path):\s*["']?([^"'\s]+)["']?\s*$/gim)]
     .map((match) => match[1]);
 }
 
