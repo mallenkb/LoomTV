@@ -23,6 +23,8 @@ import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import { normalizeAnimeCast } from '../shared/animeCast.ts';
 
 export type OfficialArtworkRefreshResult = {
+  title?: string;
+  year?: number;
   format?: string;
   thumbnail?: string;
   cover?: string;
@@ -116,11 +118,11 @@ function mergeAnimeCastMissingFields(
 
   const existingByCharacter = new Map(existing.map((credit) => [animeCreditKey(credit), credit]));
   const mergeCredit = (current: MediaItem['cast'][number] | undefined, next: MediaItem['cast'][number]) => {
-    const characterRole = isMeaningfulAnimeRole(next.characterRole)
+    const characterRole = (isMeaningfulAnimeRole(next.characterRole)
       ? next.characterRole
       : isMeaningfulAnimeRole(current?.characterRole)
         ? current?.characterRole
-        : next.characterRole || current?.characterRole || next.character || current?.character || '';
+        : next.characterRole || current?.characterRole || next.character || current?.character || '') || '';
     return {
       ...(current || next),
       name: next.name || current?.name || '',

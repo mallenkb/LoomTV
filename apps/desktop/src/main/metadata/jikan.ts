@@ -204,13 +204,13 @@ function mergeAnimeVoiceActorFallback(
     const key = creditKey(credit);
     const fallbackCredit = fallbackByCharacter.get(key);
     if (!fallbackCredit) return credit;
-    const characterName = credit.characterName || fallbackCredit.characterName || credit.name || fallbackCredit.name;
-    const characterRole = meaningfulRole(credit.characterRole)
+    const characterName = credit.characterName || fallbackCredit.characterName || credit.name || fallbackCredit.name || '';
+    const characterRole = (meaningfulRole(credit.characterRole)
       ? credit.characterRole
       : meaningfulRole(fallbackCredit.characterRole)
         ? fallbackCredit.characterRole
-        : credit.characterRole || fallbackCredit.characterRole || credit.character || fallbackCredit.character;
-    const characterImage = credit.characterImage || fallbackCredit.characterImage;
+        : credit.characterRole || fallbackCredit.characterRole || credit.character || fallbackCredit.character) || '';
+    const characterImage = credit.characterImage || fallbackCredit.characterImage || '';
     const voiceActorName = credit.voiceActorName || fallbackCredit.voiceActorName;
     const voiceActorImage = credit.voiceActorImage || fallbackCredit.voiceActorImage;
     const voiceActorLanguage = credit.voiceActorLanguage || fallbackCredit.voiceActorLanguage;
@@ -218,7 +218,7 @@ function mergeAnimeVoiceActorFallback(
       ...credit,
       name: characterName,
       character: characterRole,
-      image: characterImage,
+      image: characterImage || '',
       characterName,
       characterRole,
       characterImage,

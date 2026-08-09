@@ -47,7 +47,7 @@ export function tmdbLogoCandidates(details: unknown): string[] {
     .slice(0, MAX_TMDB_LOGO_CANDIDATES);
 }
 
-export function normalizeTitleForMatch(value?: string): string {
+export function normalizeTitleForMatch(value?: string | null): string {
   return (value || '')
     .toLowerCase()
     .replace(/&/g, ' and ')
