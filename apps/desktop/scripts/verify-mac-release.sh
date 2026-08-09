@@ -29,17 +29,30 @@ fi
 declare -a APPS=()
 declare -a DMGS=()
 declare -a ZIPS=()
+DISCOVERY_FILE="$(mktemp "${TMPDIR:-/tmp}/loomtv-mac-release-discovery.XXXXXX")"
+trap 'rm -f "$DISCOVERY_FILE"' EXIT
+
+if ! find "$SEARCH_ROOT" -type d \( -name 'LoomTV.app' -o -name 'Loom Media Server.app' \) -print0 >"$DISCOVERY_FILE"; then
+  echo "Could not enumerate macOS app bundles under $SEARCH_ROOT" >&2
+  exit 1
+fi
 while IFS= read -r -d '' app; do
   APPS+=("$app")
-done < <(
-  find "$SEARCH_ROOT" -type d \( -name 'LoomTV.app' -o -name 'Loom Media Server.app' \) -print0 2>/dev/null
-)
+done <"$DISCOVERY_FILE"
+if ! find "$SEARCH_ROOT" -type f -name 'LoomTV-*.dmg' -print0 >"$DISCOVERY_FILE"; then
+  echo "Could not enumerate final macOS DMGs under $SEARCH_ROOT" >&2
+  exit 1
+fi
 while IFS= read -r -d '' dmg; do
   DMGS+=("$dmg")
-done < <(find "$SEARCH_ROOT" -type f -name 'LoomTV-*.dmg' -print0 2>/dev/null)
+done <"$DISCOVERY_FILE"
+if ! find "$SEARCH_ROOT" -type f -name 'LoomTV-*.zip' -print0 >"$DISCOVERY_FILE"; then
+  echo "Could not enumerate final macOS ZIPs under $SEARCH_ROOT" >&2
+  exit 1
+fi
 while IFS= read -r -d '' zip; do
   ZIPS+=("$zip")
-done < <(find "$SEARCH_ROOT" -type f -name 'LoomTV-*.zip' -print0 2>/dev/null)
+done <"$DISCOVERY_FILE"
 
 if (( ${#APPS[@]} == 0 )); then
   echo "No LoomTV macOS app bundle found under $SEARCH_ROOT" >&2
@@ -66,6 +79,7 @@ verify_app() {
   local team_id
   local bundle_id
   local bundle_version
+  local signing_details
 
   [[ -d "$app_path/Contents" ]] || {
     echo "$label is not a complete macOS app bundle: $app_path" >&2
@@ -77,9 +91,16 @@ verify_app() {
   }
 
   echo "==> Verifying code signature: $label ($app_path)"
-  codesign --verify --deep --strict --verbose=2 "$app_path"
+  if ! codesign --verify --deep --strict --verbose=2 "$app_path"; then
+    echo "codesign verification failed for $label: $app_path" >&2
+    return 1
+  fi
 
-  team_id="$(codesign -dvvv "$app_path" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -n 1)"
+  if ! signing_details="$(codesign -dvvv "$app_path" 2>&1)"; then
+    echo "Could not read signing identity for $label: $app_path" >&2
+    return 1
+  fi
+  team_id="$(printf '%s\n' "$signing_details" | sed -n 's/^TeamIdentifier=//p' | head -n 1)"
   if [[ -z "$team_id" || "$team_id" =~ ^(not[[:space:]]set|none|-|unknown)$ ]]; then
     echo "$label is not signed by a Developer ID identity: $app_path" >&2
     return 1
@@ -89,25 +110,40 @@ verify_app() {
     return 1
   fi
 
-  bundle_id="$(bundle_value "$app_path" CFBundleIdentifier)"
+  if ! bundle_id="$(bundle_value "$app_path" CFBundleIdentifier)"; then
+    echo "Could not read CFBundleIdentifier for $label: $app_path" >&2
+    return 1
+  fi
   if [[ "$bundle_id" != "$EXPECTED_BUNDLE_ID" ]]; then
     echo "macOS bundle identifier mismatch for $label: expected $EXPECTED_BUNDLE_ID, found $bundle_id" >&2
     return 1
   fi
-  bundle_version="$(bundle_value "$app_path" CFBundleShortVersionString)"
+  if ! bundle_version="$(bundle_value "$app_path" CFBundleShortVersionString)"; then
+    echo "Could not read CFBundleShortVersionString for $label: $app_path" >&2
+    return 1
+  fi
   if [[ "$bundle_version" != "$EXPECTED_VERSION" ]]; then
     echo "macOS bundle version mismatch for $label: expected $EXPECTED_VERSION, found $bundle_version" >&2
     return 1
   fi
 
   echo "==> Inspecting signing identity and entitlements: $label"
-  codesign -dvvv --entitlements :- "$app_path" 2>&1 | sed -n '1,120p'
+  if ! codesign -dvvv --entitlements :- "$app_path" 2>&1 | sed -n '1,120p'; then
+    echo "Could not inspect signing entitlements for $label: $app_path" >&2
+    return 1
+  fi
 
   echo "==> Checking Gatekeeper assessment: $label"
-  spctl --assess --type execute --verbose=2 "$app_path"
+  if ! spctl --assess --type execute --verbose=2 "$app_path"; then
+    echo "Gatekeeper rejected $label: $app_path" >&2
+    return 1
+  fi
 
   echo "==> Checking stapled notarization ticket: $label"
-  xcrun stapler validate "$app_path"
+  if ! xcrun stapler validate "$app_path"; then
+    echo "Stapled notarization validation failed for $label: $app_path" >&2
+    return 1
+  fi
 }
 
 for app in "${APPS[@]}"; do
@@ -122,9 +158,18 @@ verify_dmg() {
   local -a mounted_apps=()
 
   echo "==> Verifying final DMG: $dmg_path"
-  hdiutil verify "$dmg_path"
-  spctl --assess --type open --verbose=2 "$dmg_path"
-  xcrun stapler validate "$dmg_path"
+  if ! hdiutil verify "$dmg_path"; then
+    echo "DMG integrity verification failed: $dmg_path" >&2
+    return 1
+  fi
+  if ! spctl --assess --type open --verbose=2 "$dmg_path"; then
+    echo "Gatekeeper rejected final DMG: $dmg_path" >&2
+    return 1
+  fi
+  if ! xcrun stapler validate "$dmg_path"; then
+    echo "Stapled notarization validation failed for final DMG: $dmg_path" >&2
+    return 1
+  fi
 
   mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/loomtv-dmg-mount.XXXXXX")"
   if ! hdiutil attach -nobrowse -readonly -mountpoint "$mount_dir" "$dmg_path" >/dev/null; then
@@ -133,9 +178,15 @@ verify_dmg() {
     return 1
   fi
   attached=1
+  if ! find "$mount_dir" -mindepth 1 -maxdepth 1 -type d -name '*.app' -print0 >"$DISCOVERY_FILE"; then
+    hdiutil detach "$mount_dir" -force >/dev/null || true
+    rm -rf "$mount_dir"
+    echo "Could not enumerate the mounted DMG: $dmg_path" >&2
+    return 1
+  fi
   while IFS= read -r -d '' app_path; do
     mounted_apps+=("$app_path")
-  done < <(find "$mount_dir" -mindepth 1 -maxdepth 1 -type d -name '*.app' -print0)
+  done <"$DISCOVERY_FILE"
 
   if (( ${#mounted_apps[@]} != 1 )); then
     if (( attached )); then hdiutil detach "$mount_dir" -force >/dev/null || true; fi
@@ -148,7 +199,11 @@ verify_dmg() {
     rm -rf "$mount_dir"
     return 1
   fi
-  hdiutil detach "$mount_dir" -force >/dev/null
+  if ! hdiutil detach "$mount_dir" -force >/dev/null; then
+    rm -rf "$mount_dir"
+    echo "Could not detach the read-only DMG mount: $dmg_path" >&2
+    return 1
+  fi
   attached=0
   rm -rf "$mount_dir"
 }
@@ -166,9 +221,14 @@ verify_zip() {
     echo "Could not extract final ZIP: $zip_path" >&2
     return 1
   fi
+  if ! find "$extract_dir" -mindepth 1 -maxdepth 2 -type d -name 'LoomTV.app' -print0 >"$DISCOVERY_FILE"; then
+    rm -rf "$extract_dir"
+    echo "Could not enumerate the extracted ZIP: $zip_path" >&2
+    return 1
+  fi
   while IFS= read -r -d '' app_path; do
     extracted_apps+=("$app_path")
-  done < <(find "$extract_dir" -mindepth 1 -maxdepth 2 -type d -name 'LoomTV.app' -print0)
+  done <"$DISCOVERY_FILE"
 
   if (( ${#extracted_apps[@]} != 1 )); then
     rm -rf "$extract_dir"
