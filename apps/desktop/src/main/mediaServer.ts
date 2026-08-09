@@ -34,9 +34,11 @@ import { cachedArtworkResponseHeaders } from './artworkCache';
 import { trackServerConnections } from './updateInstall';
 import {
   cacheArtworkSource,
+  cachePluginArtworkSource,
   createProfile,
   getAllProgress,
   getCachedArtwork,
+  getCachedPluginArtwork,
   getCustomArtworkData,
   getPlaybackTrackPreferences,
   getProfileLists,
@@ -65,7 +67,7 @@ import {
   getHlsProfileBinding,
   touchHlsProfileBinding,
 } from './hlsRequestPolicy';
-import { registerResource, resolveExternalArtworkResource, resolveLocalResource } from './resourceRegistry';
+import { registerResource, resolveExternalArtworkResourceContext, resolveLocalResource } from './resourceRegistry';
 import {
   createAndSelectGuest,
   broadcastProfilesChanged,
@@ -1575,11 +1577,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/cached-artwork') {
         let sourceUrl: string | null;
+        let artworkOwnerId: string | undefined;
         try {
           // External artwork is always resolved from the host registry. Raw
           // provider URLs are deliberately not accepted on this route, so a
           // renderer or paired client can only use a host-issued capability.
-          sourceUrl = resolveExternalArtworkResource(resourceId);
+          const artworkResource = resolveExternalArtworkResourceContext(resourceId);
+          sourceUrl = artworkResource.sourceUrl;
+          artworkOwnerId = artworkResource.ownerId;
         } catch {
           sourceUrl = '';
         }
@@ -1617,13 +1622,17 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           res.end(decoded.buffer);
         };
 
-        const cachedArtwork = getCachedArtwork(sourceUrl);
+        const cachedArtwork = artworkOwnerId
+          ? getCachedPluginArtwork(artworkOwnerId, sourceUrl)
+          : getCachedArtwork(sourceUrl);
         if (cachedArtwork) {
           sendArtwork(cachedArtwork);
           return;
         }
 
-        void cacheArtworkSource(sourceUrl)
+        void (artworkOwnerId
+          ? cachePluginArtworkSource(artworkOwnerId, sourceUrl)
+          : cacheArtworkSource(sourceUrl))
           .then((fetchedArtwork) => {
             if (fetchedArtwork) {
               sendArtwork(fetchedArtwork);

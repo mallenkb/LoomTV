@@ -21,7 +21,7 @@ export interface ArtworkUrlsDeps {
     ttlSeconds?: number,
     options?: { stable?: boolean },
   ) => string;
-  registerRemoteResource: (kind: LocalResourceKind, value: string, scopePath?: string) => string;
+  registerRemoteResource: (kind: LocalResourceKind, value: string, scopePath?: string, ownerId?: string) => string;
 }
 
 export function createArtworkUrls(deps: ArtworkUrlsDeps) {
@@ -79,7 +79,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     return isImageFileName(source) && fs.existsSync(source);
   }
 
-  function artworkDeliveryUrl(source?: string | null): string {
+  function artworkDeliveryUrl(source?: string | null, ownerId?: string): string {
     if (isInlineArtworkSource(source)) return String(source).trim();
 
     const durableSource = durableArtworkSource(source);
@@ -117,7 +117,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       // Provider URLs are host-only state. The renderer receives a loopback
       // cache capability keyed by an opaque resource ID, never the upstream
       // URL that the host will fetch.
-      const resourceId = registerRemoteResource('external-artwork', durableSource);
+      const resourceId = registerRemoteResource('external-artwork', durableSource, undefined, ownerId);
       const params = addLocalAccessToken(new URLSearchParams({ resourceId }), localAccessToken);
       return `http://127.0.0.1:${getMediaServerPort()}/api/cached-artwork?${params.toString()}`;
     }
@@ -130,6 +130,11 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     // boundary. Callers can fall back to another artwork candidate while the
     // host-owned resource registry remains the only delivery path.
     return '';
+  }
+
+  function pluginArtworkDeliveryUrl(addonId: string, source?: string | null): string {
+    if (!addonId.trim()) return '';
+    return artworkDeliveryUrl(source, addonId);
   }
 
   function signedArtworkUrlForRemote(base: string, pathname: string, params: URLSearchParams): string {
@@ -194,7 +199,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
   }
 
   function artworkDeliveryUrls(sources?: string[]): string[] {
-    return Array.from(new Set((sources || []).map(artworkDeliveryUrl).filter(Boolean)));
+    return Array.from(new Set((sources || []).map((source) => artworkDeliveryUrl(source)).filter(Boolean)));
   }
 
   function customArtworkForRenderer(mediaId: string): Record<string, string> {
@@ -283,6 +288,7 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
     isLocalMediaServerArtworkUrl,
     isExternalArtworkUrl,
     artworkDeliveryUrl,
+    pluginArtworkDeliveryUrl,
     rewriteLocalServerUrlSigned,
     remoteArtworkDeliveryUrl,
     artworkDeliveryUrls,

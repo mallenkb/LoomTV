@@ -263,6 +263,28 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       byte_length INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS plugin_artwork_objects (
+      content_hash TEXT PRIMARY KEY CHECK (length(content_hash) = 64),
+      cache_path TEXT NOT NULL UNIQUE,
+      mime_type TEXT NOT NULL CHECK (mime_type = 'image/png'),
+      byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+      ref_count INTEGER NOT NULL CHECK (ref_count >= 0),
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plugin_artwork_references (
+      addon_id TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      content_hash TEXT NOT NULL REFERENCES plugin_artwork_objects(content_hash) ON DELETE RESTRICT,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (addon_id, source_url)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_plugin_artwork_references_hash
+      ON plugin_artwork_references(content_hash);
+    CREATE INDEX IF NOT EXISTS idx_plugin_artwork_references_addon_updated
+      ON plugin_artwork_references(addon_id, updated_at);
   `);
 
   migrateMediaItemArtworkColumns(database);

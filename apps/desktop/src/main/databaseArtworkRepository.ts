@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
 import type { LibraryData } from './appContracts.ts';
 import { artworkCacheFileName, collectArtworkSourcesForCache } from './artworkCache.ts';
-import { sanitizeArtworkBytes } from './artworkSecurity.ts';
 
 export type CachedArtwork = {
   dataUrl?: string;
@@ -95,23 +95,20 @@ export function createDatabaseArtworkRepository(
     }
 
     try {
-      const normalized = sanitizeArtworkBytes(bytes, row.mime_type);
-      const needsRewrite = row.content_hash !== normalized.contentHash
-        || row.mime_type !== normalized.mimeType
-        || row.byte_length !== normalized.byteLength;
-      const update = database.prepare(`
-        UPDATE artwork_cache
-        SET data_url = ?, cache_path = ?, mime_type = ?, byte_length = ?, content_hash = ?, updated_at = ?
-        WHERE source_url = ?
-      `);
+      // Artwork is normalized before insertion by the bounded worker. Cache
+      // reads verify the immutable bytes without decoding again on Electron's
+      // main thread. Legacy/unverifiable rows fail closed and are refetched.
+      const contentHash = createHash('sha256').update(bytes).digest('hex');
+      if (
+        row.mime_type !== 'image/png'
+        || row.byte_length !== bytes.byteLength
+        || !/^[a-f0-9]{64}$/.test(row.content_hash || '')
+        || row.content_hash !== contentHash
+      ) throw new Error('Cached artwork integrity check failed.');
       if (cachePath && fs.existsSync(cachePath)) {
-        if (needsRewrite) fs.writeFileSync(cachePath, normalized.bytes);
-        if (needsRewrite) update.run('', cachePath, normalized.mimeType, normalized.byteLength, normalized.contentHash, Date.now(), sourceUrl);
-        return { cachePath, mimeType: normalized.mimeType, byteLength: normalized.byteLength, contentHash: normalized.contentHash };
+        return { cachePath, mimeType: 'image/png', byteLength: bytes.byteLength, contentHash };
       }
-      const dataUrl = `data:${normalized.mimeType};base64,${normalized.bytes.toString('base64')}`;
-      if (needsRewrite || row.data_url !== dataUrl) update.run(dataUrl, null, normalized.mimeType, normalized.byteLength, normalized.contentHash, Date.now(), sourceUrl);
-      return { dataUrl, mimeType: normalized.mimeType, byteLength: normalized.byteLength, contentHash: normalized.contentHash };
+      return { dataUrl: row.data_url, mimeType: 'image/png', byteLength: bytes.byteLength, contentHash };
     } catch {
       if (cachePath) {
         try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch { /* best effort */ }

@@ -35,23 +35,81 @@ function isPrivateIpv4(address: string): boolean {
     || a >= 224;
 }
 
+const IPV6_BITS = 128n;
+
+function parseIpv6(address: string): bigint | null {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  if (!normalized || normalized.includes(':::')) return null;
+  const separator = normalized.indexOf('::');
+  if (separator !== -1 && normalized.indexOf('::', separator + 2) !== -1) return null;
+  const expandSide = (side: string): number[] | null => {
+    if (!side) return [];
+    const parts = side.split(':');
+    const words: number[] = [];
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      if (part.includes('.')) {
+        if (index !== parts.length - 1 || !net.isIPv4(part)) return null;
+        const octets = part.split('.').map(Number);
+        if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return null;
+        words.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+      words.push(Number.parseInt(part, 16));
+    }
+    return words;
+  };
+  const left = expandSide(separator === -1 ? normalized : normalized.slice(0, separator));
+  const right = expandSide(separator === -1 ? '' : normalized.slice(separator + 2));
+  if (!left || !right) return null;
+  const omitted = 8 - left.length - right.length;
+  if ((separator === -1 && omitted !== 0) || (separator !== -1 && omitted < 1)) return null;
+  const words = [...left, ...Array.from({ length: omitted }, () => 0), ...right];
+  if (words.length !== 8) return null;
+  return words.reduce((value, word) => (value << 16n) | BigInt(word), 0n);
+}
+
+function ipv6CidrContains(address: bigint, prefix: string, bits: number): boolean {
+  const network = parseIpv6(prefix);
+  if (network === null || bits < 0 || bits > Number(IPV6_BITS)) return false;
+  if (bits === 0) return true;
+  const shift = IPV6_BITS - BigInt(bits);
+  return (address >> shift) === (network >> shift);
+}
+
+/**
+ * Return true for every IPv6 address that must not be contacted by provider
+ * transports. Provider fetches are fail-closed: only ordinary global unicast
+ * space is accepted, with IANA special-purpose, documentation, deprecated,
+ * mapped, and transition ranges denied explicitly.
+ */
+function isNonGlobalIpv6(address: string): boolean {
+  const value = parseIpv6(address);
+  if (value === null) return true;
+
+  // Global unicast is currently 2000::/3. This single allow-boundary also
+  // rejects unspecified, loopback, IPv4-compatible/mapped, NAT64 WKPs
+  // (64:ff9b::/96 and 64:ff9b:1::/48), discard-only 100::/64, ULA,
+  // link-local, deprecated site-local fec0::/10, and multicast space.
+  if (!ipv6CidrContains(value, '2000::', 3)) return true;
+
+  return [
+    // IETF protocol assignments, benchmarking/ORCHID/Teredo allocations,
+    // documentation space, and other non-ordinary assignments in 2001::/23.
+    ['2001::', 23],
+    // 6to4 embeds an IPv4 destination and must not bypass the IPv4 policy.
+    ['2002::', 16],
+    // Former 6bone and documentation prefixes.
+    ['3ffe::', 16],
+  ].some(([prefix, bits]) => ipv6CidrContains(value, String(prefix), Number(bits)));
+}
+
 function isPrivateAddress(address: string): boolean {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   if (net.isIPv4(normalized)) return isPrivateIpv4(normalized);
   if (!net.isIPv6(normalized)) return true;
-  if (normalized === '::' || normalized === '::1') return true;
-  if (normalized.startsWith('fc') || normalized.startsWith('fd') || /^fe[89ab]/.test(normalized)
-    || normalized.startsWith('ff') || normalized.startsWith('64:ff9b:')
-    || normalized.startsWith('2001:db8:') || normalized.startsWith('2002:')) return true;
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
-  if (mapped) return isPrivateIpv4(mapped);
-  const mappedHex = normalized.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (mappedHex) {
-    const high = Number.parseInt(mappedHex[1], 16);
-    const low = Number.parseInt(mappedHex[2], 16);
-    return isPrivateIpv4(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
-  }
-  return false;
+  return isNonGlobalIpv6(normalized);
 }
 
 function hostAllowed(hostname: string, allowedHosts?: readonly string[]): boolean {

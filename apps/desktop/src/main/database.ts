@@ -1,7 +1,7 @@
 import { app, dialog, safeStorage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import BetterSqlite3 from 'better-sqlite3';
 import { safeFetch } from './safeFetch.ts';
 import {
@@ -131,6 +131,10 @@ function databasePath(): string {
 
 function artworkCacheDirectory(): string {
   return path.join(app.getPath('userData'), 'artwork-cache');
+}
+
+function pluginArtworkCacheDirectory(): string {
+  return path.join(app.getPath('userData'), 'plugin-artwork-cache');
 }
 
 function getDb(): BetterSqlite3.Database {
@@ -900,7 +904,7 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
       return null;
     }
     const bytes = Buffer.from(await response.arrayBuffer());
-    const sanitized = sanitizeArtworkBytes(bytes, mimeType);
+    const sanitized = await sanitizeArtworkBytes(bytes, mimeType);
     rememberArtworkSuccess(sourceUrl);
     return sanitized;
   } catch {
@@ -914,6 +918,168 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
 // paired device follow a redirect to the metadata provider.
 export async function cacheArtworkSource(sourceUrl: string): Promise<CachedArtwork | null> {
   return getArtworkRepository().cacheArtworkSource(sourceUrl);
+}
+
+const PLUGIN_ARTWORK_MAX_ENTRIES_PER_ADDON = 512;
+const PLUGIN_ARTWORK_MAX_BYTES_PER_ADDON = 64 * 1024 * 1024;
+const pendingPluginArtwork = new Map<string, Promise<CachedArtwork | null>>();
+
+type PluginArtworkObjectRow = {
+  content_hash: string;
+  cache_path: string;
+  mime_type: string;
+  byte_length: number;
+};
+
+function pluginArtworkObject(addonId: string, sourceUrl: string): PluginArtworkObjectRow | null {
+  const row = getDb().prepare(`
+    SELECT object.content_hash, object.cache_path, object.mime_type, object.byte_length
+    FROM plugin_artwork_references AS reference
+    JOIN plugin_artwork_objects AS object ON object.content_hash = reference.content_hash
+    WHERE reference.addon_id = ? AND reference.source_url = ?
+  `).get(addonId, sourceUrl) as PluginArtworkObjectRow | undefined;
+  if (!row || row.mime_type !== 'image/png' || !fs.existsSync(row.cache_path)) return null;
+  try {
+    const bytes = fs.readFileSync(row.cache_path);
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (bytes.byteLength !== row.byte_length || hash !== row.content_hash) throw new Error('integrity mismatch');
+    getDb().prepare('UPDATE plugin_artwork_references SET updated_at = ? WHERE addon_id = ? AND source_url = ?')
+      .run(Date.now(), addonId, sourceUrl);
+    return row;
+  } catch {
+    removePluginArtworkReference(addonId, sourceUrl);
+    return null;
+  }
+}
+
+function removeUnreferencedPluginArtworkObject(contentHash: string): void {
+  const database = getDb();
+  const count = database.prepare('SELECT COUNT(*) AS count FROM plugin_artwork_references WHERE content_hash = ?')
+    .get(contentHash) as { count: number };
+  if (count.count > 0) {
+    database.prepare('UPDATE plugin_artwork_objects SET ref_count = ?, updated_at = ? WHERE content_hash = ?')
+      .run(count.count, Date.now(), contentHash);
+    return;
+  }
+  const row = database.prepare('SELECT cache_path FROM plugin_artwork_objects WHERE content_hash = ?')
+    .get(contentHash) as { cache_path: string } | undefined;
+  database.prepare('DELETE FROM plugin_artwork_objects WHERE content_hash = ?').run(contentHash);
+  if (row?.cache_path) {
+    try { fs.unlinkSync(row.cache_path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('[plugin-artwork] orphan cleanup failed');
+    }
+  }
+}
+
+function removePluginArtworkReference(addonId: string, sourceUrl: string): void {
+  const database = getDb();
+  const row = database.prepare('SELECT content_hash FROM plugin_artwork_references WHERE addon_id = ? AND source_url = ?')
+    .get(addonId, sourceUrl) as { content_hash: string } | undefined;
+  if (!row) return;
+  database.prepare('DELETE FROM plugin_artwork_references WHERE addon_id = ? AND source_url = ?').run(addonId, sourceUrl);
+  removeUnreferencedPluginArtworkObject(row.content_hash);
+}
+
+function enforcePluginArtworkQuota(addonId: string, incomingBytes: number, sourceUrl: string): void {
+  const database = getDb();
+  const usage = database.prepare(`
+    SELECT COUNT(*) AS count, COALESCE(SUM(object.byte_length), 0) AS bytes
+    FROM plugin_artwork_references AS reference
+    JOIN plugin_artwork_objects AS object ON object.content_hash = reference.content_hash
+    WHERE reference.addon_id = ? AND reference.source_url <> ?
+  `).get(addonId, sourceUrl) as { count: number; bytes: number };
+  if (incomingBytes > PLUGIN_ARTWORK_MAX_BYTES_PER_ADDON) throw new Error('Plugin artwork exceeds the provider quota.');
+  const rows = database.prepare(`
+    SELECT reference.source_url, object.byte_length
+    FROM plugin_artwork_references AS reference
+    JOIN plugin_artwork_objects AS object ON object.content_hash = reference.content_hash
+    WHERE reference.addon_id = ? AND reference.source_url <> ?
+    ORDER BY reference.updated_at ASC
+  `).all(addonId, sourceUrl) as Array<{ source_url: string; byte_length: number }>;
+  let count = usage.count;
+  let bytes = usage.bytes;
+  for (const row of rows) {
+    if (count + 1 <= PLUGIN_ARTWORK_MAX_ENTRIES_PER_ADDON && bytes + incomingBytes <= PLUGIN_ARTWORK_MAX_BYTES_PER_ADDON) break;
+    removePluginArtworkReference(addonId, row.source_url);
+    count -= 1;
+    bytes -= row.byte_length;
+  }
+  if (count + 1 > PLUGIN_ARTWORK_MAX_ENTRIES_PER_ADDON || bytes + incomingBytes > PLUGIN_ARTWORK_MAX_BYTES_PER_ADDON) {
+    throw new Error('Plugin artwork exceeds the provider quota.');
+  }
+}
+
+export function getCachedPluginArtwork(addonId: string, sourceUrl: string): CachedArtwork | null {
+  const row = pluginArtworkObject(addonId, sourceUrl);
+  return row ? {
+    cachePath: row.cache_path,
+    mimeType: row.mime_type,
+    byteLength: row.byte_length,
+    contentHash: row.content_hash,
+  } : null;
+}
+
+export async function cachePluginArtworkSource(addonId: string, sourceUrl: string): Promise<CachedArtwork | null> {
+  const existing = getCachedPluginArtwork(addonId, sourceUrl);
+  if (existing) return existing;
+  const pendingKey = `${addonId}\0${sourceUrl}`;
+  const pending = pendingPluginArtwork.get(pendingKey);
+  if (pending) return pending;
+  const request = (async () => {
+    const response = await safeFetch(sourceUrl, {}, {
+      timeoutMs: 20_000,
+      maxBytes: 5 * 1024 * 1024,
+      retries: 1,
+      maxRedirects: 1,
+    });
+    if (!response.ok) return null;
+    const mimeType = response.headers.get('content-type')?.split(';')[0] || '';
+    if (!mimeType.startsWith('image/')) return null;
+    const sanitized = await sanitizeArtworkBytes(Buffer.from(await response.arrayBuffer()), mimeType);
+    enforcePluginArtworkQuota(addonId, sanitized.byteLength, sourceUrl);
+
+    const cachePath = path.join(pluginArtworkCacheDirectory(), `${sanitized.contentHash}.png`);
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    if (!fs.existsSync(cachePath)) {
+      try { fs.writeFileSync(cachePath, sanitized.bytes, { flag: 'wx' }); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    }
+    const database = getDb();
+    const previous = database.prepare('SELECT content_hash FROM plugin_artwork_references WHERE addon_id = ? AND source_url = ?')
+      .get(addonId, sourceUrl) as { content_hash: string } | undefined;
+    database.transaction(() => {
+      database.prepare(`
+        INSERT INTO plugin_artwork_objects (content_hash, cache_path, mime_type, byte_length, ref_count, updated_at)
+        VALUES (?, ?, 'image/png', ?, 0, ?)
+        ON CONFLICT(content_hash) DO UPDATE SET updated_at = excluded.updated_at
+      `).run(sanitized.contentHash, cachePath, sanitized.byteLength, Date.now());
+      database.prepare(`
+        INSERT INTO plugin_artwork_references (addon_id, source_url, content_hash, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(addon_id, source_url) DO UPDATE SET content_hash = excluded.content_hash, updated_at = excluded.updated_at
+      `).run(addonId, sourceUrl, sanitized.contentHash, Date.now());
+    })();
+    // Re-check after insertion as well as before it. Concurrent fetches for
+    // different URLs can both pass the initial snapshot; this synchronous
+    // reconciliation makes the last insertion evict LRU references until the
+    // provider is back within its exact quota.
+    enforcePluginArtworkQuota(addonId, sanitized.byteLength, sourceUrl);
+    removeUnreferencedPluginArtworkObject(sanitized.contentHash);
+    if (previous && previous.content_hash !== sanitized.contentHash) removeUnreferencedPluginArtworkObject(previous.content_hash);
+    return getCachedPluginArtwork(addonId, sourceUrl);
+  })().catch(() => null).finally(() => pendingPluginArtwork.delete(pendingKey));
+  pendingPluginArtwork.set(pendingKey, request);
+  return request;
+}
+
+export function removePluginArtworkForAddon(addonId: string): number {
+  const database = getDb();
+  const rows = database.prepare('SELECT source_url, content_hash FROM plugin_artwork_references WHERE addon_id = ?')
+    .all(addonId) as Array<{ source_url: string; content_hash: string }>;
+  database.prepare('DELETE FROM plugin_artwork_references WHERE addon_id = ?').run(addonId);
+  for (const hash of new Set(rows.map((row) => row.content_hash))) removeUnreferencedPluginArtworkObject(hash);
+  return rows.length;
 }
 
 export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {

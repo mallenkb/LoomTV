@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { nativeImage } from 'electron';
+import { Worker } from 'node:worker_threads';
 
 export const MAX_ARTWORK_INPUT_BYTES = 5 * 1024 * 1024;
 export const MAX_ARTWORK_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -27,7 +27,7 @@ export type SanitizedArtwork = {
   frames: 1;
 };
 
-type ArtworkDecoder = {
+export type ArtworkDecoder = {
   createFromBuffer: (buffer: Buffer) => {
     isEmpty: () => boolean;
     getSize: () => { width: number; height: number };
@@ -209,7 +209,7 @@ export function inspectArtworkBytes(bytes: Buffer, contentType = ''): ArtworkIns
   return inspection;
 }
 
-export function sanitizeArtworkBytes(bytes: Buffer, contentType = '', decoder: ArtworkDecoder = nativeImage): SanitizedArtwork {
+export function sanitizeArtworkBytesWithDecoder(bytes: Buffer, contentType: string, decoder: ArtworkDecoder): SanitizedArtwork {
   const inspection = inspectArtworkBytes(bytes, contentType);
   const decoded = decoder.createFromBuffer(bytes);
   if (decoded.isEmpty()) rejectArtwork('image decoder returned an empty image');
@@ -228,6 +228,103 @@ export function sanitizeArtworkBytes(bytes: Buffer, contentType = '', decoder: A
     height: size.height,
     frames: 1,
   };
+}
+
+const ARTWORK_WORKER_TIMEOUT_MS = 5_000;
+const ARTWORK_WORKER_SOURCE = String.raw`
+  const { parentPort, workerData } = require('node:worker_threads');
+  const { nativeImage } = require('electron');
+  const fail = (message) => parentPort.postMessage({ ok: false, error: message });
+  try {
+    const input = Buffer.from(workerData.bytes);
+    const decoded = nativeImage.createFromBuffer(input);
+    if (decoded.isEmpty()) throw new Error('image decoder returned an empty image');
+    const size = decoded.getSize();
+    if (!Number.isSafeInteger(size.width) || !Number.isSafeInteger(size.height)
+      || size.width <= 0 || size.height <= 0
+      || size.width > workerData.maxDimension || size.height > workerData.maxDimension
+      || size.width * size.height > workerData.maxPixels) {
+      throw new Error('decoded dimensions exceed the host limit');
+    }
+    if (size.width !== workerData.expectedWidth || size.height !== workerData.expectedHeight) {
+      throw new Error('encoded and decoded dimensions differ');
+    }
+    const normalized = decoded.toPNG();
+    if (!Buffer.isBuffer(normalized) || normalized.length === 0 || normalized.length > workerData.maxOutputBytes) {
+      throw new Error('normalized image size is invalid');
+    }
+    const output = Uint8Array.from(normalized);
+    parentPort.postMessage({ ok: true, bytes: output, width: size.width, height: size.height }, [output.buffer]);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'image decoder failed');
+  }
+`;
+
+/**
+ * Decode and normalize untrusted artwork outside Electron's main event loop.
+ * The worker has a bounded V8 heap, the encoded and decoded sizes are bounded,
+ * and a timeout terminates the worker instead of leaving a wedged decoder in
+ * the long-lived host process.
+ */
+export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Promise<SanitizedArtwork> {
+  const inspection = inspectArtworkBytes(bytes, contentType);
+  const input = Uint8Array.from(bytes);
+  return new Promise<SanitizedArtwork>((resolve, reject) => {
+    const worker = new Worker(ARTWORK_WORKER_SOURCE, {
+      eval: true,
+      workerData: {
+        bytes: input,
+        expectedWidth: inspection.width,
+        expectedHeight: inspection.height,
+        maxDimension: MAX_ARTWORK_DIMENSION,
+        maxPixels: MAX_ARTWORK_PIXELS,
+        maxOutputBytes: MAX_ARTWORK_OUTPUT_BYTES,
+      },
+      resourceLimits: {
+        maxOldGenerationSizeMb: 64,
+        maxYoungGenerationSizeMb: 16,
+        codeRangeSizeMb: 16,
+        stackSizeMb: 4,
+      },
+    });
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+      void worker.terminate();
+    };
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error('Artwork rejected: decoder exceeded the time limit')));
+    }, ARTWORK_WORKER_TIMEOUT_MS);
+    worker.once('message', (message: unknown) => {
+      const result = message && typeof message === 'object' ? message as Record<string, unknown> : {};
+      if (result.ok !== true || !(result.bytes instanceof Uint8Array)) {
+        finish(() => reject(new Error(`Artwork rejected: ${String(result.error || 'image decoder failed')}`)));
+        return;
+      }
+      const normalized = Buffer.from(result.bytes);
+      if (normalized.length === 0 || normalized.length > MAX_ARTWORK_OUTPUT_BYTES) {
+        finish(() => reject(new Error('Artwork rejected: normalized image size is invalid')));
+        return;
+      }
+      const hash = createHash('sha256').update(normalized).digest('hex');
+      finish(() => resolve({
+        bytes: normalized,
+        mimeType: 'image/png',
+        byteLength: normalized.byteLength,
+        contentHash: hash,
+        width: Number(result.width),
+        height: Number(result.height),
+        frames: 1,
+      }));
+    });
+    worker.once('error', (error) => finish(() => reject(new Error(`Artwork rejected: ${error.message}`))));
+    worker.once('exit', (code) => {
+      if (code !== 0) finish(() => reject(new Error('Artwork rejected: decoder process exited unexpectedly')));
+    });
+  });
 }
 
 const negativeArtworkCache = new Map<string, number>();
