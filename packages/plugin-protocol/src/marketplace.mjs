@@ -61,6 +61,7 @@ const marketplaceContextRecords = new WeakMap();
 const verifiedUpdateRecords = new WeakMap();
 const updateContextRecords = new WeakMap();
 const verifiedCatalogRecords = new WeakMap();
+const parsedSignedCatalogRecords = new WeakSet();
 
 export class PluginMarketplaceContractError extends Error {
   constructor(issues) {
@@ -642,11 +643,13 @@ function parseSignedCatalog(value) {
 }
 
 export function parseWireSignedCatalog(input) {
-  return deepFreeze(parseSignedCatalog(input));
+  const catalog = deepFreeze(parseSignedCatalog(input));
+  parsedSignedCatalogRecords.add(catalog);
+  return catalog;
 }
 
 export function verifyWireSignedCatalog(input, hostContext, verifiedAddon) {
-  const catalog = parseSignedCatalog(input);
+  const catalog = parsedSignedCatalogRecords.has(input) ? input : parseSignedCatalog(input);
   const context = requireMarketplaceContext(hostContext);
   const addon = readVerifiedMarketplaceAddon(verifiedAddon);
   if (catalog.publisherId !== addon.publisherId || catalog.addonId !== addon.addonId || catalog.payload.addonId !== addon.addonId) {

@@ -13,17 +13,27 @@ const manifest = {
   config: [{ key: 'apiKey', type: 'password', required: true }],
 };
 
+function boundedJsonResponse(url, payload) {
+  const text = JSON.stringify(payload);
+  return {
+    status: 200,
+    url,
+    headers: {
+      get: (name) => name.toLowerCase() === 'content-length' ? String(Buffer.byteLength(text)) : null,
+    },
+    text: async () => text,
+  };
+}
+
 test('configuration callbacks gate approval and provider requests without exposing values', async () => {
   let configured = false;
   const registry = createStremioAddonRegistry({
     isAddonConfigured: () => configured,
     getConfiguration: () => ({ apiKey: 'host-only' }),
-    fetchImpl: async (url) => ({
-      status: 200,
+    fetchImpl: async (url) => boundedJsonResponse(
       url,
-      headers: { get: () => null },
-      text: async () => url.endsWith('/manifest.json') ? JSON.stringify(manifest) : JSON.stringify({ metas: [] }),
-    }),
+      url.endsWith('/manifest.json') ? manifest : { metas: [] },
+    ),
   });
   const review = await registry.reviewManifestUrl('https://configured.example/manifest.json');
   assert.throws(
@@ -41,7 +51,7 @@ test('repeated retryable provider failures transition to broken and review reset
   const registry = createStremioAddonRegistry({
     now: () => now,
     fetchImpl: async (url) => {
-      if (manifestRequest) return { status: 200, url, headers: { get: () => null }, text: async () => JSON.stringify({ ...manifest, id: 'org.example.broken', config: undefined }) };
+      if (manifestRequest) return boundedJsonResponse(url, { ...manifest, id: 'org.example.broken', config: undefined });
       throw new Error('provider unavailable');
     },
   });

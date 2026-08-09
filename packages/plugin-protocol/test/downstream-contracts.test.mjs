@@ -51,6 +51,11 @@ import {
 const zeroSignature = encodeBase64Url(new Uint8Array(64));
 const zeroPublicKey = encodeBase64Url(new Uint8Array(32));
 
+function hasIssueCode(code) {
+  return (error) => Array.isArray(error?.issues)
+    && error.issues.some((issue) => issue.code === code);
+}
+
 function marketplaceIndex() {
   return {
     wireVersion: 1,
@@ -216,7 +221,7 @@ test('future playback tickets require the corrected ready runtime lifecycle', ()
   let lease = createHostRuntimeLease({ addonId: 'addon.example', runtimeId: 'runtime-1', state: 'absent', lifecycleEpoch: 0, authorizationEpoch: 11, revocationEpoch: 3 });
   lease = transitionHostRuntimeLease(lease, 'starting');
   assert.equal(isReadyHostRuntimeLease(lease), false);
-  assert.throws(() => createHostPlaybackTicket(authorized, lease, { ticketRef: 'ticket-1', issuedAt: 150, expiresAt: 200 }), /RUNTIME_NOT_READY/);
+  assert.throws(() => createHostPlaybackTicket(authorized, lease, { ticketRef: 'ticket-1', issuedAt: 150, expiresAt: 200 }), hasIssueCode('RUNTIME_NOT_READY'));
   lease = transitionHostRuntimeLease(lease, 'ready');
   assert.equal(isReadyHostRuntimeLease(lease), true);
   const ticket = createHostPlaybackTicket(authorized, lease, { ticketRef: 'ticket-1', issuedAt: 150, expiresAt: 200 });
@@ -227,10 +232,10 @@ test('future playback tickets require the corrected ready runtime lifecycle', ()
 
   let otherLease = createHostRuntimeLease({ addonId: 'other.example', runtimeId: 'runtime-2', state: 'absent', lifecycleEpoch: 0, authorizationEpoch: 11, revocationEpoch: 3 });
   otherLease = transitionHostRuntimeLease(transitionHostRuntimeLease(otherLease, 'starting'), 'ready');
-  assert.throws(() => createHostPlaybackTicket(authorized, otherLease, { ticketRef: 'ticket-2', issuedAt: 150, expiresAt: 200 }), /RUNTIME_ADDON_MISMATCH/);
+  assert.throws(() => createHostPlaybackTicket(authorized, otherLease, { ticketRef: 'ticket-2', issuedAt: 150, expiresAt: 200 }), hasIssueCode('RUNTIME_ADDON_MISMATCH'));
   const staleLease = lease;
   lease = transitionHostRuntimeLease(lease, 'draining');
-  assert.throws(() => createHostPlaybackTicket(authorized, staleLease, { ticketRef: 'ticket-3', issuedAt: 150, expiresAt: 200 }), /RUNTIME_NOT_READY/);
+  assert.throws(() => createHostPlaybackTicket(authorized, staleLease, { ticketRef: 'ticket-3', issuedAt: 150, expiresAt: 200 }), hasIssueCode('RUNTIME_NOT_READY'));
 });
 
 test('catalog identity is stable across memberships and legacy migration is explicit', () => {
@@ -362,7 +367,10 @@ test('executable updates remain quarantined after signature verification', () =>
   assert.equal(verified.status, 'quarantined-phase9');
   assert.equal(verified.installable, false);
   assert.equal(projectPluginUpdateForRenderer(verified).artifactKind, 'executable-plugin');
-  assert.throws(() => authorizeVerifiedPluginUpdate(verified, createHostUpdateAuthorizationContext({ now: 150, approveDeclarativeUpdate: () => true })), /PHASE9_SANDBOX_REQUIRED/);
+  assert.throws(
+    () => authorizeVerifiedPluginUpdate(verified, createHostUpdateAuthorizationContext({ now: 150, approveDeclarativeUpdate: () => true })),
+    hasIssueCode('UPDATE_QUARANTINED_PHASE9'),
+  );
 });
 
 test('v2 schema covers normalized output receipts, tickets, and optional defaulted request fields', () => {
