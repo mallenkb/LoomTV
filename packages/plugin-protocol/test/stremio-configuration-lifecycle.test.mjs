@@ -64,6 +64,7 @@ test('repeated retryable provider failures transition to broken and review reset
     now += 1_000 * (2 ** attempt) + 1;
   }
   assert.equal(registry.get(review.addonId)?.state, 'broken');
+  manifestRequest = true;
   const refreshed = await registry.reviewManifestUrl('https://broken.example/manifest.json');
   assert.equal(refreshed.state, 'pending-review');
 });
