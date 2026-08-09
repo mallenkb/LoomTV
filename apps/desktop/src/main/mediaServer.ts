@@ -1038,12 +1038,12 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         && !(scope ? requireV2Scope(scope) : requireLocalOrLanAccess(reqUrl, req, res))
       ) return;
 
-      // Browser-rendered development sessions do not have Electron's preload
-      // bridge. Keep their read/write surface narrowly scoped, authenticated,
-      // and local-only so they render the same library and preferences as the
-      // desktop window without exposing IPC administration routes. The origin
-      // check below narrows an already token-authorized request; it never
-      // authorizes one, and it never gates a credential-bearing response.
+      // Browser-rendered sessions do not have Electron's preload bridge. Keep
+      // their read/write surface narrowly scoped, authenticated, and local-only
+      // so they render the same library and preferences as the desktop window
+      // without exposing IPC administration routes. The exact loopback origin
+      // check below narrows the renderer surface; the local browser policy in
+      // lanSecurity authorizes only this same-device web view.
       const rendererDecision = authorizeRendererHttpRequest({
         pathname: reqUrl.pathname,
         loopbackRequest,
@@ -1364,28 +1364,32 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const profileId = profileIdForRequest();
         if (!profileId) return;
         const kindValue = reqUrl.searchParams.get('kind');
-        const kind = kindValue === 'watchlist' || kindValue === 'favorite' ? kindValue : undefined;
+        const kind = kindValue === 'watchlist' || kindValue === 'favorite' || kindValue === 'watched' ? kindValue : undefined;
         if (req.method === 'GET') {
           writeJson(res, 200, getProfileLists(profileId, kind).filter((entry) => (
-            canProfileAccessMediaId(profileId, entry.mediaId)
+            (entry.kind === 'watched' && entry.mediaId.startsWith('discover:'))
+              || canProfileAccessMediaId(profileId, entry.mediaId)
           )));
           return;
         }
         if (req.method === 'PUT' || req.method === 'DELETE') {
           readJsonBody(req).then((body) => {
             assertCurrentSelectionRevision(body);
-            const bodyKind = body.kind === 'watchlist' || body.kind === 'favorite' ? body.kind as ProfileListKind : null;
+            const bodyKind = body.kind === 'watchlist' || body.kind === 'favorite' || body.kind === 'watched'
+              ? body.kind as ProfileListKind
+              : null;
             if (!bodyKind || !body.mediaId) {
               writeJson(res, 400, { error: 'mediaId_and_kind_required' });
               return;
             }
             const mediaId = String(body.mediaId);
-            if (req.method === 'PUT' && !canProfileAccessMediaId(profileId, mediaId)) {
+            if (req.method === 'PUT' && !(bodyKind === 'watched' && mediaId.startsWith('discover:')) && !canProfileAccessMediaId(profileId, mediaId)) {
               writeJson(res, 404, { error: 'media_not_found' });
               return;
             }
             writeJson(res, 200, setProfileListEntry(profileId, mediaId, bodyKind, req.method === 'PUT').filter((entry) => (
-              canProfileAccessMediaId(profileId, entry.mediaId)
+              (entry.kind === 'watched' && entry.mediaId.startsWith('discover:'))
+                || canProfileAccessMediaId(profileId, entry.mediaId)
             )));
           }).catch((error) => error instanceof ProfileError ? writeProfileError(error) : writeJson(res, 400, { error: 'invalid_profile_list_entry' }));
           return;

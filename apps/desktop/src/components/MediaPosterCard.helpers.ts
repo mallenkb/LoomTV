@@ -11,7 +11,10 @@ export function availableSeasonCount(show: TVShow): number {
   const fileSeasons = new Set(
     (show.episodeFiles || []).map((file) => file.season).filter((season) => season > 0),
   );
-  return fileSeasons.size || (show.seasons || []).length;
+  const metadataSeasons = new Set(
+    (show.seasons || []).map((season) => season.number).filter((season) => season > 0),
+  );
+  return fileSeasons.size || metadataSeasons.size;
 }
 
 export function mediaLink(item: MediaItem): string {

@@ -54,8 +54,24 @@ function seriesHasGenericEpisodeTitles(item: MediaItem): boolean {
 
 function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
   const isSeries = item.type === 'tv' || item.type === 'anime' || Boolean(item.episodeFiles?.length);
-  if (isSeries && (!item.year || item.year <= 0)) return true;
+  if (!item.title?.trim() || !item.year || item.year <= 0) return true;
+  if (!item.summary?.trim() || !item.genres?.length || item.rating <= 0) return true;
+  if (!item.poster?.trim() || !item.backdrop?.trim()) return true;
+  if (!Object.keys(item.contentRatings || {}).length) return true;
+  if (item.providerIds?.tmdbId && !item.streamingProviders?.length) return true;
+  if (!item.cast?.length) return true;
   if (isSeries && seriesHasGenericEpisodeTitles(item)) return true;
+  if (isSeries && item.episodeFiles?.length) {
+    const episodesByKey = new Map((item.episodes || []).map((episode) => [`${episode.season}-${episode.number}`, episode]));
+    if (item.episodeFiles.some((file) => {
+      const episode = episodesByKey.get(`${file.season}-${file.episode}`);
+      return !episode
+        || !episode.summary?.trim()
+        || !episode.still?.trim()
+        || !episode.airDate?.trim()
+        || episode.rating <= 0;
+    })) return true;
+  }
   return !mediaItemHasUsableArtwork(item);
 }
 

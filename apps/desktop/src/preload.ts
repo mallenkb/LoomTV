@@ -233,6 +233,8 @@ const desktopApi = {
     ipcRenderer.invoke('artwork:apply-official', mediaId, candidate, target),
   refreshOfficialArtwork: (mediaId: string, target?: OfficialArtworkRefreshTarget) => ipcRenderer.invoke('artwork:refresh-official', mediaId, target),
   getPlaybackLogo: (mediaId: string) => ipcRenderer.invoke('artwork:playback-logo', mediaId),
+  refreshIncompleteMetadata: (mediaId: string) => ipcRenderer.invoke('metadata:refresh-incomplete', mediaId),
+  getStreamingProviders: (mediaId: string) => ipcRenderer.invoke('metadata:streaming-providers', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
   backupDatabase: () => ipcRenderer.invoke('database:backup'),
   clearAppData: () => ipcRenderer.invoke('database:clear'),
@@ -273,6 +275,7 @@ const desktopApi = {
 
   libvlc: {
     availability: () => electronIpcRenderer.invoke('libvlc:availability') as Promise<LibVlcAvailability>,
+    refreshAvailability: () => electronIpcRenderer.invoke('libvlc:refresh-availability') as Promise<LibVlcAvailability>,
     start: (filePath: string, options?: PlaybackStartOptions) =>
       electronIpcRenderer.invoke('libvlc:start', filePath, options || {}) as Promise<LibVlcStartResult>,
     command: (sessionId: string, command: PlaybackCommand) =>

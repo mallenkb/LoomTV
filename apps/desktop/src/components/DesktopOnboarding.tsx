@@ -34,6 +34,7 @@ export default function DesktopOnboarding({
   const [message, setMessage] = useState('');
   const [showManual, setShowManual] = useState(false);
   const [homeStyle, setHomeStyle] = useState<AppHomeStyle>(() => readCachedTheme()?.homeStyle ?? DEFAULT_THEME_SETTINGS.homeStyle);
+  const canHostLocally = Boolean(window.desktopApi);
 
   const chooseHomeStyle = (nextHomeStyle: AppHomeStyle) => {
     const nextTheme = {
@@ -159,12 +160,13 @@ export default function DesktopOnboarding({
               <div className="mt-3 grid w-full gap-4 sm:grid-cols-2">
                 <button
                   type="button"
-                  onClick={() => { desktopApi.useThisComputerAsHost(); onHostReady(); }}
-                  className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+                  onClick={() => { if (canHostLocally) { desktopApi.useThisComputerAsHost(); onHostReady(); } }}
+                  disabled={!canHostLocally}
+                  className="group rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-4 text-left transition hover:border-[var(--loom-accent)] hover:bg-[var(--loom-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <span className="mb-3 grid h-10 w-10 place-items-center rounded-lg bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"><Server className="h-5 w-5" /></span>
-                  <span className="flex items-center justify-between gap-3 text-lg font-semibold">Start fresh <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" /></span>
-                  <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">Create a library on this computer.</span>
+                  <span className="flex items-center justify-between gap-3 text-lg font-semibold">Start fresh {canHostLocally && <ArrowRight className="h-4 w-4 text-[var(--loom-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--loom-accent)]" />}</span>
+                  <span className="mt-2 block text-sm leading-6 text-[var(--loom-muted)]">{canHostLocally ? 'Create a library on this computer.' : 'Open the installed desktop app to create a local library.'}</span>
                 </button>
                 <button
                   type="button"

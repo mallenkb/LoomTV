@@ -89,7 +89,7 @@ export interface IpcHandlerDependencies<
   loadLibrary: () => TLibraryData;
   libraryForRenderer: (library?: TLibraryData) => IpcResult<'library:get'>;
   libraryIndexForRenderer: () => IpcResult<'library:get-index'>;
-  libraryItemForRenderer: (mediaId: string) => IpcResult<'library:get-item'>;
+  libraryItemForRenderer: (mediaId: string) => IpcResult<'library:get-item'> | Promise<IpcResult<'library:get-item'>>;
   scanLibrary: (
     library: TLibraryData,
     options: {
@@ -206,6 +206,8 @@ export interface IpcHandlerDependencies<
   applyOfficialMetadataCandidate: (mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => IpcResult<'artwork:apply-official'> | Promise<IpcResult<'artwork:apply-official'>>;
   refreshOfficialArtwork: (mediaId: string, target?: OfficialArtworkRefreshTarget) => IpcResult<'artwork:refresh-official'> | Promise<IpcResult<'artwork:refresh-official'>>;
   getPlaybackLogo: (mediaId: string) => IpcResult<'artwork:playback-logo'> | Promise<IpcResult<'artwork:playback-logo'>>;
+  getStreamingProviders: (mediaId: string) => IpcResult<'metadata:streaming-providers'> | Promise<IpcResult<'metadata:streaming-providers'>>;
+  refreshIncompleteMetadata: (mediaId: string) => IpcResult<'metadata:refresh-incomplete'> | Promise<IpcResult<'metadata:refresh-incomplete'>>;
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => void;
   backupDatabase: () => IpcResult<'database:backup'> | Promise<IpcResult<'database:backup'>>;
   clearAppData: () => TLibraryData;
@@ -550,6 +552,11 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.testMetadataKeys(keys || {});
   });
+  handle('metadata:refresh-incomplete', (_event, mediaId: string) => {
+    deps.authorizeSettingsWrite();
+    return deps.refreshIncompleteMetadata(String(mediaId || ''));
+  });
+  handle('metadata:streaming-providers', (_event, mediaId: string) => deps.getStreamingProviders(String(mediaId || '')));
 
   handle('mpv:availability', () => mpvAvailability());
 
@@ -937,12 +944,27 @@ export function registerIpcHandlers<
     }
     return shell.openExternal(parsed.toString());
   });
-  const openFolderPath = (filePath: string) => {
+  const openFolderPath = async (filePath: string) => {
     const target = String(filePath || '').trim();
     if (!target) throw new Error('A local path is required.');
     if (/^[a-z]+:\/\//i.test(target)) throw new Error('Only local paths can be opened in the file manager.');
-    if (!fs.existsSync(target)) throw new Error('That file path could not be found.');
-    shell.showItemInFolder(path.resolve(target));
+    const resolvedTarget = path.resolve(target);
+    let existingTarget = resolvedTarget;
+    const root = path.parse(resolvedTarget).root;
+    while (!fs.existsSync(existingTarget)) {
+      const parent = path.dirname(existingTarget);
+      if (parent === existingTarget || parent === root) {
+        throw new Error('That file or folder is no longer available.');
+      }
+      existingTarget = parent;
+    }
+
+    if (existingTarget !== resolvedTarget || fs.statSync(existingTarget).isDirectory()) {
+      const error = await shell.openPath(existingTarget);
+      if (error) throw new Error(error);
+    } else {
+      shell.showItemInFolder(existingTarget);
+    }
     return true;
   };
   handle('shell:open-folder-path', (_event, filePath: string) => openFolderPath(filePath));

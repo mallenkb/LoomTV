@@ -197,9 +197,12 @@ function stremioCatalogItem(
 ): StremioPluginCatalogItem {
   const artwork = artworkReferences(item, artworkDeliveryUrl);
   const cast = castReferences(item, artworkDeliveryUrl);
+  const format = item.type === 'movie' ? 'Movie' : item.type === 'series' ? 'TV' : undefined;
   return {
     id: stremioItemId(addonId, item.type, item.id),
     type: item.type,
+    source: addonId,
+    ...(format ? { format } : {}),
     title: item.title,
     genres: [...item.genres],
     ...(artwork ? { artwork } : {}),

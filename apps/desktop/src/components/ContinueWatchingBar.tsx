@@ -12,6 +12,7 @@ import {
   looksLikeGenericEpisodeTitle,
 } from '@/lib/episodeTitles';
 import { logoSources, uniqueArtworkSources } from '@/lib/artwork';
+import { localEpisodeWatchedKey, localWatchedKey } from '@/lib/watched';
 
 const WATCHED_THRESHOLD = 0.9;
 const DISMISSED_CONTINUE_WATCHING_STORAGE_KEY = 'loomtv.dismissedContinueWatching.v1';
@@ -179,10 +180,12 @@ function findLatestCandidate(
   movies: MediaItem[],
   shows: TVShow[],
   progress: Record<string, StoredProgress>,
+  watchedKeys: ReadonlySet<string>,
 ): ContinueCandidate | null {
   const candidates: ContinueCandidate[] = [];
 
   movies.forEach((movie) => {
+    if (watchedKeys.has(localWatchedKey(movie.id))) return;
     const details = progressDetails(movie.filePath, movie.localMetadata?.durationSeconds, progress);
     if (!details.inProgress) return;
     const movieLogoSources = logoSources(movie);
@@ -240,10 +243,11 @@ function findLatestCandidate(
     const episodeDetails = sortedFiles.map((episodeFile) => ({
       episodeFile,
       details: progressDetails(episodeFile.filePath, episodeFile.localMetadata?.durationSeconds, progress),
+      manuallyWatched: watchedKeys.has(localEpisodeWatchedKey(show.id, episodeFile.season, episodeFile.episode)),
     }));
 
-    episodeDetails.forEach(({ episodeFile, details }) => {
-      if (!details.inProgress) return;
+    episodeDetails.forEach(({ episodeFile, details, manuallyWatched }) => {
+      if (!details.inProgress || manuallyWatched) return;
       const episode = playerEpisodesByKey.get(`${episodeFile.season}:${episodeFile.episode}`);
       const episodeTitle = cleanEpisodeTitleForDisplay(episode?.title, show.title, episodeFile.season, episodeFile.episode);
       candidates.push({
@@ -274,11 +278,11 @@ function findLatestCandidate(
     if (episodeDetails.some(({ details }) => details.inProgress)) return;
 
     const lastWatched = episodeDetails
-      .filter(({ details }) => details.watched)
+      .filter(({ details, manuallyWatched }) => details.watched || manuallyWatched)
       .sort((a, b) => b.details.updatedAt - a.details.updatedAt)[0];
     if (!lastWatched) return;
 
-    const nextEpisode = episodeDetails.find(({ details }) => !details.watched);
+    const nextEpisode = episodeDetails.find(({ details, manuallyWatched }) => !details.watched && !manuallyWatched);
     if (!nextEpisode) return;
 
     const { episodeFile } = nextEpisode;
@@ -317,7 +321,7 @@ function findLatestCandidate(
 
 export default function ContinueWatchingBar({ isHidden = false, onPlay }: ContinueWatchingBarProps) {
   const { state } = useLibrary();
-  const { activeProfile } = useProfiles();
+  const { activeProfile, watchedKeys } = useProfiles();
   const progress = useProgressSnapshot();
   const activeProfileId = activeProfile?.id ?? null;
   const [dismissedCandidates, setDismissedCandidates] = useState<DismissedCandidates>({});
@@ -331,8 +335,9 @@ export default function ContinueWatchingBar({ isHidden = false, onPlay }: Contin
       state.movies,
       [...state.tvShows, ...state.animeShows],
       progress,
+      watchedKeys,
     ),
-    [progress, state.animeShows, state.movies, state.tvShows],
+    [progress, state.animeShows, state.movies, state.tvShows, watchedKeys],
   );
 
   useEffect(() => {

@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router';
 
 /** Pointer travel before a press is treated as a drag rather than a click. */
 const DRAG_THRESHOLD = 12;
@@ -172,6 +173,8 @@ function RailArrow({
 
 export type MediaRailProps = {
   title: string;
+  /** Makes the heading row open the full library section. */
+  titleHref?: string;
   /** Rendered between the title and the scroll arrows, e.g. a "See All" link. */
   action?: ReactNode;
   variant?: RailVariant;
@@ -184,7 +187,7 @@ export type MediaRailProps = {
  * screen-reader-reachable way to page the rail; drag scrolling is a mouse
  * convenience layered on top of it, never the only way through.
  */
-export default function MediaRail({ title, action, variant = 'classic', className = '', children }: MediaRailProps) {
+export default function MediaRail({ title, titleHref, action, variant = 'classic', className = '', children }: MediaRailProps) {
   const { railRef, isDragging, canScrollLeft, canScrollRight, scrollByPage, railHandlers } = useRailScroll();
   const headingId = useId();
   const scrollable = canScrollLeft || canScrollRight;
@@ -192,7 +195,17 @@ export default function MediaRail({ title, action, variant = 'classic', classNam
   return (
     <section className={`min-w-0 w-full ${className}`} aria-labelledby={headingId}>
       <div className="mb-2 flex items-center justify-between gap-4">
-        <h2 id={headingId} className={TITLE_CLASS[variant]}>{title}</h2>
+        {titleHref ? (
+          <Link
+            to={titleHref}
+            className="flex min-w-0 flex-1 items-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            aria-label={`Open ${title}`}
+          >
+            <h2 id={headingId} className={TITLE_CLASS[variant]}>{title}</h2>
+          </Link>
+        ) : (
+          <h2 id={headingId} className={TITLE_CLASS[variant]}>{title}</h2>
+        )}
         <div className="flex items-center gap-1">
           {action}
           {/* Arrows stay out of the tab order entirely when everything already

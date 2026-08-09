@@ -21,10 +21,31 @@ export type AsyncMediaFileProbe = (filePath: string) => Promise<ProbeMediaFileRe
 const EMPTY_MEDIA_FILE_PROBE: MediaFileProbe = () => ({});
 
 const SKIPPED_EPISODE_DIRECTORIES = new Set([
-  'nc', 'nced', 'ncop', 'bonus', 'extras', 'extra', 'special', 'specials',
+  'nc', 'nced', 'ncop', 'bonus', 'extras', 'extra',
   'behind the scenes', 'featurettes', 'interviews', 'scenes', 'shorts',
   'trailers', 'featurette', 'sample', 'samples', 'subs', 'subtitles',
 ]);
+
+/**
+ * Jellyfin treats Season 00 as the Specials season. It also accepts the
+ * common Specials directory alias, so keep that name in one place
+ * for both classification and episode scanning.
+ */
+export function seasonNumberFromDirectoryName(name: string): number | null {
+  const normalized = name.trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  if (/^specials?$/i.test(normalized)) return 0;
+
+  const match = normalized.match(/^(?:season|series|s)\s*0*(\d{1,2})$/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+export function isSeasonDirectoryName(name: string): boolean {
+  return seasonNumberFromDirectoryName(name) !== null;
+}
+
+function seasonTitle(number: number, originalName?: string): string {
+  return number === 0 ? 'Specials' : originalName || `Season ${String(number).padStart(2, '0')}`;
+}
 
 function matchingSubtitleFilesForVideo(directory: string, videoFileName: string): string[] {
   const baseName = path.basename(videoFileName, path.extname(videoFileName)).toLowerCase();
@@ -142,9 +163,9 @@ export async function getLibraryFolderSignatureAsync(
 
 function seasonFromRelativePath(root: string, directory: string): number | null {
   const relativeParts = path.relative(root, directory).split(path.sep).filter(Boolean).reverse();
-  for (const part of relativeParts) {
-    const match = part.match(/(?:season|series|s)\s*0*(\d{1,2})/i);
-    if (match) return parseInt(match[1], 10);
+  for (const part of [...relativeParts, path.basename(root)].filter(Boolean)) {
+    const season = seasonNumberFromDirectoryName(part);
+    if (season !== null) return season;
   }
   return null;
 }
@@ -163,11 +184,18 @@ export function scanEpisodeFiles(folderPath: string, probe: MediaFileProbe = EMP
         if (!isVideoFileName(entry.name)) continue;
         const mediaProbe = probe(fullPath);
         if (!mediaProbe.localMetadata?.videoCodec) continue;
-        const parsed = parseEpisodeFileName(entry.name, mediaProbe.season || seasonFromRelativePath(folderPath, directory) || 1);
+        const folderSeason = seasonFromRelativePath(folderPath, directory);
+        const parsed = parseEpisodeFileName(entry.name, mediaProbe.season ?? folderSeason ?? 1);
         if (!parsed) continue;
+        // A named Season 00/Specials folder is authoritative. This keeps
+        // files such as an AOT finale stored in Season 00 out of Season 4,
+        // even when the filename still contains its original S04E29 code.
+        const season = folderSeason === 0
+          ? 0
+          : mediaProbe.season ?? parsed.season ?? folderSeason ?? 1;
         files.push({
-          season: mediaProbe.season || parsed.season,
-          episode: mediaProbe.episode || parsed.episode,
+          season,
+          episode: mediaProbe.episode ?? parsed.episode,
           filePath: fullPath,
           title: mediaProbe.embeddedTitle,
           subtitles: createSubtitleRecords(directory, matchingSubtitleFilesForVideo(directory, entry.name)),
@@ -196,14 +224,14 @@ export function extractSeasons(
     const directories = entries.filter((entry) => entry.isDirectory());
     const videoFiles = entries.filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name));
 
-    if (directories.some((directory) => /season/i.test(directory.name))) {
-      for (const directory of directories) {
-        const match = directory.name.match(/season\s*(\d+)/i);
-        const number = match ? parseInt(match[1], 10) : 1;
+    const seasonDirectories = directories.filter((directory) => isSeasonDirectoryName(directory.name));
+    if (seasonDirectories.length > 0) {
+      for (const directory of seasonDirectories) {
+        const number = seasonNumberFromDirectoryName(directory.name) ?? 1;
         const directoryPath = path.join(folderPath, directory.name);
         const episodeCount = scanEpisodeFiles(directoryPath, probe).length
           || fs.readdirSync(directoryPath).filter(isVideoFileName).length;
-        seasons.push({ number, title: directory.name, episodeCount });
+        seasons.push({ number, title: seasonTitle(number, directory.name), episodeCount });
       }
     } else {
       const match = folderName.match(/[Ss](\d{1,2})/);
@@ -213,7 +241,7 @@ export function extractSeasons(
       episodeFiles.forEach((file) => grouped.set(file.season, (grouped.get(file.season) || 0) + 1));
       if (grouped.size > 0) {
         grouped.forEach((episodeCount, number) => {
-          seasons.push({ number, title: `Season ${String(number).padStart(2, '0')}`, episodeCount });
+          seasons.push({ number, title: seasonTitle(number), episodeCount });
         });
       } else {
         seasons.push({ number: fallbackSeason, title: `Season ${fallbackSeason}`, episodeCount: videoFiles.length });
@@ -259,11 +287,15 @@ export async function scanEpisodeFilesAsync(
     async ({ directory, fileName, fullPath }): Promise<EpisodeFile | null> => {
       const mediaProbe = await probe(fullPath);
       if (!mediaProbe.localMetadata?.videoCodec) return null;
-      const parsed = parseEpisodeFileName(fileName, mediaProbe.season || seasonFromRelativePath(folderPath, directory) || 1);
+      const folderSeason = seasonFromRelativePath(folderPath, directory);
+      const parsed = parseEpisodeFileName(fileName, mediaProbe.season ?? folderSeason ?? 1);
       if (!parsed) return null;
+      const season = folderSeason === 0
+        ? 0
+        : mediaProbe.season ?? parsed.season ?? folderSeason ?? 1;
       return {
-        season: mediaProbe.season || parsed.season,
-        episode: mediaProbe.episode || parsed.episode,
+        season,
+        episode: mediaProbe.episode ?? parsed.episode,
         filePath: fullPath,
         title: mediaProbe.embeddedTitle,
         subtitles: createSubtitleRecords(directory, await matchingSubtitleFilesForVideoAsync(directory, fileName)),
@@ -288,10 +320,10 @@ export async function extractSeasonsAsync(
   const directories = entries.filter((entry) => entry.isDirectory());
   const videoFiles = entries.filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name));
 
-  if (directories.some((directory) => /season/i.test(directory.name))) {
-    for (const directory of directories) {
-      const match = directory.name.match(/season\s*(\d+)/i);
-      const number = match ? parseInt(match[1], 10) : 1;
+  const seasonDirectories = directories.filter((directory) => isSeasonDirectoryName(directory.name));
+  if (seasonDirectories.length > 0) {
+    for (const directory of seasonDirectories) {
+      const number = seasonNumberFromDirectoryName(directory.name) ?? 1;
       const directoryPath = path.join(folderPath, directory.name);
       const knownEpisodeCount = knownEpisodeFiles?.filter((file) => {
         const relativePath = path.relative(directoryPath, file.filePath);
@@ -302,7 +334,7 @@ export async function extractSeasonsAsync(
       }).length;
       const episodeCount = (knownEpisodeCount ?? (await scanEpisodeFilesAsync(directoryPath, probe)).length)
         || (await fs.promises.readdir(directoryPath)).filter(isVideoFileName).length;
-      seasons.push({ number, title: directory.name, episodeCount });
+      seasons.push({ number, title: seasonTitle(number, directory.name), episodeCount });
     }
   } else {
     const match = folderName.match(/[Ss](\d{1,2})/);
@@ -312,7 +344,7 @@ export async function extractSeasonsAsync(
     episodeFiles.forEach((file) => grouped.set(file.season, (grouped.get(file.season) || 0) + 1));
     if (grouped.size > 0) {
       grouped.forEach((episodeCount, number) => {
-        seasons.push({ number, title: `Season ${String(number).padStart(2, '0')}`, episodeCount });
+        seasons.push({ number, title: seasonTitle(number), episodeCount });
       });
     } else {
       seasons.push({ number: fallbackSeason, title: `Season ${fallbackSeason}`, episodeCount: videoFiles.length });

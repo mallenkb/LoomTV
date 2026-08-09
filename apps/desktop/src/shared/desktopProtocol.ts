@@ -6,6 +6,7 @@ import type {
   LanLibraryItemDetailsPayload,
   LanLibraryPayload,
   LanLibraryPlaybackReference,
+  LanStreamingProvider,
   LanPlaybackCapabilities,
   LanPlaybackPlan,
   LanPlaybackPlanResponse,
@@ -177,6 +178,7 @@ export type MpvCommand =
 export interface WireMediaItem {
   id: string;
   type: 'movie' | 'tv' | 'anime';
+  format?: string;
   title: string;
   year: number;
   poster: string;
@@ -187,6 +189,11 @@ export interface WireMediaItem {
   logoCandidates?: string[];
   summary: string;
   rating: number;
+  contentRatings?: Record<string, LanContentRating>;
+  streamingProviders?: LanStreamingProvider[];
+  runtime?: string;
+  seasonCount?: number;
+  episodeCount?: number;
   genres: string[];
   cast: {
     name: string;
@@ -217,6 +224,7 @@ export interface WireMediaItem {
 }
 
 export type LibraryCard = LanLibraryCard;
+export type StreamingProvider = LanStreamingProvider;
 export type LibraryPlaybackReference = LanLibraryPlaybackReference;
 export interface LibraryIndexPayload extends LanLibraryIndexPayload<LibraryCard> {
   // Renderer-only configuration data. LAN projections deliberately omit host
@@ -576,16 +584,29 @@ export interface LocalSegmentAnalysisStatus {
 }
 
 export interface OfficialArtworkResult {
+  format?: string;
   thumbnail?: string;
   cover?: string;
   summary?: string;
   rating?: number;
+  contentRatings?: Record<string, LanContentRating>;
   episodes?: WireEpisodeMeta[];
   episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logoCandidates?: string[];
   logo?: string;
+  cast?: Array<{
+    name: string;
+    character: string;
+    image: string;
+    characterName?: string;
+    characterRole?: string;
+    characterImage?: string;
+    voiceActorName?: string;
+    voiceActorImage?: string;
+    voiceActorLanguage?: string;
+  }>;
 }
 
 export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
@@ -725,6 +746,9 @@ export interface StremioPluginCatalogItem {
   /** Stable addon/type/provider-namespaced item key. */
   id: string;
   type: string;
+  /** Source namespace used for profile-scoped Discover state. */
+  source?: string;
+  format?: string;
   title: string;
   genres: readonly string[];
   artwork?: StremioPluginArtworkReferences;
@@ -737,7 +761,12 @@ export interface StremioPluginCatalogItem {
   releaseInfo?: string;
   released?: string;
   rating?: number;
+  contentRating?: string;
+  streamingProviders?: LanStreamingProvider[];
+  trailerUrl?: string;
   runtime?: string;
+  seasonCount?: number;
+  episodeCount?: number;
 }
 
 export interface StremioPluginCatalogResult {

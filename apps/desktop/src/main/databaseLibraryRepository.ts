@@ -1,13 +1,14 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import type { LibraryData, LibraryFolderGroups, ScanCacheEntry, ScanCacheFolderKind } from './appContracts.ts';
 import { customArtworkReference } from './artworkCache.ts';
-import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
+import type { EpisodeFile, EpisodeMeta, MediaItem, StreamingProvider } from './metadata/types.ts';
 
 type SeasonEntry = { number: number; title: string; episodeCount: number };
 
 type MediaItemRow = {
   id: string;
   type: string;
+  format: string;
   title: string;
   year: number;
   poster: string;
@@ -23,6 +24,7 @@ type MediaItemRow = {
   subtitles_json: string | null;
   local_metadata_json: string | null;
   provider_ids_json: string | null;
+  streaming_providers_json: string | null;
   poster_candidates_json: string | null;
   backdrop_candidates_json: string | null;
   logo_candidates_json: string | null;
@@ -59,6 +61,7 @@ type ScanCacheRow = {
   file_count: number;
   item_count: number;
   scanned_at: number;
+  ratings_refreshed_at: number;
 };
 
 function jsonParse<T>(value: string | null | undefined, fallback: T): T {
@@ -208,6 +211,7 @@ export function loadLibrary(
       fileCount: row.file_count,
       itemCount: row.item_count,
       scannedAt: row.scanned_at,
+      ratingsRefreshedAt: row.ratings_refreshed_at || row.scanned_at,
     },
   ]));
 
@@ -224,6 +228,7 @@ export function loadLibrary(
     const item = applyDurableState({
       id: row.id,
       type: row.type as MediaItem['type'],
+      format: row.format || undefined,
       title: row.title,
       year: row.year,
       poster: row.poster,
@@ -235,6 +240,7 @@ export function loadLibrary(
       summary: row.summary,
       rating: row.rating,
       contentRatings: jsonParse(row.content_ratings_json, {}),
+      streamingProviders: jsonParse<StreamingProvider[] | undefined>(row.streaming_providers_json, undefined),
       genres: jsonParse(row.genres_json, []),
       cast: jsonParse(row.cast_json, []),
       filePath: row.file_path,
@@ -269,9 +275,12 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
 
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
-        id, type, title, year, poster, backdrop, logo, summary, rating, file_path, file_size, last_played,
-        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, type, format, title, year, poster, backdrop, logo, summary, rating, file_path, file_size, last_played,
+        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
     const insertEpisode = database.prepare(`
@@ -287,6 +296,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
       insertItem.run(
         item.id,
         item.type,
+        item.format || '',
         item.title || '',
         item.year || 0,
         durableArtworkSource(item.poster),
@@ -302,6 +312,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         jsonString(item.subtitles || []),
         item.localMetadata ? jsonString(item.localMetadata) : null,
         item.providerIds ? jsonString(item.providerIds) : null,
+        item.streamingProviders ? jsonString(item.streamingProviders) : null,
         jsonString(durableArtworkSources(item.posterCandidates || [])),
         jsonString(durableArtworkSources(item.backdropCandidates || [])),
         jsonString(durableArtworkSources(item.logoCandidates || [])),
@@ -339,8 +350,8 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
     }
 
     const insertScanCache = database.prepare(`
-      INSERT OR REPLACE INTO scan_cache (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO scan_cache (folder_path, version, folder_kind, signature, subtitle_profile, file_count, item_count, scanned_at, ratings_refreshed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const [folder, entry] of Object.entries(data.scanCache || {})) {
       insertScanCache.run(
@@ -352,6 +363,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         entry.fileCount || 0,
         entry.itemCount || 0,
         entry.scannedAt || now,
+        entry.ratingsRefreshedAt || entry.scannedAt || now,
       );
     }
   });

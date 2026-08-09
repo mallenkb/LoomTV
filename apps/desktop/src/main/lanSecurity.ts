@@ -68,6 +68,12 @@ export interface LanSecurityDeps {
   loadSettings: () => AppSettings;
   saveSettings: (settings: AppSettings) => void;
   localAccessToken: string;
+  /**
+   * Authorizes the same-origin browser view on the loopback media server.
+   * This is deliberately separate from LAN pairing and is scoped by the
+   * caller to the local web renderer's request headers and routes.
+   */
+  authorizeLocalBrowserRequest?: (reqUrl: URL, req: IncomingMessage) => boolean;
   requestPairingApproval?: (request: LanPairingApprovalPrompt) => Promise<boolean>;
 }
 
@@ -76,6 +82,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     loadSettings,
     saveSettings,
     localAccessToken,
+    authorizeLocalBrowserRequest,
     requestPairingApproval,
   } = deps;
   let pairingSecretExpiresAt = 0;
@@ -272,7 +279,9 @@ export function createLanSecurity(deps: LanSecurityDeps) {
   }
 
   function authorizeLocalRequest(reqUrl: URL, req: IncomingMessage): boolean {
-    return isLoopbackRequest(req) && hasValidLocalAccessToken(reqUrl, req.headers, localAccessToken);
+    if (!isLoopbackRequest(req)) return false;
+    return hasValidLocalAccessToken(reqUrl, req.headers, localAccessToken)
+      || Boolean(authorizeLocalBrowserRequest?.(reqUrl, req));
   }
 
   function requireLocalOrLanAccess(reqUrl: URL, req: IncomingMessage, res: ServerResponse): boolean {

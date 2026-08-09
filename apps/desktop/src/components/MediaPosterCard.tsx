@@ -2,11 +2,16 @@ import { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { Play, Star } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
+import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
+import WatchedToggle from '@/components/WatchedToggle';
+import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
 import { artworkVariant } from '@/lib/artworkVariants';
 import { desktopApi } from '@/lib/desktopApi';
 import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.helpers';
+import { mediaFormatLabel } from '@/shared/mediaFormat';
+import { isLocalItemWatched, localWatchedKeysForItem } from '@/lib/watched';
 
 type MediaPosterCardVariant = 'home' | 'movies' | 'tv' | 'others';
 
@@ -17,10 +22,10 @@ interface MediaPosterCardProps {
   metaLine?: string;
 }
 
-/* Home rail cards are approximately 200x340. VirtualPosterGrid gives library
+/* Home rail cards are approximately 200x384. VirtualPosterGrid gives library
    cards an explicit height, which their h-full root inherits even when content
    visibility skips their internals. contain-intrinsic-size takes width first. */
-const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_340px] [content-visibility:auto]';
+const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_384px] [content-visibility:auto]';
 
 const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
   home: `loom-poster-link group block w-[200px] flex-none ${SKIPPED_CARD_SIZE}`,
@@ -98,37 +103,56 @@ const MediaPosterCard = memo(function MediaPosterCard({
   metaLine = '',
 }: MediaPosterCardProps) {
   const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
+  const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
+  const { watchedKeys, setWatchedEntries } = useProfiles();
+  const watched = isLocalItemWatched(item, watchedKeys);
 
   return (
-    <Link
-      to={mediaLink(item)}
-      state={{ from, artwork: routeArtwork }}
-      className={ROOT_CLASS[variant]}
-    >
-      <div className="loom-poster-frame relative aspect-[2/3] min-h-0 shrink overflow-hidden rounded-lg transition-all duration-200">
-        <SafeArtwork
-          src={cardSources}
-          alt={item.title}
-          className="h-full w-full transition-transform group-hover:scale-105"
-          imgClassName="object-cover"
-          fallback={(
-            <div className={FALLBACK_CLASS}>
-              <Play className={FALLBACK_ICON_CLASS} />
-              <p className={FALLBACK_TEXT_CLASS}>{item.title}</p>
+    <div className={`${ROOT_CLASS[variant]} relative`}>
+      <Link
+        to={mediaLink(item)}
+        state={{ from, artwork: routeArtwork }}
+        className="flex h-full w-full flex-col"
+      >
+        <div className="loom-poster-frame relative aspect-[2/3] min-h-0 shrink-0 overflow-hidden rounded-lg transition-all duration-200">
+          <SafeArtwork
+            src={cardSources}
+            alt={item.title}
+            className="h-full w-full transition-transform group-hover:scale-105"
+            imgClassName="object-cover"
+            fallback={(
+              <div className={FALLBACK_CLASS}>
+                <Play className={FALLBACK_ICON_CLASS} />
+                <p className={FALLBACK_TEXT_CLASS}>{item.title}</p>
+              </div>
+            )}
+          />
+          <RatingBadge rating={item.rating} />
+          <div className={BACKDROP_CLASS} />
+          <div className={PLAY_OVERLAY_CLASS}>
+            <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+          </div>
+        </div>
+        <div className="mt-2 shrink-0 overflow-hidden">
+          <h4 className="line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]">{item.title}</h4>
+          {(metaLine || contentRating || item.format) && (
+            <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
+              {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
+              <ContentRatingBadge
+                rating={mediaFormatLabel(item.format, item.type)}
+                className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"
+              />
+              <ContentRatingBadge rating={contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
             </div>
           )}
-        />
-        <RatingBadge rating={item.rating} />
-        <div className={BACKDROP_CLASS} />
-        <div className={PLAY_OVERLAY_CLASS}>
-          <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
         </div>
-      </div>
-      <div className="mt-2 shrink-0 overflow-hidden">
-        <h4 className="line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]">{item.title}</h4>
-        {metaLine && <p className="truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
-      </div>
-    </Link>
+      </Link>
+      <WatchedToggle
+        watched={watched}
+        onToggle={() => void setWatchedEntries(localWatchedKeysForItem(item), !watched)}
+        className="absolute left-2 top-2 z-20"
+      />
+    </div>
   );
 });
 

@@ -167,7 +167,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           title={episodeTitle}
           isCurrent={isCurrent}
         />
-        {file && !isCurrent && (
+        {file && !isCurrent && !watched && (
           <span className="absolute inset-0 grid place-items-center rounded-lg bg-black/45 opacity-0 transition-opacity group-hover:opacity-100">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-white/95 shadow-lg">
               <Play className="ml-0.5 h-3.5 w-3.5 fill-black text-black" />
@@ -175,18 +175,20 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
           </span>
         )}
         {watched && !isCurrent && (
-          <WatchedSolidIcon
-            role="img"
-            aria-label="Watched"
-            className="absolute right-1.5 top-1.5 h-6 w-6 text-emerald-500 drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]"
-          />
+          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-lg bg-black/55">
+            <WatchedSolidIcon
+              role="img"
+              aria-label="Watched"
+              className="h-12 w-12 text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
+            />
+          </span>
         )}
         {runtime && (
           <span className="absolute bottom-1.5 right-1.5 rounded bg-black/75 px-1 py-0.5 text-[9px] font-medium leading-none text-white/90">
             {runtime}
           </span>
         )}
-        {(inProgress || isCurrent) && progFrac > 0 && (
+        {!watched && (inProgress || isCurrent) && progFrac > 0 && (
           <span className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden rounded-b-lg bg-white/20">
             <span
               className="block h-full bg-[var(--loom-accent)]"

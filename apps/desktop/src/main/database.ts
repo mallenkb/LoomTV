@@ -630,7 +630,7 @@ function validateProfileImport(value: unknown): asserts value is ProfileExportV1
       || typeof entry.mediaId !== 'string'
       || !entry.mediaId
       || entry.mediaId.length > 240
-      || (entry.kind !== 'watchlist' && entry.kind !== 'favorite')
+      || (entry.kind !== 'watchlist' && entry.kind !== 'favorite' && entry.kind !== 'watched')
       || !validExportTimestamp(entry.createdAt)
     ) throw new Error('The profile lists are invalid.');
   }
@@ -700,7 +700,9 @@ export function importProfileData(bundle: ProfileExportV1): ProfileImportResult 
       allowedFolders: Array.isArray(bundle.restrictions?.allowedFolders) ? bundle.restrictions.allowedFolders : [],
     });
     for (const entry of listEntries) {
-      if (!validMediaIds.has(entry.mediaId) || (entry.kind !== 'watchlist' && entry.kind !== 'favorite')) {
+      const isDiscoverWatched = entry.kind === 'watched' && entry.mediaId.startsWith('discover:');
+      if ((!validMediaIds.has(entry.mediaId) && !isDiscoverWatched)
+        || (entry.kind !== 'watchlist' && entry.kind !== 'favorite' && entry.kind !== 'watched')) {
         skippedLists++;
         continue;
       }

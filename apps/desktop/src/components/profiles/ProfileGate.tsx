@@ -19,7 +19,7 @@ type EditorOrigin = 'gate' | 'source';
  * surface and becomes an overlay when opened from an active profile.
  */
 export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'host' | 'remote' | null }) {
-  const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
+  const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, loadError, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>('gate');
@@ -252,6 +252,13 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
             <p className="mb-8 text-center text-sm text-[var(--loom-muted)]">Select a profile to edit</p>
           )}
           {mode === 'select' && <div className="mb-8" />}
+          {loadError && profiles.length === 0 && (
+            <div role="alert" className="mb-8 max-w-xl rounded-2xl border border-red-500/30 bg-red-500/10 px-5 py-4 text-center text-sm leading-6 text-red-100">
+              <p className="font-semibold">Could not load profiles.</p>
+              <p className="mt-1 text-red-100/80">{loadError}</p>
+              <p className="mt-2 text-red-100/70">The desktop renderer needs LoomTV’s desktop app session. Use the installed app or connect this browser through the hosted LoomTV web client.</p>
+            </div>
+          )}
           <div className="flex max-w-[900px] flex-wrap items-start justify-center gap-[clamp(16px,3vw,44px)]">
             {profiles.filter((profile) => !profile.isGuest).map((profile, index, permanentProfiles) => (
               <ProfileCard

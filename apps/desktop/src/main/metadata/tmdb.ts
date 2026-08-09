@@ -1,7 +1,8 @@
 import { movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers';
-import type { ContentRating, EpisodeMeta, MediaItem } from './types';
+import type { ContentRating, EpisodeMeta, MediaItem, StreamingProvider } from './types';
 import { safeFetch } from '../safeFetch';
 import { normalizeContentRating } from './contentRatings.ts';
+import { preferredProviderLogoUrl } from '../../shared/providerLogos';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -41,6 +42,23 @@ interface TMDBEpisode {
   air_date?: string;
 }
 
+interface TMDBWatchProvider {
+  provider_id?: number;
+  provider_name?: string;
+  logo_path?: string | null;
+  display_priority?: number;
+}
+
+interface TMDBWatchProviderRegion {
+  flatrate?: TMDBWatchProvider[];
+  ads?: TMDBWatchProvider[];
+  free?: TMDBWatchProvider[];
+}
+
+interface TMDBWatchProviderResponse {
+  results?: Record<string, TMDBWatchProviderRegion>;
+}
+
 interface TMDBMedia {
   id?: number;
   title?: string;
@@ -63,6 +81,7 @@ interface TMDBMedia {
   content_ratings?: {
     results?: Array<{ iso_3166_1?: string; rating?: string }>;
   };
+  'watch/providers'?: TMDBWatchProviderResponse;
 }
 
 interface TMDBSearchResponse {
@@ -132,6 +151,69 @@ function tmdbContentRatings(d: TMDBMedia): Record<string, ContentRating> {
   return ratings;
 }
 
+function tmdbStreamingProvidersFromResponse(
+  response: TMDBWatchProviderResponse | null | undefined,
+  regionCode = 'US',
+): StreamingProvider[] {
+  const region = response?.results?.[regionCode.toUpperCase()];
+  if (!region) return [];
+
+  const seen = new Set<number>();
+  return [
+    ...(region.flatrate || []),
+    ...(region.ads || []),
+    ...(region.free || []),
+  ]
+    .filter((provider): provider is TMDBWatchProvider & { provider_id: number; provider_name: string; logo_path: string } => (
+      Number.isFinite(provider.provider_id)
+      && Boolean(provider.provider_name?.trim())
+      && Boolean(provider.logo_path)
+    ))
+    .sort((left, right) => (
+      (left.display_priority ?? Number.MAX_SAFE_INTEGER) - (right.display_priority ?? Number.MAX_SAFE_INTEGER)
+      || left.provider_name.localeCompare(right.provider_name)
+    ))
+    .filter((provider) => {
+      if (seen.has(provider.provider_id)) return false;
+      seen.add(provider.provider_id);
+      return true;
+    })
+    .map((provider) => {
+      return {
+        id: provider.provider_id,
+        name: provider.provider_name,
+        logoUrl: preferredProviderLogoUrl({
+          id: provider.provider_id,
+          name: provider.provider_name,
+          logoPath: provider.logo_path,
+        }),
+      };
+    });
+}
+
+function tmdbStreamingProviders(d: TMDBMedia): StreamingProvider[] {
+  return tmdbStreamingProvidersFromResponse(d['watch/providers']);
+}
+
+export async function fetchTMDBStreamingProvidersById(
+  type: 'movie' | 'tv',
+  tmdbId: string | undefined,
+  tmdbCredential?: string,
+  regionCode = 'US',
+): Promise<StreamingProvider[] | null> {
+  if (!tmdbId || !tmdbCredential) return null;
+  try {
+    const response = await fetchTMDBJson<TMDBWatchProviderResponse>(
+      `${type}/${encodeURIComponent(tmdbId)}/watch/providers`,
+      tmdbCredential,
+    );
+    return tmdbStreamingProvidersFromResponse(response, regionCode);
+  } catch (err) {
+    console.error(`[TMDB ${type} streaming providers]`, err);
+    return null;
+  }
+}
+
 function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<MediaItem> | null {
   if (!d) return null;
   const cast = (d.credits?.cast ?? []).slice(0, 8).map((c) => ({
@@ -153,6 +235,7 @@ function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<Me
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
     contentRatings: tmdbContentRatings(d),
+    streamingProviders: tmdbStreamingProviders(d),
     genres: (d.genres ?? []).map((g) => g.name as string),
     year: d.release_date ? new Date(d.release_date).getFullYear() : 0,
     cast,
@@ -219,7 +302,7 @@ export async function fetchTMDBMovieMetadata(
     }
     if (!hit) return null;
 
-    const d = await fetchTMDBJson<TMDBMedia>(`movie/${hit.id}?append_to_response=credits,images,external_ids,release_dates`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`movie/${hit.id}?append_to_response=credits,images,external_ids,release_dates,watch/providers`, tmdbCredential);
     const result = tmdbMovieResult(d, hit.title || title);
     return result ? { ...result, year: result.year || year || 0 } : null;
   } catch (err) {
@@ -234,7 +317,7 @@ export async function fetchTMDBMovieMetadataById(
 ): Promise<Partial<MediaItem> | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {
-    const d = await fetchTMDBJson<TMDBMedia>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,release_dates`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,release_dates,watch/providers`, tmdbCredential);
     return tmdbMovieResult(d, '');
   } catch (err) {
     console.error('[TMDB movie id]', err);
@@ -251,7 +334,9 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
     image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
   }));
 
-  const realSeasons = (d.seasons ?? []).filter((s) => (s.season_number ?? 0) > 0);
+  // Season 0 is TMDB's Specials season. Keep it so local S00E## files can be
+  // enriched with provider metadata instead of falling back to embedded tags.
+  const realSeasons = (d.seasons ?? []).filter((s) => (s.season_number ?? -1) >= 0);
 
   const tmdbSeasons = realSeasons.map((s) => ({
     number: s.season_number as number,
@@ -294,6 +379,7 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
     summary: (d.overview as string) || '',
     rating: (d.vote_average as number) ?? 0,
     contentRatings: tmdbContentRatings(d),
+    streamingProviders: tmdbStreamingProviders(d),
     genres: (d.genres ?? []).map((g) => g.name as string),
     year: d.first_air_date ? new Date(d.first_air_date as string).getFullYear() : 0,
     cast,
@@ -354,7 +440,7 @@ export async function fetchTMDBTVMetadata(
     const hit = tmdbSearchResults(searchData)[0];
     if (!hit) return null;
 
-    const d = await fetchTMDBJson<TMDBMedia>(`tv/${hit.id}?append_to_response=credits,images,external_ids,content_ratings`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`tv/${hit.id}?append_to_response=credits,images,external_ids,content_ratings,watch/providers`, tmdbCredential);
     const result = await tmdbTVResultFromDetails(d, hit.name || title, tmdbCredential);
     return result ? { ...result, year: result.year || year || 0 } : null;
   } catch (err) {
@@ -369,7 +455,7 @@ export async function fetchTMDBTVMetadataById(
 ): Promise<TMDBTVResult | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {
-    const d = await fetchTMDBJson<TMDBMedia>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,content_ratings`, tmdbCredential);
+    const d = await fetchTMDBJson<TMDBMedia>(`tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,content_ratings,watch/providers`, tmdbCredential);
     return tmdbTVResultFromDetails(d, '', tmdbCredential);
   } catch (err) {
     console.error('[TMDB TV id]', err);

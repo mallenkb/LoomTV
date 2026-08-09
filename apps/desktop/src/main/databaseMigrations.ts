@@ -43,6 +43,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
     CREATE TABLE IF NOT EXISTS media_items (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL CHECK (type IN ('movie', 'tv', 'anime')),
+      format TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       year INTEGER NOT NULL DEFAULT 0,
       poster TEXT NOT NULL DEFAULT '',
@@ -58,6 +59,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       subtitles_json TEXT NOT NULL DEFAULT '[]',
       local_metadata_json TEXT,
       provider_ids_json TEXT,
+      streaming_providers_json TEXT,
       poster_candidates_json TEXT NOT NULL DEFAULT '[]',
       backdrop_candidates_json TEXT NOT NULL DEFAULT '[]',
       logo_candidates_json TEXT NOT NULL DEFAULT '[]',
@@ -109,7 +111,8 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       subtitle_profile TEXT NOT NULL DEFAULT '',
       file_count INTEGER NOT NULL DEFAULT 0,
       item_count INTEGER NOT NULL DEFAULT 0,
-      scanned_at INTEGER NOT NULL
+      scanned_at INTEGER NOT NULL,
+      ratings_refreshed_at INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS playback_progress (
@@ -290,8 +293,10 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   `);
 
   migrateMediaItemArtworkColumns(database);
+  ensureColumn(database, 'media_items', 'format', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'episode_files', 'subtitles_json', "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, 'scan_cache', 'subtitle_profile', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, 'scan_cache', 'ratings_refreshed_at', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(database, 'media_segment_candidates', 'analysis_metadata_json', 'TEXT');
   migrateArtworkCacheColumns(database);
   ensureColumn(database, 'artwork_cache', 'content_hash', "TEXT NOT NULL DEFAULT ''");
@@ -300,6 +305,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   makeProviderSegmentsDurable(database);
   migrateProfiles(database);
   migrateProfileFeatures(database);
+  migrateProfileMediaListsWatched(database);
   migrateProfileSelectionLedger(database);
   migrateProfileGuestType(database);
   migrateProfileGlyphAvatars(database);
@@ -813,7 +819,7 @@ function migrateProfileFeatures(database: BetterSqlite3.Database): void {
         CREATE TABLE IF NOT EXISTS profile_media_lists (
           profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
           media_id TEXT NOT NULL,
-          list_kind TEXT NOT NULL CHECK (list_kind IN ('watchlist', 'favorite')),
+          list_kind TEXT NOT NULL CHECK (list_kind IN ('watchlist', 'favorite', 'watched')),
           created_at INTEGER NOT NULL,
           PRIMARY KEY (profile_id, media_id, list_kind)
         );
@@ -856,6 +862,32 @@ function migrateProfileFeatures(database: BetterSqlite3.Database): void {
   // Guest data is intentionally crash-resilient only for the active boot.
   // Any abandoned guest rows from a previous process are purged on startup.
   database.prepare('DELETE FROM profiles WHERE is_guest = 1').run();
+}
+
+function migrateProfileMediaListsWatched(database: BetterSqlite3.Database): void {
+  const row = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'profile_media_lists'").get() as { sql?: string } | undefined;
+  if (!row || row.sql?.includes("'watched'")) return;
+
+  const migrate = database.transaction(() => {
+    database.exec(`
+      ALTER TABLE profile_media_lists RENAME TO profile_media_lists_legacy;
+
+      CREATE TABLE profile_media_lists (
+        profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        media_id TEXT NOT NULL,
+        list_kind TEXT NOT NULL CHECK (list_kind IN ('watchlist', 'favorite', 'watched')),
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (profile_id, media_id, list_kind)
+      );
+
+      INSERT INTO profile_media_lists (profile_id, media_id, list_kind, created_at)
+      SELECT profile_id, media_id, list_kind, created_at
+      FROM profile_media_lists_legacy;
+
+      DROP TABLE profile_media_lists_legacy;
+    `);
+  });
+  migrate();
 }
 
 function makeProviderSegmentsDurable(database: BetterSqlite3.Database): void {
@@ -909,6 +941,9 @@ function migrateMediaItemArtworkColumns(database: BetterSqlite3.Database): void 
   }
   if (!columns.has('provider_ids_json')) {
     database.exec('ALTER TABLE media_items ADD COLUMN provider_ids_json TEXT;');
+  }
+  if (!columns.has('streaming_providers_json')) {
+    database.exec('ALTER TABLE media_items ADD COLUMN streaming_providers_json TEXT;');
   }
 }
 

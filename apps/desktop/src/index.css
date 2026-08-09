@@ -544,6 +544,23 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   color: var(--loom-text);
 }
 
+/* Search fields use the same quiet pill treatment as the modern controls. Keep
+   the readable border, but do not add a second focus ring around the field. */
+.loom-library-search-control,
+.loom-dropdown-search-input {
+  border-color: var(--loom-panel-border) !important;
+}
+
+.loom-library-search-control:focus-within,
+.loom-library-search-control input:focus,
+.loom-library-search-control input:focus-visible,
+.loom-dropdown-search-input:focus,
+.loom-dropdown-search-input:focus-visible {
+  border-color: var(--loom-panel-border) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 .loom-modern-search-overlay {
   background: color-mix(in srgb, var(--loom-bg) 88%, transparent);
 }
@@ -772,6 +789,18 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
     0 1px 2px rgba(0, 0, 0, 0.92),
     0 2px 10px rgba(0, 0, 0, 0.72),
     0 0 22px rgba(0, 0, 0, 0.5);
+}
+
+/* The watched eye sits inside the shared hero action pill. Its resting and
+   pressed states stay transparent; hover uses the same feedback as its peers. */
+.loom-modern-hero-watched-toggle,
+.loom-modern-hero-watched-toggle[aria-pressed="true"] {
+  background-color: transparent !important;
+}
+
+.loom-modern-hero-watched-toggle:hover,
+.loom-modern-hero-watched-toggle:active {
+  background-color: var(--loom-active-bg) !important;
 }
 
 .loom-modern-hero-artwork {
@@ -1517,6 +1546,8 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   }
 
   .loom-detail-page-modern .loom-detail-hero-controls {
+    align-self: flex-end;
+    margin-bottom: 0.25rem;
     margin-left: auto;
   }
 }
@@ -2323,6 +2354,14 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 .loom-app-shell :focus-visible:not(input):not(select):not(textarea) {
   outline: 2px solid var(--loom-focus-ring);
   outline-offset: 2px;
+}
+
+/* Buttons use the app's quiet interaction treatment without a persistent
+   focus ring. Form controls keep their separate focus styling below. */
+.loom-app-shell :where(button, [role="button"]):focus,
+.loom-app-shell :where(button, [role="button"]):focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* Form controls get one clean, rounded Stone focus treatment. This suppresses

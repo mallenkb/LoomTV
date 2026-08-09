@@ -1514,15 +1514,29 @@ export default function VideoPlayer({
         // saved preference and this episode's actual stream indexes before
         // opening the source, otherwise the default audio can begin playing
         // and subtitles can be mapped against the previous episode.
-        const preferences = await trackPreferencesLoadRef.current;
+        const loadedPreferences = await trackPreferencesLoadRef.current;
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+        // The load promise is intentionally scoped to the series, so it can
+        // outlive several episode transitions. Preserve a selection made in
+        // the current player session instead of restoring that promise's
+        // initial snapshot on every new file.
+        const currentPreferences = sharedTrackPreferencesRef.current;
+        const preferences: PlaybackTrackPreferences = {
+          ...loadedPreferences,
+          ...(currentPreferences.audio ? { audio: currentPreferences.audio } : {}),
+          ...(currentPreferences.subtitle ? { subtitle: currentPreferences.subtitle } : {}),
+        };
         sharedTrackPreferencesRef.current = preferences;
         const probeResult = await desktopApi.media.probe(filePath);
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data, preferences);
 
         const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath);
-        const libVlcAvailable = isLocalFile && await LibVlcPlaybackEngine.available().catch(() => false);
+        // Saved audio/subtitle preferences must not disqualify the native
+        // desktop engine. They are applied after LibVLC reports its own track
+        // IDs, while semantic matching remains based on the probe data above.
+        const libVlcAvailable = isLocalFile
+          && await LibVlcPlaybackEngine.available().catch(() => false);
         // MPV is an optional fallback. Do not execute it just to probe its
         // version when LibVLC can already handle this file. If LibVLC later
         // fails, handleNativePlaybackState performs the MPV check on demand.
@@ -1554,22 +1568,9 @@ export default function VideoPlayer({
           selectedSubtitleTrackIndexRef.current = textAlternative.index;
           setSelectedSubtitleTrackIndex(textAlternative.index);
         }
-        const bitmapNeedsCompatibilityEngine = Boolean(
-          libVlcAvailable
-          && selectedSubtitleTrack
-          && isBitmapSubtitleCodec(selectedSubtitleTrack.codec),
-        );
         const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = [];
-        if (bitmapNeedsCompatibilityEngine && mpvAvailable) {
-          // Preserve an explicit or bitmap-only choice through the old engine,
-          // whose subtitle control path is implemented, instead of exposing
-          // LibVLC controls that silently cannot apply visual styling.
-          nativeEngineFactories.push(MpvPlaybackEngine);
-          if (libVlcAvailable) nativeEngineFactories.push(LibVlcPlaybackEngine);
-        } else {
-          if (libVlcAvailable) nativeEngineFactories.push(LibVlcPlaybackEngine);
-          if (mpvAvailable) nativeEngineFactories.push(MpvPlaybackEngine);
-        }
+        if (libVlcAvailable) nativeEngineFactories.push(LibVlcPlaybackEngine);
+        if (mpvAvailable) nativeEngineFactories.push(MpvPlaybackEngine);
         const selectedExternalSubtitle = (() => {
           if (selectedSubtitleIndex > -1000) return undefined;
           const selected = visibleSubtitles[-1000 - selectedSubtitleIndex];

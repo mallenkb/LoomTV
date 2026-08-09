@@ -30,7 +30,9 @@ type ProfileContextValue = {
   activeState: ActiveProfileState;
   preferences: ProfilePreferences;
   lists: ProfileListEntry[];
+  watchedKeys: ReadonlySet<string>;
   isLoading: boolean;
+  loadError: string | null;
   gateOpen: boolean;
   gateIntent: GateIntent | null;
   clearGateIntent: () => void;
@@ -53,6 +55,8 @@ type ProfileContextValue = {
   getRestrictions: (profileId: string) => Promise<ProfileRestrictions>;
   saveRestrictions: (profileId: string, input: Omit<ProfileRestrictions, 'revision'>) => Promise<ProfileRestrictions>;
   setListEntry: (mediaId: string, kind: ProfileListKind, present: boolean) => Promise<void>;
+  setWatched: (mediaId: string, present: boolean) => Promise<void>;
+  setWatchedEntries: (mediaIds: readonly string[], present: boolean) => Promise<void>;
   exportProfile: (profileId: string) => Promise<ProfileTransferResult>;
   importProfile: () => Promise<ProfileTransferResult>;
 };
@@ -72,16 +76,21 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [activeState, setActiveState] = useState<ActiveProfileState>(EMPTY_ACTIVE_STATE);
   const [preferences, setPreferences] = useState<ProfilePreferences>({});
   const [lists, setLists] = useState<ProfileListEntry[]>([]);
+  const [watchedOverrides, setWatchedOverrides] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedThisSession, setSelectedThisSession] = useState(false);
   const [ownerSessionAuthorized, setOwnerSessionAuthorized] = useState(false);
   const [generation, setGeneration] = useState(0);
   const generationRef = useRef(0);
+  const watchedMutationRef = useRef(new Map<string, number>());
   const mountedRef = useRef(true);
 
   const hydratePersonalState = useCallback(async (profileId: string | null) => {
     const hydrationGeneration = ++generationRef.current;
     setGeneration(hydrationGeneration);
+    watchedMutationRef.current.clear();
+    setWatchedOverrides({});
     await setProgressProfile(profileId);
     if (hydrationGeneration !== generationRef.current) return;
     if (!profileId) {
@@ -109,11 +118,16 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         if (!mountedRef.current) return;
         setProfiles(nextProfiles);
         setActiveState(nextActiveState);
+        setLoadError(null);
         const active = nextProfiles.find((profile) => profile.id === nextActiveState.profileId);
         const mayEnter = Boolean(active && nextActiveState.automaticSignIn);
         setSelectedThisSession(mayEnter);
         setOwnerSessionAuthorized(Boolean(mayEnter && active?.type === 'owner'));
         if (mayEnter) await hydratePersonalState(nextActiveState.profileId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'The profile session could not be loaded.';
+        console.error('Failed to load profile session:', error);
+        if (mountedRef.current) setLoadError(message);
       } finally {
         if (mountedRef.current) setIsLoading(false);
       }
@@ -254,6 +268,53 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     if (writeGeneration === generationRef.current) setLists(saved);
   }, [activeState.profileId]);
 
+  const watchedKeys = useMemo(
+    () => {
+      const next = new Set(lists.filter((entry) => entry.kind === 'watched').map((entry) => entry.mediaId));
+      for (const [mediaId, present] of Object.entries(watchedOverrides)) {
+        if (present) next.add(mediaId);
+        else next.delete(mediaId);
+      }
+      return next;
+    },
+    [lists, watchedOverrides],
+  );
+
+  const setWatched = useCallback(async (mediaId: string, present: boolean) => {
+    const expectedProfileId = activeState.profileId || undefined;
+    const writeGeneration = generationRef.current;
+    const previousPresent = watchedKeys.has(mediaId);
+    const mutationId = (watchedMutationRef.current.get(mediaId) || 0) + 1;
+    watchedMutationRef.current.set(mediaId, mutationId);
+
+    // Keep the icon and My List responsive while the profile store persists.
+    setWatchedOverrides((current) => ({ ...current, [mediaId]: present }));
+
+    try {
+      const saved = await desktopApi.setProfileListEntry(mediaId, 'watched', present, expectedProfileId);
+      const isLatestMutation = watchedMutationRef.current.get(mediaId) === mutationId;
+      if (!mountedRef.current || writeGeneration !== generationRef.current || !isLatestMutation) return;
+      watchedMutationRef.current.delete(mediaId);
+      setLists(saved);
+      setWatchedOverrides((current) => {
+        if (!(mediaId in current) || current[mediaId] !== present) return current;
+        const next = { ...current };
+        delete next[mediaId];
+        return next;
+      });
+    } catch (error) {
+      const isLatestMutation = watchedMutationRef.current.get(mediaId) === mutationId;
+      if (!mountedRef.current || writeGeneration !== generationRef.current || !isLatestMutation) return;
+      watchedMutationRef.current.delete(mediaId);
+      setWatchedOverrides((current) => ({ ...current, [mediaId]: previousPresent }));
+      console.error('Failed to update watched state:', error);
+    }
+  }, [activeState.profileId, watchedKeys]);
+
+  const setWatchedEntries = useCallback(async (mediaIds: readonly string[], present: boolean) => {
+    await Promise.all(mediaIds.map((mediaId) => setWatched(mediaId, present)));
+  }, [setWatched]);
+
   const exportProfile = useCallback((profileId: string) => desktopApi.exportProfile(profileId), []);
   const importProfile = useCallback(async () => {
     const result = await desktopApi.importProfile();
@@ -290,7 +351,9 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     activeState,
     preferences,
     lists,
+    watchedKeys,
     isLoading,
+    loadError,
     gateOpen,
     gateIntent,
     clearGateIntent,
@@ -313,13 +376,16 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     getRestrictions: desktopApi.getProfileRestrictions,
     saveRestrictions: desktopApi.saveProfileRestrictions,
     setListEntry,
+    setWatched,
+    setWatchedEntries,
     exportProfile,
     importProfile,
   }), [
-    profiles, activeProfile, activeState, preferences, lists, isLoading, gateOpen, gateIntent, clearGateIntent,
+    profiles, activeProfile, activeState, preferences, lists, isLoading, loadError, gateOpen, gateIntent, clearGateIntent,
     generation, canManageProfiles, canCreateProfiles,
     openGate, closeGate, selectProfile, selectGuestProfile, lock, createProfile, updateProfile,
-    deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry,
+    deleteProfile, reorder, changePin, resetOwner, setAutomaticSignIn, savePreferences, setListEntry, setWatched,
+    setWatchedEntries, watchedKeys,
     exportProfile, importProfile,
   ]);
 

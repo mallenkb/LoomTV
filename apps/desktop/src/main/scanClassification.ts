@@ -109,6 +109,11 @@ function inferAnimeSeasonSearchTitles(episodeFiles: EpisodeFile[], fallbackTitle
 
   const result = new Map<number, string>();
   for (const [season, titles] of titlesBySeason) {
+    // Jikan exposes an anime's regular episodes as Season 1 and has no
+    // provider-equivalent Specials season. Season 0 must be handled by a
+    // provider that actually exposes Specials (TMDB), not remapped to the
+    // first regular episodes.
+    if (season === 0) continue;
     const best = [...titles.values()].sort((a, b) => b.count - a.count)[0];
     result.set(season, best?.title || fallbackTitle);
   }

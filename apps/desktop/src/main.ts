@@ -6,6 +6,7 @@ import {
   protocol,
   net,
   session,
+  shell,
 } from 'electron';
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
@@ -42,6 +43,8 @@ import { probeMediaFile, probeMediaFileAsync } from './main/mediaProbeFile';
 import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/httpResponses';
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
 import { createLanSecurity, type LanPairingApprovalPrompt } from './main/lanSecurity';
+import { isIpcOnlyHttpRoute } from './main/lanRoutePolicy';
+import { isTrustedRendererHttpOrigin } from './main/rendererHttpAccess';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
@@ -223,6 +226,7 @@ import {
   fetchTMDBMovieMetadata,
   fetchTMDBMovieMetadataById,
   fetchTMDBMovieMetadataCandidates,
+  fetchTMDBStreamingProvidersById,
   fetchTMDBTVMetadata,
   fetchTMDBTVMetadataById,
   fetchTMDBTVMetadataCandidates,
@@ -402,6 +406,19 @@ const {
   loadSettings,
   saveSettings,
   localAccessToken: LOCAL_ACCESS_TOKEN,
+  authorizeLocalBrowserRequest: (reqUrl, req) => {
+    // A browser opened at the local /app/ route is another renderer of the
+    // desktop host. Keep this fallback loopback-only and exclude routes that
+    // are intentionally reserved for validated Electron IPC.
+    if (isIpcOnlyHttpRoute(reqUrl.pathname)) return false;
+    return isTrustedRendererHttpOrigin({
+      headers: req.headers,
+      // Direct browser access must be the exact loopback media-server origin;
+      // do not widen this local authorization through LAN/dev CORS origins.
+      allowedOrigins: new Set<string>(),
+      loopbackServerPort: getMediaServerPort(),
+    });
+  },
   requestPairingApproval: requestLanPairingApproval,
 });
 
@@ -555,6 +572,8 @@ async function scanLibrary(
     onCheckpoint?: (snapshot: LibraryScanProgress) => void | Promise<void>;
   } = {},
 ): Promise<LibraryData> {
+  const metadataRefreshIntervalMs = 7 * 24 * 60 * 60 * 1000;
+  const missingMetadataRetryIntervalMs = 24 * 60 * 60 * 1000;
   const mode: LibraryScanMode = options.force ? 'full' : options.mode || 'quick';
   const settings = loadSettings();
   const ctx: ScanContext = {
@@ -699,14 +718,14 @@ async function scanLibrary(
       const cachedItemsByPath = new Map(cachedItems
         .filter((item) => item.filePath)
         .map((item) => [path.resolve(item.filePath), item]));
-      const preserveItems = (items: MediaItem[]) => mode === 'metadata'
-        ? items
-        : items.map((item) => preserveExistingItemDuringScan(
+      let refreshProviderRatings = false;
+      const preserveItems = (items: MediaItem[]) => items.map((item) => preserveExistingItemDuringScan(
           item,
           existingItemsById.get(item.id)
             || (item.filePath ? existingItemsByPath.get(path.resolve(item.filePath)) : undefined)
             || cachedItemsById.get(item.id)
             || (item.filePath ? cachedItemsByPath.get(path.resolve(item.filePath)) : undefined),
+          { refreshRatings: refreshProviderRatings },
         ));
       const folderStatus = folderStatusFor(folder, folderKind);
       if (folderStatus.state === 'unavailable') {
@@ -722,6 +741,19 @@ async function scanLibrary(
       try {
         const folderSignature = await getLibraryFolderSignatureAsync(folder);
         const cachedEntry = previousScanCache[folder];
+        const ratingsAreFresh = Boolean(
+          cachedEntry
+          && Date.now() - (cachedEntry.ratingsRefreshedAt || cachedEntry.scannedAt || 0) < metadataRefreshIntervalMs,
+        );
+        const cachedMetadataIsComplete = cachedItemsAreComplete(cachedItems);
+        const missingMetadataRetryIsDue = Boolean(
+          !cachedMetadataIsComplete
+          && (!cachedEntry || Date.now() - (cachedEntry.scannedAt || 0) >= missingMetadataRetryIntervalMs),
+        );
+        // The automatic sync uses quick scans. Once the persisted metadata is
+        // a week old, let that normal scan query providers again; the merge
+        // below retains every populated/manual value and only refreshes ratings.
+        refreshProviderRatings = !ratingsAreFresh;
 
         if (
           mode !== 'full'
@@ -731,8 +763,10 @@ async function scanLibrary(
           && cachedEntry.signature === folderSignature.signature
           && (cachedEntry.subtitleProfile || '') === subtitleProfile
         ) {
-          const metadataIsFresh = mode !== 'metadata' || Date.now() - (cachedEntry.scannedAt || 0) < 7 * 24 * 60 * 60 * 1000;
-          if (metadataIsFresh && cachedItems.length === cachedEntry.itemCount && cachedItemsAreComplete(cachedItems)) {
+          const canUseCachedMetadata = ratingsAreFresh
+            && mode !== 'metadata'
+            && (!missingMetadataRetryIsDue || cachedMetadataIsComplete);
+          if (canUseCachedMetadata && cachedItems.length === cachedEntry.itemCount) {
             appendItems(cachedItems, folderKind);
             nextScanCache[folder] = cachedEntry;
             processedFolders.add(folder);
@@ -762,6 +796,9 @@ async function scanLibrary(
             fileCount: folderSignature.fileCount,
             itemCount: uniqueItems.length,
             scannedAt: Date.now(),
+            ratingsRefreshedAt: refreshProviderRatings
+              ? Date.now()
+              : cachedEntry?.ratingsRefreshedAt || cachedEntry?.scannedAt || Date.now(),
           };
         }
       } catch (error) {
@@ -1131,6 +1168,8 @@ const {
   applyOfficialMetadataCandidate,
   getOfficialMetadataCandidates,
   getPlaybackLogo,
+  getStreamingProviders,
+  refreshIncompleteMetadata,
   refreshOfficialArtwork,
 } = createOfficialMetadataService({
   artworkDeliveryUrl,
@@ -1145,6 +1184,7 @@ const {
   fetchTMDBMovieMetadata,
   fetchTMDBMovieMetadataById,
   fetchTMDBMovieMetadataCandidates,
+  fetchTMDBStreamingProvidersById,
   fetchTMDBTVMetadata,
   fetchTMDBTVMetadataById,
   fetchTMDBTVMetadataCandidates,
@@ -1158,6 +1198,16 @@ const {
   probeMediaFile,
   saveLibrary: saveLibraryMutation,
 });
+
+async function libraryItemForRendererWithMetadataRefresh(mediaId: string) {
+  const profileId = getDesktopActiveProfileId();
+  if (!profileId) return null;
+  const scopedLibrary = filterLibraryForProfile(loadLibrary(), profileId);
+  if (!findLibraryItem(scopedLibrary, mediaId)) return null;
+  await refreshIncompleteMetadata(mediaId);
+  return compactLibraryItemForRenderer(mediaId);
+}
+
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
   if (!candidatePath) return false;
   const relative = path.relative(path.resolve(folderPath), path.resolve(candidatePath));
@@ -1249,12 +1299,20 @@ function configureRendererSecurityPolicy(): void {
     "font-src 'self' file: data:",
     "object-src 'none'",
     "base-uri 'none'",
-    "frame-src 'none'",
+    "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
     "frame-ancestors 'none'",
     "form-action 'none'",
   ].join('; ');
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const isRendererDocument = details.resourceType === 'mainFrame'
+      && (details.url.startsWith('file://')
+        || Boolean(MAIN_WINDOW_DEV_SERVER_URL && details.url.startsWith(MAIN_WINDOW_DEV_SERVER_URL)));
+    if (!isRendererDocument) {
+      callback({ responseHeaders: details.responseHeaders || {} });
+      return;
+    }
+
     const responseHeaders = { ...(details.responseHeaders || {}) };
     responseHeaders['Content-Security-Policy'] = [csp];
     callback({ responseHeaders });
@@ -1311,7 +1369,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   loadLibrary,
   libraryForRenderer,
   libraryIndexForRenderer: compactLibraryIndexForRenderer,
-  libraryItemForRenderer: compactLibraryItemForRenderer,
+  libraryItemForRenderer: libraryItemForRendererWithMetadataRefresh,
   scanLibrary,
   saveLibraryFromScan,
   saveLibraryScanCheckpoint,
@@ -1637,6 +1695,8 @@ registerIpcHandlers<LibraryData, AppSettings>({
   applyOfficialMetadataCandidate,
   refreshOfficialArtwork,
   getPlaybackLogo,
+  getStreamingProviders,
+  refreshIncompleteMetadata,
   importCustomArtwork,
   backupDatabase,
   clearAppData,
@@ -1765,6 +1825,14 @@ async function startBackgroundServices(): Promise<void> {
       onOpen: () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
         createWindow();
+      },
+      onOpenWeb: () => {
+        if (isUpdateInstalling() || isAppShuttingDown) return;
+        const webUrl = new URL(`http://127.0.0.1:${getMediaServerPort()}/app/`);
+        webUrl.searchParams.set(LOCAL_ACCESS_QUERY_PARAM, LOCAL_ACCESS_TOKEN);
+        void shell.openExternal(webUrl.toString()).catch((error) => {
+          console.warn('[tray] Could not open LoomTV in the default browser:', error);
+        });
       },
       onQuit: () => app.quit(),
       port: getMediaServerPort(),

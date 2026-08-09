@@ -1,12 +1,17 @@
 import { memo } from 'react';
 import { Play, Star } from 'lucide-react';
+import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
+import ContentRatingBadge from '@/components/ContentRatingBadge';
+import WatchedToggle from '@/components/WatchedToggle';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
+import { mediaFormatLabel } from '@/shared/mediaFormat';
+import { cacheWatchedDiscoverItem, discoverWatchedKey } from '@/lib/watched';
 
 /* Keep the Discover card pitch aligned with the local-library poster cards so
    VirtualPosterGrid can reuse the same responsive geometry and scroll rhythm. */
-const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_340px] [content-visibility:auto]';
-const ROOT_CLASS = `loom-poster-link loom-virtual-poster-card group flex h-full w-full max-w-[200px] flex-col overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-bg)] ${SKIPPED_CARD_SIZE}`;
+const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_384px] [content-visibility:auto]';
+const ROOT_CLASS = `loom-poster-link loom-virtual-poster-card group relative flex h-full w-full max-w-[200px] flex-col overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-bg)] ${SKIPPED_CARD_SIZE}`;
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
 const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]';
 const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
@@ -51,14 +56,24 @@ const StremioPosterCard = memo(function StremioPosterCard({
   metaLine?: string;
   onSelect: (item: StremioPluginCatalogItem) => void;
 }) {
+  const { watchedKeys, setWatched } = useProfiles();
+  const watchedKey = discoverWatchedKey(item);
+  const watched = watchedKeys.has(watchedKey);
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(item)}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onSelect(item);
+      }}
       className={ROOT_CLASS}
       aria-label={`${item.title}${item.releaseInfo ? ` (${item.releaseInfo})` : ''}`}
     >
-      <div className="loom-poster-frame relative min-h-0 shrink aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
+      <div className="loom-poster-frame relative min-h-0 shrink-0 aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
           src={artworkSources(item)}
           alt={item.title}
@@ -74,9 +89,26 @@ const StremioPosterCard = memo(function StremioPosterCard({
       </div>
       <div className="mt-2 shrink-0 overflow-hidden">
         <h4 className="truncate text-sm font-semibold text-[var(--loom-text)]">{item.title}</h4>
-        {metaLine && <p className="text-xs text-[var(--loom-muted)]">{metaLine}</p>}
+        {(metaLine || item.contentRating || item.format) && (
+          <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
+            {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
+            <ContentRatingBadge
+              rating={mediaFormatLabel(item.format, item.type)}
+              className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"
+            />
+            <ContentRatingBadge rating={item.contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
+          </div>
+        )}
       </div>
-    </button>
+      <WatchedToggle
+        watched={watched}
+        onToggle={() => {
+          cacheWatchedDiscoverItem(item);
+          void setWatched(watchedKey, !watched);
+        }}
+        className="absolute left-2 top-2 z-20"
+      />
+    </div>
   );
 });
 

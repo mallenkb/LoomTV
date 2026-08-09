@@ -42,20 +42,31 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
 
   async load(filePath: string, options?: PlaybackStartOptions): Promise<boolean> {
     this.volumeController.reset(options?.volume, options?.muted);
-    const result = await desktopApi.libvlc.start(filePath, options);
-    if (!result.ok || !result.sessionId) {
-      throw new Error(result.error || 'Native LibVLC playback could not be started.');
+    const failures: string[] = [];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const result = await desktopApi.libvlc.start(filePath, options);
+      if (result.ok && result.sessionId && result.surface === 'composited-window') {
+        this.sessionId = result.sessionId;
+        const sessionId = this.sessionId;
+        this.pendingStates.splice(0).forEach((state) => {
+          if (state.sessionId && state.sessionId !== sessionId) return;
+          this.listener({ ...state, sessionId });
+        });
+        return true;
+      }
+
+      failures.push(result.error || (
+        result.surface !== 'composited-window'
+          ? 'LibVLC playback is unavailable because its native surface is not composited.'
+          : 'Native LibVLC playback could not be started.'
+      ));
+      console.warn(`[player] LibVLC startup attempt ${attempt} of 3 failed:`, failures.at(-1));
+      if (attempt < 3) {
+        await desktopApi.libvlc.refreshAvailability().catch(() => undefined);
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+      }
     }
-    if (result.surface !== 'composited-window') {
-      throw new Error('LibVLC playback is unavailable because its native surface is not composited.');
-    }
-    this.sessionId = result.sessionId;
-    const sessionId = this.sessionId;
-    this.pendingStates.splice(0).forEach((state) => {
-      if (state.sessionId && state.sessionId !== sessionId) return;
-      this.listener({ ...state, sessionId });
-    });
-    return true;
+    throw new Error(`LibVLC could not start after three attempts: ${failures.join(' | ')}`);
   }
 
   private async command(command: LibVlcCommand): Promise<void> {

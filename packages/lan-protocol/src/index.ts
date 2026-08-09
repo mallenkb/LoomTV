@@ -15,9 +15,17 @@ export type LanLibraryPlaybackReference = {
   durationSeconds?: number;
 };
 
+export type LanStreamingProvider = {
+  id: number;
+  name: string;
+  logoUrl: string;
+};
+
 export type LanLibraryCard = {
   id: string;
   type: 'movie' | 'tv' | 'anime';
+  /** Canonical presentation format, e.g. Movie, TV, OVA, or ONA. */
+  format?: string;
   title: string;
   year?: number;
   poster: string;
@@ -28,6 +36,8 @@ export type LanLibraryCard = {
   logoCandidates?: string[];
   summary: string;
   rating: number;
+  contentRatings?: Record<string, LanContentRating>;
+  streamingProviders?: LanStreamingProvider[];
   genres: string[];
   lastPlayed?: number;
   seasons?: Array<{ number: number; title: string; episodeCount: number }>;
@@ -239,7 +249,7 @@ export type LanProfileRestrictions = {
   revision: number;
 };
 
-export type LanProfileListKind = 'watchlist' | 'favorite';
+export type LanProfileListKind = 'watchlist' | 'favorite' | 'watched';
 
 export type LanProfileListEntry = {
   mediaId: string;

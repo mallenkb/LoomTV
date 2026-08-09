@@ -45,7 +45,7 @@ export default function VirtualPosterGrid<T extends { id: string }>({
   renderItem,
   minColumnWidth = 176,
   maxColumnWidth = 200,
-  rowHeight = 340,
+  rowHeight = 384,
   gap = 24,
 }: VirtualPosterGridProps<T>) {
   const rootRef = useRef<HTMLDivElement | null>(null);

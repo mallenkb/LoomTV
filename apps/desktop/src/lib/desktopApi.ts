@@ -33,6 +33,7 @@ import type {
   MediaSegmentType,
   MetadataApiKeys,
   MetadataKeyTestResult,
+  StreamingProvider,
   OfficialArtworkResult,
   OfficialArtworkRefreshTarget,
   OfficialMetadataApplyTarget,
@@ -100,6 +101,7 @@ export type {
   MediaSegmentType,
   MetadataApiKeys,
   MetadataKeyTestResult,
+  StreamingProvider,
   MpvAvailability,
   MpvCommand,
   MpvPlaybackDiagnostics,
@@ -270,6 +272,8 @@ export type DesktopBridgeApi = {
       applyOfficialMetadata?: (mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => Promise<OfficialArtworkResult>;
       refreshOfficialArtwork?: (mediaId: string, target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
       getPlaybackLogo?: (mediaId: string) => Promise<PlaybackLogoResult>;
+      refreshIncompleteMetadata?: (mediaId: string) => Promise<boolean>;
+      getStreamingProviders?: (mediaId: string) => Promise<StreamingProvider[]>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       clearAppData?: () => Promise<LibraryIndexPayload>;
@@ -291,6 +295,7 @@ export type DesktopBridgeApi = {
       };
       libvlc?: {
         availability: () => Promise<LibVlcAvailability>;
+        refreshAvailability: () => Promise<LibVlcAvailability>;
         start: (filePath: string, options?: PlaybackStartOptions) => Promise<LibVlcStartResult>;
         command: (sessionId: string, command: LibVlcCommand) => Promise<boolean>;
         stop: (sessionId: string) => Promise<boolean>;
@@ -341,11 +346,55 @@ function unwrapStremioPluginResult<T>(result: StremioPluginIpcResult<T>): T {
 const DEFAULT_MEDIA_PORT = 3847;
 const LOCAL_ACCESS_QUERY_PARAM = 'loomtvToken';
 const LOCAL_ACCESS_HEADER = 'x-loomtv-token';
+const BROWSER_LOCAL_SESSION_KEY = 'loomtv:browser-local-session-token.v1';
 let resolvedServerBase: string | null = null;
 let resolvedLocalAccessToken: string | null = null;
 let remoteCatalogCache: { identity: string; etag: string; index: LibraryIndexPayload } | null = null;
 
+function browserLocalSessionToken(): string | null {
+  if (typeof window === 'undefined' || window.desktopApi) return null;
+  try {
+    const url = new URL(window.location.href);
+    const queryToken = url.searchParams.get(LOCAL_ACCESS_QUERY_PARAM)?.trim() || '';
+    const storedToken = window.sessionStorage.getItem(BROWSER_LOCAL_SESSION_KEY)?.trim() || '';
+    const token = queryToken || storedToken;
+    if (!token) return null;
+
+    if (queryToken) {
+      window.sessionStorage.setItem(BROWSER_LOCAL_SESSION_KEY, token);
+      url.searchParams.delete(LOCAL_ACCESS_QUERY_PARAM);
+      window.history.replaceState(window.history.state, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+function clearBrowserLocalSessionToken(): void {
+  if (typeof window === 'undefined' || window.desktopApi) return;
+  try {
+    window.sessionStorage.removeItem(BROWSER_LOCAL_SESSION_KEY);
+  } catch {
+    // Ignore unavailable session storage.
+  }
+}
+
+export function hasBrowserLocalSession(): boolean {
+  return Boolean(browserLocalSessionToken());
+}
+
+export function isBrowserLocalApp(): boolean {
+  if (typeof window === 'undefined' || window.desktopApi) return false;
+  const host = window.location.hostname.toLowerCase();
+  const isLoopbackHost = host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
+  return isLoopbackHost && (window.location.pathname === '/app' || window.location.pathname.startsWith('/app/'));
+}
+
 async function discoverServerBase(): Promise<string> {
+  if (!window.desktopApi && !resolvedLocalAccessToken) {
+    resolvedLocalAccessToken = browserLocalSessionToken();
+  }
   if (resolvedServerBase) return resolvedServerBase;
 
   // Electron renderers receive the port and the local access token over
@@ -361,16 +410,16 @@ async function discoverServerBase(): Promise<string> {
     }
   }
 
-  // A browser-only session has no preload bridge and therefore no credential.
-  // Port discovery stays credential-free; token-bearing routes fail closed with
-  // 401 rather than being handed authority over an attacker-set header.
+  // A browser tab opened directly has no credential. The tray's local web
+  // handoff stores one in sessionStorage after removing it from the address bar;
+  // direct tabs still discover the port without credentials and fail closed on
+  // token-bearing routes.
   const candidatePorts = Array.from({ length: 8 }, (_, index) => DEFAULT_MEDIA_PORT + index);
   for (const port of candidatePorts) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/ping`);
       if (response.ok) {
         resolvedServerBase = `http://127.0.0.1:${port}`;
-        resolvedLocalAccessToken = null;
         return resolvedServerBase;
       }
     } catch {
@@ -426,6 +475,7 @@ async function fetchLocalResponse(pathname: string, init?: RequestInit): Promise
   if (response.status === 401) {
     resolvedServerBase = null;
     resolvedLocalAccessToken = null;
+    clearBrowserLocalSessionToken();
     response = await request();
   }
   return response;
@@ -806,6 +856,14 @@ export const desktopApi = {
     };
   },
 
+  async getFileInfo(filePath: string): Promise<{ size: number; path: string; exists: boolean }> {
+    if (window.desktopApi?.getFileInfo) return window.desktopApi.getFileInfo(filePath);
+    // The browser renderer cannot inspect host paths directly. Electron's
+    // bridge is the authoritative check; keep a conservative fallback for
+    // local web mode so it can continue using its existing stream route.
+    return { size: 0, path: filePath, exists: false };
+  },
+
   async getSubtitleUrl(filePath: string, streamOrdinal?: number): Promise<{ url: string }> {
     if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
       const parsed = new URL(filePath);
@@ -874,7 +932,44 @@ export const desktopApi = {
       return { ...connection, library: remoteLibrarySources(connection.library, connection.baseUrl) };
     }
 
-    throw new Error('Secure host pairing is available in the installed LoomTV desktop app.');
+    const response = await fetchRequestWithTimeout(`${normalizedBaseUrl}/api/v2/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: normalizedCode,
+        deviceName: 'LoomTV browser',
+      }),
+    }, REMOTE_REQUEST_TIMEOUT_MS);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+      throw new Error(payload?.message || payload?.error || `The host rejected pairing (${response.status}).`);
+    }
+    const payload = await response.json() as {
+      deviceId?: string;
+      accessToken?: string;
+      accessTokenExpiresAt?: number;
+      refreshToken?: string;
+      refreshTokenExpiresAt?: number;
+      hostDeviceId?: string;
+      hostDeviceName?: string;
+      library?: LibraryPayload;
+      libraryEtag?: string;
+    };
+    if (!payload.deviceId || !payload.accessToken || !payload.refreshToken) {
+      throw new Error('The host returned an incomplete pairing session.');
+    }
+    return {
+      baseUrl: normalizedBaseUrl,
+      deviceId: payload.deviceId,
+      deviceToken: payload.accessToken,
+      accessTokenExpiresAt: Number(payload.accessTokenExpiresAt) || 0,
+      refreshToken: payload.refreshToken,
+      refreshTokenExpiresAt: Number(payload.refreshTokenExpiresAt) || 0,
+      hostDeviceId: payload.hostDeviceId,
+      hostDeviceName: payload.hostDeviceName,
+      library: remoteLibrarySources(payload.library || { movies: [], tvShows: [], animeShows: [], libraryFolders: [] }, normalizedBaseUrl),
+      libraryEtag: payload.libraryEtag || '',
+    };
   },
 
   activateRemoteLibrary(connection: RemoteLibraryConnection): void {
@@ -1483,6 +1578,22 @@ export const desktopApi = {
     });
   },
 
+  async getStreamingProviders(mediaId: string): Promise<StreamingProvider[]> {
+    if (window.desktopApi?.getStreamingProviders) return window.desktopApi.getStreamingProviders(mediaId);
+    return fetchJson<StreamingProvider[]>('/api/metadata/streaming-providers', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId }),
+    });
+  },
+
+  async refreshIncompleteMetadata(mediaId: string): Promise<boolean> {
+    if (window.desktopApi?.refreshIncompleteMetadata) return window.desktopApi.refreshIncompleteMetadata(mediaId);
+    return fetchJson<boolean>('/api/metadata/refresh-incomplete', {
+      method: 'POST',
+      body: JSON.stringify({ mediaId }),
+    });
+  },
+
   async getPlaybackLogo(mediaId: string): Promise<PlaybackLogoResult> {
     if (window.desktopApi?.getPlaybackLogo) return window.desktopApi.getPlaybackLogo(mediaId);
     return fetchJson<PlaybackLogoResult>('/api/artwork/playback-logo', {
@@ -1662,10 +1773,22 @@ export const desktopApi = {
           available: false,
           enabled: false,
           surface: 'unavailable',
-          reason: 'The experimental LibVLC bridge is not available for this desktop session.',
+          reason: 'The LibVLC bridge is not available for this desktop session.',
         };
       }
       return window.desktopApi.libvlc.availability();
+    },
+
+    async refreshAvailability(): Promise<LibVlcAvailability> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.libvlc) {
+        return {
+          available: false,
+          enabled: false,
+          surface: 'unavailable',
+          reason: 'The LibVLC bridge is not available for this desktop session.',
+        };
+      }
+      return window.desktopApi.libvlc.refreshAvailability();
     },
 
     async start(filePath: string, options?: PlaybackStartOptions): Promise<LibVlcStartResult> {

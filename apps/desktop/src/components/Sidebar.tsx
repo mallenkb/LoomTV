@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
+import { Bookmark, Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -13,20 +13,31 @@ import SharedListHighlight from '@/components/SharedListHighlight';
 import { useToast } from '@/components/ToastProvider';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
-type NavItemId = 'home' | 'discover' | SidebarNavItemId | 'settings';
+type NavItemId = 'home' | 'my-list' | 'discover' | SidebarNavItemId | 'settings';
 type SidebarIcon = React.ComponentType<{ className?: string }>;
 type SidebarNavItem = { id: NavItemId; path: string; label: string; icon: SidebarIcon; activeIcon?: SidebarIcon };
+type ModernCategoryItem = {
+  label: string;
+  path: string;
+  routePrefix: string;
+  folderKey: 'anime' | 'tvShows' | 'movies' | 'others' | null;
+  icon?: SidebarIcon;
+  activeIcon?: SidebarIcon;
+  iconOnly?: boolean;
+};
 
 const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
-const modernCategoryItems = [
+const modernCategoryItems: readonly ModernCategoryItem[] = [
   { label: 'Home', path: '/', routePrefix: '/', folderKey: null },
   { label: 'Anime', path: '/anime', routePrefix: '/anime', folderKey: 'anime' },
   { label: 'TV Shows', path: '/tv', routePrefix: '/tv', folderKey: 'tvShows' },
   { label: 'Movies', path: '/movies', routePrefix: '/movie', folderKey: 'movies' },
+  { label: 'My List', path: '/my-list', routePrefix: '/my-list', folderKey: null, icon: Bookmark, activeIcon: BookmarkSolidIcon, iconOnly: true },
   { label: 'Others', path: '/others', routePrefix: '/others', folderKey: 'others' },
-] as const;
+];
 
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
+const myListNavItem: SidebarNavItem = { id: 'my-list', path: '/my-list', label: 'My List', icon: Bookmark, activeIcon: BookmarkSolidIcon };
 const discoverNavItem: SidebarNavItem = { id: 'discover', path: '/discover', label: 'Discover', icon: DiscoverIcon, activeIcon: DiscoverActiveIcon };
 const settingsNavItem: SidebarNavItem = { id: 'settings', path: '/settings', label: 'Settings', icon: SettingsNavExactIcon, activeIcon: SettingsNavSolidExactIcon };
 
@@ -46,6 +57,7 @@ function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | nu
   const activePath = detailRoute && fromPath ? fromPath : pathname;
 
   if (activePath === '/' || activePath.startsWith('/?')) return 'home';
+  if (activePath === '/my-list' || activePath.startsWith('/my-list/')) return 'my-list';
   if (activePath === '/discover' || activePath.startsWith('/discover/')) return 'discover';
   if (activePath === '/movies' || activePath.startsWith('/movies/') || activePath.startsWith('/movie/')) return 'movies';
   if (activePath === '/tv' || activePath.startsWith('/tv/')) return 'tv';
@@ -77,9 +89,9 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
     : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
 
   return (
-    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-6 z-50 flex justify-center px-5">
+    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-6 z-50 flex h-12 items-center justify-center px-5">
       <nav
-        className="loom-modern-category-pill loom-no-drag h-12 rounded-full border p-1 backdrop-blur-2xl"
+        className="loom-modern-category-pill loom-no-drag flex h-12 items-center rounded-full border p-1 backdrop-blur-2xl"
         aria-label="Library categories"
       >
         <SharedListHighlight
@@ -89,20 +101,25 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
         >
           {visibleCategories.map((category) => {
             const isActive = category.path === activeCategory?.path;
+            const CategoryIcon = isActive ? (category.activeIcon || category.icon) : category.icon;
             return (
               <Link
                 key={category.path}
                 to={category.path}
+                aria-label={category.iconOnly ? category.label : undefined}
+                title={category.iconOnly ? category.label : undefined}
                 aria-current={isActive ? 'page' : undefined}
                 aria-pressed={isActive}
                 data-shared-highlight-item
                 data-shared-highlight-id={category.path}
                 className={cn(
-                  'relative z-10 inline-flex h-full items-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
+                  'relative z-10 inline-flex h-full items-center justify-center rounded-full px-5 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]',
+                  category.iconOnly && 'w-12 px-3',
                   isActive ? 'loom-modern-category-active' : 'loom-modern-category-idle',
                 )}
               >
-                {category.label}
+                {CategoryIcon ? <CategoryIcon className="h-4 w-4" aria-hidden="true" /> : null}
+                {!category.iconOnly && category.label}
               </Link>
             );
           })}
@@ -110,6 +127,10 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
       </nav>
     </header>
   );
+}
+
+function BookmarkSolidIcon({ className }: { className?: string }) {
+  return <Bookmark className={className} fill="currentColor" aria-hidden="true" />;
 }
 
 function AnimeIcon({ className, solid = false }: { className?: string; solid?: boolean }) {
@@ -404,7 +425,11 @@ export default function Sidebar() {
   const { showToast } = useToast();
   const { state, scanLibrary } = useLibrary();
   const { libraryFolderGroups } = state;
-  const sourceRoute = (location.state as { from?: string } | null)?.from;
+  const routeState = location.state as { from?: string; fromDiscover?: boolean } | null;
+  const sourceRoute = routeState?.from;
+  const isExploreContext = location.pathname === '/discover'
+    || routeState?.fromDiscover === true
+    || sourceRoute?.startsWith('/discover') === true;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
   const [libraryActionError, setLibraryActionError] = useState('');
@@ -457,6 +482,7 @@ export default function Sidebar() {
           return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
         }),
       ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
+      myListNavItem,
     ],
     [libraryFolderGroups, navOrder],
   );
@@ -469,6 +495,7 @@ export default function Sidebar() {
         return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
       }),
       ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
+      myListNavItem,
       settingsNavItem,
     ],
     [libraryFolderGroups],
@@ -600,7 +627,7 @@ export default function Sidebar() {
           )}
           <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
         </aside>
-        {!location.pathname.startsWith('/settings') && (
+        {!location.pathname.startsWith('/settings') && !isExploreContext && (
           <ModernCategoryPill pathname={location.pathname} />
         )}
       </>

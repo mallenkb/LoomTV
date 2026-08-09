@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, ImageUp, Loader2, MoreHorizontal, PanelsTopLeft, Search, Star, X } from 'lucide-react';
+import { FolderOpen, Image, ImageUp, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
 import { useToast } from '@/components/ToastProvider';
-import type { OfficialArtworkRefreshTarget, OfficialMetadataApplyTarget, OfficialMetadataCandidate } from '@/lib/desktopApi';
+import { desktopApi, type OfficialArtworkRefreshTarget, type OfficialMetadataApplyTarget, type OfficialMetadataCandidate } from '@/lib/desktopApi';
 
 type ArtworkTarget = 'cover' | 'thumbnail';
 export type CustomArtworkState = Partial<Record<ArtworkTarget | 'poster', string>>;
@@ -63,6 +63,15 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
+function fileManagerActionLabel(): string {
+  const platform = typeof navigator === 'undefined'
+    ? ''
+    : `${navigator.platform || ''} ${navigator.userAgent || ''}`.toLowerCase();
+  if (platform.includes('mac')) return 'Reveal in Finder';
+  if (platform.includes('win')) return 'Show in Explorer';
+  return 'Show in File Manager';
+}
+
 function cropArtworkToDataUrl(preview: ArtworkPreview): Promise<string> {
   const target = ARTWORK_TARGETS[preview.target];
   const targetAspect = target.outputWidth / target.outputHeight;
@@ -105,9 +114,12 @@ interface ArtworkEditorControlsProps {
   officialThumbnailSources?: string[];
   officialCoverSources?: string[];
   fallbackFrameSource?: string;
+  revealPath?: string;
   onFetchOfficialArtwork?: (target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
   onFetchOfficialArtworkCandidates?: () => Promise<OfficialMetadataCandidate[]>;
   onApplyOfficialArtworkCandidate?: (candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => Promise<OfficialArtworkResult>;
+  refreshMetadataState?: 'idle' | 'loading' | 'success' | 'error';
+  onRefreshIncompleteMetadata?: () => Promise<void> | void;
 }
 
 export default function ArtworkEditorControls({
@@ -118,9 +130,12 @@ export default function ArtworkEditorControls({
   officialThumbnailSources = [],
   officialCoverSources = [],
   fallbackFrameSource = '',
+  revealPath = '',
   onFetchOfficialArtwork,
   onFetchOfficialArtworkCandidates,
   onApplyOfficialArtworkCandidate,
+  refreshMetadataState = 'idle',
+  onRefreshIncompleteMetadata,
 }: ArtworkEditorControlsProps) {
   const [artworkMenuOpen, setArtworkMenuOpen] = useState(false);
   const [artworkPreview, setArtworkPreview] = useState<ArtworkPreview | null>(null);
@@ -138,6 +153,12 @@ export default function ArtworkEditorControls({
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
   const { showToast } = useToast();
+  const revealLabel = fileManagerActionLabel();
+  const canRevealLocalFile = Boolean(
+    revealPath.trim()
+    && typeof window !== 'undefined'
+    && window.desktopApi?.openFolderPath,
+  );
 
   useEffect(() => {
     if (!artworkMenuOpen) return;
@@ -192,6 +213,20 @@ export default function ArtworkEditorControls({
     const input = target === 'cover' ? coverInputRef.current : thumbnailInputRef.current;
     input?.click();
     setArtworkMenuOpen(false);
+  };
+
+  const revealLocalFile = async () => {
+    if (!canRevealLocalFile) return;
+    setArtworkMenuOpen(false);
+    try {
+      await desktopApi.openFolderPath(revealPath);
+    } catch (error) {
+      showToast({
+        title: 'Unable to open file location',
+        description: error instanceof Error ? error.message : 'The local file location could not be opened.',
+        tone: 'error',
+      });
+    }
   };
 
   const saveOfficialArtwork = async (
@@ -463,6 +498,26 @@ export default function ArtworkEditorControls({
                 type="button"
                 role="menuitem"
                 onClick={() => {
+                  setArtworkMenuOpen(false);
+                  void onRefreshIncompleteMetadata?.();
+                }}
+                disabled={!onRefreshIncompleteMetadata || refreshMetadataState === 'loading'}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
+              >
+                {refreshMetadataState === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {refreshMetadataState === 'loading'
+                  ? 'Refreshing metadata…'
+                  : refreshMetadataState === 'success'
+                    ? 'Metadata refreshed'
+                    : refreshMetadataState === 'error'
+                      ? 'Refresh failed'
+                      : 'Refresh metadata'}
+              </button>
+              <div role="separator" className="my-1 border-t border-[var(--loom-control-border)]" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
                   void openMetadataCandidates('cover');
                 }}
                 disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
@@ -489,6 +544,18 @@ export default function ArtworkEditorControls({
               >
                 <ImageUp className="h-4 w-4" />
                 Upload cover
+              </button>
+              <div role="separator" className="my-1 border-t border-[var(--loom-control-border)]" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void revealLocalFile()}
+                disabled={!canRevealLocalFile}
+                title={canRevealLocalFile ? revealLabel : 'No local file is available for this title'}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FolderOpen className="h-4 w-4" />
+                {revealLabel}
               </button>
             </div>
           )}

@@ -149,6 +149,23 @@ export function seriesTitleFromEpisodeFileName(value?: string | null): string | 
   return title;
 }
 
+/**
+ * Extract the human-readable title after an SxxExx marker. File names are the
+ * canonical local source here: embedded MKV titles can describe a different
+ * release of the same episode.
+ */
+export function episodeTitleFromFileName(value?: string | null): string {
+  if (!value) return '';
+  const withoutExt = basenameFromPath(value).replace(/\.(3gp|avi|divx|flv|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|mts|mxf|ogm|ogv|ts|vob|webm|wmv)$/i, '');
+  const match = withoutExt.match(/[Ss]\s*0*\d{1,2}\s*[._ -]*[Ee]\s*0*\d{1,3}[\s._-]*(.*)$/i);
+  if (!match?.[1]) return '';
+  return match[1]
+    .replace(/\[[^\]]*]/g, ' ')
+    .replace(/[._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function bestSeriesTitleFromEpisodeFiles(files: Array<{ filePath?: string | null }>): string | null {
   const counts = countUsefulTitles(files.map((file) => seriesTitleFromEpisodeFileName(file.filePath)));
   if (counts.length === 0) return null;
@@ -239,30 +256,72 @@ function episodeKey(episode: Pick<EpisodeMeta, 'season' | 'number'>): string {
   return `${episode.season}-${episode.number}`;
 }
 
+function normalizedSpecialEpisodeTitle(value?: string | null): string {
+  return normalizeTitleForMatch(value)
+    .replace(/\b(first|one)\b/g, '1')
+    .replace(/\b(second|two)\b/g, '2')
+    .replace(/\b(third|three)\b/g, '3')
+    .replace(/\b(fourth|four)\b/g, '4')
+    .replace(/\b(?:specials?|part|pt|episodes?|eps?)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function specialEpisodeTitlesMatch(localTitle: string, remoteTitle: string): boolean {
+  const local = normalizedSpecialEpisodeTitle(localTitle);
+  const remote = normalizedSpecialEpisodeTitle(remoteTitle);
+  if (!local || !remote) return false;
+  return local === remote || local.endsWith(` ${remote}`) || remote.endsWith(` ${local}`);
+}
+
+export function findEpisodeMetadataMatch(
+  local: EpisodeMeta,
+  remoteEpisodes: EpisodeMeta[],
+): EpisodeMeta | undefined {
+  // Specials are often numbered differently by providers. Prefer a matching
+  // title before falling back to the numeric key, otherwise local S00E01 can
+  // incorrectly receive an unrelated provider S00E01 recap.
+  if (local.season === 0 && local.title) {
+    const titledMatch = remoteEpisodes.find((remote) => (
+      remote.season === 0 && specialEpisodeTitlesMatch(local.title, remote.title)
+    ));
+    if (titledMatch) return titledMatch;
+  }
+
+  return remoteEpisodes.find((remote) => episodeKey(remote) === episodeKey(local));
+}
+
 export function mergeEpisodeMetadataSources(
   localEpisodes: EpisodeMeta[],
   remoteSources: Array<EpisodeMeta[] | null | undefined>,
+  options: { ratingSourceOrder?: number[] } = {},
 ): EpisodeMeta[] {
-  const remoteMaps = remoteSources
-    .filter((source): source is EpisodeMeta[] => Boolean(source?.length))
-    .map((source) => new Map(source.map((episode) => [episodeKey(episode), episode])));
+  const availableSources = remoteSources
+    .map((source, index) => ({ source, index }))
+    .filter((entry): entry is { source: EpisodeMeta[]; index: number } => Boolean(entry.source?.length));
 
-  if (remoteMaps.length === 0) return localEpisodes;
+  if (availableSources.length === 0) return localEpisodes;
 
   return localEpisodes.map((local) => {
-    const remotes = remoteMaps
-      .map((source) => source.get(episodeKey(local)))
-      .filter((episode): episode is EpisodeMeta => Boolean(episode));
+    const remotes = availableSources
+      .map(({ source, index }) => ({ index, episode: findEpisodeMetadataMatch(local, source) }))
+      .filter((entry): entry is { index: number; episode: EpisodeMeta } => Boolean(entry.episode));
 
     if (remotes.length === 0) return local;
 
+    const ratingRemotes = options.ratingSourceOrder
+      ? options.ratingSourceOrder
+        .map((sourceIndex) => remotes.find((entry) => entry.index === sourceIndex)?.episode)
+        .filter((episode): episode is EpisodeMeta => Boolean(episode))
+      : remotes.map(({ episode }) => episode);
+
     return {
       ...local,
-      title: remotes.find((episode) => Boolean(episode.title))?.title || local.title,
-      summary: local.summary || remotes.find((episode) => Boolean(episode.summary))?.summary || '',
-      still: remotes.find((episode) => Boolean(episode.still))?.still || local.still,
-      rating: local.rating || remotes.find((episode) => numericRating(episode.rating) > 0)?.rating || 0,
-      airDate: local.airDate || remotes.find((episode) => Boolean(episode.airDate))?.airDate || '',
+      title: remotes.find(({ episode }) => Boolean(episode.title))?.episode.title || local.title,
+      summary: local.summary || remotes.find(({ episode }) => Boolean(episode.summary))?.episode.summary || '',
+      still: remotes.find(({ episode }) => Boolean(episode.still))?.episode.still || local.still,
+      rating: local.rating || ratingRemotes.find((episode) => numericRating(episode.rating) > 0)?.rating || 0,
+      airDate: local.airDate || remotes.find(({ episode }) => Boolean(episode.airDate))?.episode.airDate || '',
     };
   });
 }

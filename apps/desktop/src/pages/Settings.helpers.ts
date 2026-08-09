@@ -41,6 +41,7 @@ export const APP_LICENSE = {
 export const THIRD_PARTY_DEPENDENCIES = [
   { name: 'DiceBear Glyphs', owner: 'Matt Houser / DiceBear', license: 'CC BY 4.0', url: 'https://www.dicebear.com/styles/glyphs/' },
   { name: 'Electron', owner: 'Electron Community', license: 'MIT', url: 'https://www.electronjs.org/' },
+  { name: 'YouTube embedded player', owner: 'Google LLC / YouTube', license: 'YouTube Terms of Service', url: 'https://www.youtube.com/t/terms' },
   { name: 'Electron Forge', owner: 'Electron Forge contributors', license: 'MIT', url: 'https://www.electronforge.io/' },
   { name: 'React', owner: 'Meta Platforms, Inc. and affiliates', license: 'MIT', url: 'https://react.dev/' },
   { name: 'React Router', owner: 'Remix Software', license: 'MIT', url: 'https://reactrouter.com/' },

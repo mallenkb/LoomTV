@@ -24,6 +24,7 @@ export interface ScanCacheEntry {
   fileCount: number;
   itemCount: number;
   scannedAt: number;
+  ratingsRefreshedAt?: number;
 }
 
 export type LibraryScanCache = Record<string, ScanCacheEntry>;

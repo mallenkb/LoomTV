@@ -15,7 +15,6 @@ import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
-import { DiscoverCatalog } from '@/pages/PluginDiscover';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -62,7 +61,7 @@ function DefaultHome() {
     };
     return [...movies, ...tvShows, ...animeShows]
       .map((item) => [item, recency(item)] as const)
-      .filter(([, last]) => last > 0)
+      .filter(([item, last]) => last > 0 && !matchesLibraryFilter(item, 'watched', progress))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([item]) => item);
@@ -131,19 +130,19 @@ function DefaultHome() {
         )}
 
         {showAnimeSection && (
-          <MediaRail title="Anime" className="mb-8" action={<SeeAllLink to="/anime" />}>
+          <MediaRail title="Anime" titleHref="/anime" className="mb-8" action={<SeeAllLink to="/anime" />}>
             <PosterCards items={filteredAnime.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
 
         {showTVSection && (
-          <MediaRail title="TV Shows" className="mb-8" action={<SeeAllLink to="/tv" />}>
+          <MediaRail title="TV Shows" titleHref="/tv" className="mb-8" action={<SeeAllLink to="/tv" />}>
             <PosterCards items={filteredTVShows.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
 
         {showMoviesSection && (
-          <MediaRail title="Movies" className="mb-8" action={<SeeAllLink to="/movies" />}>
+          <MediaRail title="Movies" titleHref="/movies" className="mb-8" action={<SeeAllLink to="/movies" />}>
             <PosterCards items={filteredMovies.slice(0, 10)} from={currentRoute} isLoading={isLoading} />
           </MediaRail>
         )}
@@ -152,7 +151,6 @@ function DefaultHome() {
             {activeFilter !== 'all' && !normalizedQuery ? 'No titles match this filter' : 'No local matches found'}
           </div>
         )}
-        <DiscoverCatalog mode="home" />
       </div>
     </div>
   );

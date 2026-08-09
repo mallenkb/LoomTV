@@ -26,6 +26,20 @@ function expectedRendererAppUrl(): string {
   return pathToFileURL(path.resolve(packagedRendererFilePath())).toString();
 }
 
+function isAllowedYouTubeFrameUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:') return false;
+    const host = url.hostname.toLowerCase();
+    return host === 'youtube.com'
+      || host.endsWith('.youtube.com')
+      || host === 'youtube-nocookie.com'
+      || host.endsWith('.youtube-nocookie.com');
+  } catch {
+    return false;
+  }
+}
+
 function presentMainWindow(window: BrowserWindow): void {
   if (process.platform === 'darwin') {
     void app.dock?.show();
@@ -129,9 +143,16 @@ export function createWindow(): void {
   const rejectUnexpectedNavigation = (details: { preventDefault: () => void; url: string; isMainFrame: boolean }): void => {
     if (!details.isMainFrame || !isExpectedAppUrl(details.url, expectedAppUrl)) details.preventDefault();
   };
+  const rejectUnexpectedFrameNavigation = (details: { preventDefault: () => void; url: string; isMainFrame: boolean }): void => {
+    if (details.isMainFrame) {
+      if (!isExpectedAppUrl(details.url, expectedAppUrl)) details.preventDefault();
+      return;
+    }
+    if (!isAllowedYouTubeFrameUrl(details.url)) details.preventDefault();
+  };
   mainWindow.webContents.on('will-navigate', rejectUnexpectedNavigation);
   mainWindow.webContents.on('will-redirect', rejectUnexpectedNavigation);
-  mainWindow.webContents.on('will-frame-navigate', rejectUnexpectedNavigation);
+  mainWindow.webContents.on('will-frame-navigate', rejectUnexpectedFrameNavigation);
 
   mainWindow.on('ready-to-show', () => {
     revealWindow();

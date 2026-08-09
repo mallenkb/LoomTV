@@ -7,6 +7,7 @@ const LIBRARY_FILTER_PATHNAMES: ReadonlySet<string> = new Set([
   '/anime',
   '/tv',
   '/movies',
+  '/my-list',
 ]);
 
 export const LibraryFilterVisibilityContext = createContext(false);

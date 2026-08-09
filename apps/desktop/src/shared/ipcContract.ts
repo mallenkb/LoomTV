@@ -39,6 +39,7 @@ import type {
   RemoteLibraryRequest,
   RemoteLibraryResponse,
   RemoteLibrarySessionState,
+  StreamingProvider,
   RendererSession,
   SettingsPayload,
   SkipAnalysisRunScope,
@@ -90,6 +91,8 @@ export interface IpcContract {
   'media:start-transcode': { args: [filePath: string, options?: TranscodeOptions]; result: ApiResult<TranscodeSession> };
   'media:stop-transcode': { args: [sessionId: string]; result: ApiResult<boolean> };
   'metadata:test-keys': { args: [keys: MetadataApiKeys]; result: MetadataKeyTestResult[] };
+  'metadata:refresh-incomplete': { args: [mediaId: string]; result: boolean };
+  'metadata:streaming-providers': { args: [mediaId: string]; result: StreamingProvider[] };
   'mpv:availability': { args: []; result: MpvAvailability };
   'mpv:choose-executable': { args: []; result: MpvAvailability };
   'mpv:reset-executable': { args: []; result: MpvAvailability };

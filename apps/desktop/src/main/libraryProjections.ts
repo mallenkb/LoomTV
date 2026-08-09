@@ -166,6 +166,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     return {
       id: item.id,
       type: item.type,
+      format: item.format,
       title: item.title,
       year: item.year,
       poster,
@@ -176,6 +177,8 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       logoCandidates,
       summary: item.summary,
       rating: item.rating,
+      contentRatings: item.contentRatings,
+      streamingProviders: item.streamingProviders,
       genres: item.genres,
       lastPlayed: item.lastPlayed,
       seasons: item.seasons,
@@ -223,6 +226,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     return {
       id: item.id,
       type: item.type,
+      format: item.format,
       title: item.title,
       year: item.year,
       poster,
@@ -233,6 +237,8 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       logoCandidates,
       summary: item.summary,
       rating: item.rating,
+      contentRatings: item.contentRatings,
+      streamingProviders: item.streamingProviders,
       genres: item.genres,
       lastPlayed: item.lastPlayed,
       seasons: item.seasons,

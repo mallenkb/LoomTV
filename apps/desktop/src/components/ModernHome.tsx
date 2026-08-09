@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Bookmark, CalendarDays, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, Tag, X } from 'lucide-react';
+import { AudioLines, Bookmark, Captions, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { libraryMutationMessage, type MediaItem, type TVShow, useLibrary } from '@/contexts/LibraryContext';
+import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import MediaPosterCard from '@/components/MediaPosterCard';
+import ProviderMark from '@/components/ProviderMark';
 import MediaRail from '@/components/MediaRail';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,11 +19,14 @@ import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import { useModalLayer } from '@/components/ui/dialog';
-import { DiscoverCatalog } from '@/pages/PluginDiscover';
+import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
+import { mediaFormatLabel } from '@/shared/mediaFormat';
+import WatchedToggle from '@/components/WatchedToggle';
+import { isLocalItemWatched, localWatchedKeysForItem } from '@/lib/watched';
 
 export default function ModernHome() {
   const { state, addLibraryFolder } = useLibrary();
-  const { lists, setListEntry } = useProfiles();
+  const { lists, setListEntry, watchedKeys, setWatchedEntries } = useProfiles();
   const { theme } = useTheme();
   const progress = useProgressSnapshot();
   const location = useLocation();
@@ -70,7 +74,7 @@ export default function ModernHome() {
     );
     return visibleItems
       .map((item) => [item, recency(item)] as const)
-      .filter(([, updatedAt]) => updatedAt > 0)
+      .filter(([item, updatedAt]) => updatedAt > 0 && !matchesLibraryFilter(item, 'watched', progress))
       .sort((left, right) => right[1] - left[1])
       .map(([item]) => item);
   }, [progress, visibleItems]);
@@ -99,6 +103,7 @@ export default function ModernHome() {
   const usesContinueWatchingHero = theme.modernHeroMode === 'continue-watching' && continueWatching.length > 0;
   const heroItems = usesContinueWatchingHero ? continueWatching.slice(0, 1) : featuredHeroItems;
   const hero = heroItems[activeHeroIndex] || heroItems[0];
+  const heroWatched = hero ? isLocalItemWatched(hero, watchedKeys) : false;
   const myListIds = listState.myListIds;
   const handleAddFolder = async () => {
     setLibraryActionError('');
@@ -230,6 +235,8 @@ export default function ModernHome() {
             from={currentRoute}
             inWatchlist={myListIds.has(hero.id)}
             onToggleWatchlist={() => void setListEntry(hero.id, 'watchlist', !myListIds.has(hero.id))}
+            watched={heroWatched}
+            onToggleWatched={() => void setWatchedEntries(localWatchedKeysForItem(hero), !heroWatched)}
             activeIndex={activeHeroIndex}
             itemCount={heroItems.length}
             mode={usesContinueWatchingHero ? 'continue-watching' : 'featured'}
@@ -246,7 +253,6 @@ export default function ModernHome() {
             {visibleAnimeShows.length > 0 && <PosterRail title="Anime" items={visibleAnimeShows} from={currentRoute} />}
             {visibleTVShows.length > 0 && <PosterRail title="TV Shows" items={visibleTVShows} from={currentRoute} />}
             {visibleMovies.length > 0 && <PosterRail title="Movies" items={visibleMovies} from={currentRoute} />}
-            <DiscoverCatalog mode="home" />
           </main>
         </>
       ) : !searchOpen && isLoading ? (
@@ -260,7 +266,6 @@ export default function ModernHome() {
               <Button onClick={() => setActiveFilter('all')} className="mt-7 rounded-full px-6">Clear filter</Button>
             </div>
           </div>
-          <DiscoverCatalog mode="home" />
         </div>
       ) : !searchOpen ? (
         <div className="px-[var(--loom-frame-inset)] pt-24">
@@ -273,7 +278,6 @@ export default function ModernHome() {
               <Button disabled={isScanning} onClick={() => void handleAddFolder()} className="mt-7 gap-2 rounded-full px-6"><FolderPlus className="h-4 w-4" /> Add a folder</Button>
             </div>
           </div>
-          <DiscoverCatalog mode="home" />
         </div>
       ) : null}
     </div>
@@ -310,6 +314,8 @@ type HeroProps = {
   from: string;
   inWatchlist: boolean;
   onToggleWatchlist: () => void;
+  watched: boolean;
+  onToggleWatched: () => void;
   activeIndex: number;
   itemCount: number;
   mode: 'continue-watching' | 'featured';
@@ -317,12 +323,17 @@ type HeroProps = {
   onHoverChange: (hovered: boolean) => void;
 };
 
-function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCount, mode, onSelect, onHoverChange }: HeroProps) {
+function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWatched, activeIndex, itemCount, mode, onSelect, onHoverChange }: HeroProps) {
   const prefersReducedMotion = useReducedMotion();
-  const seasonCount = item.type === 'movie' ? 0 : availableSeasonCount(item as TVShow);
   const metadataGenres = item.genres.slice(0, 2);
+  const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
+  const mediaFormat = mediaFormatLabel(item.format, item.type);
   const [headline, kicker] = splitHeroTitle(item.title);
-  const metadata = [item.year > 0 ? item.year : null, seasonCount ? `${seasonCount} ${seasonCount === 1 ? 'Season' : 'Seasons'}` : null].filter(Boolean);
+  const mediaDetails = heroMediaDetails(item);
+  const durationLabel = item.type === 'movie' ? heroDurationLabel(mediaDetails?.durationSeconds) : '';
+  const resolutionLabel = heroResolutionLabel(mediaDetails?.width, mediaDetails?.height);
+  const audioLabel = heroAudioLabel(mediaDetails?.audioCodec);
+  const hasSubtitles = Boolean((mediaDetails?.subtitleTracks || 0) > 0 || item.subtitles?.length);
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
   const heroLogoSources = useMemo(() => logoSources(item), [item]);
@@ -410,7 +421,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
         <AnimatePresence initial={false} mode="wait">
           <motion.div
             key={`hero-copy-${item.id}`}
-            className="loom-modern-hero-copy flex w-full max-w-3xl flex-col px-[var(--loom-frame-inset)] pt-10"
+            className="loom-modern-hero-copy flex w-full max-w-[60rem] flex-col px-[var(--loom-frame-inset)] pt-10"
             initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: -22 }}
             animate={{ opacity: 1, x: 0 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 14 }}
@@ -422,7 +433,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
                 alt={item.title}
                 decoding="async"
                 fetchPriority="high"
-                className="max-h-[clamp(4rem,11.2vh,8rem)] w-[min(24rem,41.6vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                className="max-h-[clamp(4.2rem,12vh,7.7rem)] w-[min(21rem,34vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
                 onError={() => setLogoFailed(true)}
               />
             ) : (
@@ -447,27 +458,54 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
                 )}
               </>
             )}
-            <div className="loom-modern-hero-text mt-5 flex flex-wrap items-center gap-3 text-sm text-[var(--loom-on-media-muted)]">
-              {item.rating > 0 && (
-                <span className="loom-rating inline-flex items-center gap-1.5">
-                  <Star className="h-4 w-4" fill="currentColor" />
-                  {item.rating.toFixed(1)}
+            <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(1rem,1.35vw,1.45rem)] font-semibold text-[var(--loom-on-media)]">
+              <span className="inline-flex items-center gap-2">
+                <ProviderMark mediaId={item.id} providers={item.streamingProviders} />
+                <span>{[heroMediaTypeLabel(item), ...metadataGenres].join(' · ')}</span>
+              </span>
+              <ContentRatingBadge
+                rating={mediaFormat}
+                className="border-[var(--loom-accent)]/75 bg-white/10 text-[var(--loom-accent)]"
+              />
+              {contentRating && <ContentRatingBadge rating={contentRating} className="border-white/75 bg-white/10 text-white" />}
+            </div>
+
+            <div className="mt-3 w-full max-w-[50%]">
+              <p className="loom-modern-hero-text min-h-[2.9em] line-clamp-2 text-[clamp(1rem,1.35vw,1.55rem)] leading-[1.45] text-[var(--loom-on-media)]">
+                {heroSummary}
+              </p>
+            </div>
+
+            <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[clamp(0.95rem,1.2vw,1.2rem)] font-semibold text-[var(--loom-on-media-muted)]">
+              {(item.rating > 0 || item.year > 0) && (
+                <span className="inline-flex items-center gap-1.5">
+                  {item.rating > 0 && (
+                    <span className="loom-rating inline-flex items-center gap-1.5">
+                      <Star className="h-4 w-4" fill="currentColor" />
+                      {item.rating.toFixed(1)}
+                    </span>
+                  )}
+                  {item.rating > 0 && item.year > 0 && <span aria-hidden="true">•</span>}
+                  {item.year > 0 && <span>{item.year}</span>}
                 </span>
               )}
-              {metadata.length > 0 && <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-4 w-4" />{metadata.join(' • ')}</span>}
-              {metadataGenres.length > 0 && (
+              {durationLabel && <span>{durationLabel}</span>}
+              {resolutionLabel && <span className="rounded-md bg-white/90 px-2 py-0.5 text-sm font-bold text-black">{resolutionLabel}</span>}
+              {audioLabel && (
                 <span className="inline-flex items-center gap-1.5">
-                  <Tag className="h-4 w-4" />
-                  {metadataGenres.join(', ')}
+                  <AudioLines className="h-4 w-4" />
+                  {audioLabel}
+                </span>
+              )}
+              {hasSubtitles && (
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-white/60 px-2 py-0.5 text-sm">
+                  <Captions className="h-4 w-4" />
+                  CC
                 </span>
               )}
             </div>
 
-            <p className="loom-modern-hero-text mt-5 max-w-[33.6rem] text-sm leading-7 text-[var(--loom-on-media)] sm:text-base line-clamp-2">
-              {heroSummary}
-            </p>
-
-            <div className="mt-7 flex items-center gap-3">
+            <div className="mt-5 flex items-center gap-3">
               <Link
                 to={mediaLink(item)}
                 state={linkState}
@@ -484,8 +522,16 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
                   aria-label={inWatchlist ? `Remove ${item.title} from My List` : `Add ${item.title} to My List`}
                   className="grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
                 >
-                  <Bookmark className={`h-5 w-5 ${inWatchlist ? 'fill-current' : ''}`} />
+                  <Bookmark className="h-5 w-5" fill={inWatchlist ? 'currentColor' : 'none'} />
                 </button>
+                <span className="my-auto inline-block h-7 w-px bg-white/20" />
+                <WatchedToggle
+                  watched={watched}
+                  onToggle={onToggleWatched}
+                  surface="plain"
+                  className="loom-modern-hero-watched-toggle h-14 w-14 rounded-full bg-transparent text-white/80"
+                  label={watched ? 'Mark as unwatched' : 'Mark as watched'}
+                />
                 <span className="my-auto inline-block h-7 w-px bg-white/20" />
                 <Link
                   to={mediaLink(item)}
@@ -530,9 +576,43 @@ function splitHeroTitle(title: string): [string, string] {
   return [withLineBreak[0], withLineBreak.slice(1).join(':')];
 }
 
+function heroMediaTypeLabel(item: MediaItem): string {
+  if (item.type === 'anime') return 'Anime';
+  if (item.type === 'tv') return 'TV Show';
+  return 'Movie';
+}
+
+function heroMediaDetails(item: MediaItem): MediaItem['localMetadata'] {
+  if (item.type === 'movie') return item.localMetadata;
+  const episodeDetails = item.episodeFiles?.find((episode) => Boolean(episode.localMetadata))?.localMetadata;
+  if (!episodeDetails) return item.localMetadata;
+  return { ...episodeDetails, ...item.localMetadata };
+}
+
+function heroDurationLabel(seconds?: number): string {
+  if (!seconds || seconds <= 0) return '';
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function heroResolutionLabel(width?: number, height?: number): string {
+  if (!width || !height) return '';
+  if (width >= 3840 || height >= 2160) return '4K';
+  if (width >= 1280 || height >= 720) return 'HD';
+  return 'SD';
+}
+
+function heroAudioLabel(audioCodec?: string): string {
+  return audioCodec?.trim().replace(/[._-]+/g, ' ').toUpperCase() || '';
+}
+
 function PosterRail({ title, items, from }: { title: string; items: MediaItem[]; from: string }) {
+  const titleHref = title === 'Anime' ? '/anime' : title === 'TV Shows' ? '/tv' : title === 'Movies' ? '/movies' : undefined;
   return (
-    <MediaRail title={title} variant="modern">
+    <MediaRail title={title} titleHref={titleHref} variant="modern">
       {items.slice(0, 24).map((item) => (
         <MediaPosterCard
           key={item.id}
@@ -705,9 +785,4 @@ function SearchResults({ items, query, from, isLoading, overlay = false, gridRef
       {!isLoading && items.length === 0 && <p className="py-20 text-center text-[var(--loom-muted)]">No local matches found</p>}
     </main>
   );
-}
-
-function availableSeasonCount(show: TVShow): number {
-  const seasons = new Set((show.episodeFiles || []).map((episode) => episode.season).filter((season) => season > 0));
-  return seasons.size || (show.seasons || []).length;
 }

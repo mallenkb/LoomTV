@@ -6,6 +6,7 @@ import type { EpisodeFile, EpisodeMeta, MediaItem } from './contexts/LibraryCont
 import { ProfileProvider, useProfiles } from './contexts/ProfileContext';
 import ProfileGate from './components/profiles/ProfileGate';
 import Home from './pages/Home';
+import MyList from './pages/MyList';
 import Movies from './pages/Movies';
 import Others from './pages/Others';
 import TVShows from './pages/TVShows';
@@ -26,7 +27,7 @@ import {
   isLibraryFilterPath,
   LibraryFilterVisibilityContext,
 } from './contexts/LibraryFilterVisibilityContext';
-import { desktopApi } from './lib/desktopApi';
+import { desktopApi, hasBrowserLocalSession, isBrowserLocalApp } from './lib/desktopApi';
 import {
   clearDesktopLibraryMode,
   clearRemoteDesktopSession,
@@ -57,22 +58,57 @@ interface NowPlaying {
   startPosition?: number;
 }
 
+type PlaybackCandidate = {
+  filePath: string;
+  subtitles?: MediaItem['subtitles'];
+};
+
+function isRemotePlaybackSource(filePath: string): boolean {
+  return /^(?:https?|plexserver):\/\//i.test(filePath);
+}
+
+async function choosePlaybackCandidate(candidates: PlaybackCandidate[]): Promise<PlaybackCandidate | null> {
+  const uniqueCandidates = candidates.filter((candidate, index, all) => (
+    candidate.filePath
+      && all.findIndex((other) => other.filePath === candidate.filePath) === index
+  ));
+  if (uniqueCandidates.length === 0) return null;
+
+  // Remote sources are already opaque playback capabilities. The paired host
+  // owns their existence check, so do not send them through the local probe.
+  if (isRemotePlaybackSource(uniqueCandidates[0].filePath) || !window.desktopApi?.getFileInfo) {
+    return uniqueCandidates[0];
+  }
+
+  for (const candidate of uniqueCandidates) {
+    try {
+      if ((await desktopApi.getFileInfo(candidate.filePath)).exists) return candidate;
+    } catch {
+      // A stale candidate is expected while a library refresh is settling.
+    }
+  }
+
+  // Keep the original candidate so the player can show its normal error state
+  // if every local path is unavailable.
+  return uniqueCandidates[0];
+}
+
 const StartupReadyContext = createContext<() => void>(() => undefined);
 const StartupVisibilityContext = createContext(false);
 
-function StartupSplash() {
+function StartupSplash({ message = 'Preparing your library' }: { message?: string }) {
   return (
     <div
       className="fixed inset-0 z-[10000] grid select-none place-items-center bg-black text-white"
       role="status"
       aria-live="polite"
-      aria-label="LoomTV is preparing your library"
+      aria-label={`LoomTV startup: ${message}`}
     >
       <div className="grid justify-items-center gap-7">
         <div style={{ '--loom-logo-word': '#f5f5f5' } as React.CSSProperties}>
           <LoomLogo className="h-auto w-64" accent="#1680ff" />
         </div>
-        <p className="text-sm tracking-wide text-[#999]">Preparing your library</p>
+        <p className="max-w-md text-center text-sm tracking-wide text-[#999]">{message}</p>
         <div className="flex h-2 gap-2" aria-hidden="true">
           {[0, 160, 320].map((delay) => (
             <span
@@ -143,8 +179,61 @@ function StartupReadySignal({
 }
 
 export default function App() {
-  const [startupReady, setStartupReady] = useState(false);
-  const markStartupReady = useCallback(() => setStartupReady(true), []);
+  const hasDesktopLibVlcBridge = Boolean(window.desktopApi?.libvlc?.refreshAvailability);
+  const [contentReady, setContentReady] = useState(false);
+  const [libVlcReady, setLibVlcReady] = useState(!hasDesktopLibVlcBridge);
+  const [startupMessage, setStartupMessage] = useState(
+    hasDesktopLibVlcBridge ? 'Loading LibVLC' : 'Preparing your library',
+  );
+  const startupReady = contentReady && libVlcReady;
+  const markStartupReady = useCallback(() => setContentReady(true), []);
+
+  useEffect(() => {
+    if (!hasDesktopLibVlcBridge) return undefined;
+    let cancelled = false;
+
+    const loadLibVlc = async () => {
+      const failures: string[] = [];
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        if (cancelled) return;
+        setStartupMessage(`Loading LibVLC (attempt ${attempt} of 3)`);
+        try {
+          const availability = await desktopApi.libvlc.refreshAvailability();
+          if (availability.available && availability.surface === 'composited-window') {
+            console.info('[startup] LibVLC loaded.', {
+              attempt,
+              version: availability.version,
+              libraryPath: availability.libraryPath,
+            });
+            if (!cancelled) {
+              setStartupMessage('Preparing your library');
+              setLibVlcReady(true);
+            }
+            return;
+          }
+          failures.push(availability.warning || availability.reason || 'LibVLC reported that it is unavailable.');
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : 'LibVLC initialization failed.');
+        }
+        console.warn(`[startup] LibVLC initialization attempt ${attempt} of 3 failed:`, failures.at(-1));
+        if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+
+      const reason = failures.at(-1) || 'LibVLC could not be loaded.';
+      console.error('[startup] LibVLC failed to load after three attempts. Compatibility playback remains available.', {
+        reason,
+        failures,
+      });
+      if (!cancelled) {
+        setStartupMessage(`LibVLC unavailable: ${reason}`);
+        await new Promise((resolve) => window.setTimeout(resolve, 600));
+        if (!cancelled) setLibVlcReady(true);
+      }
+    };
+
+    void loadLibVlc();
+    return () => { cancelled = true; };
+  }, [hasDesktopLibVlcBridge]);
 
   return (
     <StartupReadyContext.Provider value={markStartupReady}>
@@ -157,7 +246,7 @@ export default function App() {
             <DesktopBootstrap />
           </HashRouter>
         </MotionConfig>
-        {!startupReady && <StartupSplash />}
+        {!startupReady && <StartupSplash message={startupMessage} />}
       </StartupVisibilityContext.Provider>
     </StartupReadyContext.Provider>
   );
@@ -178,6 +267,8 @@ function DesktopBootstrap() {
     const resolveMode = async () => {
       purgeRemoteDesktopSecrets();
       const savedMode = getDesktopLibraryMode();
+      const browserLocalSession = hasBrowserLocalSession();
+      const browserLocalApp = isBrowserLocalApp();
       if (savedMode === 'remote') {
         const cachedSession = getRemoteDesktopSession();
         let persistedSession = null;
@@ -201,6 +292,13 @@ function DesktopBootstrap() {
         return;
       }
       if (savedMode) {
+        // The local host mode is backed by Electron IPC unless this is the
+        // loopback web renderer (with or without the tray handoff token).
+        if (savedMode === 'host' && !window.desktopApi && !browserLocalSession && !browserLocalApp) {
+          clearDesktopLibraryMode();
+          if (!cancelled) setMode(null);
+          return;
+        }
         if (!cancelled) setMode(savedMode);
         return;
       }
@@ -339,9 +437,10 @@ function AppShell() {
     location.pathname === '/settings'
     || location.pathname.startsWith('/settings/')
     || location.hash.includes('/settings');
+  const showContinueBarOnRoute = ['/', '/anime', '/tv', '/movies'].includes(location.pathname);
   const showLibraryFilter = !nowPlaying && isLibraryFilterPath(location.pathname);
-  const hideContinueBar = Boolean(nowPlaying) || isSettingsRoute;
-  const reserveContinueBarSpace = !hideContinueBar;
+  const hideContinueBar = Boolean(nowPlaying) || !showContinueBarOnRoute;
+  const reserveContinueBarSpace = showContinueBarOnRoute && !nowPlaying;
   const appUnderlayHidden = Boolean(nowPlaying || gateOpen);
   const markHomeReady = useCallback(() => {
     setHomeReady(true);
@@ -360,18 +459,27 @@ function AppShell() {
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
   ) => {
-    const openPlayer = (details?: MediaItem | null) => {
+    const openPlayer = async (details?: MediaItem | null) => {
       const resolvedEpisode = details && typeof currentSeason === 'number' && typeof currentEpisode === 'number'
         ? details.episodeFiles?.find((candidate) => (
             candidate.season === currentSeason && candidate.episode === currentEpisode
           ))
         : undefined;
+      const candidate = await choosePlaybackCandidate([
+        { filePath, subtitles },
+        ...(resolvedEpisode?.filePath
+          ? [{ filePath: resolvedEpisode.filePath, subtitles: resolvedEpisode.subtitles }]
+          : []),
+        ...(details?.filePath
+          ? [{ filePath: details.filePath, subtitles: details.subtitles }]
+          : []),
+      ]);
       setNowPlaying({
         mediaId,
-        filePath: resolvedEpisode?.filePath || details?.filePath || filePath,
+        filePath: candidate?.filePath || filePath,
         title,
         artwork,
-        subtitles: resolvedEpisode?.subtitles || details?.subtitles || subtitles,
+        subtitles: candidate?.subtitles || resolvedEpisode?.subtitles || details?.subtitles || subtitles,
         episodes: details?.episodes || episodes,
         episodeFiles: details?.episodeFiles || episodeFiles,
         currentSeason,
@@ -380,14 +488,25 @@ function AppShell() {
       });
     };
     if (!mediaId) {
-      openPlayer();
+      void openPlayer();
       return;
     }
     void hydrateLibraryItem(mediaId)
+      .then(async (details) => {
+        if (details) return details;
+        // A catalog revision can make the cached hydration return null while
+        // the clicked item is still present. Ask the desktop bridge once more
+        // so playback does not fall back to an opaque catalog reference.
+        try {
+          return (await desktopApi.getLibraryItem(mediaId))?.item || null;
+        } catch {
+          return null;
+        }
+      })
       .then(openPlayer)
       .catch((error) => {
         console.warn('Could not hydrate playback details:', error);
-        openPlayer();
+        void openPlayer();
       });
   }, [hydrateLibraryItem]);
 
@@ -444,6 +563,7 @@ function AppShell() {
         >
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/my-list" element={<MyList />} />
             <Route path="/movies" element={<Movies />} />
             <Route path="/others" element={<Others />} />
             <Route path="/tv" element={<TVShows kind="series" />} />

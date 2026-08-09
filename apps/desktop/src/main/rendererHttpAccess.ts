@@ -31,10 +31,9 @@ export function rendererRequestOrigin(headers: http.IncomingHttpHeaders): string
 /**
  * Whether the request presents an origin the renderer surface recognises.
  *
- * `Origin` and `Referer` are written by the caller, so any local process can
- * make this return true. It may only narrow a request that some other check
- * already authenticated; it must never be the sole reason a request is served,
- * and it must never gate a response that carries a credential.
+ * `Origin` and `Referer` are written by the caller, so this is not a network
+ * credential. The server may use it only as part of the loopback-only browser
+ * renderer policy; it never returns or exposes the Electron local access token.
  */
 export function isTrustedRendererHttpOrigin(input: {
   headers: http.IncomingHttpHeaders;
@@ -80,10 +79,10 @@ const SESSION_ROUTE_RETIRED: RendererHttpDecision = {
 /**
  * Gate for the loopback-only `/api/renderer/*` compatibility surface.
  *
- * Callers reaching this point have already satisfied local-access-token or
- * paired-device authorization; this only narrows what remains. The session
- * route is refused unconditionally, so no HTTP request — forged `Origin`,
- * plain loopback, or remote — can obtain the local access token.
+ * Callers reaching this point have either satisfied local-access-token or
+ * paired-device authorization, or passed the loopback browser-renderer policy;
+ * this only narrows what remains. The session route is refused unconditionally,
+ * so no HTTP request can obtain the local access token.
  */
 export function authorizeRendererHttpRequest(input: {
   pathname: string;

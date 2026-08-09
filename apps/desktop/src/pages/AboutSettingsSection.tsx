@@ -261,6 +261,17 @@ export default function AboutSettingsSection({
             </div>
           </div>
           <p className="mt-3 text-xs leading-5 text-[var(--loom-faint)]">
+            Trailers use YouTube&apos;s privacy-enhanced embedded player. YouTube content remains subject to the{' '}
+            <button
+              type="button"
+              onClick={() => desktopApi.openExternal('https://www.youtube.com/t/terms')}
+              className="text-[var(--loom-accent)] hover:underline"
+            >
+              YouTube Terms of Service
+            </button>
+            .
+          </p>
+          <p className="mt-3 text-xs leading-5 text-[var(--loom-faint)]">
             * LibVLC/libvlccore are generally distributed under LGPL-2.1-or-later; VLC
             plugins and bundled dependencies can carry different terms. The exact bundled
             payload provenance and applicable notices are recorded in

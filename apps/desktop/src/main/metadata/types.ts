@@ -67,15 +67,25 @@ export type SubtitleRecord = {
   format?: string;
 };
 
+export type ContentRatingSource = 'tmdb' | 'omdb' | 'jikan';
+
 export interface ContentRating {
   code: string;
   minimumAge: number;
-  source: string;
+  source: ContentRatingSource;
+}
+
+export interface StreamingProvider {
+  id: number;
+  name: string;
+  logoUrl: string;
 }
 
 export interface MediaItem {
   id: string;
   type: 'movie' | 'tv' | 'anime';
+  /** Canonical presentation format, e.g. Movie, TV, OVA, or ONA. */
+  format?: string;
   title: string;
   year: number;
   poster: string;
@@ -87,6 +97,7 @@ export interface MediaItem {
   summary: string;
   rating: number;
   contentRatings?: Record<string, ContentRating>;
+  streamingProviders?: StreamingProvider[];
   genres: string[];
   cast: {
     name: string;

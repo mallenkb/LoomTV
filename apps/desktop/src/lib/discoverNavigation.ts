@@ -1,7 +1,7 @@
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 
 export const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
-const EXPLORE_ITEM_CACHE_PREFIX = 'loomtv:explore-item-v1:';
+const EXPLORE_ITEM_CACHE_PREFIX = 'loomtv:explore-item-v2:';
 const DISCOVER_RETURN_ROUTE_TTL_MS = 7_200_000;
 
 type CachedDiscoverReturnRoute = { at: number; route: string };
@@ -9,7 +9,7 @@ type CachedDiscoverReturnRoute = { at: number; route: string };
 function normalizeDiscoverReturnRoute(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const route = value.trim();
-  return route.startsWith('/discover') || route === '/' || route.startsWith('/?') ? route : null;
+  return route.startsWith('/discover') || route === '/' || route.startsWith('/?') || route.startsWith('/my-list') ? route : null;
 }
 
 export function cacheDiscoverReturnRoute(route: string): void {

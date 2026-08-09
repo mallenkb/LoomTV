@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { Bookmark, Play, Star, ChevronRight, ChevronDown } from 'lucide-react';
+import { Bookmark, Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,12 @@ import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
+import TrailerDialog from '@/components/TrailerDialog';
+import HeroMetadata from '@/components/HeroMetadata';
+import { preferredContentRating } from '@/components/ContentRatingBadge';
+import { normalizeAnimeCast } from '@/shared/animeCast';
+import WatchedToggle from '@/components/WatchedToggle';
+import { cacheWatchedDiscoverItem, discoverWatchedKey, localWatchedKeysForItem } from '@/lib/watched';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -45,6 +51,31 @@ function episodeTitleDisplay(title: string | undefined, seriesTitle: string, sea
 function formatShortMinutes(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
   return `${Math.max(1, Math.round(seconds / 60))}m`;
+}
+
+const episodeAirDateFormatter = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  month: 'long',
+  timeZone: 'UTC',
+  year: 'numeric',
+});
+
+function formatEpisodeAirDate(value?: string): string {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '';
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    !Number.isFinite(date.getTime())
+    || date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) return '';
+
+  return episodeAirDateFormatter.format(date);
 }
 
 function formatThumbnailTime(seconds: number, duration = 0): string {
@@ -86,6 +117,7 @@ function showFromStremioCatalogItem(
   return {
     id: item.id,
     type: item.type === 'anime' ? 'anime' : 'tv',
+    format: item.format,
     title: item.title,
     year: normalizeRouteYear(item.releaseInfo, item.released),
     poster,
@@ -93,8 +125,14 @@ function showFromStremioCatalogItem(
     logo: item.artwork?.logo || item.logoUrl || '',
     summary: item.description || '',
     rating: item.rating || 0,
+    contentRating: item.contentRating,
+    streamingProviders: item.streamingProviders,
+    trailerUrl: item.trailerUrl,
+    runtime: item.runtime,
+    seasonCount: item.seasonCount,
+    episodeCount: item.episodeCount,
     genres: [...item.genres],
-    cast: (item.cast || []).map((person) => ({
+    cast: (kind === 'anime' ? normalizeAnimeCast(item.cast || []) : item.cast || []).map((person) => ({
       name: person.name,
       character: person.character || '',
       image: person.image || '',
@@ -116,55 +154,181 @@ function showFromStremioCatalogItem(
   };
 }
 
+function creditInitials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join('')
+    .toUpperCase() || '—';
+}
+
+function formatCreditRole(role: string): string {
+  const normalized = role.trim().toLowerCase();
+  return normalized ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}` : 'Character';
+}
+
+function animeCastNeedsRefresh(cast: TVShow['cast']): boolean {
+  const normalized = normalizeAnimeCast(cast);
+  return normalized.length === 0 || normalized.some((credit) => {
+    const role = (credit.characterRole || '').trim().toLowerCase();
+    return !credit.characterImage || !['main', 'supporting', 'background'].includes(role);
+  });
+}
+
+const ANILIST_API_URL = 'https://graphql.anilist.co';
+const ANILIST_CAST_QUERY = `
+  query ($id: Int!) {
+    Media(id: $id, type: ANIME) {
+      characters(page: 1, perPage: 20, sort: [ROLE, FAVOURITES_DESC]) {
+        edges {
+          node {
+            name { full }
+            image { large medium }
+          }
+          role
+          voiceActors {
+            name { full }
+            image { large medium }
+            languageV2
+          }
+        }
+      }
+    }
+  }
+`;
+
+type AniListCastEdge = {
+  node?: {
+    name?: { full?: string | null } | null;
+    image?: { large?: string | null; medium?: string | null } | null;
+  } | null;
+  role?: string | null;
+  voiceActors?: Array<{
+    name?: { full?: string | null } | null;
+    image?: { large?: string | null; medium?: string | null } | null;
+    languageV2?: string | null;
+  }> | null;
+};
+
+type AniListCastResponse = {
+  data?: {
+    Media?: {
+      characters?: { edges?: AniListCastEdge[] | null } | null;
+    } | null;
+  };
+  errors?: Array<{ message?: string }>;
+};
+
+function aniListImageUrl(image?: { large?: string | null; medium?: string | null } | null): string {
+  return image?.large || image?.medium || '';
+}
+
+function aniListVoiceActorPriority(language?: string | null): number {
+  return language?.trim().toLowerCase() === 'japanese' ? 0 : 1;
+}
+
+function mapAniListCast(edges: AniListCastEdge[]): TVShow['cast'] {
+  return edges
+    .filter((edge) => (
+      (edge.role === 'MAIN' || edge.role === 'SUPPORTING')
+      && Boolean(edge.node?.name?.full)
+    ))
+    .map((edge) => {
+      const characterName = edge.node?.name?.full || 'Unknown character';
+      const characterImage = aniListImageUrl(edge.node?.image);
+      const voiceActor = [...(edge.voiceActors || [])]
+        .filter((actor) => Boolean(actor.name?.full))
+        .sort((left, right) => (
+          aniListVoiceActorPriority(left.languageV2) - aniListVoiceActorPriority(right.languageV2)
+        ))[0];
+      const voiceActorName = voiceActor?.name?.full || '';
+
+      return {
+        name: characterName,
+        character: edge.role || '',
+        image: characterImage,
+        characterName,
+        characterRole: edge.role || '',
+        characterImage,
+        voiceActorName,
+        voiceActorImage: aniListImageUrl(voiceActor?.image),
+        voiceActorLanguage: voiceActor?.languageV2 || '',
+      };
+    });
+}
+
+async function fetchAniListCastById(mediaId: string): Promise<TVShow['cast']> {
+  const id = Number(mediaId);
+  if (!Number.isSafeInteger(id) || id <= 0) return [];
+
+  const response = await fetch(ANILIST_API_URL, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ query: ANILIST_CAST_QUERY, variables: { id } }),
+  });
+  if (!response.ok) throw new Error(`AniList request failed: ${response.status}`);
+
+  const payload = await response.json() as AniListCastResponse;
+  if (payload.errors?.length) throw new Error(payload.errors[0]?.message || 'AniList cast request returned an error.');
+  return mapAniListCast(payload.data?.Media?.characters?.edges || []);
+}
+
 function AnimeCreditRows({ credits }: { credits: TVShow['cast'] }) {
+  const normalizedCredits = normalizeAnimeCast(credits);
+
   return (
-    <div role="list" aria-label="Anime character and voice actor credits" className="space-y-2">
-      {credits.map((credit, index) => {
+    <div role="list" aria-label="Anime character and voice actor credits" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {normalizedCredits.map((credit, index) => {
         const characterName = credit.characterName || credit.name || 'Unknown character';
-        const characterRole = credit.characterRole || credit.character || 'Character';
+        const characterRole = formatCreditRole(credit.characterRole || credit.character || 'Character');
+        const characterImage = credit.characterImage || credit.image || '';
         const actorName = credit.voiceActorName || '';
-        const actorImage = credit.voiceActorImage || (actorName ? credit.image : '');
-        const voiceLanguage = credit.voiceActorLanguage || '';
+        const actorImage = credit.voiceActorImage || '';
         const accessibleLabel = actorName
-          ? `${characterName} — voiced by ${actorName}${voiceLanguage ? `, ${voiceLanguage}` : ''}`
+          ? `${characterName} — voiced by ${actorName}`
           : `${characterName} — no voice actor listed`;
 
         return (
           <div
-            key={`${characterName}:${actorName}:${voiceLanguage}:${index}`}
+            key={`${characterName}:${actorName}:${index}`}
             role="listitem"
             aria-label={accessibleLabel}
-            className="rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3"
+            className="overflow-hidden rounded-[12px] border border-white/5 bg-[var(--loom-season-accordion-bg)]"
           >
-            <div className="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+            <div className="px-[16px] py-[12px]">
               <div className="flex min-w-0 items-center gap-3">
-                <Avatar className="h-12 w-12 shrink-0">
-                  {credit.characterImage ? (
-                    <AvatarImage src={credit.characterImage} alt={`${characterName} character portrait`} />
+                <Avatar className="h-14 w-14 shrink-0 rounded-full">
+                  {characterImage ? (
+                    <AvatarImage src={characterImage} alt={`${characterName} character portrait`} className="object-cover" />
                   ) : (
-                    <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-text)]">{characterName.charAt(0)}</AvatarFallback>
+                    <AvatarFallback className="rounded-full bg-[var(--loom-season-accordion-bg)] text-sm text-[var(--loom-text)]">{creditInitials(characterName)}</AvatarFallback>
                   )}
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-[var(--loom-text)]">{characterName}</p>
-                  <p className="truncate text-xs text-[var(--loom-muted)]">{characterRole}</p>
+                  <p className="line-clamp-2 text-[16px] font-semibold leading-5 text-[var(--loom-text)]">{characterName}</p>
+                  <p className="truncate text-xs tracking-wide text-[var(--loom-muted)]">{characterRole}</p>
                 </div>
               </div>
+            </div>
 
-              <span className="text-center text-xs font-medium text-[var(--loom-muted)] sm:px-2">Voiced by</span>
-
-              <div className="flex min-w-0 items-center justify-end gap-3 sm:flex-row-reverse">
-                <Avatar className="h-12 w-12 shrink-0">
-                  {actorImage ? (
-                    <AvatarImage src={actorImage} alt={`${actorName || 'Voice actor'} portrait`} />
-                  ) : (
-                    <AvatarFallback className="bg-[var(--loom-surface-3)] text-xs text-[var(--loom-muted)]">—</AvatarFallback>
-                  )}
-                </Avatar>
-                <div className="min-w-0 text-right sm:text-left">
-                  <p className="truncate text-sm font-semibold text-[var(--loom-text)]">{actorName || 'Voice actor not listed'}</p>
-                  <p className="truncate text-xs text-[var(--loom-muted)]">{voiceLanguage || 'Language unavailable'}</p>
-                </div>
+            <div className="flex min-w-0 items-center gap-3 bg-[var(--loom-season-episodes-veil)] px-[16px] py-[12px]">
+              <Avatar className="h-14 w-14 shrink-0 rounded-full">
+                {actorImage ? (
+                  <AvatarImage src={actorImage} alt={`${actorName || 'Voice actor'} portrait`} className="object-cover" />
+                ) : (
+                  <AvatarFallback className="rounded-full bg-[var(--loom-season-episodes-veil)] text-[var(--loom-muted)]">
+                    <UserRound aria-hidden="true" className="h-6 w-6" />
+                  </AvatarFallback>
+                )}
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate text-[16px] font-medium leading-5 text-[var(--loom-text)]">{actorName || 'Voice actor not listed'}</p>
+                <p className="text-xs font-semibold text-[var(--loom-muted)]">Voice actor</p>
               </div>
             </div>
           </div>
@@ -183,7 +347,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
-  const { canManageProfiles, lists, setListEntry } = useProfiles();
+  const { canManageProfiles, lists, setListEntry, watchedKeys, setWatchedEntries } = useProfiles();
   const { theme } = useTheme();
   const [show, setShow] = useState<TVShow | null>(null);
   const [expandedSeason, setExpandedSeason] = useState<number | null>(null);
@@ -194,6 +358,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
+  const [trailerOpen, setTrailerOpen] = useState(false);
+  const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const animeCastRefreshKeyRef = useRef('');
+  const contentRatingRefreshKeyRef = useRef('');
   const routeState = (location.state as TVDetailRouteState | null) || null;
   // Explore/remote records use a provider-owned ID and artwork contract.
   // Keep that cache out of ordinary local routes so a colliding provider ID
@@ -203,14 +371,18 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     || routeState?.fromDiscover
     || routeState?.from?.startsWith('/discover'),
   );
+  const routeCatalogItem = useMemo(
+    () => routeState?.stremioCatalogItem || (isRemoteDetailRoute
+      ? getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId)
+      : null),
+    [isRemoteDetailRoute, kind, mediaId, routeState?.stremioCatalogItem],
+  );
   const routeFallbackShow = useMemo(
     () => showFromStremioCatalogItem(
       kind,
-      routeState?.stremioCatalogItem
-      || (isRemoteDetailRoute ? getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId) : undefined)
-      || undefined,
+      routeCatalogItem || undefined,
     ),
-    [isRemoteDetailRoute, kind, mediaId, routeState?.stremioCatalogItem],
+    [kind, routeCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioShow, setIsRemoteStremioShow] = useState(Boolean(routeState?.stremioCatalogItem));
@@ -284,6 +456,31 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, kind, mediaId, progressTick, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
 
+  useEffect(() => {
+    if (isRemoteStremioShow || !show?.id) return;
+    if (preferredContentRating(show.contentRatings, show.contentRating)) return;
+    if (contentRatingRefreshKeyRef.current === show.id) return;
+
+    contentRatingRefreshKeyRef.current = show.id;
+    let cancelled = false;
+    void desktopApi.refreshOfficialArtwork(show.id, 'all')
+      .then((refreshed) => {
+        if (cancelled) return;
+        const contentRatings = Object.keys(refreshed.contentRatings || {}).length > 0
+          ? refreshed.contentRatings
+          : undefined;
+        if (contentRatings) {
+          setShow((current) => current?.id === show.id ? { ...current, contentRatings } : current);
+        }
+        void refreshLibrary().catch((error) => console.warn('Could not refresh content rating:', error));
+      })
+      .catch((error) => {
+        if (!cancelled) console.warn('Could not load content rating:', error);
+      });
+
+    return () => { cancelled = true; };
+  }, [isRemoteStremioShow, refreshLibrary, show?.contentRating, show?.contentRatings, show?.id]);
+
   const toggleSeason = (seasonNumber: number) => {
     accordionWasToggledRef.current = true;
     setExpandedSeason((current) => current === seasonNumber ? null : seasonNumber);
@@ -295,6 +492,51 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const frame = window.requestAnimationFrame(() => setDetailsReady(true));
     return () => window.cancelAnimationFrame(frame);
   }, [show?.id, shouldOpenDetailsFirst]);
+
+  useEffect(() => {
+    if (kind !== 'anime' || !show?.id) return;
+    if (!animeCastNeedsRefresh(show.cast)) return;
+    if (animeCastRefreshKeyRef.current === show.id) return;
+
+    animeCastRefreshKeyRef.current = show.id;
+
+    if (Number.isSafeInteger(Number(show.id)) && Number(show.id) > 0) {
+      let cancelled = false;
+      void fetchAniListCastById(show.id)
+        .then((cast) => {
+          if (cancelled || cast.length === 0) return;
+          setShow((current) => current?.id === show.id ? { ...current, cast } : current);
+        })
+        .catch((error) => console.warn('Could not load AniList cast:', error));
+      return () => { cancelled = true; };
+    }
+
+    if (isRemoteStremioShow) return;
+    void desktopApi.refreshOfficialArtwork(show.id, 'all')
+      .then((refreshed) => {
+        if (!refreshed.cast?.length) return;
+        setShow((current) => current?.id === show.id ? { ...current, cast: refreshed.cast || current.cast } : current);
+        void refreshLibrary().catch((error) => console.warn('Could not refresh AniList cast:', error));
+      })
+      .catch((error) => console.warn('Could not load AniList cast:', error));
+  }, [isRemoteStremioShow, kind, refreshLibrary, show?.cast, show?.id]);
+
+  const handleRefreshIncompleteMetadata = async () => {
+    if (!show?.id || isRemoteStremioShow || metadataRefreshState === 'loading') return;
+    setMetadataRefreshState('loading');
+    try {
+      await desktopApi.refreshIncompleteMetadata(show.id);
+      const refreshed = await hydrateLibraryItem(show.id);
+      if (refreshed) setShow(refreshed as TVShow);
+      else await refreshLibrary();
+      setMetadataRefreshState('success');
+      window.setTimeout(() => setMetadataRefreshState('idle'), 2200);
+    } catch (error) {
+      console.warn('Could not refresh incomplete metadata:', error);
+      setMetadataRefreshState('error');
+      window.setTimeout(() => setMetadataRefreshState('idle'), 2600);
+    }
+  };
 
   // Custom artwork is keyed by media id, so it reloads only when the title
   // changes. Reloading it whenever an artwork field changes would blank the
@@ -407,7 +649,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     const name = filePath.split(/[\\/]/).pop() || `Episode ${episode}`;
     return name
       .replace(/\.[^.]+$/, '')
-      .replace(new RegExp(`[Ss]0*${season}[._ -]*[Ee]0*${episode}`, 'i'), '')
+      .replace(/[Ss]0*\d{1,2}[._ -]*[Ee]0*\d{1,3}/i, '')
       .replace(new RegExp(`^(episode|ep|e)?\\s*0*${episode}\\b`, 'i'), '')
       .replace(/[._-]+/g, ' ')
       .replace(/\s+/g, ' ')
@@ -452,24 +694,34 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
   const playerEpisodes = visibleSeasons.flatMap((season) => episodesWithFilesForSeason(season.number));
 
-  const firstPlayableEpisode = show.episodeFiles
+  // Specials are displayed separately, but should not become the default
+  // Play/Resume target for the main series. They remain available when the
+  // Specials season is opened or when playback is explicitly started there.
+  const orderedEpisodeFilesForPlayback = show.episodeFiles
     ?.slice()
-    .sort((a, b) => a.season - b.season || a.episode - b.episode)
-    .find((file) => Boolean(file.filePath));
+    .sort((a, b) => {
+      const specialOrder = Number(a.season === 0) - Number(b.season === 0);
+      return specialOrder || a.season - b.season || a.episode - b.episode;
+    });
 
-  const resumeEpisode = show.episodeFiles
-    ?.slice()
-    .sort((a, b) => a.season - b.season || a.episode - b.episode)
-    .find((file) => getProgressState(file.filePath, file.localMetadata?.durationSeconds).inProgress);
+  const firstPlayableEpisode = orderedEpisodeFilesForPlayback
+    ?.find((file) => file.season > 0 && Boolean(file.filePath))
+    || orderedEpisodeFilesForPlayback?.find((file) => Boolean(file.filePath));
 
-  const nextEpisode = show.episodeFiles
-    ?.slice()
-    .sort((a, b) => a.season - b.season || a.episode - b.episode)
-    .find((file) => !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
+  const resumeEpisode = orderedEpisodeFilesForPlayback
+    ?.find((file) => getProgressState(file.filePath, file.localMetadata?.durationSeconds).inProgress);
+
+  const nextEpisode = orderedEpisodeFilesForPlayback
+    ?.find((file) => !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
 
   const heroEpisode = resumeEpisode || nextEpisode || firstPlayableEpisode || null;
   const canPlayShow = Boolean(onPlay && heroEpisode?.filePath);
   const inMyList = lists.some((entry) => entry.mediaId === show.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
+  const isRemoteContent = isRemoteStremioShow || Boolean(routeCatalogItem);
+  const watchedEntryKeys = isRemoteContent
+    ? [discoverWatchedKey({ id: show.id, type: routeCatalogItem?.type || (kind === 'anime' ? 'anime' : 'tv'), source: routeCatalogItem?.source })]
+    : localWatchedKeysForItem(show);
+  const isWatched = watchedEntryKeys.length > 0 && watchedEntryKeys.every((key) => watchedKeys.has(key));
   const heroIsResume = Boolean(resumeEpisode);
   const heroProgress = heroEpisode
     ? getProgressState(heroEpisode.filePath, heroEpisode.localMetadata?.durationSeconds)
@@ -512,12 +764,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     backdropCandidates: heroArtwork,
     rating: show.rating,
   };
-  const heroMetadata = [
-    show.year > 0 ? String(show.year) : '',
-    visibleSeasons.length > 0 ? `${visibleSeasons.length} ${visibleSeasons.length === 1 ? 'Season' : 'Seasons'}` : '',
-    ...show.genres.slice(0, 2),
-  ].filter(Boolean).join(' • ');
-
   const handlePlayEpisode = (season: number, episode: number) => {
     const filePath = findEpisodeFile(season, episode);
     if (!filePath || !onPlay) return;
@@ -609,9 +855,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={generatedArtwork[0] || ''}
+          revealPath={show.filePath}
           onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(show.id, target)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(show.id)}
           onApplyOfficialArtworkCandidate={(candidate, target) => desktopApi.applyOfficialMetadata(show.id, candidate, target)}
+          refreshMetadataState={metadataRefreshState}
+          onRefreshIncompleteMetadata={handleRefreshIncompleteMetadata}
         />}
         <button
           type="button"
@@ -639,15 +888,17 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           />
           <div className="loom-detail-hero-info min-w-0 flex-1">
             <h1 className="text-4xl font-semibold text-white">{show.title}</h1>
-            <div className="mt-5 flex flex-wrap items-center gap-4 text-[var(--loom-muted)] text-sm">
-              <span className="loom-rating flex items-center gap-1">
-                <Star className="w-4 h-4" fill="currentColor" />
-                {show.rating ? show.rating.toFixed(1) : 'N/A'}
-              </span>
-              {heroMetadata && <span>{heroMetadata}</span>}
-            </div>
+            <HeroMetadata item={show} />
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
+          {show.trailerUrl && <Button
+            variant="outline"
+            onClick={() => setTrailerOpen(true)}
+            className="h-12 gap-2 rounded-full border-white/25 bg-white/10 px-4 text-white backdrop-blur-md hover:bg-white/20 hover:text-white"
+          >
+            <Play className="h-4 w-4 fill-current" />
+            Trailer
+          </Button>}
           {canPlayShow && (
             <Button
               onClick={handlePlayShow}
@@ -670,8 +921,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
-          {!isRemoteStremioShow && (
             <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+              {!isRemoteContent && (
               <button
                 type="button"
                 aria-pressed={inMyList}
@@ -682,10 +933,19 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
                 title={inMyList ? 'Remove from My List' : 'Add to My List'}
               >
-                <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+                <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
               </button>
+              )}
+              <WatchedToggle
+                watched={isWatched}
+                onToggle={() => {
+                  if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
+                  void setWatchedEntries(watchedEntryKeys, !isWatched);
+                }}
+                className={`h-14 w-14 bg-white/10 text-white/80 ${isWatched ? 'hover:bg-white/10' : 'hover:bg-[var(--loom-active-bg)]'}`}
+                label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
+              />
             </div>
-          )}
           </div>
           </div>
         </div>
@@ -737,8 +997,13 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             <SharedListHighlight activeId={expandedSeason === null ? null : String(expandedSeason)} className="loom-shared-highlight-season-cards space-y-2">
               {visibleSeasons.map((season) => {
                 const seasonEps = episodesWithFilesForSeason(season.number);
-                const fileCount = show.episodeFiles?.filter((file) => file.season === season.number).length || 0;
+                const seasonTitle = season.number === 0 ? 'Specials' : season.title;
+                const seasonFiles = sortedEpisodeFilesForSeason(season.number);
+                const fileCount = seasonFiles.length;
                 const hasFiles = fileCount > 0;
+                const seasonIsCompleted = hasFiles && seasonFiles.every((file) =>
+                  getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched,
+                );
                 const isExpanded = expandedSeason === season.number;
                 const seasonPlaybackEpisode = getSeasonPlaybackEpisode(season.number);
                 const seasonProgress = seasonPlaybackEpisode
@@ -765,7 +1030,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                         <span className="text-[var(--loom-text)]">
                           {isExpanded ? <ChevronDown className="h-4 w-4 text-[var(--loom-muted)]" /> : <ChevronRight className="h-4 w-4 text-[var(--loom-muted)]" />}
                         </span>
-                        <span className="font-medium text-[var(--loom-text)]">{season.title}</span>
+                        <span className="font-medium text-[var(--loom-text)]">{seasonTitle}</span>
                         <span className="text-sm text-[var(--loom-muted)]">
                           {seasonEps.length > 0 ? `${seasonEps.length} episodes` : `${season.episodeCount || fileCount} episodes`}
                         </span>
@@ -774,15 +1039,20 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                       {hasFiles && (
                         <Button
                           size="sm"
-                          onClick={() => handlePlaySeason(season.number)}
-                          className="absolute right-4 top-1/2 z-20 h-7 -translate-y-1/2 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-3 text-xs text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)] gap-1"
+                          disabled={seasonIsCompleted}
+                          onClick={seasonIsCompleted ? undefined : () => handlePlaySeason(season.number)}
+                          aria-label={seasonIsCompleted ? `${seasonTitle} completed` : `${seasonIsResume ? 'Resume' : 'Play'} ${seasonTitle}`}
+                          className={`absolute right-4 top-1/2 z-20 h-7 -translate-y-1/2 overflow-hidden rounded-lg px-3 text-xs gap-1 whitespace-nowrap ${seasonIsCompleted
+                            ? 'border border-emerald-400/45 bg-emerald-700 text-white shadow-[0_0_12px_rgba(16,185,129,0.16)] disabled:cursor-default disabled:opacity-100'
+                            : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]'
+                          }`}
                         >
-                          {seasonIsResume && seasonProgressPercent > 0 && (
+                          {!seasonIsCompleted && seasonIsResume && seasonProgressPercent > 0 && (
                             <span className="pointer-events-none absolute inset-y-0 left-0 bg-black/20" style={{ width: `${seasonProgressPercent}%` }} />
                           )}
                           <span className="relative z-10 flex items-center gap-1">
-                            <Play className="h-3 w-3" />
-                            {seasonIsResume ? 'Resume' : 'Play'}
+                            {seasonIsCompleted ? <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 stroke-[3]" /> : <Play className="h-3 w-3" />}
+                            {seasonIsCompleted ? 'Completed' : seasonIsResume ? 'Resume' : 'Play'}
                           </span>
                         </Button>
                       )}
@@ -846,7 +1116,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             {detailsReady && show.cast.length > 0 && (
               <section>
                 <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
-                {kind === 'anime' && show.cast.some((credit) => Boolean(credit.characterName || credit.voiceActorName || credit.characterImage)) ? (
+                {kind === 'anime' ? (
                   <AnimeCreditRows credits={show.cast.slice(0, 20)} />
                 ) : (
                   <div className="flex gap-4 overflow-x-auto pb-2">
@@ -867,6 +1137,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         )}
       </div>
       </div>
+      <TrailerDialog
+        open={trailerOpen}
+        title={show.title}
+        trailerUrl={show.trailerUrl}
+        onClose={() => setTrailerOpen(false)}
+      />
     </div>
   );
 }
@@ -915,6 +1191,7 @@ function EpisodeRow({
 
   const epLabel = `S${String(seasonNum).padStart(2, '0')}E${String(ep.number).padStart(2, '0')}`;
   const displayTitle = episodeTitleDisplay(ep.title, seriesTitle, seasonNum, ep.number);
+  const episodeAirDate = formatEpisodeAirDate(ep.airDate);
   const episodeRating = Number.isFinite(ep.rating) && ep.rating > 0 ? ep.rating : 0;
   const progress = getProgressState(filePath, durationHint);
   const isResumable = progress.inProgress && !progress.watched;
@@ -937,11 +1214,10 @@ function EpisodeRow({
       data-shared-highlight-id={`${seasonNum}-${ep.number}`}
       className="group relative z-10 flex w-full items-center gap-4 p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)]"
       onClick={onPlay}
-      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
+      aria-label={`${isResumable ? 'Resume' : 'Play'} ${epLabel}: ${displayTitle}${episodeAirDate ? `. Released ${episodeAirDate}` : ''}${watchStatusCopy ? `. ${watchStatusCopy}` : ''}`}
     >
       {/* Thumbnail. Watch state lives here rather than in a right-hand column:
-          the still is what the eye lands on when scanning a season, so the
-          badge and the resume bar read without a second stop. */}
+          the still is what the eye lands on when scanning a season. */}
       <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded bg-[var(--loom-surface-3)]">
         {(thumbnailUrl || ep.still) && !imgError ? (
           <img
@@ -956,20 +1232,28 @@ function EpisodeRow({
             <span className="font-mono text-xs text-[var(--loom-faint)]">{epLabel}</span>
           </div>
         )}
-        <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-[opacity,background-color] group-hover:bg-black/40 group-hover:opacity-100">
-          <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--loom-accent)]">
-            <Play className="h-4 w-4 fill-current text-[var(--loom-accent-foreground)]" />
-          </span>
-        </div>
+        {!progress.watched && (
+          <div
+            className={`absolute inset-0 flex items-center justify-center transition-[opacity,background-color] ${isResumable
+              ? 'bg-black/40 opacity-100'
+              : 'bg-black/0 opacity-0 group-hover:bg-black/40 group-hover:opacity-100'
+            }`}
+          >
+            <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--loom-accent)]">
+              <Play className="h-4 w-4 fill-current text-[var(--loom-accent-foreground)]" />
+            </span>
+          </div>
+        )}
         {progress.watched && (
-          <WatchedSolidIcon
-            aria-hidden="true"
-            className="absolute right-1 top-1 h-5 w-5 text-emerald-500 drop-shadow-[0_2px_6px_rgba(0,0,0,0.65)]"
-          />
+          <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded bg-black/55">
+            <WatchedSolidIcon
+              aria-hidden="true"
+              className="h-10 w-10 text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
+            />
+          </span>
         )}
         {/* Partly-watched episodes get a resume bar across the foot of the
-            still. Finished ones show the badge alone — a full-width bar next to
-            a check is the same fact told twice. */}
+            still. Finished ones show the centered completion state instead. */}
         {!progress.watched && progress.inProgress && progress.fraction > 0 && (
           <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[7px] bg-[var(--loom-media-track)]">
             <span
@@ -982,18 +1266,23 @@ function EpisodeRow({
 
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col justify-center">
-        <div className="flex min-w-0 items-center gap-2">
-          <p className="min-w-0 truncate text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
-          {isResumable && (
-            <span
-              aria-hidden="true"
-              className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--loom-accent)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent-foreground)]"
-            >
-              Resume
-            </span>
+        <div className="flex min-w-0 items-baseline gap-2">
+          <div className="flex min-w-0 flex-1 items-baseline gap-2">
+            <p className="min-w-0 truncate text-sm font-medium text-white">{epLabel} - {displayTitle}</p>
+            {isResumable && (
+              <span
+                aria-hidden="true"
+                className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--loom-accent)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--loom-accent-foreground)]"
+              >
+                Resume
+              </span>
+            )}
+          </div>
+          {episodeAirDate && (
+            <span className="shrink-0 whitespace-nowrap text-xs text-[var(--loom-faint)]">{episodeAirDate}</span>
           )}
         </div>
-        <div className="mt-1 flex items-start gap-2">
+        <div className="mt-1 flex items-center gap-2">
           <p className="line-clamp-2 min-w-0 flex-1 text-xs leading-relaxed text-[var(--loom-muted)]">
             {ep.summary || 'No episode description available.'}
           </p>

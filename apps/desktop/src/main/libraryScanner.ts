@@ -3,6 +3,7 @@ import path from 'node:path';
 import { isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
 import { detectLibraryFolderKind } from './libraryFolders.ts';
 import { createMediaItemId } from './libraryItemHelpers.ts';
+import { isSeasonDirectoryName } from './libraryScanFiles.ts';
 import type { ProbeMediaFileResult } from './mediaProbeFile.ts';
 import {
   getBoundedLibraryProbe,
@@ -163,7 +164,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
   await downloadOpenSubtitlesForVideos(folderPath, videoFiles, ctx);
   const subtitleFiles = await subtitleFilesInDirectory(folderPath);
   const subDirs = dirEntries.filter((entry) => entry.isDirectory());
-  const hasSeasonDirs = subDirs.some((entry) => /season|series/i.test(entry.name));
+  const hasSeasonDirs = subDirs.some((entry) => isSeasonDirectoryName(entry.name));
   const nestedEpisodeFiles = videoFiles.length === 0 && !hasSeasonDirs ? await scanEpisodeFiles(folderPath) : [];
   const detectedFolderKind = detectLibraryFolderKind(folderPath);
 
@@ -320,7 +321,7 @@ async function scanFolder(
           await downloadOpenSubtitlesForVideos(fullPath, videoFiles, ctx);
           const subtitleFiles = await subtitleFilesInDirectory(fullPath);
           const subDirs = dirEntries.filter((directoryEntry) => directoryEntry.isDirectory());
-          const hasSeasonDirs = subDirs.some((directoryEntry) => /season|series/i.test(directoryEntry.name));
+          const hasSeasonDirs = subDirs.some((directoryEntry) => isSeasonDirectoryName(directoryEntry.name));
 
           // Container folder (e.g. "TV Shows/", "Anime/") - recurse.
           if (videoFiles.length === 0 && subDirs.length > 0 && !hasSeasonDirs) {

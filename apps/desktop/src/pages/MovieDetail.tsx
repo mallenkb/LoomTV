@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { Bookmark, Play, Star, Clock, ArrowLeft } from 'lucide-react';
-import { libraryMutationMessage, useLibrary, MediaItem, LocalMediaDetails } from '@/contexts/LibraryContext';
+import { Bookmark, Play, ArrowLeft } from 'lucide-react';
+import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
@@ -16,6 +15,11 @@ import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { useTheme } from '@/components/ThemeProvider';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
+import TrailerDialog from '@/components/TrailerDialog';
+import HeroMetadata from '@/components/HeroMetadata';
+import { preferredContentRating } from '@/components/ContentRatingBadge';
+import WatchedToggle from '@/components/WatchedToggle';
+import { cacheWatchedDiscoverItem, discoverWatchedKey, localWatchedKey } from '@/lib/watched';
 
 type MovieDetailRouteState = {
   from?: string;
@@ -46,18 +50,6 @@ function formatDuration(seconds?: number): string | null {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-}
-
-function formatLocalSpecs(metadata?: LocalMediaDetails): string[] {
-  if (!metadata) return [];
-  const specs: string[] = [];
-  const duration = formatDuration(metadata.durationSeconds);
-  if (duration) specs.push(duration);
-  if (metadata.width && metadata.height) specs.push(`${metadata.width}x${metadata.height}`);
-  if (metadata.videoCodec) specs.push(metadata.videoCodec.toUpperCase());
-  if (metadata.audioCodec) specs.push(metadata.audioCodec.toUpperCase());
-  if (metadata.container) specs.push(metadata.container.toUpperCase());
-  return specs;
 }
 
 function resolveMovieArtwork(
@@ -111,6 +103,7 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
   return {
     id: item.id,
     type: 'movie',
+    format: item.format,
     title: item.title,
     year: normalizeRouteYear(item.releaseInfo, item.released),
     poster,
@@ -118,6 +111,10 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
     logo: item.artwork?.logo || item.logoUrl || '',
     summary: item.description || '',
     rating: item.rating || 0,
+    contentRating: item.contentRating,
+    streamingProviders: item.streamingProviders,
+    trailerUrl: item.trailerUrl,
+    runtime: item.runtime,
     genres: [...item.genres],
     cast: (item.cast || []).map((person) => ({
       name: person.name,
@@ -141,7 +138,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { state, refreshLibrary, hydrateLibraryItem } = useLibrary();
-  const { canManageProfiles, lists, setListEntry } = useProfiles();
+  const { canManageProfiles, lists, setListEntry, watchedKeys, setWatched } = useProfiles();
   const { theme } = useTheme();
   const [movie, setMovie] = useState<MediaItem | null>(null);
   const [fallbackThumbnails, setFallbackThumbnails] = useState<string[]>([]);
@@ -149,7 +146,10 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
+  const [trailerOpen, setTrailerOpen] = useState(false);
+  const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const metadataFetchKeyRef = useRef('');
+  const contentRatingRefreshKeyRef = useRef('');
   const routeState = (location.state as MovieDetailRouteState | null) || null;
   // The Explore cache is a remote-provider detail bridge.  Never consult it
   // for an ordinary library route: local IDs are opaque and can legitimately
@@ -159,13 +159,13 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     || routeState?.fromDiscover
     || routeState?.from?.startsWith('/discover'),
   );
-  const routeFallbackMovie = useMemo(
-    () => mediaFromStremioCatalogItem(
-      routeState?.stremioCatalogItem
-      || (isRemoteDetailRoute ? getCachedExploreItem('movie', mediaId) : undefined)
-      || undefined,
-    ),
+  const routeCatalogItem = useMemo(
+    () => routeState?.stremioCatalogItem || (isRemoteDetailRoute ? getCachedExploreItem('movie', mediaId) : null),
     [isRemoteDetailRoute, mediaId, routeState?.stremioCatalogItem],
+  );
+  const routeFallbackMovie = useMemo(
+    () => mediaFromStremioCatalogItem(routeCatalogItem || undefined),
+    [routeCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioMovie, setIsRemoteStremioMovie] = useState(Boolean(routeState?.stremioCatalogItem));
@@ -212,6 +212,48 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     }
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, mediaId, routeAddonId, routeFallbackMovie, routeState?.from, routeState?.fromDiscover, state.catalogRevision, state.movies]);
+
+  useEffect(() => {
+    if (isRemoteStremioMovie || !movie?.id) return;
+    if (preferredContentRating(movie.contentRatings, movie.contentRating)) return;
+    if (contentRatingRefreshKeyRef.current === movie.id) return;
+
+    contentRatingRefreshKeyRef.current = movie.id;
+    let cancelled = false;
+    void desktopApi.refreshOfficialArtwork(movie.id, 'all')
+      .then((refreshed) => {
+        if (cancelled) return;
+        const contentRatings = Object.keys(refreshed.contentRatings || {}).length > 0
+          ? refreshed.contentRatings
+          : undefined;
+        if (contentRatings) {
+          setMovie((current) => current?.id === movie.id ? { ...current, contentRatings } : current);
+        }
+        void refreshLibrary().catch((error) => console.warn('Could not refresh movie content rating:', error));
+      })
+      .catch((error) => {
+        if (!cancelled) console.warn('Could not load movie content rating:', error);
+      });
+
+    return () => { cancelled = true; };
+  }, [isRemoteStremioMovie, movie?.contentRating, movie?.contentRatings, movie?.id, refreshLibrary]);
+
+  const handleRefreshIncompleteMetadata = async () => {
+    if (!movie?.id || isRemoteStremioMovie || metadataRefreshState === 'loading') return;
+    setMetadataRefreshState('loading');
+    try {
+      await desktopApi.refreshIncompleteMetadata(movie.id);
+      const refreshed = await hydrateLibraryItem(movie.id);
+      if (refreshed) setMovie(refreshed);
+      else await refreshLibrary();
+      setMetadataRefreshState('success');
+      window.setTimeout(() => setMetadataRefreshState('idle'), 2200);
+    } catch (error) {
+      console.warn('Could not refresh incomplete metadata:', error);
+      setMetadataRefreshState('error');
+      window.setTimeout(() => setMetadataRefreshState('idle'), 2600);
+    }
+  };
 
   useEffect(() => {
     setDetailsReady(false);
@@ -293,8 +335,12 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     );
   }
 
-  const localSpecs = formatLocalSpecs(movie.localMetadata);
   const inMyList = lists.some((entry) => entry.mediaId === movie.id && (entry.kind === 'watchlist' || entry.kind === 'favorite'));
+  const isRemoteContent = isRemoteStremioMovie || Boolean(routeCatalogItem);
+  const watchedKey = isRemoteContent
+    ? discoverWatchedKey({ id: movie.id, type: 'movie', source: routeCatalogItem?.source })
+    : localWatchedKey(movie.id);
+  const isWatched = watchedKeys.has(watchedKey);
   const sourceArtwork = routeState?.artwork;
   const { heroArtwork, posterArtwork, heroKey, posterKey } = resolveMovieArtwork(
     customArtwork,
@@ -361,9 +407,12 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           officialThumbnailSources={officialPosterArtwork}
           officialCoverSources={officialCoverArtwork}
           fallbackFrameSource={fallbackThumbnails[0] || ''}
+          revealPath={movie.filePath}
           onFetchOfficialArtwork={(target) => desktopApi.refreshOfficialArtwork(movie.id, target)}
           onFetchOfficialArtworkCandidates={() => desktopApi.getOfficialMetadataCandidates(movie.id)}
           onApplyOfficialArtworkCandidate={(candidate, target) => desktopApi.applyOfficialMetadata(movie.id, candidate, target)}
+          refreshMetadataState={metadataRefreshState}
+          onRefreshIncompleteMetadata={handleRefreshIncompleteMetadata}
         />}
         <button
           type="button"
@@ -391,39 +440,18 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             }
           />
           <div className="loom-detail-hero-info min-w-0 flex-1">
-            <h1 className="text-4xl font-bold text-white mb-2">{movie.title}</h1>
-            <div className="flex items-center gap-4 text-[var(--loom-muted)] text-sm mb-3">
-              <span className="loom-rating flex items-center gap-1">
-                <Star className="w-4 h-4" fill="currentColor" />
-                {movie.rating ? movie.rating.toFixed(1) : 'N/A'}
-              </span>
-              {movie.year > 0 && <span>{movie.year}</span>}
-              {movie.fileSize && (
-                <span className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
-                  {(movie.fileSize / 1024 / 1024 / 1024).toFixed(1)} GB
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2 mb-5">
-              {movie.genres.map((genre) => (
-                <Badge key={genre} variant="outline" className="text-white border-white/30 text-xs">
-                  {genre}
-                </Badge>
-              ))}
-            </div>
-            {localSpecs.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-5">
-                {localSpecs.map((spec) => (
-                  <Badge key={spec} variant="outline" className="text-[var(--loom-accent)] border-[var(--loom-accent)]/40 text-xs">
-                    {spec}
-                  </Badge>
-                ))}
-              </div>
-            )}
-            {movie.summary && <p className="loom-detail-hero-summary">{movie.summary}</p>}
+            <h1 className="text-4xl font-bold text-white">{movie.title}</h1>
+            <HeroMetadata item={movie} />
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
+          {movie.trailerUrl && <Button
+            variant="outline"
+            onClick={() => setTrailerOpen(true)}
+            className="h-12 gap-2 rounded-full border-white/25 bg-white/10 px-4 text-white backdrop-blur-md hover:bg-white/20 hover:text-white"
+          >
+            <Play className="h-4 w-4 fill-current" />
+            Trailer
+          </Button>}
           {canPlayMovie && <Button
             onClick={handlePlay}
             className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
@@ -444,8 +472,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </span>
             </span>
           </Button>}
-          {!isRemoteStremioMovie && (
             <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+              {!isRemoteContent && (
               <button
                 type="button"
                 aria-pressed={inMyList}
@@ -456,10 +484,19 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
                 className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
                 title={inMyList ? 'Remove from My List' : 'Add to My List'}
               >
-                <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+                <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
               </button>
+              )}
+              <WatchedToggle
+                watched={isWatched}
+                onToggle={() => {
+                  if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
+                  void setWatched(watchedKey, !isWatched);
+                }}
+                className={`h-14 w-14 bg-white/10 text-white/80 ${isWatched ? 'hover:bg-white/10' : 'hover:bg-[var(--loom-active-bg)]'}`}
+                label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
+              />
             </div>
-          )}
           </div>
           </div>
         </div>
@@ -533,6 +570,12 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         )}
       </div>
       </div>
+      <TrailerDialog
+        open={trailerOpen}
+        title={movie.title}
+        trailerUrl={movie.trailerUrl}
+        onClose={() => setTrailerOpen(false)}
+      />
     </div>
   );
 }

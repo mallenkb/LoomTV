@@ -12,6 +12,7 @@ import { useProfiles } from './ProfileContext';
 export interface MediaItem {
   id: string;
   type: 'movie' | 'tv' | 'anime';
+  format?: string;
   title: string;
   year: number;
   poster: string;
@@ -22,6 +23,13 @@ export interface MediaItem {
   logoCandidates?: string[];
   summary: string;
   rating: number;
+  contentRating?: string;
+  trailerUrl?: string;
+  contentRatings?: Record<string, { code: string; minimumAge: number; source: string }>;
+  streamingProviders?: { id: number; name: string; logoUrl: string }[];
+  runtime?: string;
+  seasonCount?: number;
+  episodeCount?: number;
   genres: string[];
   cast: {
     name: string;
@@ -429,6 +437,7 @@ function mediaItemFromCatalogCard(
   const item: MediaItem = {
     id: card.id,
     type: card.type,
+    format: card.format,
     title: card.title,
     year: card.year || 0,
     poster: card.poster,
@@ -439,6 +448,8 @@ function mediaItemFromCatalogCard(
     logoCandidates: card.logoCandidates,
     summary: card.summary,
     rating: card.rating,
+    contentRatings: card.contentRatings,
+    streamingProviders: card.streamingProviders,
     genres: card.genres,
     cast: [],
     filePath: firstReference?.progressKey || '',
@@ -829,6 +840,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     void prepareLibrary();
     return () => {
       cancelled = true;
+      // A profile switch can tear down this startup effect while its quick
+      // sync is still waiting on the host. Do not leave the old profile's
+      // spinner mounted after that request is abandoned.
+      if (isScanningRef.current) {
+        isScanningRef.current = false;
+        dispatch({ type: 'SET_SCANNING', payload: false });
+        dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
+      }
     };
   }, [activeProfile?.id, activeProfile?.type, applyCompactIndex, beginLibraryMutation, loadPrimaryCatalog]);
 

@@ -18,7 +18,7 @@ const devRendererCsp = [
   "font-src 'self' file: data:",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-src 'none'",
+  "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
 ].join('; ');
 
 const prodRendererCsp = [
@@ -31,7 +31,7 @@ const prodRendererCsp = [
   "font-src 'self' file: data:",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-src 'none'",
+  "frame-src https://www.youtube-nocookie.com https://www.youtube.com",
 ].join('; ');
 
 function rendererCspPlugin(): Plugin {

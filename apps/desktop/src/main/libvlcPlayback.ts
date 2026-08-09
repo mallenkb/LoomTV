@@ -457,10 +457,10 @@ export function libVlcRuntimeSummary(): string {
 
   const candidate = configuredLibraryCandidate();
   if (candidate) {
-    return `[playback] experimental LibVLC configured — ${candidate.source} runtime detected at ${candidate.path}; native loading is deferred until local playback starts`;
+    return `[playback] LibVLC configured — ${candidate.source} runtime detected at ${candidate.path}; the startup loader will validate it before the app is released`;
   }
 
-  return '[playback] experimental LibVLC configured — no bundled or installed runtime file detected; native loading is deferred until local playback starts';
+  return '[playback] LibVLC configured — no bundled or installed runtime file detected; the startup loader will report the load failure before compatibility playback is used';
 }
 
 function finite(value: unknown, fallback: number): number {

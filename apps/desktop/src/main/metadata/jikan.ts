@@ -2,15 +2,23 @@ import { remoteMatchesAnyLocalTitle, yearFromDateString } from './helpers.ts';
 import type { EpisodeMeta, MediaItem } from './types.ts';
 import { safeFetch } from '../safeFetch.ts';
 import { jikanContentRating } from './contentRatings.ts';
+import { fetchAniListAnimeCast } from './anilist.ts';
+import { normalizeAnimeCast } from '../../shared/animeCast.ts';
 
 export interface JikanAnimeResult extends Partial<MediaItem> {
   episodes?: EpisodeMeta[];
   malId?: number;
   aliases?: string[];
+  format?: string;
 }
 
 interface JikanImageSet {
   jpg?: { image_url?: string; large_image_url?: string };
+}
+
+interface JikanPersonEntry {
+  name?: string;
+  images?: JikanImageSet;
 }
 
 interface JikanEpisodeEntry {
@@ -25,6 +33,7 @@ interface JikanEpisodeEntry {
 interface JikanCharacterEntry {
   role?: string;
   character?: { name?: string; images?: JikanImageSet };
+  voice_actors?: { person?: JikanPersonEntry; language?: string }[];
 }
 
 interface JikanGenre {
@@ -33,6 +42,7 @@ interface JikanGenre {
 
 interface JikanAnimeHit {
   mal_id?: number;
+  type?: string;
   title?: string;
   title_english?: string;
   title_japanese?: string;
@@ -126,6 +136,112 @@ function jikanHitMatchesLocal(hit: JikanAnimeHit, localTitles: string[]): boolea
   return jikanHitTitles(hit).some((title) => remoteMatchesAnyLocalTitle(localTitles, title));
 }
 
+function jikanVoiceActorLanguagePriority(language?: string): number {
+  return language?.trim().toLowerCase() === 'japanese' ? 0 : 1;
+}
+
+async function fetchJikanCharacterCast(malId: number): Promise<MediaItem['cast']> {
+  if (!malId) return [];
+  try {
+    const charData = await jikanFetch<JikanListResponse<JikanCharacterEntry>>(`/anime/${malId}/characters`);
+    return normalizeAnimeCast(
+      (charData.data ?? [])
+        .filter((entry) => entry.role === 'Main' || entry.role === 'Supporting')
+        .slice(0, 20)
+        .map((entry) => {
+          const characterName = entry.character?.name ?? '';
+          const characterImage = entry.character?.images?.jpg?.large_image_url
+            || entry.character?.images?.jpg?.image_url
+            || '';
+          const voiceActor = [...(entry.voice_actors ?? [])]
+            .filter((voice) => Boolean(voice.person?.name))
+            .sort((left, right) => (
+              jikanVoiceActorLanguagePriority(left.language) - jikanVoiceActorLanguagePriority(right.language)
+            ))[0];
+
+          return {
+            name: characterName,
+            character: entry.role ?? '',
+            image: characterImage,
+            characterName,
+            characterRole: entry.role ?? '',
+            characterImage,
+            voiceActorName: voiceActor?.person?.name ?? '',
+            voiceActorImage: voiceActor?.person?.images?.jpg?.large_image_url
+              || voiceActor?.person?.images?.jpg?.image_url
+              || '',
+            voiceActorLanguage: voiceActor?.language ?? '',
+          };
+        }),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function mergeAnimeVoiceActorFallback(
+  primary: MediaItem['cast'],
+  fallback: MediaItem['cast'],
+): MediaItem['cast'] {
+  if (primary.length === 0) return fallback;
+
+  const creditKey = (credit: MediaItem['cast'][number]): string => (
+    credit.characterName
+      || credit.character
+      || credit.name
+      || ''
+  ).trim().toLowerCase();
+  const meaningfulRole = (role: string | undefined): boolean => (
+    role?.trim().toLowerCase() === 'main'
+      || role?.trim().toLowerCase() === 'supporting'
+      || role?.trim().toLowerCase() === 'background'
+  );
+  const fallbackByCharacter = new Map(
+    fallback.map((credit) => [creditKey(credit), credit]),
+  );
+
+  return primary.map((credit) => {
+    const key = creditKey(credit);
+    const fallbackCredit = fallbackByCharacter.get(key);
+    if (!fallbackCredit) return credit;
+    const characterName = credit.characterName || fallbackCredit.characterName || credit.name || fallbackCredit.name;
+    const characterRole = meaningfulRole(credit.characterRole)
+      ? credit.characterRole
+      : meaningfulRole(fallbackCredit.characterRole)
+        ? fallbackCredit.characterRole
+        : credit.characterRole || fallbackCredit.characterRole || credit.character || fallbackCredit.character;
+    const characterImage = credit.characterImage || fallbackCredit.characterImage;
+    const voiceActorName = credit.voiceActorName || fallbackCredit.voiceActorName;
+    const voiceActorImage = credit.voiceActorImage || fallbackCredit.voiceActorImage;
+    const voiceActorLanguage = credit.voiceActorLanguage || fallbackCredit.voiceActorLanguage;
+    return {
+      ...credit,
+      name: characterName,
+      character: characterRole,
+      image: characterImage,
+      characterName,
+      characterRole,
+      characterImage,
+      voiceActorName,
+      voiceActorImage,
+      voiceActorLanguage,
+    };
+  });
+}
+
+async function fetchAnimeCast(malId: number, title: string): Promise<MediaItem['cast']> {
+  let primary: MediaItem['cast'] = [];
+  try {
+    primary = normalizeAnimeCast(await fetchAniListAnimeCast(malId, title));
+  } catch { /* use Jikan's character endpoint below */ }
+
+  // AniList is the primary source. Always consult Jikan when AniList returns
+  // credits so missing portraits, roles, or actor fields can be filled one
+  // field at a time without replacing AniList's preferred values.
+  const fallback = await fetchJikanCharacterCast(malId);
+  return mergeAnimeVoiceActorFallback(primary, fallback);
+}
+
 export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | null> {
   try {
     const searchData = await jikanFetch<JikanListResponse<JikanAnimeHit>>(
@@ -138,18 +254,7 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
     const poster =
       hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '';
 
-    let cast: MediaItem['cast'] = [];
-    try {
-      const charData = await jikanFetch<JikanListResponse<JikanCharacterEntry>>(`/anime/${malId}/characters`);
-      cast = (charData.data ?? [])
-        .filter((c) => c.role === 'Main')
-        .slice(0, 8)
-        .map((c) => ({
-          name: c.character?.name ?? '',
-          character: c.character?.name ?? '',
-          image: c.character?.images?.jpg?.image_url ?? '',
-        }));
-    } catch { /* cast is optional */ }
+    const cast = await fetchAnimeCast(malId, title);
 
     let episodes: EpisodeMeta[] = [];
     try {
@@ -158,6 +263,7 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
 
     return {
       malId,
+      format: hit.type,
       title: (hit.title_english as string) || (hit.title as string) || title,
       aliases: [
         hit.title,
@@ -196,6 +302,7 @@ export async function fetchJikanMetadataCandidates(title: string, localTitles: s
       } catch { /* candidate episode names are optional */ }
       results.push({
         malId,
+        format: hit.type,
         title: (hit.title_english as string) || (hit.title as string) || title,
         aliases: [
           hit.title,
