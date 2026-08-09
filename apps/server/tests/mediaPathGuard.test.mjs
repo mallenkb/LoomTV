@@ -275,8 +275,9 @@ test('a file replaced between the containment check and the open is rejected', a
   // Replacing it — the time-of-check/time-of-use window between a catalog read
   // and a stream open — changes the inode and must be refused rather than
   // served under the authorization granted for the old file.
-  await fs.rm(file);
-  await fs.writeFile(file, 'substituted-bytes');
+  const replacement = path.join(root, 'replacement.mkv');
+  await fs.writeFile(replacement, 'substituted-bytes');
+  await fs.rename(replacement, file);
   const substituted = await rejection(openContainedFile(root, file, { expectedFileId: authorized.fileId }));
   assert.equal(substituted?.status, 409);
   assert.equal(substituted?.code, 'media_path_substituted');

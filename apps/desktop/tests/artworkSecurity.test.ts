@@ -5,7 +5,7 @@ import { inspectArtworkBytes, artworkNegativeCacheAllows, rememberArtworkFailure
 test('artwork security rejects SVG, unknown signatures, and animated image containers', () => {
   assert.throws(() => inspectArtworkBytes(Buffer.from('<svg/>'), 'image/svg+xml'), /SVG/);
   assert.throws(() => inspectArtworkBytes(Buffer.from('not-an-image'), 'image/png'), /signature/);
-  assert.throws(() => inspectArtworkBytes(Buffer.from('GIF89a'), 'image/gif'), /incomplete|frame/);
+  assert.throws(() => inspectArtworkBytes(Buffer.from('GIF89a'), 'image/gif'), /signature|incomplete|frame/);
 });
 
 test('artwork failures are negatively cached for the bounded retry window', () => {

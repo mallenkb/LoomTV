@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -183,7 +184,12 @@ test('artwork repository persists custom artwork and maintains the disk cache th
     fetchArtworkBytes: async (sourceUrl) => {
       fetched.push(sourceUrl);
       const bytes = Buffer.from(`image:${sourceUrl}`);
-      return { bytes, mimeType: 'image/png', byteLength: bytes.byteLength };
+      return {
+        bytes,
+        mimeType: 'image/png',
+        byteLength: bytes.byteLength,
+        contentHash: createHash('sha256').update(bytes).digest('hex'),
+      };
     },
   });
 
