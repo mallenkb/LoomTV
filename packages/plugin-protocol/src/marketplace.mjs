@@ -17,6 +17,7 @@ import {
 import { parseWireCatalogResult } from './identity.mjs';
 import {
   deepFreeze,
+  compareSemVerStrings,
   failWith,
   isRecord,
   readBoolean,
@@ -121,6 +122,9 @@ function parseRevocation(value, path) {
   if (state === 'revoked' && (effectiveAt === undefined || reasonCode === undefined)) {
     fail('INVALID_REVOCATION', 'Revoked add-ons require effectiveAt and reasonCode.', path);
   }
+  if (state === 'active' && (effectiveAt !== undefined || reasonCode !== undefined)) {
+    fail('INVALID_REVOCATION', 'Active declarations cannot carry revocation activation fields.', path);
+  }
   return {
     state,
     ...(effectiveAt === undefined ? {} : { effectiveAt }),
@@ -136,6 +140,7 @@ function parseRollback(value, path) {
   const maximumVersion = value.maximumVersion === undefined ? undefined : readSemVer(value.maximumVersion, `${path}.maximumVersion`, PluginMarketplaceContractError);
   const requiresHostApproval = readBoolean(value.requiresHostApproval, `${path}.requiresHostApproval`, PluginMarketplaceContractError);
   if (allowed && !requiresHostApproval) fail('INVALID_ROLLBACK', 'Rollback must require explicit host approval.', path);
+  if (!allowed && maximumVersion !== undefined) fail('INVALID_ROLLBACK', 'A disabled rollback cannot declare a maximum version.', path);
   return {
     allowed,
     minimumSequence,
@@ -306,14 +311,41 @@ function verifySignature(context, key, signature, bytes, path, purpose) {
   }
 }
 
+function sequenceScope(value) {
+  return {
+    publisherId: value.publisherId,
+    ...(value.addonId === undefined ? {} : { addonId: value.addonId }),
+    kind: value.kind,
+  };
+}
+
+function sequencePayload(value) {
+  return canonicalizeJcs(value.kind === 'signed-catalog' ? signedCatalogPayload(value) : unsignedPayload(value));
+}
+
 function checkSequenceAndRollback(index, context) {
+  const scope = sequenceScope(index);
   const previousSequence = typeof context.getLastAcceptedSequence === 'function'
-    ? context.getLastAcceptedSequence({ publisherId: index.publisherId, ...(index.addonId === undefined ? {} : { addonId: index.addonId }), kind: index.kind })
+    ? context.getLastAcceptedSequence(scope)
     : undefined;
   if (previousSequence === undefined) return;
   const previous = readInteger(previousSequence, '$.host.lastAcceptedSequence', PluginMarketplaceContractError);
-  if (index.sequence >= previous) return;
-  if (!index.rollback.allowed || index.sequence < index.rollback.minimumSequence || context.approveRollback?.({ previousSequence: previous, nextSequence: index.sequence, publisherId: index.publisherId, ...(index.addonId === undefined ? {} : { addonId: index.addonId }), kind: index.kind }) !== true) {
+  if (index.sequence === previous) {
+    const acceptedPayload = context.getLastAcceptedPayload?.(scope);
+    if (typeof acceptedPayload !== 'string' || acceptedPayload !== sequencePayload(index)) {
+      fail('SEQUENCE_FORK', 'A different signed payload reused an accepted sequence.', '$.sequence');
+    }
+    return;
+  }
+  if (index.sequence > previous) return;
+  const rollbackVersionAllowed = index.version === undefined
+    ? index.rollback.maximumVersion === undefined
+    : index.rollback.maximumVersion !== undefined && compareSemVerStrings(index.version, index.rollback.maximumVersion) <= 0;
+  if (!index.rollback.allowed
+      || !index.rollback.requiresHostApproval
+      || !rollbackVersionAllowed
+      || index.sequence < index.rollback.minimumSequence
+      || context.approveRollback?.({ previousSequence: previous, nextSequence: index.sequence, ...scope }) !== true) {
     fail('SEQUENCE_REGRESSION', 'The signed marketplace sequence regressed without an approved rollback.', '$.sequence');
   }
 }
@@ -340,8 +372,9 @@ export function createHostMarketplaceVerificationContext(input) {
   if (typeof input.resolvePublisherKey !== 'function') fail('INVALID_CONTEXT', 'Host verification must resolve pinned publisher keys.', '$.resolvePublisherKey');
   if (typeof input.verifySignature !== 'function') fail('INVALID_CONTEXT', 'Host verification must provide a signature verifier.', '$.verifySignature');
   if (typeof input.isPublisherTrusted !== 'function') fail('INVALID_CONTEXT', 'Host verification must provide a publisher trust decision.', '$.isPublisherTrusted');
+  if (typeof input.isHostApiRangeSupported !== 'function') fail('INVALID_CONTEXT', 'Host verification must enforce update host API compatibility.', '$.isHostApiRangeSupported');
   const context = Object.freeze({ kind: 'host-marketplace-verification-context' });
-  marketplaceContextRecords.set(context, Object.freeze({ ...input }));
+  marketplaceContextRecords.set(context, deepFreeze({ ...input }));
   return context;
 }
 
@@ -354,17 +387,17 @@ export function verifyWireMarketplaceIndex(input, hostContext) {
   const signingKey = resolveKey(context, index.publisherId, index.publisherKeyId, '$.publisherKeyId');
   verifySignature(context, signingKey, index.signature, domainSeparatedSignedBytes('marketplace-index', unsignedPayload(index)), '$.signature', 'marketplace-index');
   checkKeyTransition(index, context, signingKey);
-  const verifiedIndex = Object.freeze({
+  const verifiedIndex = deepFreeze({
     wireVersion: index.wireVersion,
     kind: index.kind,
     indexId: index.indexId,
     sequence: index.sequence,
     issuedAt: index.issuedAt,
     expiresAt: index.expiresAt,
-    addons: Object.freeze(index.addons.map((addon) => Object.freeze({ ...addon, catalogs: Object.freeze(addon.catalogs.map((catalog) => Object.freeze({ ...catalog }))) }))),
+    addons: index.addons,
   });
-  verifiedIndexRecords.set(verifiedIndex, { index, context });
-  for (const addon of verifiedIndex.addons) verifiedAddonRecords.set(addon, { addon, verifiedIndex });
+  verifiedIndexRecords.set(verifiedIndex, deepFreeze({ index, context }));
+  for (const addon of verifiedIndex.addons) verifiedAddonRecords.set(addon, deepFreeze({ addon, verifiedIndex }));
   return verifiedIndex;
 }
 
@@ -480,6 +513,15 @@ export function verifyWirePluginUpdate(input, hostContext, verifiedAddon) {
   if (addon.manifestOrigin !== update.manifestOrigin) fail('MANIFEST_ORIGIN_MISMATCH', 'The update manifest origin must match the verified add-on origin.', '$.manifestOrigin');
   if (context.isPublisherTrusted({ publisherId: update.publisherId }) !== true) fail('PUBLISHER_UNTRUSTED', 'The update publisher is not trusted.', '$.publisherId');
   if (context.now < update.issuedAt || context.now >= update.expiresAt) fail('UPDATE_EXPIRED', 'The signed update is outside its validity window.', '$');
+  if (update.review.state !== 'approved' || update.review.expiresAt === undefined || context.now >= update.review.expiresAt) {
+    fail('UPDATE_REVIEW_EXPIRED', 'The update does not have a current approved review.', '$.review');
+  }
+  if (update.revocation.state === 'revoked' && update.revocation.effectiveAt <= context.now) {
+    fail('UPDATE_REVOKED', 'The update revocation is effective.', '$.revocation');
+  }
+  if (context.isHostApiRangeSupported({ range: update.hostApiRange }) !== true) {
+    fail('HOST_API_INCOMPATIBLE', 'The update hostApiRange does not include the current host API.', '$.hostApiRange');
+  }
   checkSequenceAndRollback(update, context);
   const key = resolveKey(context, update.publisherId, update.keyId, '$.keyId');
   verifySignature(context, key, update.signature, domainSeparatedSignedBytes('update', unsignedPayload(update)), '$.signature', 'plugin-update');
@@ -501,7 +543,7 @@ export function verifyWirePluginUpdate(input, hostContext, verifiedAddon) {
     installable: false,
     reasonCode: status === 'quarantined-phase9' ? 'PHASE9_SANDBOX_REQUIRED' : 'HOST_STAGING_REQUIRED',
   });
-  verifiedUpdateRecords.set(verifiedUpdate, { update, context, verifiedAddon });
+  verifiedUpdateRecords.set(verifiedUpdate, deepFreeze({ update, context, verifiedAddon }));
   return verifiedUpdate;
 }
 
@@ -513,7 +555,8 @@ export function createHostUpdateAuthorizationContext(input) {
   if (!isRecord(input)) fail('INVALID_TYPE', 'A host update authorization context must be an object.');
   if (typeof input.approveDeclarativeUpdate !== 'function') fail('INVALID_CONTEXT', 'Host update authorization must approve declarative staging.', '$.approveDeclarativeUpdate');
   const context = Object.freeze({ kind: 'host-update-authorization-context' });
-  updateContextRecords.set(context, Object.freeze({ ...input }));
+  if (typeof input.now !== 'number' || !Number.isSafeInteger(input.now)) fail('INVALID_INTEGER', 'Host update authorization time must be an integer.', '$.now');
+  updateContextRecords.set(context, deepFreeze({ ...input }));
   return context;
 }
 
@@ -525,7 +568,10 @@ export function authorizeVerifiedPluginUpdate(verifiedUpdate, hostUpdateContext)
   if (record.update.artifactKind === 'executable-plugin') {
     fail('UPDATE_QUARANTINED_PHASE9', 'Executable artifact updates remain quarantined until the Phase 9 sandbox gate is approved.', '$.artifactKind');
   }
-  if (record.update.revocation.state !== 'active' || record.update.review.state !== 'approved') {
+  if (record.update.review.state !== 'approved'
+      || record.update.review.expiresAt === undefined
+      || context.now >= record.update.review.expiresAt
+      || (record.update.revocation.state === 'revoked' && record.update.revocation.effectiveAt <= context.now)) {
     fail('UPDATE_NOT_AUTHORIZABLE', 'Only approved and active declarative updates may reach host staging.', '$');
   }
   if (context.approveDeclarativeUpdate({ addonId: record.update.addonId, version: record.update.version, sequence: record.update.sequence }) !== true) {
@@ -624,7 +670,7 @@ export function verifyWireSignedCatalog(input, hostContext, verifiedAddon) {
     expiresAt: catalog.expiresAt,
     payload: catalog.payload,
   });
-  verifiedCatalogRecords.set(verified, { catalog, verifiedAddon });
+  verifiedCatalogRecords.set(verified, deepFreeze({ catalog, verifiedAddon }));
   return verified;
 }
 

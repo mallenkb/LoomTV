@@ -3,6 +3,7 @@ export const PLUGIN_ITEM_IDENTITY_KIND: 'plugin-item-identity';
 export const PLUGIN_CATALOG_MEMBERSHIP_KIND: 'catalog-membership';
 export const PLUGIN_CATALOG_RESULT_KIND: 'plugin-catalog-result';
 export const PLUGIN_ITEM_KEY_PREFIX: 'loom-plugin:item:v1';
+export const LEGACY_STREMIO_ITEM_KEY_PREFIX: 'loomtv-stremio-item-v1';
 
 export interface PluginIdentityIssue {
   path: string;

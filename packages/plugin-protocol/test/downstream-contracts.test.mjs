@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createPublicKey, verify as verifyEd25519 } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -94,6 +96,7 @@ function hostMarketplaceContext() {
     resolvePublisherKey: () => ({ publicKey: zeroPublicKey }),
     verifySignature: () => true,
     isPublisherTrusted: () => true,
+    isHostApiRangeSupported: ({ range }) => range === '^1.0.0',
   });
 }
 
@@ -107,7 +110,10 @@ function hostAuthorizationContext() {
     profileId: 'profile-1',
     selectionRevision: 7,
     authorizationEpoch: 11,
+    revocationEpoch: 3,
     now: 150,
+    isAuthorizationCurrent: (binding) => binding.authorizationEpoch === 11 && binding.revocationEpoch === 3,
+    isAddonCurrentlyAuthorized: ({ addonId }) => addonId === 'addon.example',
     allowedAddons: [{
       addonId: 'addon.example',
       capabilities: ['metadata.catalog', 'subtitle.provider', 'playback.provider'],
@@ -207,7 +213,7 @@ test('future playback tickets require the corrected ready runtime lifecycle', ()
   }, verifiedAddon());
   const authorized = authorizeVerifiedPlaybackTicketRequest(playback, hostAuthorizationContext());
   const plan = createPlaybackProxyPlan(authorized);
-  let lease = createHostRuntimeLease({ addonId: 'addon.example', runtimeId: 'runtime-1', state: 'absent', lifecycleEpoch: 0 });
+  let lease = createHostRuntimeLease({ addonId: 'addon.example', runtimeId: 'runtime-1', state: 'absent', lifecycleEpoch: 0, authorizationEpoch: 11, revocationEpoch: 3 });
   lease = transitionHostRuntimeLease(lease, 'starting');
   assert.equal(isReadyHostRuntimeLease(lease), false);
   assert.throws(() => createHostPlaybackTicket(authorized, lease, { ticketRef: 'ticket-1', issuedAt: 150, expiresAt: 200 }), /RUNTIME_NOT_READY/);
@@ -217,16 +223,27 @@ test('future playback tickets require the corrected ready runtime lifecycle', ()
   assert.equal(ticket.proxyPolicy.hostResolvesDestination, true);
   assert.equal(Object.hasOwn(ticket, 'url'), false);
   assert.equal(plan.rawUrlAllowed, false);
+  assert.equal(ticket.runtimeBinding.lifecycleEpoch, lease.lifecycleEpoch);
+
+  let otherLease = createHostRuntimeLease({ addonId: 'other.example', runtimeId: 'runtime-2', state: 'absent', lifecycleEpoch: 0, authorizationEpoch: 11, revocationEpoch: 3 });
+  otherLease = transitionHostRuntimeLease(transitionHostRuntimeLease(otherLease, 'starting'), 'ready');
+  assert.throws(() => createHostPlaybackTicket(authorized, otherLease, { ticketRef: 'ticket-2', issuedAt: 150, expiresAt: 200 }), /RUNTIME_ADDON_MISMATCH/);
+  const staleLease = lease;
+  lease = transitionHostRuntimeLease(lease, 'draining');
+  assert.throws(() => createHostPlaybackTicket(authorized, staleLease, { ticketRef: 'ticket-3', issuedAt: 150, expiresAt: 200 }), /RUNTIME_NOT_READY/);
 });
 
 test('catalog identity is stable across memberships and legacy migration is explicit', () => {
   const first = migrateLegacyCatalogItemIdentity({ pluginId: 'addon.example', catalogType: 'movie', catalogId: 'one', itemId: 'provider-42' });
   const second = migrateLegacyCatalogItemIdentity({ pluginId: 'addon.example', catalogType: 'movie', catalogId: 'two', itemId: 'provider-42' });
   assert.equal(first.canonicalKey, second.canonicalKey);
-  assert.notEqual(first.legacyKey, second.legacyKey);
+  assert.equal(first.legacyKey, second.legacyKey);
+  assert.equal(first.legacyKey, 'bG9vbXR2LXN0cmVtaW8taXRlbS12MQ.YWRkb24uZXhhbXBsZQ.bW92aWU.cHJvdmlkZXItNDI');
   assert.equal(first.identity.addonId, 'addon.example');
   assert.equal(first.identity.providerId, 'provider-42');
   assert.equal(canonicalPluginItemKey(first.identity), first.canonicalKey);
+  assert.equal(first.canonicalKey.startsWith('loom-plugin:item:v1:'), true);
+  assert.equal(first.canonicalKey.startsWith('loom-plugin%3Aitem%3Av1'), false);
 
   const catalogOne = parseWireCatalogResult({
     wireVersion: 1,
@@ -265,6 +282,9 @@ test('signed-byte vectors are exact and reject non-64-byte signatures', () => {
   assert.throws(() => decodeEd25519Signature(encodeBase64Url(new Uint8Array(65))), /exactly 64 bytes/);
   assert.equal(hexToBytes(PLUGIN_SIGNING_TEST_VECTORS[0].publicKeyHex).byteLength, 32);
   assert.equal(decodeEd25519PublicKey(PLUGIN_SIGNING_TEST_VECTORS[0].publicKeyBase64Url).byteLength, 32);
+  const spkiPrefix = Buffer.from('302a300506032b6570032100', 'hex');
+  const publicKey = createPublicKey({ key: Buffer.concat([spkiPrefix, Buffer.from(PLUGIN_SIGNING_TEST_VECTORS[0].publicKeyHex, 'hex')]), format: 'der', type: 'spki' });
+  assert.equal(verifyEd25519(null, Buffer.alloc(0), publicKey, Buffer.from(PLUGIN_SIGNING_TEST_VECTORS[0].signatureHex, 'hex')), true);
 });
 
 test('renderer projections omit marketplace signing and origin details', () => {
@@ -275,6 +295,8 @@ test('renderer projections omit marketplace signing and origin details', () => {
   assert.equal(Object.hasOwn(projection.addons[0], 'manifestOrigin'), false);
   assert.equal(Object.hasOwn(projection.addons[0], 'rollback'), false);
   assert.equal(Object.hasOwn(projection.addons[0], 'keyTransition'), false);
+  assert.equal(Object.isFrozen(verified.addons[0].review), true);
+  assert.throws(() => { verified.addons[0].review.state = 'rejected'; }, TypeError);
 });
 
 test('signed catalogs bind the verified add-on while keeping derived item keys out of signed bytes', () => {
@@ -340,5 +362,15 @@ test('executable updates remain quarantined after signature verification', () =>
   assert.equal(verified.status, 'quarantined-phase9');
   assert.equal(verified.installable, false);
   assert.equal(projectPluginUpdateForRenderer(verified).artifactKind, 'executable-plugin');
-  assert.throws(() => authorizeVerifiedPluginUpdate(verified, createHostUpdateAuthorizationContext({ approveDeclarativeUpdate: () => true })), /PHASE9_SANDBOX_REQUIRED/);
+  assert.throws(() => authorizeVerifiedPluginUpdate(verified, createHostUpdateAuthorizationContext({ now: 150, approveDeclarativeUpdate: () => true })), /PHASE9_SANDBOX_REQUIRED/);
+});
+
+test('v2 schema covers normalized output receipts, tickets, and optional defaulted request fields', () => {
+  const schema = JSON.parse(readFileSync(new URL('../schema/plugin-downstream.v2.schema.json', import.meta.url), 'utf8'));
+  const refs = schema.oneOf.map((entry) => entry.$ref);
+  assert.equal(refs.includes('#/$defs/subtitleReceipt'), true);
+  assert.equal(refs.includes('#/$defs/playbackTicket'), true);
+  assert.equal(schema.$defs.searchRequest.required.includes('query'), false);
+  assert.equal(schema.$defs.playbackRequest.required.includes('requestedModes'), false);
+  assert.equal(schema.$defs.hostParity.properties.surfaces.allOf.length, 8);
 });

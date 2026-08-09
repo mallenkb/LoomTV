@@ -7,6 +7,8 @@
     { "$ref": "#/$defs/searchRequest" },
     { "$ref": "#/$defs/subtitleRequest" },
     { "$ref": "#/$defs/playbackRequest" },
+    { "$ref": "#/$defs/subtitleReceipt" },
+    { "$ref": "#/$defs/playbackTicket" },
     { "$ref": "#/$defs/catalogResult" },
     { "$ref": "#/$defs/signedCatalog" },
     { "$ref": "#/$defs/marketplaceIndex" },
@@ -73,7 +75,7 @@
     "searchRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["wireVersion", "kind", "transport", "addonId", "catalogType", "catalogId", "query", "page", "limit"],
+      "required": ["wireVersion", "kind", "transport", "addonId", "catalogType", "catalogId"],
       "properties": {
         "wireVersion": { "const": 2 },
         "kind": { "const": "plugin-search-request" },
@@ -105,7 +107,7 @@
     "playbackRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["wireVersion", "kind", "transport", "addonId", "requestRef", "mediaRef", "sourceRef", "sourceKind", "requestedModes"],
+      "required": ["wireVersion", "kind", "transport", "addonId", "requestRef", "mediaRef", "sourceRef", "sourceKind"],
       "properties": {
         "wireVersion": { "const": 2 },
         "kind": { "const": "playback-ticket-request" },
@@ -130,6 +132,78 @@
         "catalogId": { "$ref": "#/$defs/text" },
         "revision": { "type": "integer", "minimum": 0 },
         "items": { "type": "array", "maxItems": 1000, "items": { "$ref": "#/$defs/catalogItem" } }
+      }
+    },
+    "authorizationBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deviceRef", "profileId", "selectionRevision", "authorizationEpoch", "revocationEpoch"],
+      "properties": {
+        "deviceRef": { "$ref": "#/$defs/opaqueRef" },
+        "profileId": { "$ref": "#/$defs/opaqueRef" },
+        "selectionRevision": { "type": "integer", "minimum": 0 },
+        "authorizationEpoch": { "type": "integer", "minimum": 0 },
+        "revocationEpoch": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "subtitleReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "transport", "addonId", "requestRef", "mediaRef", "status", "binding"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "subtitle-attachment-receipt" },
+        "transport": { "$ref": "#/$defs/transport" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "requestRef": { "$ref": "#/$defs/opaqueRef" },
+        "mediaRef": { "$ref": "#/$defs/opaqueRef" },
+        "status": { "enum": ["accepted", "rejected"] },
+        "attachmentRef": { "$ref": "#/$defs/opaqueRef" },
+        "reasonCode": { "$ref": "#/$defs/opaqueRef" },
+        "binding": { "$ref": "#/$defs/authorizationBinding" }
+      },
+      "oneOf": [
+        { "properties": { "status": { "const": "accepted" } }, "required": ["attachmentRef"], "not": { "required": ["reasonCode"] } },
+        { "properties": { "status": { "const": "rejected" } }, "required": ["reasonCode"], "not": { "required": ["attachmentRef"] } }
+      ]
+    },
+    "playbackTicket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wireVersion", "kind", "transport", "ticketRef", "requestRef", "addonId", "mediaRef", "sourceKind", "issuedAt", "expiresAt", "binding", "runtimeBinding", "proxyPolicy"],
+      "properties": {
+        "wireVersion": { "const": 2 },
+        "kind": { "const": "playback-ticket" },
+        "transport": { "const": "host-mediated-proxy" },
+        "ticketRef": { "$ref": "#/$defs/opaqueRef" },
+        "requestRef": { "$ref": "#/$defs/opaqueRef" },
+        "addonId": { "$ref": "#/$defs/addonId" },
+        "mediaRef": { "$ref": "#/$defs/opaqueRef" },
+        "sourceKind": { "enum": ["https-media", "hls"] },
+        "issuedAt": { "type": "integer", "minimum": 0 },
+        "expiresAt": { "type": "integer", "minimum": 1 },
+        "binding": { "$ref": "#/$defs/authorizationBinding" },
+        "runtimeBinding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["runtimeId", "lifecycleEpoch", "authorizationEpoch", "revocationEpoch"],
+          "properties": {
+            "runtimeId": { "$ref": "#/$defs/opaqueRef" },
+            "lifecycleEpoch": { "type": "integer", "minimum": 0 },
+            "authorizationEpoch": { "type": "integer", "minimum": 0 },
+            "revocationEpoch": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "proxyPolicy": {
+          "const": {
+            "methods": ["GET", "HEAD"],
+            "rangeRequests": true,
+            "redirects": "deny",
+            "cache": "no-store",
+            "hostResolvesDestination": true,
+            "recheckAuthorizationAtUse": true
+          }
+        }
       }
     },
     "rendererCatalogItem": {
@@ -404,7 +478,22 @@
         "transport": { "$ref": "#/$defs/transport" },
         "runtime": { "enum": ["desktop", "headless"] },
         "hostApiVersion": { "$ref": "#/$defs/semver" },
-        "surfaces": { "type": "array", "minItems": 8, "maxItems": 8, "items": { "$ref": "#/$defs/hostSurface" } },
+        "surfaces": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/hostSurface" },
+          "allOf": [
+            { "contains": { "properties": { "id": { "const": "catalog.read" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "catalog.search" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "metadata.read" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "subtitle.attachment" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "playback.ticket" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "catalog.signature" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "update.signature" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "properties": { "id": { "const": "executable.sandbox" } }, "required": ["id"] }, "minContains": 1, "maxContains": 1 }
+          ]
+        },
         "scope": { "const": "pre-phase-scaffold" },
         "prohibited": { "const": ["raw-url-playback", "raw-url-subtitles", "executable-plugin-code"] }
       }
