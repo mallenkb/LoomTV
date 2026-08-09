@@ -124,6 +124,7 @@ import { closeServerForUpdateInstall } from './main/updateInstall';
 import {
   backupDatabase,
   cacheLibraryArtwork,
+  removePluginArtworkForAddon,
   clearDatabase,
   clearAllGuestProfiles,
   cancelSegmentAnalysisJobs,
@@ -410,6 +411,7 @@ const {
   getEmbeddedThumbnailUrl,
   isExternalArtworkUrl,
   artworkDeliveryUrl,
+  pluginArtworkDeliveryUrl,
   remoteArtworkDeliveryUrl,
   artworkDeliveryUrls,
   customArtworkForRenderer,
@@ -419,11 +421,12 @@ const {
 } = createArtworkUrls({
   localAccessToken: LOCAL_ACCESS_TOKEN,
   buildSignedLanUrl,
-  registerRemoteResource: (kind, value, scopePath) => registerResource(
+  registerRemoteResource: (kind, value, scopePath, ownerId) => registerResource(
     getLanHmacSecret(),
     kind,
     value,
     scopePath,
+    ownerId,
   ),
 });
 
@@ -1530,7 +1533,11 @@ registerIpcHandlers<LibraryData, AppSettings>({
   disableStremioAddon: async (addonId) => stremioPluginSummaryForRenderer(
     await stremioPluginService.disable(addonId),
   ),
-  removeStremioAddon: (addonId) => stremioPluginService.remove(addonId),
+  removeStremioAddon: async (addonId) => {
+    const removed = await stremioPluginService.remove(addonId);
+    if (removed) removePluginArtworkForAddon(addonId);
+    return removed;
+  },
   listStremioProfileAccess: (profileId) => [...stremioPluginService.listManagedProfileAccess(profileId)],
   setStremioProfileAccess: (profileId, addonId, enabled) => stremioPluginService.setProfileAccess(
     profileId,
@@ -1544,7 +1551,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
     addonId,
     request,
     await stremioPluginService.fetchCatalogComplete(requireDesktopProfileId(), addonId, request),
-    artworkDeliveryUrl,
+    (source) => pluginArtworkDeliveryUrl(addonId, source),
   ),
   fetchStremioMeta: async (addonId, request) => {
     const itemIdentity = parseStremioItemId(request?.id);
@@ -1561,7 +1568,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
         type: itemIdentity.type,
         id: itemIdentity.providerId,
       }),
-      artworkDeliveryUrl,
+      (source) => pluginArtworkDeliveryUrl(addonId, source),
     );
   },
   fetchStremioMetaByItem: async (request) => {
@@ -1579,7 +1586,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
         type: itemIdentity.type,
         id: itemIdentity.providerId,
       }),
-      artworkDeliveryUrl,
+      (source) => pluginArtworkDeliveryUrl(itemIdentity.addonId, source),
     );
   },
   getMediaSegments: skipSegmentService.getSegments,

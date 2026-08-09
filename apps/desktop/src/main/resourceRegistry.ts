@@ -8,6 +8,7 @@ type RegisteredResource = {
   kind: LocalResourceKind;
   value: string;
   scopePath?: string;
+  ownerId?: string;
   catalogGeneration: number;
   lastUsedAt: number;
 };
@@ -86,14 +87,19 @@ export function registerResource(
   kind: LocalResourceKind,
   value: string,
   scopePath?: string,
+  ownerId?: string,
 ): string {
   const now = Date.now();
   pruneExpiredResources(now);
   const normalized = kind === 'external-artwork' ? value.trim() : path.resolve(value);
   const normalizedResourceScope = scopePath ? normalizedScopePath(scopePath) : undefined;
+  const normalizedOwnerId = ownerId?.trim();
+  if (normalizedOwnerId && (kind !== 'external-artwork' || normalizedOwnerId.length > 256)) {
+    throw new Error('Only bounded external artwork resources may have an owner.');
+  }
   const identity = normalizedResourceScope
     ? `${kind}\0${normalized}\0scope\0${normalizedResourceScope}`
-    : `${kind}\0${normalized}`;
+    : `${kind}\0${normalized}${normalizedOwnerId ? `\0owner\0${normalizedOwnerId}` : ''}`;
   const id = createHmac('sha256', secret).update(identity).digest('base64url');
   if (resources.has(id)) {
     // Re-registering an existing capability is a use and should refresh its
@@ -107,6 +113,7 @@ export function registerResource(
     kind,
     value: normalized,
     scopePath: normalizedResourceScope,
+    ownerId: normalizedOwnerId,
     catalogGeneration: currentCatalogGeneration,
     lastUsedAt: now,
   });
@@ -165,4 +172,15 @@ export function resolveExternalArtworkResource(id: string): string {
   resource.lastUsedAt = Date.now();
   resources.set(id, resource);
   return resource.value;
+}
+
+export function resolveExternalArtworkResourceContext(id: string): { sourceUrl: string; ownerId?: string } {
+  pruneExpiredResources();
+  const resource = resources.get(id);
+  if (!resource || resource.kind !== 'external-artwork') throw new Error('Unknown artwork resource.');
+  resources.delete(id);
+  resource.catalogGeneration = currentCatalogGeneration;
+  resource.lastUsedAt = Date.now();
+  resources.set(id, resource);
+  return { sourceUrl: resource.value, ...(resource.ownerId ? { ownerId: resource.ownerId } : {}) };
 }
