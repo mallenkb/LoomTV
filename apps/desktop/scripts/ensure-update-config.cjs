@@ -14,16 +14,16 @@ function resourcesPath(appOutDir, platform) {
 
 exports.default = async function ensureUpdateConfig(context) {
   const target = path.join(resourcesPath(context.appOutDir, context.electronPlatformName), 'app-update.yml');
-  if (!fs.existsSync(target)) {
-    fs.writeFileSync(target, UPDATE_CONFIG, 'utf8');
-    console.log(`[updates] Wrote packaged update configuration to ${target}`);
-    return;
-  }
+  const hadExistingConfig = fs.existsSync(target);
+  const actual = hadExistingConfig ? fs.readFileSync(target, 'utf8') : undefined;
 
-  const actual = fs.readFileSync(target, 'utf8');
+  // Electron Builder may emit platform-specific formatting or defaults before
+  // this hook runs. The release identity is owned by LoomTV, so normalize the
+  // generated file instead of failing the entire package on harmless differences.
   if (actual !== UPDATE_CONFIG) {
-    throw new Error(
-      `Packaged updater configuration is not the canonical LoomTV GitHub release identity: ${target}`,
+    fs.writeFileSync(target, UPDATE_CONFIG, 'utf8');
+    console.log(
+      `[updates] ${hadExistingConfig ? 'Normalized' : 'Wrote'} packaged update configuration to ${target}`,
     );
   }
 };
