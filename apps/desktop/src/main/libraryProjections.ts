@@ -100,12 +100,12 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
   } = deps;
 
   const itemWithArtworkDeliveryUrls = (item: MediaItem): MediaItem => {
-    const poster = artworkDeliveryUrl(item.poster);
-    const backdrop = artworkDeliveryUrl(item.backdrop);
     const logo = artworkDeliveryUrl(item.logo);
     const posterCandidates = artworkDeliveryUrls(item.posterCandidates);
     const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates);
     const logoCandidates = artworkDeliveryUrls(item.logoCandidates);
+    const poster = artworkDeliveryUrl(item.poster) || posterCandidates[0] || '';
+    const backdrop = artworkDeliveryUrl(item.backdrop) || backdropCandidates[0] || poster;
 
     return {
       ...item,
@@ -157,40 +157,47 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     }];
   };
 
-  const cardForRenderer = (item: MediaItem): LibraryCard => ({
-    id: item.id,
-    type: item.type,
-    title: item.title,
-    year: item.year,
-    poster: artworkDeliveryUrl(item.poster),
-    backdrop: artworkDeliveryUrl(item.backdrop),
-    logo: artworkDeliveryUrl(item.logo),
-    posterCandidates: artworkDeliveryUrls(item.posterCandidates),
-    backdropCandidates: artworkDeliveryUrls(item.backdropCandidates),
-    logoCandidates: artworkDeliveryUrls(item.logoCandidates),
-    summary: item.summary,
-    rating: item.rating,
-    genres: item.genres,
-    lastPlayed: item.lastPlayed,
-    seasons: item.seasons,
-    // Desktop progress is keyed by local paths. The LAN projection below keeps
-    // using opaque resource identifiers, so host paths never cross the network.
-    playbackReferences: (item.episodeFiles || []).length > 0
-      ? (item.episodeFiles || []).map((episodeFile) => ({
-          progressKey: episodeFile.filePath,
-          season: episodeFile.season,
-          episode: episodeFile.episode,
-          ...(episodeFile.localMetadata?.durationSeconds
-            ? { durationSeconds: episodeFile.localMetadata.durationSeconds }
-            : {}),
-        }))
-      : item.filePath
-        ? [{
-            progressKey: item.filePath,
-            ...(item.localMetadata?.durationSeconds ? { durationSeconds: item.localMetadata.durationSeconds } : {}),
-          }]
-        : [],
-  });
+  const cardForRenderer = (item: MediaItem): LibraryCard => {
+    const posterCandidates = artworkDeliveryUrls(item.posterCandidates);
+    const backdropCandidates = artworkDeliveryUrls(item.backdropCandidates);
+    const logoCandidates = artworkDeliveryUrls(item.logoCandidates);
+    const poster = artworkDeliveryUrl(item.poster) || posterCandidates[0] || '';
+    const backdrop = artworkDeliveryUrl(item.backdrop) || backdropCandidates[0] || poster;
+    return {
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      year: item.year,
+      poster,
+      backdrop,
+      logo: artworkDeliveryUrl(item.logo) || logoCandidates[0] || '',
+      posterCandidates,
+      backdropCandidates,
+      logoCandidates,
+      summary: item.summary,
+      rating: item.rating,
+      genres: item.genres,
+      lastPlayed: item.lastPlayed,
+      seasons: item.seasons,
+      // Desktop progress is keyed by local paths. The LAN projection below keeps
+      // using opaque resource identifiers, so host paths never cross the network.
+      playbackReferences: (item.episodeFiles || []).length > 0
+        ? (item.episodeFiles || []).map((episodeFile) => ({
+            progressKey: episodeFile.filePath,
+            season: episodeFile.season,
+            episode: episodeFile.episode,
+            ...(episodeFile.localMetadata?.durationSeconds
+              ? { durationSeconds: episodeFile.localMetadata.durationSeconds }
+              : {}),
+          }))
+        : item.filePath
+          ? [{
+              progressKey: item.filePath,
+              ...(item.localMetadata?.durationSeconds ? { durationSeconds: item.localMetadata.durationSeconds } : {}),
+            }]
+          : [],
+    };
+  };
 
   const cardForLocalNetwork = (
     item: MediaItem,

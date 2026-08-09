@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Bookmark, CalendarDays, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, Tag, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -14,7 +14,7 @@ import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { useProgressSnapshot } from '@/lib/progress';
 import { useTheme } from '@/components/ThemeProvider';
 import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
-import type { StoredProgress } from '@/lib/desktopApi';
+import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
 import { useModalLayer } from '@/components/ui/dialog';
@@ -318,6 +318,41 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
   const heroLogoSources = useMemo(() => logoSources(item), [item]);
+  const heroArtworkSources = useMemo(() => backdropSources(item), [item]);
+  const heroFilePathCandidate = item.filePath || item.episodeFiles?.find((episode) => Boolean(episode.filePath))?.filePath || '';
+  // Compact/paired-library cards can carry opaque or signed playback keys.
+  // Only pass an actual local filesystem path to the desktop thumbnail IPC.
+  const heroFilePath = /^(?:\/|[A-Za-z]:[\\/])/.test(heroFilePathCandidate) ? heroFilePathCandidate : '';
+  const [generatedHeroArtwork, setGeneratedHeroArtwork] = useState('');
+  const heroThumbnailRequestRef = useRef('');
+  const generatedHeroArtworkRef = useRef('');
+  const heroThumbnailGenerationRef = useRef(0);
+  const requestHeroThumbnail = useCallback(() => {
+    if (!heroFilePath || generatedHeroArtworkRef.current || heroThumbnailRequestRef.current === heroFilePath) return;
+    heroThumbnailRequestRef.current = heroFilePath;
+    const generation = heroThumbnailGenerationRef.current;
+    void desktopApi.getThumbnail(heroFilePath, '00:03:00')
+      .then(({ url }) => {
+        if (generation !== heroThumbnailGenerationRef.current) return;
+        generatedHeroArtworkRef.current = url;
+        setGeneratedHeroArtwork(url);
+      })
+      .catch(() => {
+        // Metadata artwork remains the normal path; a thumbnail is only a
+        // bounded local-file fallback for records without working artwork.
+      });
+  }, [heroFilePath]);
+  useEffect(() => {
+    heroThumbnailGenerationRef.current += 1;
+    generatedHeroArtworkRef.current = '';
+    setGeneratedHeroArtwork('');
+    heroThumbnailRequestRef.current = '';
+    if (heroArtworkSources.length === 0) requestHeroThumbnail();
+  }, [heroArtworkSources.length, heroFilePath, requestHeroThumbnail]);
+  const resolvedHeroArtwork = useMemo(
+    () => backdropSources(item, undefined, generatedHeroArtwork ? [generatedHeroArtwork] : []),
+    [generatedHeroArtwork, item],
+  );
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => setLogoFailed(false), [item.id]);
   const showsHeroLogo = heroLogoSources.length > 0 && !logoFailed;
@@ -352,10 +387,11 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
             transition={artworkTransition}
           >
             <SafeArtwork
-              src={backdropSources(item)}
+              src={resolvedHeroArtwork}
               alt=""
               className="h-full w-full"
               imgClassName="object-cover object-center"
+              onError={requestHeroThumbnail}
               priority
             />
           </motion.div>

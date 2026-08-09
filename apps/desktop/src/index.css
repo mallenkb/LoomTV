@@ -820,6 +820,17 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* The expanded search field is the same floating surface as the filter
+   control. Keep its outline at the exact same contrast so the pill reads as a
+   single control family instead of a darker, nearly invisible border. */
+:root[data-theme="dark"][data-home-style="modern"] .loom-library-search-modern .loom-library-search-control {
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+:root[data-theme="light"][data-home-style="modern"] .loom-library-search-modern .loom-library-search-control {
+  border-color: var(--loom-control-border) !important;
+}
+
 :root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot [role="menu"] {
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 1rem;

@@ -151,9 +151,21 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [detailsReady, setDetailsReady] = useState(false);
   const metadataFetchKeyRef = useRef('');
   const routeState = (location.state as MovieDetailRouteState | null) || null;
+  // The Explore cache is a remote-provider detail bridge.  Never consult it
+  // for an ordinary library route: local IDs are opaque and can legitimately
+  // collide with a TMDB/AniList ID stored in the session cache.
+  const isRemoteDetailRoute = Boolean(
+    routeState?.stremioCatalogItem
+    || routeState?.fromDiscover
+    || routeState?.from?.startsWith('/discover'),
+  );
   const routeFallbackMovie = useMemo(
-    () => mediaFromStremioCatalogItem(routeState?.stremioCatalogItem || getCachedExploreItem('movie', mediaId) || undefined),
-    [mediaId, routeState?.stremioCatalogItem],
+    () => mediaFromStremioCatalogItem(
+      routeState?.stremioCatalogItem
+      || (isRemoteDetailRoute ? getCachedExploreItem('movie', mediaId) : undefined)
+      || undefined,
+    ),
+    [isRemoteDetailRoute, mediaId, routeState?.stremioCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioMovie, setIsRemoteStremioMovie] = useState(Boolean(routeState?.stremioCatalogItem));
@@ -432,20 +444,22 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </span>
             </span>
           </Button>}
-          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
-            <button
-              type="button"
-              aria-pressed={inMyList}
-              onClick={() => void (async () => {
-                await setListEntry(movie.id, 'watchlist', !inMyList);
-                if (inMyList) await setListEntry(movie.id, 'favorite', false);
-              })()}
-              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
-              title={inMyList ? 'Remove from My List' : 'Add to My List'}
-            >
-              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
-            </button>
-          </div>
+          {!isRemoteStremioMovie && (
+            <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+              <button
+                type="button"
+                aria-pressed={inMyList}
+                onClick={() => void (async () => {
+                  await setListEntry(movie.id, 'watchlist', !inMyList);
+                  if (inMyList) await setListEntry(movie.id, 'favorite', false);
+                })()}
+                className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
+                title={inMyList ? 'Remove from My List' : 'Add to My List'}
+              >
+                <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+              </button>
+            </div>
+          )}
           </div>
           </div>
         </div>

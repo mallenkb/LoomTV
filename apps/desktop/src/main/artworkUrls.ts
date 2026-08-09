@@ -91,7 +91,13 @@ export function createArtworkUrls(deps: ArtworkUrlsDeps) {
       // crop has been removed. Do not send that dead URL to the renderer or a
       // paired device; returning an empty source lets the next real poster
       // candidate become the primary image immediately.
-      const customDataUrl = getCustomArtwork(customArtwork.mediaId)[customArtwork.target] || '';
+      const customDataUrl = String(getCustomArtwork(customArtwork.mediaId)[customArtwork.target] || '').trim();
+      // Older saved artwork may contain the original provider URL rather than
+      // an inline data URL. Keep the renderer contract opaque by routing that
+      // value through the normal host-owned artwork capability. Self-referential
+      // custom refs are invalid and must fall through to another candidate.
+      if (parseCustomArtworkReference(customDataUrl)) return '';
+      if (!isInlineArtworkSource(customDataUrl)) return artworkDeliveryUrl(customDataUrl, ownerId);
       if (!/^data:image\/[^;,]+;base64,[A-Za-z0-9+/=\r\n]+$/i.test(customDataUrl)) return '';
       // The reference itself is content-independent, so without a version the
       // delivery URL is byte-identical before and after an edit. React then

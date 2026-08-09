@@ -6,7 +6,7 @@ import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 /* Keep the Discover card pitch aligned with the local-library poster cards so
    VirtualPosterGrid can reuse the same responsive geometry and scroll rhythm. */
 const SKIPPED_CARD_SIZE = '[contain-intrinsic-size:200px_340px] [content-visibility:auto]';
-const ROOT_CLASS = `loom-poster-link group block w-full max-w-[200px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-bg)] ${SKIPPED_CARD_SIZE}`;
+const ROOT_CLASS = `loom-poster-link loom-virtual-poster-card group flex h-full w-full max-w-[200px] flex-col overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--loom-bg)] ${SKIPPED_CARD_SIZE}`;
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
 const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text-[var(--loom-muted)]';
 const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
@@ -58,7 +58,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
       className={ROOT_CLASS}
       aria-label={`${item.title}${item.releaseInfo ? ` (${item.releaseInfo})` : ''}`}
     >
-      <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
+      <div className="loom-poster-frame relative min-h-0 shrink aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
           src={artworkSources(item)}
           alt={item.title}
@@ -72,7 +72,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
           <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
         </div>
       </div>
-      <div className="mt-2 overflow-hidden">
+      <div className="mt-2 shrink-0 overflow-hidden">
         <h4 className="truncate text-sm font-semibold text-[var(--loom-text)]">{item.title}</h4>
         {metaLine && <p className="text-xs text-[var(--loom-muted)]">{metaLine}</p>}
       </div>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Check, Compass, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
+import { Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
 import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -27,7 +27,7 @@ const modernCategoryItems = [
 ] as const;
 
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
-const discoverNavItem: SidebarNavItem = { id: 'discover', path: '/discover', label: 'Discover', icon: Compass };
+const discoverNavItem: SidebarNavItem = { id: 'discover', path: '/discover', label: 'Discover', icon: DiscoverIcon, activeIcon: DiscoverActiveIcon };
 const settingsNavItem: SidebarNavItem = { id: 'settings', path: '/settings', label: 'Settings', icon: SettingsNavExactIcon, activeIcon: SettingsNavSolidExactIcon };
 
 const sidebarNavItems: Record<SidebarNavItemId, SidebarNavItem> = {
@@ -144,6 +144,36 @@ function AnimeSolidIcon({ className }: { className?: string }) {
         <path d="m12.593 23.258-.011.002-.071.035-.02.004-.014-.004-.071-.035q-.016-.005-.024.005l-.004.01-.017.428l.005.02l.01.013l.104.074l.015.004l.012-.004l.104-.074l.012-.016l.004-.017l-.017-.427q-.004-.016-.017-.018m.265-.113-.013.002-.185.093-.01.01-.003.011l.018.43l.005.012l.008.007l.201.093q.019.005.029-.008l.004-.014l-.034-.614q-.005-.018-.02-.022m-.715.002a.02.02 0 0 0-.027.006l-.006.014l-.034.614q.001.018.017.024l.015-.002l.201-.093q.019-.005.029-.024l.017-.43l-.003-.012l-.01-.01z" />
         <path fill="currentColor" d="M21.778 3.372a1 1 0 0 1 .116 1.075l-2 4a1 1 0 0 1-.777.546q-1.557.178-3.117.306v1.366a58 58 0 0 0 3.797-.644a1 1 0 0 1 .406 1.958q-.6.122-1.203.23V18a1 1 0 1 1 0 2h-5a1 1 0 1 1 0-2v-5.095c-.692.059-1.374.095-2 .095s-1.308-.037-2-.095V18a1 1 0 1 1 0 2H5a1 1 0 1 1 0-2v-5.79a51 51 0 0 1-1.203-.23a1 1 0 0 1 .406-1.96c1.258.258 2.525.47 3.797.645V9.299a100 100 0 0 1-3.116-.306a1.01 1.01 0 0 1-.778-.546l-2-4a1 1 0 0 1 1.143-1.415l.47.117l.952.224l.856.191l.642.137l.337.069q.398.08.81.158l.83.15c1.392.24 2.798.422 3.854.422s2.462-.181 3.853-.421l.83-.15l.81-.16l.98-.205l.856-.19l.482-.113q.471-.11.939-.23a1 1 0 0 1 1.028.34ZM14 10.897v-1.46l-.827.04c-.407.014-.803.023-1.173.023s-.766-.009-1.173-.024L10 9.438v1.459c.703.063 1.387.103 2 .103c.49 0 1.026-.025 1.581-.068z" />
       </g>
+    </svg>
+  );
+}
+
+function DiscoverActiveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 512 512"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M0 0h512v512H0z" fill="none" />
+      <circle cx="256" cy="256" r="24" fill="currentColor" />
+      <path fill="currentColor" d="M256 48C141.31 48 48 141.31 48 256s93.31 208 208 208 208-93.31 208-208S370.69 48 256 48m105.07 113.33l-46.88 117.2a64 64 0 0 1-35.66 35.66l-117.2 46.88a8 8 0 0 1-10.4-10.4l46.88-117.2a64 64 0 0 1 35.66-35.66l117.2-46.88a8 8 0 0 1 10.4 10.4" />
+    </svg>
+  );
+}
+
+function DiscoverIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 512 512"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M0 0h512v512H0z" fill="none" />
+      <path fill="none" stroke="currentColor" strokeMiterlimit="10" strokeWidth="32" d="M448 256c0-106-86-192-192-192S64 150 64 256s86 192 192 192 192-86 192-192Z" />
+      <path fill="currentColor" d="m350.67 150.93l-117.2 46.88a64 64 0 0 0-35.66 35.66l-46.88 117.2a8 8 0 0 0 10.4 10.4l117.2-46.88a64 64 0 0 0 35.66-35.66l46.88-117.2a8 8 0 0 0-10.4-10.4M256 280a24 24 0 1 1 24-24a24 24 0 0 1-24 24" />
     </svg>
   );
 }
@@ -570,7 +600,9 @@ export default function Sidebar() {
           )}
           <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
         </aside>
-        {!location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
+        {!location.pathname.startsWith('/settings') && (
+          <ModernCategoryPill pathname={location.pathname} />
+        )}
       </>
     );
   }

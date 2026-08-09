@@ -328,6 +328,12 @@ function AppShell() {
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  // A renderer reload can preserve the document element while the player
+  // component is being replaced. Never leave the native-player transparency
+  // mode latched over the normal library shell after playback has closed.
+  useEffect(() => {
+    if (!nowPlaying) document.documentElement.classList.remove('loom-native-active');
+  }, [nowPlaying]);
   const location = useLocation();
   const isSettingsRoute =
     location.pathname === '/settings'

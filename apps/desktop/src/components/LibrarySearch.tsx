@@ -24,10 +24,10 @@ export default function LibrarySearch({
 
   if (theme.homeStyle === 'modern') {
     return (
-      <div className="loom-library-search loom-library-search-modern loom-no-drag pointer-events-none fixed left-24 right-5 top-5 z-[55] flex justify-end">
+      <div className="loom-library-search loom-library-search-modern loom-no-drag pointer-events-none fixed left-24 right-5 top-6 z-[55] flex justify-end">
         <div className="loom-library-search-inner flex items-center justify-end gap-2">
           {isModernSearchOpen ? (
-            <div className="loom-library-search-control loom-no-drag pointer-events-auto flex h-12 w-[min(22rem,calc(100vw-9rem))] items-center gap-3 rounded-full border border-white/12 bg-black/55 px-4 text-white shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-colors">
+            <div className="loom-library-search-control loom-no-drag pointer-events-auto flex h-12 w-[min(22rem,calc(100vw-9rem))] items-center gap-3 rounded-full border border-[var(--loom-control-border)] bg-black/55 px-4 text-white shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-colors">
               <SearchSmIcon className="h-5 w-5 shrink-0 text-white/60" />
               <input
                 type="text"

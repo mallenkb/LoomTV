@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, KeyRound, PackagePlus, Plug, ShieldCheck, 
 import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   desktopApi,
   type OfficialStremioAddon,
@@ -183,6 +184,62 @@ export default function PluginsSettingsSection() {
 
   return (
     <div className="space-y-4">
+      <Dialog
+        open={Boolean(review)}
+        contentClassName="max-w-[min(92vw,48rem)] border border-[var(--loom-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)]"
+        onOpenChange={(open) => {
+          if (open) return;
+          setReview(null);
+          setReviewConfirmed(false);
+        }}
+      >
+        <DialogContent className="space-y-4 p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <ShieldCheck className="h-4 w-4 text-[var(--loom-accent)]" />
+              Approval review: {review?.name}
+            </DialogTitle>
+            <DialogDescription className="text-[var(--loom-muted)]">
+              {review ? `Version ${review.version} from ${review.manifestOrigin}. Approval applies only to this reviewed manifest revision.` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {review && (
+            <div className="space-y-4 text-sm">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <ReviewField label="Resources" value={review.resources.join(', ') || 'None'} />
+                <ReviewField label="Media types" value={review.types.join(', ') || 'None'} />
+                <ReviewField label="Catalogs" value={review.catalogs.map(({ name, type }) => `${name} (${type})`).join(', ') || 'None'} />
+                <ReviewField label="Endpoint" value={review.manifestUrlRedacted} />
+              </div>
+              {review.warnings.length > 0 && (
+                <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-yellow-100">
+                  <p className="flex items-center gap-2 font-medium"><AlertTriangle className="h-4 w-4" /> Review warnings</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
+                    {review.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                  </ul>
+                </div>
+              )}
+              <label className="flex items-start gap-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3 text-[var(--loom-muted)]">
+                <input
+                  type="checkbox"
+                  checked={reviewConfirmed}
+                  onChange={(event) => setReviewConfirmed(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-[var(--loom-accent)]"
+                />
+                <span>I understand this add-on is a remote third-party service and approve LoomTV contacting the reviewed origin.</span>
+              </label>
+              <div className="flex gap-2 sm:justify-end">
+                <Button variant="ghost" onClick={() => setReview(null)} disabled={busyKey !== null}>Cancel</Button>
+                <Button onClick={() => void approveReview()} disabled={!reviewConfirmed || busyKey !== null}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  {busyKey === `approve:${review.addonId}` ? 'Enabling…' : 'Approve & enable'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {error && (
         <div role="alert" className="rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {error}
@@ -266,52 +323,6 @@ export default function PluginsSettingsSection() {
           </form>
         </CardContent>
       </Card>
-
-      {review && (
-        <Card className="settings-panel border-[var(--loom-accent)]/40">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-white">
-              <ShieldCheck className="h-4 w-4 text-[var(--loom-accent)]" />
-              Approval review: {review.name}
-            </CardTitle>
-            <CardDescription className="text-[var(--loom-muted)]">
-              Version {review.version} from {review.manifestOrigin}. Approval applies only to this reviewed manifest revision.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ReviewField label="Resources" value={review.resources.join(', ') || 'None'} />
-              <ReviewField label="Media types" value={review.types.join(', ') || 'None'} />
-              <ReviewField label="Catalogs" value={review.catalogs.map(({ name, type }) => `${name} (${type})`).join(', ') || 'None'} />
-              <ReviewField label="Endpoint" value={review.manifestUrlRedacted} />
-            </div>
-            {review.warnings.length > 0 && (
-              <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-3 text-yellow-100">
-                <p className="flex items-center gap-2 font-medium"><AlertTriangle className="h-4 w-4" /> Review warnings</p>
-                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
-                  {review.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                </ul>
-              </div>
-            )}
-            <label className="flex items-start gap-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3 text-[var(--loom-muted)]">
-              <input
-                type="checkbox"
-                checked={reviewConfirmed}
-                onChange={(event) => setReviewConfirmed(event.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-[var(--loom-accent)]"
-              />
-              <span>I understand this add-on is a remote third-party service and approve LoomTV contacting the reviewed origin.</span>
-            </label>
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setReview(null)} disabled={busyKey !== null}>Cancel</Button>
-              <Button onClick={() => void approveReview()} disabled={!reviewConfirmed || busyKey !== null}>
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                {busyKey === `approve:${review.addonId}` ? 'Enabling…' : 'Approve & enable'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       <Card className="settings-panel">
         <CardHeader>

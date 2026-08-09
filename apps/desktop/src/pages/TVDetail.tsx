@@ -131,9 +131,22 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
   const routeState = (location.state as TVDetailRouteState | null) || null;
+  // Explore/remote records use a provider-owned ID and artwork contract.
+  // Keep that cache out of ordinary local routes so a colliding provider ID
+  // cannot replace the library's TMDB/OMDb/Jikan-hydrated record.
+  const isRemoteDetailRoute = Boolean(
+    routeState?.stremioCatalogItem
+    || routeState?.fromDiscover
+    || routeState?.from?.startsWith('/discover'),
+  );
   const routeFallbackShow = useMemo(
-    () => showFromStremioCatalogItem(kind, routeState?.stremioCatalogItem || getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId) || undefined),
-    [kind, mediaId, routeState?.stremioCatalogItem],
+    () => showFromStremioCatalogItem(
+      kind,
+      routeState?.stremioCatalogItem
+      || (isRemoteDetailRoute ? getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId) : undefined)
+      || undefined,
+    ),
+    [isRemoteDetailRoute, kind, mediaId, routeState?.stremioCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioShow, setIsRemoteStremioShow] = useState(Boolean(routeState?.stremioCatalogItem));
@@ -593,20 +606,22 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
-          <div className="loom-detail-hero-actions flex shrink-0 gap-2">
-            <button
-              type="button"
-              aria-pressed={inMyList}
-              onClick={() => void (async () => {
-                await setListEntry(show.id, 'watchlist', !inMyList);
-                if (inMyList) await setListEntry(show.id, 'favorite', false);
-              })()}
-              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
-              title={inMyList ? 'Remove from My List' : 'Add to My List'}
-            >
-              <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
-            </button>
-          </div>
+          {!isRemoteStremioShow && (
+            <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+              <button
+                type="button"
+                aria-pressed={inMyList}
+                onClick={() => void (async () => {
+                  await setListEntry(show.id, 'watchlist', !inMyList);
+                  if (inMyList) await setListEntry(show.id, 'favorite', false);
+                })()}
+                className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
+                title={inMyList ? 'Remove from My List' : 'Add to My List'}
+              >
+                <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
+              </button>
+            </div>
+          )}
           </div>
           </div>
         </div>
