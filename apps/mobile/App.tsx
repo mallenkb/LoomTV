@@ -1310,6 +1310,7 @@ function AppRoot() {
   const [profileError, setProfileError] = useState('');
   const [profileLists, setProfileLists] = useState<MobileProfileListEntry[]>([]);
   const profileHydrationGenerationRef = useRef(0);
+  const mandatoryPlayerTeardownRef = useRef<() => void>(() => undefined);
   const enterProfilePicker = (mode: MobileProfilePickerMode, nextConnection?: Connection, selectionRevision?: number) => {
     profileHydrationGenerationRef.current += 1;
     setProfilePinTarget(null);
@@ -1317,6 +1318,26 @@ function AppRoot() {
     setProfileError('');
     if (mode !== 'voluntary') {
       pendingMobileFocusTarget = null;
+      mandatoryPlayerTeardownRef.current();
+      activeCatalogIdentityRef.current = 'profile:none:-1';
+      detailItemCacheRef.current.clear();
+      detailItemRequestsRef.current.clear();
+      lastDetailByKindRef.current.clear();
+      setDetailItem(null);
+      setPosterCandidateSheet(null);
+      setApplyingPosterCandidateId('');
+      setMiniPlayerTarget(null);
+      playerReturnItemRef.current = null;
+      closingPlayerRef.current = false;
+      setPlayTarget(null);
+      setPlaybackUrl(null);
+      setPlaybackFailure(null);
+      setIsPreparingStream(false);
+      setStreamOptions({});
+      shouldAutoplayRef.current = false;
+      userPausedRef.current = false;
+      pendingSeekRef.current = 0;
+      autoAdvancedEpisodeRef.current = null;
       setActiveProfile(null);
       setAutomaticProfileSignIn(false);
       setProfileLists([]);
@@ -2023,6 +2044,17 @@ function AppRoot() {
     nextPlayer.loop = false;
     nextPlayer.timeUpdateEventInterval = 0.5;
   });
+  mandatoryPlayerTeardownRef.current = () => {
+    try {
+      player.pause();
+    } catch {
+      // The native player may already be tearing down.
+    }
+    void player.replaceAsync(null).catch(() => {
+      // Clearing the React playback state remains authoritative if native
+      // teardown races a profile-required response.
+    });
+  };
 
   useEffect(() => {
     if (playbackUrl) {
@@ -3576,6 +3608,8 @@ function AppRoot() {
         </View>
       )}
 
+      {!showProfilePicker ? (
+      <Fragment>
       <DetailModal
         activeProfile={activeProfile}
         activeKind={activeKind}
@@ -3672,7 +3706,9 @@ function AppRoot() {
         onRetry={retryPlayback}
         onStreamOptionsChange={setStreamOptions}
       />
-      {showStartupSplash ? (
+      </Fragment>
+      ) : null}
+      {showStartupSplash && !showProfilePicker ? (
         <Animated.View
           pointerEvents="none"
           accessibilityElementsHidden
