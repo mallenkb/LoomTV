@@ -454,6 +454,9 @@ export function createHeadlessMediaService({
   }
 
   startQuotaSweeper();
+  // Populate the internal snapshot on startup. Public health reads the
+  // cached value and never triggers an unbounded filesystem scan itself.
+  void enforceCacheQuota();
 
   function issuePlaybackToken(itemId, userId, action) {
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
@@ -643,7 +646,11 @@ export function createHeadlessMediaService({
         action: 'hls',
         profile,
         idleTimeoutMs: HLS_NO_CLIENT_GRACE_MS,
-        activeIdleTimeoutMs: SESSION_TTL_MS,
+        // Segment/playlist requests already touch the lease. Once a client
+        // stops making requests, reclaim the FFmpeg process after the same
+        // short idle boundary used by direct playback; the absolute cap stays
+        // independent and non-renewable.
+        activeIdleTimeoutMs: MEDIA_TOKEN_TTL_MS,
         absoluteTimeoutMs: HLS_ABSOLUTE_TIMEOUT_MS,
       });
       session = {
@@ -997,8 +1004,7 @@ export function createHeadlessMediaService({
     getAdmissionHealth() {
       return { ...admission.stats(), quota: cacheQuota.snapshot() };
     },
-    async getCacheQuotaHealth() {
-      await cacheQuota.status();
+    getCacheQuotaHealth() {
       return cacheQuota.snapshot();
     },
     async listSessions() {

@@ -11,7 +11,7 @@ import { terminateChild } from '../src/media-service.js';
 import { createTranscodeAdmission } from '../src/transcode-admission.js';
 import { createTranscodeCacheQuota } from '../src/transcode-cache-quota.js';
 
-test('playback renewal uses a fake clock, renews the safety window, and overlaps rotated tokens', () => {
+test('playback renewal preserves the absolute cap and overlaps rotated tokens without alias replay', () => {
   let currentTime = 0;
   const registry = createPlaybackSessionRegistry({
     now: () => currentTime,
@@ -26,7 +26,8 @@ test('playback renewal uses a fake clock, renews the safety window, and overlaps
   assert.ok(renewed);
   assert.notEqual(renewed.token, created.token);
   assert.equal(registry.authorize(created.token, { action: 'hls' })?.id, created.id);
-  assert.ok(renewed.absoluteExpiresAt > created.absoluteExpiresAt);
+  assert.equal(renewed.absoluteExpiresAt, created.absoluteExpiresAt);
+  assert.equal(registry.renew(created.token, { principalId: 'user-1', itemId: 'item-1', action: 'hls' }), null);
   currentTime = 116;
   assert.equal(registry.authorize(created.token, { action: 'hls' }), null);
   registry.close();

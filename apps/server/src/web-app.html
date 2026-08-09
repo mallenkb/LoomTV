@@ -17,6 +17,7 @@
     <form id="authForm" class="form">
       <label id="nameField" class="hidden">Owner name<input id="name" autocomplete="name"></label>
       <label>Username<input id="username" autocomplete="username"></label>
+      <label id="bootstrapSecretField" class="hidden">One-time bootstrap secret<input id="bootstrapSecret" type="password" autocomplete="off" spellcheck="false" placeholder="From the LoomTV startup log"></label>
       <label>Password<input id="password" type="password" autocomplete="current-password" required minlength="8"></label>
       <button class="primary" id="authSubmit">Sign in</button>
     </form><div id="authStatus" class="status"></div>
@@ -70,8 +71,10 @@
         authView.classList.remove('hidden');
         appView.classList.add('hidden');
         $('authTitle').textContent = onboarding ? 'Create your LoomTV owner' : 'Sign in';
-        $('authCopy').textContent = onboarding ? 'Set the first server password, then start watching.' : 'Connect to your always-on LoomTV server.';
+        $('authCopy').textContent = onboarding ? 'Paste the one-time secret from the server startup log, then choose the first owner password.' : 'Connect to your always-on LoomTV server.';
         $('nameField').classList.toggle('hidden', !onboarding);
+        $('bootstrapSecretField').classList.toggle('hidden', !onboarding);
+        $('bootstrapSecret').required = onboarding;
         $('username').classList.toggle('hidden', onboarding);
         $('authSubmit').textContent = onboarding ? 'Create owner' : 'Sign in';
         $('authForm').dataset.onboarding = onboarding ? '1' : '';
@@ -155,11 +158,11 @@
       async function saveCurrentProgress() { if (!selectedProfile || !currentMedia) return; const video = $('video'); await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(currentMedia)}`, { method: 'PUT', body: JSON.stringify({ position: video.currentTime, duration: video.duration || 0 }) }).catch(() => {}); }
       async function editProgress(id) { if (!selectedProfile) { setStatus('libraryStatus', 'Choose a profile first.'); return; } const data = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(id)}`); const value = data.progress?.position || 0; const next = prompt('Resume position in seconds', String(Math.round(value))); if (next === null) return; await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ position: Number(next), duration: data.progress?.duration || 0 }) }); setStatus('libraryStatus', 'Progress saved.'); }
       $('video').addEventListener('error', retryPlaybackOnce);
-      $('authForm').onsubmit = async (event) => { event.preventDefault(); const onboarding = event.currentTarget.dataset.onboarding === '1'; setStatus('authStatus', 'Working…'); try { const data = await api(onboarding ? '/api/v1/auth/owner' : '/api/v1/auth/session', { method: 'POST', body: JSON.stringify({ name: $('name').value, username: $('username').value, password: $('password').value }) }); token = data.adminToken || data.accessToken || ''; if (!token) throw new Error('The server did not return a session token.'); localStorage.setItem(tokenKey, token); await loadApp(); } catch (error) { setStatus('authStatus', error.message); } };
+      $('authForm').onsubmit = async (event) => { event.preventDefault(); const onboarding = event.currentTarget.dataset.onboarding === '1'; setStatus('authStatus', 'Working…'); try { const data = await api(onboarding ? '/api/v1/auth/owner' : '/api/v1/auth/session', { method: 'POST', body: JSON.stringify({ name: $('name').value, username: $('username').value, password: $('password').value, ...(onboarding ? { bootstrapSecret: $('bootstrapSecret').value.trim() } : {}) }) }); token = data.adminToken || data.accessToken || ''; if (!token) throw new Error('The server did not return a session token.'); if (onboarding) $('bootstrapSecret').value = ''; localStorage.setItem(tokenKey, token); await loadApp(); } catch (error) { setStatus('authStatus', error.message); } };
       $('profileForm').onsubmit = async (event) => { event.preventDefault(); try { await api('/api/v1/profiles', { method: 'POST', body: JSON.stringify({ name: $('profileName').value, type: 'standard' }) }); $('profileName').value = ''; await loadProfiles(); } catch (error) { setStatus('libraryStatus', error.message); } };
       $('scan').onclick = async () => { try { await api('/api/v1/library/scan', { method: 'POST', body: '{}' }); setStatus('libraryStatus', 'Scan started.'); window.setTimeout(loadLibrary, 1200); } catch (error) { setStatus('libraryStatus', error.message); } };
       $('logout').onclick = async () => { await api('/api/v1/auth/session', { method: 'DELETE' }).catch(() => {}); clearRenewal(); token = ''; localStorage.removeItem(tokenKey); showAuth(false); };
-      $('closePlayer').onclick = async () => { clearRenewal(); $('video').pause(); await saveCurrentProgress(); if (playbackSession && currentMedia) { const stopUrl = `/api/v1/media/${encodeURIComponent(currentMedia)}/playback-session?sessionId=${encodeURIComponent(playbackSession)}&token=${encodeURIComponent(playbackToken)}`; await fetch(stopUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {}); } currentMedia = ''; playbackAction = ''; playbackToken = ''; playbackSession = ''; playbackRenewUrl = ''; playbackExpiresAt = 0; currentPlaybackUrl = ''; if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; } $('video').removeAttribute('src'); $('player').classList.add('hidden'); };
+      $('closePlayer').onclick = async () => { clearRenewal(); $('video').pause(); await saveCurrentProgress(); if (playbackSession && currentMedia) { const stopUrl = `/api/v1/media/${encodeURIComponent(currentMedia)}/playback-session`; await fetch(stopUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: playbackSession, action: playbackAction }) }).catch(() => {}); } currentMedia = ''; playbackAction = ''; playbackToken = ''; playbackSession = ''; playbackRenewUrl = ''; playbackExpiresAt = 0; currentPlaybackUrl = ''; if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; } $('video').removeAttribute('src'); $('player').classList.add('hidden'); };
       function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character])); }
       function escapeAttr(value) { return escapeHtml(value); }
       boot();

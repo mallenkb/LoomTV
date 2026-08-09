@@ -5,7 +5,10 @@ export const DEFAULT_PLAYBACK_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 export const DEFAULT_PLAYBACK_ABSOLUTE_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_MAX_PLAYBACK_SESSIONS = 4_096;
 export const DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS = 5 * 1000;
-export const DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS = 15 * 1000;
+// Native HLS playlists can advertise up to 45 two-second segments. Keep the
+// previous capability usable for the full playlist/retry horizon while a
+// client receives the rotated token.
+export const DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS = 90 * 1000;
 
 function positiveInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
   if (!Number.isFinite(value)) return fallback;
@@ -75,7 +78,7 @@ export function createPlaybackSessionRegistry(options = {}) {
   const sweepIntervalMs = Number.isFinite(options.sweepIntervalMs)
     ? Math.max(0, Math.trunc(options.sweepIntervalMs))
     : DEFAULT_PLAYBACK_SWEEP_INTERVAL_MS;
-  const tokenOverlapMs = nonNegativeInteger(options.tokenOverlapMs, DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS, 60 * 1000);
+  const tokenOverlapMs = nonNegativeInteger(options.tokenOverlapMs, DEFAULT_PLAYBACK_TOKEN_OVERLAP_MS, 120 * 1000);
   const maxTokenAliases = positiveInteger(options.maxTokenAliases, 4, 32);
   const onRevoke = typeof options.onRevoke === 'function' ? options.onRevoke : null;
   const sessions = new Map();
@@ -220,7 +223,7 @@ export function createPlaybackSessionRegistry(options = {}) {
       idleTimeoutMs: expiry.idleTimeoutMs,
       activeIdleTimeoutMs: expiry.activeIdleTimeoutMs,
       absoluteTimeoutMs: expiry.absoluteTimeoutMs,
-      tokenOverlapMs: nonNegativeInteger(input.tokenOverlapMs, tokenOverlapMs, 60 * 1000),
+      tokenOverlapMs: nonNegativeInteger(input.tokenOverlapMs, tokenOverlapMs, 120 * 1000),
       tokenAliases: new Map(),
       renewedAt: undefined,
       revokedAt: undefined,
@@ -260,6 +263,11 @@ export function createPlaybackSessionRegistry(options = {}) {
   function renew(identifier, expected = {}, currentTime = now()) {
     ensureOpen();
     const entry = resolve(identifier, currentTime);
+    // A rotated capability may remain valid for media requests during its
+    // bounded overlap, but it must never rotate the lease again. Renewal
+    // accepts the current token or an authenticated session id only.
+    const isSessionId = typeof identifier === 'string' && sessions.has(identifier);
+    if (!isSessionId && (!entry || entry.token !== identifier)) return null;
     if (!entry || !matches(entry, expected) || expire(entry, currentTime)) {
       if (entry && expire(entry, currentTime)) revokeEntry(entry, 'expired', currentTime);
       return null;
@@ -267,7 +275,7 @@ export function createPlaybackSessionRegistry(options = {}) {
     const previousToken = entry.token;
     let nextToken = randomBytes(24).toString('base64url');
     while (tokenToId.has(nextToken)) nextToken = randomBytes(24).toString('base64url');
-    const overlap = nonNegativeInteger(entry.tokenOverlapMs, tokenOverlapMs, 60 * 1000);
+    const overlap = nonNegativeInteger(entry.tokenOverlapMs, tokenOverlapMs, 120 * 1000);
     if (overlap > 0) {
       entry.tokenAliases.set(previousToken, currentTime + overlap);
       while (entry.tokenAliases.size > maxTokenAliases) {
@@ -280,7 +288,8 @@ export function createPlaybackSessionRegistry(options = {}) {
     tokenToId.set(nextToken, entry.id);
     entry.idleTimeoutMs = entry.activeIdleTimeoutMs || entry.idleTimeoutMs;
     entry.lastActivityAt = currentTime;
-    entry.absoluteExpiresAt = currentTime + entry.absoluteTimeoutMs;
+    // `absoluteExpiresAt` is a hard cap measured from creation. Renewal may
+    // extend idle time, never the total lifetime of a playback capability.
     entry.idleExpiresAt = Math.min(currentTime + entry.idleTimeoutMs, entry.absoluteExpiresAt);
     entry.renewedAt = currentTime;
     return snapshot(entry, true);

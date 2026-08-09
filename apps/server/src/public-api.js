@@ -29,8 +29,8 @@ function writeJson(res, status, payload, headers = {}) {
   res.end(body);
 }
 
-function writeError(res, status, code, message, details = {}) {
-  writeJson(res, status, { ok: false, error: { code, message, ...details } });
+function writeError(res, status, code, message, details = {}, headers = {}) {
+  writeJson(res, status, { ok: false, error: { code, message, ...details } }, headers);
 }
 
 function writeData(res, status, data, headers = {}) {
@@ -364,6 +364,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
     const segments = pathname.slice(`${PUBLIC_API_PREFIX}/`.length).split('/').filter(Boolean);
     const resource = segments[0] || '';
     const publicDiscovery = (resource === 'discovery' && req.method === 'GET')
+      || (resource === 'health' && req.method === 'GET')
       || (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET')
       || (pathname === `${PUBLIC_API_PREFIX}/openapi.json` && (req.method === 'GET' || req.method === 'HEAD'));
     if (requireSecureTransport && !publicDiscovery && !isSecureRequest(req)) {
@@ -390,6 +391,8 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeData(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
+          bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
+          address: proxyPolicy.clientAddress(req),
         }));
         return true;
       }
@@ -772,7 +775,14 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       const status = Number.isInteger(error?.status) ? error.status : 500;
       const code = error?.code || 'request_failed';
       const message = status >= 500 ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.';
-      writeError(res, status, code, message, error?.retryAfter ? { retryAfter: error.retryAfter } : {});
+      writeError(
+        res,
+        status,
+        code,
+        message,
+        error?.retryAfter ? { retryAfter: error.retryAfter } : {},
+        error?.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {},
+      );
       return true;
     }
   };
