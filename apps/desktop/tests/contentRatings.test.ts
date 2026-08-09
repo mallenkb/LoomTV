@@ -14,7 +14,7 @@ test('content ratings normalize supported countries and reject unknown values', 
     source: 'tmdb',
   });
   assert.equal(normalizeContentRating('GB', 'unknown', 'tmdb'), null);
-  assert.equal(normalizeContentRating('FR', '12', 'tmdb'), null);
+  assert.equal(normalizeContentRating('FR', '12', 'tmdb')?.minimumAge, 12);
   assert.equal(normalizeContentRating('CA', '14A', 'tmdb')?.minimumAge, 14);
   assert.equal(normalizeContentRating('AU', 'MA15+', 'tmdb')?.minimumAge, 15);
 });

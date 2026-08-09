@@ -176,7 +176,10 @@ test('profile lists and progress filter stale media identifiers after a profile 
   const listsStart = source.indexOf("reqUrl.pathname === '/api/v2/profile-lists'");
   const listsBody = source.slice(listsStart, source.indexOf("reqUrl.pathname === '/api/v2/artwork/official-candidates'", listsStart));
   assert.match(listsBody, /getProfileLists\(profileId, kind\)\.filter/);
-  assert.match(listsBody, /req\.method === 'PUT' && !canProfileAccessMediaId\(profileId, mediaId\)/);
+  assert.match(
+    listsBody,
+    /req\.method === 'PUT' && !\(bodyKind === 'watched' && mediaId\.startsWith\('discover:'\)\) && !canProfileAccessMediaId\(profileId, mediaId\)/,
+  );
 
   const progressStart = source.indexOf("reqUrl.pathname === '/api/v2/progress' && req.method === 'GET'");
   const progressBody = source.slice(progressStart, source.indexOf("reqUrl.pathname === '/api/v2/playback-track-preferences'", progressStart));
