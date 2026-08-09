@@ -157,7 +157,8 @@ jobs:
       - name: Install dependencies
         run: corepack pnpm install --frozen-lockfile
 
-      - name: Build signed macOS installers
+      - name: Build macOS installers
+        id: build-macos
         if: runner.os == 'macOS'
         env:
           MACOS_CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
@@ -167,20 +168,28 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         shell: bash
         run: |
-          missing=()
-          for name in MACOS_CSC_LINK MACOS_CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            [[ -n "${!name:-}" ]] || missing+=("$name")
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Production macOS release is missing required credential: %s\n' "${missing[@]}" >&2
-            exit 1
+          if [[ -n "${MACOS_CSC_LINK:-}" ]]; then
+            missing=()
+            for name in MACOS_CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              [[ -n "${!name:-}" ]] || missing+=("$name")
+            done
+            if (( ${#missing[@]} > 0 )); then
+              printf 'Production macOS signing is partially configured; missing credential: %s\n' "${missing[@]}" >&2
+              exit 1
+            fi
+            export CSC_LINK="$MACOS_CSC_LINK"
+            export CSC_KEY_PASSWORD="$MACOS_CSC_KEY_PASSWORD"
+            echo 'signed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'No Developer ID certificate configured; the existing ad-hoc macOS signer will seal the app bundle.'
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
           fi
           node apps/desktop/scripts/fetch-fpcalc.cjs
-          export CSC_LINK="$MACOS_CSC_LINK"
-          export CSC_KEY_PASSWORD="$MACOS_CSC_KEY_PASSWORD"
           corepack pnpm --filter loom-media-server-desktop run dist
 
-      - name: Build signed Windows installers
+      - name: Build Windows installers
+        id: build-windows
         if: runner.os == 'Windows'
         env:
           WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
@@ -188,28 +197,35 @@ jobs:
           WINDOWS_SIGNER_THUMBPRINT: ${{ secrets.WINDOWS_SIGNER_THUMBPRINT }}
         shell: bash
         run: |
-          missing=()
-          for name in WINDOWS_CSC_LINK WINDOWS_CSC_KEY_PASSWORD WINDOWS_SIGNER_THUMBPRINT; do
-            [[ -n "${!name:-}" ]] || missing+=("$name")
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Production Windows release is missing required credential: %s\n' "${missing[@]}" >&2
-            exit 1
+          if [[ -n "${WINDOWS_CSC_LINK:-}" ]]; then
+            missing=()
+            for name in WINDOWS_CSC_KEY_PASSWORD WINDOWS_SIGNER_THUMBPRINT; do
+              [[ -n "${!name:-}" ]] || missing+=("$name")
+            done
+            if (( ${#missing[@]} > 0 )); then
+              printf 'Production Windows signing is partially configured; missing credential: %s\n' "${missing[@]}" >&2
+              exit 1
+            fi
+            export CSC_LINK="$WINDOWS_CSC_LINK"
+            export CSC_KEY_PASSWORD="$WINDOWS_CSC_KEY_PASSWORD"
+            echo 'signed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'No Windows signing certificate configured; building an unsigned installer.'
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
           fi
           node apps/desktop/scripts/fetch-fpcalc.cjs
-          export CSC_LINK="$WINDOWS_CSC_LINK"
-          export CSC_KEY_PASSWORD="$WINDOWS_CSC_KEY_PASSWORD"
           corepack pnpm --filter loom-media-server-desktop run dist
 
       - name: Verify final macOS signature and notarization
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && steps.build-macos.outputs.signed == 'true'
         env:
           MACOS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: corepack pnpm --filter loom-media-server-desktop run verify:mac-release
 
       - name: Verify final Windows signatures
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.build-windows.outputs.signed == 'true'
         env:
           WINDOWS_SIGNER_THUMBPRINT: ${{ secrets.WINDOWS_SIGNER_THUMBPRINT }}
         shell: pwsh
