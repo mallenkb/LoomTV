@@ -16,7 +16,7 @@ import PluginDiscover from './pages/PluginDiscover';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer/LazyVideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
-import { ConfirmProvider } from './components/ConfirmProvider';
+import { ConfirmProvider } from '@/components/ConfirmProvider';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/ToastProvider';
 import { ThemeProvider } from './components/ThemeProvider';
