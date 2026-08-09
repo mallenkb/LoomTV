@@ -4,7 +4,13 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { ATTESTATION_PREDICATE, MANIFEST_NAME } = require('./release-evidence.cjs');
+const {
+  ATTESTATION_PREDICATE,
+  MANIFEST_NAME,
+  TRUSTED_ATTESTATION_BUILDERS,
+  artifactDescriptor,
+  metadataTarget,
+} = require('./release-evidence.cjs');
 const { parseReleaseTag } = require('./release-identity.cjs');
 
 function parseArguments(argv) {
@@ -32,15 +38,20 @@ function sha256File(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function verifySubject(filePath, repository, tag, sourceDigest) {
-  const result = spawnSync('gh', [
+function attestationArguments(filePath, repository, tag, sourceDigest, trustedBuilder) {
+  if (!Object.values(TRUSTED_ATTESTATION_BUILDERS).includes(trustedBuilder)) {
+    throw new Error(`Untrusted release attestation builder: ${trustedBuilder || 'missing'}.`);
+  }
+  return [
     'attestation',
     'verify',
     filePath,
     '--repo',
     repository,
     '--signer-workflow',
-    `${repository}/.github/workflows/release.yml`,
+    `${repository}/${trustedBuilder}`,
+    '--signer-digest',
+    sourceDigest,
     '--source-ref',
     `refs/tags/${tag}`,
     '--source-digest',
@@ -50,7 +61,17 @@ function verifySubject(filePath, repository, tag, sourceDigest) {
     '--deny-self-hosted-runners',
     '--format',
     'json',
-  ], { encoding: 'utf8' });
+  ];
+}
+
+function verifySubject(filePath, repository, tag, sourceDigest, trustedBuilder, execute = spawnSync) {
+  const result = execute('gh', attestationArguments(
+    filePath,
+    repository,
+    tag,
+    sourceDigest,
+    trustedBuilder,
+  ), { encoding: 'utf8' });
 
   if (result.error) throw new Error(`Could not execute gh attestation verify: ${result.error.message}`);
   if (result.status !== 0) {
@@ -107,8 +128,18 @@ function main(values) {
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(filePath)) {
       throw new Error(`Release attestation subject is missing: ${entry.name}.`);
     }
-    verifySubject(filePath, repository, tag, sourceDigest);
-    console.log(`Verified GitHub/SLSA subject ${entry.name}.`);
+    const expectedTarget = artifactDescriptor(entry.name, version) || metadataTarget(entry.name);
+    if (!expectedTarget || JSON.stringify(entry.target) !== JSON.stringify(expectedTarget)) {
+      throw new Error(`Release attestation target identity mismatch for ${entry.name}.`);
+    }
+    verifySubject(
+      filePath,
+      repository,
+      tag,
+      sourceDigest,
+      expectedTarget.trustedAttestationBuilder,
+    );
+    console.log(`Verified GitHub/SLSA subject ${entry.name} from ${expectedTarget.trustedAttestationBuilder}.`);
   }
 }
 
@@ -121,4 +152,9 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, parseArguments };
+module.exports = {
+  attestationArguments,
+  main,
+  parseArguments,
+  verifySubject,
+};

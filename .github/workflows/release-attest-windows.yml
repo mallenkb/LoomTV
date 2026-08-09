@@ -1,0 +1,47 @@
+name: Trusted Windows release attester
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Exact artifact name produced by this release run
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  attest:
+    name: Attest Windows release tuple
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Check out trusted attester policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download exact Windows build artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: release-subjects
+
+      - name: Enforce Windows-only attestation subjects
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/verify-attestation-input.cjs release-subjects Windows "$RELEASE_TAG"
+
+      - name: Generate trusted Windows GitHub/SLSA attestations
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            release-subjects/**/*.exe
+            release-subjects/**/*.blockmap
+            release-subjects/**/latest.yml

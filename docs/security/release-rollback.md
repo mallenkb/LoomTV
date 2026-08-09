@@ -5,7 +5,7 @@ This runbook covers a bad desktop release, a failed draft publication, or a susp
 ## Stop publication
 
 1. If the run is still active, cancel it in GitHub Actions.
-2. If the release is still a draft, leave it unpublished while investigating. Save the run URL and the `loomtv-prior-draft-evidence-*` workflow artifact before deleting or replacing the draft.
+2. If the release is still a draft, leave it unpublished while investigating. Save the run URL and confirm both the 90-day `loomtv-prior-draft-evidence-*` workflow artifact and the permanent `loomtv-evidence-*` draft release exist before deleting or replacing the draft. Permanent evidence drafts must never be published or deleted.
 3. If release authority may have been exposed, disable the Release workflow and remove/rotate `MACOS_CSC_LINK`, `MACOS_CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `WINDOWS_CSC_LINK`, `WINDOWS_CSC_KEY_PASSWORD`, and `WINDOWS_SIGNER_THUMBPRINT` in the `production-release` environment. Remove environment reviewers and deployment access until the incident is contained.
 
 ## Bad published release

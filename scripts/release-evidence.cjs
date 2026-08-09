@@ -9,6 +9,11 @@ const MANIFEST_NAME = 'release-manifest.json';
 const CHECKSUMS_NAME = 'SHA256SUMS';
 const ATTESTATION_PREDICATE = 'https://slsa.dev/provenance/v1';
 const EVIDENCE_NAMES = new Set([MANIFEST_NAME, CHECKSUMS_NAME]);
+const TRUSTED_ATTESTATION_BUILDERS = Object.freeze({
+  Linux: '.github/workflows/release-attest-linux.yml',
+  macOS: '.github/workflows/release-attest-macos.yml',
+  Windows: '.github/workflows/release-attest-windows.yml',
+});
 
 // This is the production release contract.  Keep this list in lockstep with
 // apps/desktop/package.json so a new platform or architecture cannot silently
@@ -134,6 +139,7 @@ function expectedTargetMatrix(version) {
     arch: target.arch,
     artifacts: target.installerExtensions.map((extension) => `LoomTV-${version}-${target.stem}.${extension}`),
     updaterMetadata: target.updaterMetadata,
+    trustedAttestationBuilder: TRUSTED_ATTESTATION_BUILDERS[target.platform],
   }));
 }
 
@@ -155,6 +161,8 @@ function metadataTarget(metadataName) {
   return {
     metadata: metadataName,
     targetIds: targets.map((target) => target.id),
+    platform: targets[0].platform,
+    trustedAttestationBuilder: TRUSTED_ATTESTATION_BUILDERS[targets[0].platform],
   };
 }
 
@@ -169,6 +177,7 @@ function artifactDescriptor(name, version) {
           arch: target.arch,
           extension,
           blockmap: false,
+          trustedAttestationBuilder: TRUSTED_ATTESTATION_BUILDERS[target.platform],
         };
       }
       if (name === `${artifactName}.blockmap`) {
@@ -178,6 +187,7 @@ function artifactDescriptor(name, version) {
           arch: target.arch,
           extension,
           blockmap: true,
+          trustedAttestationBuilder: TRUSTED_ATTESTATION_BUILDERS[target.platform],
         };
       }
     }
@@ -474,10 +484,12 @@ module.exports = {
   EVIDENCE_NAMES,
   MANIFEST_NAME,
   TARGET_MATRIX,
+  TRUSTED_ATTESTATION_BUILDERS,
   artifactDescriptor,
   expectedTargetMatrix,
   expectedUpdaterCoverage,
   isReleaseArtifact,
+  metadataTarget,
   validateArtifactSet,
   validateManifestPolicy,
   verifyEvidence,

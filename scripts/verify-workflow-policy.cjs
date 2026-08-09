@@ -145,15 +145,8 @@ function releaseWorkflowViolations(workflow, source, fileName = 'release.yml') {
   if (makeJob?.environment !== 'production-release') {
     violations.push(`${fileName}: jobs.make must use the production-release environment.`);
   }
-  for (const [scope, expected] of Object.entries({
-    contents: 'read',
-    'id-token': 'write',
-    attestations: 'write',
-    'artifact-metadata': 'write',
-  })) {
-    if (makePermissions[scope] !== expected) {
-      violations.push(`${fileName}: jobs.make.permissions.${scope} must be ${expected}.`);
-    }
+  if (JSON.stringify(makePermissions) !== JSON.stringify({ contents: 'read' })) {
+    violations.push(`${fileName}: jobs.make must remain read-only; attestation authority belongs only to trusted reusable workflows.`);
   }
   const matrix = makeJob?.strategy?.matrix?.include;
   const actualMatrix = Array.isArray(matrix)
@@ -167,8 +160,31 @@ function releaseWorkflowViolations(workflow, source, fileName = 'release.yml') {
   if (JSON.stringify(actualMatrix) !== JSON.stringify(expectedMatrix)) {
     violations.push(`${fileName}: jobs.make matrix must exactly cover macOS, Windows, and Linux release builders.`);
   }
-  if (!jobSteps(makeJob).some((step) => step?.uses === ATTEST_ACTION)) {
-    violations.push(`${fileName}: jobs.make must use the full-SHA-pinned actions/attest action.`);
+  if (jobSteps(makeJob).some((step) => step?.uses === ATTEST_ACTION)) {
+    violations.push(`${fileName}: jobs.make must not attest directly; each platform requires a distinct trusted reusable workflow.`);
+  }
+
+  const trustedAttesters = {
+    'attest-linux': './.github/workflows/release-attest-linux.yml',
+    'attest-macos': './.github/workflows/release-attest-macos.yml',
+    'attest-windows': './.github/workflows/release-attest-windows.yml',
+  };
+  for (const [jobName, expectedWorkflow] of Object.entries(trustedAttesters)) {
+    const job = workflow.jobs?.[jobName];
+    if (job?.uses !== expectedWorkflow) {
+      violations.push(`${fileName}: jobs.${jobName} must call ${expectedWorkflow}.`);
+    }
+    for (const [scope, expected] of Object.entries({
+      actions: 'read',
+      contents: 'read',
+      'id-token': 'write',
+      attestations: 'write',
+      'artifact-metadata': 'write',
+    })) {
+      if (job?.permissions?.[scope] !== expected) {
+        violations.push(`${fileName}: jobs.${jobName}.permissions.${scope} must be ${expected}.`);
+      }
+    }
   }
 
   const publishJob = workflow.jobs?.['publish-release'];
@@ -189,9 +205,14 @@ function releaseWorkflowViolations(workflow, source, fileName = 'release.yml') {
     || !source.includes('immediately before publication')) {
     violations.push(`${fileName}: tag type, tag object OID, and peeled commit must be revalidated immediately before draft creation and publication.`);
   }
+  if (!source.includes('Release tag peeled commit does not match the event-time github.sha')
+    || !source.includes('Release tag object does not match the event-time ref object')) {
+    violations.push(`${fileName}: initial tag object and peeled commit must be bound to event-time identities.`);
+  }
   if (!source.includes('only a confirmed 404 permits replacement')
     || !source.includes('Archive prior draft evidence before deletion')
-    || !source.includes('Upload prior draft evidence archive before deletion')) {
+    || !source.includes('Upload prior draft evidence archive before deletion')
+    || !source.includes('Persist prior draft evidence as a permanent draft record')) {
     violations.push(`${fileName}: draft lookup errors and prior evidence archival must fail closed before deletion.`);
   }
   if (!source.includes('verify-release-attestations.cjs') || !source.includes('--draft=false')) {
