@@ -57,6 +57,7 @@ const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
 type SavedPlaybackSettings = {
   skipBackSeconds: number;
   skipForwardSeconds: number;
+  displaySleepTimeoutMinutes: number;
 };
 
 type LibraryAction = {
@@ -177,6 +178,7 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
+  const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
   const [savedPlaybackSettings, setSavedPlaybackSettings] = useState<SavedPlaybackSettings | null>(null);
   const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
@@ -351,11 +353,16 @@ export default function Settings() {
       const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
       const loadedSkipBack = Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10;
       const loadedSkipForward = Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15;
+      const loadedDisplaySleepTimeout = Number.isFinite(Number(s.playbackDisplaySleepTimeoutMinutes))
+        ? Math.max(0, Math.min(480, Math.round(Number(s.playbackDisplaySleepTimeoutMinutes))))
+        : 0;
       setPlaybackSkipBackSeconds(loadedSkipBack);
       setPlaybackSkipForwardSeconds(loadedSkipForward);
+      setPlaybackDisplaySleepTimeoutMinutes(loadedDisplaySleepTimeout);
       setSavedPlaybackSettings({
         skipBackSeconds: loadedSkipBack,
         skipForwardSeconds: loadedSkipForward,
+        displaySleepTimeoutMinutes: loadedDisplaySleepTimeout,
       });
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
@@ -556,7 +563,20 @@ export default function Settings() {
     setSavedPlaybackSettings({
       skipBackSeconds: normalizedBack,
       skipForwardSeconds: normalizedForward,
+      displaySleepTimeoutMinutes: savedPlaybackSettings?.displaySleepTimeoutMinutes ?? playbackDisplaySleepTimeoutMinutes,
     });
+    return true;
+  };
+
+  const handleSaveDisplaySleepSettings = async (): Promise<boolean> => {
+    if (isRemoteLibraryMode || activeProfile?.type !== 'owner') {
+      setSettingsPersistenceError('Only the local library owner can change the display sleep timer.');
+      return false;
+    }
+    const normalized = Math.max(0, Math.min(480, Math.round(Number(playbackDisplaySleepTimeoutMinutes) || 0)));
+    setPlaybackDisplaySleepTimeoutMinutes(normalized);
+    if (!await persistSettings({ playbackDisplaySleepTimeoutMinutes: normalized })) return false;
+    setSavedPlaybackSettings((saved) => saved && ({ ...saved, displaySleepTimeoutMinutes: normalized }));
     return true;
   };
 
@@ -564,6 +584,8 @@ export default function Settings() {
     playbackSkipBackSeconds !== savedPlaybackSettings.skipBackSeconds
     || playbackSkipForwardSeconds !== savedPlaybackSettings.skipForwardSeconds
   );
+  const displaySleepSettingsDirty = savedPlaybackSettings !== null
+    && playbackDisplaySleepTimeoutMinutes !== savedPlaybackSettings.displaySleepTimeoutMinutes;
 
   const handleAnalysisAction = async (
     action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
@@ -989,14 +1011,19 @@ export default function Settings() {
                   showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
                   skipBackSeconds={playbackSkipBackSeconds}
                   skipForwardSeconds={playbackSkipForwardSeconds}
+                  displaySleepTimeoutMinutes={playbackDisplaySleepTimeoutMinutes}
                   onSkipBackChange={setPlaybackSkipBackSeconds}
                   onSkipForwardChange={setPlaybackSkipForwardSeconds}
+                  onDisplaySleepTimeoutChange={setPlaybackDisplaySleepTimeoutMinutes}
                   playbackSettingsDirty={playbackSettingsDirty}
+                  displaySleepSettingsDirty={displaySleepSettingsDirty}
+                  displaySleepSettingsAvailable={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
                   skipAnalysis={skipAnalysis}
                   onSkipAnalysisChange={setSkipAnalysis}
                   analysisStatus={localAnalysisStatus}
                   onAnalysisAction={handleAnalysisAction}
                   onSave={handleSavePlaybackSettings}
+                  onDisplaySleepSave={handleSaveDisplaySleepSettings}
                   libvlcAvailability={isRemoteLibraryMode
                     ? { available: false, enabled: false, surface: 'unavailable', reason: 'Native LibVLC playback is available only for local files on this laptop.' }
                     : libvlcAvailability}

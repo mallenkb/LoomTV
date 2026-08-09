@@ -243,6 +243,8 @@ export interface SettingsPayload {
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
+  /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
+  playbackDisplaySleepTimeoutMinutes?: number;
   localSkipAnalysisEnabled?: boolean;
   skipAnalysis?: SkipAnalysisSettings;
   sidebarNavOrder?: string[];

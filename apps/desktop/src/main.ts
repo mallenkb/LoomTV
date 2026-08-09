@@ -71,6 +71,7 @@ import {
 } from './main/windowManager';
 import { stopAllMpvPlayback } from './main/mpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
+import { refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
@@ -1355,6 +1356,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   saveSettings,
   onSettingsSaved: () => {
     analysisCoordinator.settingsChanged();
+    refreshNativePlaybackDisplaySleepTimeout();
     if (!loadSettings().localNetworkSharingEnabled) stopTranscodesForScope('lan:');
   },
   syncLanAdvertisement,

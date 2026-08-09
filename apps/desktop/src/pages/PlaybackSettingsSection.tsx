@@ -9,9 +9,13 @@ type PlaybackSettingsSectionProps = {
   showServerControls?: boolean;
   skipBackSeconds: number;
   skipForwardSeconds: number;
+  displaySleepTimeoutMinutes: number;
   onSkipBackChange: (value: number) => void;
   onSkipForwardChange: (value: number) => void;
+  onDisplaySleepTimeoutChange: (value: number) => void;
   playbackSettingsDirty: boolean;
+  displaySleepSettingsDirty: boolean;
+  displaySleepSettingsAvailable: boolean;
   skipAnalysis: SkipAnalysisSettings;
   onSkipAnalysisChange: (value: SkipAnalysisSettings) => void;
   analysisStatus: LocalSegmentAnalysisStatus | null;
@@ -20,6 +24,7 @@ type PlaybackSettingsSectionProps = {
     scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
   ) => Promise<{ queued: number } | undefined> | void;
   onSave: () => void | boolean | Promise<void | boolean>;
+  onDisplaySleepSave: () => void | boolean | Promise<void | boolean>;
   libvlcAvailability?: LibVlcAvailability | null;
   mpvAvailability?: MpvAvailability | null;
   onMpvChoose?: () => void | Promise<void>;
@@ -44,14 +49,19 @@ export default function PlaybackSettingsSection({
   showServerControls = true,
   skipBackSeconds,
   skipForwardSeconds,
+  displaySleepTimeoutMinutes,
   onSkipBackChange,
   onSkipForwardChange,
+  onDisplaySleepTimeoutChange,
   playbackSettingsDirty,
+  displaySleepSettingsDirty,
+  displaySleepSettingsAvailable,
   skipAnalysis,
   onSkipAnalysisChange,
   analysisStatus,
   onAnalysisAction,
   onSave,
+  onDisplaySleepSave,
   libvlcAvailability = null,
   mpvAvailability = null,
   onMpvChoose,
@@ -145,6 +155,43 @@ export default function PlaybackSettingsSection({
           </div>
         </CardContent>
       </Card>
+
+      {displaySleepSettingsAvailable && (
+        <Card className="settings-panel">
+          <CardHeader>
+            <CardTitle className="text-white">Display sleep timer</CardTitle>
+            <CardDescription className="text-[var(--loom-muted)]">
+              Choose how long LoomTV keeps the display awake during active playback. Pausing allows sleep immediately; resuming starts a fresh timer.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                [0, 'Never'],
+                [15, '15 min'],
+                [30, '30 min'],
+                [45, '45 min'],
+                [60, '1 hour'],
+                [90, '1.5 hours'],
+                [120, '2 hours'],
+              ].map(([minutes, label]) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  onClick={() => onDisplaySleepTimeoutChange(Number(minutes))}
+                  aria-pressed={displaySleepTimeoutMinutes === minutes}
+                  className={`rounded-lg border px-3 py-3 text-sm transition-colors ${displaySleepTimeoutMinutes === minutes ? 'border-[var(--loom-accent)]/55 bg-[var(--loom-accent)]/10 text-white ring-1 ring-inset ring-[var(--loom-accent)]/15' : 'border-[var(--loom-border)] bg-[var(--loom-surface-2)] text-white/70 hover:border-white/25 hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <Button type="button" disabled={!displaySleepSettingsDirty} onClick={onDisplaySleepSave}>Save display timer</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="settings-panel">
         <CardHeader>
