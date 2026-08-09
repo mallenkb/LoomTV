@@ -1,4 +1,7 @@
+import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
+
 export const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
+const EXPLORE_ITEM_CACHE_PREFIX = 'loomtv:explore-item-v1:';
 const DISCOVER_RETURN_ROUTE_TTL_MS = 7_200_000;
 
 type CachedDiscoverReturnRoute = { at: number; route: string };
@@ -38,6 +41,27 @@ export function getCachedDiscoverReturnRoute(): string | null {
       return null;
     }
     return route;
+  } catch {
+    return null;
+  }
+}
+
+export function cacheExploreItem(item: StremioPluginCatalogItem): void {
+  if (typeof window === 'undefined' || !item.id || !item.type) return;
+  try {
+    window.sessionStorage.setItem(`${EXPLORE_ITEM_CACHE_PREFIX}${item.type}:${item.id}`, JSON.stringify(item));
+  } catch {
+    // Route state remains authoritative when session storage is unavailable.
+  }
+}
+
+export function getCachedExploreItem(type: string, id?: string): StremioPluginCatalogItem | null {
+  if (typeof window === 'undefined' || !id) return null;
+  try {
+    const raw = window.sessionStorage.getItem(`${EXPLORE_ITEM_CACHE_PREFIX}${type}:${id}`);
+    if (!raw) return null;
+    const item = JSON.parse(raw) as StremioPluginCatalogItem;
+    return item && item.id === id && item.type === type ? item : null;
   } catch {
     return null;
   }

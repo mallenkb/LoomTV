@@ -4,14 +4,19 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import type { LibVlcAvailability, LocalSegmentAnalysisStatus, MpvAvailability, SkipAnalysisSettings } from '@/lib/desktopApi';
 import SkipTimestampManager from './SkipTimestampManager';
+import { isBundledFFmpegPath } from './Settings.helpers';
 
 type PlaybackSettingsSectionProps = {
   showServerControls?: boolean;
   skipBackSeconds: number;
   skipForwardSeconds: number;
+  displaySleepTimeoutMinutes: number;
   onSkipBackChange: (value: number) => void;
   onSkipForwardChange: (value: number) => void;
+  onDisplaySleepTimeoutChange: (value: number) => void;
   playbackSettingsDirty: boolean;
+  displaySleepSettingsDirty: boolean;
+  displaySleepSettingsAvailable: boolean;
   skipAnalysis: SkipAnalysisSettings;
   onSkipAnalysisChange: (value: SkipAnalysisSettings) => void;
   analysisStatus: LocalSegmentAnalysisStatus | null;
@@ -20,8 +25,10 @@ type PlaybackSettingsSectionProps = {
     scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
   ) => Promise<{ queued: number } | undefined> | void;
   onSave: () => void | boolean | Promise<void | boolean>;
+  onDisplaySleepSave: () => void | boolean | Promise<void | boolean>;
   libvlcAvailability?: LibVlcAvailability | null;
   mpvAvailability?: MpvAvailability | null;
+  ffmpegStatus?: { available: boolean; path: string | null } | null;
   onMpvChoose?: () => void | Promise<void>;
   onMpvReset?: () => void | Promise<void>;
   onMpvRefresh?: () => void | Promise<void>;
@@ -44,16 +51,22 @@ export default function PlaybackSettingsSection({
   showServerControls = true,
   skipBackSeconds,
   skipForwardSeconds,
+  displaySleepTimeoutMinutes,
   onSkipBackChange,
   onSkipForwardChange,
+  onDisplaySleepTimeoutChange,
   playbackSettingsDirty,
+  displaySleepSettingsDirty,
+  displaySleepSettingsAvailable,
   skipAnalysis,
   onSkipAnalysisChange,
   analysisStatus,
   onAnalysisAction,
   onSave,
+  onDisplaySleepSave,
   libvlcAvailability = null,
   mpvAvailability = null,
+  ffmpegStatus = null,
   onMpvChoose,
   onMpvReset,
   onMpvRefresh,
@@ -126,7 +139,7 @@ export default function PlaybackSettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Playback</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Adjust the default seek distances used by the player controls and keyboard shortcuts.
+            Adjust seek distances and choose how long LoomTV keeps the display awake during playback.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -145,6 +158,41 @@ export default function PlaybackSettingsSection({
           </div>
         </CardContent>
       </Card>
+
+      {displaySleepSettingsAvailable && <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="text-white">Display sleep timer</CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Choose how long LoomTV keeps the display awake during active playback. Pausing allows sleep immediately; resuming starts a fresh timer.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              [0, 'Never'],
+              [15, '15 min'],
+              [30, '30 min'],
+              [45, '45 min'],
+              [60, '1 hour'],
+              [90, '1.5 hours'],
+              [120, '2 hours'],
+            ].map(([minutes, label]) => (
+              <button
+                key={minutes}
+                type="button"
+                onClick={() => onDisplaySleepTimeoutChange(Number(minutes))}
+                aria-pressed={displaySleepTimeoutMinutes === minutes}
+                className={`rounded-lg border px-3 py-3 text-sm transition-colors ${displaySleepTimeoutMinutes === minutes ? 'border-[var(--loom-accent)]/55 bg-[var(--loom-accent)]/10 text-white ring-1 ring-inset ring-[var(--loom-accent)]/15' : 'border-[var(--loom-border)] bg-[var(--loom-surface-2)] text-white/70 hover:border-white/25 hover:bg-[var(--loom-surface-3)] hover:text-white'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button type="button" disabled={!displaySleepSettingsDirty} onClick={onDisplaySleepSave}>Save display timer</Button>
+          </div>
+        </CardContent>
+      </Card>}
 
       <Card className="settings-panel">
         <CardHeader>
@@ -405,22 +453,32 @@ export default function PlaybackSettingsSection({
             </div>
           </dl>
 
-          <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="font-medium text-white">LibVLC runtime</span>
-              <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
+          <div className="overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] divide-y divide-[var(--loom-panel-border)]">
+            <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+              <span className="font-medium text-white">LibVLC</span>
+              <span className="text-xs text-[var(--loom-faint)]">Primary local playback on macOS</span>
+              <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={libvlcAvailability?.libraryPath || libvlcAvailability?.warning || libvlcAvailability?.reason}>
                 {libvlcAvailability === null
                   ? 'Checking…'
                   : libvlcAvailability.available
-                    ? `Available${libvlcAvailability.version ? ` · ${libvlcAvailability.version}` : ''}`
-                    : libvlcAvailability.reason?.includes('held back')
-                      ? 'Held back for overlay safety'
-                      : 'Unavailable'}
+                    ? `Ready${libvlcAvailability.version ? ` · ${libvlcAvailability.version}` : ''}`
+                    : 'Unavailable'}
               </span>
             </div>
-            <p className="mt-2 break-all text-xs text-[var(--loom-muted)]">
-              {libvlcAvailability?.libraryPath || libvlcAvailability?.warning || libvlcAvailability?.reason || 'The desktop app is checking the bundled runtime.'}
-            </p>
+            <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+              <span className="font-medium text-white">mpv</span>
+              <span className="text-xs text-[var(--loom-faint)]">Optional local playback fallback</span>
+              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason}>
+                {mpvAvailability === null ? 'Not checked' : mpvAvailability.available ? `Ready${mpvAvailability.version ? ` · ${mpvAvailability.version}` : ''}` : 'Unavailable'}
+              </span>
+            </div>
+            <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
+              <span className="font-medium text-white">FFmpeg</span>
+              <span className="text-xs text-[var(--loom-faint)]">Media probing and incompatible-stream transcoding</span>
+              <span className={ffmpegStatus?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={ffmpegStatus?.path || undefined}>
+                {ffmpegStatus === null ? 'Checking…' : ffmpegStatus.available ? `Ready · ${isBundledFFmpegPath(ffmpegStatus.path) ? 'Bundled' : 'System'}` : 'Unavailable'}
+              </span>
+            </div>
           </div>
         </CardContent>
       </Card>

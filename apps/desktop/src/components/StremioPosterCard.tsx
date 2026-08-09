@@ -17,6 +17,9 @@ function artworkSources(item: StremioPluginCatalogItem): string[] {
     item.artwork?.poster,
     item.artwork?.background,
     item.artwork?.logo,
+    item.posterUrl,
+    item.backgroundUrl,
+    item.logoUrl,
   ].filter((value): value is string => Boolean(value))));
 }
 

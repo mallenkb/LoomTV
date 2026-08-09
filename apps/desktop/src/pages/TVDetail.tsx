@@ -16,7 +16,7 @@ import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkE
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
-import { getCachedDiscoverReturnRoute } from '@/lib/discoverNavigation';
+import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 
 interface TVDetailProps {
@@ -81,8 +81,8 @@ function showFromStremioCatalogItem(
   item: StremioPluginCatalogItem | null | undefined,
 ): TVShow | null {
   if (!item || !isCatalogTypeForKind(kind, item.type)) return null;
-  const poster = item.artwork?.poster || '';
-  const backdrop = item.artwork?.background || poster;
+  const poster = item.artwork?.poster || item.posterUrl || '';
+  const backdrop = item.artwork?.background || item.backgroundUrl || poster;
   return {
     id: item.id,
     type: item.type === 'anime' ? 'anime' : 'tv',
@@ -90,7 +90,7 @@ function showFromStremioCatalogItem(
     year: normalizeRouteYear(item.releaseInfo, item.released),
     poster,
     backdrop,
-    logo: item.artwork?.logo || '',
+    logo: item.artwork?.logo || item.logoUrl || '',
     summary: item.description || '',
     rating: item.rating || 0,
     genres: [...item.genres],
@@ -106,7 +106,7 @@ function showFromStremioCatalogItem(
     episodeFiles: [],
     posterCandidates: poster ? [poster] : [],
     backdropCandidates: backdrop ? [backdrop] : [],
-    logoCandidates: item.artwork?.logo ? [item.artwork.logo] : [],
+    logoCandidates: item.artwork?.logo || item.logoUrl ? [item.artwork?.logo || item.logoUrl || ''] : [],
   };
 }
 
@@ -132,14 +132,15 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [detailsReady, setDetailsReady] = useState(false);
   const routeState = (location.state as TVDetailRouteState | null) || null;
   const routeFallbackShow = useMemo(
-    () => showFromStremioCatalogItem(kind, routeState?.stremioCatalogItem),
-    [kind, routeState?.stremioCatalogItem],
+    () => showFromStremioCatalogItem(kind, routeState?.stremioCatalogItem || getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId) || undefined),
+    [kind, mediaId, routeState?.stremioCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
+  const [isRemoteStremioShow, setIsRemoteStremioShow] = useState(Boolean(routeState?.stremioCatalogItem));
   const routeAddonType = kind === 'anime'
     ? 'anime'
     : routeState?.stremioCatalogItem?.type === 'tv' ? 'tv' : 'series';
-  const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover'));
+  const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover') || isRemoteStremioShow);
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(shouldOpenDetailsFirst ? 'details' : 'episodes');
   const metadataFetchKeyRef = useRef('');
 
@@ -157,6 +158,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     // local library identity.
     const found = routeFallbackShow ? null : findLocalShowMatch(collection, mediaId);
     const nextShow = routeFallbackShow || found;
+    if (routeFallbackShow) setIsRemoteStremioShow(true);
+    else if (found) setIsRemoteStremioShow(false);
     setShow(nextShow);
     const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|${routeAddonType}|${mediaId}` : '';
     if (!nextShow && mediaId && metadataFetchKeyRef.current !== fetchKey) {
@@ -168,7 +171,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         .then((result) => {
           if (cancelled) return;
           const remoteShow = showFromStremioCatalogItem(kind, result.item);
-          if (remoteShow) setShow(remoteShow);
+          if (remoteShow) {
+            setShow(remoteShow);
+            setIsRemoteStremioShow(true);
+          }
         })
         .catch((error) => {
           if (!cancelled) console.warn('Could not load Discover series metadata:', error);
@@ -493,7 +499,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
   const sourceRoute = routeState?.from?.startsWith('/discover')
     ? routeState.from
-    : routeState?.fromDiscover
+    : routeState?.fromDiscover || isRemoteStremioShow
       ? getCachedDiscoverReturnRoute()
       : routeState?.from;
   const fallbackRoute = kind === 'anime' ? '/anime' : '/tv';
@@ -518,7 +524,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
         {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
-        {canManageProfiles && !routeState?.stremioCatalogItem && <ArtworkEditorControls
+        {canManageProfiles && !isRemoteStremioShow && <ArtworkEditorControls
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}
@@ -533,7 +539,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="loom-detail-back loom-no-drag fixed top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag fixed top-6 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           Back
@@ -595,7 +601,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 await setListEntry(show.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(show.id, 'favorite', false);
               })()}
-              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-lg border border-white/25 bg-black/30 text-white hover:bg-white/15"
+              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
               title={inMyList ? 'Remove from My List' : 'Add to My List'}
             >
               <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />
@@ -608,7 +614,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
       <div className="loom-detail-body loom-frame">
       <div className="loom-detail-content page-bottom-safe-lg p-8">
-        <div
+        {!shouldOpenDetailsFirst && <div
           className="mb-6 border-b border-[var(--loom-panel-border)]"
           role="tablist"
           aria-label="Title information"
@@ -638,9 +644,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             );
           })}
           </SharedListHighlight>
-        </div>
+        </div>}
 
-        {activeDetailTab === 'episodes' && (
+        {activeDetailTab === 'episodes' && !shouldOpenDetailsFirst && (
         <section
           id="detail-panel-episodes"
           role="tabpanel"
@@ -665,7 +671,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                   : 0;
 
                 return (
-                  <div key={season.number} className="overflow-hidden rounded-lg bg-[var(--loom-panel)]">
+                  <div key={season.number} className="loom-season-accordion overflow-hidden rounded-lg">
                     <div className="relative">
                     <button
                       type="button"
@@ -704,7 +710,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                     </div>
 
                     {isExpanded && (
-                      <SharedListHighlight className="loom-shared-highlight-episodes divide-y divide-[var(--loom-panel-border)] bg-[var(--loom-surface-2)]" >
+                      <SharedListHighlight className="loom-shared-highlight-episodes divide-y divide-[var(--loom-panel-border)]" >
                         <div id={`season-${season.number}-episodes`} className="contents">
                         {seasonEps.length > 0 ? seasonEps.map((episode) => (
                           <EpisodeRow
@@ -743,11 +749,12 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </section>
         )}
 
-        {activeDetailTab === 'details' && (
+        {(activeDetailTab === 'details' || shouldOpenDetailsFirst) && (
           <div
             id="detail-panel-details"
-            role="tabpanel"
-            aria-labelledby="detail-tab-details"
+            role={shouldOpenDetailsFirst ? 'region' : 'tabpanel'}
+            aria-label={shouldOpenDetailsFirst ? 'Title details' : undefined}
+            aria-labelledby={shouldOpenDetailsFirst ? undefined : 'detail-tab-details'}
             className="space-y-8"
           >
             {show.summary && (

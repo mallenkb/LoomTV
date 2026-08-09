@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Check, FolderPlus, Play, Plus, Search, Star, X } from 'lucide-react';
+import { Bookmark, CalendarDays, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, Tag, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { libraryMutationMessage, type MediaItem, type TVShow, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -9,7 +9,7 @@ import MediaPosterCard from '@/components/MediaPosterCard';
 import MediaRail from '@/components/MediaRail';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { backdropSources, posterSources, routeArtworkState } from '@/lib/artwork';
+import { backdropSources, logoSources, posterSources, routeArtworkState } from '@/lib/artwork';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { useProgressSnapshot } from '@/lib/progress';
 import { useTheme } from '@/components/ThemeProvider';
@@ -159,7 +159,7 @@ export default function ModernHome() {
   return (
     <div className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       {!searchOpen && (
-        <div className="loom-library-search-slot loom-no-drag pointer-events-auto fixed right-5 top-5 z-[55]">
+        <div className="loom-library-search-slot loom-no-drag pointer-events-auto fixed right-5 top-6 z-[55]">
           <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
         </div>
       )}
@@ -235,7 +235,7 @@ export default function ModernHome() {
             onSelect={setActiveHeroIndex}
             onHoverChange={setHeroHovered}
           />
-          <main className="loom-modern-content-frame page-bottom-safe relative z-10 -mt-24 space-y-10 px-[var(--loom-frame-inset)] pb-10">
+          <main className="loom-modern-content-frame page-bottom-safe relative z-10 mt-7 space-y-10 px-[var(--loom-frame-inset)] pb-10">
             {continueWatching.length > 0 && (
               <ContinueWatchingRail items={continueWatching} from={currentRoute} progress={progress} />
             )}
@@ -281,7 +281,7 @@ function ModernHomeSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading your library">
       <Skeleton className="h-[clamp(38rem,76vh,54rem)] w-full rounded-none" />
-      <div className="loom-modern-content-frame page-bottom-safe relative z-10 -mt-24 space-y-10 px-[var(--loom-frame-inset)] pb-10">
+      <div className="loom-modern-content-frame page-bottom-safe relative z-10 mt-7 space-y-10 px-[var(--loom-frame-inset)] pb-10">
         {['Continue Watching', 'Anime', 'TV Shows'].map((title) => (
           <section key={title}>
             <h2 className="mb-4 text-xl font-semibold text-[var(--loom-text)]">{title}</h2>
@@ -312,7 +312,15 @@ type HeroProps = {
 function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCount, mode, onSelect, onHoverChange }: HeroProps) {
   const prefersReducedMotion = useReducedMotion();
   const seasonCount = item.type === 'movie' ? 0 : availableSeasonCount(item as TVShow);
-  const metadata = [item.year > 0 ? item.year : null, seasonCount ? `${seasonCount} ${seasonCount === 1 ? 'Season' : 'Seasons'}` : null, ...item.genres.slice(0, 2)].filter(Boolean).join(' • ');
+  const metadataGenres = item.genres.slice(0, 2);
+  const [headline, kicker] = splitHeroTitle(item.title);
+  const metadata = [item.year > 0 ? item.year : null, seasonCount ? `${seasonCount} ${seasonCount === 1 ? 'Season' : 'Seasons'}` : null].filter(Boolean);
+  const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
+  const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
+  const heroLogoSources = useMemo(() => logoSources(item), [item]);
+  const [logoFailed, setLogoFailed] = useState(false);
+  useEffect(() => setLogoFailed(false), [item.id]);
+  const showsHeroLogo = heroLogoSources.length > 0 && !logoFailed;
   const artworkTransition = prefersReducedMotion
     ? { duration: 0 }
     : { duration: 0.8, ease: [0.22, 1, 0.36, 1] as const };
@@ -321,7 +329,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
     : { duration: 0.42, ease: [0.22, 1, 0.36, 1] as const };
   return (
     <section
-      className="loom-modern-hero relative h-[clamp(38rem,76vh,54rem)] overflow-hidden bg-[var(--loom-bg)] text-white"
+      className="loom-modern-hero relative h-[clamp(38rem,76vh,43.2rem)] overflow-hidden bg-[var(--loom-bg)] text-white"
       aria-label={mode === 'continue-watching' ? 'Continue watching' : 'Featured titles'}
       aria-roledescription={mode === 'featured' ? 'carousel' : undefined}
       onPointerEnter={() => onHoverChange(true)}
@@ -354,53 +362,114 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
         </AnimatePresence>
         <div className="loom-modern-hero-vignette absolute inset-0" />
       </div>
-      <div className="loom-modern-content-frame loom-modern-hero-frame relative z-10 flex h-full items-stretch">
+      <div className="loom-modern-content-frame loom-modern-hero-frame relative z-10 flex h-full items-end">
         <AnimatePresence initial={false} mode="wait">
           <motion.div
             key={`hero-copy-${item.id}`}
-            className="flex w-full max-w-3xl flex-col justify-center px-[var(--loom-frame-inset)] pb-24 pt-64"
+            className="loom-modern-hero-copy flex w-full max-w-3xl flex-col px-[var(--loom-frame-inset)] pt-10"
             initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: -22 }}
             animate={{ opacity: 1, x: 0 }}
             exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, x: 14 }}
             transition={copyTransition}
           >
-            <h1 className="font-semibold leading-[0.94] tracking-[-0.045em] drop-shadow-2xl text-[clamp(2.64rem,5vw,3.96rem)]">{item.title}</h1>
-            <div className="mt-5 flex flex-wrap items-center gap-3 text-sm font-medium text-[var(--loom-on-media-muted)]">
+            {showsHeroLogo ? (
+              <img
+                src={heroLogoSources[0]}
+                alt={item.title}
+                decoding="async"
+                fetchPriority="high"
+                className="max-h-[clamp(4rem,11.2vh,8rem)] w-[min(24rem,41.6vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                onError={() => setLogoFailed(true)}
+              />
+            ) : (
+              <>
+                <h1
+                  className="max-w-2xl text-[clamp(2.25rem,4.2vw,3.75rem)] leading-[0.9] tracking-[-0.045em] drop-shadow-2xl"
+                  style={{
+                    transform: 'skew(-7deg)',
+                    transformOrigin: 'left top',
+                    textShadow: '0 4px 0 rgba(0,0,0,0.42), 3px 4px 0 rgba(0,0,0,0.35)',
+                    color: 'var(--loom-accent)',
+                    WebkitTextStroke: '2px rgb(0 23 46 / 0.95)',
+                    paintOrder: 'stroke fill',
+                  }}
+                >
+                  {headline}
+                </h1>
+                {kicker && (
+                  <div className="mt-2 text-lg font-semibold italic tracking-[-0.028em] text-[#ffc627]/95 drop-shadow-[0_2px_3px_rgba(0,0,0,0.7)] sm:text-2xl">
+                    {kicker}
+                  </div>
+                )}
+              </>
+            )}
+            <div className="loom-modern-hero-text mt-5 flex flex-wrap items-center gap-3 text-sm text-[var(--loom-on-media-muted)]">
               {item.rating > 0 && (
-                <span className="loom-rating flex items-center gap-1">
+                <span className="loom-rating inline-flex items-center gap-1.5">
                   <Star className="h-4 w-4" fill="currentColor" />
                   {item.rating.toFixed(1)}
                 </span>
               )}
-              {metadata && <span>{metadata}</span>}
+              {metadata.length > 0 && <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-4 w-4" />{metadata.join(' • ')}</span>}
+              {metadataGenres.length > 0 && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Tag className="h-4 w-4" />
+                  {metadataGenres.join(', ')}
+                </span>
+              )}
             </div>
-            <div className="mt-7 flex items-center gap-[6px]">
-              <Link to={mediaLink(item)} state={{ from, artwork: routeArtworkState(item, posterSources(item)) }} className="inline-flex h-14 items-center rounded-full bg-white px-7 text-sm font-bold text-black transition-transform hover:scale-[1.02]">
-                View details
+
+            <p className="loom-modern-hero-text mt-5 max-w-[33.6rem] text-sm leading-7 text-[var(--loom-on-media)] sm:text-base line-clamp-2">
+              {heroSummary}
+            </p>
+
+            <div className="mt-7 flex items-center gap-3">
+              <Link
+                to={mediaLink(item)}
+                state={linkState}
+                className="inline-flex h-14 items-center gap-2.5 rounded-full bg-white px-8 text-base font-bold text-black"
+              >
+                <Clapperboard className="h-5 w-5 fill-black" />
+                <span>Play</span>
               </Link>
-              <button type="button" onClick={onToggleWatchlist} aria-label={inWatchlist ? `Remove ${item.title} from My List` : `Add ${item.title} to My List`} className="grid h-14 w-14 place-items-center rounded-full border border-[var(--loom-media-hairline-strong)] bg-[var(--loom-media-scrim)] backdrop-blur-xl transition-colors hover:bg-[var(--loom-media-veil-hover)]">
-                {inWatchlist ? <Check className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
-              </button>
+
+              <div className="inline-flex h-14 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
+                <button
+                  type="button"
+                  onClick={onToggleWatchlist}
+                  aria-label={inWatchlist ? `Remove ${item.title} from My List` : `Add ${item.title} to My List`}
+                  className="grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+                >
+                  <Bookmark className={`h-5 w-5 ${inWatchlist ? 'fill-current' : ''}`} />
+                </button>
+                <span className="my-auto inline-block h-7 w-px bg-white/20" />
+                <Link
+                  to={mediaLink(item)}
+                  state={linkState}
+                  className="grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+                  aria-label={`Open details for ${item.title}`}
+                >
+                  <CircleHelp className="h-5 w-5" />
+                </Link>
+              </div>
             </div>
           </motion.div>
         </AnimatePresence>
+        {itemCount > 1 && (
+          <div className="loom-modern-hero-pager absolute right-[var(--loom-frame-inset)] z-20 flex h-14 items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.55)]">
+            {Array.from({ length: itemCount }).map((_, index) => (
+              <button
+                key={`hero-dot-${index}`}
+                type="button"
+                aria-label={`Show featured title ${index + 1} of ${itemCount}`}
+                aria-current={activeIndex === index ? 'true' : undefined}
+                onClick={() => onSelect(index)}
+                className={`h-1.5 rounded-full transition-[width,background-color] duration-300 ${activeIndex === index ? 'w-8 bg-[var(--loom-on-media)]' : 'w-1.5 bg-[var(--loom-media-hairline-strong)] hover:bg-[var(--loom-on-media)]'}`}
+              />
+            ))}
+          </div>
+        )}
       </div>
-      {/* Dots only: no chrome, no arrows, no pause. Each dot is its own button,
-          so this stays fully keyboard reachable without the control cluster. */}
-      {itemCount > 1 && (
-        <div className="absolute bottom-28 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.55)]">
-          {Array.from({ length: itemCount }).map((_, index) => (
-            <button
-              key={`hero-dot-${index}`}
-              type="button"
-              aria-label={`Show featured title ${index + 1} of ${itemCount}`}
-              aria-current={activeIndex === index ? 'true' : undefined}
-              onClick={() => onSelect(index)}
-              className={`h-1.5 rounded-full transition-[width,background-color] duration-300 ${activeIndex === index ? 'w-8 bg-[var(--loom-on-media)]' : 'w-1.5 bg-[var(--loom-media-hairline-strong)] hover:bg-[var(--loom-on-media)]'}`}
-            />
-          ))}
-        </div>
-      )}
       {/* Announce slide changes without moving focus. */}
       <p className="sr-only" aria-live="polite">
         {mode === 'continue-watching'
@@ -409,6 +478,12 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, activeIndex, itemCou
       </p>
     </section>
   );
+}
+
+function splitHeroTitle(title: string): [string, string] {
+  const withLineBreak = title.split(':').map((part) => part.trim()).filter(Boolean);
+  if (withLineBreak.length <= 1) return [title, ''];
+  return [withLineBreak[0], withLineBreak.slice(1).join(':')];
 }
 
 function PosterRail({ title, items, from }: { title: string; items: MediaItem[]; from: string }) {
@@ -462,7 +537,7 @@ function ContinueWatchingCard({
       state={{ from, artwork: routeArtworkState(item, posterSources(item)) }}
       className="loom-continue-watching-card group block w-[280px] flex-none"
     >
-      <div className="relative aspect-video overflow-hidden rounded-2xl border border-[var(--loom-media-hairline)] bg-[var(--loom-media-veil)] shadow-lg transition-colors group-hover:border-[var(--loom-media-hairline-strong)]">
+      <div className="relative aspect-video overflow-hidden rounded-2xl bg-[var(--loom-media-veil)] shadow-lg">
         <SafeArtwork
           src={backdropSources(item)}
           alt={item.title}

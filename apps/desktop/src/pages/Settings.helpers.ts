@@ -7,9 +7,9 @@ export type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'profiles', label: 'Profiles' },
   { id: 'library', label: 'Library' },
+  { id: 'network', label: 'Network' },
   { id: 'playback', label: 'Playback' },
   { id: 'plugins', label: 'Plugins' },
-  { id: 'network', label: 'Network' },
   { id: 'metadata', label: 'Metadata API Keys' },
   { id: 'theme', label: 'Theme' },
   { id: 'about', label: 'About' },
@@ -50,6 +50,7 @@ export const THIRD_PARTY_DEPENDENCIES = [
   { name: 'PostCSS', owner: 'Andrey Sitnik and PostCSS contributors', license: 'MIT', url: 'https://postcss.org/' },
   { name: 'better-sqlite3', owner: 'Joshua Wise and contributors', license: 'MIT', url: 'https://github.com/WiseLibs/better-sqlite3' },
   { name: 'LibVLC / VLC media engine', owner: 'VideoLAN', license: 'LGPL-2.1+ core*', url: 'https://www.videolan.org/legal.html' },
+  { name: 'mpv media player', owner: 'mpv contributors', license: 'GPL-2.0-or-later*', url: 'https://github.com/mpv-player/mpv' },
   { name: 'clsx', owner: 'Luke Edwards', license: 'MIT', url: 'https://github.com/lukeed/clsx' },
   { name: 'electron-squirrel-startup', owner: 'MongoDB, Inc. and contributors', license: 'Apache-2.0', url: 'https://github.com/mongodb-js/electron-squirrel-startup' },
   { name: 'hls.js', owner: 'video-dev contributors', license: 'Apache-2.0', url: 'https://github.com/video-dev/hls.js' },

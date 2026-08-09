@@ -77,7 +77,7 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
     : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
 
   return (
-    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-5 z-50 flex justify-center px-5">
+    <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-6 z-50 flex justify-center px-5">
       <nav
         className="loom-modern-category-pill loom-no-drag h-12 rounded-full border p-1 backdrop-blur-2xl"
         aria-label="Library categories"
@@ -187,7 +187,15 @@ function SettingsNavSolidExactIcon({ className }: { className?: string }) {
   </svg>;
 }
 
-function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
+function SidebarProfileSwitcher({
+  compact = false,
+  isScanning,
+  onQuickScan,
+}: {
+  compact?: boolean;
+  isScanning: boolean;
+  onQuickScan: () => void;
+}) {
   const { activeProfile, canCreateProfiles, canManageProfiles, openGate, profiles, selectProfile } = useProfiles();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -321,6 +329,23 @@ function SidebarProfileSwitcher({ compact = false }: { compact?: boolean }) {
               </button>
             </>
           )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={isScanning}
+            onClick={() => {
+              setMenuOpen(false);
+              onQuickScan();
+            }}
+            data-shared-highlight-item
+            data-shared-highlight-id="quick-scan"
+            className="relative z-10 flex h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm font-medium text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--loom-accent)] disabled:cursor-default disabled:opacity-60"
+          >
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--loom-surface-2)]">
+              <RefreshCw className={cn('h-4 w-4', isScanning && 'animate-spin')} />
+            </span>
+            {isScanning ? 'Scanning…' : 'Quick scan'}
+          </button>
           <Link
             to="/settings"
             role="menuitem"
@@ -543,7 +568,7 @@ export default function Sidebar() {
               </span>
             </button>
           )}
-          <SidebarProfileSwitcher compact />
+          <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
         </aside>
         {!location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
       </>
@@ -634,7 +659,7 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-1">
-          <SidebarProfileSwitcher />
+          <SidebarProfileSwitcher isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
           <button
             type="button"
             onClick={() => void handleScanLibrary()}

@@ -11,7 +11,7 @@ import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
-import { getCachedDiscoverReturnRoute } from '@/lib/discoverNavigation';
+import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { useTheme } from '@/components/ThemeProvider';
@@ -106,8 +106,8 @@ function normalizeRouteYear(releaseInfo?: string, released?: string): number {
 
 function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | undefined): MediaItem | null {
   if (!item || item.type !== 'movie') return null;
-  const poster = item.artwork?.poster || '';
-  const backdrop = item.artwork?.background || poster;
+  const poster = item.artwork?.poster || item.posterUrl || '';
+  const backdrop = item.artwork?.background || item.backgroundUrl || poster;
   return {
     id: item.id,
     type: 'movie',
@@ -115,7 +115,7 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
     year: normalizeRouteYear(item.releaseInfo, item.released),
     poster,
     backdrop,
-    logo: item.artwork?.logo || '',
+    logo: item.artwork?.logo || item.logoUrl || '',
     summary: item.description || '',
     rating: item.rating || 0,
     genres: [...item.genres],
@@ -128,7 +128,7 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
     subtitles: [],
     posterCandidates: poster ? [poster] : [],
     backdropCandidates: backdrop ? [backdrop] : [],
-    logoCandidates: item.artwork?.logo ? [item.artwork.logo] : [],
+    logoCandidates: item.artwork?.logo || item.logoUrl ? [item.artwork?.logo || item.logoUrl || ''] : [],
   };
 }
 
@@ -152,11 +152,11 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const metadataFetchKeyRef = useRef('');
   const routeState = (location.state as MovieDetailRouteState | null) || null;
   const routeFallbackMovie = useMemo(
-    () => mediaFromStremioCatalogItem(routeState?.stremioCatalogItem),
-    [routeState?.stremioCatalogItem],
+    () => mediaFromStremioCatalogItem(routeState?.stremioCatalogItem || getCachedExploreItem('movie', mediaId) || undefined),
+    [mediaId, routeState?.stremioCatalogItem],
   );
   const routeAddonId = routeState?.addonId;
-  const isRemoteStremioMovie = Boolean(routeState?.stremioCatalogItem);
+  const [isRemoteStremioMovie, setIsRemoteStremioMovie] = useState(Boolean(routeState?.stremioCatalogItem));
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +165,8 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     // until the host supplies an explicit provider-to-library binding.
     const found = routeFallbackMovie ? null : findLocalMovieMatch(state.movies, mediaId);
     const nextMovie = routeFallbackMovie || found;
+    if (routeFallbackMovie) setIsRemoteStremioMovie(true);
+    else if (found) setIsRemoteStremioMovie(false);
     setMovie(nextMovie);
     const fetchKey = mediaId ? `${routeAddonId || 'opaque'}|movie|${mediaId}` : '';
     if (!nextMovie && mediaId && metadataFetchKeyRef.current !== fetchKey) {
@@ -176,7 +178,10 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         .then((result) => {
           if (cancelled) return;
           const remoteMovie = mediaFromStremioCatalogItem(result.item);
-          if (remoteMovie) setMovie(remoteMovie);
+          if (remoteMovie) {
+            setMovie(remoteMovie);
+            setIsRemoteStremioMovie(true);
+          }
         })
         .catch((error) => {
           if (!cancelled) console.warn('Could not load Discover movie metadata:', error);
@@ -314,7 +319,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
 
   const sourceRoute = routeState?.from?.startsWith('/discover')
     ? routeState.from
-    : routeState?.fromDiscover
+    : routeState?.fromDiscover || isRemoteStremioMovie
       ? getCachedDiscoverReturnRoute()
       : routeState?.from;
   const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/') ? sourceRoute : '/movies';
@@ -351,7 +356,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         <button
           type="button"
           onClick={handleBack}
-          className="loom-detail-back loom-no-drag fixed top-4 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag fixed top-6 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ArrowLeft className="w-5 h-5" />
           Back
@@ -435,7 +440,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
                 await setListEntry(movie.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(movie.id, 'favorite', false);
               })()}
-              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-lg border border-white/25 bg-black/30 text-white hover:bg-white/15"
+              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
               title={inMyList ? 'Remove from My List' : 'Add to My List'}
             >
               <Bookmark className={`h-5 w-5 ${inMyList ? 'fill-current' : ''}`} />

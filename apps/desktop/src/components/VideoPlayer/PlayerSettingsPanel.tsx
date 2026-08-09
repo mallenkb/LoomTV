@@ -36,6 +36,16 @@ const ROTATION_OPTIONS: { value: RotationMode; label: string }[] = [
   { value: 270, label: '270°' },
 ];
 
+const DISPLAY_SLEEP_OPTIONS = [
+  { value: 0, label: 'Never while playing' },
+  { value: 15, label: 'After 15 minutes' },
+  { value: 30, label: 'After 30 minutes' },
+  { value: 45, label: 'After 45 minutes' },
+  { value: 60, label: 'After 1 hour' },
+  { value: 90, label: 'After 1.5 hours' },
+  { value: 120, label: 'After 2 hours' },
+] as const;
+
 function colorInputValue(value: string): string {
   return /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
 }
@@ -103,6 +113,12 @@ interface PlayerSettingsPanelProps {
   setRotation: (rotation: RotationMode) => void;
   playbackRate: number;
   setPlaybackRate: (rate: number) => void;
+  displaySleepSettingsAvailable: boolean;
+  displaySleepTimeoutMinutes: number;
+  displaySleepTimerRemainingSeconds: number | null;
+  playbackPaused: boolean;
+  displaySleepTimeoutError?: string;
+  setDisplaySleepTimeoutMinutes: (minutes: number) => void;
   playbackInformation: {
     engine: string;
     mode: string;
@@ -149,6 +165,12 @@ export default function PlayerSettingsPanel({
   setRotation,
   playbackRate,
   setPlaybackRate,
+  displaySleepSettingsAvailable,
+  displaySleepTimeoutMinutes,
+  displaySleepTimerRemainingSeconds,
+  playbackPaused,
+  displaySleepTimeoutError,
+  setDisplaySleepTimeoutMinutes,
   playbackInformation,
   audioTracks,
   selectedAudioTrackIndex,
@@ -303,6 +325,38 @@ export default function PlayerSettingsPanel({
                   <span>4x</span>
                 </div>
               </div>
+
+              {displaySleepSettingsAvailable && <section className="rounded-lg border border-white/10 bg-white/[0.04] p-3" aria-labelledby="display-sleep-heading">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 id="display-sleep-heading" className="text-xs font-semibold text-white">Display sleep timer</h3>
+                    <p className="mt-1 text-[10px] text-white/70">Pausing resets the countdown.</p>
+                  </div>
+                  <span className="shrink-0 rounded-md bg-white/10 px-2 py-1 font-mono text-xs text-[var(--loom-accent)]" aria-live="polite">
+                    {displaySleepTimeoutMinutes === 0
+                      ? 'Never'
+                      : playbackPaused
+                        ? 'Paused'
+                        : `${String(Math.floor((displaySleepTimerRemainingSeconds || 0) / 60)).padStart(2, '0')}:${String((displaySleepTimerRemainingSeconds || 0) % 60).padStart(2, '0')}`}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  {DISPLAY_SLEEP_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setDisplaySleepTimeoutMinutes(option.value)}
+                      aria-pressed={displaySleepTimeoutMinutes === option.value}
+                      className={`rounded-md border px-2 py-2 text-xs transition-colors ${displaySleepTimeoutMinutes === option.value ? 'border-[var(--loom-accent)]/55 bg-[var(--loom-accent)]/10 text-white ring-1 ring-inset ring-[var(--loom-accent)]/15' : 'border-white/10 bg-white/[0.06] text-white/65 hover:border-white/20 hover:bg-white/10 hover:text-white'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className={`mt-2 text-[10px] ${displaySleepTimeoutError ? 'text-red-300' : 'text-white/70'}`} role={displaySleepTimeoutError ? 'alert' : undefined}>
+                  {displaySleepTimeoutError || (displaySleepTimeoutMinutes === 0 ? 'The display stays awake until playback stops or pauses.' : 'The display may sleep when the countdown reaches zero.')}
+                </p>
+              </section>}
 
               <section
                 className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2"

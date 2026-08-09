@@ -148,6 +148,7 @@ const desktopApi = {
     autoSyncIntervalHours?: number;
     playbackSkipBackSeconds?: number;
     playbackSkipForwardSeconds?: number;
+    playbackDisplaySleepTimeoutMinutes?: number;
     localSkipAnalysisEnabled?: boolean;
     sidebarNavOrder?: string[];
     appThemeMode?: 'dark' | 'light';

@@ -130,7 +130,7 @@ export function useRailScroll() {
 
 const ARROW_CLASS: Record<RailVariant, string> = {
   classic: 'h-10 w-10 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md',
-  modern: 'h-9 w-9 rounded-full border border-[var(--loom-panel-border)] bg-[var(--loom-panel)] text-[var(--loom-muted)] backdrop-blur-md',
+  modern: 'h-9 w-9 rounded-full bg-[var(--loom-control-veil)] text-[var(--loom-text)] backdrop-blur-[12px]',
 };
 
 const TITLE_CLASS: Record<RailVariant, string> = {

@@ -12,6 +12,7 @@ const RENDERER_SETTINGS_WRITE_KEYS = new Set<keyof SettingsPayload>([
   'autoSyncIntervalHours',
   'playbackSkipBackSeconds',
   'playbackSkipForwardSeconds',
+  'playbackDisplaySleepTimeoutMinutes',
   'localSkipAnalysisEnabled',
   'skipAnalysis',
   'sidebarNavOrder',
@@ -40,6 +41,7 @@ export function settingsForRenderer(settings: AppSettings): SettingsPayload {
     autoSyncIntervalHours: settings.autoSyncIntervalHours,
     playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
     playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+    playbackDisplaySleepTimeoutMinutes: settings.playbackDisplaySleepTimeoutMinutes,
     localSkipAnalysisEnabled: settings.localSkipAnalysisEnabled,
     skipAnalysis: settings.skipAnalysis,
     sidebarNavOrder: settings.sidebarNavOrder,
@@ -60,6 +62,7 @@ export function settingsPreferencesForRenderer(settings: AppSettings): SettingsP
     appLoaderStyle: settings.appLoaderStyle,
     playbackSkipBackSeconds: settings.playbackSkipBackSeconds,
     playbackSkipForwardSeconds: settings.playbackSkipForwardSeconds,
+    playbackDisplaySleepTimeoutMinutes: settings.playbackDisplaySleepTimeoutMinutes,
   };
 }
 

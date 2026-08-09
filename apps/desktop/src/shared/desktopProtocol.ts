@@ -243,6 +243,8 @@ export interface SettingsPayload {
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
+  /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
+  playbackDisplaySleepTimeoutMinutes?: number;
   localSkipAnalysisEnabled?: boolean;
   skipAnalysis?: SkipAnalysisSettings;
   sidebarNavOrder?: string[];
@@ -709,6 +711,10 @@ export interface StremioPluginCatalogItem {
   title: string;
   genres: readonly string[];
   artwork?: StremioPluginArtworkReferences;
+  /** Renderer-owned provider artwork used by the standalone Explore sources. */
+  posterUrl?: string;
+  backgroundUrl?: string;
+  logoUrl?: string;
   cast?: readonly StremioPluginCastMember[];
   description?: string;
   releaseInfo?: string;

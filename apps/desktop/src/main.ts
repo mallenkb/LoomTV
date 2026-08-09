@@ -43,6 +43,7 @@ import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
 import { createLanSecurity, type LanPairingApprovalPrompt } from './main/lanSecurity';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
+import { refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
 import {
   registerResource,
@@ -1355,6 +1356,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   saveSettings,
   onSettingsSaved: () => {
     analysisCoordinator.settingsChanged();
+    refreshNativePlaybackDisplaySleepTimeout();
     if (!loadSettings().localNetworkSharingEnabled) stopTranscodesForScope('lan:');
   },
   syncLanAdvertisement,

@@ -419,7 +419,7 @@ export default function ArtworkEditorControls({
     <>
       <div
         ref={artworkMenuRef}
-        className="loom-artwork-editor-controls loom-no-drag fixed top-4 z-50 flex items-center gap-2"
+        className="loom-artwork-editor-controls loom-no-drag fixed top-6 z-50 flex items-center gap-2"
       >
         <Button
           type="button"
