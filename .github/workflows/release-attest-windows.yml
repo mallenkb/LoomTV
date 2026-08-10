@@ -36,7 +36,8 @@ jobs:
       - name: Enforce Windows-only attestation subjects
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: node scripts/verify-attestation-input.cjs release-subjects Windows "$RELEASE_TAG"
+        shell: pwsh
+        run: node scripts/verify-attestation-input.cjs release-subjects Windows "$env:RELEASE_TAG"
 
       - name: Generate trusted Windows GitHub/SLSA attestations
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
