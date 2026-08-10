@@ -26,7 +26,7 @@ const TARGET_MATRIX = Object.freeze([
     stem: 'mac-arm64',
     installerExtensions: Object.freeze(['dmg', 'zip']),
     updaterMetadata: 'latest-mac.yml',
-    updaterExtensions: Object.freeze(['zip']),
+    updaterExtensions: Object.freeze(['dmg', 'zip']),
   }),
   Object.freeze({
     id: 'mac-x64',
@@ -35,7 +35,7 @@ const TARGET_MATRIX = Object.freeze([
     stem: 'mac-x64',
     installerExtensions: Object.freeze(['dmg', 'zip']),
     updaterMetadata: 'latest-mac.yml',
-    updaterExtensions: Object.freeze(['zip']),
+    updaterExtensions: Object.freeze(['dmg', 'zip']),
   }),
   Object.freeze({
     id: 'win-x64',
@@ -58,7 +58,7 @@ const TARGET_MATRIX = Object.freeze([
     }),
     installerExtensions: Object.freeze(['deb', 'rpm', 'AppImage']),
     updaterMetadata: 'latest-linux.yml',
-    updaterExtensions: Object.freeze(['AppImage']),
+    updaterExtensions: Object.freeze(['deb', 'rpm', 'AppImage']),
   }),
 ]);
 

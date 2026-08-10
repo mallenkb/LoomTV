@@ -377,6 +377,7 @@ Bundled third-party tools and dependencies remain under their own licenses. In p
 - [LoomTV 1.0.115](docs/releases/v1.0.115.md): fixes release attestation inputs and Linux artifact naming for the desktop installers.
 - [LoomTV 1.0.116](docs/releases/v1.0.116.md): restores automatic desktop updates with a complete, attested multi-platform release.
 - [LoomTV 1.0.117](docs/releases/v1.0.117.md): fixes desktop release artifact filtering and refreshes the Discover page header layout.
+- [LoomTV 1.0.118](docs/releases/v1.0.118.md): aligns updater evidence with the desktop installers published by electron-builder.
 - [LoomTV 1.0.112](docs/releases/v1.0.112.md): refines desktop Discover browsing and enhances anime cast display.
 - [LoomTV 1.0.110](docs/releases/v1.0.110.md): improves macOS MPV compatibility and avoids unnecessary fallback-runtime checks during playback.
 - [LoomTV 1.0.109](docs/releases/v1.0.109.md): replaces raw updater filesystem errors with concise, actionable status messages.
