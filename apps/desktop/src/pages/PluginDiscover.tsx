@@ -2104,7 +2104,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   return (
     <div ref={pageRef} className={isHome ? 'mt-10' : 'loom-page loom-library-page h-full overflow-y-auto'}>
       <div className={`${frameClass} ${isHome ? 'rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-surface)] p-5 sm:p-6' : 'loom-library-page-frame page-bottom-safe page-list-bottom-safe'} ${isHome ? 'pt-0' : topPaddingClass}`}>
-        <header className="loom-library-page-heading sticky top-0 z-30 mb-6 flex min-h-8 flex-wrap items-start justify-between gap-4 bg-[var(--loom-bg)] py-2 backdrop-blur-xl">
+        <header className="loom-library-page-heading sticky top-0 z-40 isolate mb-6 flex min-h-8 shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[var(--loom-border)] bg-[var(--loom-bg)] py-3 shadow-[0_12px_24px_-22px_rgb(0_0_0_/_0.9)] backdrop-blur-xl">
           <div className="flex w-full min-w-0 flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">{isHome ? 'Browse more titles' : 'Discover'}</h1>

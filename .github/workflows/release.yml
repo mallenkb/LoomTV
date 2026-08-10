@@ -251,6 +251,7 @@ jobs:
             apps/desktop/out/builder/**/*.dmg
             apps/desktop/out/builder/**/*.zip
             apps/desktop/out/builder/**/*.exe
+            !apps/desktop/out/builder/**/win-unpacked/**
             apps/desktop/out/builder/**/*.deb
             apps/desktop/out/builder/**/*.rpm
             apps/desktop/out/builder/**/*.AppImage
