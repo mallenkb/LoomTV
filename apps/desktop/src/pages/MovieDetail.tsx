@@ -9,7 +9,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
-import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
+import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
@@ -19,7 +19,7 @@ import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import { preferredContentRating } from '@/components/ContentRatingBadge';
 import WatchedToggle from '@/components/WatchedToggle';
-import { cacheWatchedDiscoverItem, discoverWatchedKey, localWatchedKey } from '@/lib/watched';
+import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKey } from '@/lib/watched';
 
 type MovieDetailRouteState = {
   from?: string;
@@ -340,7 +340,9 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const watchedKey = isRemoteContent
     ? discoverWatchedKey({ id: movie.id, type: 'movie', source: routeCatalogItem?.source })
     : localWatchedKey(movie.id);
-  const isWatched = watchedKeys.has(watchedKey);
+  const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
+  const watchedByProgress = !isRemoteContent && progress.watched;
+  const isWatched = watchedByProgress || watchedKeys.has(watchedKey);
   const sourceArtwork = routeState?.artwork;
   const { heroArtwork, posterArtwork, heroKey, posterKey } = resolveMovieArtwork(
     customArtwork,
@@ -360,7 +362,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     backdropCandidates: heroArtwork,
     rating: movie.rating,
   };
-  const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
   const hasResumeProgress = progress.inProgress;
   const progressPercent = Math.min(100, Math.max(0, progress.fraction * 100));
   const progressCopy = progress.duration > 0
@@ -491,7 +492,9 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
                 watched={isWatched}
                 onToggle={() => {
                   if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
-                  void setWatched(watchedKey, !isWatched);
+                  const present = !isWatched;
+                  if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(movie));
+                  void setWatched(watchedKey, present);
                 }}
                 className={`h-14 w-14 bg-white/10 text-white/80 ${isWatched ? 'hover:bg-white/10' : 'hover:bg-[var(--loom-active-bg)]'}`}
                 label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}

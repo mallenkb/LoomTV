@@ -10,7 +10,7 @@ import { desktopApi } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { WatchedSolidIcon } from '@/components/LoomIcons';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
-import { getProgressState, useProgressRefreshRevision } from '@/lib/progress';
+import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
@@ -23,7 +23,7 @@ import HeroMetadata from '@/components/HeroMetadata';
 import { preferredContentRating } from '@/components/ContentRatingBadge';
 import { normalizeAnimeCast } from '@/shared/animeCast';
 import WatchedToggle from '@/components/WatchedToggle';
-import { cacheWatchedDiscoverItem, discoverWatchedKey, localWatchedKeysForItem } from '@/lib/watched';
+import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -721,7 +721,11 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const watchedEntryKeys = isRemoteContent
     ? [discoverWatchedKey({ id: show.id, type: routeCatalogItem?.type || (kind === 'anime' ? 'anime' : 'tv'), source: routeCatalogItem?.source })]
     : localWatchedKeysForItem(show);
-  const isWatched = watchedEntryKeys.length > 0 && watchedEntryKeys.every((key) => watchedKeys.has(key));
+  const episodeFiles = show.episodeFiles || [];
+  const watchedByProgress = !isRemoteContent
+    && episodeFiles.length > 0
+    && episodeFiles.every((file) => getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched);
+  const isWatched = watchedByProgress || (watchedEntryKeys.length > 0 && watchedEntryKeys.every((key) => watchedKeys.has(key)));
   const heroIsResume = Boolean(resumeEpisode);
   const heroProgress = heroEpisode
     ? getProgressState(heroEpisode.filePath, heroEpisode.localMetadata?.durationSeconds)
@@ -940,7 +944,9 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                 watched={isWatched}
                 onToggle={() => {
                   if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
-                  void setWatchedEntries(watchedEntryKeys, !isWatched);
+                  const present = !isWatched;
+                  if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(show));
+                  void setWatchedEntries(watchedEntryKeys, present);
                 }}
                 className={`h-14 w-14 bg-white/10 text-white/80 ${isWatched ? 'hover:bg-white/10' : 'hover:bg-[var(--loom-active-bg)]'}`}
                 label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}

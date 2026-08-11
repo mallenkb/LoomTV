@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { backdropSources, logoSources, posterSources, routeArtworkState } from '@/lib/artwork';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
-import { useProgressSnapshot } from '@/lib/progress';
+import { resetProgress, useProgressSnapshot } from '@/lib/progress';
 import { useTheme } from '@/components/ThemeProvider';
 import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
@@ -22,7 +22,7 @@ import { useModalLayer } from '@/components/ui/dialog';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 import WatchedToggle from '@/components/WatchedToggle';
-import { isLocalItemWatched, localWatchedKeysForItem } from '@/lib/watched';
+import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 
 export default function ModernHome() {
   const { state, addLibraryFolder } = useLibrary();
@@ -72,9 +72,13 @@ export default function ModernHome() {
       progress[item.filePath]?.updatedAt || 0,
       ...(item.episodeFiles || []).map((episode) => progress[episode.filePath]?.updatedAt || 0),
     );
+    const hasPlaybackProgress = (item: MediaItem): boolean => (
+      (progress[item.filePath]?.position || 0) > 10
+      || (item.episodeFiles || []).some((episode) => (progress[episode.filePath]?.position || 0) > 10)
+    );
     return visibleItems
       .map((item) => [item, recency(item)] as const)
-      .filter(([item, updatedAt]) => updatedAt > 0 && !matchesLibraryFilter(item, 'watched', progress))
+      .filter(([item, updatedAt]) => updatedAt > 0 && hasPlaybackProgress(item) && !matchesLibraryFilter(item, 'watched', progress))
       .sort((left, right) => right[1] - left[1])
       .map(([item]) => item);
   }, [progress, visibleItems]);
@@ -103,8 +107,15 @@ export default function ModernHome() {
   const usesContinueWatchingHero = theme.modernHeroMode === 'continue-watching' && continueWatching.length > 0;
   const heroItems = usesContinueWatchingHero ? continueWatching.slice(0, 1) : featuredHeroItems;
   const hero = heroItems[activeHeroIndex] || heroItems[0];
-  const heroWatched = hero ? isLocalItemWatched(hero, watchedKeys) : false;
+  const heroWatchedByProgress = hero ? matchesLibraryFilter(hero, 'watched', progress) : false;
+  const heroWatched = heroWatchedByProgress || (hero ? isLocalItemWatched(hero, watchedKeys) : false);
   const myListIds = listState.myListIds;
+  const toggleHeroWatched = () => {
+    if (!hero) return;
+    const present = !heroWatched;
+    if (!present && heroWatchedByProgress) void resetProgress(localProgressPathsForItem(hero));
+    void setWatchedEntries(localWatchedKeysForItem(hero), present);
+  };
   const handleAddFolder = async () => {
     setLibraryActionError('');
     try {
@@ -236,7 +247,7 @@ export default function ModernHome() {
             inWatchlist={myListIds.has(hero.id)}
             onToggleWatchlist={() => void setListEntry(hero.id, 'watchlist', !myListIds.has(hero.id))}
             watched={heroWatched}
-            onToggleWatched={() => void setWatchedEntries(localWatchedKeysForItem(hero), !heroWatched)}
+            onToggleWatched={toggleHeroWatched}
             activeIndex={activeHeroIndex}
             itemCount={heroItems.length}
             mode={usesContinueWatchingHero ? 'continue-watching' : 'featured'}

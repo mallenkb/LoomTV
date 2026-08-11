@@ -24,6 +24,13 @@ export function localWatchedKeysForItem(item: Pick<MediaItem, 'id' | 'type' | 'e
   return episodeKeys.length > 0 ? episodeKeys : [localWatchedKey(item.id)];
 }
 
+export function localProgressPathsForItem(item: Pick<MediaItem, 'filePath' | 'type' | 'episodeFiles'>): string[] {
+  const paths = item.type === 'movie'
+    ? [item.filePath]
+    : (item.episodeFiles || []).map((episode) => episode.filePath);
+  return [...new Set(paths.filter(Boolean))];
+}
+
 export function isLocalItemWatched(
   item: Pick<MediaItem, 'id' | 'type' | 'episodeFiles'>,
   watchedKeys: ReadonlySet<string>,

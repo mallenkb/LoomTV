@@ -11,7 +11,9 @@ import { artworkVariant } from '@/lib/artworkVariants';
 import { desktopApi } from '@/lib/desktopApi';
 import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.helpers';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
-import { isLocalItemWatched, localWatchedKeysForItem } from '@/lib/watched';
+import { resetProgress, useProgressSnapshot } from '@/lib/progress';
+import { matchesLibraryFilter } from '@/lib/libraryFilters';
+import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 
 type MediaPosterCardVariant = 'home' | 'movies' | 'tv' | 'others';
 
@@ -105,7 +107,17 @@ const MediaPosterCard = memo(function MediaPosterCard({
   const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
   const { watchedKeys, setWatchedEntries } = useProfiles();
-  const watched = isLocalItemWatched(item, watchedKeys);
+  const progress = useProgressSnapshot();
+  const watchedByProgress = matchesLibraryFilter(item, 'watched', progress);
+  const watched = watchedByProgress || isLocalItemWatched(item, watchedKeys);
+  const watchedKeysForItem = localWatchedKeysForItem(item);
+  const progressPaths = localProgressPathsForItem(item);
+
+  const toggleWatched = () => {
+    const present = !watched;
+    if (!present && watchedByProgress) void resetProgress(progressPaths);
+    void setWatchedEntries(watchedKeysForItem, present);
+  };
 
   return (
     <div className={`${ROOT_CLASS[variant]} relative`}>
@@ -149,7 +161,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
       </Link>
       <WatchedToggle
         watched={watched}
-        onToggle={() => void setWatchedEntries(localWatchedKeysForItem(item), !watched)}
+        onToggle={toggleWatched}
         className="absolute left-2 top-2 z-20"
       />
     </div>

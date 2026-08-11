@@ -214,3 +214,45 @@ export async function saveProgress(filePath: string, position: number, duration:
   pendingWrites.add(write);
   await write.finally(() => pendingWrites.delete(write));
 }
+
+/**
+ * Mark a title as unwatched without leaving its completed playback row in the
+ * watched filter. The normal playback writer intentionally ignores positions
+ * at or below ten seconds, so this path explicitly persists the reset.
+ */
+export async function resetProgress(filePaths: readonly string[]): Promise<void> {
+  const paths = [...new Set(filePaths.filter(Boolean))];
+  if (paths.length === 0) return;
+
+  const generation = profileGeneration;
+  const profileId = activeProfileId ?? undefined;
+  const writes: Promise<void>[] = [];
+
+  for (const filePath of paths) {
+    const existing = progressCache[filePath];
+    if (!existing || (existing.position <= 0 && !existing.watched)) continue;
+
+    const reset: StoredProgress = {
+      position: 0,
+      duration: existing.duration,
+      updatedAt: Date.now(),
+      watched: false,
+    };
+    progressCache = { ...progressCache, [filePath]: reset };
+    writeLocalProgress();
+
+    const write = desktopApi.saveProgress(filePath, 0, reset.duration, profileId)
+      .then((stored) => {
+        if (generation !== profileGeneration || profileId !== activeProfileId) return;
+        progressCache = { ...progressCache, [filePath]: stored };
+        writeLocalProgress();
+      })
+      .catch(() => {
+        // Keep the local reset until the desktop is reachable again.
+      });
+    pendingWrites.add(write);
+    writes.push(write.finally(() => pendingWrites.delete(write)));
+  }
+
+  await Promise.all(writes);
+}

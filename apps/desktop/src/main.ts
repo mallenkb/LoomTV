@@ -1267,6 +1267,7 @@ function applyAppIcon() {
 }
 
 let rendererSecurityPolicyConfigured = false;
+const YOUTUBE_EMBED_REFERER = 'https://github.com/mallenkb/LoomTV/';
 
 function configureRendererSecurityPolicy(): void {
   if (rendererSecurityPolicyConfigured) return;
@@ -1303,6 +1304,26 @@ function configureRendererSecurityPolicy(): void {
     "frame-ancestors 'none'",
     "form-action 'none'",
   ].join('; ');
+
+  // Packaged renderer pages use file://, which does not provide YouTube with
+  // the HTTPS client identity required by its embedded player (error 153).
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    {
+      urls: [
+        'https://www.youtube-nocookie.com/embed/*',
+        'https://www.youtube.com/embed/*',
+      ],
+      types: ['subFrame'],
+    },
+    (details, callback) => {
+      callback({
+        requestHeaders: {
+          ...details.requestHeaders,
+          Referer: YOUTUBE_EMBED_REFERER,
+        },
+      });
+    },
+  );
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const isRendererDocument = details.resourceType === 'mainFrame'

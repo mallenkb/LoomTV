@@ -59,9 +59,13 @@ function DefaultHome() {
       }
       return last;
     };
+    const hasPlaybackProgress = (item: MediaItem): boolean => (
+      (progress[item.filePath]?.position || 0) > 10
+      || (item.episodeFiles || []).some((episodeFile) => (progress[episodeFile.filePath]?.position || 0) > 10)
+    );
     return [...movies, ...tvShows, ...animeShows]
       .map((item) => [item, recency(item)] as const)
-      .filter(([item, last]) => last > 0 && !matchesLibraryFilter(item, 'watched', progress))
+      .filter(([item, last]) => last > 0 && hasPlaybackProgress(item) && !matchesLibraryFilter(item, 'watched', progress))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([item]) => item);
