@@ -296,6 +296,11 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE INDEX IF NOT EXISTS idx_artwork_cache_updated_at
+      ON artwork_cache(updated_at);
+    CREATE INDEX IF NOT EXISTS idx_thumbnail_cache_updated_at
+      ON thumbnail_cache(updated_at);
+
     CREATE TABLE IF NOT EXISTS plugin_artwork_objects (
       content_hash TEXT PRIMARY KEY CHECK (length(content_hash) = 64),
       cache_path TEXT NOT NULL UNIQUE,
@@ -675,14 +680,18 @@ function migrateProfileGuestType(database: BetterSqlite3.Database): void {
         CREATE UNIQUE INDEX one_owner ON profiles(profile_type) WHERE profile_type = 'owner';
         CREATE UNIQUE INDEX one_guest_per_device ON profiles(guest_device_id) WHERE is_guest = 1;
       `);
+
+      const violations = database.pragma('foreign_key_check') as unknown[];
+      if (violations.length > 0) {
+        throw new Error('Guest profile migration aborted: foreign key check failed.');
+      }
+
       database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
         .run(PROFILE_GUEST_TYPE_MIGRATION_VERSION, Date.now());
     })();
   } finally {
     if (foreignKeysEnabled) database.pragma('foreign_keys = ON');
   }
-  const violations = database.pragma('foreign_key_check') as unknown[];
-  if (violations.length > 0) throw new Error('Guest profile migration aborted: foreign key check failed.');
 }
 
 function migrateProfileSelectionLedger(database: BetterSqlite3.Database): void {
@@ -968,30 +977,32 @@ function migrateMediaSegmentsPrimaryKey(database: BetterSqlite3.Database): void 
   const columns = database.prepare('PRAGMA table_info(media_segments)').all() as Array<{ name: string; pk: number }>;
   const primaryKey = columns.filter((column) => column.pk > 0).sort((a, b) => a.pk - b.pk).map((column) => column.name);
   if (primaryKey.join(',') === 'file_revision,id') return;
-  database.exec(`
-    ALTER TABLE media_segments RENAME TO media_segments_old;
+  database.transaction(() => {
+    database.exec(`
+      ALTER TABLE media_segments RENAME TO media_segments_old;
 
-    CREATE TABLE media_segments (
-      file_revision TEXT NOT NULL,
-      type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
-      id TEXT NOT NULL,
-      start_ms INTEGER NOT NULL,
-      end_ms INTEGER,
-      confidence REAL NOT NULL,
-      source TEXT NOT NULL,
-      media_duration_ms INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL,
-      PRIMARY KEY (file_revision, id)
-    );
+      CREATE TABLE media_segments (
+        file_revision TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('intro', 'recap', 'outro', 'credits', 'preview')),
+        id TEXT NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER,
+        confidence REAL NOT NULL,
+        source TEXT NOT NULL,
+        media_duration_ms INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (file_revision, id)
+      );
 
-    INSERT OR REPLACE INTO media_segments (
-      file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
-    )
-    SELECT file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
-    FROM media_segments_old;
+      INSERT OR REPLACE INTO media_segments (
+        file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
+      )
+      SELECT file_revision, type, id, start_ms, end_ms, confidence, source, media_duration_ms, updated_at
+      FROM media_segments_old;
 
-    DROP TABLE media_segments_old;
-  `);
+      DROP TABLE media_segments_old;
+    `);
+  })();
 }
 
 function migrateMediaItemArtworkColumns(database: BetterSqlite3.Database): void {
@@ -1024,25 +1035,27 @@ function migrateLibraryFoldersKind(database: BetterSqlite3.Database): void {
   const row = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'library_folders'").get() as { sql?: string } | undefined;
   if (row?.sql?.includes("'others'")) return;
 
-  database.exec(`
-    ALTER TABLE library_folders RENAME TO library_folders_old;
+  database.transaction(() => {
+    database.exec(`
+      ALTER TABLE library_folders RENAME TO library_folders_old;
 
-    CREATE TABLE library_folders (
-      path TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('movies', 'tvShows', 'anime', 'others')),
-      added_at INTEGER NOT NULL
-    );
+      CREATE TABLE library_folders (
+        path TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind IN ('movies', 'tvShows', 'anime', 'others')),
+        added_at INTEGER NOT NULL
+      );
 
-    INSERT OR REPLACE INTO library_folders (path, kind, added_at)
-    SELECT
-      path,
-      CASE
-        WHEN kind IN ('movies', 'tvShows', 'anime', 'others') THEN kind
-        ELSE 'movies'
-      END,
-      added_at
-    FROM library_folders_old;
+      INSERT OR REPLACE INTO library_folders (path, kind, added_at)
+      SELECT
+        path,
+        CASE
+          WHEN kind IN ('movies', 'tvShows', 'anime', 'others') THEN kind
+          ELSE 'movies'
+        END,
+        added_at
+      FROM library_folders_old;
 
-    DROP TABLE library_folders_old;
-  `);
+      DROP TABLE library_folders_old;
+    `);
+  })();
 }

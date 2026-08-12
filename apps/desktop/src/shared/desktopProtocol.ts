@@ -299,12 +299,20 @@ export interface SettingsPayload {
   skipAnalysis?: SkipAnalysisSettings;
   sidebarNavOrder?: string[];
   customFolderNames?: Record<string, string>;
+  otherFolderGroups?: Record<string, OtherFolderGroup>;
+  otherFolderIcon?: string;
   appThemeMode?: 'dark' | 'light';
   appThemeColor?: 'orange' | 'yellow' | 'red' | 'blue' | 'twitch';
   appDarkTheme?: 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   localNetworkSharingEnabled?: boolean;
   localNetworkShareToken?: string;
+}
+
+export interface OtherFolderGroup {
+  name: string;
+  icon: string;
+  folders: string[];
 }
 
 export type SkipAnalysisSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';

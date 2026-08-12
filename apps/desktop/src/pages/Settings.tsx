@@ -19,6 +19,8 @@ import {
   type SettingsSection,
   type SidebarNavItemId,
 } from './Settings.helpers';
+import { normalizeOtherFolderIcon, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
+import { assignOtherFolderToGroup, createOtherFolderGroup, normalizeOtherFolderGroups, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import AboutSettingsSection from './AboutSettingsSection';
 import LibrarySettingsSection from './LibrarySettingsSection';
 import MetadataSettingsSection from './MetadataSettingsSection';
@@ -170,7 +172,7 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
 }
 
 export default function Settings() {
-  const { state, addLibraryFolder, scanLibrary, fullRescanLibrary, refreshMetadata, refreshLibrary, clearAppData, removeLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
+  const { state, addLibraryFolder, addLibraryFolderPath, scanLibrary, fullRescanLibrary, refreshMetadata, clearAppData, removeLibraryFolder, updateLibraryFolder, setAutoSyncIntervalHours } = useLibrary();
   const { activeProfile } = useProfiles();
   const confirm = useConfirm();
   const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
@@ -198,6 +200,8 @@ export default function Settings() {
   const [isMobileSettingsMenuOpen, setIsMobileSettingsMenuOpen] = useState(true);
   const [sidebarNavOrder, setSidebarNavOrder] = useState<SidebarNavItemId[]>(DEFAULT_SIDEBAR_NAV_ORDER);
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
+  const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
+  const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
   const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
@@ -234,7 +238,6 @@ export default function Settings() {
     [activeProfile?.type, isRemoteLibraryMode],
   );
   const peerScanInFlightRef = useRef(false);
-  const renameGenerationRef = useRef(new Map<string, number>());
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
   const {
     theme,
@@ -308,10 +311,6 @@ export default function Settings() {
     void runLibraryAction({ operation: 'full-rescan', run: fullRescanLibrary });
   }, [fullRescanLibrary, runLibraryAction]);
 
-  const handleRefreshLibrary = useCallback(() => {
-    void runLibraryAction({ operation: 'refresh', run: refreshLibrary });
-  }, [refreshLibrary, runLibraryAction]);
-
   const handleAutoSyncIntervalChange = useCallback((hours: number) => {
     void runLibraryAction({ operation: 'auto-sync', run: () => setAutoSyncIntervalHours(hours) });
   }, [runLibraryAction, setAutoSyncIntervalHours]);
@@ -377,6 +376,8 @@ export default function Settings() {
       );
       setSidebarNavOrder(normalizeSidebarNavOrder(profilePreferences.sidebarNavOrder ?? s.sidebarNavOrder));
       setCustomFolderNames(s.customFolderNames || {});
+      setOtherFolderGroups(normalizeOtherFolderGroups(s.otherFolderGroups));
+      setOtherFolderIcon(normalizeOtherFolderIcon(s.otherFolderIcon));
       const skipBack = profilePreferences.playbackSkipBackSeconds ?? s.playbackSkipBackSeconds;
       const skipForward = profilePreferences.playbackSkipForwardSeconds ?? s.playbackSkipForwardSeconds;
       const loadedSkipBack = Number.isFinite(skipBack) && (skipBack || 0) > 0 ? (skipBack || 10) : 10;
@@ -437,36 +438,74 @@ export default function Settings() {
     return () => { cancelled = true; };
   }, [activeSection]);
 
-  const renameFolder = useCallback((folder: string, name: string) => {
-    const trimmed = name.trim();
-    const previous = customFolderNames;
-    const next = { ...customFolderNames };
-    if (trimmed && trimmed !== folder) next[folder] = trimmed;
-    else delete next[folder];
-    const generation = (renameGenerationRef.current.get(folder) || 0) + 1;
-    renameGenerationRef.current.set(folder, generation);
-    setCustomFolderNames(next);
-    const action: LibraryAction = {
-      operation: 'rename-folder',
-      run: async () => {
-        if (renameGenerationRef.current.get(folder) !== generation) return;
-        setCustomFolderNames(next);
-        try {
-          await desktopApi.saveSettings({ customFolderNames: next });
-        } catch (error) {
-          if (renameGenerationRef.current.get(folder) !== generation) return;
-          setCustomFolderNames((current) => {
-            const restored = { ...current };
-            if (previous[folder]) restored[folder] = previous[folder];
-            else delete restored[folder];
-            return restored;
-          });
-          throw error;
-        }
-      },
-    };
-    void runLibraryAction(action);
-  }, [customFolderNames, runLibraryAction]);
+  const editFolder = useCallback(async (
+    folder: string,
+    nextFolder: string,
+    name: string,
+    icon: OtherFolderIconId,
+    kind: LibraryFolderKind,
+    groupId: string,
+    newGroupName: string,
+  ) => {
+    const normalizedNextFolder = nextFolder.trim();
+    if (normalizedNextFolder !== folder) {
+      await updateLibraryFolder(folder, normalizedNextFolder, kind);
+    }
+    const nextNames = { ...customFolderNames };
+    delete nextNames[folder];
+    delete nextNames[otherFolderIconStorageKey(folder)];
+    const trimmedName = name.trim();
+    if (trimmedName) nextNames[normalizedNextFolder] = trimmedName;
+    if (kind === 'others') nextNames[otherFolderIconStorageKey(normalizedNextFolder)] = icon;
+    const groupUpdate = kind === 'others'
+      ? assignOtherFolderToGroup(otherFolderGroups, folder, normalizedNextFolder, { groupId, newGroupName, icon })
+      : { groups: otherFolderGroups, groupId: '' };
+    await desktopApi.saveSettings({ customFolderNames: nextNames, otherFolderGroups: groupUpdate.groups });
+    setCustomFolderNames(nextNames);
+    setOtherFolderGroups(groupUpdate.groups);
+    window.dispatchEvent(new CustomEvent('loomtv:custom-folder-names-changed', { detail: nextNames }));
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: groupUpdate.groups }));
+  }, [customFolderNames, otherFolderGroups, updateLibraryFolder]);
+
+  const createCustomLibrary = useCallback(async (name: string, icon: OtherFolderIconId) => {
+    const created = createOtherFolderGroup(otherFolderGroups, name, icon);
+    await desktopApi.saveSettings({ otherFolderGroups: created.groups });
+    setOtherFolderGroups(created.groups);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: created.groups }));
+  }, [otherFolderGroups]);
+
+  const addFolderToCustomLibrary = useCallback(async (groupId: string) => {
+    const folder = await desktopApi.pickLibraryFolder();
+    if (!folder) return;
+    await addLibraryFolderPath('others', folder);
+    const assigned = assignOtherFolderToGroup(otherFolderGroups, '', folder, { groupId, icon: otherFolderGroups[groupId]?.icon || 'folder' });
+    await desktopApi.saveSettings({ otherFolderGroups: assigned.groups });
+    setOtherFolderGroups(assigned.groups);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: assigned.groups }));
+  }, [addLibraryFolderPath, otherFolderGroups]);
+
+  const deleteCustomLibrary = useCallback(async (groupId: string) => {
+    const group = otherFolderGroups[groupId];
+    if (!group) return;
+    const confirmed = await confirm({ title: `Delete ${group.name}?`, description: 'The folders will stay in LoomTV as ungrouped Others folders. No files will be deleted.', confirmLabel: 'Delete group', destructive: true });
+    if (!confirmed) return;
+    const next = { ...otherFolderGroups };
+    delete next[groupId];
+    await desktopApi.saveSettings({ otherFolderGroups: next });
+    setOtherFolderGroups(next);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-groups-changed', { detail: next }));
+  }, [confirm, otherFolderGroups]);
+
+  const changeOtherFolderIcon = useCallback((icon: OtherFolderIconId) => {
+    const previous = otherFolderIcon;
+    setOtherFolderIcon(icon);
+    window.dispatchEvent(new CustomEvent('loomtv:other-folder-icon-changed', { detail: icon }));
+    void desktopApi.saveSettings({ otherFolderIcon: icon }).catch((error) => {
+      console.error('Failed to save Others icon:', error);
+      setOtherFolderIcon(previous);
+      window.dispatchEvent(new CustomEvent('loomtv:other-folder-icon-changed', { detail: previous }));
+    });
+  }, [otherFolderIcon]);
 
   useEffect(() => {
     localStorage.setItem(SETTINGS_SECTION_STORAGE_KEY, activeSection);
@@ -1085,7 +1124,13 @@ export default function Settings() {
             addLibraryFolder={handleAddLibraryFolder}
             removeLibraryFolder={handleRemoveLibraryFolder}
             customFolderNames={customFolderNames}
-            onRenameFolder={renameFolder}
+            otherFolderGroups={otherFolderGroups}
+            onCreateOtherFolderGroup={createCustomLibrary}
+            onAddFolderToGroup={addFolderToCustomLibrary}
+            onDeleteOtherFolderGroup={deleteCustomLibrary}
+            onEditFolder={editFolder}
+            otherFolderIcon={otherFolderIcon}
+            onOtherFolderIconChange={changeOtherFolderIcon}
             sidebarNavOrder={sidebarNavOrder}
             draggedSidebarItem={draggedSidebarItem}
             setDraggedSidebarItem={setDraggedSidebarItem}
@@ -1099,7 +1144,6 @@ export default function Settings() {
             scanLibrary={handleScanLibrary}
             refreshMetadata={handleRefreshMetadata}
             fullRescanLibrary={handleFullRescanLibrary}
-            refreshLibrary={handleRefreshLibrary}
             autoSyncIntervalHours={autoSyncIntervalHours}
             setAutoSyncIntervalHours={handleAutoSyncIntervalChange}
             backupStatus={backupStatus}

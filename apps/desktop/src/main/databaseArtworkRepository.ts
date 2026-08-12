@@ -137,9 +137,9 @@ export function createDatabaseArtworkRepository(
         || row.content_hash !== contentHash
       ) throw new Error('Cached artwork integrity check failed.');
       if (cachePath && fs.existsSync(cachePath)) {
-        if (!row.data_url) {
-          database.prepare('UPDATE artwork_cache SET data_url = ? WHERE source_url = ?')
-            .run(`data:${row.mime_type};base64,${bytes.toString('base64')}`, sourceUrl);
+        if (row.data_url) {
+          database.prepare("UPDATE artwork_cache SET data_url = '' WHERE source_url = ?")
+            .run(sourceUrl);
         }
         return { cachePath, mimeType: 'image/png', byteLength: bytes.byteLength, contentHash };
       }
@@ -203,7 +203,7 @@ export function createDatabaseArtworkRepository(
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         sourceUrl,
-        `data:${cached.mimeType};base64,${cached.bytes.toString('base64')}`,
+        '',
         cachePath,
         cached.mimeType,
         cached.byteLength,

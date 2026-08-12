@@ -160,7 +160,21 @@ function getDb(): BetterSqlite3.Database {
   db.pragma('busy_timeout = 5000');
   backupBeforeProfilesMigration(db);
   migrateDatabase(db);
+  scheduleDatabaseMaintenance(db);
   return db;
+}
+
+function scheduleDatabaseMaintenance(database: BetterSqlite3.Database): void {
+  const timer = setTimeout(() => {
+    if (db !== database) return;
+    try {
+      database.pragma('optimize');
+      database.pragma('wal_checkpoint(PASSIVE)');
+    } catch (error) {
+      console.warn('[database] Idle maintenance failed:', error);
+    }
+  }, 30_000);
+  timer.unref();
 }
 
 // A plain file copy of an open WAL database misses recent writes, so the
@@ -1216,16 +1230,70 @@ export async function cacheLibraryArtwork(data: LibraryData): Promise<void> {
   await getArtworkRepository().cacheLibraryArtwork(data);
 }
 export async function backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
-  const source = databasePath();
   const result = await dialog.showSaveDialog({
     title: 'Back Up LoomTV Database',
     defaultPath: `loomtv-backup-${new Date().toISOString().slice(0, 10)}.sqlite`,
     filters: [{ name: 'SQLite database', extensions: ['sqlite', 'db'] }],
   });
   if (result.canceled || !result.filePath) return { ok: false, error: 'cancelled' };
-  getDb().pragma('wal_checkpoint(TRUNCATE)');
-  fs.copyFileSync(source, result.filePath);
-  return { ok: true, path: result.filePath };
+
+  const database = getDb();
+  const destination = result.filePath;
+  const temporaryPath = `${destination}.${randomUUID()}.tmp`;
+  const previousPath = `${destination}.${randomUUID()}.previous`;
+  let movedExistingBackup = false;
+
+  try {
+    await database.backup(temporaryPath);
+
+    const backup = new BetterSqlite3(temporaryPath, { readonly: true });
+    try {
+      const check = backup.pragma('quick_check') as Array<{ quick_check?: string }>;
+      if (check.length === 0 || check.some((row) => row.quick_check !== 'ok')) {
+        throw new Error('The backup failed SQLite integrity verification.');
+      }
+    } finally {
+      backup.close();
+    }
+
+    if (fs.existsSync(destination)) {
+      fs.renameSync(destination, previousPath);
+      movedExistingBackup = true;
+    }
+
+    try {
+      fs.renameSync(temporaryPath, destination);
+    } catch (error) {
+      if (movedExistingBackup && !fs.existsSync(destination) && fs.existsSync(previousPath)) {
+        fs.renameSync(previousPath, destination);
+      }
+      throw error;
+    }
+
+    if (movedExistingBackup) {
+      try {
+        fs.rmSync(previousPath, { force: true });
+      } catch (error) {
+        console.warn('[database] Could not remove the previous backup copy:', error);
+      }
+    }
+
+    return { ok: true, path: destination };
+  } catch (error) {
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+    } catch {
+      // Best-effort cleanup only.
+    }
+    if (movedExistingBackup && !fs.existsSync(destination) && fs.existsSync(previousPath)) {
+      try {
+        fs.renameSync(previousPath, destination);
+      } catch {
+        // Keep the previous copy in place if restoration cannot be completed.
+      }
+    }
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export function clearDatabase(): ProfileRecord {
@@ -1240,8 +1308,12 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM segment_analysis_inventory;
     DELETE FROM segment_analysis_jobs;
     DELETE FROM segment_analysis_state;
+    DELETE FROM media_metadata_refresh_state;
     DELETE FROM artwork_cache;
+    DELETE FROM thumbnail_cache;
     DELETE FROM custom_artwork;
+    DELETE FROM plugin_artwork_references;
+    DELETE FROM plugin_artwork_objects;
     DELETE FROM playback_progress;
     DELETE FROM playback_track_preferences;
     DELETE FROM profile_stremio_access;
@@ -1252,8 +1324,11 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM device_profile_selections;
     DELETE FROM device_profile_selection_revisions;
     DELETE FROM profiles;
+    DELETE FROM stremio_plugin_state_metadata;
     DELETE FROM stremio_addons;
     DELETE FROM plugin_secrets;
+    DELETE FROM plugin_secret_revisions;
+    DELETE FROM plugin_secret_store_keys;
     DELETE FROM stremio_plugin_audit;
     DELETE FROM episode_files;
     DELETE FROM episodes;
@@ -1263,6 +1338,15 @@ export function clearDatabase(): ProfileRecord {
     DELETE FROM scan_cache;
     DELETE FROM app_settings;
   `))();
+
+  for (const cacheDirectory of [artworkCacheDirectory(), pluginArtworkCacheDirectory()]) {
+    try {
+      fs.rmSync(cacheDirectory, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[database] Could not clear cache directory ${cacheDirectory}:`, error);
+    }
+  }
+
   const now = Date.now();
   const ownerId = randomUUID();
   database.prepare(`

@@ -1475,6 +1475,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
         if (!requireProfileMediaAccess(filePath)) return;
+        if (isImageFileName(path.basename(filePath)) && fs.existsSync(filePath)) {
+          res.writeHead(200, {
+            'Content-Type': getImageMimeType(filePath),
+            'Cache-Control': isCacheableImageRequest ? LOCAL_IMAGE_CACHE_CONTROL : 'private, max-age=3600',
+          });
+          pipeResponse(fs.createReadStream(filePath), res);
+          return;
+        }
         const cacheKey = thumbnailCacheKey(filePath, time, embedded, streamIndex);
         const cachedThumbnail = cacheKey ? getCachedThumbnail(cacheKey) : null;
         res.writeHead(200, {

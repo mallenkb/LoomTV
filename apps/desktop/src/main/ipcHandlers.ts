@@ -650,6 +650,36 @@ export function registerIpcHandlers<
     return null;
   }, z.tuple([libraryFolderKindSchema.optional()]));
 
+  handle('library:add-folder-path', async (_event, kind: string, folderPath: string) => {
+    deps.authorizeSettingsWrite();
+    const normalizedFolderPath = folderPath.trim();
+    if (!path.isAbsolute(normalizedFolderPath)) throw new Error('Folder path must be an absolute path.');
+    const data = deps.loadLibrary();
+    const updated = deps.addFolderToLibrary(data, path.resolve(normalizedFolderPath), safeLibraryFolderKind(kind));
+    deps.saveLibraryMutation(updated);
+    return enqueueLibraryScan(async () => {
+      const scanData = deps.loadLibrary();
+      const scanVersion = deps.getLibraryMutationVersion();
+      const progressPublisher = createScanProgressPublisher<TLibraryData>((snapshot) => {
+        BrowserWindow.getAllWindows().forEach((window) => {
+          if (!window.webContents.isDestroyed()) window.webContents.send('library:scan-progress', scanProgressPayload(snapshot));
+        });
+      });
+      try {
+        const scanned = await deps.scanLibrary(scanData, {
+          mode: 'quick',
+          onProgress: progressPublisher.publish,
+          onCheckpoint: (snapshot) => { deps.saveLibraryScanCheckpoint(snapshot, scanVersion); },
+        });
+        progressPublisher.flush();
+        if (deps.saveLibraryFromScan(scanned, scanVersion)) await deps.cacheArtworkNow(scanned);
+        return deps.libraryIndexForRenderer();
+      } finally {
+        progressPublisher.cancel();
+      }
+    });
+  }, z.tuple([libraryFolderKindSchema, nonEmptyString]));
+
   handle('library:remove-folder', (_event, folderPath: string) => {
     deps.authorizeSettingsWrite();
     const data = deps.loadLibrary();
@@ -657,6 +687,65 @@ export function registerIpcHandlers<
     deps.saveLibraryMutation(updated);
     return deps.libraryIndexForRenderer();
   }, z.tuple([nonEmptyString]));
+
+  handle('library:pick-folder', async (_event, currentPath?: string) => {
+    deps.authorizeSettingsWrite();
+    const result = await deps.showOpenFolderDialog({
+      properties: ['openDirectory'],
+      buttonLabel: 'Choose Folder',
+      message: 'Choose a folder for this LoomTV library entry.',
+      ...(currentPath?.trim() ? { defaultPath: currentPath.trim() } : {}),
+    });
+    return result.canceled ? null : result.filePaths[0] || null;
+  }, z.tuple([z.string().optional()]));
+
+  handle('library:update-folder', async (_event, folderPath: string, nextFolderPath: string, kind: string) => {
+    deps.authorizeSettingsWrite();
+    const normalizedNextFolderPath = nextFolderPath.trim();
+    if (!path.isAbsolute(normalizedNextFolderPath)) {
+      throw new Error('Folder path must be an absolute path.');
+    }
+    if (path.resolve(folderPath) === path.resolve(normalizedNextFolderPath)) {
+      return deps.libraryIndexForRenderer();
+    }
+
+    const data = deps.loadLibrary();
+    const withoutPreviousFolder = deps.removeFolderFromLibrary(data, folderPath);
+    const updated = deps.addFolderToLibrary(
+      withoutPreviousFolder,
+      path.resolve(normalizedNextFolderPath),
+      safeLibraryFolderKind(kind),
+    );
+    deps.saveLibraryMutation(updated);
+
+    return enqueueLibraryScan(async () => {
+      const scanData = deps.loadLibrary();
+      const scanVersion = deps.getLibraryMutationVersion();
+      const progressPublisher = createScanProgressPublisher<TLibraryData>((snapshot) => {
+        BrowserWindow.getAllWindows().forEach((window) => {
+          if (!window.webContents.isDestroyed()) {
+            window.webContents.send('library:scan-progress', scanProgressPayload(snapshot));
+          }
+        });
+      });
+      try {
+        const scanned = await deps.scanLibrary(scanData, {
+          mode: 'quick',
+          onProgress: progressPublisher.publish,
+          onCheckpoint: (snapshot) => {
+            deps.saveLibraryScanCheckpoint(snapshot, scanVersion);
+          },
+        });
+        progressPublisher.flush();
+        if (deps.saveLibraryFromScan(scanned, scanVersion)) {
+          await deps.cacheArtworkNow(scanned);
+        }
+        return deps.libraryIndexForRenderer();
+      } finally {
+        progressPublisher.cancel();
+      }
+    });
+  }, z.tuple([nonEmptyString, nonEmptyString, libraryFolderKindSchema]));
 
   handle('media:play', async (_event, filePath: string) => {
     try {

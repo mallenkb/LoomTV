@@ -850,14 +850,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           </div>
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
-          {show.trailerUrl && <Button
-            variant="outline"
-            onClick={() => setTrailerOpen(true)}
-            className="h-12 gap-2 rounded-full border-white/25 bg-white/10 px-4 text-white backdrop-blur-md hover:bg-white/20 hover:text-white"
-          >
-            <Play className="h-4 w-4 fill-current" />
-            Trailer
-          </Button>}
           {canPlayShow && (
             <Button
               onClick={handlePlayShow}
@@ -885,6 +877,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               canBookmark={!isRemoteContent}
               inMyList={inMyList}
               watched={isWatched}
+              onPlayTrailer={isRemoteContent && show.trailerUrl ? () => setTrailerOpen(true) : undefined}
               onToggleList={() => void (async () => {
                 await setListEntry(show.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(show.id, 'favorite', false);

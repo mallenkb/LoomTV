@@ -9,19 +9,27 @@ export type CachedThumbnail = {
 
 const MAX_THUMBNAIL_CACHE_ENTRIES = 8_192;
 const MAX_THUMBNAIL_CACHE_BYTES = 256 * 1024 * 1024;
-const thumbnailRowSchema = z.object({ mime_type: z.string(), image_bytes: z.instanceof(Buffer) });
+const THUMBNAIL_TOUCH_INTERVAL_MS = 60 * 60 * 1000;
+const thumbnailRowSchema = z.object({
+  mime_type: z.string(),
+  image_bytes: z.instanceof(Buffer),
+  updated_at: z.number().finite(),
+});
 const thumbnailQuotaRowSchema = z.object({ count: z.number().finite(), bytes: z.number().finite() });
 const thumbnailEntryRowSchema = z.object({ cache_key: z.string(), bytes: z.number().finite() });
 
 export function createDatabaseThumbnailRepository(database: BetterSqlite3.Database) {
   function getCachedThumbnail(cacheKey: string): CachedThumbnail | null {
     const row = parseDatabaseRow(
-      database.prepare('SELECT mime_type, image_bytes FROM thumbnail_cache WHERE cache_key = ?').get(cacheKey),
+      database.prepare('SELECT mime_type, image_bytes, updated_at FROM thumbnail_cache WHERE cache_key = ?').get(cacheKey),
       thumbnailRowSchema.optional(),
       'thumbnail cache',
     );
     if (!row?.image_bytes?.byteLength) return null;
-    database.prepare('UPDATE thumbnail_cache SET updated_at = ? WHERE cache_key = ?').run(Date.now(), cacheKey);
+    const now = Date.now();
+    if (now - row.updated_at >= THUMBNAIL_TOUCH_INTERVAL_MS) {
+      database.prepare('UPDATE thumbnail_cache SET updated_at = ? WHERE cache_key = ?').run(now, cacheKey);
+    }
     return { bytes: Buffer.from(row.image_bytes), mimeType: row.mime_type };
   }
 

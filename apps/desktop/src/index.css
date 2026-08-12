@@ -835,6 +835,7 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
    its rail overlays the canvas rather than sitting in flow. Classic keeps the
    1rem offset it always had. */
 .loom-detail-back {
+  top: var(--loom-detail-floating-top, 1.5rem);
   left: calc(
     var(--loom-sidebar-width)
     + max(0px, (100vw - var(--loom-sidebar-width) - var(--loom-frame-max-width)) / 2)
@@ -843,6 +844,7 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 }
 
 .loom-artwork-editor-controls {
+  top: var(--loom-detail-floating-top, 1.5rem);
   right: calc(
     max(0px, (100vw - var(--loom-sidebar-width) - var(--loom-frame-max-width)) / 2)
     + 1rem
@@ -1799,7 +1801,7 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 /* The category pill is 3rem tall while the side actions are 2.5rem. Moving
    the actions down by half the difference puts all three centers on one axis. */
 .loom-detail-page-modern .loom-detail-back {
-  top: calc(1.5rem + 0.25rem);
+  --loom-detail-floating-top: calc(1.5rem + 0.25rem);
   left: var(--loom-detail-frame-start);
   border-radius: 9999px;
 }
@@ -1809,7 +1811,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 }
 
 .loom-detail-page-modern .loom-artwork-editor-controls {
-  top: calc(1.5rem + 0.25rem);
+  --loom-detail-floating-top: calc(1.5rem + 0.25rem);
   right: var(--loom-detail-frame-end);
 }
 

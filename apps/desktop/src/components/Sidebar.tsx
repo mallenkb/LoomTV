@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Bookmark, Check, Download, LockKeyhole, Plus, RefreshCw, Search, UsersRound } from 'lucide-react';
 import { FolderNavIcon, FolderNavSolidIcon } from '@/components/LoomIcons';
+import { normalizeOtherFolderIcon, otherFolderIconPair, otherFolderIconStorageKey, type OtherFolderIconId } from '@/components/OtherFolderIcons';
 import { libraryMutationMessage, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, UpdateState } from '@/lib/desktopApi';
+import { normalizeOtherFolderGroups, type OtherFolderGroups } from '@/lib/otherFolderGroups';
 import { cn } from '@/lib/utils';
 import LoomLogo from '@/components/LoomLogo';
 import ProfileAvatar from '@/components/profiles/ProfileAvatar';
@@ -33,7 +35,6 @@ const modernCategoryItems: readonly ModernCategoryItem[] = [
   { label: 'TV Shows', path: '/tv', routePrefix: '/tv', folderKey: 'tvShows' },
   { label: 'Movies', path: '/movies', routePrefix: '/movie', folderKey: 'movies' },
   { label: 'My List', path: '/my-list', routePrefix: '/my-list', folderKey: null, icon: Bookmark, activeIcon: BookmarkSolidIcon, iconOnly: true },
-  { label: 'Others', path: '/others', routePrefix: '/others', folderKey: 'others' },
 ];
 
 const homeNavItem: SidebarNavItem = { id: 'home', path: '/', label: 'Home', icon: HomeSmileIcon, activeIcon: HomeSmileSolidIcon };
@@ -50,6 +51,12 @@ const sidebarNavItems: Record<SidebarNavItemId, SidebarNavItem> = {
 
 function hasLinkedLibraryFolder(folders: readonly unknown[] | undefined): boolean {
   return Boolean(folders?.some((folder) => typeof folder === 'string' && folder.trim().length > 0));
+}
+
+function folderNavLabel(folder: string, customNames: Record<string, string>): string {
+  const customName = customNames[folder]?.trim();
+  if (customName) return customName;
+  return folder.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || 'Others';
 }
 
 function getActiveNavItemId(pathname: string, fromPath?: string): NavItemId | null {
@@ -432,6 +439,9 @@ export default function Sidebar() {
     || sourceRoute?.startsWith('/discover') === true;
   const activeNavItemId = getActiveNavItemId(location.pathname, sourceRoute);
   const [navOrder, setNavOrder] = useState<SidebarNavItemId[]>(defaultSidebarNavOrder);
+  const [otherFolderIcon, setOtherFolderIcon] = useState<OtherFolderIconId>('folder');
+  const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
+  const [otherFolderGroups, setOtherFolderGroups] = useState<OtherFolderGroups>({});
   const [libraryActionError, setLibraryActionError] = useState('');
 
   const handleScanLibrary = async () => {
@@ -455,6 +465,9 @@ export default function Sidebar() {
     Promise.all([desktopApi.getSettings(), desktopApi.getProfilePreferences()]).then(([settings, preferences]) => {
       if (mounted) {
         setNavOrder(normalizeSidebarNavOrder(preferences.sidebarNavOrder ?? settings.sidebarNavOrder));
+        setOtherFolderIcon(normalizeOtherFolderIcon(settings.otherFolderIcon));
+        setCustomFolderNames(settings.customFolderNames || {});
+        setOtherFolderGroups(normalizeOtherFolderGroups(settings.otherFolderGroups));
       }
     });
 
@@ -464,17 +477,34 @@ export default function Sidebar() {
     };
 
     window.addEventListener('loomtv:sidebar-order-changed', handleSidebarOrderChanged);
+    const handleOtherFolderIconChanged = (event: Event) => {
+      setOtherFolderIcon(normalizeOtherFolderIcon((event as CustomEvent<string>).detail));
+    };
+    window.addEventListener('loomtv:other-folder-icon-changed', handleOtherFolderIconChanged);
+    const handleCustomFolderNamesChanged = (event: Event) => {
+      setCustomFolderNames((event as CustomEvent<Record<string, string>>).detail || {});
+    };
+    window.addEventListener('loomtv:custom-folder-names-changed', handleCustomFolderNamesChanged);
+    const handleOtherFolderGroupsChanged = (event: Event) => {
+      setOtherFolderGroups(normalizeOtherFolderGroups((event as CustomEvent<OtherFolderGroups>).detail));
+    };
+    window.addEventListener('loomtv:other-folder-groups-changed', handleOtherFolderGroupsChanged);
 
     return () => {
       mounted = false;
       window.removeEventListener('loomtv:sidebar-order-changed', handleSidebarOrderChanged);
+      window.removeEventListener('loomtv:other-folder-icon-changed', handleOtherFolderIconChanged);
+      window.removeEventListener('loomtv:custom-folder-names-changed', handleCustomFolderNamesChanged);
+      window.removeEventListener('loomtv:other-folder-groups-changed', handleOtherFolderGroupsChanged);
     };
   }, [activeProfile?.id]);
 
   const navItems = useMemo(
-    () => [
+    () => {
+      return [
       homeNavItem,
       ...(desktopApi.isRemoteLibraryMode() ? defaultSidebarNavOrder : navOrder)
+        .filter((itemId) => itemId !== 'others')
         .map((itemId) => sidebarNavItems[itemId])
         .filter((item) => {
           if (desktopApi.isRemoteLibraryMode()) return true;
@@ -483,23 +513,59 @@ export default function Sidebar() {
         }),
       ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       myListNavItem,
-    ],
+      ];
+    },
     [libraryFolderGroups, navOrder],
   );
   const mobileNavItems = useMemo(
-    () => [
+    () => {
+      return [
       homeNavItem,
-      ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies, sidebarNavItems.others] as SidebarNavItem[]).filter((item) => {
+      ...([sidebarNavItems.anime, sidebarNavItems.tv, sidebarNavItems.movies] as SidebarNavItem[]).filter((item) => {
         if (desktopApi.isRemoteLibraryMode()) return true;
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
         return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
       }),
       ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
       myListNavItem,
-      settingsNavItem,
-    ],
+      ];
+    },
     [libraryFolderGroups],
   );
+  const customFolderNavItems = useMemo(() => {
+    const availableFolders = new Set(libraryFolderGroups.others || []);
+    const groupedFolders = new Set<string>();
+    const groupItems = Object.entries(otherFolderGroups).flatMap(([groupId, group]) => {
+      const folders = group.folders.filter((folder) => availableFolders.has(folder));
+      folders.forEach((folder) => groupedFolders.add(folder));
+      const icons = otherFolderIconPair(group.icon || otherFolderIcon);
+      return [{
+        id: `group:${groupId}`,
+        label: group.name,
+        path: `/others?group=${encodeURIComponent(groupId)}`,
+        icon: icons.outline,
+        activeIcon: icons.solid,
+      }];
+    });
+    const folderItems = (libraryFolderGroups.others || []).filter((folder) => !groupedFolders.has(folder)).map((folder) => {
+      const icons = otherFolderIconPair(customFolderNames[otherFolderIconStorageKey(folder)] || otherFolderIcon);
+      return {
+        id: `folder:${folder}`,
+        label: folderNavLabel(folder, customFolderNames),
+        path: `/others?folder=${encodeURIComponent(folder)}`,
+        icon: icons.outline,
+        activeIcon: icons.solid,
+      };
+    });
+    return [...groupItems, ...folderItems];
+  }, [customFolderNames, libraryFolderGroups.others, otherFolderGroups, otherFolderIcon]);
+  const selectedOtherItem = location.pathname === '/others'
+    ? (() => {
+      const params = new URLSearchParams(location.search);
+      const group = params.get('group');
+      return group ? `group:${group}` : `folder:${params.get('folder') || ''}`;
+    })()
+    : '';
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
 
   useEffect(() => {
@@ -569,6 +635,28 @@ export default function Sidebar() {
                     aria-current={isActive ? 'page' : undefined}
                     data-shared-highlight-item
                     data-shared-highlight-id={item.id}
+                    className={cn(
+                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                      isActive && 'loom-modern-sidebar-action-active',
+                    )}
+                  >
+                    <Icon className={item.id === 'discover' ? 'h-7 w-7' : 'h-6 w-6'} />
+                  </Link>
+                );
+              })}
+              {customFolderNavItems.length > 0 ? <div className="my-1 h-px w-8 bg-[var(--loom-text)] opacity-[0.22]" aria-hidden="true" /> : null}
+              {customFolderNavItems.map((item) => {
+                const isActive = selectedOtherItem === item.id;
+                const Icon = isActive ? item.activeIcon : item.icon;
+                return (
+                  <Link
+                    key={`modern-other-${item.id}`}
+                    to={item.path}
+                    title={item.label}
+                    aria-label={item.label}
+                    aria-current={isActive ? 'page' : undefined}
+                    data-shared-highlight-item
+                    data-shared-highlight-id={`other:${item.id}`}
                     className={cn(
                       'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
                       isActive && 'loom-modern-sidebar-action-active',
@@ -668,6 +756,27 @@ export default function Sidebar() {
               </Link>
             );
           })}
+          {customFolderNavItems.length > 0 ? <div className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" /> : null}
+          {customFolderNavItems.map((item) => {
+            const isActive = selectedOtherFolder === item.folder;
+            const Icon = isActive ? item.activeIcon : item.icon;
+            return (
+              <Link
+                key={`other-${item.folder}`}
+                to={item.path}
+                aria-current={isActive ? 'page' : undefined}
+                data-shared-highlight-item
+                data-shared-highlight-id={`other:${item.folder}`}
+                className={cn(
+                  'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                  isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="truncate text-sm font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
           {mobileNavItems.map((item) => {
             const isActive = activeNavItemId === item.id;
             const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
@@ -691,6 +800,35 @@ export default function Sidebar() {
               </Link>
             );
           })}
+          {customFolderNavItems.map((item) => {
+            const isActive = selectedOtherFolder === item.folder;
+            const Icon = isActive ? item.activeIcon : item.icon;
+            return (
+              <Link
+                key={`mobile-other-${item.folder}`}
+                to={item.path}
+                aria-current={isActive ? 'page' : undefined}
+                data-shared-highlight-item
+                data-shared-highlight-id={`mobile-other:${item.folder}`}
+                className={cn(
+                  'loom-mobile-nav-link relative z-10 mb-1 hidden h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                  isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
+                )}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="truncate text-sm font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
+          <Link
+            to={settingsNavItem.path}
+            data-shared-highlight-item
+            data-shared-highlight-id={settingsNavItem.id}
+            className="loom-mobile-nav-link relative z-10 mb-1 hidden h-10 items-center gap-3 rounded-lg px-3 text-[var(--loom-muted)] transition-colors hover:text-[var(--loom-active-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+          >
+            <settingsNavItem.icon className="h-5 w-5" />
+            <span className="text-sm font-medium">{settingsNavItem.label}</span>
+          </Link>
         </SharedListHighlight>
 
         <div className="mt-auto flex items-center gap-1">

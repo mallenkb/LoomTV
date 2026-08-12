@@ -443,14 +443,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           </div>
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
-          {movie.trailerUrl && <Button
-            variant="outline"
-            onClick={() => setTrailerOpen(true)}
-            className="h-12 gap-2 rounded-full border-white/25 bg-white/10 px-4 text-white backdrop-blur-md hover:bg-white/20 hover:text-white"
-          >
-            <Play className="h-4 w-4 fill-current" />
-            Trailer
-          </Button>}
           {canPlayMovie && <Button
             onClick={handlePlay}
             aria-label={hasResumeProgress ? `Resume ${isOtherMedia ? 'video' : 'movie'}` : `Play ${isOtherMedia ? 'video' : 'movie'}`}
@@ -476,6 +468,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               canBookmark={!isRemoteContent}
               inMyList={inMyList}
               watched={isWatched}
+              onPlayTrailer={isRemoteContent && movie.trailerUrl ? () => setTrailerOpen(true) : undefined}
               onToggleList={() => void (async () => {
                 await setListEntry(movie.id, 'watchlist', !inMyList);
                 if (inMyList) await setListEntry(movie.id, 'favorite', false);

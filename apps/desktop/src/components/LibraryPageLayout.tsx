@@ -7,6 +7,7 @@ import type { LibraryFilter } from '@/lib/libraryFilters';
 interface LibraryPageLayoutProps {
   title: string;
   subtitle?: string;
+  headerAction?: ReactNode;
   query: string;
   onQueryChange: (value: string) => void;
   placeholder: string;
@@ -20,6 +21,7 @@ interface LibraryPageLayoutProps {
 export default function LibraryPageLayout({
   title,
   subtitle,
+  headerAction,
   query,
   onQueryChange,
   placeholder,
@@ -47,6 +49,7 @@ export default function LibraryPageLayout({
             <h1 className="truncate text-xl font-semibold text-[var(--loom-text)]">{title}</h1>
             {subtitle ? <p className="mt-1 text-sm text-[var(--loom-muted)]">{subtitle}</p> : null}
           </div>
+          {headerAction ? <div className="loom-no-drag shrink-0">{headerAction}</div> : null}
         </header>
         {children}
       </div>

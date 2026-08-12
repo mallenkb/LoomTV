@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
+import { isImageFileName, isSubtitleFileName, isVideoFileName } from './fileClassification.ts';
 import { detectLibraryFolderKind } from './libraryFolders.ts';
 import { createMediaItemId } from './libraryItemHelpers.ts';
 import { isSeasonDirectoryName } from './libraryScanFiles.ts';
@@ -109,6 +109,29 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
         .filter((result) => result.status === 'error')
         .forEach((result) => console.warn('[OpenSubtitles]', result.videoPath, result.message));
     }
+  }
+
+  async function buildImageItems(folderPath: string, imageFiles: string[]): Promise<MediaItem[]> {
+    return Promise.all(imageFiles.map(async (imageFile) => {
+      const fullPath = path.join(folderPath, imageFile);
+      const parsedImage = cleanMediaTitle(imageFile);
+      const stats = await fs.promises.stat(fullPath);
+      return {
+        id: createMediaItemId(fullPath),
+        type: 'movie',
+        format: 'Image',
+        title: parsedImage.title,
+        year: parsedImage.year,
+        poster: '',
+        backdrop: '',
+        summary: '',
+        rating: 0,
+        genres: [],
+        cast: [],
+        filePath: fullPath,
+        fileSize: stats.size,
+      };
+    }));
   }
 
   async function buildLooseVideoItems(
@@ -263,6 +286,11 @@ async function scanFolder(
     const rootVideoFiles = rootEntries
       .filter((entry) => !entry.isDirectory() && isVideoFileName(entry.name))
       .map((entry) => entry.name);
+    const rootImageFiles = ctx.folderKind
+      ? []
+      : rootEntries
+          .filter((entry) => !entry.isDirectory() && isImageFileName(entry.name))
+          .map((entry) => entry.name);
     await downloadOpenSubtitlesForVideos(folderPath, rootVideoFiles, ctx);
     const rootSubtitleFiles = await subtitleFilesInDirectory(folderPath);
 
@@ -306,6 +334,10 @@ async function scanFolder(
         },
     );
 
+    if (rootImageFiles.length > 0) {
+      await addItems(await buildImageItems(folderPath, rootImageFiles));
+    }
+
     const rootDirectories = rootEntries.filter((entry) => entry.isDirectory());
     await processWithConcurrencyInOrder(
         rootDirectories,
@@ -317,6 +349,12 @@ async function scanFolder(
             .filter((directoryEntry) => !directoryEntry.isDirectory())
             .map((directoryEntry) => directoryEntry.name)
             .filter(isVideoFileName);
+          const imageFiles = ctx.folderKind
+            ? []
+            : dirEntries
+                .filter((directoryEntry) => !directoryEntry.isDirectory())
+                .map((directoryEntry) => directoryEntry.name)
+                .filter(isImageFileName);
 
           await downloadOpenSubtitlesForVideos(fullPath, videoFiles, ctx);
           const subtitleFiles = await subtitleFilesInDirectory(fullPath);
@@ -388,14 +426,17 @@ async function scanFolder(
             const looseItems = looseVideoFiles.length > 0
               ? await buildLooseVideoItems(fullPath, looseVideoFiles, subtitleFiles, ctx)
               : [];
+            const imageItems = await buildImageItems(fullPath, imageFiles);
             return [
               ...(tvItem ? [tvItem] : []),
               ...looseItems,
+              ...imageItems,
             ];
           }
 
-          if (videoFiles.length === 0) return [];
-          return buildLooseVideoItems(fullPath, videoFiles, subtitleFiles, ctx);
+          const imageItems = await buildImageItems(fullPath, imageFiles);
+          if (videoFiles.length === 0) return imageItems;
+          return [...await buildLooseVideoItems(fullPath, videoFiles, subtitleFiles, ctx), ...imageItems];
         },
         async (nextItems) => {
           for (const item of nextItems) await addItems([item]);

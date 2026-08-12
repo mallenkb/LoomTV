@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 
 const DialogLabelContext = React.createContext<{ titleId: string; descriptionId: string }>({
@@ -211,36 +212,40 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
     });
 
     if (!open) return null;
-    return (
+    return createPortal(
       <div
         ref={forwardedRef}
-        className={cn('loom-no-drag fixed inset-0 z-50 flex items-center justify-center bg-black/80', className)}
+        className={cn('loom-no-drag fixed inset-0 flex items-center justify-center bg-black/80 p-4', className)}
+        style={{ zIndex: 1000 }}
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) onOpenChange?.(false);
         }}
         {...props}
       >
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) onOpenChange?.(false);
+          ref={contentRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={descriptionId}
+          tabIndex={-1}
+          className={cn('loom-modal-surface max-h-[85vh] w-full max-w-4xl overflow-auto rounded-lg border bg-card p-6 shadow-lg', contentClassName)}
+          style={{
+            position: 'fixed',
+            top: '50dvh',
+            left: '50vw',
+            margin: 0,
+            transform: 'translate(-50%, -50%)',
+            zIndex: 1001,
           }}
+          onMouseDown={(event) => event.stopPropagation()}
         >
-          <div
-            ref={contentRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={titleId}
-            aria-describedby={descriptionId}
-            tabIndex={-1}
-            className={cn('loom-modal-surface relative z-50 max-h-[85vh] w-full max-w-4xl overflow-auto rounded-lg border bg-card p-6 shadow-lg', contentClassName)}
-          >
-            <DialogLabelContext.Provider value={{ titleId, descriptionId }}>
-              {children}
-            </DialogLabelContext.Provider>
-          </div>
+          <DialogLabelContext.Provider value={{ titleId, descriptionId }}>
+            {children}
+          </DialogLabelContext.Provider>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 );

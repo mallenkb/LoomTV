@@ -9,6 +9,7 @@ import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { useProgressSnapshot } from '@/lib/progress';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 import { availableSeasonCount } from '@/components/MediaPosterCard.helpers';
@@ -20,7 +21,11 @@ interface TVShowsProps {
 export default function TVShows({ kind = 'series' }: TVShowsProps) {
   const { state, addLibraryFolder } = useLibrary();
   const { isLoading, isScanning } = state;
-  const tvShows = kind === 'anime' ? state.animeShows : state.tvShows;
+  const sourceShows = kind === 'anime' ? state.animeShows : state.tvShows;
+  const tvShows = useMemo(
+    () => excludeOtherFolderMedia(sourceShows, state.libraryFolderGroups.others || []),
+    [sourceShows, state.libraryFolderGroups.others],
+  );
   const { lists } = useProfiles();
   const title = kind === 'anime' ? 'Anime' : 'TV Shows';
   const location = useLocation();

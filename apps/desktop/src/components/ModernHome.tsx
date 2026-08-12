@@ -20,6 +20,7 @@ import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import { useModalLayer } from '@/components/ui/dialog';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
@@ -45,7 +46,26 @@ export default function ModernHome() {
   const searchOverlayRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const resultsGridRef = useRef<HTMLDivElement | null>(null);
-  const { movies, tvShows, animeShows, isLoading, isScanning } = state;
+  const {
+    movies: allMovies,
+    tvShows: allTVShows,
+    animeShows: allAnimeShows,
+    libraryFolderGroups,
+    isLoading,
+    isScanning,
+  } = state;
+  const movies = useMemo(
+    () => excludeOtherFolderMedia(allMovies, libraryFolderGroups.others || []),
+    [allMovies, libraryFolderGroups.others],
+  );
+  const tvShows = useMemo(
+    () => excludeOtherFolderMedia(allTVShows, libraryFolderGroups.others || []),
+    [allTVShows, libraryFolderGroups.others],
+  );
+  const animeShows = useMemo(
+    () => excludeOtherFolderMedia(allAnimeShows, libraryFolderGroups.others || []),
+    [allAnimeShows, libraryFolderGroups.others],
+  );
   const allItems = useMemo(() => [...animeShows, ...tvShows, ...movies], [animeShows, movies, tvShows]);
   const listState = useMemo(() => createLibraryListState(lists), [lists]);
   const visibleItems = useMemo(

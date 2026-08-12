@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bookmark, Eye, MoreHorizontal } from 'lucide-react';
+import { Bookmark, Eye, MoreHorizontal, Play } from 'lucide-react';
 import WatchedToggle from '@/components/WatchedToggle';
 import { useToast } from '@/components/ToastProvider';
 
@@ -7,6 +7,7 @@ type DetailHeroActionsProps = {
   canBookmark: boolean;
   inMyList: boolean;
   watched: boolean;
+  onPlayTrailer?: () => void;
   onToggleList: () => void;
   onToggleWatched: () => void;
 };
@@ -15,6 +16,7 @@ export default function DetailHeroActions({
   canBookmark,
   inMyList,
   watched,
+  onPlayTrailer,
   onToggleList,
   onToggleWatched,
 }: DetailHeroActionsProps) {
@@ -55,6 +57,20 @@ export default function DetailHeroActions({
   return (
     <>
       <div className="loom-detail-hero-actions inline-flex h-14 shrink-0 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
+        {onPlayTrailer && (
+          <>
+            <button
+              type="button"
+              aria-label="Play trailer"
+              onClick={onPlayTrailer}
+              className="flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+            >
+              <Play className="h-5 w-5 fill-current" />
+              <span>Trailer</span>
+            </button>
+            <span className="my-auto inline-block h-7 w-px bg-white/20" />
+          </>
+        )}
         {canBookmark && (
           <>
             <button
@@ -97,6 +113,20 @@ export default function DetailHeroActions({
             aria-label="Title actions"
             className="absolute bottom-full right-0 z-50 mb-2 w-56 overflow-hidden rounded-xl border border-[var(--loom-control-border)] bg-[var(--loom-panel)] p-1 text-[var(--loom-text)] shadow-[0_20px_60px_rgba(0,0,0,0.62)] backdrop-blur-xl"
           >
+            {onPlayTrailer && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onPlayTrailer();
+                }}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+              >
+                <Play className="h-4 w-4 fill-current" />
+                Play trailer
+              </button>
+            )}
             {canBookmark && (
               <button
                 type="button"

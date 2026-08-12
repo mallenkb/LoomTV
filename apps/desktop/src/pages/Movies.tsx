@@ -9,12 +9,17 @@ import VirtualPosterGrid from '@/components/VirtualPosterGrid';
 import { useProgressSnapshot } from '@/lib/progress';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 import LibraryPageLayout from '@/components/LibraryPageLayout';
 import MediaPosterCard from '@/components/MediaPosterCard';
 
 export default function Movies() {
   const { state, addLibraryFolder } = useLibrary();
-  const { movies, isLoading, isScanning } = state;
+  const { movies: allMovies, libraryFolderGroups, isLoading, isScanning } = state;
+  const movies = useMemo(
+    () => excludeOtherFolderMedia(allMovies, libraryFolderGroups.others || []),
+    [allMovies, libraryFolderGroups.others],
+  );
   const { lists } = useProfiles();
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;

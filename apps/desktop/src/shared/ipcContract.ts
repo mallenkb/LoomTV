@@ -75,10 +75,13 @@ export interface IpcContract {
   'database:backup': { args: []; result: { ok: boolean; path?: string; error?: string } };
   'database:clear': { args: []; result: LibraryIndexPayload };
   'library:add-folder': { args: [kind?: LibraryFolderKind]; result: LibraryIndexPayload | null };
+  'library:add-folder-path': { args: [kind: LibraryFolderKind, folderPath: string]; result: LibraryIndexPayload };
   'library:get': { args: []; result: LibraryPayload };
   'library:get-index': { args: []; result: LibraryIndexPayload };
   'library:get-item': { args: [mediaId: string]; result: LibraryItemDetailsPayload | null };
+  'library:pick-folder': { args: [currentPath?: string]; result: string | null };
   'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };
+  'library:update-folder': { args: [folderPath: string, nextFolderPath: string, kind: LibraryFolderKind]; result: LibraryIndexPayload };
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
   'media:can-direct-play': { args: [filePath: string, backend?: 'html5' | 'hls']; result: ApiResult<boolean> };
   'media:ffmpeg-available': { args: []; result: { available: boolean; path: string | null } };

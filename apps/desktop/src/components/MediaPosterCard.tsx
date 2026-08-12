@@ -7,7 +7,7 @@ import SafeArtwork from '@/components/SafeArtwork';
 import WatchedToggle from '@/components/WatchedToggle';
 import RatingBadge from '@/components/RatingBadge';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
-import { posterSources, routeArtworkState } from '@/lib/artwork';
+import { posterSources, routeArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { artworkVariant } from '@/lib/artworkVariants';
 import { desktopApi } from '@/lib/desktopApi';
 import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.helpers';
@@ -23,6 +23,7 @@ interface MediaPosterCardProps {
   from: string;
   variant: MediaPosterCardVariant;
   metaLine?: string;
+  onPlay?: (item: MediaItem) => void;
 }
 
 /* Home rail cards are approximately 200x384. VirtualPosterGrid gives library
@@ -34,7 +35,7 @@ const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
   home: `loom-poster-link group block w-[200px] flex-none ${SKIPPED_CARD_SIZE}`,
   movies: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
   tv: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
-  others: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
+  others: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-visible ${SKIPPED_CARD_SIZE}`,
 };
 
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
@@ -43,7 +44,12 @@ const FALLBACK_TEXT_CLASS = 'line-clamp-4 text-center text-xs leading-tight text
 const BACKDROP_CLASS = 'absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/40';
 const PLAY_OVERLAY_CLASS = 'absolute inset-0 flex items-center justify-center opacity-0 transition-opacity group-hover:opacity-100';
 
-export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
+function fileNameForItem(item: MediaItem): string {
+  const filePath = firstPlayableMediaPath(item);
+  return filePath.split(/[\\/]/).filter(Boolean).pop() || item.title;
+}
+
+export function usePosterArtwork(item: MediaItem, fallbackFilePath: string, preferGenerated = false) {
   const [fallbackThumbnail, setFallbackThumbnail] = useState('');
   const baseImageSources = useMemo(() => posterSources(item), [item]);
   const generatedSources = useMemo(
@@ -51,8 +57,10 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
     [fallbackThumbnail],
   );
   const imageSources = useMemo(
-    () => posterSources(item, undefined, generatedSources),
-    [generatedSources, item],
+    () => preferGenerated
+      ? uniqueArtworkSources(generatedSources, baseImageSources)
+      : posterSources(item, undefined, generatedSources),
+    [baseImageSources, generatedSources, item, preferGenerated],
   );
   // Grid and rail posters paint into roughly a 150px-wide box, which is 300
   // device pixels on a 2x display. w342 is the smallest TMDB rendition that
@@ -70,10 +78,10 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
 
   useEffect(() => {
     setFallbackThumbnail('');
-    if (!fallbackFilePath || baseImageSources.length > 0) return;
+    if (!fallbackFilePath || (!preferGenerated && baseImageSources.length > 0)) return;
 
     let isMounted = true;
-    void desktopApi.getThumbnail(fallbackFilePath, '00:03:00')
+    void desktopApi.getThumbnail(fallbackFilePath, preferGenerated ? '00:00:00' : '00:03:00')
       .then(({ url }) => {
         if (isMounted) setFallbackThumbnail(url);
       })
@@ -84,7 +92,7 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
     return () => {
       isMounted = false;
     };
-  }, [baseImageSources.length, fallbackFilePath]);
+  }, [baseImageSources.length, fallbackFilePath, preferGenerated]);
 
   return { imageSources, cardSources, routeArtwork };
 }
@@ -94,11 +102,16 @@ const MediaPosterCard = memo(function MediaPosterCard({
   from,
   variant,
   metaLine = '',
+  onPlay,
 }: MediaPosterCardProps) {
-  const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
+  const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item), variant === 'others');
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
-  const formatLabel = variant === 'others' && item.type === 'movie'
-    ? 'Video'
+  const isImage = variant === 'others' && item.format?.toLowerCase() === 'image';
+  const displayTitle = variant === 'others' ? fileNameForItem(item) : item.title;
+  const formatLabel = isImage
+    ? 'Image'
+    : variant === 'others' && item.type === 'movie'
+      ? 'Video'
     : mediaFormatLabel(item.format, item.type);
   const { watchedKeys, setWatchedEntries } = useProfiles();
   const progress = useProgressSnapshot();
@@ -113,53 +126,75 @@ const MediaPosterCard = memo(function MediaPosterCard({
     void setWatchedEntries(watchedKeysForItem, present);
   };
 
-  return (
-    <div className={`${ROOT_CLASS[variant]} relative`}>
-      <Link
-        to={mediaLink(item)}
-        state={{ from, artwork: routeArtwork }}
-        className="flex h-full w-full flex-col"
-      >
-        <div className="loom-poster-frame relative aspect-[2/3] min-h-0 shrink-0 overflow-hidden rounded-lg transition-all duration-200">
-          <SafeArtwork
-            src={cardSources}
-            alt={item.title}
-            className="h-full w-full transition-transform group-hover:scale-105"
-            imgClassName="object-cover"
-            fallback={(
-              <div className={FALLBACK_CLASS}>
-                <Play className={FALLBACK_ICON_CLASS} />
-                <p className={FALLBACK_TEXT_CLASS}>{item.title}</p>
-              </div>
-            )}
-          />
-          <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
-          <div className={BACKDROP_CLASS} />
-          <div className={PLAY_OVERLAY_CLASS}>
-            <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
-          </div>
-        </div>
-        <div className="mt-2 shrink-0 overflow-hidden">
-          <h4 className="line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]">{item.title}</h4>
-          {(metaLine || contentRating || item.format) && (
-            <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
-              {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
-              <ContentRatingBadge
-                rating={formatLabel}
-                className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"
-              />
-              <ContentRatingBadge rating={contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
+  const cardContent = (
+    <>
+      <div className={variant === 'others'
+        ? 'relative flex h-24 min-h-0 shrink-0 items-center justify-center overflow-visible bg-transparent transition-all duration-200'
+        : 'loom-poster-frame relative aspect-[2/3] min-h-0 shrink-0 overflow-hidden rounded-lg transition-all duration-200'}>
+        <SafeArtwork
+          src={cardSources}
+        alt={displayTitle}
+          className={variant === 'others'
+            ? 'flex h-full w-full items-center justify-center bg-transparent'
+            : 'h-full w-full transition-transform group-hover:scale-105'}
+          naturalSize={variant === 'others'}
+          imgClassName={variant === 'others'
+            ? 'rounded-lg object-contain shadow-sm'
+            : 'object-cover'}
+          fallback={variant === 'others' ? (
+            <div className="h-full w-full bg-transparent" />
+          ) : (
+            <div className={FALLBACK_CLASS}>
+              <Play className={FALLBACK_ICON_CLASS} />
+              <p className={FALLBACK_TEXT_CLASS}>{item.title}</p>
             </div>
           )}
-        </div>
-      </Link>
-      <WatchedToggle
-        watched={watched}
-        onToggle={toggleWatched}
-        className="absolute left-2 top-2 z-20"
-        iconClassName="h-4 w-4"
-        size="compact"
-      />
+        />
+        {variant !== 'others' ? <RatingBadge rating={item.rating} providerRatings={item.providerRatings} /> : null}
+        {variant !== 'others' && !isImage ? (
+          <>
+            <div className={BACKDROP_CLASS} />
+            <div className={PLAY_OVERLAY_CLASS}>
+              <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+            </div>
+          </>
+        ) : null}
+      </div>
+      <div className="mt-2 shrink-0 overflow-hidden text-left">
+        <h4 className={variant === 'others'
+          ? 'line-clamp-2 min-h-[2rem] w-full break-all text-center text-xs font-normal leading-snug text-[var(--loom-text)]'
+          : 'line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]'}>{displayTitle}</h4>
+        {variant !== 'others' && (metaLine || contentRating || item.format) && (
+          <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
+            {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
+            <ContentRatingBadge rating={formatLabel} className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]" />
+            <ContentRatingBadge rating={contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div className={`${ROOT_CLASS[variant]} relative`}>
+      {onPlay ? (
+        <button type="button" onClick={() => onPlay(item)} className="flex h-full w-full flex-col">
+          {cardContent}
+        </button>
+      ) : (
+        <Link to={mediaLink(item)} state={{ from, artwork: routeArtwork }} className="flex h-full w-full flex-col">
+          {cardContent}
+        </Link>
+      )}
+      {variant !== 'others' ? (
+        <WatchedToggle
+          watched={watched}
+          onToggle={toggleWatched}
+          className="absolute left-2 top-2 z-20"
+          iconClassName="h-4 w-4"
+          size="compact"
+        />
+      ) : null}
     </div>
   );
 });

@@ -565,7 +565,7 @@ function AppShell() {
             <Route path="/" element={<Home />} />
             <Route path="/my-list" element={<MyList />} />
             <Route path="/movies" element={<Movies />} />
-            <Route path="/others" element={<Others />} />
+            <Route path="/others" element={<Others onPlay={handlePlayMedia} />} />
             <Route path="/tv" element={<TVShows kind="series" />} />
             <Route path="/anime" element={<TVShows kind="anime" />} />
             <Route path="/discover" element={<PluginDiscover />} />

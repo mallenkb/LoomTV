@@ -223,7 +223,10 @@ export type DesktopBridgeApi = {
       scanLibrary: (options?: { force?: boolean; mode?: LibraryScanMode }) => Promise<LibraryIndexPayload>;
       onLibraryScanProgress?: (callback: (progress: LibraryScanProgress) => void) => () => void;
       addLibraryFolder: (kind?: LibraryFolderKind) => Promise<LibraryIndexPayload | null>;
+      addLibraryFolderPath?: (kind: LibraryFolderKind, folderPath: string) => Promise<LibraryIndexPayload>;
+      pickLibraryFolder?: (currentPath?: string) => Promise<string | null>;
       removeLibraryFolder: (folderPath: string) => Promise<LibraryIndexPayload>;
+      updateLibraryFolder?: (folderPath: string, nextFolderPath: string, kind: LibraryFolderKind) => Promise<LibraryIndexPayload>;
       playMedia: (filePath: string) => Promise<boolean>;
       getStreamUrl: (filePath: string, options?: StreamUrlOptions) => Promise<StreamUrlResult>;
       getSubtitleUrl?: (filePath: string, streamOrdinal?: number) => Promise<{ url: string }>;
@@ -1150,12 +1153,29 @@ export const desktopApi = {
     });
   },
 
+  async addLibraryFolderPath(kind: LibraryFolderKind, folderPath: string): Promise<LibraryIndexPayload> {
+    if (window.desktopApi?.addLibraryFolderPath) return window.desktopApi.addLibraryFolderPath(kind, folderPath);
+    throw new Error('Folders can only be added from the LoomTV host desktop app.');
+  },
+
   async removeLibraryFolder(folderPath: string): Promise<LibraryIndexPayload> {
     if (window.desktopApi) return window.desktopApi.removeLibraryFolder(folderPath);
     return fetchJson('/api/library/remove-folder', desktopLibraryIndexSchema, {
       method: 'POST',
       body: JSON.stringify({ folderPath }),
     });
+  },
+
+  async pickLibraryFolder(currentPath?: string): Promise<string | null> {
+    if (window.desktopApi?.pickLibraryFolder) return window.desktopApi.pickLibraryFolder(currentPath);
+    throw new Error('Folders can only be selected from the LoomTV host desktop app.');
+  },
+
+  async updateLibraryFolder(folderPath: string, nextFolderPath: string, kind: LibraryFolderKind): Promise<LibraryIndexPayload> {
+    if (window.desktopApi?.updateLibraryFolder) {
+      return window.desktopApi.updateLibraryFolder(folderPath, nextFolderPath, kind);
+    }
+    throw new Error('Folder paths can only be edited from the LoomTV host desktop app.');
   },
 
   async getMediaServerPort(): Promise<number> {

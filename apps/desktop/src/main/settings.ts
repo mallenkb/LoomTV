@@ -33,6 +33,7 @@ const settingsInputSchema = z.looseObject({
   appThemeColor: z.unknown().optional(),
   appThemeMode: z.unknown().optional(),
   autoSyncIntervalHours: z.unknown().optional(),
+  otherFolderIcon: z.unknown().optional(),
   localNetworkDeviceId: z.unknown().optional(),
   localNetworkDeviceName: z.unknown().optional(),
   localNetworkHmacSecret: z.unknown().optional(),
@@ -218,7 +219,8 @@ function normalizeSettings(input: unknown): AppSettings {
     openSubtitlesAutoDownload: Boolean(raw.openSubtitlesAutoDownload),
     autoSyncIntervalHours: Number.isFinite(autoSyncIntervalHours) && autoSyncIntervalHours > 0
       ? autoSyncIntervalHours
-      : 12,
+      : 72,
+    otherFolderIcon: typeof raw.otherFolderIcon === 'string' ? raw.otherFolderIcon : 'folder',
     playbackSkipBackSeconds: Number.isFinite(Number(raw.playbackSkipBackSeconds)) && Number(raw.playbackSkipBackSeconds) > 0
       ? Number(raw.playbackSkipBackSeconds)
       : 10,

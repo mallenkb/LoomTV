@@ -15,6 +15,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import ModernHome from '@/components/ModernHome';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { excludeOtherFolderMedia } from '@/lib/otherFolderMedia';
 
 export default function Home() {
   const { theme } = useTheme();
@@ -23,7 +24,26 @@ export default function Home() {
 function DefaultHome() {
   const { state, addLibraryFolder } = useLibrary();
   const { lists } = useProfiles();
-  const { movies, tvShows, animeShows, isLoading, isScanning } = state;
+  const {
+    movies: allMovies,
+    tvShows: allTVShows,
+    animeShows: allAnimeShows,
+    libraryFolderGroups,
+    isLoading,
+    isScanning,
+  } = state;
+  const movies = useMemo(
+    () => excludeOtherFolderMedia(allMovies, libraryFolderGroups.others || []),
+    [allMovies, libraryFolderGroups.others],
+  );
+  const tvShows = useMemo(
+    () => excludeOtherFolderMedia(allTVShows, libraryFolderGroups.others || []),
+    [allTVShows, libraryFolderGroups.others],
+  );
+  const animeShows = useMemo(
+    () => excludeOtherFolderMedia(allAnimeShows, libraryFolderGroups.others || []),
+    [allAnimeShows, libraryFolderGroups.others],
+  );
   const location = useLocation();
   const currentRoute = `${location.pathname}${location.search}`;
   const [query, setQuery] = useState('');

@@ -40,6 +40,7 @@ export type LibraryMutationOperation =
   | 'full-rescan'
   | 'add-folder'
   | 'remove-folder'
+  | 'update-folder'
   | 'rename-folder'
   | 'clear-data'
   | 'auto-sync';
@@ -52,6 +53,7 @@ export type LibraryMutationCode =
   | 'LIBRARY_FULL_RESCAN_FAILED'
   | 'LIBRARY_FOLDER_ADD_FAILED'
   | 'LIBRARY_FOLDER_REMOVE_FAILED'
+  | 'LIBRARY_FOLDER_UPDATE_FAILED'
   | 'LIBRARY_FOLDER_RENAME_FAILED'
   | 'LIBRARY_DATA_CLEAR_FAILED'
   | 'LIBRARY_AUTOSYNC_UPDATE_FAILED';
@@ -70,6 +72,7 @@ const LIBRARY_MUTATION_METADATA: Record<LibraryMutationOperation, LibraryMutatio
   'full-rescan': { code: 'LIBRARY_FULL_RESCAN_FAILED', kind: 'scan', retryable: true, message: 'The full library rescan could not be completed.' },
   'add-folder': { code: 'LIBRARY_FOLDER_ADD_FAILED', kind: 'folder', retryable: true, message: 'The library folder could not be added.' },
   'remove-folder': { code: 'LIBRARY_FOLDER_REMOVE_FAILED', kind: 'folder', retryable: true, message: 'The library folder could not be removed.' },
+  'update-folder': { code: 'LIBRARY_FOLDER_UPDATE_FAILED', kind: 'folder', retryable: true, message: 'The library folder could not be updated.' },
   'rename-folder': { code: 'LIBRARY_FOLDER_RENAME_FAILED', kind: 'folder', retryable: true, message: 'The library folder name could not be saved.' },
   'clear-data': { code: 'LIBRARY_DATA_CLEAR_FAILED', kind: 'data', retryable: false, message: 'The library data could not be cleared.' },
   'auto-sync': { code: 'LIBRARY_AUTOSYNC_UPDATE_FAILED', kind: 'settings', retryable: true, message: 'The automatic sync setting could not be saved.' },
@@ -164,7 +167,7 @@ const initialState: LibraryState = {
   scanProgress: 0,
   isLoading: true,
   isStartupPrepared: false,
-  autoSyncIntervalHours: 12,
+  autoSyncIntervalHours: 72,
   catalogRevision: null,
   catalogTransport: 'legacy',
 };
@@ -297,7 +300,9 @@ interface LibraryContextType {
   fullRescanLibrary: () => Promise<void>;
   refreshMetadata: () => Promise<void>;
   addLibraryFolder: (kind?: LibraryFolderKind) => Promise<void>;
+  addLibraryFolderPath: (kind: LibraryFolderKind, folder: string) => Promise<void>;
   removeLibraryFolder: (folder: string) => Promise<void>;
+  updateLibraryFolder: (folder: string, nextFolder: string, kind: LibraryFolderKind) => Promise<void>;
   refreshLibrary: () => Promise<void>;
   clearAppData: () => Promise<void>;
   setAutoSyncIntervalHours: (hours: number) => Promise<void>;
@@ -662,6 +667,19 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const addLibraryFolderPath = async (kind: LibraryFolderKind, folder: string) => {
+    const mutationToken = beginLibraryMutation('catalog');
+    try {
+      const index = await desktopApi.addLibraryFolderPath(kind, folder);
+      await applyScanCatalog(index, mutationToken);
+    } catch (error) {
+      console.error('Failed to add library folder path:', error);
+      throw toLibraryMutationError('add-folder', error);
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
   const removeLibraryFolder = async (folder: string) => {
     const mutationToken = beginLibraryMutation('catalog');
     try {
@@ -670,6 +688,17 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Failed to remove library folder:', error);
       throw toLibraryMutationError('remove-folder', error);
+    }
+  };
+
+  const updateLibraryFolder = async (folder: string, nextFolder: string, kind: LibraryFolderKind) => {
+    const mutationToken = beginLibraryMutation('catalog');
+    try {
+      const index = await desktopApi.updateLibraryFolder(folder, nextFolder, kind);
+      await applyScanCatalog(index, mutationToken);
+    } catch (error) {
+      console.error('Failed to update library folder:', error);
+      throw toLibraryMutationError('update-folder', error);
     }
   };
 
@@ -695,7 +724,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   };
 
   const setAutoSyncIntervalHours = async (hours: number) => {
-    const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 12;
+    const normalizedHours = Number.isFinite(hours) && hours > 0 ? hours : 72;
     const mutationToken = beginLibraryMutation('settings');
     const previousHours = autoSyncHoursRef.current;
     autoSyncHoursRef.current = normalizedHours;
@@ -841,7 +870,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   }, [activeProfile, beginLibraryMutation, loadPrimaryCatalog]);
 
   return (
-    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, removeLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours, hydrateLibraryItem }}>
+    <LibraryContext.Provider value={{ state, dispatch, scanLibrary, fullRescanLibrary, refreshMetadata, addLibraryFolder, addLibraryFolderPath, removeLibraryFolder, updateLibraryFolder, refreshLibrary, clearAppData, setAutoSyncIntervalHours, hydrateLibraryItem }}>
       {children}
     </LibraryContext.Provider>
   );

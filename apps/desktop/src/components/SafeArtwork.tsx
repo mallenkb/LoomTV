@@ -36,6 +36,7 @@ interface SafeArtworkProps {
   placeholderSrc?: string;
   onError?: () => void;
   priority?: boolean;
+  naturalSize?: boolean;
 }
 
 function normalizeSources(src: string | string[]): string[] {
@@ -52,6 +53,7 @@ export default function SafeArtwork({
   placeholderSrc = '',
   onError,
   priority = false,
+  naturalSize = false,
 }: SafeArtworkProps) {
   const [sourceIndex, setSourceIndex] = useState(0);
   const [loadedSource, setLoadedSource] = useState('');
@@ -90,8 +92,8 @@ export default function SafeArtwork({
   }, [currentSource, shouldRenderImage]);
 
   return (
-    <div ref={artworkRef} className={`relative overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)] ${className}`}>
-      {fallback}
+    <div ref={artworkRef} className={`relative ${naturalSize ? 'overflow-visible bg-transparent' : 'overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)]'} ${className}`}>
+      {naturalSize ? <div className="absolute inset-0">{fallback}</div> : fallback}
       {placeholderSrc && !sourceLoaded && (
         <img
           src={placeholderSrc}
@@ -99,7 +101,7 @@ export default function SafeArtwork({
           aria-hidden="true"
           loading="eager"
           decoding="async"
-          className={`absolute inset-0 h-full w-full ${imgClassName}`}
+          className={`${naturalSize ? 'relative h-auto max-h-full w-auto max-w-full' : 'absolute inset-0 h-full w-full'} ${imgClassName}`}
         />
       )}
       {shouldRenderImage && currentSource && (
@@ -110,7 +112,7 @@ export default function SafeArtwork({
           loading={priority ? 'eager' : 'lazy'}
           fetchPriority={priority ? 'high' : 'auto'}
           decoding="async"
-          className={`absolute inset-0 h-full w-full transition-opacity duration-150 ${imgClassName} ${sourceLoaded ? 'opacity-100' : 'opacity-0'}`}
+          className={`${naturalSize ? 'relative h-auto max-h-full w-auto max-w-full' : 'absolute inset-0 h-full w-full'} transition-opacity duration-150 ${imgClassName} ${sourceLoaded ? 'opacity-100' : 'opacity-0'}`}
           onLoad={() => setLoadedSource(currentSource)}
           onError={() => {
             onError?.();

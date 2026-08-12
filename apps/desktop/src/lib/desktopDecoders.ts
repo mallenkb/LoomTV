@@ -189,6 +189,12 @@ export const settingsPayloadSchema = z.object({
   }).optional(),
   sidebarNavOrder: z.array(z.string()).optional(),
   customFolderNames: z.record(z.string(), z.string()).optional(),
+  otherFolderGroups: z.record(z.string(), z.object({
+    name: z.string(),
+    icon: z.string(),
+    folders: z.array(z.string()),
+  })).optional(),
+  otherFolderIcon: z.string().optional(),
   appThemeMode: z.enum(['dark', 'light']).optional(),
   appThemeColor: z.enum(['orange', 'yellow', 'red', 'blue', 'twitch']).optional(),
   appDarkTheme: z.literal('black').optional(),

@@ -791,7 +791,7 @@ export default function ArtworkEditorControls({
         onOpenChange={(open) => {
           if (!open && !applyingCandidateId) setMetadataDialogOpen(false);
         }}
-        contentClassName="max-h-[90vh] max-w-[min(1180px,calc(100vw-2rem))] border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
+        contentClassName="max-h-[calc(100vh-8rem)] max-w-[min(1180px,calc(100vw-2rem))] overflow-hidden border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
       >
         <DialogContent>
           <DialogHeader className="border-b border-[var(--loom-panel-border)] px-5 py-4 pr-14">
@@ -819,7 +819,7 @@ export default function ArtworkEditorControls({
                   : 'No matching metadata was found from the connected metadata APIs.'}
               </div>
             ) : (
-              <div className={`grid max-h-[72vh] gap-3 overflow-y-auto pr-1 ${isArtworkTarget ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : ''}`}>
+              <div className={`grid max-h-[calc(100vh-18rem)] gap-3 overflow-y-auto pr-1 ${isArtworkTarget ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : ''}`}>
                 {isArtworkTarget ? metadataArtworkChoices.map((choice) => {
                   const { candidate, imageUrl } = choice;
                   const isApplying = applyingCandidateId === candidate.id;
@@ -887,10 +887,10 @@ export default function ArtworkEditorControls({
                   return (
                     <div
                       key={candidate.id}
-                      className="grid gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3"
+                      className="grid gap-4 rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4"
                     >
-                      <div className="grid min-w-0 grid-cols-[58px_1fr] gap-3">
-                        <div className="h-[86px] w-[58px] overflow-hidden rounded-md bg-[var(--loom-surface)]">
+                      <div className="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_260px]">
+                        <div className="mx-auto aspect-[2/3] w-44 overflow-hidden rounded-lg bg-[var(--loom-surface)] shadow-lg md:mx-0 md:w-full">
                           {posterImage ? (
                             <img
                               src={posterImage}
@@ -908,11 +908,11 @@ export default function ArtworkEditorControls({
                             </div>
                           )}
                         </div>
-                        <div className="min-w-0 space-y-2">
+                        <div className="min-w-0 space-y-3">
                           <div className="flex min-w-0 items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <h3 className="truncate text-sm font-semibold text-[var(--loom-text)]">{candidate.title}</h3>
-                              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                              <h3 className="text-lg font-semibold leading-tight text-[var(--loom-text)]">{candidate.title}</h3>
+                              <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                 {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
                                 <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
                                 {candidate.rating ? (
@@ -925,11 +925,11 @@ export default function ArtworkEditorControls({
                             </div>
                           </div>
                           {candidate.summary ? (
-                            <p className="line-clamp-1 text-xs leading-5 text-[var(--loom-muted)]">{candidate.summary}</p>
+                            <p className="line-clamp-3 text-sm leading-5 text-[var(--loom-muted)]">{candidate.summary}</p>
                           ) : (
-                            <p className="text-xs text-[var(--loom-muted)]">No summary provided.</p>
+                            <p className="text-sm text-[var(--loom-muted)]">No summary provided.</p>
                           )}
-                          <div className="h-12 overflow-hidden rounded-md bg-[var(--loom-surface)]">
+                          <div className="aspect-video w-full overflow-hidden rounded-lg bg-black/40">
                             {coverImage ? (
                               <img
                                 src={coverImage}
@@ -939,25 +939,27 @@ export default function ArtworkEditorControls({
                                   next.add(coverImage);
                                   return next;
                                 })}
-                                className="h-full w-full object-cover"
+                                className="h-full w-full object-contain"
                               />
                             ) : (
                               <div className="grid h-full place-items-center text-[11px] text-white/30">No cover</div>
                             )}
                           </div>
-                          {candidate.episodePreview?.length ? (
-                            <div className="rounded-md bg-[var(--loom-surface)] px-2.5 py-2">
-                              <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-[var(--loom-faint)]">
+                        </div>
+                        {candidate.episodePreview?.length ? (
+                          <aside className="h-full rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] p-4 md:col-span-2 xl:col-span-1">
+                              <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--loom-faint)]">
                                 {candidate.episodeCount || candidate.episodePreview.length} episodes
                               </p>
-                              <div className="space-y-0.5">
-                                {candidate.episodePreview.slice(0, 3).map((episodeName) => (
-                                  <p key={episodeName} className="truncate text-xs text-[var(--loom-muted)]">{episodeName}</p>
+                              <div className="space-y-2">
+                                {candidate.episodePreview.slice(0, 4).map((episodeName) => (
+                                  <p key={episodeName} className="line-clamp-2 border-b border-[var(--loom-panel-border)] pb-2 text-xs leading-5 text-[var(--loom-muted)] last:border-b-0 last:pb-0">{episodeName}</p>
                                 ))}
                               </div>
-                            </div>
-                          ) : null}
-                        </div>
+                          </aside>
+                        ) : (
+                          <div className="hidden xl:block" />
+                        )}
                       </div>
                       <div className="flex items-center justify-between gap-2">
                         {candidate.genres?.length ? (

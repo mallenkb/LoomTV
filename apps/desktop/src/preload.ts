@@ -78,7 +78,10 @@ const desktopApi = {
     return () => ipcRenderer.removeListener('library:scan-progress', handler);
   },
   addLibraryFolder: (kind?: 'movies' | 'tvShows' | 'anime' | 'others') => ipcRenderer.invoke('library:add-folder', kind),
+  addLibraryFolderPath: (kind: 'movies' | 'tvShows' | 'anime' | 'others', folderPath: string) => ipcRenderer.invoke('library:add-folder-path', kind, folderPath),
+  pickLibraryFolder: (currentPath?: string) => ipcRenderer.invoke('library:pick-folder', currentPath),
   removeLibraryFolder: (folderPath: string) => ipcRenderer.invoke('library:remove-folder', folderPath),
+  updateLibraryFolder: (folderPath: string, nextFolderPath: string, kind: 'movies' | 'tvShows' | 'anime' | 'others') => ipcRenderer.invoke('library:update-folder', folderPath, nextFolderPath, kind),
   playMedia: (filePath: string) => ipcRenderer.invoke('media:play', filePath),
   getStreamUrl: (filePath: string, options?: {
     startSeconds?: number;
