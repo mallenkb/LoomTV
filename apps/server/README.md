@@ -27,6 +27,8 @@ Or invoke the entry point directly:
 
 ```sh
 node apps/server/src/cli.js --host 0.0.0.0 --port 3847 \
+  --tls-cert-file /etc/loomtv/tls/fullchain.pem \
+  --tls-key-file /etc/loomtv/tls/privkey.pem \
   --data-dir /var/lib/loomtv --cache-dir /var/cache/loomtv --media-dir /media
 ```
 
@@ -42,12 +44,37 @@ which are convenient for containers, and the `LOOMTV_*` aliases are supported:
 | Setting | CLI | Environment | Default |
 | --- | --- | --- | --- |
 | Bind address | `--host` | `HOST`, `LOOMTV_HOST` | `127.0.0.1` |
-| HTTP port | `--port` | `PORT`, `LOOMTV_PORT` | `3847` |
+| Listener port | `--port` | `PORT`, `LOOMTV_PORT` | `3847` |
 | Persistent data | `--data-dir` | `DATA_DIR`, `LOOMTV_DATA_DIR` | platform app-data/LoomTV |
 | Cache | `--cache-dir` | `CACHE_DIR`, `LOOMTV_CACHE_DIR` | `<data-dir>/cache` |
 | Media root | `--media-dir` | `MEDIA_DIR`, `LOOMTV_MEDIA_DIR` | not configured |
 | Require secure requests | `--require-secure-transport` | `REQUIRE_SECURE_TRANSPORT`, `LOOMTV_REQUIRE_SECURE_TRANSPORT` | `false` |
 | Trusted proxy allowlist | `--trusted-proxies` | `TRUSTED_PROXIES`, `LOOMTV_TRUSTED_PROXIES` | empty |
+| Bootstrap secret file | `--bootstrap-secret-file` | `BOOTSTRAP_SECRET_FILE`, `LOOMTV_BOOTSTRAP_SECRET_FILE` | `<data-dir>/bootstrap-secret` (generated) |
+| Bootstrap secret value | — | `BOOTSTRAP_SECRET`, `LOOMTV_BOOTSTRAP_SECRET` | generated when no owner exists |
+| TLS certificate | `--tls-cert-file` | `TLS_CERT_FILE`, `LOOMTV_TLS_CERT_FILE` | not configured |
+| TLS private key | `--tls-key-file` | `TLS_KEY_FILE`, `LOOMTV_TLS_KEY_FILE` | not configured |
+| Insecure development LAN | `--development-allow-insecure-non-loopback` | `LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK` | `false` |
+
+A non-loopback bind fails before listening unless direct TLS is configured,
+an explicit trusted-proxy allowlist is paired with required secure transport,
+or the explicitly named development override is set. The override sends
+credentials and media over cleartext and is not a production setting.
+
+## First owner bootstrap
+
+When no owner exists, LoomTV requires a one-time secret in addition to the
+owner name and password. By default it generates 32 random bytes, writes the
+secret to `<data-dir>/bootstrap-secret` with private permissions, and prints it
+once in the startup/container log. Paste it into the first-run browser form.
+The generated file is removed and the capability is invalidated after owner
+creation. Health, discovery, and onboarding-status responses never contain it.
+
+For unattended provisioning, provide either a protected file or an environment
+value (not both). Generate an operator-supplied value with at least 32 random
+bytes, for example `openssl rand -base64 32`. Prefer a file so the secret does
+not appear in container environment inspection. Repeated failures have a
+dedicated rate limit independent of normal account sign-in.
 
 ## Health contract
 

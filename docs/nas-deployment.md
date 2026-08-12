@@ -12,7 +12,7 @@ separate client/runtime, while the hosted client keeps portable profiles and
 watch progress on the server.
 
 The headless server now owns a small persistent catalog, safe background scans,
-direct HTTP media delivery, on-demand HLS transcoding, and a same-origin
+direct media delivery, on-demand HLS transcoding, and a same-origin
 browser client. The deployment shape is stable now, so NAS operators can
 exercise process startup, storage paths, health checks, permissions, browser
 playback, and graceful shutdown without an Electron session.
@@ -45,6 +45,7 @@ UID or GID instead of starting with elevated filesystem access.
 
 ```sh
 mkdir -p /srv/loomtv/config /srv/loomtv/cache
+mkdir -p /srv/loomtv/tls
 sudo chown -R 1000:1000 /srv/loomtv/config /srv/loomtv/cache
 ```
 
@@ -70,21 +71,57 @@ LOOMTV_PORT=3847
 LOOMTV_CONFIG_DIR=/srv/loomtv/config
 LOOMTV_CACHE_DIR=/srv/loomtv/cache
 LOOMTV_MEDIA_DIR=/srv/loomtv/media
+LOOMTV_TLS_DIR=/srv/loomtv/tls
 TZ=UTC
 ```
 
-The checked-in Compose file builds the current checkout and names the local
-image `loomtv:1.0.111`. The version is deliberate: update it only when the
-checkout and the intended LoomTV release agree. Start and inspect the service:
+Place a certificate chain and matching private key trusted by the LAN clients
+at `/srv/loomtv/tls/fullchain.pem` and `/srv/loomtv/tls/privkey.pem`. The
+default Compose file keeps `HOST=0.0.0.0` so TVs and phones can connect, but it
+will refuse to listen until those TLS files are valid. This preserves a usable
+LAN bind without silently exposing passwords, bearer tokens, or media over
+cleartext.
+
+```sh
+sudo chown 1000:1000 /srv/loomtv/tls/fullchain.pem /srv/loomtv/tls/privkey.pem
+sudo chmod 0644 /srv/loomtv/tls/fullchain.pem
+sudo chmod 0600 /srv/loomtv/tls/privkey.pem
+```
+
+Start and inspect the service:
 
 ```sh
 docker compose up -d --build
 docker compose ps
 docker compose logs --follow loomtv
-curl --fail http://127.0.0.1:3847/healthz
+curl --fail --resolve loomtv.example.com:3847:127.0.0.1 https://loomtv.example.com:3847/healthz
 # Open the viewer client or control plane from a trusted browser:
-# http://127.0.0.1:3847/app/
-# http://127.0.0.1:3847/admin/
+# https://loomtv.example.com:3847/app/
+# https://loomtv.example.com:3847/admin/
+```
+
+On the first successful start, `docker compose logs loomtv` prints a one-time
+owner bootstrap secret. Paste it into the first-run browser form. The same
+secret is stored at `/config/bootstrap-secret` with private permissions so a
+detached startup does not lose it; LoomTV removes the generated file after the
+owner is created. Health and discovery responses never return the secret.
+
+### TLS reverse proxy
+
+If TLS terminates at Caddy, nginx, or another reverse proxy, remove LoomTV's
+host `ports:` entry and use only `expose: ["3847"]` on a proxy-private Docker
+network. Set the following on the LoomTV service, leave the direct TLS file
+variables empty, and allowlist only the immediate proxy peer or proxy-network
+CIDR:
+
+```yaml
+environment:
+  TLS_CERT_FILE: ""
+  TLS_KEY_FILE: ""
+  REQUIRE_SECURE_TRANSPORT: "true"
+  TRUSTED_PROXIES: "172.28.0.2/32"
+expose:
+  - "3847"
 ```
 
 For a registry deployment, remove `build:` and replace `image:` with either an
@@ -101,6 +138,18 @@ docker buildx imagetools inspect registry.example/owner/loomtv:1.0.111
 The placeholder above is documentation, not a usable digest. Do not publish
 port 3847 directly to the public Internet; use a VPN or a carefully configured
 reverse proxy after authentication and remote-access policy are in place.
+
+Start from `deploy/docker/Caddyfile.example`. The proxy must overwrite
+`X-Forwarded-Proto` with exactly `https`; requests without that secure signal
+are rejected, including direct/download and HLS media routes. Never publish the
+cleartext backend port in this mode. LoomTV accepts forwarding headers only
+when the socket peer matches `TRUSTED_PROXIES`; do not allowlist client or LAN
+ranges merely because requests originate there.
+
+For an isolated development LAN only, direct cleartext can be enabled with
+`LOOMTV_TLS_CERT_FILE=`, `LOOMTV_TLS_KEY_FILE=`, and
+`LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK=true`. This is deliberately
+verbose and must not be used for a normal NAS deployment.
 
 ### Permissions
 
@@ -200,10 +249,11 @@ After the device is mounted, inspect the actual capability report rather than
 assuming that an FFmpeg build advertising an encoder can use it:
 
 ```sh
-curl --fail http://127.0.0.1:3847/api/transcoder/capabilities | jq .
+curl --fail --resolve loomtv.example.com:3847:127.0.0.1 https://loomtv.example.com:3847/api/transcoder/capabilities | jq .
 # Force one-frame encoder probes for every advertised backend/codec:
 curl --fail -H "Authorization: Bearer $LOOMTV_ADMIN_TOKEN" \
-  http://127.0.0.1:3847/api/transcoder/self-test | jq .
+  --resolve loomtv.example.com:3847:127.0.0.1 \
+  https://loomtv.example.com:3847/api/transcoder/self-test | jq .
 ```
 
 The report distinguishes compiled encoders from a one-frame device probe and
@@ -247,21 +297,23 @@ Linux server. Create a dedicated service account and local state directories:
 sudo useradd --system --home-dir /var/lib/loomtv --create-home --shell /usr/sbin/nologin loomtv
 sudo install -d -o loomtv -g loomtv -m 0750 /var/lib/loomtv /var/cache/loomtv /srv/loomtv-media
 sudo install -d -m 0755 /opt/loomtv /etc/loomtv
+sudo install -d -o root -g loomtv -m 0750 /etc/loomtv/tls
 sudo cp deploy/systemd/loomtv.env.example /etc/loomtv/loomtv.env
 sudo chown root:loomtv /etc/loomtv/loomtv.env
 sudo chmod 0640 /etc/loomtv/loomtv.env
 ```
 
 Install the server release under `/opt/loomtv` and ensure `node` is available
-at `/usr/bin/node`. Mount SMB/NFS at `/srv/loomtv-media`, then install and
-start the unit:
+at `/usr/bin/node`. Install the trusted certificate chain and private key at
+the paths in `loomtv.env`, readable by the `loomtv` group. Mount SMB/NFS at
+`/srv/loomtv-media`, then install and start the unit:
 
 ```sh
 sudo cp deploy/systemd/loomtv.service /etc/systemd/system/loomtv.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now loomtv
 systemctl status loomtv
-curl --fail http://127.0.0.1:3847/healthz
+curl --fail --resolve loomtv.example.com:3847:127.0.0.1 https://loomtv.example.com:3847/healthz
 ```
 
 If you choose different data/cache/media paths, update both
