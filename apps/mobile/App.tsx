@@ -105,6 +105,7 @@ import {
   configureSecureLanTransport,
   probeLanCertificate,
   secureLanUrl,
+  stopSecureLanTransport,
 } from './mobileSecureTransport';
 import {
   mobileDetailCacheKey,
@@ -130,7 +131,6 @@ import {
   type ResolvedMobileThemeMode,
 } from './mobileTheme';
 import {
-  allItems,
   collections,
   episodeCode,
   episodePlayTarget,
@@ -272,22 +272,10 @@ const PROFILE_COLOR_HEX: Record<string, string> = {
 };
 
 function mobileProfileAvatarUri(profile: Pick<MobileProfile, 'avatarKey' | 'colorKey'>): string {
-  if (profile.avatarKey.startsWith('data:image/')) return profile.avatarKey;
-  const match = /(?:glyph|weave)-(\d+)$/.exec(profile.avatarKey);
-  const parsed = match ? Number.parseInt(match[1], 10) : 1;
-  const variantNumber = Number.isFinite(parsed) && parsed > 0 ? ((parsed - 1) % 12) + 1 : 1;
-  const variant = String(variantNumber).padStart(2, '0');
-  const color = PROFILE_COLOR_HEX[profile.colorKey] || PROFILE_COLOR_HEX.ember;
-  const params = new URLSearchParams({
-    seed: `loomtv-glyph-${variant}`,
-    shapeVariant: `variant${variant}`,
-    backgroundColor: color,
-    backgroundColorFill: 'solid',
-    glyphColor: color,
-    glyphColorFill: 'solid',
-    size: '256',
-  });
-  return `https://api.dicebear.com/10.x/glyphs/png?${params.toString()}`;
+  const accent = `#${PROFILE_COLOR_HEX[profile.colorKey] || PROFILE_COLOR_HEX.ocean}`;
+  const initial = (profile.avatarKey || 'L').trim().charAt(0).toUpperCase().replace(/[^A-Z0-9]/g, 'L');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="48" fill="' + accent + '"/><text x="48" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="40" font-weight="700" fill="white">' + initial + '</text></svg>';
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
 }
 
 function mobileDeviceName(): string {
@@ -1047,21 +1035,26 @@ function MobileProfilePicker({
         />
         <Text style={[mobileProfileStyles.title, { color: colors.text }]}>Enter PIN</Text>
         <Text style={{ color: colors.muted }}>Unlock {pinTarget.name}</Text>
-        <View style={mobileProfileStyles.dots}>
+        <View
+          accessible
+          accessibilityLabel={`${pin.length} of 4 PIN digits entered`}
+          accessibilityLiveRegion="polite"
+          style={mobileProfileStyles.dots}
+        >
           {[0, 1, 2, 3].map((index) => <View key={index} style={[mobileProfileStyles.dot, { backgroundColor: index < pin.length ? colors.text : colors.border }]} />)}
         </View>
         <View style={mobileProfileStyles.pinGrid}>
           {'123456789'.split('').map((digit) => (
-            <Pressable disabled={Boolean(pendingProfileId)} key={digit} onPress={() => append(digit)} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}>
+            <Pressable accessibilityLabel={`Digit ${digit}`} accessibilityRole="button" disabled={Boolean(pendingProfileId)} key={digit} onPress={() => append(digit)} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}>
               <Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>{digit}</Text>
             </Pressable>
           ))}
           <View style={mobileProfileStyles.pinKey} />
-          <Pressable disabled={Boolean(pendingProfileId)} onPress={() => append('0')} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}><Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>0</Text></Pressable>
-          <Pressable disabled={Boolean(pendingProfileId)} onPress={() => setPin(pin.slice(0, -1))} style={mobileProfileStyles.pinKey}><Text style={{ color: colors.muted }}>Delete</Text></Pressable>
+          <Pressable accessibilityLabel="Digit 0" accessibilityRole="button" disabled={Boolean(pendingProfileId)} onPress={() => append('0')} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}><Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>0</Text></Pressable>
+          <Pressable accessibilityLabel="Delete last digit" accessibilityRole="button" disabled={Boolean(pendingProfileId)} onPress={() => setPin(pin.slice(0, -1))} style={mobileProfileStyles.pinKey}><Text style={{ color: colors.muted }}>Delete</Text></Pressable>
         </View>
         {pendingProfileId ? <ActivityIndicator color={colors.accent} size="small" /> : null}
-        {error ? <Text style={mobileProfileStyles.error}>{error}</Text> : null}
+        {error ? <Text accessibilityLiveRegion="assertive" role="alert" style={mobileProfileStyles.error}>{error}</Text> : null}
       </View>
     );
   }
@@ -1100,7 +1093,8 @@ function MobileProfilePicker({
               mobileProfileStyles.avatar,
               { backgroundColor: colors.panel, borderColor: colors.border },
             ]}>
-              <ExpoImage source={{ uri: mobileProfileAvatarUri(profile) }} style={mobileProfileStyles.avatarImage} contentFit="cover" />
+              <ExpoImage
+        cachePolicy="memory-disk" source={{ uri: mobileProfileAvatarUri(profile) }} style={mobileProfileStyles.avatarImage} contentFit="cover" />
             </View>
             <Text numberOfLines={1} style={[mobileProfileStyles.name, { color: colors.text }]}>{profile.name}</Text>
             {pendingProfileId === profile.id ? <ActivityIndicator color={colors.accent} size="small" /> : profile.id === activeProfile?.id ? (
@@ -1490,6 +1484,10 @@ function AppRoot() {
     return () => subscription.remove();
   }, []);
 
+  useEffect(() => () => {
+    void stopSecureLanTransport();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void SecureStore.getItemAsync(MOBILE_THEME_MODE_KEY)
@@ -1700,6 +1698,7 @@ function AppRoot() {
           await clearMobileOfflineSnapshot(savedConnection.hostDeviceId);
           setSavedConnection(null);
           setConnection(null);
+          void stopSecureLanTransport();
           setOfflineSnapshotSavedAt(null);
           setIsServerOffline(false);
           setError('Your secure session expired. Pair with the desktop again.');
@@ -1736,7 +1735,27 @@ function AppRoot() {
 
   const library = useMemo(() => connection?.library || {}, [connection?.library]);
   const grouped = useMemo(() => collections(library), [library]);
-  const everything = useMemo(() => allItems(library), [library]);
+  const everything = useMemo(() => [...grouped.anime, ...grouped.tv, ...grouped.movies], [grouped]);
+
+  useEffect(() => {
+    if (!connection?.baseUrl || isServerOffline) return;
+    const media = [...grouped.anime, ...grouped.tv, ...grouped.movies, ...grouped.others];
+    const urls = Array.from(new Set(media.flatMap((item) => imageUrlsFor(connection.baseUrl, [
+      item.poster,
+      ...(item.posterCandidates || []),
+      item.backdrop,
+      ...(item.backdropCandidates || []),
+      ...(item.episodeFiles || []).flatMap((episode) => [episode.still, episode.thumbnail]),
+    ])))).slice(0, 240);
+    if (urls.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      for (let index = 0; index < urls.length && !cancelled; index += 24) {
+        await ExpoImage.prefetch(urls.slice(index, index + 24), 'disk');
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [connection?.baseUrl, connection?.catalogRevision, grouped, isServerOffline]);
   const itemsById = useMemo(() => new Map(everything.map((item) => [item.id, item])), [everything]);
   const filterSource = useMemo(() => {
     if (activeKind === 'settings') return EMPTY_ITEMS;
@@ -2018,6 +2037,7 @@ function AppRoot() {
 
   useEffect(() => {
     let cancelled = false;
+    const requestController = new AbortController();
 
     async function loadSource() {
       const source = playbackUrl
@@ -2192,6 +2212,7 @@ function AppRoot() {
           filePathFromUrl(playTarget.streamPath),
           options,
           connection.selectionRevision,
+          requestController.signal,
         );
         const result = await readJsonResponse(response, hlsSessionResultSchema, 'HLS session');
         if (!response.ok || !result.ok || !result.data?.playlistUrl) {
@@ -2215,6 +2236,7 @@ function AppRoot() {
     void prepareStream();
     return () => {
       cancelled = true;
+      requestController.abort();
     };
   }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, streamOptions, streamRetryNonce]);
 
@@ -2611,6 +2633,7 @@ function AppRoot() {
         await clearMobileOfflineSnapshot(saved.hostDeviceId);
         setSavedConnection(null);
         setConnection(null);
+        void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setError('Your secure session expired. Select the desktop and enter its current 6-digit pairing PIN.');
         setIsServerOffline(false);
@@ -2802,6 +2825,7 @@ function AppRoot() {
         await clearMobileOfflineSnapshot(connection.hostDeviceId);
         setSavedConnection(null);
         setConnection(null);
+        void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
@@ -2834,6 +2858,7 @@ function AppRoot() {
         await clearMobileOfflineSnapshot(connection.hostDeviceId);
         setSavedConnection(null);
         setConnection(null);
+        void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
         setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
@@ -2875,6 +2900,7 @@ function AppRoot() {
         await clearMobileOfflineSnapshot(connection.hostDeviceId);
         setSavedConnection(null);
         setConnection(null);
+        void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
@@ -2909,6 +2935,7 @@ function AppRoot() {
         await clearMobileOfflineSnapshot(connection.hostDeviceId);
         setSavedConnection(null);
         setConnection(null);
+        void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
         setError('Your secure session expired. Enter the current 6-digit pairing PIN to pair again.');
@@ -2980,6 +3007,7 @@ function AppRoot() {
     // remove the stale live connection so onboarding can show the host that
     // Bonjour currently discovers.
     setConnection(null);
+    void stopSecureLanTransport();
     setIsOnboarding(true);
     setIsServerOffline(false);
     setOfflineSnapshotSavedAt(null);
@@ -2998,6 +3026,7 @@ function AppRoot() {
     if (hostDeviceId) void clearMobileOfflineSnapshot(hostDeviceId);
     setSavedConnection(null);
     setConnection(null);
+    void stopSecureLanTransport();
     setBaseUrl('');
     setShareCode('');
     setDetailItem(null);
@@ -3289,7 +3318,7 @@ function AppRoot() {
                   listRef={libraryListRef}
                   onScroll={rememberMainScroll}
                   showEmpty={showHomeRails ? false : (searchOpen ? showSearchEmpty : true)}
-                  onSelect={openDetailItem}
+                  onSelect={activeKind === 'others' ? playHomeItem : openDetailItem}
                   refreshControl={libraryRefreshControl}
                   header={(
                   <View style={{ gap: 12 }}>
@@ -3342,7 +3371,7 @@ function AppRoot() {
                         myList={mobileMyListItems}
                         onOpenKind={navigateToKind}
                         onResume={playHomeItem}
-                        onSelect={openDetailItem}
+                        onSelect={activeKind === 'others' ? playHomeItem : openDetailItem}
                       />
                     ) : null}
                   </View>
@@ -3595,7 +3624,7 @@ function PairingScreen({
         contentContainerStyle={[styles.pairingContent, isKeyboardVisible && styles.pairingContentKeyboard]}
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={isKeyboardVisible}
+        scrollEnabled
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.pairingHero}>
@@ -3732,7 +3761,7 @@ function PairingScreen({
             </Text>
           ) : manualVisible ? (
             <Text selectable style={styles.manualHint}>
-              Use the HTTPS address and PIN from desktop app → Settings → Network. The desktop-only http://127.0.0.1:3847 address will not work on this device.
+              On your desktop, open Settings > Network. Enter the HTTPS address and 6-digit PIN shown there. Do not use the address beginning with 127.0.0.1.
             </Text>
           ) : null}
           <Pressable
@@ -4065,6 +4094,7 @@ function BottomNavItem({
       <Animated.View style={[styles.bottomNavIconWrap, { transform: [{ scale: iconScale }] }]}>
         {item.avatarUri ? (
           <ExpoImage
+        cachePolicy="memory-disk"
             source={{ uri: item.avatarUri }}
             style={styles.bottomNavAvatar}
             contentFit="cover"
@@ -5997,7 +6027,8 @@ function SettingsScreen({
       <View style={styles.settingsProfile}>
         <View style={styles.settingsAvatar}>
           {activeProfile ? (
-            <ExpoImage source={{ uri: mobileProfileAvatarUri(activeProfile) }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            <ExpoImage
+        cachePolicy="memory-disk" source={{ uri: mobileProfileAvatarUri(activeProfile) }} style={StyleSheet.absoluteFill} contentFit="cover" />
           ) : (
             <Text style={styles.settingsAvatarText}>LT</Text>
           )}
@@ -6359,7 +6390,7 @@ function HomeSections({
   onSelect: (item: MediaItem) => void;
 }) {
   const { styles } = useMobileTheme();
-  const hasItems = grouped.anime.length > 0 || grouped.tv.length > 0 || grouped.movies.length > 0 || grouped.others.length > 0;
+  const hasItems = grouped.anime.length > 0 || grouped.tv.length > 0 || grouped.movies.length > 0;
 
   // Keep one featured title fixed while Home remains mounted. Playback progress
   // updates `lastPlayed`, but that should not replace the cover already shown.

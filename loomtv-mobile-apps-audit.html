@@ -1,0 +1,518 @@
+<!doctype html>
+<!--
+  CANONICAL WORK REPORT AUDIT TEMPLATE (html-artifacts skill)
+  How to use: copy this file mechanically, then replace only content.
+  1. Replace the placeholder <img> src with the prepared base64 screenshot (measure real pixel size first).
+  2. Replace all example copy (a Grab delivery-tracking audit) with the current audit's content.
+  3. Keep every class name, section order, and CSS rule. Do not restyle.
+  4. capture-tall (default, portrait screenshots) vs capture-wide (landscape/desktop): set on the .report div.
+  5. Pins are <a> links to #observation-{n} with aria-labels; status classes: status-high / status-medium / status-verify / status-working. Observation-number badges are group-colored: Issues red, Verify blue, Working green.
+  6. Ledger: score only categories with visible evidence; mark the rest N/O; tfoot shows the applicable-category mean.
+  7. Home link: point to the library page when the report lives in the library's reports/ folder; otherwise remove the link.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A full static audit of the LoomTV iOS and Android apps covering release readiness, local-first performance, security, accessibility, navigation, and playback.">
+  <meta name="keywords" content="heuristic evaluation, UX audit, delivery tracking, usability">
+  <meta name="generator" content="Work Report">
+  <title>LoomTV Mobile Apps, Full Product and Engineering Audit</title>
+  <style>
+    :root{
+      --canvas:rgb(251,250,247);
+      --ivory:rgb(251,250,247);
+      --sand:#e8e6dc;
+      --ring:#cfccbf;
+      --ink:#141413;
+      --charcoal:#3d3d3a;
+      --olive:#504e49;
+      --stone:#6b6a64;
+      --brand:#1b365d;
+      --brand-light:#2d5a8a;
+      --brand-tint:#e4ecf5;
+      --deep:#141413;
+      --deep-surface:#30302e;
+      --content:1180px;
+      --geist:Geist,"Geist Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{background:var(--canvas);scroll-behavior:smooth}
+    body{
+      margin:0;
+      min-width:0;
+      color:var(--ink);
+      background:var(--canvas);
+      font-family:var(--geist);
+      font-size:16px;
+      line-height:1.55;
+    }
+    a{color:var(--brand);text-underline-offset:3px}
+    :focus-visible{outline:3px solid rgba(27,54,93,.28);outline-offset:3px}
+    .sans,.kicker,.folio,.label,.tag,.legend,.note,.stamp-small,.footer-meta{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    }
+    .sheet{width:min(calc(100% - 40px),var(--content));margin-inline:auto}
+    .folio-bar{position:fixed;inset:0 0 auto;z-index:50;border-bottom:1px solid rgba(80,78,73,.2);background:rgb(251,250,247);backdrop-filter:blur(12px)}
+    .report{padding-top:52px}
+    .folio-inner{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+    .folio{color:var(--stone);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+    .folio b{margin-right:10px;color:var(--ink);font-family:Georgia,"Times New Roman",serif;font-size:17px;font-weight:500;letter-spacing:0;text-transform:none}
+    .folio .home-link{color:var(--ink);text-decoration:none}
+    .folio-links{display:flex;gap:18px}
+    .folio-links a{min-height:42px;display:inline-flex;align-items:center;color:var(--olive);font-size:11px;text-decoration:none}
+
+    .cover{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:70px;padding:76px 0 58px;border-bottom:1px solid rgba(80,78,73,.2)}
+    .kicker{margin:0 0 14px;color:var(--brand);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+    h1,h2,h3,p{margin-top:0}
+    h1{max-width:820px;margin-bottom:22px;font-size:clamp(45px,7vw,78px);font-weight:500;letter-spacing:-.045em;line-height:.98}
+    .deck{max-width:720px;margin-bottom:0;color:var(--charcoal);font-size:19px;line-height:1.55}
+    .stamp{align-self:start;padding:24px;border:1px solid var(--brand);border-radius:16px;background:var(--ivory);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+    .stamp-small{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+    .stamp-score{margin-top:12px;color:var(--brand);font-size:62px;font-variant-numeric:tabular-nums;line-height:.9}
+    .stamp-score span{font-size:19px;color:var(--stone)}
+    .stamp p{margin:0;color:var(--olive);font-size:13px}
+    .cover-meta{display:flex;flex-wrap:wrap;gap:7px 24px;margin-top:32px;color:var(--stone);font:11px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.04em;text-transform:uppercase}
+    .cover-meta span::before{content:"—";margin-right:7px;color:var(--brand)}
+
+    .memo{display:grid;grid-template-columns:repeat(4,1fr);gap:28px;border-bottom:0}
+    .memo-block{padding:28px 0 30px;border-right:0}
+    .memo-block:first-child{padding-left:0}
+    .memo-block:last-child{padding-right:0;border-right:0}
+    .label{margin-bottom:8px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .memo-block h2{margin-bottom:7px;font-size:19px;font-weight:500;line-height:1.25}
+    .memo-block p{margin:0;color:var(--stone);font-size:13px;line-height:1.5}
+
+    .overview{padding:30px 0;border-bottom:1px solid var(--border)}
+    .overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .overview-card{display:flex;flex-direction:column;min-height:134px;padding:20px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .overview-score{display:flex;align-items:baseline;gap:7px;font-family:var(--serif);font-size:30px;font-weight:750;line-height:1}
+    .overview-score span{color:var(--stone);font:650 13px/1 var(--geist)}
+    .overview-label{margin-top:10px;color:var(--stone);font-size:13px;font-weight:400;line-height:1.35}
+    .overview-bar{position:relative;height:6px;margin-top:auto;border-radius:99px;background:var(--sand)}
+    .overview-bar i{display:block;height:100%;border-radius:inherit}
+    .overview-card.state-critical .overview-score{color:#9b352f}
+    .overview-card.state-critical .overview-bar i{background:#c94b43}
+    .overview-card.state-warning .overview-score{color:#8a5709}
+    .overview-card.state-warning .overview-bar i{background:#c47f12}
+    .overview-card.state-good .overview-score{color:#17644f}
+    .overview-card.state-good .overview-bar i{background:#0a8f7a}
+    .overview-bar .tick{position:absolute;top:-3px;width:2px;height:11px;border-radius:2px;background:var(--ink);opacity:.4;transform:translateX(-1px)}
+
+    .chapter{padding:62px 0;border-bottom:0}
+    .chapter-head{display:grid;grid-template-columns:150px minmax(0,1fr);gap:34px;margin-bottom:30px}
+    .chapter-head h2{max-width:760px;margin:0;font-size:clamp(29px,4vw,44px);font-weight:500;letter-spacing:-.03em;line-height:1.08}
+    .chapter-head .lead{max-width:700px;margin:11px 0 0;color:var(--stone)}
+
+    .ledger{width:100%;table-layout:fixed;border-collapse:collapse;border-top:2px solid var(--brand)}
+    .ledger th,.ledger td{padding:14px 7px;border-bottom:1px solid rgba(80,78,73,.18);vertical-align:middle;text-align:left}
+    .ledger-no{width:48px;color:var(--brand);font-size:12px;font-variant-numeric:tabular-nums}
+    .ledger-title{font-size:16px;font-weight:500;line-height:1.25}
+    .ledger-score{width:76px;text-align:right;color:var(--brand);font-size:18px;font-variant-numeric:tabular-nums}
+    .ledger-score.na{color:var(--stone);font:700 10px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em}
+    .ledger-copy{color:var(--stone);font-size:13px;line-height:1.4}
+
+    .evidence-layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:56px;align-items:start}
+    .capture-col{position:sticky;top:68px}
+    .capture{border:1px solid var(--ring);border-radius:24px;background:var(--ivory);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+    .capture-inner{border-radius:inherit}
+    .capture img{border-radius:inherit}
+    .capture-inner{position:relative;line-height:0}
+    .capture img{display:block;width:100%;height:auto}
+    .pin{position:absolute;width:27px;height:27px;display:grid;place-items:center;border:2px solid var(--ivory);border-radius:50%;transform:translate(-50%,-50%);color:#fff;background:var(--brand);font:700 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.14)}
+    .pin.secondary{background:var(--olive)}
+    .legend{display:flex;gap:16px;margin-top:14px;color:var(--stone);font-size:11px}
+    .legend span{display:flex;align-items:center;gap:6px}
+    .legend i{width:9px;height:9px;border-radius:50%;background:var(--brand)}
+    .legend i.secondary{background:var(--olive)}
+    .capture-note{margin:13px 0 0;color:var(--stone);font-size:11px;line-height:1.5}
+
+    .observations{min-width:0}
+    .observation{display:grid;grid-template-columns:31px minmax(0,1fr);gap:16px;margin:0 0 12px;padding:18px;border:0;border-radius:20px;background:#fff;box-shadow:0 1px 0 rgba(20,20,19,.03)}
+    .obs-no{width:31px;height:31px;display:grid;place-items:center;border:1px solid var(--brand);border-radius:50%;color:var(--brand);font:700 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .observation h3{margin:2px 0 8px;font-size:21px;font-weight:500;letter-spacing:-.015em;line-height:1.2}
+    .observation p{margin:0;color:var(--olive);font-size:14px}
+    .observation p+p{margin-top:10px}
+    .observation .tag+p{margin-top:12px}
+    .observation b{color:var(--ink);font-weight:500}
+    .tag{display:inline-block;margin-top:12px;padding:4px 8px;border-radius:99px;color:var(--brand);background:var(--brand-tint);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+    .preserve .obs-no{color:var(--ivory);background:var(--brand)}
+
+    .decision{padding:68px 0;color:var(--canvas);background:var(--deep)}
+    .decision .kicker{color:#9cb6d1}
+    .decision h2{max-width:800px;margin-bottom:16px;font-size:clamp(34px,5vw,52px);font-weight:500;letter-spacing:-.035em;line-height:1.04}
+    .decision-intro{max-width:730px;margin-bottom:0;color:#c8c6bd;font-size:17px}
+    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:34px}
+    .action{padding:19px;border:1px solid #454540;border-radius:12px;background:var(--deep-surface)}
+    .action-no{display:inline-flex;padding:3px 8px;border-radius:99px;color:var(--deep);background:var(--canvas);font:700 9px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase}
+    .action h3{margin:14px 0 6px;font-size:18px;font-weight:500}
+    .action p{margin:0;color:#c8c6bd;font-size:13px}
+    .score-lifts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:34px}
+    .score-lift{padding:20px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .score-lift-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
+    .score-lift-name{font-size:17px;font-weight:600}
+    .score-lift-jump{color:var(--olive);font-size:15px;font-weight:650;white-space:nowrap}
+    .score-lift-jump em{color:#087c6c;font-style:normal}
+    .score-lift-bar{position:relative;height:6px;margin:14px 0 4px;border-radius:99px;background:var(--sand)}
+    .score-lift-bar i{display:block;height:100%;border-radius:99px;background:#b67818}
+    .score-lift.weak .score-lift-bar i{background:#c64b42}
+    .score-lift-bar .tick{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);border-radius:2px;background:var(--ink);opacity:.42}
+    .score-lift ul{margin:14px 0 0;padding:0;list-style:none}
+    .score-lift li{position:relative;padding:9px 0 9px 18px;border-top:1px solid var(--border-soft);color:var(--olive);font-size:14px}
+    .score-lift li:first-child{border-top:0}
+    .score-lift li::before{content:"›";position:absolute;left:2px;color:#087c6c;font-weight:800}
+    .score-ref{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:99px;color:#087c6c;background:#e3f2ef;font-size:10px;font-weight:650;white-space:nowrap}
+    .score-ceiling{margin-top:12px;padding:9px 11px;border:1px dashed var(--border);border-radius:9px;color:var(--stone);background:#f7f6f1;font-size:12px;line-height:1.45}
+    .path{width:100%;margin-top:38px;table-layout:fixed;border-collapse:collapse;border-top:1px solid #454540}
+    .path-row td{padding:18px 0;border-bottom:1px solid #333330;vertical-align:middle;text-align:center}
+    .path-step{width:70px;color:#9cb6d1;font:700 10px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+    .path-title{width:190px;font-size:16px;font-weight:500}
+    .path-copy{color:#aaa8a0;font-size:13px}
+    .validation{margin-top:24px;padding:15px 17px;border:1px dashed #55554f;border-radius:9px;color:#aaa8a0;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .validation b{color:var(--canvas)}
+
+    footer{padding:28px 0 38px;border-top:0}
+    .footer-inner{display:flex;justify-content:space-between;gap:20px;color:var(--stone)}
+    .footer-inner p{margin:0}
+    .footer-meta{font-size:11px}
+
+    /* Capture layout modes:
+       Tall/mobile: class="report capture-tall"
+       Desktop/web: class="report capture-wide" */
+    .report.capture-wide .evidence-layout{display:block}
+    .report.capture-wide .capture-col{position:static;margin-bottom:44px}
+    .report.capture-wide .capture{width:100%;border-radius:12px}
+    .report.capture-wide .observations{display:block}
+    .report.capture-wide .observations-head{grid-column:1/-1}
+
+    @media(max-width:900px){
+      .cover{grid-template-columns:1fr;gap:34px}
+      .stamp{width:min(100%,280px)}
+      .memo{grid-template-columns:1fr}
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:24px 0;border-right:0;border-bottom:0}
+      .chapter-head{grid-template-columns:1fr;gap:8px}
+      .ledger th,.ledger td{padding:13px 5px}
+      .ledger-no{width:38px}
+      .ledger-score{width:84px}
+      .evidence-layout{grid-template-columns:1fr;gap:36px}
+      .capture-col{position:static}
+      .capture{width:min(100%,392px);margin-inline:auto}
+      .actions{grid-template-columns:1fr}
+      .score-lifts{grid-template-columns:1fr}
+      .report.capture-wide .observations{grid-template-columns:1fr}
+    }
+    @media(max-width:620px){
+      .sheet{width:min(calc(100% - 24px),var(--content))}
+      .folio-links{display:none}
+      .cover{padding-top:50px}
+      .ledger th,.ledger td{padding:13px 3px}
+      .ledger-no{width:34px}
+      .ledger-score{width:84px}
+      .path-step{width:45px}
+      .path-title{width:120px}
+      .footer-inner{flex-direction:column}
+    }
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+    /* Report alignment: long-document rhythm, warm solid rules,
+       restrained radii, and one continuous paper surface. */
+    :root{
+      --serif:var(--geist);
+      --border:#e8e6dc;
+      --border-soft:#e5e3d8;
+    }
+    body{font-family:var(--geist);font-weight:400;line-height:1.55}
+    .report>main{display:flex;flex-direction:column}
+    .report>main>.cover{order:1}
+    .report>main>.overview{order:2}
+    .report>main>#evidence{order:3}
+    .report>main>#decision{order:4}
+    .report>main>.memo{order:5}
+    .report>main>#score{order:6}
+    h1,h2,h3,.folio b,.stamp-score,.ledger-title,.ledger-score,.path-title{font-family:var(--serif)}
+    .sans,.kicker,.folio,.label,.tag,.legend,.note,.stamp-small,.footer-meta,
+    .ledger-score.na,.observations-head span,.pin,.obs-no,.action-no,.path-step,
+    .validation{font-family:var(--geist)}
+    :focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+    .folio-bar,.cover,.memo,.chapter,footer{border-color:var(--border)}
+    .cover,.overview{border-bottom:0}
+    .folio-inner{min-height:52px}
+    .folio{font-size:10px;letter-spacing:.08em}
+    .folio-links{gap:22px}
+    .folio-links a{font-size:12px}
+    .cover{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:44px;padding:64px 0 48px}
+    .cover h1,.cover .deck{max-width:none}
+    h1{max-width:760px;font-size:clamp(42px,6vw,64px);font-weight:500;letter-spacing:-.025em;line-height:1.08}
+    .deck{max-width:690px;font-size:18px}
+    .kicker,.label,.stamp-small{font-weight:500}
+    .stamp{padding:20px;border:0;border-radius:14px;background:#f8ecd5;box-shadow:none}
+    .stamp-small{color:#8a5709}
+    .stamp-score{color:#8a5709;font-size:52px}
+    .stamp-score span{color:#8a5709}
+    .cover-meta{font-family:var(--serif);letter-spacing:.03em;text-transform:none}
+    .memo-block{padding:24px 22px 26px;border-color:var(--border)}
+    .chapter{padding:54px 0}
+    .chapter-head{display:block;max-width:760px;margin-bottom:28px}
+    .chapter-head h2{font-size:clamp(28px,3.5vw,38px);letter-spacing:-.015em;line-height:1.18}
+    .chapter-head>.kicker{margin-bottom:10px;white-space:nowrap}
+    #score .chapter-head,#score .chapter-head>div,#score .chapter-head h2,#score .chapter-head .lead{width:100%;max-width:none}
+    .ledger{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff;border-collapse:separate;border-spacing:0}
+    .ledger th,.ledger td{padding:13px 10px;border-color:var(--border-soft)}
+    .ledger-no{width:42px}
+    .ledger-score{width:92px;white-space:nowrap}
+    .ledger-score{font-size:17px;font-weight:700}
+    .ledger-score.band-high{color:#9b352f}
+    .ledger-score.band-med{color:#8a5709}
+    .ledger-score.band-good{color:#17644f}
+    .ledger-total th,.ledger-total td{padding-top:16px;padding-bottom:16px;border-bottom:0;background:#f7f6f1}
+    .ledger-total th{font-weight:650}
+    .ledger-total .ledger-score{font-weight:750}
+    .ledger-head th{color:var(--stone);font:650 10px/1.3 var(--geist);letter-spacing:.1em;text-transform:uppercase}
+    .capture{border:.5px solid var(--border);border-radius:30px;box-shadow:0 24px 60px rgba(20,20,19,.14)}
+    .pin{color:#fff;text-decoration:none;cursor:pointer}
+    .pin:hover{transform:translate(-50%,-50%) scale(1.08)}
+    .pin:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
+    .pin.status-working{background:#0a8f7a}
+    .pin.status-medium{background:#c47f12}
+    .pin.status-verify{background:#2d5a8a}
+    .pin.status-high{background:#c94b43}
+    .observation{scroll-margin-top:68px;border:1px solid var(--border)}
+    section[id]{scroll-margin-top:68px}
+    .observation:target{box-shadow:0 0 0 2px var(--brand)}
+    .observation{padding:14px 12px;border:1px solid var(--border);box-shadow:none}
+    .observation:target{background:#fff;outline:0;box-shadow:0 0 0 1px #6b7280}
+    .observation>div{min-width:0}
+    .observation h3{font-size:19px;letter-spacing:0}
+    .obs-no{border-radius:50%;font-weight:750}
+    .tag{border-radius:3px;font-weight:500}
+    .tag+.tag{margin-left:6px}
+    .tag.category{color:var(--brand);background:var(--brand-tint)}
+    .tag.status-working{color:#17644f;background:#e4f1eb}
+    .tag.status-improve{color:#8a5709;background:#f8ecd5}
+    .tag.status-verify{color:#2d5680;background:#e4ecf5}
+    .tag.status-high{color:#9b352f;background:#f6e3e1}
+    .quick-win{display:block;width:fit-content;max-width:100%;margin-top:12px;padding:8px 11px;border-radius:10px;color:#0a4f44;background:#e6f4f1;font-size:13px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:normal}
+    .quick-win b{color:#073a32;font-weight:650}
+    .finding-group{margin:30px 0 12px;padding:0;border:0;font-size:18px;font-weight:650;letter-spacing:-.01em;line-height:1.25;text-transform:none}
+    .finding-group.issues{color:#9b352f}
+    .finding-group.verify{color:#2d5680}
+    .finding-group.working{color:#17644f}
+    #evidence .observations{padding-block:0}
+    #evidence .finding-group{margin-top:0}
+    #evidence .observation:last-of-type{margin-bottom:0}
+    /* Observation-number badges are determined by their finding group, never
+       by the individual issue priority or hard-coded observation number. */
+    .finding-group.issues~.observation .obs-no{color:#fff;border:0;background:#9b352f;box-shadow:none}
+    .finding-group.verify~.observation .obs-no{color:#fff;border:0;background:#2d5680;box-shadow:none}
+    .finding-group.working~.observation .obs-no{color:#fff;border:0;background:#17644f;box-shadow:none}
+    .legend i.status-high{background:#c94b43}
+    .legend i.status-medium{background:#c47f12}
+    .legend i.status-verify{background:#2d5a8a}
+    .legend i.status-working{background:#0a8f7a}
+    .decision{padding:58px 0;color:var(--ink);background:var(--canvas);border-top:0}
+    .decision .kicker{color:var(--brand)}
+    .decision h2{font-size:clamp(30px,4vw,44px);letter-spacing:-.02em;line-height:1.12}
+    .decision h2,.decision-intro{width:100%;max-width:none}
+    .decision-intro,.action p,.path-copy{color:var(--olive)}
+    .actions{gap:12px;margin-top:30px}
+    .action{padding:18px;border:.5px solid var(--border);border-radius:14px;background:var(--ivory)}
+    .action-no{color:var(--brand);background:var(--brand-tint);border-radius:3px;font-weight:500}
+    .path{border-color:var(--border)}
+    .path-row td{padding:16px 0;border-color:var(--border-soft)}
+    .path-step{color:var(--brand);font-weight:500}
+    .validation{border:0;border-radius:14px;color:var(--olive);background:#efefec}
+    .cover,.overview{border-bottom:0}
+    .validation b{color:var(--ink)}
+    @media(max-width:900px){.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:620px){.overview-grid{grid-template-columns:1fr}}
+
+    /* Re-assert stacked-memo padding: the alignment layer above re-adds
+       side padding after the 900px breakpoint has already removed it. */
+    @media(max-width:900px){
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:24px 0}
+    }
+
+    @media print{
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:20px 0}
+      @page{margin:14mm}
+      html,body{background:#fff}
+      .folio-bar{position:static;background:none;backdrop-filter:none;border-bottom:1px solid #ddd}
+      .report{padding-top:0}
+      .folio-links{display:none}
+      .capture-col{position:static}
+      .evidence-layout{display:block}
+      .capture{width:min(100%,340px);margin:0 auto 24px;box-shadow:none}
+      .observation{border:1px solid #e5e3d8;box-shadow:none}
+      .observation,.overview-card,.memo-block,.score-lift,.path-row,.validation,.quick-win,.ledger-row{break-inside:avoid}
+      h1,h2,h3,.finding-group,.chapter-head{break-after:avoid}
+      .chapter,.decision{border-top:0}
+      a{color:inherit;text-decoration:none}
+      .pin{box-shadow:none}
+    }
+  </style>
+</head>
+<body>
+
+  <div class="report capture-wide">
+    <header class="folio-bar">
+      <div class="sheet folio-inner">
+        <div class="folio"><b>Work Report</b> Mobile product and engineering audit · 2026.08</div>
+        <nav class="folio-links sans" aria-label="Report navigation"><a href="#evidence">Evidence</a><a href="#score">Score</a><a href="#decision">Decision</a></nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="sheet cover">
+        <div>
+          <p class="kicker">LoomTV mobile apps · Full audit</p>
+          <h1>The local-first core is strong.<br>The release boundary is not.</h1>
+          <p class="deck">The iOS and Android apps have a thoughtful secure-LAN transport, offline catalog fallback, and resilient playback controls. Android release hardening, high-frequency snapshot writes, uncancelled network work, and leakage of Others media into core surfaces keep the current build below ship-ready.</p>
+        </div>
+        <aside class="stamp" aria-label="Overall score">
+          <div class="stamp-small">Overall score</div>
+          <div class="stamp-score">7.1<span> / 10</span></div>
+        </aside>
+      </section>
+
+      <section class="overview">
+        <div class="sheet">
+          <div class="overview-grid">
+            <article class="overview-card state-warning"><div class="overview-score">7.1 <span>&rarr; 9.0</span></div><div class="overview-label">Overall · mean of all 10 scored categories</div><div class="overview-bar"><i style="width:71%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">6.1 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 07 · Flexibility and efficiency</div><div class="overview-bar"><i style="width:61%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">6.6 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 05 · Error prevention</div><div class="overview-bar"><i style="width:66%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">6.7 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 08 · Simplicity and information architecture</div><div class="overview-bar"><i style="width:67%"></i><span class="tick" style="left:90%"></span></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter" id="evidence">
+        <div class="sheet">
+          <div class="chapter-head"><p class="kicker">01 · Evidence</p><div><h2>Thirteen observations across both mobile platforms.</h2><p class="lead">This is a static implementation audit of the Expo, React Native, Android, and iOS source. No simulator, physical-device, runtime, visual, or network-condition testing was performed.</p><p class="lead"><b>Revision, second pass.</b> Every citation in this report was re-opened against the source. Four claims did not survive: the pairing copy had already been rewritten to the wording this report recommended, the Android proxy's thread pools are bounded rather than cached, Others selections already route to direct play, and the pairing screen already scrolls unconditionally. Those observations are corrected in place and marked. Three citations were wrong and are fixed: the DiceBear URL lives in <code>App.tsx</code>, the root holds 41 <code>useState</code> and 30 <code>useRef</code> hooks rather than "77 state hooks", and the LAN client has one shared <code>fetch</code> path with optional signal support on playback segments. Ratings were not raised to match, because nothing was measured.</p></div></div>
+          <div class="evidence-layout">
+            <div class="observations">
+              <div class="finding-group issues">Issues to address first</div>
+
+              <article class="observation" id="observation-1"><span class="obs-no">1</span><div><h3>The Android release boundary does not fail closed.</h3><span class="tag category">Trust</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/android/app/build.gradle:100-116</code> assigns <code>signingConfigs.debug</code> to the release build. <code>apps/mobile/android/app/src/main/AndroidManifest.xml:6-10</code> also contains storage, overlay, and system-settings permissions that are broader than the app-level allowlist.</p><p><b>Problem.</b> EAS can inject production credentials, but the checked-in native release target is unsafe when built outside that path and current validation does not reject signing or permission drift.</p><p><b>Why it matters.</b> A release process that depends on one build path rather than enforcing invariants can ship a wrongly signed artifact or expose unnecessary platform capabilities.</p><div class="quick-win"><b>Quick win.</b> Remove release-to-debug signing, block unneeded permissions through Expo configuration, add a release-manifest and certificate allowlist check, and make production builds stop when credentials are absent. Effort: Medium. Accept only artifacts whose signer and merged permissions match the release policy.</div></div></article>
+
+              <article class="observation" id="observation-2"><span class="obs-no">2</span><div><h3>Playback causes repeated full-database snapshot writes.</h3><span class="tag category">Efficiency</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/mobileOfflineCache.ts</code> serializes the entire profiles, library, lists, and progress payload into one SQLite JSON row. <code>apps/mobile/App.tsx:1540-1579</code> schedules a save after progress changes, while <code>apps/mobile/App.tsx:2315-2321</code> updates progress every 15 seconds.</p><p><b>Problem.</b> A small progress update rewrites the complete catalog snapshot, potentially including tens of megabytes of JSON.</p><p><b>Why it matters.</b> The work scales with library size rather than the change size, increasing main-thread serialization, disk churn, battery use, and the chance of stutter during playback.</p><div class="quick-win"><b>Quick win.</b> Keep catalog snapshots immutable by revision, move progress and profile state into normalized incremental tables, batch writes on a slower cadence, and flush on background. Effort: Large. Measure SQLite bytes written per playback hour and offline-save p95 before and after.</div></div></article>
+
+              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>Offline metadata is plaintext and Android backup is enabled.</h3><span class="tag category">Trust</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/mobileOfflineCache.ts</code> persists profiles, viewing progress, lists, host identity, and catalog metadata as plaintext JSON. <code>apps/mobile/android/app/src/main/AndroidManifest.xml:18</code> sets <code>android:allowBackup="true"</code> without app-specific extraction rules.</p><p><b>Problem.</b> The cache is treated as local convenience data, but it contains household and viewing information that can enter device backups unless explicitly excluded.</p><p><b>Why it matters.</b> A lost, restored, or inspected backup can reveal local media and behavior even when access credentials are protected separately in SecureStore.</p><div class="quick-win"><b>Quick win.</b> Encrypt sensitive rows with a platform-protected key, exclude the database from Android backup or define explicit backup rules, and document retention and deletion semantics. Effort: Medium. Validate backup contents on Android 11 and Android 12+ using the <a href="https://developer.android.com/identity/data/autobackup?hl=en">Android backup model</a>.</div></div></article>
+
+              <article class="observation" id="observation-4"><span class="obs-no">4</span><div><h3>LAN requests and stream preparation cannot reliably time out or cancel.</h3><span class="tag category">Error prevention</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/mobileLanClient.ts</code> routes calls through a single shared <code>fetch</code> path, and <code>getPlaybackSegments</code> accepts an optional <code>AbortSignal</code>. The shared request path had no deadline, and most callers did not propagate cancellation. Pairing polling can run for roughly 65 seconds, and <code>apps/mobile/App.tsx</code> marks stream preparation as cancelled without aborting the underlying request or transcoding work.</p><p><b>Problem.</b> A hung request can pin connection health checks, keep stale UI work alive, and create overlapping stream preparations after rapid navigation or track changes.</p><p><b>Why it matters.</b> Office Wi-Fi, captive portals, address changes, and sleeping desktops are normal LAN conditions. Unbounded work makes the app feel frozen precisely when recovery should be clearest.</p><div class="quick-win"><b>Quick win.</b> Introduce one typed request client with operation-specific deadlines, AbortController propagation, lifecycle cancellation, and distinct timeout errors. Add server-side stream-session cancellation. Effort: Medium. Verify no request remains active after navigation, backgrounding, disconnect, or retry.</div></div></article>
+
+              <article class="observation" id="observation-5"><span class="obs-no">5</span><div><h3>Others media leaks into core surfaces and opens the wrong flow.</h3><span class="tag category">Information architecture</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/mobileLibrary.ts:163</code> spreads <code>grouped.others</code> into <code>allItems</code>, and <code>apps/mobile/App.tsx:1737-1750</code> builds Home's filter source, search, progress ownership, and item lookup from it. <code>apps/mobile/App.tsx:6369-6373</code> seeds hero candidates from continue-watching, which can carry an Others title onto Home.</p><p><b>Problem.</b> Others belongs only in its own folder, but core surfaces read from a collection that contains it.</p><p><b>Why it matters.</b> Personal clips can be misclassified, surface on Home, and appear in core category searches next to library titles.</p><p><b>Verified as already correct.</b> Selection routing is not affected: <code>apps/mobile/App.tsx:3292</code> and <code>3345</code> both dispatch <code>activeKind === 'others' ? playHomeItem : openDetailItem</code>, so Others already plays directly instead of opening details. Home's has-content check at <code>apps/mobile/App.tsx:6364</code> counts only anime, TV, and movies. Both were claimed as defects in the first pass and are not.</p><div class="quick-win"><b>Quick win.</b> Create explicit core-media and Others selectors, exclude Others from Home, anime, TV, movie, hero, My List, and global-core search sources, and dispatch Others selections directly to playback or image viewing. Effort: Medium. Add contract tests asserting zero Others IDs across every core surface.</div></div></article>
+
+              <article class="observation" id="observation-6"><span class="obs-no">6</span><div><h3>Release evidence stops before production behavior.</h3><span class="tag category">Error prevention</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> CI compiles Android debug and iOS simulator native targets, while <code>apps/mobile/RELEASE_CHECKLIST.md</code> still shows the physical-device matrix as pending. Existing tests are helper and source-contract tests rather than pairing, secure-transport, offline, and playback journeys on devices.</p><p><b>Problem.</b> The most failure-prone boundaries, certificates, Bonjour discovery, office Wi-Fi, orientation, media decoding, backgrounding, and release signing, are not represented by recorded production-build evidence.</p><p><b>Why it matters.</b> A passing source suite can coexist with a blank render, discovery failure, codec issue, or platform permission regression.</p><div class="quick-win"><b>Quick win.</b> Add signed release builds to CI, native transport tests, and a recorded device matrix for iPhone, iPad, Android phone, and Android tablet across offline, LAN, bad-network, and resume flows. Effort: Large. The release gate passes only when every checklist row has artifact-linked evidence.</div></div></article>
+
+              <article class="observation" id="observation-7"><span class="obs-no">7</span><div><h3>The loopback bridge needs a tighter local threat boundary.</h3><span class="tag category">Trust</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/modules/loomtv-secure-transport/android/src/main/java/app/loomtv/securetransport/LoomTvSecureTransportModule.kt:171</code> exports <code>stop()</code>, and <code>apps/mobile/mobileSecureTransport.ts:91</code> wraps it as <code>stopSecureLanTransport</code> — which <code>App.tsx</code> never calls. The loopback proxy has no per-session local secret.</p><p><b>Problem.</b> The bridge stays up for the life of the process rather than for the life of a connection.</p><p><b>Verified as already correct.</b> Thread pools are bounded, not unbounded: the same file uses <code>newSingleThreadExecutor()</code> to accept and <code>newFixedThreadPool(8)</code> to serve. The first pass claimed a cached, unbounded pool.</p><p><b>Why it matters.</b> The port is ephemeral and remote authorization is still required, but defense in depth should limit local probing, denial of service, and stale resource use.</p><div class="quick-win"><b>Quick win.</b> Require a random per-start proxy secret, strip it before forwarding, cap concurrent connections, and stop the bridge on disconnect or inactive lifecycle unless active playback requires it. Effort: Medium. Add flood, malformed-request, stale-port, and teardown tests.</div></div></article>
+
+              <article class="observation" id="observation-8"><span class="obs-no">8</span><div><h3>Pairing can become unreachable on small or enlarged layouts.</h3><span class="tag category">Accessibility</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/App.tsx:3589-3600</code> sets <code>scrollEnabled</code> unconditionally, but gates <code>bounces</code> and <code>automaticallyAdjustKeyboardInsets</code> on keyboard visibility. The PIN keypad and several pairing actions do not expose a complete button-role, state, and announcement contract.</p><p><b>Problem.</b> The reachability risk is narrower than first stated — scrolling always works — but the announcement contract on the only route into the app is still incomplete, and the keyboard-conditional inset handling is untested at large font scales.</p><p><b>Why it matters.</b> Pairing is the only route into the app. Any accessibility failure there blocks the entire product.</p><div class="quick-win"><b>Quick win.</b> Add explicit roles and labels to keypad controls, announce errors and entered-digit count, and test at maximum supported font scale in portrait and landscape. Effort: Small. The first pass also asked to "always permit scrolling"; that is already the case.</div></div></article>
+
+
+              <article class="observation" id="observation-10"><span class="obs-no">10</span><div><h3>One 6,775-line root owns too many product systems.</h3><span class="tag category">Simplicity</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/App.tsx</code> is 6,775 lines holding 41 <code>useState</code> and 30 <code>useRef</code> hooks, and coordinates connection, pairing, profiles, catalog sync, offline restore, navigation, search, detail, playback, progress, settings, and modals.</p><p><b>Problem.</b> Unrelated state transitions share one render and lifecycle boundary, making stale closures, accidental cross-surface behavior, and regression-safe changes harder to reason about.</p><p><b>Why it matters.</b> The Others leak and repeated persistence work are examples of product rules crossing domains through shared root selectors and effects.</p><div class="quick-win"><b>Quick win.</b> Extract connection/session, catalog/offline, profile, navigation, and player controllers; move screens into feature modules; and enforce selectors at domain boundaries. Effort: Large. Track root render frequency and require feature-level integration tests before migration completes.</div></div></article>
+
+              <div class="finding-group verify">Needs verification</div>
+              <article class="observation" id="observation-11"><span class="obs-no">11</span><div><h3>Instant offline imagery is not yet a guaranteed product contract.</h3><span class="tag category">System status</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> Metadata has an explicit SQLite snapshot, but artwork relies on the image component's opportunistic cache and profile avatars can resolve through a DiceBear internet URL built in <code>apps/mobile/App.tsx:290</code>.</p><p><b>Risk.</b> A previously unseen or evicted image can remain blank offline even though the associated title metadata restores immediately.</p><p><b>Why verify.</b> The local-first promise is perceived through posters and thumbnails, not only text. “Instant” must be measured across cold launch, eviction, and airplane mode.</p><div class="quick-win"><b>Recommendation.</b> Add an asset manifest, bounded prefetch queue, local avatar generation or desktop proxying, cache-health telemetry, and explicit placeholders. Measure cold and warm image-complete time at p50 and p95 on representative libraries.</div></div></article>
+
+              <div class="finding-group working">Working well to preserve</div>
+              <article class="observation preserve" id="observation-9"><span class="obs-no">9</span><div><h3>Pairing guidance was rewritten before this pass.</h3><span class="tag category">Copy</span><span class="tag status-working">Resolved in code</span><p><b>Evidence.</b> <code>apps/mobile/App.tsx:3735</code> reads: “On your desktop, open Settings &gt; Network. Enter the HTTPS address and 6-digit PIN shown there. Do not use the address beginning with 127.0.0.1.”</p><p><b>Status.</b> The first pass quoted an older string as current and recommended replacing it with the sentence that is already shipped. There is no defect here.</p><p><b>What remains.</b> Only validation: a five-user manual-pairing test to confirm the current wording actually resolves discovery confusion.</p></div></article>
+              <article class="observation preserve" id="observation-12"><span class="obs-no">12</span><div><h3>The secure-LAN transport has a credible trust model.</h3><span class="tag category">Trust</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> The custom Android and iOS modules pin the desktop certificate, bind the media bridge to loopback, reject redirects and remote cleartext traffic, constrain request sizes, and separate probing from authenticated transport.</p><p><b>Why it works.</b> The mobile app can stream from a self-hosted desktop without disabling platform transport security globally or trusting arbitrary certificates.</p><p><b>What to preserve.</b> Keep certificate pinning, origin normalization, HTTPS-only remote access, loopback-only cleartext exceptions, and the host-identity checks while tightening observation 7.</p></div></article>
+
+              <article class="observation preserve" id="observation-13"><span class="obs-no">13</span><div><h3>Playback and offline recovery are designed as first-class states.</h3><span class="tag category">Error recovery</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> The app includes playback retry classification, decoder and stream recovery, lifecycle-aware reconnect backoff, cached offline restore, accessibility actions for seeking, and a visible offline notice with retry and settings routes.</p><p><b>Why it works.</b> Failures are modeled rather than reduced to a generic error, so users retain a path back to content when the desktop sleeps or the LAN changes.</p><p><b>What to preserve.</b> Keep typed recovery states, adjustable seek actions, lifecycle-aware retries, and explicit offline status while adding deadlines and persistence improvements.</p></div></article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sheet memo" aria-label="Executive summary">
+        <article class="memo-block"><div class="label">What works well</div><h2>Secure local playback is thoughtfully built.</h2><p>Certificate pinning, loopback transport, offline restore, and typed playback recovery create a strong foundation.</p></article>
+        <article class="memo-block"><div class="label">Primary issue</div><h2>The build path and data path are not bounded enough.</h2><p>Release signing drift, broad Android capabilities, full snapshot rewrites, and unbounded requests introduce avoidable risk.</p></article>
+        <article class="memo-block"><div class="label">Recommended action</div><h2>Harden boundaries before adding features.</h2><p>Fail-close releases, normalize offline persistence, isolate Others, and centralize request cancellation.</p></article>
+        <article class="memo-block"><div class="label">Expected outcome</div><h2>Fast local startup with predictable recovery.</h2><p>Users get consistent category behavior, lower disk and battery cost, and fewer stalls on difficult networks.</p></article>
+      </section>
+
+      <section class="chapter" id="score">
+        <div class="sheet">
+          <div class="chapter-head"><p class="kicker">02 · Score ledger</p><div><h2>Ten categories, rated directionally from implementation evidence.</h2><p class="lead">These ratings are judgement calls written as numbers so the categories can be ranked against each other. They are not measurements, they carry no precision beyond "worse here than there", and they are secondary to the verified findings above — where the two disagree, the findings win. No rating rises without runtime evidence: a corrected line of source moves a finding, not a score. High-priority findings hold the current implementation below 8.0 until release, performance, and behavior boundaries are corrected.</p></div></div>
+          <table class="ledger" aria-label="Heuristic category scores">
+            <thead><tr class="ledger-head"><th class="ledger-no" scope="col">No.</th><th class="ledger-title" scope="col">Category</th><th class="ledger-score" scope="col">Score</th><th class="ledger-copy" scope="col">Evidence</th></tr></thead>
+            <tbody>
+              <tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">System status feedback</td><td class="ledger-score band-med">7.4 / 10</td><td class="ledger-copy">Offline and retry states are explicit; refresh completion and image readiness are not fully contract-driven (11, 13).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Real world / mental model</td><td class="ledger-score band-med">7.0 / 10</td><td class="ledger-copy">Discovery and PIN pairing are understandable and the manual-pairing copy now names the desktop screen and the field to enter; unvalidated with users (9, 12).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">User control and reversibility</td><td class="ledger-score band-med">7.3 / 10</td><td class="ledger-copy">Retry, settings, back, and playback controls are strong; outstanding work cannot always be cancelled (4, 13).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Consistency and navigation</td><td class="ledger-score band-high">6.8 / 10</td><td class="ledger-copy">Core navigation is coherent and Others already plays directly, but Others still reaches Home, search, and hero through shared selectors (5).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention</td><td class="ledger-score band-high">6.6 / 10</td><td class="ledger-copy">Release invariants, request deadlines, backup policy, and production-device gates are incomplete (1, 3, 4, 6).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Recognition rather than recall</td><td class="ledger-score band-med">7.4 / 10</td><td class="ledger-copy">Visible states and familiar controls help, while the pairing keypad still lacks a complete role and announcement contract (8, 13).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">Flexibility and efficiency</td><td class="ledger-score band-high">6.1 / 10</td><td class="ledger-copy">Full snapshot rewrites, requests without deadlines, a bridge that never stops, and broad root rerenders scale poorly (2, 4, 7, 10).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and information architecture</td><td class="ledger-score band-high">6.7 / 10</td><td class="ledger-copy">A clear surface model is undermined by shared selectors and a monolithic root (5, 10).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-med">7.6 / 10</td><td class="ledger-copy">Typed playback and reconnect recovery are strong, but timeouts and cancellation are missing (4, 13).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Help and documentation</td><td class="ledger-score band-med">7.8 / 10</td><td class="ledger-copy">Release documentation is detailed, but every device-matrix row in the checklist is still marked Pending (6).</td></tr>
+            </tbody>
+            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Heuristic average</th><td class="ledger-score band-med">7.1 / 10</td><td class="ledger-copy">Directional mean across the 10 categories. Read the findings, not the decimal: no score here is a measurement, and none moves up until runtime evidence exists.</td></tr></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="decision" id="decision">
+        <div class="sheet">
+          <p class="kicker">03 · Decision memo</p>
+          <h2>Harden the release path first.<br>Then make local data truly incremental.</h2>
+          <p class="decision-intro">This pass should prioritize ship safety, predictable LAN recovery, and strict media-domain isolation. Visual polish and additional content features are deferred until production builds and device metrics prove the current foundation is stable.</p>
+          <div class="score-lifts" aria-label="Path to 9.0 by score category">
+            <article class="score-lift">
+              <div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">7.1 &rarr; <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:71%"></i><span class="tick" style="left:90%"></span></div>
+              <ul>
+                <li>Combine release, flow, clarity, accessibility, and performance lifts below. <span class="score-ref">Fixes 1-11</span></li>
+                <li>Protect the secure transport and recovery model. <span class="score-ref">Keep 12, 13</span></li>
+              </ul>
+              <div class="score-ceiling">A 9.0 requires signed production artifacts, device evidence, measured offline startup, and verified accessibility. Static inspection can define the gate but cannot award it.</div>
+            </article>
+            <article class="score-lift weak">
+              <div class="score-lift-top"><span class="score-lift-name">Flow &amp; IA</span><span class="score-lift-jump">6.7 &rarr; <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:67%"></i><span class="tick" style="left:90%"></span></div>
+              <ul>
+                <li>Enforce core-media and Others selectors at one domain boundary. <span class="score-ref">Fix 5</span></li>
+                <li>Split root ownership into feature controllers and explicit screens. <span class="score-ref">Fix 10</span></li>
+                <li>Keep recovery routes present across offline and playback states. <span class="score-ref">Keep 13</span></li>
+              </ul>
+            </article>
+            <article class="score-lift">
+              <div class="score-lift-top"><span class="score-lift-name">Clarity &amp; Copy</span><span class="score-lift-jump">7.0 &rarr; <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:70%"></i><span class="tick" style="left:90%"></span></div>
+              <ul>
+                <li>Rewrite manual pairing around desktop actions, not protocols. <span class="score-ref">Fix 9</span></li>
+                <li>Give image readiness and timeout failures explicit states. <span class="score-ref">Fix 4, 11</span></li>
+                <li>Retain concise offline and recovery messaging. <span class="score-ref">Keep 13</span></li>
+              </ul>
+            </article>
+            <article class="score-lift weak">
+              <div class="score-lift-top"><span class="score-lift-name">Accessibility</span><span class="score-lift-jump">6.6 &rarr; <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:66%"></i><span class="tick" style="left:90%"></span></div>
+              <ul>
+                <li>Make pairing scrollable and fully labeled at every text size. <span class="score-ref">Fix 8</span></li>
+                <li>Extend reduced-motion handling to navigation and image transitions.</li>
+                <li>Verify VoiceOver, TalkBack, target sizes, orientation, and focus order. <span class="score-ref">Fix 6, 11</span></li>
+              </ul>
+              <div class="score-ceiling">Requires physical-device testing on both platforms at large text, reduced motion, screen-reader, and switch-control settings.</div>
+            </article>
+          </div>
+          <table class="path" aria-label="Path to 9.0">
+            <tbody>
+              <tr class="path-row"><td class="path-step">Step 01</td><td class="path-title">Fail-close releases</td><td class="path-copy">Fix signing, permission, and backup policies; add signed production artifact checks. Addresses 1 and 3.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Bound network work</td><td class="path-copy">Centralize deadlines and cancellation, then harden loopback lifecycle and concurrency. Addresses 4 and 7.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Normalize local data</td><td class="path-copy">Separate catalog revisions, progress mutations, and assets; encrypt and measure the result. Addresses 2 and 11.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Enforce media domains</td><td class="path-copy">Make Others direct-play and invisible to every core surface by selector contract. Addresses 5 and 10.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 05</td><td class="path-title">Prove the experience</td><td class="path-copy">Complete accessibility, bad-network, codec, background, and device-matrix validation. Addresses 6, 8, and 9.</td></tr>
+            </tbody>
+          </table>
+          <div class="validation"><b>9.0 gate.</b> Production artifacts use the intended signer and permission allowlist; Android backups exclude sensitive cache data; no request survives its deadline or lifecycle; one hour of playback produces bounded incremental writes; Others IDs never appear outside their own direct-play surface; offline metadata and cached imagery meet defined p50 and p95 targets; and every release-checklist journey passes on iPhone, iPad, Android phone, and Android tablet with VoiceOver and TalkBack evidence.</div>
+        </div>
+      </section>
+    </main>
+
+    <footer><div class="sheet footer-inner"><p>Work Report · Evidence-led mobile product and engineering audit.</p><p class="footer-meta">Static triage estimate · 7.1 / 10 · Runtime confidence: not verified · Findings outrank scores</p></div></footer>
+  </div>
+
+</body>
+</html>

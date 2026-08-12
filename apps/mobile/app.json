@@ -27,7 +27,8 @@
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false,
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "NSFileProtectionKey": "NSFileProtectionComplete"
       }
     },
     "android": {
@@ -46,7 +47,14 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "app.loomtv.mobile"
+      "package": "app.loomtv.mobile",
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.WRITE_SETTINGS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -70,7 +78,8 @@
         }
       ],
       "./plugins/withLoomTvLoopbackTransport.cjs",
-      "./plugins/with-gradle-distribution-checksum.cjs"
+      "./plugins/with-gradle-distribution-checksum.cjs",
+      "./plugins/withMobileReleaseHardening"
     ]
   }
 }

@@ -758,15 +758,15 @@ export default function Sidebar() {
           })}
           {customFolderNavItems.length > 0 ? <div className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" /> : null}
           {customFolderNavItems.map((item) => {
-            const isActive = selectedOtherFolder === item.folder;
+            const isActive = selectedOtherItem === item.id;
             const Icon = isActive ? item.activeIcon : item.icon;
             return (
               <Link
-                key={`other-${item.folder}`}
+                key={`other-${item.id}`}
                 to={item.path}
                 aria-current={isActive ? 'page' : undefined}
                 data-shared-highlight-item
-                data-shared-highlight-id={`other:${item.folder}`}
+                data-shared-highlight-id={`other:${item.id}`}
                 className={cn(
                   'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
                   isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
@@ -801,15 +801,15 @@ export default function Sidebar() {
             );
           })}
           {customFolderNavItems.map((item) => {
-            const isActive = selectedOtherFolder === item.folder;
+            const isActive = selectedOtherItem === item.id;
             const Icon = isActive ? item.activeIcon : item.icon;
             return (
               <Link
-                key={`mobile-other-${item.folder}`}
+                key={`mobile-other-${item.id}`}
                 to={item.path}
                 aria-current={isActive ? 'page' : undefined}
                 data-shared-highlight-item
-                data-shared-highlight-id={`mobile-other:${item.folder}`}
+                data-shared-highlight-id={`mobile-other:${item.id}`}
                 className={cn(
                   'loom-mobile-nav-link relative z-10 mb-1 hidden h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
                   isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',

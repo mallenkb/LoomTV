@@ -17,6 +17,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import javax.net.ssl.HttpsURLConnection
@@ -137,11 +138,12 @@ private data class ProxyRequest(
 
 private class SecureLanProxy {
   private val acceptExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-  private val requestExecutor: ExecutorService = Executors.newCachedThreadPool()
+  private val requestExecutor: ExecutorService = Executors.newFixedThreadPool(8)
   @Volatile private var serverSocket: ServerSocket? = null
   @Volatile private var remoteOrigin: URI? = null
   @Volatile private var certFingerprint: String? = null
   @Volatile private var sslContext: SSLContext? = null
+  @Volatile private var localSecret: String? = null
 
   @Synchronized
   fun start(origin: String, fingerprint: String): String {
@@ -153,18 +155,21 @@ private class SecureLanProxy {
       && !currentServer.isClosed
       && remoteOrigin == normalizedOrigin
       && certFingerprint == normalizedFingerprint
-    ) return "http://localhost:${currentServer.localPort}"
+      && localSecret != null
+    ) return "http://localhost:${currentServer.localPort}/${localSecret}"
 
     stop()
     val context = SSLContext.getInstance("TLS")
     context.init(null, arrayOf(PinnedTrustManager(normalizedFingerprint)), null)
     val nextServer = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+    val nextSecret = UUID.randomUUID().toString().replace("-", "")
     remoteOrigin = normalizedOrigin
     certFingerprint = normalizedFingerprint
     sslContext = context
+    localSecret = nextSecret
     serverSocket = nextServer
     acceptExecutor.execute { acceptLoop(nextServer) }
-    return "http://localhost:${nextServer.localPort}"
+    return "http://localhost:${nextServer.localPort}/${nextSecret}"
   }
 
   @Synchronized
@@ -174,6 +179,7 @@ private class SecureLanProxy {
     remoteOrigin = null
     certFingerprint = null
     sslContext = null
+    localSecret = null
     try { current?.close() } catch (_: Exception) { }
   }
 
@@ -199,7 +205,8 @@ private class SecureLanProxy {
     socket.use { client ->
       val remote = remoteOrigin
       val context = sslContext
-      if (serverSocket !== expectedServer || remote == null || context == null) {
+      val secret = localSecret
+      if (serverSocket !== expectedServer || remote == null || context == null || secret == null) {
         writeProxyError(client, 503, "Secure transport is restarting.")
         return
       }
@@ -207,7 +214,13 @@ private class SecureLanProxy {
         val input = BufferedInputStream(client.getInputStream(), COPY_BUFFER_BYTES)
         val output = BufferedOutputStream(client.getOutputStream(), COPY_BUFFER_BYTES)
         val request = readRequest(input)
-        forwardRequest(remote, context, request, input, output)
+        val prefix = "/$secret"
+        if (request.target != prefix && !request.target.startsWith("$prefix/") && !request.target.startsWith("$prefix?")) {
+          writeProxyError(client, 403, "The local transport session is invalid.")
+          return
+        }
+        val forwardedTarget = request.target.removePrefix(prefix).ifEmpty { "/" }
+        forwardRequest(remote, context, request.copy(target = forwardedTarget), input, output)
       } catch (_: Exception) {
         writeProxyError(client, 502, "The secure desktop connection failed.")
       }

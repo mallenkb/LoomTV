@@ -1617,12 +1617,12 @@ export const desktopApi = {
 
   async getCustomArtwork(mediaId: string): Promise<Record<string, string>> {
     if (window.desktopApi?.getCustomArtwork) return window.desktopApi.getCustomArtwork(mediaId);
-    return fetchJson(`/api/artwork?mediaId=${encodeURIComponent(mediaId)}`, stringRecordSchema);
+    return fetchJson(`/api/renderer/artwork?mediaId=${encodeURIComponent(mediaId)}`, stringRecordSchema);
   },
 
   async saveCustomArtwork(mediaId: string, target: string, dataUrl: string): Promise<Record<string, string>> {
     if (window.desktopApi?.saveCustomArtwork) return window.desktopApi.saveCustomArtwork(mediaId, target, dataUrl);
-    return fetchJson('/api/artwork', stringRecordSchema, {
+    return fetchJson('/api/renderer/artwork', stringRecordSchema, {
       method: 'POST',
       body: JSON.stringify({ mediaId, target, dataUrl }),
     });
@@ -1646,7 +1646,7 @@ export const desktopApi = {
 
   async refreshIncompleteMetadata(mediaId: string): Promise<boolean> {
     if (window.desktopApi?.refreshIncompleteMetadata) return window.desktopApi.refreshIncompleteMetadata(mediaId);
-    return fetchJson('/api/metadata/refresh-incomplete', z.boolean(), {
+    return fetchJson('/api/renderer/metadata/refresh-incomplete', z.boolean(), {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -1670,7 +1670,7 @@ export const desktopApi = {
 
   async getOfficialMetadataCandidates(mediaId: string): Promise<OfficialMetadataCandidate[]> {
     if (window.desktopApi?.getOfficialMetadataCandidates) return window.desktopApi.getOfficialMetadataCandidates(mediaId);
-    return fetchJson('/api/artwork/official-candidates', z.array(officialMetadataCandidateSchema), {
+    return fetchJson('/api/renderer/artwork/official-candidates', z.array(officialMetadataCandidateSchema), {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -1678,7 +1678,7 @@ export const desktopApi = {
 
   async applyOfficialMetadata(mediaId: string, candidate: OfficialMetadataCandidate, target: OfficialMetadataApplyTarget = 'all'): Promise<OfficialArtworkResult> {
     if (window.desktopApi?.applyOfficialMetadata) return window.desktopApi.applyOfficialMetadata(mediaId, candidate, target);
-    return fetchJson('/api/artwork/apply-official', officialArtworkResultSchema, {
+    return fetchJson('/api/renderer/artwork/apply-official', officialArtworkResultSchema, {
       method: 'POST',
       body: JSON.stringify({ mediaId, candidate, target }),
     });

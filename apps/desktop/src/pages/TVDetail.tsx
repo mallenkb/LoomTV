@@ -6,7 +6,7 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { desktopApi } from '@/lib/desktopApi';
+import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { WatchedSolidIcon } from '@/components/LoomIcons';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
@@ -801,7 +801,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
         {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
-        {canManageProfiles && !isRemoteStremioShow && <ArtworkEditorControls
+        {(canManageProfiles || Boolean(window.desktopApi) || isBrowserLocalApp()) && !isRemoteStremioShow && <ArtworkEditorControls
           mediaId={show.id}
           legacyStorageKey={CUSTOM_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}

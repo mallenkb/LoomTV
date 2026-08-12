@@ -67,7 +67,6 @@ export default function LibrarySettingsSection({
   onDeleteOtherFolderGroup,
   onEditFolder,
   otherFolderIcon,
-  onOtherFolderIconChange,
   sidebarNavOrder,
   draggedSidebarItem,
   setDraggedSidebarItem,

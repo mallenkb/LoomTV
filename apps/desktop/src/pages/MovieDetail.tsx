@@ -6,7 +6,7 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { desktopApi } from '@/lib/desktopApi';
+import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
@@ -393,7 +393,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         </div>
         <div className="loom-detail-hero-fade absolute inset-0" />
         {libraryActionError ? <div role="alert" className="absolute inset-x-6 bottom-4 z-20 rounded-lg bg-red-950/85 px-3 py-2 text-sm text-red-100">{libraryActionError}</div> : null}
-        {canManageProfiles && !isRemoteStremioMovie && <ArtworkEditorControls
+        {(canManageProfiles || Boolean(window.desktopApi) || isBrowserLocalApp()) && !isRemoteStremioMovie && <ArtworkEditorControls
           mediaId={movie.id}
           legacyStorageKey={CUSTOM_MOVIE_ARTWORK_KEY}
           onCustomArtworkChange={setCustomArtwork}

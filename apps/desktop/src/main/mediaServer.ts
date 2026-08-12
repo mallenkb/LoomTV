@@ -137,6 +137,9 @@ export interface MediaServerDependencies {
   getLibraryRevision: () => number;
   getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) => Promise<MediaSegmentResponse>;
   getOfficialMetadataCandidates: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
+  customArtworkForRenderer: (mediaId: string) => Record<string, string>;
+  saveCustomArtwork: (mediaId: string, target: string, dataUrl: string) => void;
+  refreshIncompleteMetadata: (mediaId: string) => Promise<boolean>;
   requestMetadataProvider: (request: import('../shared/desktopProtocol.ts').MetadataProviderRequest) => Promise<unknown>;
   applyOfficialMetadataCandidate: (
     mediaId: string,
@@ -217,6 +220,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     getLibraryRevision,
     getMediaSegments,
     getOfficialMetadataCandidates,
+    customArtworkForRenderer,
+    saveCustomArtwork,
+    refreshIncompleteMetadata,
     requestMetadataProvider,
     applyOfficialMetadataCandidate,
     getWebRendererDevServerUrl,
@@ -990,6 +996,74 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             console.warn('[metadata] Renderer provider request failed:', error);
             writeJson(res, 502, { error: 'metadata_provider_request_failed' });
           });
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/metadata/refresh-incomplete' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererMetadataRefreshIncomplete)
+          .then(async ({ mediaId }) => {
+            requireOwner();
+            writeJson(res, 200, await refreshIncompleteMetadata(mediaId));
+          })
+          .catch((error) => error instanceof ProfileError
+            ? writeProfileError(error)
+            : writeJson(res, 400, { error: 'Unable to refresh metadata.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/artwork') {
+        if (req.method === 'GET') {
+          try {
+            requireOwner();
+            const mediaId = reqUrl.searchParams.get('mediaId') || '';
+            writeJson(res, 200, customArtworkForRenderer(mediaId));
+          } catch (error) {
+            if (error instanceof ProfileError) writeProfileError(error);
+            else writeJson(res, 400, { error: 'Unable to read custom artwork.' });
+          }
+          return;
+        }
+        if (req.method === 'POST') {
+          readJsonBody(req).then(httpBodyParsers.rendererArtworkSave)
+            .then(({ mediaId, target, dataUrl }) => {
+              requireOwner();
+              saveCustomArtwork(mediaId, target, dataUrl);
+              writeJson(res, 200, customArtworkForRenderer(mediaId));
+            })
+            .catch((error) => error instanceof ProfileError
+              ? writeProfileError(error)
+              : writeJson(res, 400, { error: 'Unable to save custom artwork.' }));
+          return;
+        }
+      }
+
+      if (reqUrl.pathname === '/api/renderer/artwork/official-candidates' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererArtworkCandidates)
+          .then(async ({ mediaId }) => {
+            requireOwner();
+            writeJson(res, 200, await getOfficialMetadataCandidates(mediaId));
+          })
+          .catch((error) => error instanceof ProfileError
+            ? writeProfileError(error)
+            : writeJson(res, 400, { error: 'Unable to load metadata matches.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/artwork/apply-official' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererArtworkApply)
+          .then(async ({ mediaId, candidate, target }) => {
+            requireOwner();
+            const candidates = await getOfficialMetadataCandidates(mediaId);
+            const selected = candidates.find((entry) => entry.id === candidate.id);
+            if (!selected) {
+              writeJson(res, 400, { error: 'The selected metadata match is no longer available.' });
+              return;
+            }
+            writeJson(res, 200, await applyOfficialMetadataCandidate(mediaId, selected, target));
+          })
+          .catch((error) => error instanceof ProfileError
+            ? writeProfileError(error)
+            : writeJson(res, 400, { error: 'Unable to apply metadata.' }));
         return;
       }
 

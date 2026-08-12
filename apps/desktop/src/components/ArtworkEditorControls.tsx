@@ -578,9 +578,7 @@ export default function ArtworkEditorControls({
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  void openMetadataCandidates('all');
-                }}
+                onClick={() => void openMetadataCandidates('all')}
                 disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
               >
@@ -590,11 +588,9 @@ export default function ArtworkEditorControls({
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  void openMetadataCandidates('poster');
-                }}
+                onClick={() => void openMetadataCandidates('poster')}
                 disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
               >
                 <Image className="h-4 w-4" />
                 Choose poster image
@@ -602,11 +598,9 @@ export default function ArtworkEditorControls({
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => {
-                  void openMetadataCandidates('cover');
-                }}
+                onClick={() => void openMetadataCandidates('cover')}
                 disabled={!onFetchOfficialArtworkCandidates || isFetchingArtwork}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
               >
                 <PanelsTopLeft className="h-4 w-4" />
                 Choose cover / banner image
@@ -791,7 +785,7 @@ export default function ArtworkEditorControls({
         onOpenChange={(open) => {
           if (!open && !applyingCandidateId) setMetadataDialogOpen(false);
         }}
-        contentClassName="max-h-[calc(100vh-8rem)] max-w-[min(1180px,calc(100vw-2rem))] overflow-hidden border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
+        contentClassName="max-h-[calc(100vh-8rem)] max-w-[min(944px,calc(100vw-2rem))] overflow-hidden border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
       >
         <DialogContent>
           <DialogHeader className="border-b border-[var(--loom-panel-border)] px-5 py-4 pr-14">
@@ -889,8 +883,29 @@ export default function ArtworkEditorControls({
                       key={candidate.id}
                       className="grid gap-4 rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4"
                     >
-                      <div className="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-[180px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_260px]">
-                        <div className="mx-auto aspect-[2/3] w-44 overflow-hidden rounded-lg bg-[var(--loom-surface)] shadow-lg md:mx-0 md:w-full">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                        <h3 className="min-w-0 text-lg font-semibold leading-tight text-[var(--loom-text)]">{candidate.title}</h3>
+                        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+                          {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
+                          <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
+                          {candidate.rating ? (
+                            <span className="loom-rating inline-flex items-center gap-1 rounded-full bg-[var(--loom-rating-surface)] px-2 py-0.5 text-[11px] font-medium">
+                              <Star className="h-3 w-3 fill-current" />
+                              {candidate.rating.toFixed(1)}
+                            </span>
+                          ) : null}
+                        </div>
+                        </div>
+                        {candidate.summary ? (
+                          <p className="mt-3 truncate text-sm leading-5 text-[var(--loom-muted)]">{candidate.summary}</p>
+                        ) : (
+                          <p className="mt-3 truncate text-sm text-[var(--loom-muted)]">No summary provided.</p>
+                        )}
+                      </div>
+                      <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(220px,1fr)]">
+                        <div className="grid min-w-0 grid-cols-1 items-stretch gap-4 md:h-[254px] md:grid-cols-[169px_minmax(0,1fr)]">
+                        <div className="mx-auto h-[254px] w-[169px] shrink-0 overflow-hidden rounded-lg bg-[var(--loom-surface)] shadow-lg md:mx-0">
                           {posterImage ? (
                             <img
                               src={posterImage}
@@ -908,28 +923,8 @@ export default function ArtworkEditorControls({
                             </div>
                           )}
                         </div>
-                        <div className="min-w-0 space-y-3">
-                          <div className="flex min-w-0 items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <h3 className="text-lg font-semibold leading-tight text-[var(--loom-text)]">{candidate.title}</h3>
-                              <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
-                                <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
-                                {candidate.rating ? (
-                                  <span className="loom-rating inline-flex items-center gap-1 rounded-full bg-[var(--loom-rating-surface)] px-2 py-0.5 text-[11px] font-medium">
-                                    <Star className="h-3 w-3 fill-current" />
-                                    {candidate.rating.toFixed(1)}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-                          {candidate.summary ? (
-                            <p className="line-clamp-3 text-sm leading-5 text-[var(--loom-muted)]">{candidate.summary}</p>
-                          ) : (
-                            <p className="text-sm text-[var(--loom-muted)]">No summary provided.</p>
-                          )}
-                          <div className="aspect-video w-full overflow-hidden rounded-lg bg-black/40">
+                        <div className="min-w-0 self-stretch">
+                          <div className="aspect-video h-[254px] max-w-full overflow-hidden rounded-lg bg-black/40">
                             {coverImage ? (
                               <img
                                 src={coverImage}
@@ -939,15 +934,16 @@ export default function ArtworkEditorControls({
                                   next.add(coverImage);
                                   return next;
                                 })}
-                                className="h-full w-full object-contain"
+                                className="h-full w-full object-cover"
                               />
                             ) : (
                               <div className="grid h-full place-items-center text-[11px] text-white/30">No cover</div>
                             )}
                           </div>
                         </div>
+                        </div>
                         {candidate.episodePreview?.length ? (
-                          <aside className="h-full rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] p-4 md:col-span-2 xl:col-span-1">
+                          <aside className="hidden h-[254px] min-h-0 min-w-0 w-full self-stretch overflow-y-auto rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface)] p-4 xl:col-span-1 xl:block">
                               <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--loom-faint)]">
                                 {candidate.episodeCount || candidate.episodePreview.length} episodes
                               </p>
@@ -969,7 +965,7 @@ export default function ArtworkEditorControls({
                           type="button"
                           onClick={() => applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId) || !candidateSupportsTarget}
-                          className="h-8 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-xs text-[var(--loom-text)] shadow-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                          className="h-8 rounded-lg border border-white bg-white px-3 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:border-white/40 disabled:bg-white/40 disabled:text-black/60"
                         >
                           {isApplying ? 'Applying...' : candidateSupportsTarget ? metadataApplyLabel : 'Unavailable'}
                         </Button>

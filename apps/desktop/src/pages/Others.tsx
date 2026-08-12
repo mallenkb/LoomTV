@@ -36,7 +36,7 @@ type OthersProps = {
 };
 
 export default function Others({ onPlay }: OthersProps) {
-  const { state, addLibraryFolder, addLibraryFolderPath, updateLibraryFolder } = useLibrary();
+  const { state, addLibraryFolderPath, updateLibraryFolder } = useLibrary();
   const { isLoading, libraryFolderGroups } = state;
   const { lists } = useProfiles();
   const othersFolders = useMemo(() => libraryFolderGroups.others || [], [libraryFolderGroups.others]);

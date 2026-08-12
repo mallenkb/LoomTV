@@ -14,7 +14,7 @@ function bearerHeaders(token: string, headers: Record<string, string> = {}): Rec
 }
 
 export function createMobileLanClient(
-  fetchImpl: FetchImplementation = (input, init) => fetch(input, init),
+  fetchImpl: FetchImplementation = (input, init) => mobileFetch(input, init),
 ) {
   return {
     getClientConfig(baseUrl: string, token: string) {
@@ -67,11 +67,12 @@ export function createMobileLanClient(
         body: JSON.stringify({ mediaId, kind, selectionRevision }),
       });
     },
-    startHls(baseUrl: string, token: string, mediaId: string, options: StreamOptions, selectionRevision?: number) {
+    startHls(baseUrl: string, token: string, mediaId: string, options: StreamOptions, selectionRevision?: number, signal?: AbortSignal) {
       return fetchImpl(`${baseUrl}/api/v2/start-hls`, {
         method: 'POST',
         headers: bearerHeaders(token, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ mediaId, options, selectionRevision }),
+        signal,
       });
     },
     getPlaybackPlan(baseUrl: string, token: string, mediaId: string, capabilities: LanPlaybackCapabilities, selectionRevision?: number) {
@@ -163,3 +164,34 @@ export function createMobileLanClient(
 }
 
 export type MobileLanClient = ReturnType<typeof createMobileLanClient>;
+
+
+export class MobileLanTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`The desktop did not respond within ${timeoutMs}ms.`);
+    this.name = 'MobileLanTimeoutError';
+  }
+}
+
+async function mobileFetch(
+  input: Parameters<typeof fetch>[0],
+  init: Parameters<typeof fetch>[1] = {},
+  timeoutMs = 12_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const callerSignal = init?.signal;
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort();
+  if (callerSignal?.aborted) controller.abort();
+  else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new MobileLanTimeoutError(timeoutMs);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', abortFromCaller);
+  }
+}

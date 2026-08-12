@@ -28,11 +28,25 @@ export type MobileOfflineSnapshot = {
   savedAt: number;
 };
 
-type MobileOfflineSnapshotRow = {
-  payload: string;
+type MobileOfflineSnapshotRow = { payload: string; saved_at: number };
+type MobileOfflineProgressRow = { media_path: string; payload: string };
+type PersistedSnapshotInput = Omit<MobileOfflineSnapshot, 'version' | 'savedAt'>;
+type SnapshotIdentity = {
+  activeProfile: MobileProfile | null;
+  automaticProfileSignIn: boolean;
+  profiles: MobileProfile[];
+  library: LibraryPayload;
+  libraryEtag: string;
+  catalogRevision?: number;
+  catalogTransport?: 'compact' | 'legacy';
+  selectionRevision?: number;
+  profileLists: MobileProfileListEntry[];
 };
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let saveQueue: Promise<void> = Promise.resolve();
+const snapshotIdentityByHost = new Map<string, SnapshotIdentity>();
+const encodedProgressByHost = new Map<string, Map<string, string>>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -88,14 +102,8 @@ export function normalizeMobileOfflineSnapshot(
 }
 
 export function canRestoreMobileOfflineSnapshot(snapshot: MobileOfflineSnapshot): boolean {
-  // A PIN-protected or manually selected profile must never be reopened from a
-  // plaintext metadata cache. Legacy hosts without profiles remain supported.
   if (snapshot.activeProfile === null) return snapshot.profiles.length === 0;
-  return (
-    snapshot.automaticProfileSignIn
-    && !snapshot.activeProfile.hasPin
-    && !snapshot.activeProfile.isGuest
-  );
+  return snapshot.automaticProfileSignIn && !snapshot.activeProfile.hasPin && !snapshot.activeProfile.isGuest;
 }
 
 async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
@@ -110,6 +118,15 @@ async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
         );
         CREATE INDEX IF NOT EXISTS mobile_offline_snapshots_saved_at
           ON mobile_offline_snapshots(saved_at);
+        CREATE TABLE IF NOT EXISTS mobile_offline_progress (
+          host_device_id TEXT NOT NULL,
+          media_path TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          saved_at INTEGER NOT NULL,
+          PRIMARY KEY (host_device_id, media_path)
+        );
+        CREATE INDEX IF NOT EXISTS mobile_offline_progress_saved_at
+          ON mobile_offline_progress(saved_at);
       `);
       return database;
     }).catch((error) => {
@@ -120,34 +137,88 @@ async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
   return databasePromise;
 }
 
-export async function saveMobileOfflineSnapshot(
-  snapshot: Omit<MobileOfflineSnapshot, 'version' | 'savedAt'>,
-): Promise<void> {
-  const payload: MobileOfflineSnapshot = {
-    ...snapshot,
-    version: MOBILE_OFFLINE_CACHE_VERSION,
-    savedAt: Date.now(),
+function snapshotIdentity(snapshot: PersistedSnapshotInput): SnapshotIdentity {
+  return {
+    activeProfile: snapshot.activeProfile,
+    automaticProfileSignIn: snapshot.automaticProfileSignIn,
+    profiles: snapshot.profiles,
+    library: snapshot.library,
+    libraryEtag: snapshot.libraryEtag,
+    catalogRevision: snapshot.catalogRevision,
+    catalogTransport: snapshot.catalogTransport,
+    selectionRevision: snapshot.selectionRevision,
+    profileLists: snapshot.profileLists,
   };
-  const encoded = JSON.stringify(payload);
-  if (encoded.length > MOBILE_OFFLINE_CACHE_MAX_PAYLOAD_BYTES) {
-    throw new Error('The saved mobile library is too large for the offline metadata cache.');
-  }
+}
 
+function sameSnapshotIdentity(left: SnapshotIdentity | undefined, right: SnapshotIdentity): boolean {
+  return Boolean(left)
+    && left?.activeProfile === right.activeProfile
+    && left?.automaticProfileSignIn === right.automaticProfileSignIn
+    && left?.profiles === right.profiles
+    && left?.library === right.library
+    && left?.libraryEtag === right.libraryEtag
+    && left?.catalogRevision === right.catalogRevision
+    && left?.catalogTransport === right.catalogTransport
+    && left?.selectionRevision === right.selectionRevision
+    && left?.profileLists === right.profileLists;
+}
+
+async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> {
   const database = await openMobileOfflineDatabase();
-  await database.runAsync(
-    `INSERT INTO mobile_offline_snapshots (host_device_id, payload, saved_at)
-     VALUES (?, ?, ?)
-     ON CONFLICT(host_device_id) DO UPDATE SET
-       payload = excluded.payload,
-       saved_at = excluded.saved_at`,
-    payload.hostDeviceId,
-    encoded,
-    payload.savedAt,
-  );
-  await database.runAsync(
-    'DELETE FROM mobile_offline_snapshots WHERE saved_at < ?',
-    payload.savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS,
-  );
+  const savedAt = Date.now();
+  const nextIdentity = snapshotIdentity(snapshot);
+  const metadataChanged = !sameSnapshotIdentity(snapshotIdentityByHost.get(snapshot.hostDeviceId), nextIdentity);
+  const nextProgress = new Map(Object.entries(snapshot.progress).map(([mediaPath, value]) => [mediaPath, JSON.stringify(value)]));
+  const previousProgress = encodedProgressByHost.get(snapshot.hostDeviceId) || new Map<string, string>();
+
+  await database.withTransactionAsync(async () => {
+    if (metadataChanged) {
+      const payload: MobileOfflineSnapshot = { ...snapshot, progress: {}, version: MOBILE_OFFLINE_CACHE_VERSION, savedAt };
+      const encoded = JSON.stringify(payload);
+      if (encoded.length > MOBILE_OFFLINE_CACHE_MAX_PAYLOAD_BYTES) {
+        throw new Error('The saved mobile library is too large for the offline metadata cache.');
+      }
+      await database.runAsync(
+        `INSERT INTO mobile_offline_snapshots (host_device_id, payload, saved_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(host_device_id) DO UPDATE SET payload = excluded.payload, saved_at = excluded.saved_at`,
+        snapshot.hostDeviceId,
+        encoded,
+        savedAt,
+      );
+    } else {
+      await database.runAsync('UPDATE mobile_offline_snapshots SET saved_at = ? WHERE host_device_id = ?', savedAt, snapshot.hostDeviceId);
+    }
+
+    for (const [mediaPath, encoded] of nextProgress) {
+      if (previousProgress.get(mediaPath) === encoded) continue;
+      await database.runAsync(
+        `INSERT INTO mobile_offline_progress (host_device_id, media_path, payload, saved_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(host_device_id, media_path) DO UPDATE SET payload = excluded.payload, saved_at = excluded.saved_at`,
+        snapshot.hostDeviceId,
+        mediaPath,
+        encoded,
+        savedAt,
+      );
+    }
+    for (const mediaPath of previousProgress.keys()) {
+      if (!nextProgress.has(mediaPath)) {
+        await database.runAsync('DELETE FROM mobile_offline_progress WHERE host_device_id = ? AND media_path = ?', snapshot.hostDeviceId, mediaPath);
+      }
+    }
+    await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE saved_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
+    await database.runAsync('DELETE FROM mobile_offline_progress WHERE saved_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
+  });
+
+  snapshotIdentityByHost.set(snapshot.hostDeviceId, nextIdentity);
+  encodedProgressByHost.set(snapshot.hostDeviceId, nextProgress);
+}
+
+export function saveMobileOfflineSnapshot(snapshot: PersistedSnapshotInput): Promise<void> {
+  saveQueue = saveQueue.catch(() => {}).then(() => saveSnapshotNow(snapshot));
+  return saveQueue;
 }
 
 export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<MobileOfflineSnapshot | null> {
@@ -155,13 +226,34 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
   try {
     const database = await openMobileOfflineDatabase();
     const row = await database.getFirstAsync<MobileOfflineSnapshotRow>(
-      'SELECT payload FROM mobile_offline_snapshots WHERE host_device_id = ?',
+      'SELECT payload, saved_at FROM mobile_offline_snapshots WHERE host_device_id = ?',
       hostDeviceId,
     );
     if (!row?.payload || row.payload.length > MOBILE_OFFLINE_CACHE_MAX_PAYLOAD_BYTES) return null;
-    const snapshot = normalizeMobileOfflineSnapshot(JSON.parse(row.payload), hostDeviceId);
-    if (!snapshot) await clearMobileOfflineSnapshot(hostDeviceId);
-    return snapshot;
+    const parsed = JSON.parse(row.payload) as Record<string, unknown>;
+    const snapshot = normalizeMobileOfflineSnapshot({ ...parsed, savedAt: row.saved_at }, hostDeviceId);
+    if (!snapshot) {
+      await clearMobileOfflineSnapshot(hostDeviceId);
+      return null;
+    }
+    const rows = await database.getAllAsync<MobileOfflineProgressRow>(
+      'SELECT media_path, payload FROM mobile_offline_progress WHERE host_device_id = ?',
+      hostDeviceId,
+    );
+    const progress = { ...snapshot.progress };
+    const encodedProgress = new Map<string, string>();
+    for (const row of rows) {
+      try {
+        const value = JSON.parse(row.payload);
+        if (!isRecord(value)) continue;
+        progress[row.media_path] = value as StoredProgress;
+        encodedProgress.set(row.media_path, row.payload);
+      } catch {
+        // Ignore one corrupt progress row instead of discarding the catalog.
+      }
+    }
+    encodedProgressByHost.set(hostDeviceId, encodedProgress);
+    return { ...snapshot, progress };
   } catch {
     return null;
   }
@@ -169,12 +261,14 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
 
 export async function clearMobileOfflineSnapshot(hostDeviceId: string): Promise<void> {
   if (!hostDeviceId) return;
+  snapshotIdentityByHost.delete(hostDeviceId);
+  encodedProgressByHost.delete(hostDeviceId);
   try {
     const database = await openMobileOfflineDatabase();
-    await database.runAsync(
-      'DELETE FROM mobile_offline_snapshots WHERE host_device_id = ?',
-      hostDeviceId,
-    );
+    await database.withTransactionAsync(async () => {
+      await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE host_device_id = ?', hostDeviceId);
+      await database.runAsync('DELETE FROM mobile_offline_progress WHERE host_device_id = ?', hostDeviceId);
+    });
   } catch {
     // Cache cleanup must never block sign-out or a revoked-session response.
   }

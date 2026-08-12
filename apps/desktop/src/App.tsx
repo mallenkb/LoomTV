@@ -293,14 +293,15 @@ function DesktopBootstrap() {
       }
       if (savedMode) {
         // The local host mode is backed by Electron IPC unless this is the
-        // loopback web renderer (with or without the tray handoff token).
+        // loopback web renderer (with or without the tray handoff token). A
+        // development browser can also be the renderer, so let it prove the
+        // running local catalog below before discarding the remembered mode.
         if (savedMode === 'host' && !window.desktopApi && !browserLocalSession && !browserLocalApp) {
-          clearDesktopLibraryMode();
-          if (!cancelled) setMode(null);
+          // Fall through to the authenticated local catalog probe.
+        } else {
+          if (!cancelled) setMode(savedMode);
           return;
         }
-        if (!cancelled) setMode(savedMode);
-        return;
       }
       let remoteSession = null;
       try {
@@ -334,6 +335,7 @@ function DesktopBootstrap() {
       } catch {
         // A new installation can continue to the explicit setup choice.
       }
+      if (savedMode === 'host') clearDesktopLibraryMode();
       if (!cancelled) setMode(null);
     };
     void resolveMode();

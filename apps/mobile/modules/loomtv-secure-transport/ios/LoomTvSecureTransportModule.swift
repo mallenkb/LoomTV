@@ -133,6 +133,7 @@ private final class SecureLanProxy {
   private var listener: NWListener?
   private var remoteOrigin: URL?
   private var certFingerprint: String?
+  private var localSecret: String?
   private var proxySession: URLSession?
   private var proxySessionDelegate: PinnedProxySessionDelegate?
 
@@ -140,9 +141,9 @@ private final class SecureLanProxy {
     let remote = try secureOrigin(origin)
     let normalized = try normalizedFingerprint(fingerprint)
     stateLock.lock()
-    if let listener, let port = listener.port, remoteOrigin == remote, certFingerprint == normalized {
+    if let listener, let port = listener.port, let localSecret, remoteOrigin == remote, certFingerprint == normalized {
       stateLock.unlock()
-      return "http://localhost:\(port.rawValue)"
+      return "http://localhost:\(port.rawValue)/\(localSecret)"
     }
     stateLock.unlock()
     stop()
@@ -150,6 +151,7 @@ private final class SecureLanProxy {
     let parameters = NWParameters.tcp
     parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
     let nextListener = try NWListener(using: parameters, on: .any)
+    let nextSecret = UUID().uuidString.replacingOccurrences(of: "-", with: "")
     let nextSessionDelegate = PinnedProxySessionDelegate(expectedFingerprint: normalized)
     let sessionConfiguration = URLSessionConfiguration.ephemeral
     sessionConfiguration.timeoutIntervalForRequest = 60
@@ -167,6 +169,7 @@ private final class SecureLanProxy {
     listener = nextListener
     remoteOrigin = remote
     certFingerprint = normalized
+    localSecret = nextSecret
     proxySession = nextSession
     proxySessionDelegate = nextSessionDelegate
     stateLock.unlock()
@@ -191,7 +194,7 @@ private final class SecureLanProxy {
             return
           }
           completed = true
-          continuation.resume(returning: "http://localhost:\(port.rawValue)")
+          continuation.resume(returning: "http://localhost:\(port.rawValue)/\(nextSecret)")
         case .failed(let error):
           completed = true
           self?.stop()
@@ -214,6 +217,7 @@ private final class SecureLanProxy {
     listener = nil
     remoteOrigin = nil
     certFingerprint = nil
+    localSecret = nil
     proxySession = nil
     proxySessionDelegate = nil
     stateLock.unlock()
@@ -291,12 +295,20 @@ private final class SecureLanProxy {
     let remote = remoteOrigin
     let session = proxySession
     let sessionDelegate = proxySessionDelegate
+    let secret = localSecret
     stateLock.unlock()
-    guard currentListener === expectedListener, let remote, let session, let sessionDelegate else {
+    guard currentListener === expectedListener, let remote, let session, let sessionDelegate, let secret else {
       writeError(to: connection, status: 503, message: "Secure transport is restarting.")
       return
     }
-    guard let url = URL(string: request.target, relativeTo: remote)?.absoluteURL else {
+    let prefix = "/\(secret)"
+    guard request.target == prefix || request.target.hasPrefix(prefix + "/") || request.target.hasPrefix(prefix + "?") else {
+      writeError(to: connection, status: 403, message: "The local transport session is invalid.")
+      return
+    }
+    let strippedTarget = String(request.target.dropFirst(prefix.count))
+    let forwardedTarget = strippedTarget.isEmpty ? "/" : strippedTarget
+    guard let url = URL(string: forwardedTarget, relativeTo: remote)?.absoluteURL else {
       writeError(to: connection, status: 400, message: "Invalid local request target.")
       return
     }

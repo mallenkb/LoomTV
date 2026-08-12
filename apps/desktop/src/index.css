@@ -1460,6 +1460,7 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-top-controls {
   );
   z-index: 0;
   width: auto;
+  max-width: none;
   margin: 0;
 }
 
@@ -2637,8 +2638,11 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
 @media (max-width: 640px) {
   .loom-detail-page-modern .loom-detail-cover-image {
+    right: 0;
     left: 0;
-    width: 100%;
+    width: auto;
+    max-width: none;
+    margin: 0;
   }
 
   .loom-detail-page .loom-detail-cover.relative.h-\[45vh\],
