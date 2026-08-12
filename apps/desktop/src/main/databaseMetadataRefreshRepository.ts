@@ -44,7 +44,7 @@ export function getMetadataRefreshState(
       FROM media_metadata_refresh_state
       WHERE media_id = ? AND category = ?
     `).get(mediaId, category),
-    metadataRefreshRowSchema,
+    metadataRefreshRowSchema.optional(),
     'Metadata refresh state',
   );
   return row

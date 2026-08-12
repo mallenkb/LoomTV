@@ -28,9 +28,12 @@ type ArtworkPrepareState = {
 type MetadataArtworkChoice = {
   id: string;
   imageUrl: string;
-  providerIndex: number;
-  providerTotal: number;
   candidate: OfficialMetadataCandidate;
+};
+
+type ArtworkDimensions = {
+  width: number;
+  height: number;
 };
 
 const ARTWORK_PROVIDER_PRIORITY: Record<OfficialMetadataCandidate['source'], number> = {
@@ -77,6 +80,23 @@ const ARTWORK_TARGETS: Record<ArtworkTarget, ArtworkTargetConfig> = {
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
+}
+
+function artworkResolutionTag(
+  dimensions: ArtworkDimensions | undefined,
+  target: OfficialMetadataApplyTarget,
+): 'High-res' | 'HD' | null {
+  if (!dimensions) return null;
+
+  if (target === 'cover') {
+    if (dimensions.width >= 1920 && dimensions.height >= 1080) return 'High-res';
+    if (dimensions.width >= 1280 && dimensions.height >= 720) return 'HD';
+    return null;
+  }
+
+  if (dimensions.width >= 1000 && dimensions.height >= 1500) return 'High-res';
+  if (dimensions.width >= 800 && dimensions.height >= 1200) return 'HD';
+  return null;
 }
 
 function fileManagerActionLabel(): string {
@@ -164,6 +184,7 @@ export default function ArtworkEditorControls({
   const [applyingCandidateId, setApplyingCandidateId] = useState('');
   const [metadataError, setMetadataError] = useState('');
   const [failedMetadataArtwork, setFailedMetadataArtwork] = useState<Set<string>>(() => new Set());
+  const [metadataArtworkDimensions, setMetadataArtworkDimensions] = useState<Record<string, ArtworkDimensions>>({});
   const [artworkSaveError, setArtworkSaveError] = useState('');
   const [isPageScrolled, setIsPageScrolled] = useState(false);
   const artworkMenuRef = useRef<HTMLDivElement | null>(null);
@@ -471,10 +492,6 @@ export default function ArtworkEditorControls({
     }).sort((left, right) => (
       ARTWORK_PROVIDER_PRIORITY[left.candidate.source] - ARTWORK_PROVIDER_PRIORITY[right.candidate.source]
     ));
-    const totals = new Map<OfficialMetadataCandidate['source'], number>();
-    for (const choice of choices) {
-      totals.set(choice.candidate.source, (totals.get(choice.candidate.source) || 0) + 1);
-    }
     const positions = new Map<OfficialMetadataCandidate['source'], number>();
 
     return choices.map(({ candidate, imageUrl }) => {
@@ -487,8 +504,6 @@ export default function ArtworkEditorControls({
       return {
         id,
         imageUrl,
-        providerIndex,
-        providerTotal: totals.get(candidate.source) || 1,
         candidate: {
           ...candidate,
           id,
@@ -776,7 +791,7 @@ export default function ArtworkEditorControls({
         onOpenChange={(open) => {
           if (!open && !applyingCandidateId) setMetadataDialogOpen(false);
         }}
-        contentClassName="max-w-[560px] border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
+        contentClassName="max-h-[90vh] max-w-[min(1180px,calc(100vw-2rem))] border-[var(--loom-panel-border)] bg-[var(--loom-panel)] p-0 text-[var(--loom-text)] shadow-none"
       >
         <DialogContent>
           <DialogHeader className="border-b border-[var(--loom-panel-border)] px-5 py-4 pr-14">
@@ -793,8 +808,8 @@ export default function ArtworkEditorControls({
               <X className="h-4 w-4" />
             </Button>
           </DialogHeader>
-          <div className="space-y-4 p-5">
-            <DialogDescription className="text-[var(--loom-muted)]">
+          <div className="space-y-4 p-4 sm:p-5">
+            <DialogDescription className={isArtworkTarget ? 'sr-only' : 'text-[var(--loom-muted)]'}>
               {metadataDialogDescription}
             </DialogDescription>
             {(isArtworkTarget ? metadataArtworkChoices.length : visibleMetadataCandidates.length) === 0 ? (
@@ -804,41 +819,56 @@ export default function ArtworkEditorControls({
                   : 'No matching metadata was found from the connected metadata APIs.'}
               </div>
             ) : (
-              <div className="grid max-h-[62vh] gap-2 overflow-y-auto pr-1">
+              <div className={`grid max-h-[72vh] gap-3 overflow-y-auto pr-1 ${isArtworkTarget ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : ''}`}>
                 {isArtworkTarget ? metadataArtworkChoices.map((choice) => {
-                  const { candidate, imageUrl, providerIndex, providerTotal } = choice;
+                  const { candidate, imageUrl } = choice;
                   const isApplying = applyingCandidateId === candidate.id;
                   const artworkLabel = metadataApplyTarget === 'cover' ? 'cover' : 'poster';
+                  const dimensions = metadataArtworkDimensions[imageUrl];
+                  const resolutionTag = artworkResolutionTag(dimensions, metadataApplyTarget);
                   return (
-                    <div key={choice.id} className="grid gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-                      <div className={`${metadataApplyTarget === 'cover' ? 'aspect-video w-full' : 'mx-auto aspect-[2/3] w-40'} overflow-hidden rounded-md bg-[var(--loom-surface)]`}>
-                        <img
-                          src={imageUrl}
-                          alt={`${candidate.title} ${artworkLabel} from ${candidate.source}`}
-                          onError={() => setFailedMetadataArtwork((current) => {
-                            const next = new Set(current);
-                            next.add(imageUrl);
-                            return next;
-                          })}
-                          className="h-full w-full object-cover"
-                        />
+                    <div
+                      key={choice.id}
+                      className={`group relative overflow-hidden rounded-xl border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] shadow-sm ${metadataApplyTarget === 'cover' ? 'aspect-[16/10]' : 'aspect-[2/3]'}`}
+                    >
+                      <img
+                        src={imageUrl}
+                        alt={`${candidate.title} ${artworkLabel} from ${candidate.source}`}
+                        onLoad={(event) => {
+                          const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+                          setMetadataArtworkDimensions((current) => {
+                            const existing = current[imageUrl];
+                            if (existing?.width === width && existing.height === height) return current;
+                            return { ...current, [imageUrl]: { width, height } };
+                          });
+                        }}
+                        onError={() => setFailedMetadataArtwork((current) => {
+                          const next = new Set(current);
+                          next.add(imageUrl);
+                          return next;
+                        })}
+                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                      />
+                      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
+                        <span className="rounded-full border border-white/15 bg-black/75 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm">
+                          {candidate.source}
+                        </span>
+                        {resolutionTag ? (
+                          <span
+                            title={`${dimensions?.width} × ${dimensions?.height}`}
+                            className="rounded-full border border-white/20 bg-black/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm"
+                          >
+                            {resolutionTag}
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-sm font-semibold text-[var(--loom-text)]">{candidate.title}</h3>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                            {candidate.year ? <span className="text-xs text-[var(--loom-muted)]">{candidate.year}</span> : null}
-                            <span className="rounded-full border border-[var(--loom-panel-border)] px-2 py-0.5 text-[11px] text-[var(--loom-muted)]">{candidate.source}</span>
-                            {providerTotal > 1 ? (
-                              <span className="text-[11px] capitalize text-[var(--loom-faint)]">{artworkLabel} {providerIndex} of {providerTotal}</span>
-                            ) : null}
-                          </div>
-                        </div>
+                      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-end gap-2 bg-black/75 p-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
                         <Button
                           type="button"
                           onClick={() => applyMetadataCandidate(candidate)}
                           disabled={Boolean(applyingCandidateId)}
-                          className="h-8 shrink-0 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-xs text-[var(--loom-text)] shadow-sm transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                          aria-label={`${metadataApplyLabel} ${candidate.title} from ${candidate.source}`}
+                          className="h-9 rounded-lg border border-white/20 bg-white px-3 text-xs font-semibold text-black shadow-sm transition-colors hover:bg-white/90 disabled:bg-white/70"
                         >
                           {isApplying ? 'Applying...' : metadataApplyLabel}
                         </Button>

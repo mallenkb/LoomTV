@@ -12,7 +12,7 @@
   },
   "scripts": {
     "preinstall": "node scripts/enforce-pnpm.cjs",
-    "prestart": "node scripts/enforce-pnpm.cjs && electron-rebuild -f -w better-sqlite3",
+    "prestart": "node scripts/enforce-pnpm.cjs && node scripts/ensure-electron-natives.cjs",
     "prebuild": "node scripts/enforce-pnpm.cjs",
     "prepackage": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
     "premake": "node scripts/enforce-pnpm.cjs && node scripts/fetch-fpcalc.cjs && node scripts/stage-native-runtimes.cjs --required",
@@ -24,7 +24,7 @@
     "start:built": "corepack pnpm run rebuild:natives && corepack pnpm run build && corepack pnpm exec electron .",
     "clean:out": "node -e \"require('fs').rmSync('out', { recursive: true, force: true })\"",
     "clean:build": "node -e \"const fs=require('fs'); for (const p of ['out', '.vite']) fs.rmSync(p, { recursive: true, force: true })\"",
-    "rebuild:natives": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:natives": "node scripts/ensure-electron-natives.cjs",
     "build:main": "vp build --config vite.main.config.ts",
     "build:preload": "vp build --config vite.preload.config.ts",
     "build:renderer": "vp build --config vite.renderer.config.ts",

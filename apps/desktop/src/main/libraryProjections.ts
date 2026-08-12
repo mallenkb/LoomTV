@@ -94,6 +94,12 @@ function itemsInOtherFolders(data: LibraryData, groups: LibraryFolderGroups): Me
     .filter((item) => itemBelongsToOtherFolders(item, folderPrefixes));
 }
 
+function itemsOutsideOtherFolders(items: MediaItem[], groups: LibraryFolderGroups): MediaItem[] {
+  const folderPrefixes = groups.others.map(normalizedPathPrefix).filter(Boolean);
+  if (folderPrefixes.length === 0) return items;
+  return items.filter((item) => !itemBelongsToOtherFolders(item, folderPrefixes));
+}
+
 export function createLibraryDeliveryProjections(deps: LibraryProjectionDependencies) {
   const {
     artworkDeliveryUrl,
@@ -288,9 +294,9 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       libraryFolderGroups,
       libraryFolderStatuses: libraryFolderStatusesFor(libraryFolderGroups),
-      movies: (data.movies || []).map(cardForRenderer),
-      tvShows: (data.tvShows || []).map(cardForRenderer),
-      animeShows: (data.animeShows || []).map(cardForRenderer),
+      movies: itemsOutsideOtherFolders(data.movies || [], libraryFolderGroups).map(cardForRenderer),
+      tvShows: itemsOutsideOtherFolders(data.tvShows || [], libraryFolderGroups).map(cardForRenderer),
+      animeShows: itemsOutsideOtherFolders(data.animeShows || [], libraryFolderGroups).map(cardForRenderer),
       others: itemsInOtherFolders(data, libraryFolderGroups).map(cardForRenderer),
     };
   };
@@ -305,9 +311,12 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     return {
       catalogVersion: 1,
       revision,
-      movies: (data.movies || []).map((item) => cardForLocalNetwork(item, base, identity)),
-      tvShows: (data.tvShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
-      animeShows: (data.animeShows || []).map((item) => cardForLocalNetwork(item, base, identity)),
+      movies: itemsOutsideOtherFolders(data.movies || [], libraryFolderGroups)
+        .map((item) => cardForLocalNetwork(item, base, identity)),
+      tvShows: itemsOutsideOtherFolders(data.tvShows || [], libraryFolderGroups)
+        .map((item) => cardForLocalNetwork(item, base, identity)),
+      animeShows: itemsOutsideOtherFolders(data.animeShows || [], libraryFolderGroups)
+        .map((item) => cardForLocalNetwork(item, base, identity)),
       others: itemsInOtherFolders(data, libraryFolderGroups)
         .map((item) => cardForLocalNetwork(item, base, identity)),
     };

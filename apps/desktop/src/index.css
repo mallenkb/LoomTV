@@ -1618,27 +1618,19 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   padding: 3rem 0 2.5rem;
 }
 
-/* The detail ground follows the same rule as the home hero: it is sized by the
-   copy it protects, and every edge that is not a screen edge fades out inside
-   the layer, so there is no box to see. The poster-and-metadata block is the
-   anchor, so the frost starts just above the poster and never climbs over the
-   artwork; left and bottom bleed to the viewport, where there is nothing to
-   cut. It runs the full width behind the action controls, and the mask thins it
-   out on the way — the controls paint above it, so the buttons themselves are
-   never frosted. */
+/* Use the same copy-sized ground as the Home hero. Anchoring to the metadata
+   instead of the combined poster row keeps the frost from growing to poster
+   height and gives both heroes the same fade, reach, tint, and blur. */
 .loom-detail-page-modern .loom-detail-hero-identity {
   position: relative;
   z-index: 1;
-  anchor-name: --loom-detail-hero-content;
 }
 
 .loom-detail-page-modern .loom-detail-hero-content-wrap::before {
   position: absolute;
   position-anchor: --loom-detail-hero-content;
-  /* The fallback approximates a poster-height block, so a frame where the
-     anchor cannot resolve looks the same rather than snapping to full height. */
-  top: calc(anchor(top, 34%) - var(--loom-hero-ground-reach-y));
-  right: 0;
+  top: calc(anchor(top, 62%) - var(--loom-hero-ground-reach-y));
+  right: calc(anchor(right, 42%) - var(--loom-hero-ground-reach-x));
   bottom: 0;
   left: 0;
   z-index: 0;
@@ -1662,6 +1654,7 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   flex: 1 1 auto;
   min-width: 0;
   max-width: none;
+  anchor-name: --loom-detail-hero-content;
 }
 
 .loom-detail-page-modern .loom-detail-hero-info h1 {

@@ -98,7 +98,7 @@ function EmptyOthersState({ error, onAddFolder }: { error?: string; onAddFolder:
         </div>
         <h3 className="text-2xl font-semibold text-white">Add an Others folder</h3>
         <p className="mx-auto mt-3 max-w-[420px] text-sm leading-6 text-[var(--loom-muted)]">
-          Use Others for mixed folders. LoomTV will scan the files and sort detected movies, TV shows, and anime automatically.
+          Videos added here stay in Others. LoomTV still detects series and anime structure so every file remains easy to browse and play.
         </p>
         {error ? <p role="alert" className="mt-4 text-sm text-red-200">{error}</p> : null}
         <Button onClick={onAddFolder} className="mt-8 h-12 gap-2 px-5">

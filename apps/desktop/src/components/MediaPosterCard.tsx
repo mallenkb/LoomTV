@@ -97,6 +97,9 @@ const MediaPosterCard = memo(function MediaPosterCard({
 }: MediaPosterCardProps) {
   const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
+  const formatLabel = variant === 'others' && item.type === 'movie'
+    ? 'Video'
+    : mediaFormatLabel(item.format, item.type);
   const { watchedKeys, setWatchedEntries } = useProfiles();
   const progress = useProgressSnapshot();
   const watchedByProgress = matchesLibraryFilter(item, 'watched', progress);
@@ -142,7 +145,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
             <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
               {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
               <ContentRatingBadge
-                rating={mediaFormatLabel(item.format, item.type)}
+                rating={formatLabel}
                 className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"
               />
               <ContentRatingBadge rating={contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />

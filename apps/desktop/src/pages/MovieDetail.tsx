@@ -133,6 +133,16 @@ function findLocalMovieMatch(movies: readonly MediaItem[], mediaId: string | und
   return mediaId ? movies.find((item) => item.id === mediaId) || null : null;
 }
 
+function mediaBelongsToFolders(filePath: string | undefined, folders: readonly string[]): boolean {
+  const normalizedPath = (filePath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalizedPath) return false;
+  return folders.some((folder) => {
+    const normalizedFolder = folder.replace(/\\/g, '/').replace(/\/+$/, '');
+    return normalizedFolder.length > 0
+      && (normalizedPath === normalizedFolder || normalizedPath.startsWith(`${normalizedFolder}/`));
+  });
+}
+
 export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const { id: mediaId } = useParams<{ id: string }>();
   const location = useLocation();
@@ -358,7 +368,11 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     : routeState?.fromDiscover || isRemoteStremioMovie
       ? getCachedDiscoverReturnRoute()
       : routeState?.from;
-  const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/') ? sourceRoute : '/movies';
+  const isOtherMedia = !isRemoteContent
+    && mediaBelongsToFolders(movie.filePath, state.libraryFolderGroups.others || []);
+  const backTarget = sourceRoute && !sourceRoute.startsWith('/movie/')
+    ? sourceRoute
+    : isOtherMedia ? '/others' : '/movies';
   const handleBack = () => navigate(backTarget);
 
 
@@ -425,7 +439,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           />
           <div className="loom-detail-hero-info min-w-0 flex-1">
             <h1 className="text-4xl font-bold text-white">{movie.title}</h1>
-            <HeroMetadata item={movie} />
+            <HeroMetadata item={movie} isOther={isOtherMedia} />
           </div>
           </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
@@ -439,7 +453,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           </Button>}
           {canPlayMovie && <Button
             onClick={handlePlay}
-            aria-label={hasResumeProgress ? 'Resume movie' : 'Play movie'}
+            aria-label={hasResumeProgress ? `Resume ${isOtherMedia ? 'video' : 'movie'}` : `Play ${isOtherMedia ? 'video' : 'movie'}`}
             className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
           >
             {hasResumeProgress && progressPercent > 0 && (

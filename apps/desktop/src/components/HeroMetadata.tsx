@@ -10,6 +10,7 @@ import { useTheme } from '@/components/ThemeProvider';
 
 type HeroMetadataProps = {
   item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'providerRatings' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'originPlatform' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
+  isOther?: boolean;
 };
 
 function formatDuration(seconds?: number): string {
@@ -33,11 +34,11 @@ function episodeCountFromRuntime(runtime?: string): number {
   return match ? Number(match[1]) : 0;
 }
 
-export default function HeroMetadata({ item }: HeroMetadataProps) {
+export default function HeroMetadata({ item, isOther = false }: HeroMetadataProps) {
   const { showProviderRatingBadges } = useTheme();
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
-  const mediaType = item.type === 'anime' ? 'Anime' : item.type === 'tv' ? 'TV Show' : 'Movie';
-  const mediaFormat = mediaFormatLabel(item.format, item.type);
+  const mediaType = isOther ? 'Other' : item.type === 'anime' ? 'Anime' : item.type === 'tv' ? 'TV Show' : 'Movie';
+  const mediaFormat = isOther ? 'Video' : mediaFormatLabel(item.format, item.type);
   const regularSeasonNumbers = new Set([
     ...(item.seasons || []).filter((season) => season.number > 0).map((season) => season.number),
     ...(item.episodeFiles || []).filter((episode) => episode.season > 0).map((episode) => episode.season),
