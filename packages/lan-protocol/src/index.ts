@@ -19,6 +19,21 @@ export type LanStreamingProvider = {
   id: number;
   name: string;
   logoUrl: string;
+  regions?: string[];
+  offerTypes?: Array<'subscription' | 'ads' | 'free' | 'rent' | 'buy'>;
+  availability?: 'preferred-region' | 'other-region';
+  source?: 'tmdb';
+};
+
+export type LanOriginPlatform = {
+  id?: number;
+  name: string;
+  kind: 'network' | 'web-channel';
+  countryCode?: string;
+  countryName?: string;
+  officialSite?: string;
+  logoUrl?: string;
+  source: 'tvmaze';
 };
 
 export type LanLibraryCard = {
@@ -38,6 +53,7 @@ export type LanLibraryCard = {
   rating: number;
   contentRatings?: Record<string, LanContentRating>;
   streamingProviders?: LanStreamingProvider[];
+  originPlatform?: LanOriginPlatform;
   genres: string[];
   lastPlayed?: number;
   seasons?: Array<{ number: number; title: string; episodeCount: number }>;

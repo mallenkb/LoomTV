@@ -58,7 +58,8 @@ function cachedItemNeedsMetadataRefresh(item: MediaItem): boolean {
   if (!item.summary?.trim() || !item.genres?.length || item.rating <= 0) return true;
   if (!item.poster?.trim() || !item.backdrop?.trim()) return true;
   if (!Object.keys(item.contentRatings || {}).length) return true;
-  if (item.providerIds?.tmdbId && !item.streamingProviders?.length) return true;
+  if (item.providerIds?.tmdbId && !item.streamingProviders?.length && !item.originPlatform) return true;
+  if (item.type !== 'movie' && !item.streamingProviders?.length && !item.originPlatform) return true;
   if (!item.cast?.length) return true;
   if (isSeries && seriesHasGenericEpisodeTitles(item)) return true;
   if (isSeries && item.episodeFiles?.length) {

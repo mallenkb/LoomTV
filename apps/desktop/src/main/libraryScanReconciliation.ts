@@ -178,6 +178,7 @@ export function preserveExistingItemDuringScan(
     streamingProviders: existing.streamingProviders?.length
       ? existing.streamingProviders
       : fresh.streamingProviders,
+    originPlatform: existing.originPlatform || fresh.originPlatform,
     providerIds: mergeProviderIds(existing.providerIds || {}, fresh.providerIds || {}),
     seasons: seasons.size > 0
       ? [...seasons.values()].sort((left, right) => left.number - right.number)

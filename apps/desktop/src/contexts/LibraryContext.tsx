@@ -26,7 +26,25 @@ export interface MediaItem {
   contentRating?: string;
   trailerUrl?: string;
   contentRatings?: Record<string, { code: string; minimumAge: number; source: string }>;
-  streamingProviders?: { id: number; name: string; logoUrl: string }[];
+  streamingProviders?: Array<{
+    id: number;
+    name: string;
+    logoUrl: string;
+    regions?: string[];
+    offerTypes?: Array<'subscription' | 'ads' | 'free' | 'rent' | 'buy'>;
+    availability?: 'preferred-region' | 'other-region';
+    source?: 'tmdb';
+  }>;
+  originPlatform?: {
+    id?: number;
+    name: string;
+    kind: 'network' | 'web-channel';
+    countryCode?: string;
+    countryName?: string;
+    officialSite?: string;
+    logoUrl?: string;
+    source: 'tvmaze';
+  };
   runtime?: string;
   seasonCount?: number;
   episodeCount?: number;
@@ -54,6 +72,7 @@ export interface MediaItem {
     tmdbId?: string;
     imdbId?: string;
     tvdbId?: string;
+    tvmazeId?: string;
     malId?: string;
     malIdBySeason?: Record<string, string>;
   };
@@ -450,6 +469,7 @@ function mediaItemFromCatalogCard(
     rating: card.rating,
     contentRatings: card.contentRatings,
     streamingProviders: card.streamingProviders,
+    originPlatform: card.originPlatform,
     genres: card.genres,
     cast: [],
     filePath: firstReference?.progressKey || '',

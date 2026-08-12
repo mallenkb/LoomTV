@@ -471,7 +471,11 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
             )}
             <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(1rem,1.35vw,1.45rem)] font-semibold text-[var(--loom-on-media)]">
               <span className="inline-flex items-center gap-2">
-                <ProviderMark mediaId={item.id} providers={item.streamingProviders} />
+                <ProviderMark
+                  mediaId={item.id}
+                  providers={item.streamingProviders}
+                  originPlatform={item.originPlatform}
+                />
                 <span>{[heroMediaTypeLabel(item), ...metadataGenres].join(' · ')}</span>
               </span>
               <ContentRatingBadge

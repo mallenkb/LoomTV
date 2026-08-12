@@ -356,6 +356,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
         finalType === 'anime' ? matchedJikanMeta?.contentRatings : undefined,
       ),
       streamingProviders: matchedTmdbTVMeta?.streamingProviders || [],
+      originPlatform: matchedTVMeta?.originPlatform,
       genres,
       cast,
       filePath: fullPath,
@@ -576,6 +577,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       streamingProviders: (useShowMetadata
         ? matchedTmdbTVMeta?.streamingProviders
         : matchedTmdbData?.streamingProviders) || [],
+      originPlatform: useShowMetadata ? matchedTVMeta?.originPlatform : undefined,
       genres,
       cast,
       filePath: fullPath,

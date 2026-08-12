@@ -25,6 +25,7 @@ type MediaItemRow = {
   local_metadata_json: string | null;
   provider_ids_json: string | null;
   streaming_providers_json: string | null;
+  origin_platform_json: string | null;
   poster_candidates_json: string | null;
   backdrop_candidates_json: string | null;
   logo_candidates_json: string | null;
@@ -241,6 +242,7 @@ export function loadLibrary(
       rating: row.rating,
       contentRatings: jsonParse(row.content_ratings_json, {}),
       streamingProviders: jsonParse<StreamingProvider[] | undefined>(row.streaming_providers_json, undefined),
+      originPlatform: jsonParse<MediaItem['originPlatform']>(row.origin_platform_json, undefined),
       genres: jsonParse(row.genres_json, []),
       cast: jsonParse(row.cast_json, []),
       filePath: row.file_path,
@@ -276,10 +278,10 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
         id, type, format, title, year, poster, backdrop, logo, summary, rating, file_path, file_size, last_played,
-        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
@@ -313,6 +315,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         item.localMetadata ? jsonString(item.localMetadata) : null,
         item.providerIds ? jsonString(item.providerIds) : null,
         item.streamingProviders ? jsonString(item.streamingProviders) : null,
+        item.originPlatform ? jsonString(item.originPlatform) : null,
         jsonString(durableArtworkSources(item.posterCandidates || [])),
         jsonString(durableArtworkSources(item.backdropCandidates || [])),
         jsonString(durableArtworkSources(item.logoCandidates || [])),

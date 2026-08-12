@@ -60,6 +60,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       local_metadata_json TEXT,
       provider_ids_json TEXT,
       streaming_providers_json TEXT,
+      origin_platform_json TEXT,
       poster_candidates_json TEXT NOT NULL DEFAULT '[]',
       backdrop_candidates_json TEXT NOT NULL DEFAULT '[]',
       logo_candidates_json TEXT NOT NULL DEFAULT '[]',
@@ -944,6 +945,9 @@ function migrateMediaItemArtworkColumns(database: BetterSqlite3.Database): void 
   }
   if (!columns.has('streaming_providers_json')) {
     database.exec('ALTER TABLE media_items ADD COLUMN streaming_providers_json TEXT;');
+  }
+  if (!columns.has('origin_platform_json')) {
+    database.exec('ALTER TABLE media_items ADD COLUMN origin_platform_json TEXT;');
   }
 }
 

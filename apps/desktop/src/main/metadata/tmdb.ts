@@ -1,5 +1,5 @@
 import { movieHitMatchesLocal, tmdbLogoCandidates, uniqueLocalTitles, uniqueMetadataSearchHits, yearFromDateString } from './helpers';
-import type { ContentRating, EpisodeMeta, MediaItem, StreamingProvider } from './types';
+import type { ContentRating, EpisodeMeta, MediaItem, StreamingOfferType, StreamingProvider } from './types';
 import { safeFetch } from '../safeFetch';
 import { normalizeContentRating } from './contentRatings.ts';
 import { preferredProviderLogoUrl } from '../../shared/providerLogos';
@@ -50,9 +50,12 @@ interface TMDBWatchProvider {
 }
 
 interface TMDBWatchProviderRegion {
+  link?: string;
   flatrate?: TMDBWatchProvider[];
   ads?: TMDBWatchProvider[];
   free?: TMDBWatchProvider[];
+  rent?: TMDBWatchProvider[];
+  buy?: TMDBWatchProvider[];
 }
 
 interface TMDBWatchProviderResponse {
@@ -151,44 +154,94 @@ function tmdbContentRatings(d: TMDBMedia): Record<string, ContentRating> {
   return ratings;
 }
 
+function systemRegionCode(): string {
+  try {
+    return new Intl.Locale(Intl.DateTimeFormat().resolvedOptions().locale).region || 'US';
+  } catch {
+    return 'US';
+  }
+}
+
 function tmdbStreamingProvidersFromResponse(
   response: TMDBWatchProviderResponse | null | undefined,
-  regionCode = 'US',
+  regionCode = systemRegionCode(),
 ): StreamingProvider[] {
-  const region = response?.results?.[regionCode.toUpperCase()];
-  if (!region) return [];
+  type ProviderAggregate = {
+    provider: TMDBWatchProvider & { provider_id: number; provider_name: string };
+    regions: Set<string>;
+    offerTypes: Set<StreamingOfferType>;
+    priority: number;
+  };
 
-  const seen = new Set<number>();
-  return [
-    ...(region.flatrate || []),
-    ...(region.ads || []),
-    ...(region.free || []),
-  ]
-    .filter((provider): provider is TMDBWatchProvider & { provider_id: number; provider_name: string; logo_path: string } => (
-      Number.isFinite(provider.provider_id)
-      && Boolean(provider.provider_name?.trim())
-      && Boolean(provider.logo_path)
-    ))
-    .sort((left, right) => (
-      (left.display_priority ?? Number.MAX_SAFE_INTEGER) - (right.display_priority ?? Number.MAX_SAFE_INTEGER)
-      || left.provider_name.localeCompare(right.provider_name)
-    ))
-    .filter((provider) => {
-      if (seen.has(provider.provider_id)) return false;
-      seen.add(provider.provider_id);
-      return true;
+  const preferredRegion = regionCode.trim().toUpperCase() || 'US';
+  const aggregates = new Map<number, ProviderAggregate>();
+  const offerGroups: Array<[
+    'flatrate' | 'free' | 'ads' | 'rent' | 'buy',
+    StreamingOfferType,
+  ]> = [
+    ['flatrate', 'subscription'],
+    ['free', 'free'],
+    ['ads', 'ads'],
+    ['rent', 'rent'],
+    ['buy', 'buy'],
+  ];
+
+  for (const [region, availability] of Object.entries(response?.results || {})) {
+    for (const [group, offerType] of offerGroups) {
+      const providers = availability[group];
+      if (!Array.isArray(providers)) continue;
+      for (const provider of providers) {
+        if (!Number.isFinite(provider.provider_id) || !provider.provider_name?.trim()) continue;
+        const id = provider.provider_id as number;
+        const existing = aggregates.get(id);
+        const aggregate = existing || {
+          provider: provider as ProviderAggregate['provider'],
+          regions: new Set<string>(),
+          offerTypes: new Set<StreamingOfferType>(),
+          priority: Number.MAX_SAFE_INTEGER,
+        };
+        aggregate.regions.add(region.toUpperCase());
+        aggregate.offerTypes.add(offerType);
+        aggregate.priority = Math.min(
+          aggregate.priority,
+          provider.display_priority ?? Number.MAX_SAFE_INTEGER,
+        );
+        aggregates.set(id, aggregate);
+      }
+    }
+  }
+
+  const offerPriority = (offerTypes: Set<StreamingOfferType>) => {
+    if (offerTypes.has('subscription')) return 0;
+    if (offerTypes.has('free')) return 1;
+    if (offerTypes.has('ads')) return 2;
+    if (offerTypes.has('rent')) return 3;
+    return 4;
+  };
+
+  return [...aggregates.values()]
+    .sort((left, right) => {
+      const leftIsPreferred = left.regions.has(preferredRegion);
+      const rightIsPreferred = right.regions.has(preferredRegion);
+      if (leftIsPreferred !== rightIsPreferred) return leftIsPreferred ? -1 : 1;
+      return offerPriority(left.offerTypes) - offerPriority(right.offerTypes)
+        || left.priority - right.priority
+        || right.regions.size - left.regions.size
+        || left.provider.provider_name.localeCompare(right.provider.provider_name);
     })
-    .map((provider) => {
-      return {
+    .map(({ provider, regions, offerTypes }) => ({
+      id: provider.provider_id,
+      name: provider.provider_name,
+      logoUrl: preferredProviderLogoUrl({
         id: provider.provider_id,
         name: provider.provider_name,
-        logoUrl: preferredProviderLogoUrl({
-          id: provider.provider_id,
-          name: provider.provider_name,
-          logoPath: provider.logo_path,
-        }),
-      };
-    });
+        logoPath: provider.logo_path,
+      }),
+      regions: [...regions].sort(),
+      offerTypes: [...offerTypes],
+      availability: regions.has(preferredRegion) ? 'preferred-region' : 'other-region',
+      source: 'tmdb',
+    }));
 }
 
 function tmdbStreamingProviders(d: TMDBMedia): StreamingProvider[] {
@@ -199,7 +252,7 @@ export async function fetchTMDBStreamingProvidersById(
   type: 'movie' | 'tv',
   tmdbId: string | undefined,
   tmdbCredential?: string,
-  regionCode = 'US',
+  regionCode = systemRegionCode(),
 ): Promise<StreamingProvider[] | null> {
   if (!tmdbId || !tmdbCredential) return null;
   try {

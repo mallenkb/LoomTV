@@ -1,6 +1,7 @@
 import { yearFromDateString } from './helpers';
-import type { EpisodeMeta, TVMetadata } from './types';
+import type { EpisodeMeta, OriginPlatform, TVMetadata } from './types';
 import { safeFetch } from '../safeFetch';
+import { preferredProviderLogoUrl } from '../../shared/providerLogos';
 
 interface TVMazeImage {
   medium?: string;
@@ -28,6 +29,16 @@ interface TVMazeCastEntry {
   character?: { name?: string };
 }
 
+interface TVMazePlatform {
+  id?: number;
+  name?: string;
+  officialSite?: string | null;
+  country?: {
+    code?: string;
+    name?: string;
+  } | null;
+}
+
 interface TVMazeShow {
   id?: number;
   name?: string;
@@ -39,13 +50,29 @@ interface TVMazeShow {
   language?: string;
   type?: string;
   externals?: { imdb?: string; thetvdb?: string | number };
-  network?: { country?: { name?: string } };
-  webChannel?: { country?: { name?: string } };
+  network?: TVMazePlatform | null;
+  webChannel?: TVMazePlatform | null;
   _embedded?: { seasons?: TVMazeSeason[]; cast?: TVMazeCastEntry[] };
 }
 
 interface TVMazeSearchEntry {
   show?: TVMazeShow;
+}
+
+function originPlatformFromShow(show: TVMazeShow): OriginPlatform | undefined {
+  const platform = show.webChannel || show.network;
+  const name = platform?.name?.trim();
+  if (!name) return undefined;
+  return {
+    id: platform?.id,
+    name,
+    kind: show.webChannel ? 'web-channel' : 'network',
+    countryCode: platform?.country?.code || undefined,
+    countryName: platform?.country?.name || undefined,
+    officialSite: platform?.officialSite || undefined,
+    logoUrl: preferredProviderLogoUrl({ name }),
+    source: 'tvmaze',
+  };
 }
 
 function tvmazeEpisodeToMeta(episode: TVMazeEpisode): EpisodeMeta {
@@ -105,6 +132,7 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
   return {
     title: details.name || fallbackTitle,
     providerIds: {
+      tvmazeId: String(showId),
       imdbId: details.externals?.imdb || undefined,
       tvdbId: details.externals?.thetvdb ? String(details.externals.thetvdb) : undefined,
     },
@@ -118,6 +146,7 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
     language: details.language || '',
     country: details.network?.country?.name || details.webChannel?.country?.name || '',
     showType: details.type || '',
+    originPlatform: originPlatformFromShow(details),
     seasons: seasons.length > 0 ? seasons : undefined,
     episodes,
   };
@@ -177,6 +206,7 @@ export async function fetchTVMetadataCandidates(title: string, localYear?: numbe
         language: show.language || '',
         country: show.network?.country?.name || show.webChannel?.country?.name || '',
         showType: show.type || '',
+        originPlatform: originPlatformFromShow(show),
       };
     }));
   } catch (error) {

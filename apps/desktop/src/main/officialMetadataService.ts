@@ -40,6 +40,8 @@ export type OfficialArtworkRefreshResult = {
   logoCandidates?: string[];
   contentRatings?: Record<string, ContentRating>;
   cast?: MediaItem['cast'];
+  streamingProviders?: MediaItem['streamingProviders'];
+  originPlatform?: MediaItem['originPlatform'];
 };
 
 export type OfficialArtworkRefreshTarget = 'all' | 'poster' | 'cover';
@@ -148,7 +150,8 @@ function mergeAnimeCastMissingFields(
 function itemNeedsIncompleteMetadata(item: MediaItem): boolean {
   if (!hasText(item.title) || !hasText(item.summary) || !item.genres?.length || item.rating <= 0) return true;
   if (!hasContentRatings(item.contentRatings) && !hasText((item as MediaItem & { contentRating?: string }).contentRating)) return true;
-  if (item.providerIds?.tmdbId && !item.streamingProviders?.length) return true;
+  if (item.providerIds?.tmdbId && !item.streamingProviders?.length && !item.originPlatform) return true;
+  if (item.type !== 'movie' && !item.originPlatform && !item.streamingProviders?.length) return true;
 
   if (item.type === 'anime') {
     const cast = normalizeAnimeCast(item.cast);
@@ -306,6 +309,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       logoCandidates,
       contentRatings: metadata.contentRatings,
       cast: metadata.cast,
+      streamingProviders: metadata.streamingProviders,
+      originPlatform: metadata.originPlatform,
     };
     if (!candidateWithoutId.title && !candidateWithoutId.thumbnail && !candidateWithoutId.cover) return null;
     return { ...candidateWithoutId, id: metadataCandidateId(candidateWithoutId) };
@@ -594,6 +599,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
         genres: tmdbMeta?.genres || [],
         contentRatings: mergeContentRatings(tmdbMeta?.contentRatings, omdbContentRatings(omdbMeta)),
+        streamingProviders: tmdbMeta?.streamingProviders,
         posterCandidates,
         backdropCandidates,
         logo: logoCandidates[0] || '',
@@ -671,6 +677,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       cast: likelyAnime
         ? normalizeAnimeCast(matchedJikan?.cast?.length ? matchedJikan.cast : item.cast)
         : undefined,
+      streamingProviders: tmdbMeta?.streamingProviders,
+      originPlatform: matchedTV?.originPlatform,
     };
   }
 
@@ -708,6 +716,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (applyAll && candidate.rating) target.rating = candidate.rating;
     if (applyAll && candidate.genres?.length) target.genres = candidate.genres;
     if (applyAll && hasContentRatings(candidate.contentRatings)) target.contentRatings = candidate.contentRatings;
+    if (applyAll && candidate.streamingProviders?.length) target.streamingProviders = candidate.streamingProviders;
+    if (applyAll && candidate.originPlatform) target.originPlatform = candidate.originPlatform;
     if (applyAll && target.type === 'anime') {
       const normalizedCast = normalizeAnimeCast(candidate.cast?.length ? candidate.cast : target.cast);
       if (normalizedCast.length > 0) target.cast = normalizedCast;
@@ -756,6 +766,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       logo: target.logo || '',
       logoCandidates: target.logoCandidates || [],
       cast: target.cast,
+      streamingProviders: target.streamingProviders,
+      originPlatform: target.originPlatform,
     };
   }
 
@@ -793,7 +805,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const hasRefresh = Boolean(
       (refreshPoster && refreshedPoster)
       || (refreshCover && refreshedCover)
-      || (refreshMetadata && (refreshed.format || refreshed.logo || refreshed.summary || refreshed.rating || refreshedHasContentRatings || refreshed.episodes?.length))
+      || (refreshMetadata && (refreshed.format || refreshed.logo || refreshed.summary || refreshed.rating || refreshedHasContentRatings || refreshed.episodes?.length || refreshed.streamingProviders?.length || refreshed.originPlatform))
       || (refreshMetadata && refreshedCast?.length),
     );
 
@@ -805,6 +817,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (refreshMetadata && refreshed.summary) target.summary = refreshed.summary;
       if (refreshMetadata && refreshed.rating) target.rating = refreshed.rating;
       if (refreshMetadata && refreshedHasContentRatings) target.contentRatings = refreshed.contentRatings;
+      if (refreshMetadata && refreshed.streamingProviders?.length) target.streamingProviders = refreshed.streamingProviders;
+      if (refreshMetadata && refreshed.originPlatform) target.originPlatform = refreshed.originPlatform;
       if (refreshMetadata && refreshedCast?.length) target.cast = refreshedCast;
       if (refreshMetadata) mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
       if (refreshPoster) target.posterCandidates = orderedArtworkCandidates(
@@ -882,6 +896,12 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (!target.genres?.length && refreshed.genres?.length) target.genres = refreshed.genres;
       if (!hasContentRatings(target.contentRatings) && hasContentRatings(refreshed.contentRatings)) {
         target.contentRatings = refreshed.contentRatings;
+      }
+      if (!target.streamingProviders?.length && refreshed.streamingProviders?.length) {
+        target.streamingProviders = refreshed.streamingProviders;
+      }
+      if (!target.originPlatform && refreshed.originPlatform) {
+        target.originPlatform = refreshed.originPlatform;
       }
       if (!target.posterCandidates?.length && refreshed.posterCandidates?.length) {
         target.posterCandidates = refreshed.posterCandidates;

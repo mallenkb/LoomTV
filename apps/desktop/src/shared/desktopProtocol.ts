@@ -6,6 +6,7 @@ import type {
   LanLibraryItemDetailsPayload,
   LanLibraryPayload,
   LanLibraryPlaybackReference,
+  LanOriginPlatform,
   LanStreamingProvider,
   LanPlaybackCapabilities,
   LanPlaybackPlan,
@@ -191,6 +192,7 @@ export interface WireMediaItem {
   rating: number;
   contentRatings?: Record<string, LanContentRating>;
   streamingProviders?: LanStreamingProvider[];
+  originPlatform?: LanOriginPlatform;
   runtime?: string;
   seasonCount?: number;
   episodeCount?: number;
@@ -218,6 +220,7 @@ export interface WireMediaItem {
     tmdbId?: string;
     imdbId?: string;
     tvdbId?: string;
+    tvmazeId?: string;
     malId?: string;
     malIdBySeason?: Record<string, string>;
   };
@@ -225,6 +228,7 @@ export interface WireMediaItem {
 
 export type LibraryCard = LanLibraryCard;
 export type StreamingProvider = LanStreamingProvider;
+export type OriginPlatform = LanOriginPlatform;
 export type LibraryPlaybackReference = LanLibraryPlaybackReference;
 export interface LibraryIndexPayload extends LanLibraryIndexPayload<LibraryCard> {
   // Renderer-only configuration data. LAN projections deliberately omit host

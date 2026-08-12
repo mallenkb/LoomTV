@@ -6,7 +6,7 @@ import ProviderMark from '@/components/ProviderMark';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 
 type HeroMetadataProps = {
-  item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
+  item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'originPlatform' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
 };
 
 function formatDuration(seconds?: number): string {
@@ -73,7 +73,11 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
     <div className="loom-modern-hero-text mt-3 flex w-full max-w-[46rem] flex-col items-start text-[var(--loom-on-media)]">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(1rem,1.35vw,1.45rem)] font-semibold">
         <span className="inline-flex items-center gap-2">
-          <ProviderMark mediaId={item.id} providers={item.streamingProviders} />
+          <ProviderMark
+            mediaId={item.id}
+            providers={item.streamingProviders}
+            originPlatform={item.originPlatform}
+          />
           <span>{[mediaType, ...item.genres.slice(0, 2)].join(' · ')}</span>
         </span>
         <ContentRatingBadge

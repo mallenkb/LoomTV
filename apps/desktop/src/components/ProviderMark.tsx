@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Clapperboard } from 'lucide-react';
 import { desktopApi } from '@/lib/desktopApi';
-import type { StreamingProvider } from '@/shared/desktopProtocol';
+import type { OriginPlatform, StreamingProvider } from '@/shared/desktopProtocol';
 import { preferredProviderLogoUrl } from '@/shared/providerLogos';
 
 const providerCache = new Map<string, StreamingProvider[]>();
@@ -10,6 +10,7 @@ const providerRequests = new Map<string, Promise<StreamingProvider[]>>();
 type ProviderMarkProps = {
   mediaId: string;
   providers?: readonly StreamingProvider[];
+  originPlatform?: OriginPlatform;
   className?: string;
 };
 
@@ -40,12 +41,14 @@ function loadProviders(mediaId: string): Promise<StreamingProvider[]> {
 
 function primaryProvider(providers: readonly StreamingProvider[] | undefined): StreamingProvider | undefined {
   if (!providers?.length) return undefined;
-  // Provider lists from TMDB are already ordered by display_priority. Keep
-  // that order and only skip an earlier entry when it cannot render a logo.
-  return providers.find((candidate) => Boolean(preferredProviderLogoUrl(candidate))) || providers[0];
+  const firstAvailability = providers[0]?.availability;
+  return providers.find((candidate) => (
+    candidate.availability === firstAvailability
+    && Boolean(preferredProviderLogoUrl(candidate))
+  )) || providers[0];
 }
 
-export default function ProviderMark({ mediaId, providers, className = 'h-8 w-8' }: ProviderMarkProps) {
+export default function ProviderMark({ mediaId, providers, originPlatform, className = 'h-8 w-8' }: ProviderMarkProps) {
   const [resolvedProviders, setResolvedProviders] = useState<readonly StreamingProvider[] | undefined>(providers);
   const [logoFailed, setLogoFailed] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -72,13 +75,22 @@ export default function ProviderMark({ mediaId, providers, className = 'h-8 w-8'
     return () => {
       cancelled = true;
     };
-  }, [mediaId, providers]);
+  }, [mediaId, originPlatform?.logoUrl, originPlatform?.name, providers]);
 
   const provider = primaryProvider(resolvedProviders);
-  const preferredLogoUrl = provider ? preferredProviderLogoUrl(provider) : '';
+  const preferredLogoUrl = provider
+    ? preferredProviderLogoUrl(provider)
+    : originPlatform?.logoUrl || preferredProviderLogoUrl({ name: originPlatform?.name });
   const hasLogo = Boolean(preferredLogoUrl && !logoFailed);
   const providerLogoUrl = hasLogo ? preferredLogoUrl : undefined;
-  const providerName = provider?.name || 'Streaming provider unavailable';
+  const providerName = provider?.name || originPlatform?.name || 'Streaming provider unavailable';
+  const providerLabel = provider?.availability === 'other-region'
+    ? `${providerName} · Available in other regions`
+    : provider
+      ? providerName
+      : originPlatform
+        ? `Originally on ${providerName}`
+        : providerName;
 
   useEffect(() => {
     if (!tooltipOpen) return undefined;
@@ -103,7 +115,7 @@ export default function ProviderMark({ mediaId, providers, className = 'h-8 w-8'
       <button
         type="button"
         className={`grid ${className} shrink-0 place-items-center text-white shadow-lg outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-white/80 ${hasLogo ? 'overflow-hidden rounded-xl border border-white/30 bg-black/70' : 'rounded-full border border-white/80 bg-black/45'}`}
-        aria-label={provider ? `Streaming provider: ${provider.name}` : 'Streaming provider unavailable'}
+        aria-label={provider || originPlatform ? providerLabel : 'Streaming provider unavailable'}
         aria-expanded={tooltipOpen}
         onClick={() => setTooltipOpen((open) => !open)}
       >
@@ -125,7 +137,7 @@ export default function ProviderMark({ mediaId, providers, className = 'h-8 w-8'
           role="tooltip"
           className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--loom-surface-3)] px-2.5 py-1 text-xs font-medium text-[var(--loom-text)] shadow-lg ring-1 ring-white/10"
         >
-          {providerName}
+          {providerLabel}
         </span>
       )}
     </span>

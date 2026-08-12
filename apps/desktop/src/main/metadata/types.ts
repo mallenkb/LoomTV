@@ -75,10 +75,27 @@ export interface ContentRating {
   source: ContentRatingSource;
 }
 
+export type StreamingOfferType = 'subscription' | 'ads' | 'free' | 'rent' | 'buy';
+
 export interface StreamingProvider {
   id: number;
   name: string;
   logoUrl: string;
+  regions?: string[];
+  offerTypes?: StreamingOfferType[];
+  availability?: 'preferred-region' | 'other-region';
+  source?: 'tmdb';
+}
+
+export interface OriginPlatform {
+  id?: number;
+  name: string;
+  kind: 'network' | 'web-channel';
+  countryCode?: string;
+  countryName?: string;
+  officialSite?: string;
+  logoUrl?: string;
+  source: 'tvmaze';
 }
 
 export interface MediaItem {
@@ -98,6 +115,7 @@ export interface MediaItem {
   rating: number;
   contentRatings?: Record<string, ContentRating>;
   streamingProviders?: StreamingProvider[];
+  originPlatform?: OriginPlatform;
   genres: string[];
   cast: {
     name: string;
@@ -122,6 +140,7 @@ export interface MediaItem {
     tmdbId?: string;
     imdbId?: string;
     tvdbId?: string;
+    tvmazeId?: string;
     malId?: string;
     malIdBySeason?: Record<string, string>;
   };
