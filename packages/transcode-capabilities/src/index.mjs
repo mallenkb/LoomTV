@@ -53,22 +53,23 @@ const BACKEND_DEFINITIONS = {
 const DEFAULT_CACHE_MS = 30_000;
 const capabilityCache = new Map();
 
-function outputOf(ffmpegPath, args, timeout = 3000) {
+function outputOf(ffmpegPath, args, timeout = 3000, commandRunner = execFileSync) {
   try {
-    return execFileSync(ffmpegPath, args, {
+    const output = commandRunner(ffmpegPath, args, {
       encoding: 'utf8',
       timeout,
       maxBuffer: 4 * 1024 * 1024,
       windowsHide: true,
     });
+    return typeof output === 'string' ? output : Buffer.isBuffer(output) ? output.toString('utf8') : '';
   } catch {
     return '';
   }
 }
 
-function commandSucceeds(ffmpegPath, args, timeout = 5000) {
+function commandSucceeds(ffmpegPath, args, timeout = 5000, commandRunner = execFileSync) {
   try {
-    execFileSync(ffmpegPath, args, {
+    commandRunner(ffmpegPath, args, {
       stdio: 'ignore',
       timeout,
       windowsHide: true,
@@ -149,7 +150,12 @@ function encoderCapability(ffmpegPath, backend, codec, encoder, device, options)
   if (!device) return { encoder, compiled: true, available: false, verified: false, reason: 'Required hardware device is not visible to the process.' };
   const verified = options.skipSmokeTest
     ? true
-    : commandSucceeds(ffmpegPath, smokeArgs(backend, encoder, device), options.probeTimeoutMs);
+    : commandSucceeds(
+      ffmpegPath,
+      smokeArgs(backend, encoder, device),
+      options.probeTimeoutMs,
+      options.commandRunner,
+    );
   return {
     encoder,
     compiled: true,
@@ -173,13 +179,17 @@ function cacheKey(ffmpegPath, options) {
 export function probeTranscodeCapabilities(ffmpegPath, options = {}) {
   const platform = options.platform || process.platform;
   const environment = options.environment || process.env;
+  const commandRunner = typeof options.commandRunner === 'function'
+    ? options.commandRunner
+    : execFileSync;
   const probeTimeoutMs = Number.isFinite(options.probeTimeoutMs) ? options.probeTimeoutMs : 5000;
   const now = Date.now();
   let ffmpegAvailable = Boolean(ffmpegPath);
   if (ffmpegAvailable) {
     try {
       ffmpegAvailable = fs.existsSync(ffmpegPath)
-        || (!ffmpegPath.includes('/') && !ffmpegPath.includes('\\') && commandSucceeds(ffmpegPath, ['-version'], 1000));
+        || (!ffmpegPath.includes('/') && !ffmpegPath.includes('\\')
+          && commandSucceeds(ffmpegPath, ['-version'], 1000, commandRunner));
     } catch {
       ffmpegAvailable = false;
     }
@@ -203,14 +213,18 @@ export function probeTranscodeCapabilities(ffmpegPath, options = {}) {
   }
 
   const key = cacheKey(ffmpegPath, { ...options, environment });
-  const cached = capabilityCache.get(key);
+  // Injected command runners are a deterministic testing/embedding seam and
+  // may produce different answers for the same executable, so never share
+  // production cache entries with them.
+  const cacheEnabled = options.commandRunner === undefined;
+  const cached = cacheEnabled ? capabilityCache.get(key) : undefined;
   const cacheMs = Number.isFinite(options.cacheMs) ? options.cacheMs : DEFAULT_CACHE_MS;
   if (cached && now - cached.probedAt < cacheMs) return cached;
 
-  const encoders = outputOf(ffmpegPath, ['-hide_banner', '-encoders'], probeTimeoutMs);
-  const decoders = outputOf(ffmpegPath, ['-hide_banner', '-decoders'], probeTimeoutMs);
-  const hwaccels = outputOf(ffmpegPath, ['-hide_banner', '-hwaccels'], probeTimeoutMs);
-  const filters = outputOf(ffmpegPath, ['-hide_banner', '-filters'], probeTimeoutMs);
+  const encoders = outputOf(ffmpegPath, ['-hide_banner', '-encoders'], probeTimeoutMs, commandRunner);
+  const decoders = outputOf(ffmpegPath, ['-hide_banner', '-decoders'], probeTimeoutMs, commandRunner);
+  const hwaccels = outputOf(ffmpegPath, ['-hide_banner', '-hwaccels'], probeTimeoutMs, commandRunner);
+  const filters = outputOf(ffmpegPath, ['-hide_banner', '-filters'], probeTimeoutMs, commandRunner);
   const encoderNames = Object.values(BACKEND_DEFINITIONS)
     .flatMap((definition) => Object.values(definition.encoders));
   const resultBackends = TRANSCODE_BACKENDS.map((backend) => {
@@ -222,6 +236,7 @@ export function probeTranscodeCapabilities(ffmpegPath, options = {}) {
         encoders: encoderNames.filter((name) => encoders.includes(name)),
         skipSmokeTest: options.skipSmokeTest,
         probeTimeoutMs,
+        commandRunner,
       }),
     ]));
     const available = Object.values(codecCapabilities).some((capability) => capability.available);
@@ -276,7 +291,7 @@ export function probeTranscodeCapabilities(ffmpegPath, options = {}) {
     probedAt: now,
     reason: h264 ? undefined : 'No hardware H.264 encoder passed the device probe; software transcoding remains available.',
   };
-  capabilityCache.set(key, result);
+  if (cacheEnabled) capabilityCache.set(key, result);
   return result;
 }
 

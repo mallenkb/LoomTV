@@ -12,6 +12,7 @@
     "audit:prod": "node scripts/audit-production.cjs",
     "mobile:verify-android-config": "node scripts/verify-mobile-android-config.cjs",
     "mobile:verify-release-config": "node scripts/verify-mobile-release-config.cjs",
+    "verify:test-workspaces": "node scripts/verify-test-workspaces.cjs",
     "sbom": "node scripts/generate-sbom.cjs",
     "dev": "pnpm desktop:start",
     "start": "pnpm desktop:start",
@@ -30,7 +31,7 @@
     "mobile:web": "pnpm --filter @loom-media-server/mobile web",
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm run verify:test-workspaces && node --test scripts/verify-test-workspaces.test.cjs && pnpm -r --if-present test"
   },
   "devDependencies": {
     "yaml": "2.9.0"
