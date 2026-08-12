@@ -885,20 +885,23 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
-            <div className="loom-detail-hero-actions flex shrink-0 gap-2">
+            <div className="loom-detail-hero-actions inline-flex h-14 shrink-0 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
               {!isRemoteContent && (
-              <button
-                type="button"
-                aria-pressed={inMyList}
-                onClick={() => void (async () => {
-                  await setListEntry(show.id, 'watchlist', !inMyList);
-                  if (inMyList) await setListEntry(show.id, 'favorite', false);
-                })()}
-                className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
-                title={inMyList ? 'Remove from My List' : 'Add to My List'}
-              >
-                <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
-              </button>
+                <>
+                  <button
+                    type="button"
+                    aria-pressed={inMyList}
+                    onClick={() => void (async () => {
+                      await setListEntry(show.id, 'watchlist', !inMyList);
+                      if (inMyList) await setListEntry(show.id, 'favorite', false);
+                    })()}
+                    className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+                    title={inMyList ? 'Remove from My List' : 'Add to My List'}
+                  >
+                    <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
+                  </button>
+                  <span className="my-auto inline-block h-7 w-px bg-white/20" />
+                </>
               )}
               <WatchedToggle
                 watched={isWatched}
@@ -908,7 +911,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                   if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(show));
                   void setWatchedEntries(watchedEntryKeys, present);
                 }}
-                className={`h-14 w-14 bg-white/10 text-white/80 ${isWatched ? 'hover:bg-white/10' : 'hover:bg-[var(--loom-active-bg)]'}`}
+                surface="plain"
+                className="h-14 w-14 rounded-full bg-transparent text-white/80"
                 label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
               />
             </div>
@@ -1214,7 +1218,7 @@ function EpisodeRow({
           <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded bg-black/55">
             <WatchedSolidIcon
               aria-hidden="true"
-              className="h-10 w-10 text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
+              className="h-6 w-6 text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
             />
           </span>
         )}

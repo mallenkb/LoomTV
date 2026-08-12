@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FolderOpen, Image, ImageUp, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, X } from 'lucide-react';
+import { FolderOpen, Image, Loader2, MoreHorizontal, PanelsTopLeft, RefreshCw, Search, Star, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { saveCustomArtwork } from '@/lib/customArtwork';
@@ -226,12 +226,6 @@ export default function ArtworkEditorControls({
       scrollContainer.removeEventListener('scroll', updateScrolledState);
     };
   }, [mediaId]);
-
-  const openArtworkPicker = (target: ArtworkTarget) => {
-    const input = target === 'cover' ? coverInputRef.current : thumbnailInputRef.current;
-    input?.click();
-    setArtworkMenuOpen(false);
-  };
 
   const revealLocalFile = async () => {
     if (!canRevealLocalFile) return;
@@ -531,8 +525,8 @@ export default function ArtworkEditorControls({
         <Button
           type="button"
           variant="ghost"
-          aria-label="Fix metadata match"
-          title="Fix metadata match"
+          aria-label="Update metadata"
+          title="Update metadata"
           onClick={() => void openMetadataCandidates('all')}
           disabled={isFetchingArtwork}
           className={`loom-artwork-fix-button ${isPageScrolled ? 'h-10 w-10 px-0' : 'h-10 px-3'} rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-all duration-200 hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70`}
@@ -542,7 +536,7 @@ export default function ArtworkEditorControls({
           ) : (
             <Search className={`${isPageScrolled ? '' : 'mr-2'} h-4 w-4`} />
           )}
-          {!isPageScrolled && <span className="text-sm font-medium">Fix Match</span>}
+          {!isPageScrolled && <span className="text-sm font-medium">Update Metadata</span>}
         </Button>
         <div className="relative">
           <Button
@@ -566,26 +560,6 @@ export default function ArtworkEditorControls({
               role="menu"
               className="absolute right-0 top-full mt-2 w-72 overflow-hidden rounded-lg bg-[var(--loom-panel)] py-1 shadow-2xl backdrop-blur-md"
             >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setArtworkMenuOpen(false);
-                  void onRefreshIncompleteMetadata?.();
-                }}
-                disabled={!onRefreshIncompleteMetadata || refreshMetadataState === 'loading'}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
-              >
-                {refreshMetadataState === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                {refreshMetadataState === 'loading'
-                  ? 'Refreshing metadata…'
-                  : refreshMetadataState === 'success'
-                    ? 'Metadata refreshed'
-                    : refreshMetadataState === 'error'
-                      ? 'Refresh failed'
-                      : 'Refresh metadata'}
-              </button>
-              <div role="separator" className="my-1 border-t border-[var(--loom-control-border)]" />
               <button
                 type="button"
                 role="menuitem"
@@ -622,24 +596,24 @@ export default function ArtworkEditorControls({
                 <PanelsTopLeft className="h-4 w-4" />
                 Choose cover / banner image
               </button>
-              <div role="separator" className="my-1 border-t border-[var(--loom-control-border)]" />
               <button
                 type="button"
                 role="menuitem"
-                onClick={() => openArtworkPicker('thumbnail')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+                onClick={() => {
+                  setArtworkMenuOpen(false);
+                  void onRefreshIncompleteMetadata?.();
+                }}
+                disabled={!onRefreshIncompleteMetadata || refreshMetadataState === 'loading'}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)] disabled:cursor-wait disabled:opacity-70"
               >
-                <ImageUp className="h-4 w-4" />
-                Upload poster
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => openArtworkPicker('cover')}
-                className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
-              >
-                <ImageUp className="h-4 w-4" />
-                Upload cover
+                {refreshMetadataState === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {refreshMetadataState === 'loading'
+                  ? 'Refreshing missing…'
+                  : refreshMetadataState === 'success'
+                    ? 'Missing metadata refreshed'
+                    : refreshMetadataState === 'error'
+                      ? 'Refresh failed'
+                      : 'Refresh Missing'}
               </button>
               <div role="separator" className="my-1 border-t border-[var(--loom-control-border)]" />
               <button
