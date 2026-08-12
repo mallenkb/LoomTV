@@ -248,8 +248,9 @@ test('poster markup contains missing-artwork and long-title geometry inside the 
   assert.match(cardSource, /others: `[^`]*loom-virtual-poster-card[^`]*flex[^`]*h-full[^`]*flex-col[^`]*overflow-hidden/);
   assert.match(cardSource, /FALLBACK_CLASS = '[^']*h-full[^']*'/);
   assert.match(cardSource, /loom-poster-frame[^"]*aspect-\[2\/3\][^"]*min-h-0[^"]*shrink/);
-  assert.match(cardSource, /<div className="mt-2 shrink-0 overflow-hidden">/);
-  assert.match(cardSource, /<h4 className="line-clamp-2/);
+  assert.match(cardSource, /<div className="mt-2 shrink-0 overflow-hidden[^"]*">/);
+  assert.match(cardSource, /\? 'line-clamp-2[^']*min-h-\[2rem\][^']*break-all/);
+  assert.match(cardSource, /: 'line-clamp-2[^']*text-sm/);
   assert.match(stylesSource, /\.loom-poster-link\.loom-virtual-poster-card\s*\{[^}]*width: 100% !important;[^}]*max-width: 100% !important;/s);
 });
 
