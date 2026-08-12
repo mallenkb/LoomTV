@@ -10,6 +10,23 @@ export const lanContentRatingSchema = z.object({
   source: z.enum(['tmdb', 'omdb', 'jikan']),
 });
 
+const ratingOutOfTenSchema = z.object({
+  value: nonNegativeNumber.max(10),
+  scale: z.literal(10),
+  votes: nonNegativeNumber.optional(),
+});
+
+const ratingOutOfOneHundredSchema = z.object({
+  value: nonNegativeNumber.max(100),
+  scale: z.literal(100),
+});
+
+export const lanProviderRatingsSchema = z.object({
+  imdb: ratingOutOfTenSchema.optional(),
+  rottenTomatoes: ratingOutOfOneHundredSchema.optional(),
+  metacritic: ratingOutOfOneHundredSchema.optional(),
+});
+
 export const lanStreamingProviderSchema = z.object({
   id: finiteNumber,
   name: nonEmptyString,
@@ -131,6 +148,7 @@ export const lanMediaItemSchema = z.object({
   logoCandidates: z.array(z.string()).optional(),
   summary: z.string(),
   rating: finiteNumber,
+  providerRatings: lanProviderRatingsSchema.optional(),
   contentRatings: z.record(z.string(), lanContentRatingSchema).optional(),
   streamingProviders: z.array(lanStreamingProviderSchema).optional(),
   originPlatform: lanOriginPlatformSchema.optional(),
@@ -161,6 +179,18 @@ export const lanMediaItemSchema = z.object({
   }).optional(),
 });
 
+export type LanContentRating = z.output<typeof lanContentRatingSchema>;
+export type LanProviderRatings = z.output<typeof lanProviderRatingsSchema>;
+export type LanStreamingProvider = z.output<typeof lanStreamingProviderSchema>;
+export type LanOriginPlatform = z.output<typeof lanOriginPlatformSchema>;
+export type LanLocalMediaTrack = z.output<typeof lanLocalMediaTrackSchema>;
+export type LanLocalMediaDetails = z.output<typeof lanLocalMediaDetailsSchema>;
+export type LanSubtitleRecord = z.output<typeof lanSubtitleRecordSchema>;
+export type LanEpisodeMeta = z.output<typeof lanEpisodeMetaSchema>;
+export type LanEpisodeFile = z.output<typeof lanEpisodeFileSchema>;
+export type LanCastMember = z.output<typeof lanCastMemberSchema>;
+export type LanMediaItem = z.output<typeof lanMediaItemSchema>;
+
 export const lanLibraryCardSchema = z.object({
   id: nonEmptyString,
   type: z.enum(['movie', 'tv', 'anime']),
@@ -175,6 +205,7 @@ export const lanLibraryCardSchema = z.object({
   logoCandidates: z.array(z.string()).optional(),
   summary: z.string(),
   rating: finiteNumber,
+  providerRatings: lanProviderRatingsSchema.optional(),
   contentRatings: z.record(z.string(), lanContentRatingSchema).optional(),
   streamingProviders: z.array(lanStreamingProviderSchema).optional(),
   originPlatform: lanOriginPlatformSchema.optional(),

@@ -16,7 +16,7 @@ import {
   usefulLocalTitle,
 } from './metadata/helpers.ts';
 import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
-import { omdbContentRatings, type OMDbResponse } from './metadata/omdb.ts';
+import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import {
@@ -113,8 +113,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     tmdbMeta?: Partial<MediaItem> | null,
     omdbMeta?: OMDbResponse | null,
     tvMeta?: { rating?: number } | null,
-  ): number => numericRating(tmdbMeta?.rating)
-    || numericRating(omdbMeta?.imdbRating)
+  ): number => numericRating(omdbMeta?.imdbRating)
+    || numericRating(tmdbMeta?.rating)
     || numericRating(tvMeta?.rating);
 
   const showMetadataRating = (
@@ -123,10 +123,10 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     tmdbMeta?: Partial<MediaItem> | null,
     tvMeta?: { rating?: number } | null,
     omdbMeta?: OMDbResponse | null,
-  ): number => (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
+  ): number => numericRating(omdbMeta?.imdbRating)
+    || (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
     || numericRating(tmdbMeta?.rating)
-    || numericRating(tvMeta?.rating)
-    || numericRating(omdbMeta?.imdbRating);
+    || numericRating(tvMeta?.rating);
 
   const officialArtworkOnly = (urls: Array<string | null | undefined>): string[] => {
     const seen = new Set<string>();
@@ -300,7 +300,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || matchedOmdbData?.Plot
       || '';
 
-    const rating = (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
+    const rating = numericRating(matchedOmdbData?.imdbRating)
+      || (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
       || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
 
     const genres: string[] =
@@ -367,6 +368,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
+      providerRatings: omdbProviderRatings(matchedOmdbData),
       contentRatings: mergeContentRatings(
         matchedTmdbTVMeta?.contentRatings,
         omdbContentRatings(matchedOmdbData),
@@ -560,7 +562,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       || '';
     const rating = finalType === 'movie'
       ? movieMetadataRating(matchedTmdbData, matchedOmdbData, matchedTVMeta)
-      : (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
+      : numericRating(matchedOmdbData?.imdbRating)
+        || (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
         || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
     const genres: string[] =
       (finalType === 'anime' ? matchedAniListMeta?.genres || matchedJikanMeta?.genres : null)
@@ -600,6 +603,7 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
+      providerRatings: omdbProviderRatings(matchedOmdbData),
       contentRatings: mergeContentRatings(
         useMovieMetadata ? matchedTmdbData?.contentRatings : undefined,
         useShowMetadata ? matchedTmdbTVMeta?.contentRatings : undefined,

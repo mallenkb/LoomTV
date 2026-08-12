@@ -1,4 +1,4 @@
-import type { LanContentRating, LanOriginPlatform, LanStreamingProvider } from '@loom-media-server/lan-protocol';
+import type { LanContentRating, LanOriginPlatform, LanProviderRatings, LanStreamingProvider } from '@loom-media-server/lan-protocol';
 import type {
   WireEpisodeFile,
   WireEpisodeMeta,
@@ -15,6 +15,7 @@ export type EpisodeFile = WireEpisodeFile;
 export type SubtitleRecord = WireSubtitleRecord;
 export type ContentRatingSource = LanContentRating['source'];
 export type ContentRating = LanContentRating;
+export type ProviderRatings = LanProviderRatings;
 export type StreamingOfferType = NonNullable<LanStreamingProvider['offerTypes']>[number];
 export type StreamingProvider = LanStreamingProvider;
 export type OriginPlatform = LanOriginPlatform;

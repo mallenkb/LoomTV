@@ -50,6 +50,8 @@ import {
 import type { LibVlcStartOptions } from './libvlcPlayback.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 import { z } from 'zod';
+import { lanProviderRatingsSchema } from '@loom-media-server/lan-protocol';
+import { parseIpcArguments } from './ipcValidation.ts';
 
 const finiteNumber = z.number().finite();
 const nonEmptyString = z.string().trim().min(1);
@@ -181,6 +183,7 @@ const artworkCandidateSchema = z.object({
   cover: z.string().optional(),
   summary: z.string().optional(),
   rating: finiteNumber.optional(),
+  providerRatings: lanProviderRatingsSchema.optional(),
   posterCandidates: z.array(z.string()).optional(),
   backdropCandidates: z.array(z.string()).optional(),
   logoCandidates: z.array(z.string()).optional(),
@@ -493,7 +496,7 @@ export function registerIpcHandlers<
   ) => {
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
-      const validatedArgs = argsSchema.parse(args);
+      const validatedArgs = parseIpcArguments(channel, args, argsSchema);
       return listener(event, ...validatedArgs);
     });
   };
@@ -509,7 +512,7 @@ export function registerIpcHandlers<
   ) => {
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
-      z.tuple([]).parse(args);
+      parseIpcArguments(channel, args, z.tuple([]));
       return listener(event);
     });
   };
@@ -521,7 +524,7 @@ export function registerIpcHandlers<
   ) => {
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
-      return listener(event, ...argsSchema.parse(args));
+      return listener(event, ...parseIpcArguments(channel, args, argsSchema));
     });
   };
 
@@ -546,7 +549,7 @@ export function registerIpcHandlers<
         } satisfies IpcContract[C]['result'];
       }
       try {
-        const validatedArgs = argsSchema.parse(args);
+        const validatedArgs = parseIpcArguments(channel, args, argsSchema);
         const data = await listener(event, ...validatedArgs);
         return { ok: true, data };
       } catch (error) {

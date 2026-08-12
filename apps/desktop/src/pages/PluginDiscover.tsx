@@ -17,7 +17,7 @@ import {
   aniListGenreResponseSchema,
   type AniListMediaResult,
 } from '@/lib/anilistSchemas';
-import { parseStoredValue, readJsonResponse, stremioCatalogItemSchema } from '@/lib/desktopDecoders';
+import { parseStoredValue, readJsonResponse } from '@/lib/desktopDecoders';
 import {
   tmdbContentRatingsResponseSchema,
   tmdbDetailResponseSchema,
@@ -34,23 +34,35 @@ import {
   type TmdbVideo,
 } from '@/lib/tmdbSchemas';
 import { z } from 'zod';
+import {
+  ALL_AVAILABILITY_REGION,
+  AVAILABILITY_REGIONS,
+  DEFAULT_AVAILABILITY_REGION,
+  DISCOVER_CACHE_STORAGE_KEY,
+  DISCOVER_ROUTE,
+  DISCOVER_VIEW_STATE_STORAGE_KEY,
+  buildDiscoverSearch,
+  discoverViewStateSchema,
+  getValidCachedItems,
+  hasCachedImageCandidate,
+  loadDiscoverCacheFromStorage,
+  makeCacheId,
+  nextMidnightAt,
+  normalizeAvailabilityRegion,
+  parseDiscoverFilterState,
+  releaseYearOptions,
+  toLocalDateKey,
+  type AvailabilityRegion,
+  type CachedCacheId,
+  type DiscoverCacheState,
+  type DiscoverSection,
+  type DiscoverType,
+} from './PluginDiscover/discoverState';
 
 const PROVIDER_SEARCH_DEBOUNCE_MS = 450;
 const DISCOVER_RESULT_LIMIT = 30;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const ANILIST_API_URL = 'https://graphql.anilist.co';
-const DISCOVER_CACHE_STORAGE_KEY = 'loomtv:discover-cache-v3';
-const DISCOVER_VIEW_STATE_STORAGE_KEY = 'loomtv:discover-view-state-v1';
-const DISCOVER_ROUTE = '/discover';
-const DEFAULT_AVAILABILITY_REGION = 'US';
-const AVAILABILITY_REGIONS = ['US', 'GB', 'CA', 'AU'] as const;
-const ALL_AVAILABILITY_REGION = 'ALL' as const;
-const DISCOVER_MIN_RELEASE_YEAR = 1900;
-
-type DiscoverType = 'movie' | 'tv' | 'anime';
-type DiscoverSection = 'trending' | 'popular' | 'top_rated' | 'new';
-type AvailabilityRegion = typeof AVAILABILITY_REGIONS[number] | typeof ALL_AVAILABILITY_REGION;
-type CachedCacheId = string;
 type GenreSourceType = Exclude<DiscoverType, 'anime'>;
 
 type GenreOption = {
@@ -65,80 +77,6 @@ type ProviderOption = GenreOption & {
 
 type GridEntry = { id: string; item: StremioPluginCatalogItem };
 
-interface CachedDiscoverItem {
-  expiresAt: number;
-  items: StremioPluginCatalogItem[];
-}
-
-interface DiscoverCacheState {
-  date: string;
-  entries: Record<string, CachedDiscoverItem>;
-}
-
-const discoverCacheStateSchema = z.object({
-  date: z.string(),
-  entries: z.record(z.string(), z.object({
-    expiresAt: z.number().finite().nonnegative(),
-    items: z.array(stremioCatalogItemSchema),
-  })),
-});
-const discoverViewStateSchema = z.object({
-  search: z.string().optional(),
-  scrollTop: z.number().finite().nonnegative().optional(),
-});
-
-type ParsedDiscoverFilterState = {
-  contentType: DiscoverType;
-  section: DiscoverSection;
-  genreFilter: string;
-  yearFilter: string;
-  platformFilter: string;
-  region: string;
-  query: string;
-};
-
-function parseDiscoverFilterState(search: string): ParsedDiscoverFilterState {
-  const params = new URLSearchParams(search);
-  const contentTypeParam = params.get('type');
-  const sectionParam = params.get('section');
-  const genreParam = params.get('genre') ?? '';
-  const yearParam = params.get('year') ?? '';
-  const platformParam = params.get('provider') ?? '';
-  const regionParam = params.get('region') ?? '';
-  const query = params.get('q') ?? '';
-
-  const contentType = (contentTypeParam === 'movie' || contentTypeParam === 'tv' || contentTypeParam === 'anime')
-    ? contentTypeParam
-    : 'movie';
-  const section = (sectionParam === 'trending' || sectionParam === 'popular' || sectionParam === 'top_rated' || sectionParam === 'new')
-    ? sectionParam
-    : 'trending';
-
-  return {
-    contentType,
-    section,
-    genreFilter: genreParam,
-    yearFilter: yearParam,
-    platformFilter: platformParam,
-    region: regionParam,
-    query,
-  };
-}
-
-function buildDiscoverSearch(state: ParsedDiscoverFilterState): string {
-  const params = new URLSearchParams();
-  if (state.contentType !== 'movie') params.set('type', state.contentType);
-  if (state.section !== 'trending') params.set('section', state.section);
-  if (state.genreFilter.trim()) params.set('genre', state.genreFilter.trim());
-  if (state.yearFilter.trim()) params.set('year', state.yearFilter.trim());
-  if (state.platformFilter.trim()) params.set('provider', state.platformFilter.trim());
-  if (state.platformFilter.trim() || state.region.trim().toUpperCase() !== DEFAULT_AVAILABILITY_REGION) {
-    params.set('region', state.region.trim().toUpperCase() || DEFAULT_AVAILABILITY_REGION);
-  }
-  const query = state.query.trim();
-  if (query) params.set('q', query);
-  return params.toString();
-}
 
 const DISCOVER_SECTIONS: Record<DiscoverType, readonly DiscoverSection[]> = {
   movie: ['trending', 'popular', 'top_rated', 'new'],
@@ -272,17 +210,6 @@ function errorMessage(error: unknown): string {
   return 'The provider request failed.';
 }
 
-function toLocalDateKey(date = new Date()): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function nextMidnightAt(date = new Date()): number {
-  const next = new Date(date);
-  next.setHours(24, 0, 0, 0);
-  if (next.getTime() <= date.getTime()) next.setDate(next.getDate() + 1);
-  return next.getTime();
-}
-
 function normalizeTmdbCredential(raw: string): string {
   return raw.trim().replace(/^Bearer\s+/i, '');
 }
@@ -301,22 +228,6 @@ function stripHtml(value: string): string {
 function tmdbImage(path: string | null | undefined, size: 'w45' | 'w92' | 'w185' | 'w300' | 'w500' | 'w1280'): string {
   if (!path) return '';
   return `${TMDB_IMAGE_BASE}/${size}${path}`;
-}
-
-function normalizeAvailabilityRegion(value: string): AvailabilityRegion {
-  const normalized = value.trim().toUpperCase();
-  if (normalized === ALL_AVAILABILITY_REGION) return ALL_AVAILABILITY_REGION;
-  return (AVAILABILITY_REGIONS as readonly string[]).includes(normalized)
-    ? normalized as AvailabilityRegion
-    : DEFAULT_AVAILABILITY_REGION;
-}
-
-function releaseYearOptions(): string[] {
-  const currentYear = new Date().getFullYear();
-  return Array.from(
-    { length: Math.max(1, currentYear - DISCOVER_MIN_RELEASE_YEAR + 1) },
-    (_, index) => String(currentYear - index),
-  );
 }
 
 function providerDisplayName(value: string): string {
@@ -389,25 +300,6 @@ function stremioMetaLine(item: StremioPluginCatalogItem): string {
   return [year > 0 ? String(year) : item.releaseInfo || item.released || '', item.runtime]
     .filter(Boolean)
     .join(' · ');
-}
-
-function hasCachedImageCandidate(items: readonly StremioPluginCatalogItem[]): boolean {
-  return items.some((item) => Boolean(
-    (item.posterUrl && item.posterUrl.trim())
-    || (item.backgroundUrl && item.backgroundUrl.trim())
-    || (item.logoUrl && item.logoUrl.trim()),
-  ));
-}
-
-function getValidCachedItems(
-  cache: DiscoverCacheState,
-  cacheId: CachedCacheId,
-  now = Date.now(),
-): readonly StremioPluginCatalogItem[] | null {
-  if (cache.date !== toLocalDateKey()) return null;
-  const cached = cache.entries[cacheId];
-  if (!cached || cached.expiresAt < now || !hasCachedImageCandidate(cached.items)) return null;
-  return cached.items;
 }
 
 function hasYearMatch(item: StremioPluginCatalogItem, yearFilter: string): boolean {
@@ -607,23 +499,6 @@ function mapTmdbCredits(media: TmdbCreditsResponse | undefined, existing: Stremi
   };
 }
 
-function makeCacheId(
-  type: DiscoverType,
-  section: DiscoverSection,
-  query: string,
-  genre = '',
-  year = '',
-  provider = '',
-  region = DEFAULT_AVAILABILITY_REGION,
-): CachedCacheId {
-  if (!year.trim() && !provider.trim() && normalizeAvailabilityRegion(region) === DEFAULT_AVAILABILITY_REGION) {
-    return `${type}:${section}:${query.trim().toLowerCase()}:${genre.trim().toLowerCase()}`;
-  }
-  return [type, section, query, genre, year, provider, region]
-    .map((value) => encodeURIComponent(value.trim().toLowerCase()))
-    .join(':');
-}
-
 function normalizeGenreFilter(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -638,32 +513,6 @@ function hasGenreMatch(item: StremioPluginCatalogItem, genreValue: string, type:
     return item.genres.some((genre) => selectedGenres.includes(normalizeGenreFilter(genre)));
   }
   return selectedGenres.some((genre) => item.genres.includes(genre));
-}
-
-function loadDiscoverCacheFromStorage(): DiscoverCacheState {
-  const empty: DiscoverCacheState = {
-    date: toLocalDateKey(),
-    entries: {},
-  };
-  try {
-    const raw = localStorage.getItem(DISCOVER_CACHE_STORAGE_KEY);
-    if (!raw) return empty;
-    const parsed = parseStoredValue(raw, discoverCacheStateSchema.nullable(), null);
-    if (!parsed) return empty;
-    if (!parsed || typeof parsed.date !== 'string' || parsed.date !== toLocalDateKey()) return empty;
-    if (!parsed.entries || typeof parsed.entries !== 'object') return empty;
-    return {
-      date: parsed.date,
-      entries: Object.fromEntries(
-        Object.entries(parsed.entries).filter(([, cached]) =>
-          typeof cached?.expiresAt === 'number'
-          && Array.isArray(cached?.items),
-        ),
-      ),
-    };
-  } catch {
-    return empty;
-  }
 }
 
 async function requestTmdbJson<TSchema extends z.ZodType>(

@@ -9,8 +9,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "isolatedModules": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
-    // Pure type contracts with no runtime dependencies. Without this, the
+    // Protocol contracts and runtime schemas do not use ambient platform types. Without this, the
     // hoisted node_modules/@types/* at the workspace root get auto-included.
     "types": [],
     "forceConsistentCasingInFileNames": true,

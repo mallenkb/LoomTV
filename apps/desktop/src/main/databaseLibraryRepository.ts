@@ -7,73 +7,15 @@ import {
   lanContentRatingSchema,
   lanLocalMediaDetailsSchema,
   lanOriginPlatformSchema,
+  lanProviderRatingsSchema,
   lanStreamingProviderSchema,
   lanSubtitleRecordSchema,
 } from '@loom-media-server/lan-protocol';
 import { z } from 'zod';
 import { parseStoredJson } from './runtimeValidation.ts';
+import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 
 type SeasonEntry = { number: number; title: string; episodeCount: number };
-
-type MediaItemRow = {
-  id: string;
-  type: string;
-  format: string;
-  title: string;
-  year: number;
-  poster: string;
-  backdrop: string;
-  logo: string;
-  summary: string;
-  rating: number;
-  file_path: string;
-  file_size: number | null;
-  last_played: number | null;
-  genres_json: string | null;
-  cast_json: string | null;
-  subtitles_json: string | null;
-  local_metadata_json: string | null;
-  provider_ids_json: string | null;
-  streaming_providers_json: string | null;
-  origin_platform_json: string | null;
-  poster_candidates_json: string | null;
-  backdrop_candidates_json: string | null;
-  logo_candidates_json: string | null;
-  content_ratings_json: string | null;
-};
-
-type SeasonRow = { media_id: string; number: number; title: string; episode_count: number };
-type EpisodeRow = {
-  media_id: string;
-  season: number;
-  number: number;
-  title: string;
-  summary: string;
-  still: string;
-  rating: number;
-  air_date: string;
-  local_metadata_json: string | null;
-};
-type EpisodeFileRow = {
-  media_id: string;
-  season: number;
-  episode: number;
-  file_path: string;
-  title: string | null;
-  subtitles_json: string | null;
-  local_metadata_json: string | null;
-};
-type ScanCacheRow = {
-  folder_path: string;
-  version: number;
-  folder_kind: string;
-  signature: string;
-  subtitle_profile: string | null;
-  file_count: number;
-  item_count: number;
-  scanned_at: number;
-  ratings_refreshed_at: number;
-};
 
 const stringArraySchema = z.array(z.string());
 const providerIdsSchema = z.object({
@@ -87,6 +29,74 @@ const providerIdsSchema = z.object({
 const contentRatingsSchema = z.record(z.string(), lanContentRatingSchema);
 const mediaTypeSchema = z.enum(['movie', 'tv', 'anime']);
 const scanCacheFolderKindSchema = z.enum(['movies', 'tv', 'anime', 'auto']);
+const nullableString = z.string().nullable();
+const nullableNumber = z.number().finite().nullable();
+const mediaItemRowSchema = z.object({
+  id: z.string(),
+  type: z.string(),
+  format: z.string(),
+  title: z.string(),
+  year: z.number().finite(),
+  poster: z.string(),
+  backdrop: z.string(),
+  logo: z.string(),
+  summary: z.string(),
+  rating: z.number().finite(),
+  provider_ratings_json: nullableString,
+  file_path: z.string(),
+  file_size: nullableNumber,
+  last_played: nullableNumber,
+  genres_json: nullableString,
+  cast_json: nullableString,
+  subtitles_json: nullableString,
+  local_metadata_json: nullableString,
+  provider_ids_json: nullableString,
+  streaming_providers_json: nullableString,
+  origin_platform_json: nullableString,
+  poster_candidates_json: nullableString,
+  backdrop_candidates_json: nullableString,
+  logo_candidates_json: nullableString,
+  content_ratings_json: nullableString,
+});
+const folderRowSchema = z.object({ path: z.string(), kind: z.string() });
+const countRowSchema = z.object({ count: z.number().finite().nonnegative() });
+const seasonRowSchema = z.object({
+  media_id: z.string(),
+  number: z.number().finite(),
+  title: z.string(),
+  episode_count: z.number().finite().nonnegative(),
+});
+const episodeRowSchema = z.object({
+  media_id: z.string(),
+  season: z.number().finite(),
+  number: z.number().finite(),
+  title: z.string(),
+  summary: z.string(),
+  still: z.string(),
+  rating: z.number().finite(),
+  air_date: z.string(),
+  local_metadata_json: nullableString,
+});
+const episodeFileRowSchema = z.object({
+  media_id: z.string(),
+  season: z.number().finite(),
+  episode: z.number().finite(),
+  file_path: z.string(),
+  title: nullableString,
+  subtitles_json: nullableString,
+  local_metadata_json: nullableString,
+});
+const scanCacheRowSchema = z.object({
+  folder_path: z.string(),
+  version: z.number().finite(),
+  folder_kind: z.string(),
+  signature: z.string(),
+  subtitle_profile: nullableString,
+  file_count: z.number().finite().nonnegative(),
+  item_count: z.number().finite().nonnegative(),
+  scanned_at: z.number().finite().nonnegative(),
+  ratings_refreshed_at: z.number().finite().nonnegative(),
+});
 
 function jsonString(value: unknown): string {
   return JSON.stringify(value ?? null);
@@ -166,8 +176,8 @@ function appendToMap<T>(map: Map<string, T[]>, mediaId: string, value: T): void 
 }
 
 export function hasLibraryData(database: BetterSqlite3.Database): boolean {
-  const row = database.prepare('SELECT COUNT(*) AS count FROM media_items').get() as { count: number };
-  const folders = database.prepare('SELECT COUNT(*) AS count FROM library_folders').get() as { count: number };
+  const row = parseDatabaseRow(database.prepare('SELECT COUNT(*) AS count FROM media_items').get(), countRowSchema, 'media count');
+  const folders = parseDatabaseRow(database.prepare('SELECT COUNT(*) AS count FROM library_folders').get(), countRowSchema, 'folder count');
   return row.count > 0 || folders.count > 0;
 }
 
@@ -177,12 +187,12 @@ export function loadLibrary(
 ): LibraryData | null {
   if (!hasLibraryData(database)) return null;
 
-  const folderRows = database.prepare('SELECT path, kind FROM library_folders ORDER BY added_at ASC').all() as Array<{ path: string; kind: string }>;
+  const folderRows = parseDatabaseRows(database.prepare('SELECT path, kind FROM library_folders ORDER BY added_at ASC').all(), folderRowSchema, 'library folder');
   const folderGroups = folderGroupsFromRows(folderRows);
-  const rows = database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').all() as MediaItemRow[];
+  const rows = parseDatabaseRows(database.prepare('SELECT * FROM media_items ORDER BY title COLLATE NOCASE ASC').all(), mediaItemRowSchema, 'media item');
 
   const seasonsByMedia = new Map<string, SeasonEntry[]>();
-  for (const row of database.prepare('SELECT * FROM seasons ORDER BY number ASC').all() as SeasonRow[]) {
+  for (const row of parseDatabaseRows(database.prepare('SELECT * FROM seasons ORDER BY number ASC').all(), seasonRowSchema, 'season')) {
     appendToMap(seasonsByMedia, row.media_id, {
       number: row.number,
       title: row.title,
@@ -191,7 +201,7 @@ export function loadLibrary(
   }
 
   const episodesByMedia = new Map<string, EpisodeMeta[]>();
-  for (const row of database.prepare('SELECT * FROM episodes ORDER BY season ASC, number ASC').all() as EpisodeRow[]) {
+  for (const row of parseDatabaseRows(database.prepare('SELECT * FROM episodes ORDER BY season ASC, number ASC').all(), episodeRowSchema, 'episode')) {
     appendToMap(episodesByMedia, row.media_id, {
       season: row.season,
       number: row.number,
@@ -205,7 +215,7 @@ export function loadLibrary(
   }
 
   const episodeFilesByMedia = new Map<string, EpisodeFile[]>();
-  for (const row of database.prepare('SELECT * FROM episode_files ORDER BY season ASC, episode ASC').all() as EpisodeFileRow[]) {
+  for (const row of parseDatabaseRows(database.prepare('SELECT * FROM episode_files ORDER BY season ASC, episode ASC').all(), episodeFileRowSchema, 'episode file')) {
     appendToMap(episodeFilesByMedia, row.media_id, {
       season: row.season,
       episode: row.episode,
@@ -216,7 +226,8 @@ export function loadLibrary(
     });
   }
 
-  const scanCache = Object.fromEntries((database.prepare('SELECT * FROM scan_cache').all() as ScanCacheRow[]).map((row): [string, ScanCacheEntry] => [
+  const scanCacheRows = parseDatabaseRows(database.prepare('SELECT * FROM scan_cache').all(), scanCacheRowSchema, 'scan cache');
+  const scanCache = Object.fromEntries(scanCacheRows.map((row): [string, ScanCacheEntry] => [
     row.folder_path,
     {
       version: row.version,
@@ -254,6 +265,7 @@ export function loadLibrary(
       logoCandidates: parseStoredJson(row.logo_candidates_json, stringArraySchema, []),
       summary: row.summary,
       rating: row.rating,
+      providerRatings: parseStoredJson(row.provider_ratings_json, lanProviderRatingsSchema, {}),
       contentRatings: parseStoredJson(row.content_ratings_json, contentRatingsSchema, {}),
       streamingProviders: parseStoredJson(row.streaming_providers_json, z.array(lanStreamingProviderSchema).optional(), undefined),
       originPlatform: parseStoredJson(row.origin_platform_json, lanOriginPlatformSchema.optional(), undefined),
@@ -291,11 +303,12 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
 
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
-        id, type, format, title, year, poster, backdrop, logo, summary, rating, file_path, file_size, last_played,
+        id, type, format, title, year, poster, backdrop, logo, summary, rating, provider_ratings_json, file_path, file_size, last_played,
         genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?
       )
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
@@ -320,6 +333,7 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         durableArtworkSource(item.logo),
         item.summary || '',
         item.rating || 0,
+        jsonString(item.providerRatings || {}),
         item.filePath || '',
         item.fileSize || null,
         null,

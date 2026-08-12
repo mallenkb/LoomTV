@@ -110,6 +110,7 @@ function mediaFromStremioCatalogItem(item: StremioPluginCatalogItem | null | und
     logo: item.artwork?.logo || item.logoUrl || '',
     summary: item.description || '',
     rating: item.rating || 0,
+    providerRatings: item.providerRatings,
     contentRating: item.contentRating,
     streamingProviders: item.streamingProviders,
     trailerUrl: item.trailerUrl,
@@ -251,11 +252,14 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
       || movie?.posterCandidates?.length
       || movie?.backdropCandidates?.length,
     );
-    if (!movie?.filePath || hasStoredArtwork) return;
+    if (!movie?.filePath) return;
 
     let cancelled = false;
     const progress = getProgressState(movie.filePath, movie.localMetadata?.durationSeconds);
-    const times = Array.from(new Set([
+    const preferredTime = progress.position > 10
+      ? formatThumbnailTime(progress.position, progress.duration)
+      : '00:03:00';
+    const times = hasStoredArtwork ? [preferredTime] : Array.from(new Set([
       progress.position > 10 ? formatThumbnailTime(progress.position, progress.duration) : '',
       '00:03:00',
       '00:01:00',
@@ -365,6 +369,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           <SafeArtwork
             key={heroKey}
             src={heroArtwork}
+            placeholderSrc={fallbackThumbnails[0] || ''}
             alt={movie.title}
             className="h-full w-full"
             imgClassName="object-cover"
@@ -403,6 +408,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           <SafeArtwork
             key={posterKey}
             src={posterArtwork}
+            placeholderSrc={fallbackThumbnails[0] || ''}
             alt={movie.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
             imgClassName="object-cover"

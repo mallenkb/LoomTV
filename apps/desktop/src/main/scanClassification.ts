@@ -218,9 +218,12 @@ export function mergeLocalSeasonsWithMetadata(
   const remoteByNumber = new Map((remoteSeasons || []).map((season) => [season.number, season]));
   return localSeasons.map((season) => {
     const remote = remoteByNumber.get(season.number);
+    const hasRemoteName = officialSeasonSubtitle(remote?.title, season.number) !== null;
     return {
       number: season.number,
-      title: officialSeasonDisplayTitle(season.number, remote?.title),
+      title: hasRemoteName
+        ? officialSeasonDisplayTitle(season.number, remote?.title)
+        : season.title?.trim() || genericSeasonTitle(season.number),
       episodeCount: season.episodeCount,
     };
   });

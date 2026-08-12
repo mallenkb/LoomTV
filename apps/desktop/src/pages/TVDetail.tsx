@@ -104,6 +104,20 @@ function normalizeRouteYear(releaseInfo?: string, released?: string): number {
   return match ? Number(match[0]) : 0;
 }
 
+function seasonDisplayTitle(number: number, title: string): string {
+  if (number === 0) return 'Specials';
+
+  const label = `Season ${number}`;
+  const normalizedTitle = title.trim();
+  if (!normalizedTitle || new RegExp(`^Season\\s+0*${number}$`, 'i').test(normalizedTitle)) return label;
+
+  const name = normalizedTitle.replace(
+    new RegExp(`^Season\\s+0*${number}(?:\\s*[:\\-]\\s*|\\s+)`, 'i'),
+    '',
+  ).trim();
+  return name ? `${label}: ${name}` : label;
+}
+
 function isCatalogTypeForKind(kind: 'series' | 'anime', type: string): boolean {
   return kind === 'anime' ? type === 'anime' : type === 'series' || type === 'tv';
 }
@@ -126,6 +140,7 @@ function showFromStremioCatalogItem(
     logo: item.artwork?.logo || item.logoUrl || '',
     summary: item.description || '',
     rating: item.rating || 0,
+    providerRatings: item.providerRatings,
     contentRating: item.contentRating,
     streamingProviders: item.streamingProviders,
     trailerUrl: item.trailerUrl,
@@ -499,8 +514,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
       || show?.posterCandidates?.length
       || show?.backdropCandidates?.length,
     );
-    if (hasStoredArtwork) return;
-
     const episodeFiles = show?.episodeFiles
       ?.slice()
       .sort((a, b) => a.season - b.season || a.episode - b.episode) || [];
@@ -511,7 +524,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
 
     let cancelled = false;
     const progress = getProgressState(thumbnailEpisode.filePath, thumbnailEpisode.localMetadata?.durationSeconds);
-    const times = Array.from(new Set([
+    const preferredTime = progress.position > 10
+      ? formatThumbnailTime(progress.position, progress.duration)
+      : '00:03:00';
+    const times = hasStoredArtwork ? [preferredTime] : Array.from(new Set([
       progress.position > 10 ? formatThumbnailTime(progress.position, progress.duration) : '',
       '00:03:00',
       '00:01:00',
@@ -783,6 +799,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <div className="loom-detail-cover-image absolute inset-y-0 left-0 right-0 mx-auto w-full max-w-[var(--loom-frame-max-width)]">
           <SafeArtwork
             src={heroArtwork}
+            placeholderSrc={fallbackThumbnails[0] || ''}
             alt={show.title}
             className="h-full w-full"
             imgClassName="object-cover"
@@ -820,6 +837,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
           <SafeArtwork
             src={posterArtwork}
+            placeholderSrc={fallbackThumbnails[0] || ''}
             alt={show.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
             imgClassName="object-cover"
@@ -945,7 +963,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             <SharedListHighlight activeId={expandedSeason === null ? null : String(expandedSeason)} className="loom-shared-highlight-season-cards space-y-2">
               {visibleSeasons.map((season) => {
                 const seasonEps = episodesWithFilesForSeason(season.number);
-                const seasonTitle = season.number === 0 ? 'Specials' : season.title;
+                const seasonTitle = seasonDisplayTitle(season.number, season.title);
                 const seasonFiles = sortedEpisodeFilesForSeason(season.number);
                 const fileCount = seasonFiles.length;
                 const hasFiles = fileCount > 0;

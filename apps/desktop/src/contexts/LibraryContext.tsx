@@ -379,6 +379,7 @@ function mediaItemFromCatalogCard(
     logoCandidates: card.logoCandidates,
     summary: card.summary,
     rating: card.rating,
+    providerRatings: card.providerRatings,
     contentRatings: card.contentRatings,
     streamingProviders: card.streamingProviders,
     originPlatform: card.originPlatform,

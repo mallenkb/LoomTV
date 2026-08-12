@@ -1,10 +1,9 @@
 import { StatusBar } from 'expo-status-bar';
 import * as Brightness from 'expo-brightness';
 import * as Device from 'expo-device';
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref, type RefObject } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
 import {
   ActivityIndicator,
-  AccessibilityInfo,
   Alert,
   Animated,
   AppState,
@@ -12,7 +11,6 @@ import {
   BackHandler,
   Easing,
   FlatList,
-  findNodeHandle,
   type ImageStyle,
   Keyboard,
   KeyboardAvoidingView,
@@ -95,6 +93,9 @@ import {
   type MobileThemeColors,
 } from './mobileStyles';
 import { createMobileLanClient } from './mobileLanClient';
+import { fetchMobileCatalog, synchronizeMobileCatalog } from './mobileCatalog';
+import { captureMobileFocus, clearCapturedMobileFocus, topMobileModalLayer, useMobileModalLayer } from './mobileModalStack';
+import { mobileConnectionLifecycleAction, replaceMobilePlayerSource } from './mobileLifecycle';
 import {
   connectionErrorFor,
   discoveredHostFromService,
@@ -107,7 +108,7 @@ import {
 } from './mobileSecureTransport';
 import {
   mobileDetailCacheKey,
-  mobileLibraryFromIndex,
+  mobileCatalogIdentity,
   mobileReconnectDelayMs,
   normalizeCertFingerprint,
   rememberMobileDetailItem,
@@ -174,7 +175,6 @@ import {
   hlsSessionResultSchema,
   mediaSegmentsPayloadSchema,
   mobileActiveProfileSchema,
-  mobileLibraryIndexSchema,
   mobileLibraryItemDetailsSchema,
   mobileLibrarySchema,
   mobilePairApprovalRequestSchema,
@@ -199,119 +199,6 @@ type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' |
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
 type PlayerRotation = 0 | 90 | 180 | 270;
 type MobileProfilePickerMode = 'startup' | 'lock' | 'profile-required' | 'voluntary';
-
-type MobileFocusableRef = RefObject<{ focus?: () => void } | null>;
-
-type MobileModalLayer = {
-  id: string;
-  priority: number;
-  sequence: number;
-  onBack: () => void;
-  restoreFocusTarget?: MobileFocusTarget;
-};
-
-const mobileModalLayers: MobileModalLayer[] = [];
-let mobileModalSequence = 0;
-let pendingMobileFocusTarget: MobileFocusTarget | null = null;
-
-type MobileFocusTarget = {
-  node: number;
-  invoker?: unknown;
-  ref?: MobileFocusableRef;
-};
-
-function captureMobileFocus(event: { currentTarget?: unknown }): void {
-  if (event.currentTarget === undefined) return;
-  const node = findNodeHandle(event.currentTarget as Parameters<typeof findNodeHandle>[0]);
-  if (node !== null) pendingMobileFocusTarget = { invoker: event.currentTarget, node };
-}
-
-function takeMobileFocusTarget(): MobileFocusTarget | undefined {
-  const target = pendingMobileFocusTarget || undefined;
-  pendingMobileFocusTarget = null;
-  return target;
-}
-
-function focusTargetFromRef(ref?: MobileFocusableRef): MobileFocusTarget | undefined {
-  if (!ref?.current) return undefined;
-  const node = findNodeHandle(ref.current as Parameters<typeof findNodeHandle>[0]);
-  return node === null ? undefined : { node, ref };
-}
-
-function topMobileModalLayer(): MobileModalLayer | null {
-  return mobileModalLayers.reduce<MobileModalLayer | null>((top, layer) => {
-    if (!top || layer.priority > top.priority || (layer.priority === top.priority && layer.sequence > top.sequence)) {
-      return layer;
-    }
-    return top;
-  }, null);
-}
-
-function restoreMobileFocus(target?: MobileFocusTarget): void {
-  const focusable = target?.ref?.current;
-  focusable?.focus?.();
-  const node = focusable
-    ? findNodeHandle(focusable as Parameters<typeof findNodeHandle>[0])
-    : target?.invoker !== undefined
-      ? findNodeHandle(target.invoker as Parameters<typeof findNodeHandle>[0])
-      : target?.ref
-        ? null
-        : target?.node ?? null;
-  if (node === null) return;
-  setTimeout(() => {
-    try {
-      AccessibilityInfo.setAccessibilityFocus(node);
-    } catch {
-      // The native focus target may disappear during a transition.
-    }
-  }, 0);
-}
-
-/**
- * React Native dispatches hardware Back to subscriptions rather than to the
- * visual z-order of overlays. Keep one explicit stack so a season picker,
- * player menu, or artwork sheet always closes before its parent surface.
- */
-function useMobileModalLayer({
-  open = true,
-  onBack,
-  priority = 10,
-  restoreFocusRef,
-}: {
-  open?: boolean;
-  onBack: () => void;
-  priority?: number;
-  restoreFocusRef?: MobileFocusableRef;
-}): void {
-  const idRef = useRef<string | null>(null);
-  if (!idRef.current) idRef.current = `mobile-modal-${++mobileModalSequence}`;
-  const callbackRef = useRef(onBack);
-  const wasOpenRef = useRef(false);
-  const restoreTargetRef = useRef<MobileFocusTarget | undefined>(undefined);
-  if (open && !wasOpenRef.current) {
-    restoreTargetRef.current = focusTargetFromRef(restoreFocusRef);
-  }
-  wasOpenRef.current = open;
-  callbackRef.current = onBack;
-
-  useEffect(() => {
-    if (!open || !idRef.current) return undefined;
-    const restoreFocusTarget = restoreTargetRef.current || takeMobileFocusTarget();
-    const layer: MobileModalLayer = {
-      id: idRef.current,
-      priority,
-      sequence: ++mobileModalSequence,
-      onBack: () => callbackRef.current(),
-      restoreFocusTarget,
-    };
-    mobileModalLayers.push(layer);
-    return () => {
-      const index = mobileModalLayers.findIndex((candidate) => candidate.id === layer.id);
-      if (index >= 0) mobileModalLayers.splice(index, 1);
-      restoreMobileFocus(layer.restoreFocusTarget);
-    };
-  }, [open, priority]);
-}
 
 const PLAYER_ASPECT_OPTIONS: { value: PlayerAspectRatio; label: string }[] = [
   { value: 'default', label: 'Default' },
@@ -1318,7 +1205,7 @@ function AppRoot() {
     setProfilePin('');
     setProfileError('');
     if (mode !== 'voluntary') {
-      pendingMobileFocusTarget = null;
+      clearCapturedMobileFocus();
       mandatoryPlayerTeardownRef.current();
       activeCatalogIdentityRef.current = 'profile:none:-1';
       detailItemCacheRef.current.clear();
@@ -1467,6 +1354,13 @@ function AppRoot() {
   checkDesktopConnectionHandlerRef.current = checkDesktopConnection;
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const connectionLifecycleAction = mobileConnectionLifecycleAction({
+    appState,
+    hasConnection: Boolean(connection),
+    hasSavedConnection: Boolean(savedConnection),
+    isPairing,
+    isServerOffline,
+  });
   const themedStyles = useMemo(() => createStyles(mobileTheme), [mobileTheme]);
   const themeContextValue = useMemo(() => ({ colors: mobileTheme, styles: themedStyles }), [mobileTheme, themedStyles]);
   const styles = themedStyles;
@@ -1749,7 +1643,7 @@ function AppRoot() {
     // A desktop restart can briefly fail the first request while its HTTPS
     // listener is coming back; onboarding must not turn that transient outage
     // into a new pairing/approval flow.
-    if (!savedConnection || (connection && !isServerOffline) || isPairing || appState !== 'active') return;
+    if (!savedConnection || connectionLifecycleAction !== 'retry-saved') return;
     let cancelled = false;
     let failedAttempts = 0;
     let retry: ReturnType<typeof setTimeout> | null = null;
@@ -1771,13 +1665,13 @@ function AppRoot() {
       if (retry) clearTimeout(retry);
     };
     // Keep the retry loop stable while the saved session remains unchanged.
-  }, [appState, connection, isPairing, isServerOffline, savedConnection]);
+  }, [appState, connectionLifecycleAction, savedConnection]);
 
   useEffect(() => {
-    if (!connection || appState !== 'active') return;
+    if (!connection || connectionLifecycleAction !== 'health-check') return;
     const healthCheck = setInterval(() => void checkDesktopConnectionHandlerRef.current(), 10000);
     return () => clearInterval(healthCheck);
-  }, [appState, connection]);
+  }, [connection, connectionLifecycleAction]);
 
   useEffect(() => {
     if (!savedConnection || !connection) return undefined;
@@ -1880,7 +1774,7 @@ function AppRoot() {
     return queryMatchedItems.filter((item) => matchesMobileLibraryFilter(item, libraryFilter, progress));
   }, [libraryFilter, progress, queryMatchedItems, searchOpen]);
 
-  const activeCatalogIdentity = `${activeProfile?.id || 'profile:none'}:${connection?.catalogRevision ?? -1}`;
+  const activeCatalogIdentity = mobileCatalogIdentity(activeProfile?.id, connection?.catalogRevision);
   activeCatalogIdentityRef.current = activeCatalogIdentity;
   const catalogCacheKeyFor = useCallback((mediaId: string): string => (
     `${activeCatalogIdentity}:${mediaId}`
@@ -2110,18 +2004,15 @@ function AppRoot() {
     let cancelled = false;
 
     async function loadSource() {
-      try {
-        if (!playbackUrl) {
-          await player.replaceAsync(null);
-          return;
-        }
-
-        await player.replaceAsync(videoSourceFor(playbackUrl, playTarget, connection?.deviceToken));
-      } catch {
-        if (!cancelled) {
-          setPlaybackFailure(playbackLoadFailure());
-        }
-      }
+      const source = playbackUrl
+        ? videoSourceFor(playbackUrl, playTarget, connection?.deviceToken)
+        : null;
+      const result = await replaceMobilePlayerSource(
+        (nextSource) => player.replaceAsync(nextSource),
+        source,
+        () => !cancelled,
+      );
+      if (result === 'failed') setPlaybackFailure(playbackLoadFailure());
     }
 
     void loadSource();
@@ -2466,78 +2357,17 @@ function AppRoot() {
     return tracked;
   }
 
-  type MobileCatalogFetchResult =
-    | { status: 'not-modified' }
-    | { status: 'unauthorized' }
-    | { status: 'profile-required' }
-    | {
-        status: 'ok';
-        library: LibraryPayload;
-        etag: string;
-        revision?: number;
-        transport: 'compact' | 'legacy';
-      };
-
-  async function fetchMobileCatalog(
-    nextConnection: Connection,
-    etag = '',
-  ): Promise<MobileCatalogFetchResult> {
-    const readLegacy = async (legacyEtag = ''): Promise<MobileCatalogFetchResult> => {
-      const response = await mobileLanClient.getLibrary(
-        nextConnection.baseUrl,
-        nextConnection.deviceToken,
-        legacyEtag,
-      );
-      if (response.status === 304) return { status: 'not-modified' };
-      if (response.status === 401) return { status: 'unauthorized' };
-      if (response.status === 409) {
-        const payload = await readErrorResponse(response.clone(), 'Legacy library');
-        if (payload?.error === 'profile_required' || payload?.status === 'profile_required') return { status: 'profile-required' };
-      }
-      if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
-      return {
-        status: 'ok',
-        library: await readJsonResponse(response, mobileLibrarySchema, 'Legacy library'),
-        etag: response.headers.get('ETag') || '',
-        transport: 'legacy',
-      };
-    };
-
-    if (nextConnection.catalogTransport === 'legacy') return readLegacy(etag);
-
-    const response = await mobileLanClient.getLibraryIndex(
-      nextConnection.baseUrl,
-      nextConnection.deviceToken,
+  const requestMobileCatalog = (nextConnection: Connection, etag = '') => fetchMobileCatalog(
+    mobileLanClient,
+    nextConnection,
+    {
       etag,
-    );
-    if (response.status === 304) return { status: 'not-modified' };
-    if (response.status === 401) return { status: 'unauthorized' };
-    if (response.status === 409) {
-      const payload = await readErrorResponse(response.clone(), 'Library index');
-      if (payload?.error === 'profile_required' || payload?.status === 'profile_required') return { status: 'profile-required' };
-    }
-    let unsupportedCompactPayload = false;
-    if (response.ok) {
-      const index = await readJsonResponse(response, mobileLibraryIndexSchema, 'Library index');
-      if (index.catalogVersion === 1 && Number.isSafeInteger(index.revision)) {
-        return {
-          status: 'ok',
-          library: mobileLibraryFromIndex(index),
-          etag: response.headers.get('ETag') || '',
-          revision: index.revision,
-          transport: 'compact',
-        };
-      }
-      unsupportedCompactPayload = true;
-    }
-
-    if (!unsupportedCompactPayload && response.status !== 403 && response.status !== 404 && response.status !== 410 && response.status !== 501) {
-      throw new Error(`Desktop sharing is unavailable (${response.status}).`);
-    }
-    legacyCatalogFallbackCountRef.current += 1;
-    console.warn(`[catalog] Compact index unavailable; using legacy library payload (fallback ${legacyCatalogFallbackCountRef.current}).`);
-    return readLegacy();
-  }
+      onLegacyFallback: () => {
+        legacyCatalogFallbackCountRef.current += 1;
+        console.warn(`[catalog] Compact index unavailable; using legacy library payload (fallback ${legacyCatalogFallbackCountRef.current}).`);
+      },
+    },
+  );
 
   async function hydrateSelectedProfile(
     nextConnection: Connection,
@@ -2547,7 +2377,7 @@ function AppRoot() {
   ): Promise<boolean> {
     const generation = selectionGeneration ?? ++profileHydrationGenerationRef.current;
     const [catalog, progressResponse, preferencesResponse, listsResponse] = await Promise.all([
-      fetchMobileCatalog(nextConnection),
+      requestMobileCatalog(nextConnection),
       mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfilePreferences(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfileLists(nextConnection.baseUrl, nextConnection.deviceToken),
@@ -2710,7 +2540,7 @@ function AppRoot() {
         setOfflineSnapshotSavedAt(null);
         return true;
       }
-      let catalog = await fetchMobileCatalog(baseConnection);
+      let catalog = await requestMobileCatalog(baseConnection);
       if (catalog.status === 'unauthorized') {
         activeSaved = await refreshSavedCredentials(activeSaved);
         baseConnection = { ...activeSaved, library: {}, libraryEtag: '' };
@@ -2722,7 +2552,7 @@ function AppRoot() {
           setOfflineSnapshotSavedAt(null);
           return true;
         }
-        catalog = await fetchMobileCatalog(baseConnection);
+        catalog = await requestMobileCatalog(baseConnection);
       }
       if (catalog.status === 'unauthorized') {
         invalidateCredentialRefresh();
@@ -2943,32 +2773,27 @@ function AppRoot() {
     setError('');
     setIsRefreshing(true);
     try {
-      let activeConnection = connection;
-      let activeSavedConnection = savedConnection;
-      if (activeSavedConnection && connection.accessTokenExpiresAt <= Date.now() + 60_000) {
-        const refreshed = await refreshSavedCredentials(activeSavedConnection);
-        activeSavedConnection = refreshed;
-        activeConnection = { ...connection, ...refreshed };
-      }
-      if (isServerOffline && await initializeProfiles(activeConnection)) {
+      const result = await synchronizeMobileCatalog({
+        connection,
+        savedConnection,
+        isServerOffline,
+        refreshCredentials: refreshSavedCredentials,
+        initializeProfiles,
+        refreshProfiles,
+        fetchCatalog: requestMobileCatalog,
+      });
+      if (result.status === 'profile-initialized') {
         setIsServerOffline(false);
         setOfflineSnapshotSavedAt(null);
         setError('');
         return;
       }
-      void refreshProfiles(activeConnection);
-      let catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
-      if (catalog.status === 'unauthorized' && activeSavedConnection) {
-        const refreshed = await refreshSavedCredentials(activeSavedConnection);
-        activeConnection = { ...activeConnection, ...refreshed };
-        catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
-      }
-      if (catalog.status === 'not-modified') {
+      if (result.status === 'not-modified') {
         setIsServerOffline(false);
         setOfflineSnapshotSavedAt(null);
         return;
       }
-      if (catalog.status === 'unauthorized') {
+      if (result.status === 'unauthorized') {
         invalidateCredentialRefresh();
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         await clearMobileOfflineSnapshot(connection.hostDeviceId);
@@ -2979,18 +2804,19 @@ function AppRoot() {
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
-      if (catalog.status === 'profile-required') {
-        enterProfilePicker('profile-required', activeConnection);
+      if (result.status === 'profile-required') {
+        enterProfilePicker('profile-required', result.connection);
         setError('Choose a profile to continue.');
         setIsServerOffline(false);
         return;
       }
+      const { catalog } = result;
       const nextLibrary = catalog.library;
       const libraryEtag = catalog.etag;
       setIsRefreshing(false);
       await applyLibraryInSections(nextLibrary, libraryEtag, catalog.revision, catalog.transport);
       void hydrateProgress({
-        ...connection,
+        ...result.connection,
         library: nextLibrary,
         libraryEtag,
         catalogRevision: catalog.revision,
@@ -3025,29 +2851,22 @@ function AppRoot() {
     connectionHealthCheckRef.current = true;
     setIsCheckingConnection(true);
     try {
-      let activeConnection = connection;
-      let activeSavedConnection = savedConnection;
-      if (activeSavedConnection && connection.accessTokenExpiresAt <= Date.now() + 60_000) {
-        const refreshed = await refreshSavedCredentials(activeSavedConnection);
-        activeSavedConnection = refreshed;
-        activeConnection = { ...connection, ...refreshed };
-      }
-
-      if (isServerOffline && await initializeProfiles(activeConnection)) {
+      const result = await synchronizeMobileCatalog({
+        connection,
+        savedConnection,
+        isServerOffline,
+        refreshCredentials: refreshSavedCredentials,
+        initializeProfiles,
+        refreshProfiles,
+        fetchCatalog: requestMobileCatalog,
+      });
+      if (result.status === 'profile-initialized') {
         setIsServerOffline(false);
         setOfflineSnapshotSavedAt(null);
         setError('');
         return;
       }
-
-      void refreshProfiles(activeConnection);
-      let catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
-      if (catalog.status === 'unauthorized' && activeSavedConnection) {
-        const refreshed = await refreshSavedCredentials(activeSavedConnection);
-        activeConnection = { ...activeConnection, ...refreshed };
-        catalog = await fetchMobileCatalog(activeConnection, activeConnection.libraryEtag);
-      }
-      if (catalog.status === 'unauthorized') {
+      if (result.status === 'unauthorized') {
         invalidateCredentialRefresh();
         await SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
         await clearMobileOfflineSnapshot(connection.hostDeviceId);
@@ -3058,18 +2877,19 @@ function AppRoot() {
         setError('This device is no longer authorized. Enter the current 6-digit pairing PIN to pair again.');
         return;
       }
-      if (catalog.status === 'profile-required') {
-        enterProfilePicker('profile-required', activeConnection);
+      if (result.status === 'profile-required') {
+        enterProfilePicker('profile-required', result.connection);
         setError('Choose a profile to continue.');
         setIsServerOffline(false);
         return;
       }
-      if (catalog.status === 'not-modified') {
+      if (result.status === 'not-modified') {
         setIsServerOffline(false);
         setOfflineSnapshotSavedAt(null);
         setError('');
         return;
       }
+      const { catalog } = result;
       await applyLibraryInSections(
         catalog.library,
         catalog.etag,
@@ -3210,7 +3030,7 @@ function AppRoot() {
   async function syncLibraryAfterArtworkChange(itemId: string, appliedCandidate?: OfficialMetadataCandidate): Promise<void> {
     if (!connection) return;
     const requestIdentity = activeCatalogIdentityRef.current;
-    const catalog = await fetchMobileCatalog({ ...connection, libraryEtag: '' });
+    const catalog = await requestMobileCatalog({ ...connection, libraryEtag: '' });
     if (catalog.status !== 'ok') throw new Error('Poster updated, but mobile sync failed.');
     if (activeCatalogIdentityRef.current !== requestIdentity) return;
     const nextItemsById = await applyLibraryInSections(

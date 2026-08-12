@@ -962,6 +962,7 @@ async function fetchArtworkBytes(sourceUrl: string): Promise<FetchedArtworkBytes
     const response = await safeFetch(sourceUrl, {}, {
       allowedHosts: [
         '.fanart.tv',
+        '.anilist.co',
         '.media-amazon.com',
         '.metahub.space',
         '.myanimelist.net',

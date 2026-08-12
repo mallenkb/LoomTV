@@ -34,6 +34,30 @@ function isGenericEpisodeTitle(title: string | undefined, episodeNumber: number)
     || normalized === `ep ${String(episodeNumber).padStart(2, '0')}`;
 }
 
+function isGenericSeasonTitle(title: string | undefined, seasonNumber: number): boolean {
+  const normalized = title?.trim() || '';
+  return !normalized || new RegExp(`^(?:season|series|s)\\s*0*${seasonNumber}$`, 'i').test(normalized);
+}
+
+function isCanonicalSeasonTitle(title: string | undefined, seasonNumber: number): boolean {
+  const normalized = title?.trim() || '';
+  return new RegExp(`^season\\s+0*${seasonNumber}\\s*:\\s*\\S`, 'i').test(normalized);
+}
+
+function seasonTitleForScan(
+  existingTitle: string | undefined,
+  freshTitle: string | undefined,
+  seasonNumber: number,
+): string {
+  const existing = existingTitle?.trim() || '';
+  const fresh = freshTitle?.trim() || '';
+
+  if (!existing) return fresh || `Season ${String(seasonNumber).padStart(2, '0')}`;
+  if (!fresh || isGenericSeasonTitle(fresh, seasonNumber)) return existing;
+  if (isCanonicalSeasonTitle(fresh, seasonNumber) || isGenericSeasonTitle(existing, seasonNumber)) return fresh;
+  return existing;
+}
+
 function animeCastKey(credit: MediaItem['cast'][number]): string {
   return (credit.characterName || credit.name || credit.character || '').trim().toLowerCase();
 }
@@ -131,6 +155,8 @@ export function preserveExistingItemDuringScan(
   for (const episodeFile of episodeFiles.values()) {
     seasonCounts.set(episodeFile.season, (seasonCounts.get(episodeFile.season) || 0) + 1);
   }
+  const existingSeasonsByNumber = new Map((existing.seasons || []).map((season) => [season.number, season]));
+  const freshSeasonsByNumber = new Map((fresh.seasons || []).map((season) => [season.number, season]));
   const seasons = new Map<number, NonNullable<MediaItem['seasons']>[number]>();
   for (const season of existing.seasons || []) {
     if (seasonCounts.has(season.number)) seasons.set(season.number, season);
@@ -139,10 +165,12 @@ export function preserveExistingItemDuringScan(
     if (!seasons.has(season.number)) seasons.set(season.number, season);
   }
   for (const [number, count] of seasonCounts) {
+    const existingSeason = existingSeasonsByNumber.get(number);
+    const freshSeason = freshSeasonsByNumber.get(number);
     const season = seasons.get(number);
     seasons.set(number, {
       number,
-      title: season?.title || `Season ${String(number).padStart(2, '0')}`,
+      title: seasonTitleForScan(existingSeason?.title || season?.title, freshSeason?.title, number),
       episodeCount: count,
     });
   }
@@ -170,6 +198,9 @@ export function preserveExistingItemDuringScan(
     logoCandidates: uniqueValues(existing.logoCandidates, fresh.logoCandidates),
     summary: existing.summary || fresh.summary,
     rating: refreshRating ? fresh.rating : existing.rating || fresh.rating,
+    providerRatings: options.refreshRatings && Object.keys(fresh.providerRatings || {}).length > 0
+      ? fresh.providerRatings
+      : existing.providerRatings || fresh.providerRatings,
     genres: existing.genres?.length ? existing.genres : fresh.genres,
     cast,
     contentRatings: hasValues(existing.contentRatings)

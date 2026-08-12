@@ -3,10 +3,11 @@ import { Star } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import ProviderMark from '@/components/ProviderMark';
+import MediaTechnicalBadges, { mediaTechnicalMetadata } from '@/components/MediaTechnicalBadges';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 
 type HeroMetadataProps = {
-  item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'originPlatform' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
+  item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'providerRatings' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'originPlatform' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
 };
 
 function formatDuration(seconds?: number): string {
@@ -68,6 +69,36 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
     durationLabel,
     ...seriesMetadata,
   ].filter(Boolean);
+  const providerRatings = [
+    item.providerRatings?.imdb
+      ? {
+          label: 'IMDb',
+          value: item.providerRatings.imdb.value.toFixed(1),
+          title: item.providerRatings.imdb.votes === undefined
+            ? 'IMDb rating supplied by OMDb'
+            : `IMDb rating from ${item.providerRatings.imdb.votes.toLocaleString()} votes, supplied by OMDb`,
+        }
+      : null,
+    item.providerRatings?.rottenTomatoes
+      ? {
+          label: 'Tomatometer',
+          value: `${item.providerRatings.rottenTomatoes.value.toFixed(0)}%`,
+          title: 'Rotten Tomatoes Tomatometer score supplied by OMDb',
+        }
+      : null,
+    item.providerRatings?.metacritic
+      ? {
+          label: 'Metacritic',
+          value: item.providerRatings.metacritic.value.toFixed(0),
+          title: 'Metacritic score supplied by OMDb',
+        }
+      : null,
+  ].filter((rating): rating is NonNullable<typeof rating> => rating !== null);
+  const hasRating = providerRatings.length > 0 || item.rating > 0;
+  const technicalMetadata = mediaTechnicalMetadata(item);
+  const hasTechnicalMetadata = Boolean(
+    technicalMetadata.resolution || technicalMetadata.audio || technicalMetadata.hasSubtitles,
+  );
 
   return (
     <div className="loom-modern-hero-text mt-3 flex w-full max-w-[46rem] flex-col items-start text-[var(--loom-on-media)]">
@@ -87,21 +118,31 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
         {contentRating && <ContentRatingBadge rating={contentRating} className="border-white/75 bg-white/10 text-white" />}
       </div>
 
-      {(item.rating > 0 || secondaryMetadata.length > 0) && (
+      {(hasRating || secondaryMetadata.length > 0 || hasTechnicalMetadata) && (
         <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(0.95rem,1.2vw,1.2rem)] font-semibold text-[var(--loom-on-media-muted)]">
-          {item.rating > 0 && (
+          {providerRatings.map((rating, index) => (
+            <Fragment key={rating.label}>
+              {index > 0 && <span aria-hidden="true">•</span>}
+              <span className="loom-rating inline-flex items-center gap-1.5" title={rating.title}>
+                {rating.label === 'IMDb' && <Star className="h-4 w-4" fill="currentColor" />}
+                {rating.label} {rating.value}
+              </span>
+            </Fragment>
+          ))}
+          {providerRatings.length === 0 && item.rating > 0 && (
             <span className="loom-rating inline-flex items-center gap-1.5">
               <Star className="h-4 w-4" fill="currentColor" />
               {item.rating.toFixed(1)}
             </span>
           )}
-          {item.rating > 0 && secondaryMetadata.length > 0 && <span aria-hidden="true">•</span>}
+          {hasRating && secondaryMetadata.length > 0 && <span aria-hidden="true">•</span>}
           {secondaryMetadata.map((value, index) => (
             <Fragment key={`${value}-${index}`}>
               {index > 0 && <span aria-hidden="true">•</span>}
               <span>{value}</span>
             </Fragment>
           ))}
+          <MediaTechnicalBadges item={item} />
         </div>
       )}
     </div>

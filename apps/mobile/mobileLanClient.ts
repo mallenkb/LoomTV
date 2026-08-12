@@ -161,3 +161,5 @@ export function createMobileLanClient(
     },
   };
 }
+
+export type MobileLanClient = ReturnType<typeof createMobileLanClient>;

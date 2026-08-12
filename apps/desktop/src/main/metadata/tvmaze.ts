@@ -111,9 +111,12 @@ const tvMazeShowSchema: z.ZodType<TVMazeShow> = z.object({
 const tvMazeSearchSchema: z.ZodType<TVMazeSearchEntry[]> = z.array(z.object({ show: tvMazeShowSchema.optional() }));
 
 function originPlatformFromShow(show: TVMazeShow): OriginPlatform | undefined {
-  const platform = show.webChannel || show.network;
-  const name = platform?.name?.trim();
-  if (!platform || !name) return undefined;
+  const platform = show.webChannel ?? show.network;
+  if (!platform) return undefined;
+
+  const name = platform.name?.trim();
+  if (!name) return undefined;
+
   return {
     id: platform.id,
     name,

@@ -64,6 +64,10 @@ const tmdbVideosSchema = z.object({
 export const tmdbReleaseDatesResponseSchema = tmdbReleaseDatesSchema;
 export const tmdbContentRatingsResponseSchema = tmdbContentRatingsSchema;
 export const tmdbDetailResponseSchema = tmdbListResultSchema.extend({
+  imdb_id: z.string().nullish(),
+  external_ids: z.object({
+    imdb_id: z.string().nullish(),
+  }).optional(),
   credits: z.object({
     cast: z.array(z.object({
       name: z.string().optional(),

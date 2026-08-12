@@ -52,6 +52,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       logo TEXT NOT NULL DEFAULT '',
       summary TEXT NOT NULL DEFAULT '',
       rating REAL NOT NULL DEFAULT 0,
+      provider_ratings_json TEXT NOT NULL DEFAULT '{}',
       file_path TEXT NOT NULL,
       file_size INTEGER,
       last_played INTEGER,
@@ -303,6 +304,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
 
   migrateMediaItemArtworkColumns(database);
   ensureColumn(database, 'media_items', 'format', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, 'media_items', 'provider_ratings_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(database, 'episode_files', 'subtitles_json', "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(database, 'scan_cache', 'subtitle_profile', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'scan_cache', 'ratings_refreshed_at', 'INTEGER NOT NULL DEFAULT 0');

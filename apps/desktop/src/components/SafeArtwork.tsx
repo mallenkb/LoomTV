@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 // Keep several screens of artwork warm so normal rail paging does not expose
 // an image-loading gap, while still allowing distant artwork to release its
@@ -33,6 +33,7 @@ interface SafeArtworkProps {
   className: string;
   imgClassName?: string;
   fallback?: React.ReactNode;
+  placeholderSrc?: string;
   onError?: () => void;
   priority?: boolean;
 }
@@ -48,18 +49,23 @@ export default function SafeArtwork({
   className,
   imgClassName = 'object-cover',
   fallback,
+  placeholderSrc = '',
   onError,
   priority = false,
 }: SafeArtworkProps) {
   const [sourceIndex, setSourceIndex] = useState(0);
+  const [loadedSource, setLoadedSource] = useState('');
   const [isNearViewport, setIsNearViewport] = useState(
     () => priority || typeof IntersectionObserver === 'undefined',
   );
   const artworkRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const failedSourcesRef = useRef<Set<string>>(new Set());
   const sources = useMemo(() => normalizeSources(src), [src]);
   const sourceKey = JSON.stringify(sources);
   const currentSource = sources[sourceIndex] || '';
+  const sourceLoaded = loadedSource === currentSource;
+  const shouldRenderImage = priority || isNearViewport;
 
   useEffect(() => {
     const artwork = artworkRef.current;
@@ -76,19 +82,39 @@ export default function SafeArtwork({
     failedSourcesRef.current = new Set();
   }, [sourceKey]);
 
+  useLayoutEffect(() => {
+    const image = imageRef.current;
+    if (shouldRenderImage && currentSource && image?.complete && image.naturalWidth > 0) {
+      setLoadedSource(currentSource);
+    }
+  }, [currentSource, shouldRenderImage]);
+
   return (
     <div ref={artworkRef} className={`relative overflow-hidden bg-gradient-to-br from-[var(--loom-surface)] via-[#1f2933] to-[var(--loom-bg)] ${className}`}>
       {fallback}
-      {(priority || isNearViewport) && currentSource && (
+      {placeholderSrc && !sourceLoaded && (
         <img
+          src={placeholderSrc}
+          alt=""
+          aria-hidden="true"
+          loading="eager"
+          decoding="async"
+          className={`absolute inset-0 h-full w-full ${imgClassName}`}
+        />
+      )}
+      {shouldRenderImage && currentSource && (
+        <img
+          ref={imageRef}
           src={currentSource}
           alt={alt}
           loading={priority ? 'eager' : 'lazy'}
           fetchPriority={priority ? 'high' : 'auto'}
           decoding="async"
-          className={`absolute inset-0 h-full w-full ${imgClassName}`}
+          className={`absolute inset-0 h-full w-full transition-opacity duration-150 ${imgClassName} ${sourceLoaded ? 'opacity-100' : 'opacity-0'}`}
+          onLoad={() => setLoadedSource(currentSource)}
           onError={() => {
             onError?.();
+            setLoadedSource((loaded) => loaded === currentSource ? '' : loaded);
             const nextFailed = new Set(failedSourcesRef.current).add(currentSource);
             failedSourcesRef.current = nextFailed;
             setSourceIndex((index) => {

@@ -63,6 +63,7 @@ function isCacheableArtworkSource(source: string): boolean {
 
 export function collectArtworkSourcesForCache(data: ArtworkCacheLibrary): string[] {
   const sources = new Set<string>();
+  const items = [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])];
   const add = (source?: string) => {
     if (source && isCacheableArtworkSource(source)) sources.add(source);
   };
@@ -70,13 +71,20 @@ export function collectArtworkSourcesForCache(data: ArtworkCacheLibrary): string
     (candidates || []).slice(0, MAX_CACHED_CANDIDATES_PER_KIND).forEach(add);
   };
 
-  for (const item of [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]) {
+  // Cache title-level artwork for the entire library before starting cast and
+  // episode images. The window opens while this queue runs, so interleaving a
+  // long series' episode stills used to leave later titles waiting on their
+  // poster provider even though their metadata was already in SQLite.
+  for (const item of items) {
     add(item.poster);
     add(item.backdrop);
     add(item.logo);
     addCandidates(item.posterCandidates);
     addCandidates(item.backdropCandidates);
     addCandidates(item.logoCandidates);
+  }
+
+  for (const item of items) {
     for (const credit of item.cast || []) {
       add(credit.image);
       add(credit.characterImage);

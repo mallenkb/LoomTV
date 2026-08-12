@@ -1,3 +1,10 @@
+import type {
+  LanContentRating,
+  LanOriginPlatform,
+  LanProviderRatings,
+  LanStreamingProvider,
+} from './schemas.ts';
+
 export type LanLibraryPayload<TMediaItem> = {
   movies?: TMediaItem[];
   tvShows?: TMediaItem[];
@@ -6,7 +13,7 @@ export type LanLibraryPayload<TMediaItem> = {
   others?: TMediaItem[];
 };
 
-export * from './schemas';
+export * from './schemas.ts';
 
 export type LanCatalogVersion = 1;
 
@@ -15,27 +22,6 @@ export type LanLibraryPlaybackReference = {
   season?: number;
   episode?: number;
   durationSeconds?: number;
-};
-
-export type LanStreamingProvider = {
-  id: number;
-  name: string;
-  logoUrl: string;
-  regions?: string[];
-  offerTypes?: Array<'subscription' | 'ads' | 'free' | 'rent' | 'buy'>;
-  availability?: 'preferred-region' | 'other-region';
-  source?: 'tmdb';
-};
-
-export type LanOriginPlatform = {
-  id?: number;
-  name: string;
-  kind: 'network' | 'web-channel';
-  countryCode?: string;
-  countryName?: string;
-  officialSite?: string;
-  logoUrl?: string;
-  source: 'tvmaze';
 };
 
 export type LanLibraryCard = {
@@ -53,6 +39,7 @@ export type LanLibraryCard = {
   logoCandidates?: string[];
   summary: string;
   rating: number;
+  providerRatings?: LanProviderRatings;
   contentRatings?: Record<string, LanContentRating>;
   streamingProviders?: LanStreamingProvider[];
   originPlatform?: LanOriginPlatform;
@@ -251,12 +238,6 @@ export type LanProfilePreferences = {
   autoplayNextEnabled?: boolean;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
-};
-
-export type LanContentRating = {
-  code: string;
-  minimumAge: number;
-  source: 'tmdb' | 'omdb' | 'jikan';
 };
 
 export type LanProfileRestrictions = {

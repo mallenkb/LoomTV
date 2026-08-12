@@ -15,7 +15,7 @@ import {
   uniqueLocalTitles,
 } from './metadata/helpers.ts';
 import type { ContentRating, EpisodeMeta, MediaItem, StreamingProvider } from './metadata/types.ts';
-import { omdbContentRatings, type OMDbResponse } from './metadata/omdb.ts';
+import { omdbContentRatings, omdbProviderRatings, type OMDbResponse } from './metadata/omdb.ts';
 import { mergeContentRatings } from './metadata/contentRatings.ts';
 import { mergeProviderIds, parseMetadataProviderIds } from './mediaTags.ts';
 import type { MetadataProviderIds } from './mediaTags.ts';
@@ -34,6 +34,7 @@ export type OfficialArtworkRefreshResult = {
   cover?: string;
   summary?: string;
   rating?: number;
+  providerRatings?: MediaItem['providerRatings'];
   genres?: string[];
   seasons?: { number: number; title: string; episodeCount: number }[];
   episodes?: EpisodeMeta[];
@@ -95,6 +96,12 @@ function hasContentRatings(contentRatings?: Record<string, ContentRating>): cont
   return Object.keys(contentRatings || {}).length > 0;
 }
 
+function hasProviderRatings(
+  providerRatings?: MediaItem['providerRatings'],
+): providerRatings is NonNullable<MediaItem['providerRatings']> {
+  return Object.keys(providerRatings || {}).length > 0;
+}
+
 function hasText(value?: string | null): boolean {
   return Boolean(value?.trim());
 }
@@ -104,10 +111,11 @@ function applyOfficialSeasons(
   officialSeasons?: OfficialArtworkRefreshResult['seasons'],
 ): void {
   if (target.type === 'movie') return;
+  if (!officialSeasons?.length) return;
 
   const localSeasons = target.seasons?.length
     ? target.seasons
-    : (officialSeasons || []).map((season) => ({
+    : officialSeasons.map((season) => ({
       number: season.number,
       title: '',
       episodeCount: season.episodeCount,
@@ -256,8 +264,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     omdbMeta?: OMDbResponse | null,
     tvMeta?: { rating?: number } | null,
   ): number {
-    return numericRating(tmdbMeta?.rating)
-      || numericRating(omdbMeta?.imdbRating)
+    return numericRating(omdbMeta?.imdbRating)
+      || numericRating(tmdbMeta?.rating)
       || numericRating(tvMeta?.rating);
   }
 
@@ -268,10 +276,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     tvMeta?: { rating?: number } | null,
     omdbMeta?: OMDbResponse | null,
   ): number {
-    return (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
+    return numericRating(omdbMeta?.imdbRating)
+      || (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
       || numericRating(tmdbMeta?.rating)
-      || numericRating(tvMeta?.rating)
-      || numericRating(omdbMeta?.imdbRating);
+      || numericRating(tvMeta?.rating);
   }
 
   function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
@@ -326,7 +334,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       cover: backdropCandidates[0] || posterCandidates[0] || '',
       summary: metadata.summary || '',
       rating: numericRating(metadata.rating),
+      providerRatings: metadata.providerRatings,
       genres: Array.isArray(metadata.genres) ? metadata.genres.filter(Boolean) : [],
+      seasons: metadata.seasons,
       episodes,
       episodeCount: episodes.length || undefined,
       episodePreview: episodes.slice(0, 4).map((episode) => {
@@ -356,6 +366,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       backdrop: poster,
       summary: metadata.Plot && metadata.Plot !== 'N/A' ? metadata.Plot : '',
       rating: numericRating(metadata.imdbRating),
+      providerRatings: omdbProviderRatings(metadata),
       contentRatings: omdbContentRatings(metadata),
       genres: metadata.Genre && metadata.Genre !== 'N/A' ? String(metadata.Genre).split(',').map((genre) => genre.trim()) : [],
     }, fallbackTitle);
@@ -633,6 +644,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         cover: backdropCandidates[0] || posterCandidates[0] || '',
         summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
+        providerRatings: omdbProviderRatings(omdbMeta),
         genres: tmdbMeta?.genres || [],
         contentRatings: mergeContentRatings(tmdbMeta?.contentRatings, omdbContentRatings(omdbMeta)),
         streamingProviders: tmdbMeta?.streamingProviders,
@@ -710,8 +722,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       thumbnail: posterCandidates[0] || '',
       cover: backdropCandidates[0] || posterCandidates[0] || '',
       summary: (likelyAnime ? matchedAniList?.summary : '') || tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
-      rating: (likelyAnime ? numericRating(matchedAniList?.rating) : 0)
+      rating: numericRating(omdbMeta?.imdbRating)
+        || (likelyAnime ? numericRating(matchedAniList?.rating) : 0)
         || showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
+      providerRatings: omdbProviderRatings(omdbMeta),
       genres: (likelyAnime ? matchedAniList?.genres || matchedJikan?.genres : undefined) || tmdbMeta?.genres || matchedTV?.genres || [],
       seasons: mergeOfficialSeasonMetadata(
         tmdbMeta?.tmdbSeasons,
@@ -768,6 +782,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (applyAll && candidate.logo) target.logo = candidate.logo;
     if (applyAll && candidate.summary) target.summary = candidate.summary;
     if (applyAll && candidate.rating) target.rating = candidate.rating;
+    if (applyAll && hasProviderRatings(candidate.providerRatings)) target.providerRatings = candidate.providerRatings;
     if (applyAll && candidate.genres?.length) target.genres = candidate.genres;
     if (applyAll && hasContentRatings(candidate.contentRatings)) target.contentRatings = candidate.contentRatings;
     if (applyAll && candidate.streamingProviders?.length) target.streamingProviders = candidate.streamingProviders;
@@ -813,6 +828,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       format: target.format,
       summary: target.summary || '',
       rating: target.rating || 0,
+      providerRatings: target.providerRatings,
       contentRatings: target.contentRatings,
       seasons: target.type === 'movie' ? undefined : target.seasons,
       episodes: target.type === 'movie' ? undefined : target.episodes,
@@ -858,6 +874,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       ? normalizeAnimeCast(refreshed.cast?.length ? refreshed.cast : target.cast)
       : refreshed.cast;
     const refreshedHasContentRatings = hasContentRatings(refreshed.contentRatings);
+    const refreshedHasProviderRatings = hasProviderRatings(refreshed.providerRatings);
     const hasRefresh = Boolean(
       (refreshPoster && refreshedPoster)
       || (refreshCover && refreshedCover)
@@ -866,6 +883,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         || refreshed.logo
         || refreshed.summary
         || refreshed.rating
+        || refreshedHasProviderRatings
         || refreshedHasContentRatings
         || refreshed.seasons?.length
         || refreshed.episodes?.length
@@ -882,6 +900,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (refreshMetadata && refreshed.logo) target.logo = refreshed.logo;
       if (refreshMetadata && refreshed.summary) target.summary = refreshed.summary;
       if (refreshMetadata && refreshed.rating) target.rating = refreshed.rating;
+      if (refreshMetadata && refreshedHasProviderRatings) target.providerRatings = refreshed.providerRatings;
       if (refreshMetadata && refreshedHasContentRatings) target.contentRatings = refreshed.contentRatings;
       if (refreshMetadata && refreshed.streamingProviders?.length) target.streamingProviders = refreshed.streamingProviders;
       if (refreshMetadata && refreshed.originPlatform) target.originPlatform = refreshed.originPlatform;
@@ -922,6 +941,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     return {
       ...refreshed,
+      providerRatings: target.providerRatings || refreshed.providerRatings,
       seasons: target.type === 'movie' ? undefined : target.seasons,
       episodes: target.type === 'movie' ? undefined : target.episodes,
       episodeSource: refreshed.episodeSource,
@@ -962,6 +982,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (!target.backdrop && refreshed.cover) target.backdrop = refreshed.cover;
       if (!target.logo && refreshed.logo) target.logo = refreshed.logo;
       if (!target.genres?.length && refreshed.genres?.length) target.genres = refreshed.genres;
+      if (!hasProviderRatings(target.providerRatings) && hasProviderRatings(refreshed.providerRatings)) {
+        target.providerRatings = refreshed.providerRatings;
+      }
       if (!hasContentRatings(target.contentRatings) && hasContentRatings(refreshed.contentRatings)) {
         target.contentRatings = refreshed.contentRatings;
       }
@@ -1051,6 +1074,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (refreshed.genres?.length) target.genres = refreshed.genres;
       if (refreshed.format) target.format = refreshed.format;
       if (!target.year && refreshed.year) target.year = refreshed.year;
+      if (hasProviderRatings(refreshed.providerRatings)) target.providerRatings = refreshed.providerRatings;
       if (hasContentRatings(refreshed.contentRatings)) target.contentRatings = refreshed.contentRatings;
       if (refreshed.providerIds) {
         target.providerIds = mergeProviderIds(target.providerIds || {}, refreshed.providerIds);

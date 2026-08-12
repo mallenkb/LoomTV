@@ -33,7 +33,6 @@ import {
   END_COMPLETION_TOLERANCE_SECONDS,
   HLS_RECOVERY_ATTEMPTS,
   HLS_TRANSCODE_RESTART_ATTEMPTS,
-  NEXT_EPISODE_COUNTDOWN_SECONDS,
   NEXT_EPISODE_PROMPT_REMAINING_SECONDS,
   REPLAY_FROM_START_REMAINING_SECONDS,
   SUBTITLE_DELAY_FINE_STEP_SECONDS,
@@ -121,6 +120,7 @@ import {
 } from './VideoPlayer/playerControls';
 import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
+import { useEpisodeNavigation } from './VideoPlayer/useEpisodeNavigation';
 import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
@@ -253,7 +253,6 @@ export default function VideoPlayer({
   const subtitleStyleRef = useRef<SubtitleStyleSettings>(loadSubtitleStyle());
   const audioDelayRef = useRef(0);
   const applyNativeTextTrackVisibilityRef = useRef<() => void>(() => undefined);
-  const nextEpisodeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastPositionUiUpdateRef = useRef(0);
   const lastProgressSaveRef = useRef(0);
   const playbackPositionRef = useRef(0);
@@ -314,6 +313,14 @@ export default function VideoPlayer({
   const [nativeEngineKind, setNativeEngineKind] = useState<PlaybackEngineKind | null>(null);
   const libVlcSurfaceActive = nativePlaybackActive && nativeEngineKind === 'libvlc';
 
+  // The renderer is transparent only while a live native surface is expected
+  // beneath it. Derive that global class from React state so an unmount, retry,
+  // or terminal native-player event cannot leave the library shell transparent.
+  useEffect(() => {
+    document.documentElement.classList.toggle('loom-native-active', nativePlaybackActive);
+    return () => document.documentElement.classList.remove('loom-native-active');
+  }, [nativePlaybackActive]);
+
   const libraryDurationHint = useMemo(() => {
     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
     const media = (mediaId ? items.find((item) => item.id === mediaId) : undefined)
@@ -347,7 +354,6 @@ export default function VideoPlayer({
   const [subtitlesDefaultEnabled, setSubtitlesDefaultEnabled] = useState(subtitlesDefaultEnabledRef.current);
   const [openSubtitlesEnabled, setOpenSubtitlesEnabled] = useState(false);
   const autoplayNextEnabled = true;
-  const [nextCountdown, setNextCountdown] = useState<number | null>(null);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(() => subtitleStyleRef.current);
   const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
   const [aspectMode, setAspectMode] = useState<AspectMode>('default');
@@ -887,106 +893,38 @@ export default function VideoPlayer({
     setSubtitlesDefaultEnabled(subtitlesEnabled);
   }, [externalSubtitleTracks, updatePlaybackSnapshot]);
 
-  // ─── Episode navigation ────────────────────────────────────────────────────
-
-  const clearNextEpisodeCountdown = useCallback(() => {
-    if (nextEpisodeTimerRef.current) {
-      clearInterval(nextEpisodeTimerRef.current);
-      nextEpisodeTimerRef.current = null;
-    }
-    setNextCountdown(null);
-  }, []);
-
-  const transitionToEpisode = useCallback((next: EpisodeFile) => {
-    if (!onEpisodeChange || !next.filePath || next.filePath === filePath) return;
-
-    pendingEpisodeTransitionRef.current = next.filePath;
-    clearNextEpisodeCountdown();
-    // Pause the outgoing element before changing its source. Suppress the
-    // resulting pause event so the next episode is still allowed to autoplay.
-    userPausedRef.current = false;
-    suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
-    const video = videoRef.current;
-    if (playbackEngineRef.current) void playbackEngineRef.current.pause();
-    if (video) {
-      video.autoplay = false;
-      video.pause();
-    }
-    setPaused(true);
-    onEpisodeChange(next.filePath, next.season, next.episode);
-  }, [clearNextEpisodeCountdown, filePath, onEpisodeChange]);
-
-  const goToEpisode = useCallback((season: number, episode: number) => {
-    const next = episodeFiles.find((item) => item.season === season && item.episode === episode);
-    if (next && onEpisodeChange) {
-      transitionToEpisode(next);
-    }
-  }, [episodeFiles, onEpisodeChange, transitionToEpisode]);
-
-  const handlePrevEpisode = useCallback(() => {
-    const currentIndex = playableEpisodeFiles.findIndex((item) =>
-      item.season === currentSeason && item.episode === currentEpisode,
-    );
-    const previous = currentIndex > 0 ? playableEpisodeFiles[currentIndex - 1] : null;
-    if (previous) goToEpisode(previous.season, previous.episode);
-  }, [currentEpisode, currentSeason, goToEpisode, playableEpisodeFiles]);
-
-  const handleNextEpisode = useCallback(() => {
-    if (nextEpisodeFile) goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
-  }, [goToEpisode, nextEpisodeFile]);
-
-  const markCurrentEpisodeComplete = useCallback(() => {
-    const videoDuration = Number.isFinite(videoRef.current?.duration) ? Number(videoRef.current?.duration) : 0;
-    const completeDuration = duration || playbackDurationRef.current || probedDurationRef.current || videoDuration;
-    if (completeDuration <= 0) return;
-    updatePlaybackSnapshot(completeDuration, completeDuration, { forceReact: true });
-    void savePlaybackProgress(filePath, completeDuration, completeDuration);
-    setTick((n) => n + 1);
-  }, [duration, filePath, updatePlaybackSnapshot]);
-
-  const playNextEpisodeNow = useCallback((forceComplete = false) => {
-    if (!nextEpisodeFile) return;
-    if (forceComplete || (duration > 0 && position / duration >= WATCHED_THRESHOLD)) {
-      markCurrentEpisodeComplete();
-    }
-    goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
-  }, [duration, goToEpisode, markCurrentEpisodeComplete, nextEpisodeFile, position]);
-
-  const scheduleNextEpisode = useCallback(() => {
-    if (!nextEpisodeFile || !onEpisodeChange || nextEpisodeFile.filePath === filePath) return;
-    // HLS/native playback can emit more than one end notification while the
-    // source is being released. Keep the original countdown instead of
-    // restarting it on every notification.
-    if (nextEpisodeTimerRef.current) return;
-    clearNextEpisodeCountdown();
-    let remainingSeconds = NEXT_EPISODE_COUNTDOWN_SECONDS;
-    setNextCountdown(remainingSeconds);
-    nextEpisodeTimerRef.current = setInterval(() => {
-      remainingSeconds -= 1;
-      if (remainingSeconds <= 0) {
-        clearNextEpisodeCountdown();
-        goToEpisode(nextEpisodeFile.season, nextEpisodeFile.episode);
-        return;
-      }
-      setNextCountdown(remainingSeconds);
-    }, 1000);
-  }, [clearNextEpisodeCountdown, filePath, goToEpisode, nextEpisodeFile, onEpisodeChange]);
-
-  const latestEpisodePlaybackRef = useRef({
-    autoplayNextEnabled,
-    nextEpisodeFile,
+  const {
+    clearNextEpisodeCountdown,
+    goToEpisode,
+    handleNextEpisode,
+    handlePrevEpisode,
+    latestEpisodePlaybackRef,
     markCurrentEpisodeComplete,
+    nextCountdown,
+    playNextEpisodeNow,
     scheduleNextEpisode,
+  } = useEpisodeNavigation({
+    autoplayNextEnabled,
+    currentEpisode,
+    currentSeason,
+    duration,
+    episodeFiles,
+    filePath,
+    nextEpisode: nextEpisodeFile,
+    onEpisodeChange,
+    playableEpisodes: playableEpisodeFiles,
+    position,
+    playbackDurationRef,
+    playbackEngineRef,
+    probedDurationRef,
+    pendingEpisodeTransitionRef,
+    setPaused,
+    setProgressRevision: setTick,
+    suppressPauseIntentUntilMsRef,
+    updatePlaybackSnapshot,
+    userPausedRef,
+    videoRef,
   });
-
-  useEffect(() => {
-    latestEpisodePlaybackRef.current = {
-      autoplayNextEnabled,
-      nextEpisodeFile,
-      markCurrentEpisodeComplete,
-      scheduleNextEpisode,
-    };
-  }, [autoplayNextEnabled, markCurrentEpisodeComplete, nextEpisodeFile, scheduleNextEpisode]);
 
   const startTranscodedFallback = useCallback(async (
     startSeconds = 0,
@@ -1361,6 +1299,18 @@ export default function VideoPlayer({
       if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
         latestEpisodePlaybackRef.current.scheduleNextEpisode();
       }
+    } else if (state.status === 'closed') {
+      // MPV uses --keep-open=no, so normal EOF is followed by a closed event.
+      // Its external video window is gone at that point and the Electron player
+      // must become opaque again instead of leaving a transparent ghost window.
+      const closedEngine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
+      void closedEngine?.destroy();
+      setNativePlaybackActive(false);
+      setNativeEngineKind(null);
+      document.documentElement.classList.remove('loom-native-active');
+      setPaused(true);
+      setStatusMessage('');
     } else if (state.status === 'error') {
       const fallbackPosition = playbackPositionRef.current;
       const failedEngineKind = playbackEngineRef.current?.kind;
@@ -1422,7 +1372,7 @@ export default function VideoPlayer({
         void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
       })();
     }
-  }, [filePath, startBrowserStreamAt, updatePlaybackSnapshot]);
+  }, [filePath, latestEpisodePlaybackRef, startBrowserStreamAt, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -2100,6 +2050,7 @@ export default function VideoPlayer({
     streamIsTranscoded,
     clearHls,
     clearVideoElement,
+    latestEpisodePlaybackRef,
     startTranscodedFallback,
     updatePlaybackSnapshot,
   ]);

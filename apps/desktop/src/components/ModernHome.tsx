@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { AudioLines, Bookmark, Captions, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, X } from 'lucide-react';
+import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -22,6 +22,7 @@ import { useModalLayer } from '@/components/ui/dialog';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 import WatchedToggle from '@/components/WatchedToggle';
+import MediaTechnicalBadges from '@/components/MediaTechnicalBadges';
 import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 
 export default function ModernHome() {
@@ -342,9 +343,6 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
   const [headline, kicker] = splitHeroTitle(item.title);
   const mediaDetails = heroMediaDetails(item);
   const durationLabel = item.type === 'movie' ? heroDurationLabel(mediaDetails?.durationSeconds) : '';
-  const resolutionLabel = heroResolutionLabel(mediaDetails?.width, mediaDetails?.height);
-  const audioLabel = heroAudioLabel(mediaDetails?.audioCodec);
-  const hasSubtitles = Boolean((mediaDetails?.subtitleTracks || 0) > 0 || item.subtitles?.length);
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
   const heroLogoSources = useMemo(() => logoSources(item), [item]);
@@ -505,19 +503,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
                 </span>
               )}
               {durationLabel && <span>{durationLabel}</span>}
-              {resolutionLabel && <span className="rounded-md bg-white/90 px-2 py-0.5 text-sm font-bold text-black">{resolutionLabel}</span>}
-              {audioLabel && (
-                <span className="inline-flex items-center gap-1.5">
-                  <AudioLines className="h-4 w-4" />
-                  {audioLabel}
-                </span>
-              )}
-              {hasSubtitles && (
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-white/60 px-2 py-0.5 text-sm">
-                  <Captions className="h-4 w-4" />
-                  CC
-                </span>
-              )}
+              <MediaTechnicalBadges item={item} />
             </div>
 
             <div className="mt-5 flex items-center gap-3">
@@ -611,17 +597,6 @@ function heroDurationLabel(seconds?: number): string {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
-}
-
-function heroResolutionLabel(width?: number, height?: number): string {
-  if (!width || !height) return '';
-  if (width >= 3840 || height >= 2160) return '4K';
-  if (width >= 1280 || height >= 720) return 'HD';
-  return 'SD';
-}
-
-function heroAudioLabel(audioCodec?: string): string {
-  return audioCodec?.trim().replace(/[._-]+/g, ' ').toUpperCase() || '';
 }
 
 function PosterRail({ title, items, from }: { title: string; items: MediaItem[]; from: string }) {

@@ -7,6 +7,7 @@ import type {
   LanLibraryPayload,
   LanLibraryPlaybackReference,
   LanOriginPlatform,
+  LanProviderRatings,
   LanStreamingProvider,
   LanPlaybackCapabilities,
   LanPlaybackPlan,
@@ -209,6 +210,7 @@ export interface WireMediaItem {
   logoCandidates?: string[];
   summary: string;
   rating: number;
+  providerRatings?: LanProviderRatings;
   contentRatings?: Record<string, LanContentRating>;
   streamingProviders?: LanStreamingProvider[];
   originPlatform?: LanOriginPlatform;
@@ -612,6 +614,7 @@ export interface OfficialArtworkResult {
   cover?: string;
   summary?: string;
   rating?: number;
+  providerRatings?: LanProviderRatings;
   contentRatings?: Record<string, LanContentRating>;
   episodes?: WireEpisodeMeta[];
   episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
@@ -784,6 +787,9 @@ export interface StremioPluginCatalogItem {
   releaseInfo?: string;
   released?: string;
   rating?: number;
+  providerRatings?: LanProviderRatings;
+  /** IMDb title ID resolved from TMDB, used for an exact OMDb ratings lookup. */
+  imdbId?: string;
   contentRating?: string;
   streamingProviders?: LanStreamingProvider[];
   trailerUrl?: string;

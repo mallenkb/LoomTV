@@ -343,7 +343,7 @@
   <div class="report capture-wide">
     <header class="folio-bar">
       <div class="sheet folio-inner">
-        <div class="folio"><b>Work Report</b> TypeScript code audit · 2026.08.11</div>
+        <div class="folio"><b>Work Report</b> TypeScript code audit · updated 2026.08.12</div>
         <nav class="folio-links sans" aria-label="Report navigation"><a href="#evidence">Evidence</a><a href="#score">Score</a><a href="#decision">Decision</a></nav>
       </div>
     </header>
@@ -352,22 +352,22 @@
       <section class="sheet cover">
         <div>
           <p class="kicker">LoomTV · TypeScript code audit</p>
-          <h1>The types are strict.<br>The boundaries are not.</h1>
-          <p class="deck">LoomTV has a disciplined baseline with no explicit <code>any</code> and no non-null assertions in production TypeScript. The largest gap is that remote JSON, persisted JSON, and IPC arguments are commonly cast into trusted shapes instead of decoded, while oversized React modules and duplicated domain models make those assertions harder to remove.</p>
+          <h1>The gates are green.<br>Ownership is becoming visible.</h1>
+          <p class="deck">The four selected recommendations are implemented. TVmaze narrowing is sound, mobile consumes canonical inferred media contracts, database and IPC boundaries parse unknown values into named results, and focused controllers now own catalog, lifecycle, modal, episode-navigation, discover-state, and media-server concerns. The largest remaining opportunity is continuing that extraction through mobile App, VideoPlayer, and mobile styles.</p>
         </div>
         <aside class="stamp" aria-label="Overall score">
           <div class="stamp-small">Overall score</div>
-          <div class="stamp-score">6.8<span> / 10</span></div>
+          <div class="stamp-score">8.4<span> / 10</span></div>
         </aside>
       </section>
 
       <section class="overview">
         <div class="sheet">
           <div class="overview-grid">
-            <article class="overview-card state-critical"><div class="overview-score">6.8 <span>&rarr; 9.0</span></div><div class="overview-label">Overall &middot; mean of 10 scored categories</div><div class="overview-bar"><i style="width:68%"></i><span class="tick" style="left:90%"></span></div></article>
-            <article class="overview-card state-critical"><div class="overview-score">6.0 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 08 &middot; Simplicity and architecture</div><div class="overview-bar"><i style="width:60%"></i><span class="tick" style="left:90%"></span></div></article>
-            <article class="overview-card state-critical"><div class="overview-score">6.1 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 04 &middot; Module ownership</div><div class="overview-bar"><i style="width:61%"></i><span class="tick" style="left:90%"></span></div></article>
-            <article class="overview-card state-critical"><div class="overview-score">6.2 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 01 &middot; Runtime boundary validation</div><div class="overview-bar"><i style="width:62%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card"><div class="overview-score">8.4 <span>&rarr; 9.0</span></div><div class="overview-label">Overall &middot; no open high-priority issue</div><div class="overview-bar"><i style="width:84%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card"><div class="overview-score">9.0 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 10 &middot; Quality gates</div><div class="overview-bar"><i style="width:90%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">7.2 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 08 &middot; Simplicity and architecture</div><div class="overview-bar"><i style="width:72%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">7.4 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 04 &middot; Module ownership</div><div class="overview-bar"><i style="width:74%"></i><span class="tick" style="left:90%"></span></div></article>
           </div>
         </div>
       </section>
@@ -376,45 +376,46 @@
         <div class="sheet">
           <div class="evidence-layout">
             <div class="observations">
-              <p class="capture-note sans observations-head">Scope: production TypeScript, TypeScript configuration, lint policy, Electron IPC, remote metadata clients, persistence adapters, and representative React orchestration. Not performed: tests, builds, runtime playback, device testing, visual QA, dependency vulnerability scanning, or exhaustive dead-export analysis.</p>
-              <div class="finding-group issues observations-head">Issues to address first</div>
-              <article class="observation" id="observation-4"><span class="obs-no">4</span><div><h3>Type claims replace validation at trust boundaries.</h3><span class="tag category">Boundary safety</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/App.tsx:745-754</code> returns <code>{} as T</code> for an empty successful response and <code>JSON.parse(text) as T</code> otherwise. The same pattern appears in TMDB, Jikan, AniList, TVmaze, four SQLite repositories, and the generic IPC wrappers at <code>ipcHandlers.ts:303-305</code> and <code>328-340</code>.</p><p><b>Problem.</b> Generic return types and IPC contracts describe the desired shape to the compiler, but they do not inspect runtime values. A malformed provider response, stale database row, corrupted secure-store value, or mismatched renderer call can therefore enter trusted code with a false type.</p><p><b>Why it matters.</b> Failures occur far from the boundary, often as missing-property crashes or incorrect defaults, which makes recovery and diagnosis harder. IPC options that eventually reach playback and filesystem code deserve especially explicit validation even when sender identity is checked.</p><div class="quick-win"><b>Quick win.</b> Add small decoders that accept <code>unknown</code> and return validated domain values. Start with pairing/session payloads, metadata providers, and IPC channels that touch settings, paths, or native playback. Effort: Large. Done means invalid fixtures fail at the boundary with a named error and no unchecked <code>JSON.parse(...) as T</code> remains on those paths.</div></div></article>
-              <article class="observation" id="observation-2"><span class="obs-no">2</span><div><h3>Ownership sprawl obscures ordinary control flow.</h3><span class="tag category">Architecture</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> Production source contains 565 type assertions, concentrated in database adapters, <code>desktopApi.ts</code>, metadata clients, and <code>App.tsx</code>. <code>MediaItem</code> is independently defined for main metadata, desktop rendering, and mobile, while episode types also appear in the player. <code>apps/mobile/App.tsx</code> is 7,126 lines, <code>VideoPlayer.tsx</code> is 3,814, and <code>PluginDiscover.tsx</code> is 2,242.</p><p><b>Problem.</b> Data transport, normalization, orchestration, and rendering have no single owner. Optional-heavy parallel models force callers to cast after checks that the type system cannot retain, and giant components make simple state transitions depend on distant closures and refs.</p><p><b>Why it matters.</b> This is where idiomatic TypeScript starts to resemble annotated scripting: the types follow the implementation instead of shaping it. Changes to cast, metadata, playback, or profile state must be repeated across layers and are easy to make inconsistently.</p><div class="quick-win"><b>Quick win.</b> Establish one canonical wire DTO per boundary, map it once into discriminated application models, and split mobile connection, library, and playback orchestration into focused controllers or hooks. Treat assertion count as a signal, not a deletion quota. Effort: Large. Accept when each model has one owner and renderer components consume already-narrowed values.</div></div></article>
+              <p class="capture-note sans observations-head">Scope: 261 production TypeScript and TSX files, TypeScript configuration, lint policy, Electron IPC, LAN and provider decoders, persistence adapters, and representative React orchestration. Checks run: workspace typecheck, workspace lint, 8 desktop boundary fixtures, and 13 mobile catalog/lifecycle tests. Not performed: full test suite, production builds, runtime playback, device testing, visual QA, dependency vulnerability scanning, or exhaustive dead-export analysis.</p>
+              <div class="finding-group issues observations-head">Issues to address next</div>
+              <article class="observation" id="observation-1"><span class="obs-no">1</span><div><h3>Three major modules still carry too many responsibilities.</h3><span class="tag category">Architecture</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/App.tsx</code> is 6,936 lines, <code>VideoPlayer.tsx</code> is 3,765, and <code>mobileStyles.ts</code> is 2,161. The first extraction moved catalog synchronization, connection lifecycle decisions, modal stack state, episode navigation, discover state, and media-server HTTP concerns into focused typed modules. <code>mediaServer.ts</code> is now 1,999 lines and <code>PluginDiscover.tsx</code> is 1,970.</p><p><b>Problem.</b> Mobile connection, profile, and playback state still share one renderer, while desktop player transport, tracks, subtitles, seeking, overlays, and native coordination remain tightly coupled.</p><p><b>Why it matters.</b> Strict types cannot fully compensate for distant state transitions and closure dependencies. These files remain the primary source of procedural, Python-like module structure.</p><div class="quick-win"><b>Recommendation.</b> Continue extracting by state owner. Give each controller an explicit input contract, discriminated events, narrow effects, and a typed result. Split <code>mobileStyles.ts</code> by feature boundary only when the related component moves.</div></div></article>
+              <article class="observation" id="observation-2"><span class="obs-no">2</span><div><h3>Assertion debt remains concentrated in database and native adapters.</h3><span class="tag category">Type discipline</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> AST inspection found 402 production type assertions, down from 565 in the original report and 412 before this pass. The primary desktop library repository now parses count, folder, media, season, episode, episode-file, and scan-cache rows with named Zod schemas. Mobile media contracts are aliases and projections of canonical LAN types rather than duplicate interfaces.</p><p><b>Problem.</b> Other profile, segment, and native playback adapters still assert database or platform-owned values locally.</p><p><b>Why it matters.</b> Assertions at trusted library seams can be necessary, but repeated row-shape assertions turn schema drift into delayed runtime failures.</p><div class="quick-win"><b>Recommendation.</b> Extend the same repository parser pattern to the remaining SQLite result families, and isolate unavoidable native casts behind one typed adapter per platform API. Do not introduce generic casting helpers.</div></div></article>
               <div class="finding-group verify observations-head">Needs verification</div>
-              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>Suppressed effect dependencies may hide stale lifecycle state.</h3><span class="tag category">React lifecycle</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> Twelve <code>react-hooks/exhaustive-deps</code> suppressions remain, eleven in <code>apps/mobile/App.tsx</code>. They cover saved-session restore, reconnect cadence, health checks, playback initialization, gesture handlers, and track selection.</p><p><b>Risk.</b> The comments explain intent, but static review cannot prove each closure remains fresh across reconnects, profile changes, backgrounding, stream changes, or player replacement.</p><p><b>Why verify.</b> These effects coordinate the most timing-sensitive parts of the product. A stale callback can present as intermittent offline state, duplicate retries, incorrect resume position, or track choices that only fail after a sequence of state changes.</p><div class="quick-win"><b>Recommendation.</b> Extract the connection and playback state machines first, replace suppression with stable callbacks or explicit event inputs, then test lifecycle transitions with fake timers and deterministic state sequences. No runtime tests were executed for this report.</div></div></article>
+              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>Boundary and lifecycle tests pass; end-to-end playback remains unproved.</h3><span class="tag category">Verification</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> Eight desktop tests cover invalid and truncated LAN JSON, malformed LAN shapes, provider results, database rows, and IPC arguments. Thirteen mobile tests cover malformed catalogs, profile requirements, credential refresh, unauthorized retry, offline recovery, backgrounding, pairing, resume clocks, and stale player replacement. All 21 targeted tests pass.</p><p><b>Risk.</b> These deterministic tests do not exercise Electron windows, an Expo device, native player replacement, actual network transitions, or production bundles.</p><p><b>Why verify.</b> Native lifecycle behavior and media playback depend on platform timing and integration points that unit tests intentionally model rather than execute.</p><div class="quick-win"><b>Recommendation.</b> Before release, run the full suite and production builds, then smoke-test desktop playback and one physical or simulator mobile session through disconnect, background, resume, profile switch, and track change.</div></div></article>
               <div class="finding-group working observations-head">Working well to preserve</div>
-              <article class="observation preserve" id="observation-1"><span class="obs-no">1</span><div><h3>The compiler and lint baseline rejects the easiest escapes.</h3><span class="tag category">Type discipline</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> Desktop and mobile enable <code>strict</code>. ESLint rejects explicit <code>any</code>; desktop also rejects non-null assertions. AST inspection found zero explicit <code>any</code> keywords and zero non-null assertions in production desktop and mobile TypeScript.</p><p><b>Why it works.</b> The codebase already prefers <code>unknown</code>, type guards, optional chaining, and inference over broad unsafe annotations. This keeps local implementation errors visible to the compiler.</p><p><b>What to preserve.</b> Keep these rules as errors and extend the same policy to every TypeScript package. Do not solve boundary work by introducing <code>any</code> or global casting wrappers.</p></div></article>
-              <article class="observation preserve" id="observation-5"><span class="obs-no">5</span><div><h3>Several critical paths already demonstrate the right pattern.</h3><span class="tag category">Error prevention</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>databasePluginRepository.ts</code> parses to <code>unknown</code>, checks records, validates identifiers and states, and returns normalized values. Fingerprint decoding validates frame arrays and numeric fields before narrowing. <code>safeFetch.ts</code> constrains hosts, redirects, response sizes, and addresses, while IPC sender identity is checked centrally.</p><p><b>Why it works.</b> These modules keep runtime validation close to the boundary and convert malformed input into specific failures before domain logic runs.</p><p><b>What to preserve.</b> Reuse this parse, validate, normalize pattern for provider payloads, session storage, SQLite JSON columns, and IPC arguments rather than adding a new validation abstraction with hidden control flow.</p></div></article>
+              <article class="observation preserve" id="observation-4"><span class="obs-no">4</span><div><h3>The repository's static TypeScript gates are green.</h3><span class="tag category">Quality gate</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> The TVmaze platform value is narrowed to a non-null local before its fields are read. <code>pnpm typecheck</code> and <code>pnpm lint</code> both complete successfully across the workspace. Production TypeScript contains zero explicit <code>any</code> keywords, zero non-null assertions, and zero exhaustive-dependency suppressions.</p><p><b>Why it works.</b> Ordinary narrowing and inferred values carry the implementation. Exceptions remain visible instead of disappearing into broad casts or framework-shaped wrappers.</p><p><b>What to preserve.</b> Keep strictness and hook rules at error level in every package, and require both commands before release.</p></div></article>
+              <article class="observation preserve" id="observation-5"><span class="obs-no">5</span><div><h3>Canonical schemas now own cross-platform media contracts.</h3><span class="tag category">Domain modeling</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>packages/lan-protocol/src/schemas.ts</code> exports inferred types for ratings, providers, platforms, tracks, local details, subtitles, episodes, cast, and media items. Mobile derives its required identity and optional metadata view from <code>LanMediaItem</code>. Named parsers validate database rows and IPC argument tuples at their boundaries.</p><p><b>Why it works.</b> Runtime validation and compile-time types originate from one schema, then application state narrows that contract instead of copying it.</p><p><b>What to preserve.</b> Keep wire types canonical, view state local, and mapping explicit. Avoid a universal domain object that mixes persistence, transport, and UI concerns.</p></div></article>
+              <article class="observation preserve" id="observation-6"><span class="obs-no">6</span><div><h3>New controllers own behavior instead of merely moving functions.</h3><span class="tag category">Module ownership</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>mobileCatalog.ts</code> owns catalog/profile synchronization and retry outcomes, <code>mobileLifecycle.ts</code> owns connection actions and stale player replacement, <code>mobileModalStack.ts</code> owns modal focus state, and <code>useEpisodeNavigation.ts</code> owns episode transition state. Discover cache/query state and media-server HTTP/library helpers also have dedicated modules.</p><p><b>Why it works.</b> Inputs and outputs are typed, async outcomes are discriminated unions, and React renderers consume decisions rather than duplicating orchestration branches.</p><p><b>What to preserve.</b> Keep extraction aligned with state ownership and behavior. Reject arbitrary file splitting that leaves the same implicit state graph spread across more files.</p></div></article>
             </div>
           </div>
         </div>
       </section>
 
       <section class="sheet memo" aria-label="Executive summary">
-        <article class="memo-block"><div class="label">What works well</div><h2>Strictness is real, not cosmetic.</h2><p>There is no explicit any or non-null assertion in production desktop and mobile TypeScript.</p></article>
-        <article class="memo-block"><div class="label">Primary issue</div><h2>Runtime data receives compile-time trust.</h2><p>Remote, persisted, and IPC values are often cast before their structure is proven.</p></article>
-        <article class="memo-block"><div class="label">Recommended action</div><h2>Decode once, then model once.</h2><p>Validate at boundaries, establish canonical DTO ownership, and split orchestration from rendering.</p></article>
-        <article class="memo-block"><div class="label">Expected outcome</div><h2>Fewer distant failures and safer changes.</h2><p>Provider drift, storage corruption, and lifecycle races become local, named, testable failures.</p></article>
+        <article class="memo-block"><div class="label">What improved</div><h2>Types now come from runtime truth.</h2><p>Canonical schemas, row parsers, and IPC tuple parsing replaced parallel models and unchecked adapter values.</p></article>
+        <article class="memo-block"><div class="label">Verification</div><h2>Static gates and 21 focused tests pass.</h2><p>The selected malformed-input and lifecycle scenarios now have deterministic proof.</p></article>
+        <article class="memo-block"><div class="label">Primary investment</div><h2>Continue splitting state ownership.</h2><p>App, VideoPlayer, and mobile styles remain the major concentration points.</p></article>
+        <article class="memo-block"><div class="label">Expected outcome</div><h2>Small, local, explainable changes.</h2><p>Typed controllers make state transitions visible and reduce regressions across platforms.</p></article>
       </section>
 
       <section class="chapter" id="score">
         <div class="sheet">
-          <div class="chapter-head"><p class="kicker">02 · Score ledger</p><div><h2>Ten TypeScript quality categories, tied to static evidence.</h2><p class="lead">Scores are heuristic estimates from targeted static inspection. They measure how reliably the current structure turns runtime values into trustworthy application state.</p></div></div>
+          <div class="chapter-head"><p class="kicker">02 · Score ledger</p><div><h2>Ten TypeScript quality categories, tied to current evidence.</h2><p class="lead">The category mean and reported overall score are both 8.4. No high-priority finding caps the result; the remaining ceiling comes from module ownership and integration verification.</p></div></div>
           <table class="ledger" aria-label="TypeScript code quality scores">
             <thead><tr class="ledger-head"><th class="ledger-no" scope="col">No.</th><th class="ledger-title" scope="col">Category</th><th class="ledger-score" scope="col">Score</th><th class="ledger-copy" scope="col">Evidence</th></tr></thead>
             <tbody>
-              <tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">Runtime boundary validation</td><td class="ledger-score band-high">6.2 / 10</td><td class="ledger-copy">Remote JSON, persisted JSON, and generic IPC arguments frequently rely on assertions.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Domain model clarity</td><td class="ledger-score band-high">6.5 / 10</td><td class="ledger-copy">Parallel MediaItem and episode models drift across main, renderer, mobile, and player.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">Control-flow legibility</td><td class="ledger-score band-high">6.4 / 10</td><td class="ledger-copy">Large orchestration components and effect suppressions hide state-transition ownership.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Module ownership</td><td class="ledger-score band-high">6.1 / 10</td><td class="ledger-copy">Transport, normalization, state coordination, and rendering are combined in major files.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention</td><td class="ledger-score band-high">6.8 / 10</td><td class="ledger-copy">Strong validators exist, but they are not consistently applied to equivalent boundaries.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Type inference and narrowing</td><td class="ledger-score band-med">7.8 / 10</td><td class="ledger-copy">No explicit any or non-null assertions; many ordinary local guards are well formed.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">API consistency</td><td class="ledger-score band-high">6.9 / 10</td><td class="ledger-copy">Compile-time contracts are centralized, but runtime provider and IPC decoding is inconsistent.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and architecture</td><td class="ledger-score band-high">6.0 / 10</td><td class="ledger-copy">Several files exceed 2,000 lines and mobile App.tsx exceeds 7,000.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-med">7.2 / 10</td><td class="ledger-copy">Specific security errors are good; unchecked payloads can still fail far from their source.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Quality gates and documentation</td><td class="ledger-score band-med">7.7 / 10</td><td class="ledger-copy">Strict and lint rules are solid, but unused values and hook dependencies remain warnings.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">Runtime boundary validation</td><td class="ledger-score band-good">9.1 / 10</td><td class="ledger-copy">Named schemas cover LAN, providers, stored JSON, database rows, HTTP, ffprobe, and IPC argument tuples.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Domain model clarity</td><td class="ledger-score band-good">8.8 / 10</td><td class="ledger-copy">Canonical schema-inferred media contracts now feed desktop and mobile without duplicate wire interfaces.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">Control-flow legibility</td><td class="ledger-score band-med">7.7 / 10</td><td class="ledger-copy">Catalog, lifecycle, modal, and episode navigation flows have typed owners; major renderers remain large.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Module ownership</td><td class="ledger-score band-med">7.4 / 10</td><td class="ledger-copy">The first state-owner extraction is complete, but App, VideoPlayer, and mobile styles remain concentration points.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Boundary decoders reject malformed values, and 21 focused negative-path and lifecycle tests pass.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Type inference and narrowing</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Zero explicit any, non-null assertions, or hook suppressions; TVmaze now uses stable local narrowing.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">API consistency</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">LAN schemas, mobile catalog results, lifecycle actions, database parsing, and IPC parsing expose named contracts.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and architecture</td><td class="ledger-score band-med">7.2 / 10</td><td class="ledger-copy">Two former 2,000-line modules crossed below that mark, while three major modules still require extraction.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-good">8.8 / 10</td><td class="ledger-copy">Boundary failures carry local context; retry and stale-player outcomes are explicit and covered.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Quality gates and documentation</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Workspace typecheck and lint pass, with focused tests documenting malformed and lifecycle behavior.</td></tr>
             </tbody>
-            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Average score</th><td class="ledger-score band-high">6.8 / 10</td><td class="ledger-copy">Mean of all 10 scored categories, rounded to one decimal.</td></tr></tfoot>
+            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Reported overall</th><td class="ledger-score band-good">8.4 / 10</td><td class="ledger-copy">Raw mean 8.4. Medium-priority architecture findings keep the current ceiling below 9.0.</td></tr></tfoot>
           </table>
         </div>
       </section>
@@ -422,62 +423,63 @@
       <section class="decision" id="decision">
         <div class="sheet">
           <p class="kicker">03 · Decision memo</p>
-          <h2>Trust data only after decoding.<br>Make ownership visible in the types.</h2>
-          <p class="decision-intro">The shortest path to 9.0 is to standardize the validation pattern that already exists in the strongest security modules, then reduce the ownership sprawl that produces casts and hook suppressions. This pass does not recommend a framework rewrite. Runtime performance, UI accessibility, and package vulnerabilities are deferred because they were not evaluated here.</p>
+          <h2>Keep extracting by state owner.<br>Do not flatten the types.</h2>
+          <p class="decision-intro">The selected fixes are complete and the repository has a sound TypeScript direction. No framework rewrite or universal controller abstraction is justified. Continue the same pattern through the remaining orchestration modules, extend typed row parsing at actual database boundaries, and verify the native integrations before release.</p>
           <div class="score-lifts" aria-label="Path to 9.0 by code quality dimension">
             <article class="score-lift">
-              <div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">6.8 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:68%"></i><span class="tick" style="left:90%"></span></div>
+              <div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">8.4 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:84%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
-                <li>Combine the boundary, ownership, and lifecycle lifts below. <span class="score-ref">Fixes 2, 3, 4</span></li>
-                <li>Preserve strictness and the existing validator pattern. <span class="score-ref">Keep 1, 5</span></li>
+                <li>Continue controller extraction from the two largest renderers. <span class="score-ref">Fix 1</span></li>
+                <li>Extend parsed database and native adapters. <span class="score-ref">Fix 2</span></li>
+                <li>Run full build and integration verification. <span class="score-ref">Verify 3</span></li>
               </ul>
-              <div class="score-ceiling">A 9.0 rating requires static gates plus malformed-input and lifecycle verification. This report did not run tests.</div>
+              <div class="score-ceiling">A 9.0 rating requires focused ownership throughout the major renderers and successful native integration proof, not simply fewer lines.</div>
             </article>
             <article class="score-lift weak">
-              <div class="score-lift-top"><span class="score-lift-name">Boundary safety</span><span class="score-lift-jump">6.2 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:62%"></i><span class="tick" style="left:90%"></span></div>
+              <div class="score-lift-top"><span class="score-lift-name">Architecture &amp; ownership</span><span class="score-lift-jump">7.4 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:74%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
-                <li>Parse external and persisted data as unknown, then decode it. <span class="score-ref">Fix 4</span></li>
-                <li>Validate IPC arguments before settings, filesystem, or native playback calls. <span class="score-ref">Fix 4</span></li>
-                <li>Reuse the explicit validation style already in secure persistence. <span class="score-ref">Keep 5</span></li>
-              </ul>
-            </article>
-            <article class="score-lift weak">
-              <div class="score-lift-top"><span class="score-lift-name">Architecture &amp; ownership</span><span class="score-lift-jump">6.1 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:61%"></i><span class="tick" style="left:90%"></span></div>
-              <ul>
-                <li>Give wire DTOs, normalized domain models, and view models distinct owners. <span class="score-ref">Fix 2</span></li>
-                <li>Remove parallel MediaItem definitions through explicit mapping, not a universal mega-type. <span class="score-ref">Fix 2</span></li>
-                <li>Keep compile-time IPC contracts as the shared channel catalog. <span class="score-ref">Keep 5</span></li>
+                <li>Extract mobile connection and profile orchestration. <span class="score-ref">Next</span></li>
+                <li>Extract mobile playback ownership and colocate its feature styles. <span class="score-ref">Next</span></li>
+                <li>Split desktop transport, track, subtitle, and seek state. <span class="score-ref">Next</span></li>
               </ul>
             </article>
             <article class="score-lift weak">
-              <div class="score-lift-top"><span class="score-lift-name">Maintainability</span><span class="score-lift-jump">6.4 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:64%"></i><span class="tick" style="left:90%"></span></div>
+              <div class="score-lift-top"><span class="score-lift-name">Adapter safety</span><span class="score-lift-jump">8.8 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:88%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
-                <li>Extract mobile connection, library, and playback controllers. <span class="score-ref">Fix 2</span></li>
-                <li>Resolve effect dependency suppressions after extraction. <span class="score-ref">Verify 3</span></li>
-                <li>Promote unused-value and hook-dependency warnings to errors in stages. <span class="score-ref">Keep 1</span></li>
+                <li>Parse remaining profile and segment row families. <span class="score-ref">Fix 2</span></li>
+                <li>Keep native casts inside narrow platform adapters. <span class="score-ref">Fix 2</span></li>
+                <li>Add named fixtures whenever a new untrusted boundary appears. <span class="score-ref">Keep 5</span></li>
               </ul>
-              <div class="score-ceiling">Final confidence requires deterministic reconnect, backgrounding, resume, and track-selection tests.</div>
+            </article>
+            <article class="score-lift weak">
+              <div class="score-lift-top"><span class="score-lift-name">Release confidence</span><span class="score-lift-jump">8.2 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:82%"></i><span class="tick" style="left:90%"></span></div>
+              <ul>
+                <li>Run the full suite and production builds. <span class="score-ref">Verify 3</span></li>
+                <li>Smoke-test desktop and mobile playback lifecycle. <span class="score-ref">Verify 3</span></li>
+                <li>Add dead-export reporting as a separate reviewable gate. <span class="score-ref">Follow-up</span></li>
+              </ul>
+              <div class="score-ceiling">The targeted tests prove the new units. Platform testing must still prove their real integrations.</div>
             </article>
           </div>
           <table class="path" aria-label="Path to 9.0">
             <tbody>
-              <tr class="path-row"><td class="path-step">Step 01</td><td class="path-title">Create decoders</td><td class="path-copy">Implement small parse and normalize functions for pairing, metadata, stored sessions, and SQLite JSON columns.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Harden IPC</td><td class="path-copy">Attach an argument decoder to every channel that mutates settings, reads paths, or controls native playback.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Define ownership</td><td class="path-copy">Separate canonical wire contracts from normalized application models and renderer-specific view state.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Extract orchestration</td><td class="path-copy">Split App.tsx and VideoPlayer.tsx by lifecycle, then remove hook dependency suppressions with stable inputs.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 05</td><td class="path-title">Lock the gates</td><td class="path-copy">Add dead-export checking, make warnings fail CI, and test malformed payload and lifecycle-transition fixtures.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 01</td><td class="path-title">Split mobile connection</td><td class="path-copy">Move connection, profile, and session transitions behind typed events and discriminated outcomes.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Split mobile playback</td><td class="path-copy">Give player source, progress, tracks, and recovery one explicit state owner, then colocate related styles.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Split desktop playback</td><td class="path-copy">Separate transport, track, subtitle, seek, and overlay behavior without hiding state behind generic hooks.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Finish adapter parsing</td><td class="path-copy">Extend named row parsers to profiles and segments, and isolate native platform assertions.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 05</td><td class="path-title">Verify release behavior</td><td class="path-copy">Run the full suite and builds, smoke-test native lifecycle paths, and report dead exports separately.</td></tr>
             </tbody>
           </table>
-          <div class="validation"><b>9.0 gate.</b> No external, persisted, or IPC payload reaches domain logic without a decoder; invalid payload fixtures fail with named boundary errors; canonical models have one owner; no lifecycle dependency suppressions remain in connection or playback orchestration; explicit any and non-null assertions remain at zero; lint, typecheck, dead-export checks, and deterministic lifecycle tests pass.</div>
+          <div class="validation"><b>9.0 gate.</b> Typecheck and lint remain green; malformed external, persisted, and IPC payloads fail with named errors; canonical schemas continue to own wire types; App and VideoPlayer delegate major state graphs to focused typed controllers; explicit any, non-null assertions, and hook suppressions remain at zero; full tests, production builds, native lifecycle smoke tests, and dead-export reporting pass.</div>
         </div>
       </section>
     </main>
 
-    <footer><div class="sheet footer-inner"><p>Work Report · Evidence-led TypeScript evaluation.</p><p class="footer-meta">Static code audit · 6.8 / 10 · Confidence: medium-high</p></div></footer>
+    <footer><div class="sheet footer-inner"><p>Work Report · Evidence-led TypeScript evaluation.</p><p class="footer-meta">Static code audit · 8.4 / 10 · Confidence: high</p></div></footer>
   </div>
 </body>
 </html>

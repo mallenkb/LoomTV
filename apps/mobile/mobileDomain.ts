@@ -1,18 +1,26 @@
 import type {
   LanApiResult,
   LanHlsSession,
+  LanCastMember,
+  LanEpisodeFile,
+  LanEpisodeMeta,
   LanLibraryCard,
   LanLibraryIndexPayload,
   LanLibraryItemDetailsPayload,
   LanLibraryPayload,
+  LanLocalMediaDetails,
+  LanLocalMediaTrack,
+  LanMediaItem,
   LanActiveProfile,
   LanClientConfig,
   LanPairResponse,
   LanProfileListEntry,
   LanProfilePreferences,
   LanProfileSummary,
+  LanProviderRatings,
   LanStoredProgress,
   LanStreamOptions,
+  LanSubtitleRecord,
 } from '@loom-media-server/lan-protocol';
 
 export type LibraryKind = 'home' | 'anime' | 'tv' | 'movies' | 'others' | 'settings';
@@ -20,66 +28,17 @@ export type SettingsSection = 'library' | 'network' | 'appearance' | 'about';
 export type MobileLibraryFilter = 'all' | 'in-progress' | 'unwatched' | 'watched';
 export type MobileSearchScope = 'all' | 'genre:drama' | 'genre:animation' | 'genre:action-adventure' | 'genre:comedy';
 
-export type LocalMediaTrack = {
-  index: number;
-  type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
-  codec?: string;
-  language?: string;
-  title?: string;
-  channels?: number;
-  width?: number;
-  height?: number;
-  profile?: string;
-  pixelFormat?: string;
-  default?: boolean;
-  forced?: boolean;
-};
+export type LocalMediaTrack = LanLocalMediaTrack;
+export type LocalMediaDetails = LanLocalMediaDetails;
+export type SubtitleRecord = LanSubtitleRecord;
+export type EpisodeMeta = LanEpisodeMeta;
+export type EpisodeFile = LanEpisodeFile;
+export type CastMember = LanCastMember;
 
-export type LocalMediaDetails = {
-  durationSeconds?: number;
-  videoCodec?: string;
-  audioCodec?: string;
-  audioTracks?: number;
-  subtitleTracks?: number;
-  tracks?: LocalMediaTrack[];
-  container?: string;
-  width?: number;
-  height?: number;
-};
+type MobileMediaIdentity = Pick<LanMediaItem, 'id' | 'type' | 'title' | 'filePath'>;
+type MobileMediaMetadata = Partial<Omit<LanMediaItem, keyof MobileMediaIdentity>>;
 
-export type SubtitleRecord = { lang: string; label: string; url: string };
-export type EpisodeMeta = { season: number; number: number; title?: string; summary?: string; rating?: number };
-export type EpisodeFile = {
-  season: number;
-  episode: number;
-  filePath: string;
-  title?: string;
-  thumbnail?: string;
-  still?: string;
-  subtitles?: SubtitleRecord[];
-  localMetadata?: LocalMediaDetails;
-};
-export type CastMember = { name: string; character?: string; image?: string };
-
-export type MediaItem = {
-  id: string;
-  type: 'movie' | 'tv' | 'anime';
-  title: string;
-  year?: number;
-  poster?: string;
-  backdrop?: string;
-  posterCandidates?: string[];
-  backdropCandidates?: string[];
-  summary?: string;
-  rating?: number;
-  genres?: string[];
-  cast?: CastMember[];
-  episodes?: EpisodeMeta[];
-  filePath: string;
-  lastPlayed?: number;
-  subtitles?: SubtitleRecord[];
-  localMetadata?: LocalMediaDetails;
-  episodeFiles?: EpisodeFile[];
+export type MediaItem = MobileMediaIdentity & MobileMediaMetadata & {
   /** Present only on compact browse cards; full details are fetched on demand. */
   catalogRevision?: number;
 };
@@ -95,19 +54,25 @@ export function mobileDetailCacheKey(profileId: string, revision: number, mediaI
   return `${profileId || 'profile:none'}:${revision}:${mediaId}`;
 }
 
+export function mobileCatalogIdentity(profileId: string | undefined, revision: number | undefined): string {
+  return `${profileId || 'profile:none'}:${revision ?? -1}`;
+}
+
 export function mobileLibraryFromIndex(index: MobileLibraryIndexPayload): LibraryPayload {
   const fromCard = (card: LanLibraryCard): MediaItem => {
     const playbackReferences = card.playbackReferences || [];
     const firstReference = playbackReferences[0];
-    const episodeFiles = playbackReferences
-      .filter((reference) => Number.isFinite(reference.season) && Number.isFinite(reference.episode))
-      .map((reference) => ({
-        season: reference.season as number,
-        episode: reference.episode as number,
+    const episodeFiles = playbackReferences.flatMap((reference): EpisodeFile[] => {
+      const { episode, season } = reference;
+      if (episode === undefined || season === undefined) return [];
+      return [{
+        season,
+        episode,
         filePath: reference.progressKey,
-        title: `Episode ${reference.episode}`,
+        title: `Episode ${episode}`,
         ...(reference.durationSeconds ? { localMetadata: { durationSeconds: reference.durationSeconds } } : {}),
-      }));
+      }];
+    });
     return {
       id: card.id,
       type: card.type,
@@ -119,6 +84,7 @@ export function mobileLibraryFromIndex(index: MobileLibraryIndexPayload): Librar
       backdropCandidates: card.backdropCandidates,
       summary: card.summary,
       rating: card.rating,
+      providerRatings: card.providerRatings,
       genres: card.genres,
       filePath: firstReference?.progressKey || '',
       lastPlayed: card.lastPlayed,
@@ -202,6 +168,7 @@ export type OfficialArtworkResponse = {
   cover?: string;
   summary?: string;
   rating?: number;
+  providerRatings?: LanProviderRatings;
   genres?: string[];
   episodes?: unknown[];
   episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
