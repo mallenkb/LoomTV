@@ -149,6 +149,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const metadataFetchKeyRef = useRef('');
+  const localRatingsRefreshKeyRef = useRef('');
   const routeState = (location.state as MovieDetailRouteState | null) || null;
   // The Explore cache is a remote-provider detail bridge.  Never consult it
   // for an ordinary library route: local IDs are opaque and can legitimately
@@ -211,6 +212,25 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     }
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, mediaId, routeAddonId, routeFallbackMovie, routeState?.from, routeState?.fromDiscover, state.catalogRevision, state.movies]);
+
+  useEffect(() => {
+    if (!movie?.id || isRemoteStremioMovie || Object.keys(movie.providerRatings || {}).length > 0) return;
+    if (localRatingsRefreshKeyRef.current === movie.id) return;
+
+    localRatingsRefreshKeyRef.current = movie.id;
+    let cancelled = false;
+    void desktopApi.refreshIncompleteMetadata(movie.id)
+      .then(async (changed) => {
+        if (cancelled || !changed) return;
+        const refreshed = await hydrateLibraryItem(movie.id);
+        if (!cancelled && refreshed) setMovie(refreshed);
+      })
+      .catch((error) => console.warn('Could not refresh local movie ratings:', error));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateLibraryItem, isRemoteStremioMovie, movie?.id, movie?.providerRatings]);
 
   const handleRefreshIncompleteMetadata = async () => {
     if (!movie?.id || isRemoteStremioMovie || metadataRefreshState === 'loading') return;

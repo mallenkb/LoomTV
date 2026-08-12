@@ -200,7 +200,9 @@ export function preserveExistingItemDuringScan(
     rating: refreshRating ? fresh.rating : existing.rating || fresh.rating,
     providerRatings: options.refreshRatings && Object.keys(fresh.providerRatings || {}).length > 0
       ? fresh.providerRatings
-      : existing.providerRatings || fresh.providerRatings,
+      : hasValues(existing.providerRatings)
+        ? existing.providerRatings
+        : fresh.providerRatings,
     genres: existing.genres?.length ? existing.genres : fresh.genres,
     cast,
     contentRatings: hasValues(existing.contentRatings)

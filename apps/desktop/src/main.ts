@@ -355,7 +355,7 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 10;
+const SCAN_CACHE_VERSION = 11;
 let libraryMutationVersion = 0;
 
 function advanceLibraryMutationVersion(): void {

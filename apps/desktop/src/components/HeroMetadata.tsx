@@ -3,6 +3,7 @@ import { Star } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import ProviderMark from '@/components/ProviderMark';
+import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaTechnicalBadges, { mediaTechnicalMetadata } from '@/components/MediaTechnicalBadges';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 
@@ -77,6 +78,8 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
           title: item.providerRatings.imdb.votes === undefined
             ? 'IMDb rating supplied by OMDb'
             : `IMDb rating from ${item.providerRatings.imdb.votes.toLocaleString()} votes, supplied by OMDb`,
+          provider: 'imdb' as const,
+          logoClassName: 'h-5 w-10 object-contain',
         }
       : null,
     item.providerRatings?.rottenTomatoes
@@ -84,6 +87,17 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
           label: 'Tomatometer',
           value: `${item.providerRatings.rottenTomatoes.value.toFixed(0)}%`,
           title: 'Rotten Tomatoes Tomatometer score supplied by OMDb',
+          provider: 'tomatometer' as const,
+          logoClassName: 'h-5 w-5 object-contain',
+        }
+      : null,
+    item.providerRatings?.popcornmeter
+      ? {
+          label: 'Popcornmeter',
+          value: `${item.providerRatings.popcornmeter.value.toFixed(0)}%`,
+          title: 'Rotten Tomatoes Popcornmeter score',
+          provider: 'popcornmeter' as const,
+          logoClassName: 'h-5 w-5 object-contain',
         }
       : null,
     item.providerRatings?.metacritic
@@ -91,6 +105,8 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
           label: 'Metacritic',
           value: item.providerRatings.metacritic.value.toFixed(0),
           title: 'Metacritic score supplied by OMDb',
+          provider: 'metacritic' as const,
+          logoClassName: 'h-5 w-5 object-contain',
         }
       : null,
   ].filter((rating): rating is NonNullable<typeof rating> => rating !== null);
@@ -123,9 +139,13 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
           {providerRatings.map((rating, index) => (
             <Fragment key={rating.label}>
               {index > 0 && <span aria-hidden="true">•</span>}
-              <span className="loom-rating inline-flex items-center gap-1.5" title={rating.title}>
-                {rating.label === 'IMDb' && <Star className="h-4 w-4" fill="currentColor" />}
-                {rating.label} {rating.value}
+              <span
+                className="loom-rating inline-flex items-center gap-1.5 text-sm text-white"
+                title={rating.title}
+                aria-label={`${rating.label} ${rating.value}`}
+              >
+                <ProviderRatingLogo provider={rating.provider} className={rating.logoClassName} />
+                <span aria-hidden="true">{rating.value}</span>
               </span>
             </Fragment>
           ))}

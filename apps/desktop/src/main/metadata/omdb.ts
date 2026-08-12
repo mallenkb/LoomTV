@@ -74,6 +74,11 @@ export function omdbProviderRatings(metadata: OMDbResponse | null | undefined): 
     10,
   );
   const rottenTomatoes = scoreFromText(ratingBySource(metadata, 'Rotten Tomatoes'), 100);
+  const popcornmeter = scoreFromText(
+    ratingBySource(metadata, 'Popcornmeter')
+      || ratingBySource(metadata, 'Rotten Tomatoes Audience Score'),
+    100,
+  );
   const metacritic = scoreFromText(
     metadata?.Metascore || ratingBySource(metadata, 'Metacritic'),
     100,
@@ -90,6 +95,9 @@ export function omdbProviderRatings(metadata: OMDbResponse | null | undefined): 
     }),
     ...(rottenTomatoes === undefined ? {} : {
       rottenTomatoes: { value: rottenTomatoes, scale: 100 },
+    }),
+    ...(popcornmeter === undefined ? {} : {
+      popcornmeter: { value: popcornmeter, scale: 100 },
     }),
     ...(metacritic === undefined ? {} : {
       metacritic: { value: metacritic, scale: 100 },

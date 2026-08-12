@@ -181,6 +181,7 @@ function mergeAnimeCastMissingFields(
 
 function itemNeedsIncompleteMetadata(item: MediaItem): boolean {
   if (!hasText(item.title) || !hasText(item.summary) || !item.genres?.length || item.rating <= 0) return true;
+  if (!hasProviderRatings(item.providerRatings)) return true;
   if (!hasContentRatings(item.contentRatings) && !hasText((item as MediaItem & { contentRating?: string }).contentRating)) return true;
   if (item.providerIds?.tmdbId && !item.streamingProviders?.length && !item.originPlatform) return true;
   if (item.type !== 'movie' && !item.originPlatform && !item.streamingProviders?.length) return true;

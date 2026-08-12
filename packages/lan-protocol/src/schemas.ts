@@ -24,6 +24,7 @@ const ratingOutOfOneHundredSchema = z.object({
 export const lanProviderRatingsSchema = z.object({
   imdb: ratingOutOfTenSchema.optional(),
   rottenTomatoes: ratingOutOfOneHundredSchema.optional(),
+  popcornmeter: ratingOutOfOneHundredSchema.optional(),
   metacritic: ratingOutOfOneHundredSchema.optional(),
 });
 

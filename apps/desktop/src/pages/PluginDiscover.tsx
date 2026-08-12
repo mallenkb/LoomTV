@@ -63,7 +63,21 @@ const PROVIDER_SEARCH_DEBOUNCE_MS = 450;
 const DISCOVER_RESULT_LIMIT = 30;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 const ANILIST_API_URL = 'https://graphql.anilist.co';
+const OMDB_API_URL = 'https://www.omdbapi.com/';
 type GenreSourceType = Exclude<DiscoverType, 'anime'>;
+
+const omdbDiscoverResponseSchema = z.object({
+  Response: z.string().optional(),
+  imdbRating: z.string().optional(),
+  imdbVotes: z.string().optional(),
+  Metascore: z.string().optional(),
+  Ratings: z.array(z.object({
+    Source: z.string(),
+    Value: z.string(),
+  })).optional(),
+}).passthrough();
+
+type OmdbDiscoverResponse = z.output<typeof omdbDiscoverResponseSchema>;
 
 type GenreOption = {
   label: string;
@@ -212,6 +226,85 @@ function errorMessage(error: unknown): string {
 
 function normalizeTmdbCredential(raw: string): string {
   return raw.trim().replace(/^Bearer\s+/i, '');
+}
+
+function boundedRating(value: string | undefined, maximum: 10 | 100): number | undefined {
+  if (!value || value === 'N/A') return undefined;
+  const score = Number.parseFloat(value);
+  return Number.isFinite(score) && score >= 0 && score <= maximum ? score : undefined;
+}
+
+function omdbRatingBySource(response: OmdbDiscoverResponse, source: string): string | undefined {
+  return response.Ratings?.find((rating) => rating.Source === source)?.Value;
+}
+
+function providerRatingsFromOmdb(
+  response: OmdbDiscoverResponse,
+): NonNullable<StremioPluginCatalogItem['providerRatings']> {
+  const imdb = boundedRating(
+    response.imdbRating || omdbRatingBySource(response, 'Internet Movie Database'),
+    10,
+  );
+  const rottenTomatoes = boundedRating(omdbRatingBySource(response, 'Rotten Tomatoes'), 100);
+  const popcornmeter = boundedRating(
+    omdbRatingBySource(response, 'Popcornmeter')
+      || omdbRatingBySource(response, 'Rotten Tomatoes Audience Score'),
+    100,
+  );
+  const metacritic = boundedRating(
+    response.Metascore || omdbRatingBySource(response, 'Metacritic'),
+    100,
+  );
+  const votesValue = response.imdbVotes?.replaceAll(',', '').trim();
+  const votes = votesValue ? Number(votesValue) : Number.NaN;
+
+  return {
+    ...(imdb === undefined ? {} : {
+      imdb: {
+        value: imdb,
+        scale: 10,
+        ...(Number.isSafeInteger(votes) && votes >= 0 ? { votes } : {}),
+      },
+    }),
+    ...(rottenTomatoes === undefined ? {} : {
+      rottenTomatoes: { value: rottenTomatoes, scale: 100 },
+    }),
+    ...(popcornmeter === undefined ? {} : {
+      popcornmeter: { value: popcornmeter, scale: 100 },
+    }),
+    ...(metacritic === undefined ? {} : {
+      metacritic: { value: metacritic, scale: 100 },
+    }),
+  };
+}
+
+async function enrichCatalogItemWithOmdbRatings(
+  item: StremioPluginCatalogItem,
+  credential: string,
+): Promise<StremioPluginCatalogItem> {
+  const apiKey = credential.trim();
+  if (!apiKey) return item;
+
+  const url = new URL(OMDB_API_URL);
+  url.searchParams.set('apikey', apiKey);
+  if (item.imdbId?.startsWith('tt')) {
+    url.searchParams.set('i', item.imdbId);
+  } else {
+    url.searchParams.set('t', item.title);
+    url.searchParams.set('type', item.type === 'movie' ? 'movie' : 'series');
+    const year = parseYearFromItem(item);
+    if (year > 0) url.searchParams.set('y', String(year));
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`OMDb request failed: ${response.status} ${response.statusText}`);
+  }
+  const metadata = await readJsonResponse(response, omdbDiscoverResponseSchema, 'OMDb ratings');
+  if (metadata.Response === 'False') return item;
+
+  const providerRatings = providerRatingsFromOmdb(metadata);
+  return Object.keys(providerRatings).length > 0 ? { ...item, providerRatings } : item;
 }
 
 function isTMDBReadAccessToken(value: string): boolean {
@@ -800,10 +893,11 @@ async function enrichCatalogItemWithTmdbCredits(
   credential: string,
 ): Promise<StremioPluginCatalogItem> {
   const response = await requestTmdbJson(`${type}/${item.id}`, credential, tmdbDetailResponseSchema, {
-    append_to_response: 'credits,videos,release_dates,content_ratings,watch/providers',
+    append_to_response: 'credits,videos,release_dates,content_ratings,watch/providers,external_ids',
   });
   return mapTmdbCredits(response.credits, {
     ...item,
+    imdbId: response.imdb_id || response.external_ids?.imdb_id || item.imdbId,
     description: response.overview || item.description,
     posterUrl: response.poster_path ? tmdbImage(response.poster_path, 'w500') : item.posterUrl,
     backgroundUrl: response.backdrop_path
@@ -849,12 +943,13 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
   if (!match?.id) return { ...item, streamingProviders: item.streamingProviders || [] };
 
   const details = await requestTmdbJson(`${tmdbType}/${match.id}`, credential, tmdbDetailResponseSchema, {
-    append_to_response: 'watch/providers,release_dates,content_ratings',
+    append_to_response: 'watch/providers,release_dates,content_ratings,external_ids',
   });
   const streamingProviders = tmdbStreamingProviders(details);
   const contentRating = tmdbContentRating(details, tmdbType);
   return {
     ...item,
+    imdbId: details.imdb_id || details.external_ids?.imdb_id || item.imdbId,
     streamingProviders,
     ...(contentRating ? { contentRating } : {}),
     ...(tmdbType === 'movie' && details.runtime && details.runtime > 0
@@ -1245,6 +1340,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   );
   const initialCachedItems = getValidCachedItems(discoverCache.current, initialCacheId);
   const [tmdbCredential, setTmdbCredential] = useState('');
+  const [omdbCredential, setOmdbCredential] = useState('');
   const [query, setQuery] = useState(initialFilterState.query);
   const [contentType, setContentType] = useState<DiscoverType>(initialFilterState.contentType);
   const [section, setSection] = useState<DiscoverSection>(initialFilterState.section);
@@ -1321,6 +1417,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
         const settings = await desktopApi.getSettings();
         if (!isActive) return;
         setTmdbCredential(normalizeTmdbCredential(settings.metadataApiKeys?.tmdb || settings.tmdbApiKey || ''));
+        setOmdbCredential((settings.metadataApiKeys?.omdb || settings.omdbApiKey || '').trim());
         if (!regionWasExplicitRef.current && activeProfile?.id) {
           try {
             const restrictions = await desktopApi.getProfileRestrictions(activeProfile.id);
@@ -1750,23 +1847,33 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   }, [loadCatalog]);
 
   const enrichWithCast = useCallback(async (item: StremioPluginCatalogItem): Promise<StremioPluginCatalogItem> => {
-    if (!tmdbCredential) return item;
-    const cacheKey = `detail:${item.type}:${item.id}`;
+    if (!tmdbCredential && !omdbCredential) return item;
+    const cacheKey = [
+      'detail',
+      item.type,
+      item.id,
+      tmdbCredential ? 'tmdb' : 'no-tmdb',
+      omdbCredential ? 'omdb' : 'no-omdb',
+    ].join(':');
     const existing = detailsCache.current.get(cacheKey);
     if (existing) return existing;
 
-    const pending = item.type === 'anime' && item.streamingProviders !== undefined
-      ? Promise.resolve(item)
-      : item.type === 'anime'
-        ? enrichAnimeCatalogItemWithTmdbProviders(item, tmdbCredential).catch(() => item)
-      : item.type === 'movie' || item.type === 'tv'
-        ? enrichCatalogItemWithTmdbCredits(item, item.type, tmdbCredential).catch(() => item)
-        : Promise.resolve(item);
+    let metadataPending = Promise.resolve(item);
+    if (tmdbCredential && item.type === 'anime' && item.streamingProviders === undefined) {
+      metadataPending = enrichAnimeCatalogItemWithTmdbProviders(item, tmdbCredential).catch(() => item);
+    } else if (tmdbCredential && (item.type === 'movie' || item.type === 'tv')) {
+      metadataPending = enrichCatalogItemWithTmdbCredits(item, item.type, tmdbCredential).catch(() => item);
+    }
+    const pending = metadataPending.then((metadataItem) => (
+      omdbCredential
+        ? enrichCatalogItemWithOmdbRatings(metadataItem, omdbCredential).catch(() => metadataItem)
+        : metadataItem
+    ));
     detailsCache.current.set(cacheKey, pending);
     const resolved = await pending;
     detailsCache.current.set(cacheKey, Promise.resolve(resolved));
     return resolved;
-  }, [tmdbCredential]);
+  }, [omdbCredential, tmdbCredential]);
 
   const openItemDetails = useCallback((item: StremioPluginCatalogItem) => {
     void (async () => {
