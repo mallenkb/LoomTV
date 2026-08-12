@@ -84,7 +84,14 @@ import {
   restorePortraitWithRetry,
   type PlaybackFailure,
 } from './playbackRecovery';
-import { mobileAbsoluteMediaSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
+import {
+  MOBILE_ACCESSIBLE_SEEK_STEP_SECONDS,
+  mobileAbsoluteMediaSeconds,
+  mobileAccessibleSeekRange,
+  mobileAccessibleSeekTarget,
+  mobileAccessibleTimeLabel,
+  mobilePlayerSecondsForAbsolute,
+} from './playbackClock';
 import {
   createStyles,
   settingsContentMaxWidth,
@@ -5526,6 +5533,7 @@ function PlayerContent({
   };
 
   const progressFractionValue = duration > 0 ? Math.min(1, position / duration) : 0;
+  const accessibleSeekRange = mobileAccessibleSeekRange(position, duration);
   const activeMediaSegment = useMemo(() => activeKnownMediaSegmentAt(mediaSegments, position), [mediaSegments, position]);
   const activeSegmentLabel = activeMediaSegment ? mobileMediaSegmentLabel(activeMediaSegment.type, target.mediaType === 'movie') : '';
   const displayLabels = playerDisplayLabels(target);
@@ -5696,6 +5704,23 @@ function PlayerContent({
                   }}
                   accessibilityRole="adjustable"
                   accessibilityLabel="Seek"
+                  accessibilityHint={`Adjusts playback by ${MOBILE_ACCESSIBLE_SEEK_STEP_SECONDS} seconds`}
+                  accessibilityState={{ disabled: duration <= 0 }}
+                  accessibilityValue={{
+                    min: accessibleSeekRange.min,
+                    max: accessibleSeekRange.max,
+                    now: accessibleSeekRange.now,
+                    text: `${mobileAccessibleTimeLabel(accessibleSeekRange.now)} elapsed, ${mobileAccessibleTimeLabel(accessibleSeekRange.remaining)} remaining`,
+                  }}
+                  accessibilityActions={[
+                    { name: 'increment', label: `Seek forward ${MOBILE_ACCESSIBLE_SEEK_STEP_SECONDS} seconds` },
+                    { name: 'decrement', label: `Seek back ${MOBILE_ACCESSIBLE_SEEK_STEP_SECONDS} seconds` },
+                  ]}
+                  onAccessibilityAction={(event) => {
+                    const { actionName } = event.nativeEvent;
+                    if (actionName !== 'increment' && actionName !== 'decrement') return;
+                    seekToSeconds(mobileAccessibleSeekTarget(position, duration, actionName));
+                  }}
                 >
                   <View style={styles.playerSeekTrack}>
                     <View style={[styles.playerSeekFill, { width: `${progressFractionValue * 100}%` }]} />
