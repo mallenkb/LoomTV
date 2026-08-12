@@ -1,0 +1,100 @@
+[
+  {
+    "name": "mutable production image",
+    "target": "compose",
+    "find": "image: loomtv:1.0.111",
+    "replace": "image: loomtv:latest",
+    "expected": "image must not use latest"
+  },
+  {
+    "name": "unpinned Dockerfile base",
+    "target": "dockerfile",
+    "find": "FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS dependencies",
+    "replace": "FROM node:22-bookworm-slim AS dependencies",
+    "expected": "FROM must use a literal immutable sha256 digest"
+  },
+  {
+    "name": "mutable apt source",
+    "target": "dockerfile",
+    "find": "snapshot.debian.org/archive/debian/20260806T000000Z/",
+    "replace": "deb.debian.org/debian",
+    "expected": "apt sources must use the debian Debian snapshot"
+  },
+  {
+    "name": "inherited apt sources retained",
+    "target": "dockerfile",
+    "find": "  && rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*",
+    "replace": "  && true",
+    "expected": "inherited apt sources must be cleared"
+  },
+  {
+    "name": "root runtime user",
+    "target": "dockerfile",
+    "find": "USER ${LOOMTV_UID}:${LOOMTV_GID}",
+    "replace": "USER root",
+    "expected": "final runtime USER must be explicitly non-root"
+  },
+  {
+    "name": "zero runtime uid default",
+    "target": "dockerfile",
+    "find": "ARG LOOMTV_UID=1000",
+    "replace": "ARG LOOMTV_UID=0",
+    "expected": "final runtime USER must be explicitly non-root"
+  },
+  {
+    "name": "privileged service",
+    "target": "compose",
+    "find": "    restart: unless-stopped",
+    "replace": "    restart: unless-stopped\n    privileged: true",
+    "expected": "must not run privileged"
+  },
+  {
+    "name": "entrypoint bypass",
+    "target": "compose",
+    "find": "    restart: unless-stopped",
+    "replace": "    restart: unless-stopped\n    entrypoint: [node]",
+    "expected": "must not override the fail-closed image entrypoint"
+  },
+  {
+    "name": "root service user",
+    "target": "compose",
+    "find": "user: \"${PUID:-1000}:${PGID:-1000}\"",
+    "replace": "user: root",
+    "expected": "must run as an explicitly non-root user"
+  },
+  {
+    "name": "added Linux capability",
+    "target": "compose",
+    "find": "    cap_drop:\n      - ALL",
+    "replace": "    cap_drop:\n      - ALL\n    cap_add: [SYS_ADMIN]",
+    "expected": "must not add Linux capabilities"
+  },
+  {
+    "name": "capability drop removed",
+    "target": "compose",
+    "find": "    cap_drop:\n      - ALL\n",
+    "replace": "",
+    "expected": "must drop ALL capabilities"
+  },
+  {
+    "name": "writable media mount",
+    "target": "compose",
+    "find": ":/media:ro\"",
+    "replace": ":/media:rw\"",
+    "expected": "/media must remain a read-only bind mount"
+  },
+  {
+    "name": "no-new-privileges removed",
+    "target": "compose",
+    "find": "      - no-new-privileges:true\n",
+    "replace": "",
+    "expected": "must enable no-new-privileges"
+  },
+  {
+    "name": "runtime root guard removed",
+    "target": "entrypoint",
+    "find": "if [ \"$(id -u)\" -eq 0 ] || [ \"$(id -g)\" -eq 0 ]; then",
+    "replace": "if false; then",
+    "expected": "entrypoint must refuse a root runtime UID or GID"
+  }
+]
