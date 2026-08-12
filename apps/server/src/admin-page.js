@@ -295,6 +295,8 @@ export function createAdminApiHandler(options = {}) {
         writeJson(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
+          bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
+          address: proxyPolicy.clientAddress(req),
         }));
         return true;
       }
