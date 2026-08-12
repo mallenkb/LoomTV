@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { parseStoredValue } from './desktopDecoders.ts';
+
 export type AppThemeMode = 'dark' | 'light';
 // The original color ids remain stable because they are persisted in settings.
 export type AppThemeColor = 'red' | 'blue' | 'orange' | 'yellow' | 'twitch';
@@ -250,5 +253,3 @@ export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
   root.style.setProperty('--color-input', themePalette.surface2);
   root.style.setProperty('color-scheme', mode);
 }
-import { parseStoredValue } from '@/lib/desktopDecoders';
-import { z } from 'zod';

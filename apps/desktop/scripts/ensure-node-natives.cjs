@@ -4,7 +4,11 @@
 // that looks nothing like a test failure. Rebuild for node, but only when the
 // binary is actually built for the wrong runtime — the happy path is free.
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
+let rebuildFailed = false;
 try {
   // better-sqlite3 resolves its native binding lazily, so requiring the module
   // is not enough to surface an ABI mismatch — a connection has to be opened.
@@ -18,9 +22,18 @@ try {
 }
 
 console.log('[test] better-sqlite3 is built for Electron; rebuilding it for node…');
+const workspaceRoot = path.resolve(__dirname, '../../..');
+let rebuildRoot = workspaceRoot;
+let temporaryLink = null;
+if (/\s/.test(workspaceRoot)) {
+  temporaryLink = path.join(os.tmpdir(), `loomtv-native-${process.pid}`);
+  fs.symlinkSync(workspaceRoot, temporaryLink, 'dir');
+  rebuildRoot = temporaryLink;
+}
 try {
   execFileSync('pnpm', ['rebuild', '-r', 'better-sqlite3'], {
-    cwd: __dirname + '/../../..',
+    cwd: rebuildRoot,
+    env: { ...process.env, PWD: rebuildRoot },
     stdio: 'inherit',
   });
 } catch {
@@ -28,5 +41,8 @@ try {
     '[test] Could not rebuild better-sqlite3 for node.\n'
     + '       Run `corepack pnpm rebuild -r better-sqlite3` and try again.',
   );
-  process.exit(1);
+  rebuildFailed = true;
+} finally {
+  if (temporaryLink) fs.unlinkSync(temporaryLink);
 }
+if (rebuildFailed) process.exit(1);

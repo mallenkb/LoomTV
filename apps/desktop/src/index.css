@@ -102,10 +102,62 @@
   --loom-sidebar-width: 12rem;
   --loom-frame-gutter: var(--loom-frame-inset);
 
+  /* One hero ground, shared by the Modern home hero and the Modern detail
+     heroes so the frost and the tint land in the same place on both.
+
+     The layer is sized by the copy itself rather than by a fixed ellipse: each
+     hero names its content block as a CSS anchor, and the ground stretches
+     from just above that block to the bottom edge and a little past its right
+     side. So it tracks a long title, a missing summary or an extra row of
+     buttons on its own, and the mask — now plain percentages of a box that IS
+     the content — keeps the same shape at any size. Every anchor() carries a
+     fallback so a hero without a resolvable anchor still gets a sane band. */
+  --loom-hero-ground-blur: 15px;
+  --loom-hero-ground-tint: rgba(0, 0, 0, 0.56);
+  --loom-hero-ground-reach-x: 5rem;
+  --loom-hero-ground-reach-y: 1rem;
+  --loom-hero-ground-mask: radial-gradient(
+    88% 116% at 26% 100%,
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.92) 24%,
+    rgba(0, 0, 0, 0.76) 40%,
+    rgba(0, 0, 0, 0.56) 53%,
+    rgba(0, 0, 0, 0.36) 64%,
+    rgba(0, 0, 0, 0.19) 74%,
+    rgba(0, 0, 0, 0.08) 83%,
+    rgba(0, 0, 0, 0.02) 91%,
+    transparent 97%
+  );
+
   color-scheme: dark;
 }
 
+/* The home hero ground follows its copy block. Detail pages use a tighter
+   poster-and-metadata ground further below because their action controls sit
+   in the same row but should not widen the blur. */
+.loom-modern-hero::after {
+  position: absolute;
+  position-anchor: --loom-hero-content;
+  /* The fallbacks approximate a typical copy block, so the one frame where a
+     rotating hero has swapped its copy out and the anchor cannot resolve looks
+     the same rather than snapping to the full width. */
+  top: calc(anchor(top, 62%) - var(--loom-hero-ground-reach-y));
+  right: calc(anchor(right, 42%) - var(--loom-hero-ground-reach-x));
+  bottom: 0;
+  left: 0;
+  content: "";
+  pointer-events: none;
+  background: var(--loom-hero-ground-tint);
+  -webkit-backdrop-filter: blur(var(--loom-hero-ground-blur));
+  backdrop-filter: blur(var(--loom-hero-ground-blur));
+  -webkit-mask-image: var(--loom-hero-ground-mask);
+  mask-image: var(--loom-hero-ground-mask);
+}
+
 :root[data-theme="light"] {
+  /* Light theme forces white hero copy over the artwork, so its ground has to
+     carry more of the contrast than dark theme's does. */
+  --loom-hero-ground-tint: rgba(0, 0, 0, 0.66);
   --loom-control-border: rgb(28 25 23 / 0.05) !important;
   --loom-sidebar-active-bg: rgb(28 25 23 / 0.10) !important;
   --loom-focus-ring: #a8a29e;
@@ -562,7 +614,17 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 }
 
 .loom-modern-search-overlay {
-  background: color-mix(in srgb, var(--loom-bg) 88%, transparent);
+  background: var(--loom-bg);
+  backdrop-filter: none;
+}
+
+/* Modal content is always an opaque surface. The dimmed backdrop may still
+   show the page behind it, but the dialog itself must never reveal artwork or
+   other page content through a translucent panel. */
+.loom-modal-surface {
+  background-color: var(--loom-surface) !important;
+  background-image: none !important;
+  backdrop-filter: none !important;
 }
 
 .loom-modern-search-control {
@@ -572,10 +634,13 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
 }
 
-/* Two layers with different jobs. The horizontal one carries text contrast on
-   the left and blends both side edges into the canvas. The vertical one only
-   has to blend the bottom edge — it deliberately clears by 46% so it stops
-   dimming the middle of the artwork, which the copy never sits on anyway. */
+/* Three layers with different jobs. The horizontal one blends both side edges
+   into the canvas. The radial one carries the copy's contrast and is anchored
+   under it, so the top of the artwork keeps its own light — the old build
+   washed the whole left third in page colour at full height, which dimmed the
+   top of every hero for the sake of text that only sits at the bottom. The
+   vertical one only has to blend the bottom edge — it deliberately clears by
+   46% so it stops dimming the middle of the artwork. */
 .loom-modern-hero-vignette {
   /* The artwork is intentionally constrained to the shared content frame, but
      the fade needs a small bleed past both edges. Keeping the bleed close to
@@ -588,16 +653,21 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
     linear-gradient(
       90deg,
       var(--loom-bg) 0%,
-      color-mix(in srgb, var(--loom-bg) 94%, transparent) 6%,
-      color-mix(in srgb, var(--loom-bg) 88%, transparent) 12%,
-      color-mix(in srgb, var(--loom-bg) 82%, transparent) 18%,
-      color-mix(in srgb, var(--loom-bg) 76%, transparent) 24%,
-      color-mix(in srgb, var(--loom-bg) 63%, transparent) 30%,
-      color-mix(in srgb, var(--loom-bg) 46%, transparent) 36%,
-      color-mix(in srgb, var(--loom-bg) 28%, transparent) 42%,
-      color-mix(in srgb, var(--loom-bg) 16%, transparent) 46%,
-      color-mix(in srgb, var(--loom-bg) 7%, transparent) 49%,
-      transparent 52%,
+      color-mix(in srgb, var(--loom-bg) 96%, transparent) 2%,
+      color-mix(in srgb, var(--loom-bg) 84%, transparent) 3.5%,
+      color-mix(in srgb, var(--loom-bg) 70%, transparent) 5%,
+      color-mix(in srgb, var(--loom-bg) 57%, transparent) 6.5%,
+      color-mix(in srgb, var(--loom-bg) 45%, transparent) 8%,
+      color-mix(in srgb, var(--loom-bg) 34%, transparent) 10%,
+      color-mix(in srgb, var(--loom-bg) 25%, transparent) 12%,
+      color-mix(in srgb, var(--loom-bg) 18%, transparent) 14.5%,
+      color-mix(in srgb, var(--loom-bg) 12.5%, transparent) 17%,
+      color-mix(in srgb, var(--loom-bg) 8%, transparent) 20%,
+      color-mix(in srgb, var(--loom-bg) 4.8%, transparent) 23%,
+      color-mix(in srgb, var(--loom-bg) 2.6%, transparent) 26.5%,
+      color-mix(in srgb, var(--loom-bg) 1.1%, transparent) 30%,
+      color-mix(in srgb, var(--loom-bg) 0.3%, transparent) 34%,
+      transparent 38%,
       transparent 60%,
       color-mix(in srgb, var(--loom-bg) 3%, transparent) 64%,
       color-mix(in srgb, var(--loom-bg) 8%, transparent) 69%,
@@ -623,6 +693,14 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
     );
 }
 
+/* Masking an element masks its backdrop-filter with it, so the frost ramps in
+   under the logo, summary and buttons and is gone before the top of the copy —
+   no box edge anywhere, and the artwork beside and above the copy is left
+   alone. The copy block is what the ground measures itself against. */
+.loom-modern-hero-copy {
+  anchor-name: --loom-hero-content;
+}
+
 /* The right edge needs a physical, rather than percentage-only, fade. The
    artwork stops before the page edge, so this layer reaches the canvas colour
    at that precise boundary and continues through the outer bleed. */
@@ -645,18 +723,29 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   );
 }
 
-:root[data-theme="light"][data-home-style="modern"] /* Two layers with different jobs. The horizontal one carries text contrast on
-   the left and blends both side edges into the canvas. The vertical one only
-   has to blend the bottom edge — it deliberately clears by 46% so it stops
-   dimming the middle of the artwork, which the copy never sits on anyway. */
-.loom-modern-hero-vignette {
+/* Light theme keeps forcing white hero copy over the artwork, so it needs a
+   darker ground than dark theme does — but shaped the same way, under the copy
+   rather than as a full-height band down the left. */
+:root[data-theme="light"][data-home-style="modern"] .loom-modern-hero-vignette {
   background:
     linear-gradient(
       90deg,
-      rgba(0, 0, 0, 0.94) 0%,
-      rgba(0, 0, 0, 0.72) 24%,
-      rgba(0, 0, 0, 0.24) 42%,
-      transparent 56%,
+      rgba(0, 0, 0, 0.92) 0%,
+      rgba(0, 0, 0, 0.88) 2%,
+      rgba(0, 0, 0, 0.77) 3.5%,
+      rgba(0, 0, 0, 0.64) 5%,
+      rgba(0, 0, 0, 0.52) 6.5%,
+      rgba(0, 0, 0, 0.41) 8%,
+      rgba(0, 0, 0, 0.31) 10%,
+      rgba(0, 0, 0, 0.23) 12%,
+      rgba(0, 0, 0, 0.165) 14.5%,
+      rgba(0, 0, 0, 0.115) 17%,
+      rgba(0, 0, 0, 0.073) 20%,
+      rgba(0, 0, 0, 0.044) 23%,
+      rgba(0, 0, 0, 0.024) 26.5%,
+      rgba(0, 0, 0, 0.01) 30%,
+      rgba(0, 0, 0, 0.003) 34%,
+      transparent 38%,
       transparent 84%,
       color-mix(in srgb, var(--loom-bg) 12%, transparent) 91%,
       color-mix(in srgb, var(--loom-bg) 48%, transparent) 97%,
@@ -707,6 +796,20 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   --loom-detail-frame-start: var(--loom-frame-content-start);
   --loom-detail-frame-end: var(--loom-frame-content-end);
   --loom-detail-frame-width: var(--loom-frame-content-width);
+
+  /* The home hero's backdrop is the one element allowed out of the shared
+     frame: it runs a tenth of its own width past each side, so the artwork
+     reads as a banner rather than as another framed card. Only the image
+     moves — the copy stays on the frame so it still lines up with the rails
+     below it. The left bleed stops at the rail, which is a fixed overlay the
+     artwork must not slide under. */
+  --loom-hero-artwork-bleed: calc(
+    (100vw - var(--loom-frame-content-start) - var(--loom-frame-content-end)) * 0.1
+  );
+  --loom-hero-artwork-min-start: var(--loom-sidebar-width);
+  /* Mirrors the home hero's own height class. Detail covers read from it so the
+     two heroes cannot drift apart. */
+  --loom-hero-height: clamp(38rem, 76vh, 43.2rem);
 }
 
 /* The shared page frame. Anything that should line up with the rest of the app
@@ -759,8 +862,69 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 }
 
 :root[data-home-style="modern"] .loom-modern-header {
-  right: 0;
-  left: var(--loom-sidebar-width);
+  right: var(--loom-frame-content-end);
+  left: var(--loom-frame-content-start);
+}
+
+/* Native image dragging creates a ghost preview and can accidentally select
+   artwork. Images remain clickable, but text elsewhere remains selectable. */
+img {
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+@keyframes loom-toast-lifecycle {
+  0% {
+    opacity: 0;
+    transform: translate3d(1rem, -0.35rem, 0) scale(0.96);
+  }
+  9%, 82% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0.6rem, -0.2rem, 0) scale(0.98);
+  }
+}
+
+@keyframes loom-toast-confirmation-lifecycle {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 1.25rem, 0) scale(0.92);
+  }
+  10%, 82% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 0.75rem, 0) scale(0.96);
+  }
+}
+
+.loom-toast {
+  animation-name: loom-toast-lifecycle;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+  will-change: opacity, transform;
+}
+
+.loom-toast-confirmation {
+  animation-name: loom-toast-confirmation-lifecycle;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loom-toast {
+    animation-name: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .loom-detail-page-modern .loom-artwork-fix-button {
+    display: none;
+  }
 }
 
 :root[data-home-style="modern"] .loom-library-search-modern {
@@ -804,8 +968,11 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 }
 
 .loom-modern-hero-artwork {
-  right: var(--loom-frame-content-end);
-  left: var(--loom-frame-content-start);
+  right: max(0px, calc(var(--loom-frame-content-end) - var(--loom-hero-artwork-bleed)));
+  left: max(
+    var(--loom-hero-artwork-min-start),
+    calc(var(--loom-frame-content-start) - var(--loom-hero-artwork-bleed))
+  );
   width: auto;
   max-width: none;
   margin-right: 0;
@@ -1174,23 +1341,23 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-drag-region {
   display: none;
 }
 
-.loom-player-top-control {
+.loom-player-top-controls {
   top: 1.5rem;
 }
 
-body.platform-darwin .loom-player-top-control {
+body.platform-darwin .loom-player-top-controls {
   top: 2.5rem;
 }
 
 /* Keep the old player chrome's horizontal placement, but leave a safe top
    band for the notch/camera region in macOS fullscreen. */
-.loom-player-root:fullscreen .loom-player-top-control,
-.loom-player-is-fullscreen .loom-player-top-control {
+.loom-player-root:fullscreen .loom-player-top-controls,
+.loom-player-is-fullscreen .loom-player-top-controls {
   top: 1.5rem;
 }
 
-body.platform-darwin .loom-player-root:fullscreen .loom-player-top-control,
-body.platform-darwin .loom-player-is-fullscreen .loom-player-top-control {
+body.platform-darwin .loom-player-root:fullscreen .loom-player-top-controls,
+body.platform-darwin .loom-player-is-fullscreen .loom-player-top-controls {
   top: 2.75rem;
 }
 
@@ -1266,12 +1433,15 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-top-control {
 }
 
 /* Modern home style carries the same cinematic, floating-control language into
-   movie, series, and anime details without changing the default detail layout. */
+   movie, series, and anime details without changing the default detail layout.
+   The cover takes the home hero's height rather than its own taller one, so a
+   title's banner is the same object on both pages — same size, same bleed,
+   same ground under the copy. */
 .loom-detail-page-modern .loom-detail-cover {
   --loom-detail-canvas: #000000;
-  height: 76vh;
-  min-height: 42.5rem;
-  max-height: 52rem;
+  height: var(--loom-hero-height);
+  min-height: 0;
+  max-height: none;
   background: var(--loom-bg);
 }
 
@@ -1281,19 +1451,25 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-top-control {
    declaration and drops it, so any `translate: none` reset written alongside
    `transform: none` disappeared from the bundle and the utility won. */
 .loom-detail-page-modern .loom-detail-cover-image {
-  right: var(--loom-detail-frame-end);
-  left: var(--loom-detail-frame-start);
+  right: max(0px, calc(var(--loom-detail-frame-end) - var(--loom-hero-artwork-bleed)));
+  left: max(
+    var(--loom-hero-artwork-min-start),
+    calc(var(--loom-detail-frame-start) - var(--loom-hero-artwork-bleed))
+  );
   z-index: 0;
   width: auto;
   margin: 0;
 }
 
-/* Match the Modern home hero's centred artwork frame in Electron as well.
-   The old desktop exception forced this image to 100% width, which made it
-   spill beyond the shared max-width canvas on ultrawide displays. */
+/* Match the Modern home hero's artwork frame in Electron as well, bleed and
+   all. The old desktop exception forced this image to 100% width, which made
+   it spill beyond the shared canvas on ultrawide displays. */
 body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-modern .loom-detail-cover-image {
-  right: var(--loom-detail-frame-end);
-  left: var(--loom-detail-frame-start);
+  right: max(0px, calc(var(--loom-detail-frame-end) - var(--loom-hero-artwork-bleed)));
+  left: max(
+    var(--loom-hero-artwork-min-start),
+    calc(var(--loom-detail-frame-start) - var(--loom-hero-artwork-bleed))
+  );
   z-index: 0;
   width: auto;
   max-width: none;
@@ -1303,29 +1479,36 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 /* The side fades ease out over eleven stops per edge instead of three. Alpha
    interpolated linearly between far-apart stops falls off faster than the eye
    expects in the middle of the ramp, which is what made the old 1.0 -> 0.72 ->
-   0.2 fade read as a visible band rather than a blend. */
+   0.2 fade read as a visible band rather than a blend.
+
+   Both edges run the same eleven stops mirrored around the centre. The right
+   edge used to be squeezed into the last 18% with a different curve, so the
+   artwork met the canvas gently on the left and abruptly on the right. */
 .loom-detail-page-modern .loom-detail-cover-image::after {
   background:
     linear-gradient(
       90deg,
       var(--loom-bg) 0%,
-      color-mix(in srgb, var(--loom-bg) 81.9%, transparent) 4%,
-      color-mix(in srgb, var(--loom-bg) 65.4%, transparent) 9%,
-      color-mix(in srgb, var(--loom-bg) 50.8%, transparent) 13%,
-      color-mix(in srgb, var(--loom-bg) 37.9%, transparent) 18%,
-      color-mix(in srgb, var(--loom-bg) 26.8%, transparent) 22%,
-      color-mix(in srgb, var(--loom-bg) 17.5%, transparent) 26%,
-      color-mix(in srgb, var(--loom-bg) 10.2%, transparent) 31%,
-      color-mix(in srgb, var(--loom-bg) 4.7%, transparent) 35%,
-      color-mix(in srgb, var(--loom-bg) 1.3%, transparent) 40%,
-      transparent 44%,
-      transparent 82%,
-      color-mix(in srgb, var(--loom-bg) 2%, transparent) 86%,
-      color-mix(in srgb, var(--loom-bg) 8%, transparent) 89%,
-      color-mix(in srgb, var(--loom-bg) 18%, transparent) 92%,
-      color-mix(in srgb, var(--loom-bg) 34%, transparent) 95%,
-      color-mix(in srgb, var(--loom-bg) 58%, transparent) 97%,
-      color-mix(in srgb, var(--loom-bg) 82%, transparent) 99%,
+      color-mix(in srgb, var(--loom-bg) 74%, transparent) 2%,
+      color-mix(in srgb, var(--loom-bg) 52%, transparent) 4.5%,
+      color-mix(in srgb, var(--loom-bg) 36%, transparent) 7%,
+      color-mix(in srgb, var(--loom-bg) 25%, transparent) 9.5%,
+      color-mix(in srgb, var(--loom-bg) 17%, transparent) 12%,
+      color-mix(in srgb, var(--loom-bg) 11%, transparent) 15%,
+      color-mix(in srgb, var(--loom-bg) 6.5%, transparent) 18%,
+      color-mix(in srgb, var(--loom-bg) 3.4%, transparent) 21.5%,
+      color-mix(in srgb, var(--loom-bg) 1.2%, transparent) 25%,
+      transparent 28%,
+      transparent 72%,
+      color-mix(in srgb, var(--loom-bg) 1.2%, transparent) 75%,
+      color-mix(in srgb, var(--loom-bg) 3.4%, transparent) 78.5%,
+      color-mix(in srgb, var(--loom-bg) 6.5%, transparent) 82%,
+      color-mix(in srgb, var(--loom-bg) 11%, transparent) 85%,
+      color-mix(in srgb, var(--loom-bg) 17%, transparent) 88%,
+      color-mix(in srgb, var(--loom-bg) 25%, transparent) 90.5%,
+      color-mix(in srgb, var(--loom-bg) 36%, transparent) 93%,
+      color-mix(in srgb, var(--loom-bg) 52%, transparent) 95.5%,
+      color-mix(in srgb, var(--loom-bg) 74%, transparent) 98%,
       var(--loom-bg) 100%
     );
   box-shadow: none;
@@ -1337,17 +1520,17 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   background: linear-gradient(
     180deg,
     rgba(0, 0, 0, 0.04) 0%,
-    transparent 28%,
-    color-mix(in srgb, var(--loom-detail-canvas) 1.3%, transparent) 38%,
-    color-mix(in srgb, var(--loom-detail-canvas) 4.7%, transparent) 44%,
-    color-mix(in srgb, var(--loom-detail-canvas) 10.2%, transparent) 50%,
-    color-mix(in srgb, var(--loom-detail-canvas) 17.5%, transparent) 56%,
-    color-mix(in srgb, var(--loom-detail-canvas) 26.8%, transparent) 62%,
-    color-mix(in srgb, var(--loom-detail-canvas) 37.9%, transparent) 68%,
-    color-mix(in srgb, var(--loom-detail-canvas) 50.8%, transparent) 74%,
-    color-mix(in srgb, var(--loom-detail-canvas) 65.4%, transparent) 81%,
-    color-mix(in srgb, var(--loom-detail-canvas) 81.9%, transparent) 89%,
-    var(--loom-detail-canvas) 100%
+    transparent 40%,
+    color-mix(in srgb, var(--loom-detail-canvas) 1.3%, transparent) 52%,
+    color-mix(in srgb, var(--loom-detail-canvas) 4.7%, transparent) 57%,
+    color-mix(in srgb, var(--loom-detail-canvas) 10.2%, transparent) 62%,
+    color-mix(in srgb, var(--loom-detail-canvas) 17.5%, transparent) 66%,
+    color-mix(in srgb, var(--loom-detail-canvas) 26.8%, transparent) 70%,
+    color-mix(in srgb, var(--loom-detail-canvas) 37.9%, transparent) 74%,
+    color-mix(in srgb, var(--loom-detail-canvas) 50.8%, transparent) 78%,
+    color-mix(in srgb, var(--loom-detail-canvas) 54%, transparent) 81%,
+    color-mix(in srgb, var(--loom-detail-canvas) 68%, transparent) 89%,
+    color-mix(in srgb, var(--loom-detail-canvas) 78%, transparent) 100%
   );
 }
 
@@ -1418,6 +1601,7 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
      controls above that visual layer so the blend cannot intercept clicks. */
   position: absolute;
   z-index: 6;
+  background: none;
 }
 
 .loom-detail-page-modern .loom-detail-hero-content {
@@ -1432,6 +1616,39 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   justify-content: flex-start;
   gap: 1.5rem 1rem;
   padding: 3rem 0 2.5rem;
+}
+
+/* The detail ground follows the same rule as the home hero: it is sized by the
+   copy it protects, and every edge that is not a screen edge fades out inside
+   the layer, so there is no box to see. The poster-and-metadata block is the
+   anchor, so the frost starts just above the poster and never climbs over the
+   artwork; left and bottom bleed to the viewport, where there is nothing to
+   cut. It runs the full width behind the action controls, and the mask thins it
+   out on the way — the controls paint above it, so the buttons themselves are
+   never frosted. */
+.loom-detail-page-modern .loom-detail-hero-identity {
+  position: relative;
+  z-index: 1;
+  anchor-name: --loom-detail-hero-content;
+}
+
+.loom-detail-page-modern .loom-detail-hero-content-wrap::before {
+  position: absolute;
+  position-anchor: --loom-detail-hero-content;
+  /* The fallback approximates a poster-height block, so a frame where the
+     anchor cannot resolve looks the same rather than snapping to full height. */
+  top: calc(anchor(top, 34%) - var(--loom-hero-ground-reach-y));
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  content: "";
+  pointer-events: none;
+  background: var(--loom-hero-ground-tint);
+  -webkit-backdrop-filter: blur(var(--loom-hero-ground-blur));
+  backdrop-filter: blur(var(--loom-hero-ground-blur));
+  -webkit-mask-image: var(--loom-hero-ground-mask);
+  mask-image: var(--loom-hero-ground-mask);
 }
 
 @media (min-width: 768px) {
@@ -1534,6 +1751,40 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   color: var(--loom-accent-foreground-muted);
 }
 
+/* The desktop window bottoms out at 960px wide. At that compact size, preserve
+   the hero artwork and navigation space by reducing the two primary actions to
+   their already-labelled icons. Mobile keeps its full-width labelled action. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .loom-detail-page-modern .loom-detail-hero-actions {
+    display: none;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-actions-menu {
+    display: block;
+    order: 1;
+  }
+
+  .loom-detail-page-modern .loom-detail-back {
+    width: 2.5rem;
+    padding-inline: 0;
+    justify-content: center;
+  }
+
+  .loom-detail-page-modern .loom-detail-back-label,
+  .loom-detail-page-modern .loom-detail-hero-play-label {
+    display: none;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-play {
+    flex: 0 0 3.5rem;
+    width: 3.5rem;
+    min-width: 3.5rem;
+    max-width: 3.5rem;
+    gap: 0;
+    padding-inline: 0;
+  }
+}
+
 @media (min-width: 1101px) {
   .loom-detail-page-modern .loom-detail-hero-content {
     align-items: flex-end;
@@ -1552,7 +1803,10 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   }
 }
 
+/* The category pill is 3rem tall while the side actions are 2.5rem. Moving
+   the actions down by half the difference puts all three centers on one axis. */
 .loom-detail-page-modern .loom-detail-back {
+  top: calc(1.5rem + 0.25rem);
   left: var(--loom-detail-frame-start);
   border-radius: 9999px;
 }
@@ -1562,6 +1816,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 }
 
 .loom-detail-page-modern .loom-artwork-editor-controls {
+  top: calc(1.5rem + 0.25rem);
   right: var(--loom-detail-frame-end);
 }
 
@@ -2554,6 +2809,10 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     --loom-detail-frame-start: 0px;
     --loom-detail-frame-end: 0px;
     --loom-detail-frame-width: 100%;
+    /* The hero backdrop already spans the full width here, and the rail is a
+       bottom bar, so there is nothing to bleed past or to avoid. */
+    --loom-hero-artwork-bleed: 0px;
+    --loom-hero-artwork-min-start: 0px;
   }
 
   .loom-modern-content-frame,

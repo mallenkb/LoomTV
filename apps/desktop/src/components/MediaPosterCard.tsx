@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
-import { Play, Star } from 'lucide-react';
+import { Play } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import WatchedToggle from '@/components/WatchedToggle';
+import RatingBadge from '@/components/RatingBadge';
 import ContentRatingBadge, { preferredContentRating } from '@/components/ContentRatingBadge';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
 import { artworkVariant } from '@/lib/artworkVariants';
@@ -88,16 +89,6 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
   return { imageSources, cardSources, routeArtwork };
 }
 
-function RatingBadge({ rating }: { rating?: number }) {
-  if (!rating || rating <= 0) return null;
-  return (
-    <div className="loom-chip absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-full border px-2 text-[11px] font-semibold backdrop-blur-md">
-      <Star className="h-3 w-3" fill="currentColor" />
-      {rating.toFixed(1)}
-    </div>
-  );
-}
-
 const MediaPosterCard = memo(function MediaPosterCard({
   item,
   from,
@@ -139,7 +130,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
               </div>
             )}
           />
-          <RatingBadge rating={item.rating} />
+          <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
           <div className={BACKDROP_CLASS} />
           <div className={PLAY_OVERLAY_CLASS}>
             <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
@@ -163,6 +154,8 @@ const MediaPosterCard = memo(function MediaPosterCard({
         watched={watched}
         onToggle={toggleWatched}
         className="absolute left-2 top-2 z-20"
+        iconClassName="h-4 w-4"
+        size="compact"
       />
     </div>
   );

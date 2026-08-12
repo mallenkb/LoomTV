@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -6,7 +6,9 @@ import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/L
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import MediaPosterCard from '@/components/MediaPosterCard';
+import RatingBadge from '@/components/RatingBadge';
 import ProviderMark from '@/components/ProviderMark';
+import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaRail from '@/components/MediaRail';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -337,12 +339,16 @@ type HeroProps = {
 
 function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWatched, activeIndex, itemCount, mode, onSelect, onHoverChange }: HeroProps) {
   const prefersReducedMotion = useReducedMotion();
+  const { showProviderRatingBadges } = useTheme();
   const metadataGenres = item.genres.slice(0, 2);
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
   const mediaFormat = mediaFormatLabel(item.format, item.type);
   const [headline, kicker] = splitHeroTitle(item.title);
   const mediaDetails = heroMediaDetails(item);
   const durationLabel = item.type === 'movie' ? heroDurationLabel(mediaDetails?.durationSeconds) : '';
+  const providerRatings = heroProviderRatings(item);
+  const displayedProviderRatings = showProviderRatingBadges ? providerRatings : [];
+  const hasRating = displayedProviderRatings.length > 0 || item.rating > 0;
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
   const heroLogoSources = useMemo(() => logoSources(item), [item]);
@@ -490,15 +496,28 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
             </div>
 
             <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[clamp(0.95rem,1.2vw,1.2rem)] font-semibold text-[var(--loom-on-media-muted)]">
-              {(item.rating > 0 || item.year > 0) && (
-                <span className="inline-flex items-center gap-1.5">
-                  {item.rating > 0 && (
+              {(hasRating || item.year > 0) && (
+                <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-2">
+                  {displayedProviderRatings.map((rating, index) => (
+                    <Fragment key={rating.label}>
+                      {index > 0 && <span aria-hidden="true">•</span>}
+                      <span
+                        className="loom-rating inline-flex items-center gap-1.5 text-sm text-white"
+                        title={rating.title}
+                        aria-label={`${rating.label} ${rating.value}`}
+                      >
+                        <ProviderRatingLogo provider={rating.provider} className={rating.logoClassName} />
+                        <span aria-hidden="true">{rating.value}</span>
+                      </span>
+                    </Fragment>
+                  ))}
+                  {displayedProviderRatings.length === 0 && item.rating > 0 && (
                     <span className="loom-rating inline-flex items-center gap-1.5">
                       <Star className="h-4 w-4" fill="currentColor" />
                       {item.rating.toFixed(1)}
                     </span>
                   )}
-                  {item.rating > 0 && item.year > 0 && <span aria-hidden="true">•</span>}
+                  {hasRating && item.year > 0 && <span aria-hidden="true">•</span>}
                   {item.year > 0 && <span>{item.year}</span>}
                 </span>
               )}
@@ -583,6 +602,49 @@ function heroMediaTypeLabel(item: MediaItem): string {
   return 'Movie';
 }
 
+function heroProviderRatings(item: Pick<MediaItem, 'providerRatings'>) {
+  return [
+    item.providerRatings?.imdb
+      ? {
+          label: 'IMDb',
+          value: item.providerRatings.imdb.value.toFixed(1),
+          title: item.providerRatings.imdb.votes === undefined
+            ? 'IMDb rating supplied by OMDb'
+            : `IMDb rating from ${item.providerRatings.imdb.votes.toLocaleString()} votes, supplied by OMDb`,
+          provider: 'imdb' as const,
+          logoClassName: 'h-5 w-10 object-contain',
+        }
+      : null,
+    item.providerRatings?.rottenTomatoes
+      ? {
+          label: 'Tomatometer',
+          value: `${item.providerRatings.rottenTomatoes.value.toFixed(0)}%`,
+          title: 'Rotten Tomatoes Tomatometer score supplied by OMDb',
+          provider: 'tomatometer' as const,
+          logoClassName: 'h-5 w-5 object-contain',
+        }
+      : null,
+    item.providerRatings?.popcornmeter
+      ? {
+          label: 'Popcornmeter',
+          value: `${item.providerRatings.popcornmeter.value.toFixed(0)}%`,
+          title: 'Rotten Tomatoes Popcornmeter score',
+          provider: 'popcornmeter' as const,
+          logoClassName: 'h-5 w-5 object-contain',
+        }
+      : null,
+    item.providerRatings?.metacritic
+      ? {
+          label: 'Metacritic',
+          value: item.providerRatings.metacritic.value.toFixed(0),
+          title: 'Metacritic score supplied by OMDb',
+          provider: 'metacritic' as const,
+          logoClassName: 'h-5 w-5 object-contain',
+        }
+      : null,
+  ].filter((rating): rating is NonNullable<typeof rating> => rating !== null);
+}
+
 function heroMediaDetails(item: MediaItem): MediaItem['localMetadata'] {
   if (item.type === 'movie') return item.localMetadata;
   const episodeDetails = item.episodeFiles?.find((episode) => Boolean(episode.localMetadata))?.localMetadata;
@@ -664,12 +726,7 @@ function ContinueWatchingCard({
             <Play className="ml-0.5 h-5 w-5 fill-current" />
           </span>
         </div>
-        {item.rating > 0 && (
-          <span className="absolute right-2 top-2 inline-flex h-7 items-center gap-1 rounded-full border border-[var(--loom-media-hairline)] bg-[var(--loom-media-scrim-strong)] px-2 text-[11px] font-semibold text-[var(--loom-rating)] backdrop-blur-md">
-            <Star className="h-3 w-3 fill-current" />
-            {item.rating.toFixed(1)}
-          </span>
-        )}
+        <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
         <p className="absolute bottom-4 left-3 right-3 truncate text-sm font-semibold text-[var(--loom-on-media)]">{item.title}</p>
         <div className="absolute inset-x-0 bottom-0 h-1 bg-[var(--loom-media-track)]">
           <div className="h-full bg-[var(--loom-accent)]" style={{ width: `${progressPercent}%` }} />

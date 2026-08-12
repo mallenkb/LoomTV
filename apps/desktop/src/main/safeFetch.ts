@@ -1,6 +1,7 @@
 import dns from 'node:dns/promises';
 import https from 'node:https';
 import net from 'node:net';
+import { createOperation, type CacheStatus } from './observability.ts';
 
 type ResolvedAddress = { address: string; family: number };
 type LookupImplementation = (hostname: string, options: { all: true; verbatim: true }) => Promise<ResolvedAddress[]>;
@@ -16,6 +17,9 @@ export type SafeFetchOptions = {
   lookup?: LookupImplementation;
   /** Injectable only for deterministic resolver/request boundary tests. */
   requestImpl?: PinnedRequestImplementation;
+  operation?: string;
+  provider?: string;
+  cacheStatus?: CacheStatus;
 };
 
 function isPrivateIpv4(address: string): boolean {
@@ -284,7 +288,10 @@ function stripRedirectSensitiveHeaders(headers: HeadersInit | undefined): Header
   return safe;
 }
 
-async function fetchAttempt(input: string | URL, init: RequestInit, options: Required<Omit<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl'>> & Pick<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl'>): Promise<Response> {
+type SafeFetchTransportOptions = Required<Pick<SafeFetchOptions, 'timeoutMs' | 'maxBytes' | 'retries' | 'maxRedirects'>>
+  & Pick<SafeFetchOptions, 'allowedHosts' | 'lookup' | 'requestImpl'>;
+
+async function fetchAttempt(input: string | URL, init: RequestInit, options: SafeFetchTransportOptions): Promise<Response> {
   let url = new URL(input.toString());
   let method = (init.method || 'GET').toUpperCase();
   let body = init.body;
@@ -327,6 +334,9 @@ async function fetchAttempt(input: string | URL, init: RequestInit, options: Req
 }
 
 export async function safeFetch(input: string | URL, init: RequestInit = {}, options: SafeFetchOptions = {}): Promise<Response> {
+  const target = input instanceof URL ? input : new URL(input);
+  const operation = createOperation(options.operation ?? 'provider.fetch');
+  const provider = options.provider ?? target.hostname;
   const resolved = {
     allowedHosts: options.allowedHosts,
     timeoutMs: options.timeoutMs ?? 10_000,
@@ -338,13 +348,33 @@ export async function safeFetch(input: string | URL, init: RequestInit = {}, opt
   };
   const method = (init.method || 'GET').toUpperCase();
   const mayRetry = method === 'GET' || method === 'HEAD';
-  for (let attempt = 0; attempt <= resolved.retries; attempt += 1) {
-    const response = await fetchAttempt(input, init, resolved);
-    if (mayRetry && (response.status === 429 || response.status >= 500) && attempt < resolved.retries) {
-      await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt) + Math.floor(Math.random() * 150)));
-      continue;
+  let retryCount = 0;
+  try {
+    for (let attempt = 0; attempt <= resolved.retries; attempt += 1) {
+      const response = await fetchAttempt(input, init, resolved);
+      if (mayRetry && (response.status === 429 || response.status >= 500) && attempt < resolved.retries) {
+        retryCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 250 * (2 ** attempt) + Math.floor(Math.random() * 150)));
+        continue;
+      }
+      operation.finish({
+        resultCode: response.ok ? 'success' : 'http_error',
+        cacheStatus: options.cacheStatus ?? 'not-applicable',
+        provider,
+        retryCount,
+        context: { method, status: response.status, routeFamily: 'provider' },
+      });
+      return response;
     }
-    return response;
+  } catch (error) {
+    operation.finish({
+      resultCode: error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'failed',
+      cacheStatus: options.cacheStatus ?? 'not-applicable',
+      provider,
+      retryCount,
+      context: { method, routeFamily: 'provider' },
+    });
+    throw error;
   }
   throw new Error('Provider request failed.');
 }

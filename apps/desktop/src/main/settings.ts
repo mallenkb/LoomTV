@@ -41,6 +41,7 @@ const settingsInputSchema = z.looseObject({
   localNetworkSharingEnabled: z.unknown().optional(),
   localSkipAnalysisEnabled: z.unknown().optional(),
   metadataApiKeys: z.unknown().optional(),
+  metadataOfflineMode: z.unknown().optional(),
   mpvExecutablePath: z.unknown().optional(),
   omdbApiKey: z.unknown().optional(),
   openSubtitlesAutoDownload: z.unknown().optional(),
@@ -204,6 +205,7 @@ function normalizeSettings(input: unknown): AppSettings {
     omdbApiKey: metadataApiKeys.omdb || '',
     tmdbApiKey: metadataApiKeys.tmdb || '',
     metadataApiKeys,
+    metadataOfflineMode: Boolean(raw.metadataOfflineMode),
     openSubtitlesUsername: typeof raw.openSubtitlesUsername === 'string'
       ? raw.openSubtitlesUsername.trim().slice(0, 120)
       : '',

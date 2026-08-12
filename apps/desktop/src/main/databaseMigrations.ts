@@ -52,6 +52,11 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       logo TEXT NOT NULL DEFAULT '',
       summary TEXT NOT NULL DEFAULT '',
       rating REAL NOT NULL DEFAULT 0,
+      content_rating TEXT NOT NULL DEFAULT '',
+      trailer_url TEXT NOT NULL DEFAULT '',
+      runtime TEXT NOT NULL DEFAULT '',
+      season_count INTEGER,
+      episode_count INTEGER,
       provider_ratings_json TEXT NOT NULL DEFAULT '{}',
       file_path TEXT NOT NULL,
       file_size INTEGER,
@@ -73,10 +78,13 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
     CREATE INDEX IF NOT EXISTS idx_media_items_file_path ON media_items(file_path);
 
     CREATE TABLE IF NOT EXISTS media_metadata_refresh_state (
-      media_id TEXT PRIMARY KEY,
+      media_id TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('core', 'cast', 'artwork', 'ratings', 'episodes', 'streaming-providers')),
       refreshed_at INTEGER,
-      attempted_at INTEGER NOT NULL,
-      last_error TEXT
+      attempted_at INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+      PRIMARY KEY (media_id, category)
     );
 
     CREATE TABLE IF NOT EXISTS seasons (
@@ -106,6 +114,8 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       episode INTEGER NOT NULL,
       file_path TEXT NOT NULL,
       title TEXT,
+      thumbnail TEXT NOT NULL DEFAULT '',
+      still TEXT NOT NULL DEFAULT '',
       subtitles_json TEXT NOT NULL DEFAULT '[]',
       local_metadata_json TEXT,
       PRIMARY KEY (media_id, season, episode, file_path)
@@ -310,9 +320,17 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   `);
 
   migrateMediaItemArtworkColumns(database);
+  migrateMetadataRefreshCategories(database);
   ensureColumn(database, 'media_items', 'format', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'media_items', 'provider_ratings_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(database, 'media_items', 'content_rating', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, 'media_items', 'trailer_url', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, 'media_items', 'runtime', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, 'media_items', 'season_count', 'INTEGER');
+  ensureColumn(database, 'media_items', 'episode_count', 'INTEGER');
   ensureColumn(database, 'episode_files', 'subtitles_json', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(database, 'episode_files', 'thumbnail', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, 'episode_files', 'still', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'scan_cache', 'subtitle_profile', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(database, 'scan_cache', 'ratings_refreshed_at', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(database, 'media_segment_candidates', 'analysis_metadata_json', 'TEXT');
@@ -333,6 +351,35 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migratePluginSecretStore(database);
   migrateStremioTrustStateV2(database);
   migrateLanProfileSelections(database);
+}
+
+function migrateMetadataRefreshCategories(database: BetterSqlite3.Database): void {
+  const columns = new Set((database.prepare('PRAGMA table_info(media_metadata_refresh_state)').all() as Array<{ name: string }>).map((column) => column.name));
+  if (columns.has('category') && columns.has('locked')) return;
+
+  database.transaction(() => {
+    database.exec(`
+      ALTER TABLE media_metadata_refresh_state RENAME TO media_metadata_refresh_state_legacy;
+
+      CREATE TABLE media_metadata_refresh_state (
+        media_id TEXT NOT NULL,
+        category TEXT NOT NULL CHECK (category IN ('core', 'cast', 'artwork', 'ratings', 'episodes', 'streaming-providers')),
+        refreshed_at INTEGER,
+        attempted_at INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        locked INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0, 1)),
+        PRIMARY KEY (media_id, category)
+      );
+
+      INSERT INTO media_metadata_refresh_state (
+        media_id, category, refreshed_at, attempted_at, last_error, locked
+      )
+      SELECT media_id, 'core', refreshed_at, attempted_at, last_error, 0
+      FROM media_metadata_refresh_state_legacy;
+
+      DROP TABLE media_metadata_refresh_state_legacy;
+    `);
+  })();
 }
 
 function migrateStremioTrustStateV2(database: BetterSqlite3.Database): void {

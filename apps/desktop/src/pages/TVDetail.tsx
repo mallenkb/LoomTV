@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { Bookmark, Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
+import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
@@ -21,10 +21,9 @@ import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
 import { normalizeAnimeCast } from '@/shared/animeCast';
-import WatchedToggle from '@/components/WatchedToggle';
+import DetailHeroActions from '@/components/DetailHeroActions';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
 import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
-import { readJsonResponse } from '@/lib/desktopDecoders';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -193,7 +192,6 @@ function animeCastNeedsRefresh(cast: TVShow['cast']): boolean {
   });
 }
 
-const ANILIST_API_URL = 'https://graphql.anilist.co';
 const ANILIST_CAST_QUERY = `
   query ($id: Int!) {
     Media(id: $id, type: ANIME) {
@@ -257,17 +255,11 @@ async function fetchAniListCastById(mediaId: string): Promise<TVShow['cast']> {
   const id = Number(mediaId);
   if (!Number.isSafeInteger(id) || id <= 0) return [];
 
-  const response = await fetch(ANILIST_API_URL, {
-    method: 'POST',
-    headers: {
-      accept: 'application/json',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ query: ANILIST_CAST_QUERY, variables: { id } }),
-  });
-  if (!response.ok) throw new Error(`AniList request failed: ${response.status}`);
-
-  const payload = await readJsonResponse(response, aniListCastResponseSchema, 'AniList cast');
+  const payload = aniListCastResponseSchema.parse(await desktopApi.requestMetadataProvider({
+    provider: 'anilist',
+    query: ANILIST_CAST_QUERY,
+    variables: { id },
+  }));
   if (payload.errors?.length) throw new Error(payload.errors[0]?.message || 'AniList cast request returned an error.');
   return mapAniListCast(payload.data?.Media?.characters?.edges || []);
 }
@@ -827,14 +819,16 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         <button
           type="button"
           onClick={handleBack}
+          aria-label="Back"
           className="loom-detail-back loom-no-drag fixed top-6 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
-          Back
+          <span className="loom-detail-back-label">Back</span>
         </button>
 
         <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
           <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
+          <div className="loom-detail-hero-identity flex min-w-0 flex-1 items-end gap-6">
           <SafeArtwork
             src={posterArtwork}
             placeholderSrc={fallbackThumbnails[0] || ''}
@@ -854,6 +848,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             <h1 className="text-4xl font-semibold text-white">{show.title}</h1>
             <HeroMetadata item={show} />
           </div>
+          </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
           {show.trailerUrl && <Button
             variant="outline"
@@ -866,6 +861,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           {canPlayShow && (
             <Button
               onClick={handlePlayShow}
+              aria-label={heroIsResume ? `Resume ${heroEpisodeLabel}` : `Play ${heroEpisodeLabel}`}
               className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
             >
               {heroProgressPercent > 0 && (
@@ -876,7 +872,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               )}
               <span className="relative z-10 flex items-center gap-3">
                 <Play className="h-7 w-7 fill-current" />
-                <span className="flex min-w-28 flex-col items-start leading-tight">
+                <span className="loom-detail-hero-play-label flex min-w-28 flex-col items-start leading-tight">
                   <span>{heroIsResume ? 'Resume' : 'Play'}</span>
                   <span className="text-[11px] font-medium text-[var(--loom-accent-foreground-muted)]">
                     {heroIsResume && heroProgressCopy ? `${heroEpisodeLabel} · ${heroProgressCopy}` : heroEpisodeLabel}
@@ -885,37 +881,21 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               </span>
             </Button>
           )}
-            <div className="loom-detail-hero-actions inline-flex h-14 shrink-0 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
-              {!isRemoteContent && (
-                <>
-                  <button
-                    type="button"
-                    aria-pressed={inMyList}
-                    onClick={() => void (async () => {
-                      await setListEntry(show.id, 'watchlist', !inMyList);
-                      if (inMyList) await setListEntry(show.id, 'favorite', false);
-                    })()}
-                    className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
-                    title={inMyList ? 'Remove from My List' : 'Add to My List'}
-                  >
-                    <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
-                  </button>
-                  <span className="my-auto inline-block h-7 w-px bg-white/20" />
-                </>
-              )}
-              <WatchedToggle
-                watched={isWatched}
-                onToggle={() => {
-                  if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
-                  const present = !isWatched;
-                  if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(show));
-                  void setWatchedEntries(watchedEntryKeys, present);
-                }}
-                surface="plain"
-                className="h-14 w-14 rounded-full bg-transparent text-white/80"
-                label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
-              />
-            </div>
+            <DetailHeroActions
+              canBookmark={!isRemoteContent}
+              inMyList={inMyList}
+              watched={isWatched}
+              onToggleList={() => void (async () => {
+                await setListEntry(show.id, 'watchlist', !inMyList);
+                if (inMyList) await setListEntry(show.id, 'favorite', false);
+              })()}
+              onToggleWatched={() => {
+                if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
+                const present = !isWatched;
+                if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(show));
+                void setWatchedEntries(watchedEntryKeys, present);
+              }}
+            />
           </div>
           </div>
         </div>

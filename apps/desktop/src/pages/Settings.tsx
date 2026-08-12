@@ -176,6 +176,7 @@ export default function Settings() {
   const { libraryFolderGroups, libraryFolderStatuses, isScanning, scanProgress, movies, tvShows, animeShows, autoSyncIntervalHours } = state;
 
   const [metadataKeys, setMetadataKeys] = useState<Record<string, string>>({});
+  const [metadataOfflineMode, setMetadataOfflineMode] = useState(false);
   const [openSubtitlesUsername, setOpenSubtitlesUsername] = useState('');
   const [openSubtitlesPassword, setOpenSubtitlesPassword] = useState('');
   const [openSubtitlesLanguages, setOpenSubtitlesLanguages] = useState('en');
@@ -235,7 +236,12 @@ export default function Settings() {
   const peerScanInFlightRef = useRef(false);
   const renameGenerationRef = useRef(new Map<string, number>());
   const sharedLibrarySnapshotRef = useRef<SharedLibrarySnapshot | null>(null);
-  const { theme, setTheme } = useTheme();
+  const {
+    theme,
+    setTheme,
+    showProviderRatingBadges,
+    setShowProviderRatingBadges,
+  } = useTheme();
   const openExternal = useCallback((url: string) => {
     void desktopApi.openExternal(url);
   }, []);
@@ -359,6 +365,7 @@ export default function Settings() {
         opensubtitles: s.metadataApiKeys?.opensubtitles || '',
       };
       setMetadataKeys(loadedKeys);
+      setMetadataOfflineMode(Boolean(s.metadataOfflineMode));
       setOpenSubtitlesUsername(s.openSubtitlesUsername || '');
       setOpenSubtitlesPassword(s.openSubtitlesPassword || '');
       setOpenSubtitlesLanguages(s.openSubtitlesLanguages || 'en');
@@ -538,6 +545,13 @@ export default function Settings() {
     setOpenSubtitlesAutoDownload(enabled);
     void persistSettings({ openSubtitlesAutoDownload: enabled }).then((saved) => {
       if (!saved) setOpenSubtitlesAutoDownload(!enabled);
+    });
+  }, [persistSettings]);
+
+  const handleMetadataOfflineModeChange = useCallback((enabled: boolean) => {
+    setMetadataOfflineMode(enabled);
+    void persistSettings({ metadataOfflineMode: enabled }).then((saved) => {
+      if (!saved) setMetadataOfflineMode(!enabled);
     });
   }, [persistSettings]);
 
@@ -1130,6 +1144,7 @@ export default function Settings() {
           <MetadataSettingsSection
             providers={METADATA_PROVIDERS}
             metadataKeys={metadataKeys}
+            metadataOfflineMode={metadataOfflineMode}
             editingKeys={editingKeys}
             visibleKeys={visibleKeys}
             customProviders={customProviders}
@@ -1144,6 +1159,7 @@ export default function Settings() {
             metadataKeyTestResults={metadataKeyTestResults}
             hasMetadataKeysToTest={Object.keys(cleanedMetadataKeys()).length > 0}
             setMetadataKey={setMetadataKey}
+            setMetadataOfflineMode={handleMetadataOfflineModeChange}
             setProviderEditing={setProviderEditing}
             toggleProviderVisibility={toggleProviderVisibility}
             deleteMetadataKey={handleDeleteMetadataKey}
@@ -1159,7 +1175,14 @@ export default function Settings() {
           />
         )}
 
-        {activeSection === 'theme' && <ThemeSettingsSection theme={theme} setTheme={setTheme} />}
+        {activeSection === 'theme' && (
+          <ThemeSettingsSection
+            theme={theme}
+            setTheme={setTheme}
+            showProviderRatingBadges={showProviderRatingBadges}
+            setShowProviderRatingBadges={setShowProviderRatingBadges}
+          />
+        )}
 
         {activeSection === 'about' && (
           <AboutSettingsSection

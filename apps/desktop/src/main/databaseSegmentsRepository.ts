@@ -1,5 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
+import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 import { parseStoredJson } from './runtimeValidation.ts';
 import { resolveCandidates } from './skipSegments/normalize.ts';
 import type {
@@ -72,30 +73,88 @@ const segmentCandidateSchema = z.object({
   status: z.enum(['active', 'review', 'rejected']),
   expiresAt: finiteNumber.optional(),
 });
+const segmentCandidateRowSchema = z.object({
+  id: z.string(),
+  media_id: z.string(),
+  season: finiteNumber,
+  episode: finiteNumber,
+  file_path: z.string(),
+  file_revision: z.string(),
+  release_key: z.string().nullable(),
+  type: segmentTypeSchema,
+  start_ms: finiteNumber,
+  end_ms: finiteNumber.nullable(),
+  confidence: finiteNumber,
+  source: segmentSourceSchema,
+  status: z.enum(['active', 'review', 'rejected']),
+  media_duration_ms: finiteNumber,
+  updated_at: finiteNumber,
+  expires_at: finiteNumber.nullable(),
+  analysis_metadata_json: z.string().nullable(),
+});
+type SegmentCandidateRow = z.infer<typeof segmentCandidateRowSchema>;
+const segmentSourceCacheRowSchema = z.object({
+  provider: z.enum(['theintrodb', 'aniskip']),
+  lookup_key: z.string(),
+  duration_bucket: finiteNumber,
+  status: z.enum(['success', 'empty']),
+  segments_json: z.string(),
+  fetched_at: finiteNumber,
+  expires_at: finiteNumber,
+  stale_until: finiteNumber,
+});
+const candidateIdentityRowSchema = z.object({ id: z.string(), file_revision: z.string() });
+const manualHistoryRowSchema = z.object({ history_id: z.number().int(), snapshot_json: z.string() });
+const fingerprintRowSchema = z.object({
+  file_revision: z.string(),
+  audio_track: finiteNumber,
+  window_type: z.enum(['intro', 'credits', 'recap', 'preview']),
+  algorithm_version: z.string(),
+  fingerprint_json: z.string(),
+  duration_ms: finiteNumber,
+  updated_at: finiteNumber,
+});
+const analysisJobKindSchema = z.enum(['manual', 'incremental', 'hash-recompute', 'cleanup']);
+const analysisJobStateSchema = z.enum(['pending', 'running', 'waiting_for_peers', 'complete', 'error', 'cancelled']);
+const analysisJobRowSchema = z.object({
+  job_key: z.string(),
+  kind: analysisJobKindSchema,
+  media_id: z.string(),
+  season: finiteNumber,
+  episode: finiteNumber,
+  file_revision: z.string(),
+  config_hash: z.string(),
+  state: analysisJobStateSchema,
+  detail: z.string(),
+  created_at: finiteNumber,
+  updated_at: finiteNumber,
+});
+const analysisJobCountRowSchema = z.object({ state: analysisJobStateSchema, count: finiteNumber });
+const analysisJobStateRowSchema = z.object({ state: analysisJobStateSchema });
+const analysisInventoryRowSchema = z.object({
+  file_revision: z.string(),
+  media_id: z.string(),
+  season: finiteNumber,
+  episode: finiteNumber,
+  config_hash: z.string(),
+  fingerprint_version: z.string(),
+  analyzed_at: finiteNumber,
+});
+const fileRevisionRowSchema = z.object({ file_revision: z.string() });
+const countRowSchema = z.object({ count: finiteNumber });
+const byteCountRowSchema = z.object({ bytes: finiteNumber });
+const analysisStateRowSchema = z.object({
+  job_key: z.string(),
+  media_id: z.string(),
+  season: finiteNumber,
+  state: z.string(),
+  detail: z.string(),
+  updated_at: finiteNumber,
+});
 
 export function createDatabaseSegmentsRepository(database: BetterSqlite3.Database) {
   const getDb = (): BetterSqlite3.Database => database;
   const jsonString = (value: unknown): string => JSON.stringify(value ?? null);
-
-  type SegmentCandidateRow = {
-    id: string;
-    media_id: string;
-    season: number;
-    episode: number;
-    file_path: string;
-    file_revision: string;
-    release_key: string | null;
-    type: MediaSegmentCandidate['type'];
-    start_ms: number;
-    end_ms: number | null;
-    confidence: number;
-    source: MediaSegmentCandidate['source'];
-    status: MediaSegmentCandidate['status'];
-    media_duration_ms: number;
-    updated_at: number;
-    expires_at: number | null;
-    analysis_metadata_json: string | null;
-  };
 
   function candidateFromRow(row: SegmentCandidateRow): MediaSegmentCandidate {
     return {
@@ -152,20 +211,15 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     lookupKey: string,
     durationBucket: number,
   ): ProviderCacheEntry | null {
-    const row = getDb().prepare(`
-      SELECT provider, lookup_key, duration_bucket, status, segments_json, fetched_at, expires_at, stale_until
-      FROM segment_source_cache
-      WHERE provider = ? AND lookup_key = ? AND duration_bucket = ?
-    `).get(provider, lookupKey, durationBucket) as {
-      provider: ProviderCacheEntry['provider'];
-      lookup_key: string;
-      duration_bucket: number;
-      status: ProviderCacheEntry['status'];
-      segments_json: string;
-      fetched_at: number;
-      expires_at: number;
-      stale_until: number;
-    } | undefined;
+    const row = parseDatabaseRow(
+      getDb().prepare(`
+        SELECT provider, lookup_key, duration_bucket, status, segments_json, fetched_at, expires_at, stale_until
+        FROM segment_source_cache
+        WHERE provider = ? AND lookup_key = ? AND duration_bucket = ?
+      `).get(provider, lookupKey, durationBucket),
+      segmentSourceCacheRowSchema.optional(),
+      'segment source cache',
+    );
     if (!row) return null;
     return {
       provider: row.provider,
@@ -197,18 +251,26 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   }
 
   function getSegmentCandidates(fileRevision: string): MediaSegmentCandidate[] {
-    const rows = getDb().prepare(`
-      SELECT * FROM media_segment_candidates
-      WHERE file_revision = ? AND (expires_at IS NULL OR expires_at > ?)
-    `).all(fileRevision, Date.now()) as SegmentCandidateRow[];
+    const rows = parseDatabaseRows(
+      getDb().prepare(`
+        SELECT * FROM media_segment_candidates
+        WHERE file_revision = ? AND (expires_at IS NULL OR expires_at > ?)
+      `).all(fileRevision, Date.now()),
+      segmentCandidateRowSchema,
+      'media segment candidate',
+    );
     return rows.map(candidateFromRow);
   }
 
   function getManualSegmentCandidates(mediaId: string, season: number, episode: number): MediaSegmentCandidate[] {
-    const rows = getDb().prepare(`
-      SELECT * FROM media_segment_candidates
-      WHERE media_id = ? AND season = ? AND episode = ? AND source = 'manual'
-    `).all(mediaId, season, episode) as SegmentCandidateRow[];
+    const rows = parseDatabaseRows(
+      getDb().prepare(`
+        SELECT * FROM media_segment_candidates
+        WHERE media_id = ? AND season = ? AND episode = ? AND source = 'manual'
+      `).all(mediaId, season, episode),
+      segmentCandidateRowSchema,
+      'manual media segment candidate',
+    );
     return rows.map(candidateFromRow);
   }
 
@@ -219,8 +281,11 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     if (season !== undefined) { clauses.push('season = ?'); values.push(season); }
     if (episode !== undefined) { clauses.push('episode = ?'); values.push(episode); }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-    const rows = getDb().prepare(`SELECT * FROM media_segment_candidates ${where} ORDER BY media_id, season, episode, start_ms LIMIT 5000`)
-      .all(...values) as SegmentCandidateRow[];
+    const rows = parseDatabaseRows(
+      getDb().prepare(`SELECT * FROM media_segment_candidates ${where} ORDER BY media_id, season, episode, start_ms LIMIT 5000`).all(...values),
+      segmentCandidateRowSchema,
+      'managed media segment candidate',
+    );
     return rows.map(candidateFromRow);
   }
 
@@ -229,7 +294,11 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     patch: { status?: MediaSegmentCandidate['status']; type?: MediaSegmentCandidate['type'] },
   ): boolean {
     const database = getDb();
-    const row = database.prepare('SELECT * FROM media_segment_candidates WHERE id = ?').get(candidateId) as SegmentCandidateRow | undefined;
+    const row = parseDatabaseRow(
+      database.prepare('SELECT * FROM media_segment_candidates WHERE id = ?').get(candidateId),
+      segmentCandidateRowSchema.optional(),
+      'media segment candidate',
+    );
     if (!row) return false;
     const existing = candidateFromRow(row);
     if (existing.source === 'manual') return false;
@@ -259,8 +328,11 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     const values: Array<string | number> = [mediaId];
     if (season !== undefined) { clauses.push('season = ?'); values.push(season); }
     if (episode !== undefined) { clauses.push('episode = ?'); values.push(episode); }
-    const rows = database.prepare(`SELECT id, file_revision FROM media_segment_candidates WHERE ${clauses.join(' AND ')}`)
-      .all(...values) as Array<{ id: string; file_revision: string }>;
+    const rows = parseDatabaseRows(
+      database.prepare(`SELECT id, file_revision FROM media_segment_candidates WHERE ${clauses.join(' AND ')}`).all(...values),
+      candidateIdentityRowSchema,
+      'automatic media segment candidate',
+    );
     if (!rows.length) return 0;
     database.transaction(() => {
       const remove = database.prepare('DELETE FROM media_segment_candidates WHERE id = ?');
@@ -276,9 +348,11 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     candidates: MediaSegmentCandidate[],
   ): MediaSegment[] {
     const database = getDb();
-    const existing = (database.prepare(`
-      SELECT * FROM media_segment_candidates WHERE file_revision = ? AND source = ?
-    `).all(fileRevision, source) as SegmentCandidateRow[]).map(candidateFromRow);
+    const existing = parseDatabaseRows(
+      database.prepare('SELECT * FROM media_segment_candidates WHERE file_revision = ? AND source = ?').all(fileRevision, source),
+      segmentCandidateRowSchema,
+      'source media segment candidate',
+    ).map(candidateFromRow);
     const existingById = new Map(existing.map((candidate) => [candidate.id, candidate]));
     const effectiveCandidates = candidates.map((candidate) => {
       const decision = existingById.get(candidate.id)?.analysisMetadata?.userDecision;
@@ -323,11 +397,12 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   function saveManualSegmentCandidate(candidate: MediaSegmentCandidate, replaceCandidateId?: string): MediaSegment[] {
     const database = getDb();
     const tx = database.transaction(() => {
-      const existing = (replaceCandidateId || candidate.type === 'credits'
+      const rawExisting = replaceCandidateId || candidate.type === 'credits'
         ? database.prepare(`SELECT * FROM media_segment_candidates WHERE file_revision = ? AND id = ? AND source = 'manual'`)
           .all(candidate.fileRevision, replaceCandidateId || candidate.id)
         : database.prepare(`SELECT * FROM media_segment_candidates WHERE file_revision = ? AND type = ? AND source = 'manual'`)
-          .all(candidate.fileRevision, candidate.type)) as SegmentCandidateRow[];
+          .all(candidate.fileRevision, candidate.type);
+      const existing = parseDatabaseRows(rawExisting, segmentCandidateRowSchema, 'manual media segment candidate');
       for (const row of existing) {
         database.prepare(`
           INSERT INTO segment_manual_history (candidate_id, action, snapshot_json, changed_at)
@@ -349,9 +424,10 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   ): MediaSegment[] {
     const database = getDb();
     const tx = database.transaction(() => {
-      const rows = (candidateId
+      const rawRows = candidateId
         ? database.prepare(`SELECT * FROM media_segment_candidates WHERE file_revision = ? AND id = ? AND source = 'manual'`).all(fileRevision, candidateId)
-        : database.prepare(`SELECT * FROM media_segment_candidates WHERE file_revision = ? AND type = ? AND source = 'manual'`).all(fileRevision, type)) as SegmentCandidateRow[];
+        : database.prepare(`SELECT * FROM media_segment_candidates WHERE file_revision = ? AND type = ? AND source = 'manual'`).all(fileRevision, type);
+      const rows = parseDatabaseRows(rawRows, segmentCandidateRowSchema, 'manual media segment candidate');
       const revisions = new Set(rows.map((row) => row.file_revision));
       for (const row of rows) {
         database.prepare(`
@@ -374,10 +450,14 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   ): MediaSegment[] {
     const database = getDb();
     const tx = database.transaction(() => {
-      const history = database.prepare(`
-        SELECT history_id, snapshot_json FROM segment_manual_history
-        WHERE snapshot_json IS NOT NULL ORDER BY changed_at DESC, history_id DESC LIMIT 200
-      `).all() as Array<{ history_id: number; snapshot_json: string }>;
+      const history = parseDatabaseRows(
+        database.prepare(`
+          SELECT history_id, snapshot_json FROM segment_manual_history
+          WHERE snapshot_json IS NOT NULL ORDER BY changed_at DESC, history_id DESC LIMIT 200
+        `).all(),
+        manualHistoryRowSchema,
+        'manual media segment history',
+      );
       const match = history.map((row) => ({
         row,
         candidate: parseStoredJson(row.snapshot_json, segmentCandidateSchema.nullable(), null),
@@ -417,10 +497,14 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   }
 
   function refreshResolvedSegments(fileRevision: string, database = getDb()): MediaSegment[] {
-    const candidates = (database.prepare(`
-      SELECT * FROM media_segment_candidates
-      WHERE file_revision = ? AND (expires_at IS NULL OR expires_at > ?)
-    `).all(fileRevision, Date.now()) as SegmentCandidateRow[]).map(candidateFromRow);
+    const candidates = parseDatabaseRows(
+      database.prepare(`
+        SELECT * FROM media_segment_candidates
+        WHERE file_revision = ? AND (expires_at IS NULL OR expires_at > ?)
+      `).all(fileRevision, Date.now()),
+      segmentCandidateRowSchema,
+      'media segment candidate',
+    ).map(candidateFromRow);
     const segments = resolveCandidates(candidates);
     database.prepare('DELETE FROM media_segments WHERE file_revision = ?').run(fileRevision);
     const insert = database.prepare(`
@@ -455,14 +539,15 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     windowType: StoredMediaFingerprint['windowType'],
     algorithmVersion: string,
   ): StoredMediaFingerprint | null {
-    const row = getDb().prepare(`
-      SELECT file_revision, audio_track, window_type, algorithm_version, fingerprint_json, duration_ms, updated_at
-      FROM media_fingerprints
-      WHERE file_revision = ? AND audio_track = ? AND window_type = ? AND algorithm_version = ?
-    `).get(fileRevision, audioTrack, windowType, algorithmVersion) as {
-      file_revision: string; audio_track: number; window_type: StoredMediaFingerprint['windowType'];
-      algorithm_version: string; fingerprint_json: string; duration_ms: number; updated_at: number;
-    } | undefined;
+    const row = parseDatabaseRow(
+      getDb().prepare(`
+        SELECT file_revision, audio_track, window_type, algorithm_version, fingerprint_json, duration_ms, updated_at
+        FROM media_fingerprints
+        WHERE file_revision = ? AND audio_track = ? AND window_type = ? AND algorithm_version = ?
+      `).get(fileRevision, audioTrack, windowType, algorithmVersion),
+      fingerprintRowSchema.optional(),
+      'media fingerprint',
+    );
     return row ? {
       fileRevision: row.file_revision,
       audioTrack: row.audio_track,
@@ -496,14 +581,15 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     windowType: string,
     algorithmVersion: string,
   ): StoredMediaFingerprint | null {
-    const row = getDb().prepare(`
-      SELECT file_revision, audio_track, window_type, algorithm_version, fingerprint_json, duration_ms, updated_at
-      FROM media_auxiliary_fingerprints
-      WHERE file_revision = ? AND audio_track = ? AND window_type = ? AND algorithm_version = ?
-    `).get(fileRevision, audioTrack, windowType, algorithmVersion) as {
-      file_revision: string; audio_track: number; window_type: StoredMediaFingerprint['windowType'];
-      algorithm_version: string; fingerprint_json: string; duration_ms: number; updated_at: number;
-    } | undefined;
+    const row = parseDatabaseRow(
+      getDb().prepare(`
+        SELECT file_revision, audio_track, window_type, algorithm_version, fingerprint_json, duration_ms, updated_at
+        FROM media_auxiliary_fingerprints
+        WHERE file_revision = ? AND audio_track = ? AND window_type = ? AND algorithm_version = ?
+      `).get(fileRevision, audioTrack, windowType, algorithmVersion),
+      fingerprintRowSchema.optional(),
+      'auxiliary media fingerprint',
+    );
     return row ? {
       fileRevision: row.file_revision,
       audioTrack: row.audio_track,
@@ -543,11 +629,7 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
       job.configHash, job.state, job.detail, job.createdAt, job.updatedAt);
   }
 
-  function analysisJobFromRow(row: {
-    job_key: string; kind: SegmentAnalysisJob['kind']; media_id: string; season: number; episode: number;
-    file_revision: string; config_hash: string; state: SegmentAnalysisJobState; detail: string;
-    created_at: number; updated_at: number;
-  }): SegmentAnalysisJob {
+  function analysisJobFromRow(row: z.infer<typeof analysisJobRowSchema>): SegmentAnalysisJob {
     return {
       jobKey: row.job_key, kind: row.kind, mediaId: row.media_id, season: row.season,
       episode: row.episode, fileRevision: row.file_revision, configHash: row.config_hash,
@@ -562,18 +644,23 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
           ORDER BY CASE kind WHEN 'manual' THEN 0 WHEN 'incremental' THEN 1 WHEN 'hash-recompute' THEN 2 ELSE 3 END, created_at LIMIT ?`)
         .all(...states, cappedLimit)
       : getDb().prepare('SELECT * FROM segment_analysis_jobs ORDER BY updated_at DESC LIMIT ?').all(cappedLimit);
-    return (rows as Parameters<typeof analysisJobFromRow>[0][]).map(analysisJobFromRow);
+    return parseDatabaseRows(rows, analysisJobRowSchema, 'segment analysis job').map(analysisJobFromRow);
   }
 
   function getSegmentAnalysisJobCounts(kind?: SegmentAnalysisJob['kind']): Partial<Record<SegmentAnalysisJobState, number>> {
-    const rows = (kind
+    const rawRows = kind
       ? getDb().prepare('SELECT state, COUNT(*) AS count FROM segment_analysis_jobs WHERE kind = ? GROUP BY state').all(kind)
-      : getDb().prepare('SELECT state, COUNT(*) AS count FROM segment_analysis_jobs GROUP BY state').all()) as Array<{ state: SegmentAnalysisJobState; count: number }>;
+      : getDb().prepare('SELECT state, COUNT(*) AS count FROM segment_analysis_jobs GROUP BY state').all();
+    const rows = parseDatabaseRows(rawRows, analysisJobCountRowSchema, 'segment analysis job count');
     return Object.fromEntries(rows.map((row) => [row.state, row.count]));
   }
 
   function updateSegmentAnalysisJob(jobKey: string, state: SegmentAnalysisJobState, detail = ''): void {
-    const current = getDb().prepare('SELECT state FROM segment_analysis_jobs WHERE job_key = ?').get(jobKey) as { state: SegmentAnalysisJobState } | undefined;
+    const current = parseDatabaseRow(
+      getDb().prepare('SELECT state FROM segment_analysis_jobs WHERE job_key = ?').get(jobKey),
+      analysisJobStateRowSchema.optional(),
+      'segment analysis job state',
+    );
     if (!current || !canTransitionSegmentAnalysisJob(current.state, state)) return;
     const now = Date.now();
     getDb().prepare(`UPDATE segment_analysis_jobs
@@ -599,12 +686,10 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
 
   function getSegmentAnalysisInventory(fileRevisions?: string[]): SegmentAnalysisInventory[] {
     if (fileRevisions && !fileRevisions.length) return [];
-    const rows = (fileRevisions
+    const rawRows = fileRevisions
       ? getDb().prepare(`SELECT * FROM segment_analysis_inventory WHERE file_revision IN (${fileRevisions.map(() => '?').join(',')}) ORDER BY analyzed_at DESC`).all(...fileRevisions)
-      : getDb().prepare('SELECT * FROM segment_analysis_inventory ORDER BY analyzed_at DESC').all()) as Array<{
-      file_revision: string; media_id: string; season: number; episode: number; config_hash: string;
-      fingerprint_version: string; analyzed_at: number;
-    }>;
+      : getDb().prepare('SELECT * FROM segment_analysis_inventory ORDER BY analyzed_at DESC').all();
+    const rows = parseDatabaseRows(rawRows, analysisInventoryRowSchema, 'segment analysis inventory');
     return rows.map((row) => ({
       fileRevision: row.file_revision, mediaId: row.media_id, season: row.season, episode: row.episode,
       configHash: row.config_hash, fingerprintVersion: row.fingerprint_version, analyzedAt: row.analyzed_at,
@@ -618,16 +703,20 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
     database.prepare('DELETE FROM active_analysis_revisions').run();
     const insertActive = database.prepare('INSERT OR IGNORE INTO active_analysis_revisions (file_revision) VALUES (?)');
     database.transaction(() => { for (const revision of activeRevisions) insertActive.run(revision); })();
-    const rows = database.prepare(`
-      SELECT file_revision FROM (
-        SELECT file_revision FROM segment_analysis_inventory
-        UNION SELECT file_revision FROM segment_analysis_jobs
-        UNION SELECT file_revision FROM media_fingerprints
-        UNION SELECT file_revision FROM media_auxiliary_fingerprints
-      ) revisions
-      WHERE NOT EXISTS (SELECT 1 FROM active_analysis_revisions active WHERE active.file_revision = revisions.file_revision)
-      ORDER BY file_revision LIMIT ?
-    `).all(cappedLimit) as Array<{ file_revision: string }>;
+    const rows = parseDatabaseRows(
+      database.prepare(`
+        SELECT file_revision FROM (
+          SELECT file_revision FROM segment_analysis_inventory
+          UNION SELECT file_revision FROM segment_analysis_jobs
+          UNION SELECT file_revision FROM media_fingerprints
+          UNION SELECT file_revision FROM media_auxiliary_fingerprints
+        ) revisions
+        WHERE NOT EXISTS (SELECT 1 FROM active_analysis_revisions active WHERE active.file_revision = revisions.file_revision)
+        ORDER BY file_revision LIMIT ?
+      `).all(cappedLimit),
+      fileRevisionRowSchema,
+      'orphaned segment analysis revision',
+    );
     const candidates = rows.map((row) => row.file_revision);
     if (!candidates.length) return 0;
     database.transaction(() => {
@@ -644,14 +733,14 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   }
 
   function fingerprintCount(): number {
-    const primary = getDb().prepare('SELECT COUNT(*) AS count FROM media_fingerprints').get() as { count: number };
-    const auxiliary = getDb().prepare('SELECT COUNT(*) AS count FROM media_auxiliary_fingerprints').get() as { count: number };
+    const primary = parseDatabaseRow(getDb().prepare('SELECT COUNT(*) AS count FROM media_fingerprints').get(), countRowSchema, 'media fingerprint count');
+    const auxiliary = parseDatabaseRow(getDb().prepare('SELECT COUNT(*) AS count FROM media_auxiliary_fingerprints').get(), countRowSchema, 'auxiliary media fingerprint count');
     return primary.count + auxiliary.count;
   }
 
   function fingerprintCacheBytes(): number {
-    const primary = getDb().prepare('SELECT COALESCE(SUM(LENGTH(fingerprint_json)), 0) AS bytes FROM media_fingerprints').get() as { bytes: number };
-    const auxiliary = getDb().prepare('SELECT COALESCE(SUM(LENGTH(fingerprint_json)), 0) AS bytes FROM media_auxiliary_fingerprints').get() as { bytes: number };
+    const primary = parseDatabaseRow(getDb().prepare('SELECT COALESCE(SUM(LENGTH(fingerprint_json)), 0) AS bytes FROM media_fingerprints').get(), byteCountRowSchema, 'media fingerprint byte count');
+    const auxiliary = parseDatabaseRow(getDb().prepare('SELECT COALESCE(SUM(LENGTH(fingerprint_json)), 0) AS bytes FROM media_auxiliary_fingerprints').get(), byteCountRowSchema, 'auxiliary media fingerprint byte count');
     return primary.bytes + auxiliary.bytes;
   }
 
@@ -684,9 +773,16 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
 
   function resetAutomaticAnalysisData(): number {
     const database = getDb();
-    const rows = database.prepare("SELECT DISTINCT file_revision FROM media_segment_candidates WHERE source != 'manual'")
-      .all() as Array<{ file_revision: string }>;
-    const removed = (database.prepare("SELECT COUNT(*) AS count FROM media_segment_candidates WHERE source != 'manual'").get() as { count: number }).count;
+    const rows = parseDatabaseRows(
+      database.prepare("SELECT DISTINCT file_revision FROM media_segment_candidates WHERE source != 'manual'").all(),
+      fileRevisionRowSchema,
+      'automatic media segment revision',
+    );
+    const removed = parseDatabaseRow(
+      database.prepare("SELECT COUNT(*) AS count FROM media_segment_candidates WHERE source != 'manual'").get(),
+      countRowSchema,
+      'automatic media segment count',
+    ).count;
     database.transaction(() => {
       database.prepare("DELETE FROM media_segment_candidates WHERE source != 'manual'").run();
       database.prepare('DELETE FROM segment_analysis_inventory').run();
@@ -714,11 +810,10 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
   function getSegmentAnalysisStates(mediaId?: string): Array<{
     jobKey: string; mediaId: string; season: number; state: string; detail: string; updatedAt: number;
   }> {
-    const rows = (mediaId
+    const rawRows = mediaId
       ? getDb().prepare('SELECT * FROM segment_analysis_state WHERE media_id = ? ORDER BY updated_at DESC').all(mediaId)
-      : getDb().prepare('SELECT * FROM segment_analysis_state ORDER BY updated_at DESC').all()) as Array<{
-        job_key: string; media_id: string; season: number; state: string; detail: string; updated_at: number;
-      }>;
+      : getDb().prepare('SELECT * FROM segment_analysis_state ORDER BY updated_at DESC').all();
+    const rows = parseDatabaseRows(rawRows, analysisStateRowSchema, 'segment analysis state');
     return rows.map((row) => ({
       jobKey: row.job_key,
       mediaId: row.media_id,
@@ -731,19 +826,23 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
 
   function cleanupOrphanedAutomaticSegments(limit = 250): number {
     const database = getDb();
-    const rows = database.prepare(`
-      SELECT id, file_revision FROM media_segment_candidates
-      WHERE source != 'manual'
-        AND NOT EXISTS (
-          SELECT 1 FROM episode_files WHERE episode_files.file_path = media_segment_candidates.file_path
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM media_items
-          WHERE media_items.file_path = media_segment_candidates.file_path
-            AND media_items.file_path != ''
-        )
-      LIMIT ?
-    `).all(Math.max(1, Math.min(1000, limit))) as Array<{ id: string; file_revision: string }>;
+    const rows = parseDatabaseRows(
+      database.prepare(`
+        SELECT id, file_revision FROM media_segment_candidates
+        WHERE source != 'manual'
+          AND NOT EXISTS (
+            SELECT 1 FROM episode_files WHERE episode_files.file_path = media_segment_candidates.file_path
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM media_items
+            WHERE media_items.file_path = media_segment_candidates.file_path
+              AND media_items.file_path != ''
+          )
+        LIMIT ?
+      `).all(Math.max(1, Math.min(1000, limit))),
+      candidateIdentityRowSchema,
+      'orphaned automatic media segment candidate',
+    );
     if (!rows.length) return 0;
     const tx = database.transaction(() => {
       const remove = database.prepare('DELETE FROM media_segment_candidates WHERE id = ?');

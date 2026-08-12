@@ -6,6 +6,7 @@ import ProviderMark from '@/components/ProviderMark';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaTechnicalBadges, { mediaTechnicalMetadata } from '@/components/MediaTechnicalBadges';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
+import { useTheme } from '@/components/ThemeProvider';
 
 type HeroMetadataProps = {
   item: Pick<MediaItem, 'id' | 'type' | 'format' | 'genres' | 'rating' | 'providerRatings' | 'year' | 'contentRatings' | 'contentRating' | 'streamingProviders' | 'originPlatform' | 'runtime' | 'seasonCount' | 'episodeCount' | 'localMetadata' | 'seasons' | 'episodes' | 'episodeFiles'>;
@@ -33,6 +34,7 @@ function episodeCountFromRuntime(runtime?: string): number {
 }
 
 export default function HeroMetadata({ item }: HeroMetadataProps) {
+  const { showProviderRatingBadges } = useTheme();
   const contentRating = preferredContentRating(item.contentRatings, item.contentRating);
   const mediaType = item.type === 'anime' ? 'Anime' : item.type === 'tv' ? 'TV Show' : 'Movie';
   const mediaFormat = mediaFormatLabel(item.format, item.type);
@@ -110,7 +112,8 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
         }
       : null,
   ].filter((rating): rating is NonNullable<typeof rating> => rating !== null);
-  const hasRating = providerRatings.length > 0 || item.rating > 0;
+  const displayedProviderRatings = showProviderRatingBadges ? providerRatings : [];
+  const hasRating = displayedProviderRatings.length > 0 || item.rating > 0;
   const technicalMetadata = mediaTechnicalMetadata(item);
   const hasTechnicalMetadata = Boolean(
     technicalMetadata.resolution || technicalMetadata.audio || technicalMetadata.hasSubtitles,
@@ -136,7 +139,7 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
 
       {(hasRating || secondaryMetadata.length > 0 || hasTechnicalMetadata) && (
         <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(0.95rem,1.2vw,1.2rem)] font-semibold text-[var(--loom-on-media-muted)]">
-          {providerRatings.map((rating, index) => (
+          {displayedProviderRatings.map((rating, index) => (
             <Fragment key={rating.label}>
               {index > 0 && <span aria-hidden="true">•</span>}
               <span
@@ -149,7 +152,7 @@ export default function HeroMetadata({ item }: HeroMetadataProps) {
               </span>
             </Fragment>
           ))}
-          {providerRatings.length === 0 && item.rating > 0 && (
+          {displayedProviderRatings.length === 0 && item.rating > 0 && (
             <span className="loom-rating inline-flex items-center gap-1.5">
               <Star className="h-4 w-4" fill="currentColor" />
               {item.rating.toFixed(1)}

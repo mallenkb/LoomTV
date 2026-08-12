@@ -43,6 +43,13 @@ interface TMDBEpisode {
   air_date?: string;
 }
 
+interface TMDBVideo {
+  key?: string;
+  site?: string;
+  type?: string;
+  official?: boolean;
+}
+
 interface TMDBImage {
   file_path?: string | null;
   iso_639_1?: string | null;
@@ -79,6 +86,10 @@ interface TMDBMedia {
   backdrop_path?: string | null;
   overview?: string;
   vote_average?: number;
+  runtime?: number;
+  number_of_seasons?: number;
+  number_of_episodes?: number;
+  episode_run_time?: number[];
   release_date?: string;
   first_air_date?: string;
   genres?: TMDBGenre[];
@@ -97,6 +108,7 @@ interface TMDBMedia {
     results?: Array<{ iso_3166_1?: string; rating?: string }>;
   };
   'watch/providers'?: TMDBWatchProviderResponse;
+  videos?: { results?: TMDBVideo[] };
 }
 
 interface TMDBSearchResponse {
@@ -128,6 +140,12 @@ const tmdbEpisodeSchema: z.ZodType<TMDBEpisode> = z.object({
   vote_average: z.number().finite().optional(),
   air_date: z.string().optional(),
 });
+const tmdbVideoSchema: z.ZodType<TMDBVideo> = z.object({
+  key: z.string().optional(),
+  site: z.string().optional(),
+  type: z.string().optional(),
+  official: z.boolean().optional(),
+});
 const tmdbImageSchema: z.ZodType<TMDBImage> = z.object({
   file_path: z.string().nullable().optional(),
   iso_639_1: z.string().nullable().optional(),
@@ -157,6 +175,10 @@ const tmdbMediaSchema: z.ZodType<TMDBMedia> = z.object({
   backdrop_path: z.string().nullable().optional(),
   overview: z.string().optional(),
   vote_average: z.number().finite().optional(),
+  runtime: z.number().finite().nonnegative().optional(),
+  number_of_seasons: z.number().finite().nonnegative().optional(),
+  number_of_episodes: z.number().finite().nonnegative().optional(),
+  episode_run_time: z.array(z.number().finite().nonnegative()).optional(),
   release_date: z.string().optional(),
   first_air_date: z.string().optional(),
   genres: z.array(tmdbGenreSchema).optional(),
@@ -184,6 +206,7 @@ const tmdbMediaSchema: z.ZodType<TMDBMedia> = z.object({
     })).optional(),
   }).optional(),
   'watch/providers': tmdbWatchProviderResponseSchema.optional(),
+  videos: z.object({ results: z.array(tmdbVideoSchema).optional() }).optional(),
 });
 const tmdbSearchResponseSchema: z.ZodType<TMDBSearchResponse> = z.object({
   results: z.array(tmdbMediaSchema).optional(),
@@ -284,6 +307,22 @@ function tmdbContentRatings(d: TMDBMedia): Record<string, ContentRating> {
   }
   for (const result of d.content_ratings?.results || []) accept(result.iso_3166_1, result.rating);
   return ratings;
+}
+
+function tmdbTrailerUrl(d: TMDBMedia): string {
+  const videos = d.videos?.results || [];
+  const trailer = [...videos]
+    .filter((video) => video.key && video.site?.toLowerCase() === 'youtube')
+    .sort((left, right) => {
+      const score = (video: TMDBVideo) => (
+        (video.type?.toLowerCase() === 'trailer' ? 2 : 0)
+        + (video.official ? 1 : 0)
+      );
+      return score(right) - score(left);
+    })[0];
+  return trailer?.key
+    ? `https://www.youtube.com/watch?v=${encodeURIComponent(trailer.key)}`
+    : '';
 }
 
 function systemRegionCode(): string {
@@ -422,6 +461,8 @@ function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<Me
     logoCandidates: tmdbLogoCandidates(d),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
+    runtime: d.runtime && d.runtime > 0 ? `${d.runtime}m` : undefined,
+    trailerUrl: tmdbTrailerUrl(d) || undefined,
     contentRatings: tmdbContentRatings(d),
     streamingProviders: tmdbStreamingProviders(d),
     genres: (d.genres ?? []).flatMap((genre) => genre.name ? [genre.name] : []),
@@ -441,6 +482,8 @@ function tmdbMovieSearchResult(d: TMDBMedia | null, fallbackTitle: string): Part
     backdropCandidates: tmdbBackdropCandidates(d),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
+    runtime: d.runtime && d.runtime > 0 ? `${d.runtime}m` : undefined,
+    trailerUrl: tmdbTrailerUrl(d) || undefined,
     genres: [],
     year: d.release_date ? yearFromDateString(d.release_date) : 0,
     cast: [],
@@ -493,7 +536,7 @@ export async function fetchTMDBMovieMetadata(
     if (!hit) return null;
 
     const d = await fetchTMDBJson(
-      `movie/${hit.id}?append_to_response=credits,images,external_ids,release_dates,watch/providers`,
+      `movie/${hit.id}?append_to_response=credits,images,external_ids,release_dates,watch/providers,videos`,
       tmdbMediaSchema,
       tmdbCredential,
     );
@@ -512,7 +555,7 @@ export async function fetchTMDBMovieMetadataById(
   if (!tmdbId || !tmdbCredential) return null;
   try {
     const d = await fetchTMDBJson(
-      `movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,release_dates,watch/providers`,
+      `movie/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,release_dates,watch/providers,videos`,
       tmdbMediaSchema,
       tmdbCredential,
     );
@@ -588,6 +631,12 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
     rating: d.vote_average ?? 0,
     contentRatings: tmdbContentRatings(d),
     streamingProviders: tmdbStreamingProviders(d),
+    runtime: d.episode_run_time?.[0] && d.episode_run_time[0] > 0
+      ? `${d.episode_run_time[0]}m`
+      : undefined,
+    seasonCount: d.number_of_seasons,
+    episodeCount: d.number_of_episodes,
+    trailerUrl: tmdbTrailerUrl(d) || undefined,
     genres: (d.genres ?? []).flatMap((genre) => genre.name ? [genre.name] : []),
     year: d.first_air_date ? new Date(d.first_air_date).getFullYear() : 0,
     cast,
@@ -605,6 +654,12 @@ function tmdbTVSearchResult(d: TMDBMedia | null, fallbackTitle: string): TMDBTVR
     backdrop: tmdbBackdrop(d.backdrop_path),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
+    runtime: d.episode_run_time?.[0] && d.episode_run_time[0] > 0
+      ? `${d.episode_run_time[0]}m`
+      : undefined,
+    seasonCount: d.number_of_seasons,
+    episodeCount: d.number_of_episodes,
+    trailerUrl: tmdbTrailerUrl(d) || undefined,
     genres: [],
     year: d.first_air_date ? yearFromDateString(d.first_air_date) : 0,
     cast: [],
@@ -649,7 +704,7 @@ export async function fetchTMDBTVMetadata(
     if (!hit) return null;
 
     const d = await fetchTMDBJson(
-      `tv/${hit.id}?append_to_response=credits,images,external_ids,content_ratings,watch/providers`,
+      `tv/${hit.id}?append_to_response=credits,images,external_ids,content_ratings,watch/providers,videos`,
       tmdbMediaSchema,
       tmdbCredential,
     );
@@ -668,7 +723,7 @@ export async function fetchTMDBTVMetadataById(
   if (!tmdbId || !tmdbCredential) return null;
   try {
     const d = await fetchTMDBJson(
-      `tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,content_ratings,watch/providers`,
+      `tv/${encodeURIComponent(tmdbId)}?append_to_response=credits,images,external_ids,content_ratings,watch/providers,videos`,
       tmdbMediaSchema,
       tmdbCredential,
     );

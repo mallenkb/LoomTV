@@ -27,7 +27,7 @@ export default function NextEpisodePrompt({
       className="pointer-events-none absolute inset-0 z-50 flex items-end justify-end p-6 pb-28"
     >
       <div
-        className="pointer-events-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/15 bg-black/75 text-white shadow-2xl backdrop-blur-xl"
+        className="loom-modal-surface pointer-events-auto w-full max-w-md overflow-hidden rounded-2xl border border-white/15 bg-black text-white shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         onDoubleClick={(event) => event.stopPropagation()}
       >

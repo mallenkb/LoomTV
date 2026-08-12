@@ -121,6 +121,7 @@ import {
 import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
 import { useEpisodeNavigation } from './VideoPlayer/useEpisodeNavigation';
+import { usePlayerScrubbing } from './VideoPlayer/usePlayerScrubbing';
 import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
@@ -130,7 +131,6 @@ const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
 const POSITION_UI_UPDATE_INTERVAL_MS = 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2000;
-const NATIVE_SCRUB_PREVIEW_INTERVAL_MS = 80;
 const NATIVE_SEEK_GUARD_TIMEOUT_MS = 2500;
 const NATIVE_SEEK_LANDING_TOLERANCE_SECONDS = 1.25;
 // Keep the first surface click pending long enough for the macOS double-click
@@ -236,6 +236,7 @@ export default function VideoPlayer({
   const loadTokenRef = useRef(0);
   const sourceLoadTokenRef = useRef(0);
   const playerActiveRef = useRef(true);
+  const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const userPausedRef = useRef(false);
   const suppressPauseIntentUntilMsRef = useRef(0);
   const didTryTranscodeRef = useRef(false);
@@ -260,12 +261,6 @@ export default function VideoPlayer({
   const initialResumePositionRef = useRef(0);
   const loadedFilePathRef = useRef('');
   const isScrubbingRef = useRef(false);
-  const scrubPreviewRafRef = useRef<number | null>(null);
-  const scrubListenerCleanupRef = useRef<(() => void) | null>(null);
-  const scrubHudHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const nativeScrubSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingNativeScrubSeekRef = useRef<number | null>(null);
-  const lastNativeScrubSeekAtRef = useRef(0);
   const nativeSeekGuardRef = useRef<{ target: number; expiresAt: number } | null>(null);
   const transcodeSeekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTranscodeSeekRef = useRef<number | null>(null);
@@ -605,7 +600,6 @@ export default function VideoPlayer({
     pendingEpisodeTransitionRef.current = null;
     pendingCreditsCompletionRef.current = false;
     nativeSeekGuardRef.current = null;
-    pendingNativeScrubSeekRef.current = null;
   }, [filePath]);
 
   useEffect(() => {
@@ -1372,7 +1366,7 @@ export default function VideoPlayer({
         void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
       })();
     }
-  }, [filePath, latestEpisodePlaybackRef, startBrowserStreamAt, updatePlaybackSnapshot]);
+  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, startBrowserStreamAt, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -2050,6 +2044,7 @@ export default function VideoPlayer({
     streamIsTranscoded,
     clearHls,
     clearVideoElement,
+    isScrubbingRef,
     latestEpisodePlaybackRef,
     startTranscodedFallback,
     updatePlaybackSnapshot,
@@ -2065,22 +2060,7 @@ export default function VideoPlayer({
       cancelAnimationFrame(nativeSubtitleStyleRefreshRafRef.current);
       nativeSubtitleStyleRefreshRafRef.current = null;
     }
-    if (scrubPreviewRafRef.current !== null) {
-      cancelAnimationFrame(scrubPreviewRafRef.current);
-      scrubPreviewRafRef.current = null;
-    }
-    if (scrubHudHideTimerRef.current) {
-      clearTimeout(scrubHudHideTimerRef.current);
-      scrubHudHideTimerRef.current = null;
-    }
-    if (nativeScrubSeekTimerRef.current) {
-      clearTimeout(nativeScrubSeekTimerRef.current);
-      nativeScrubSeekTimerRef.current = null;
-    }
-    pendingNativeScrubSeekRef.current = null;
     nativeSeekGuardRef.current = null;
-    scrubListenerCleanupRef.current?.();
-    scrubListenerCleanupRef.current = null;
     if (transcodeSeekTimerRef.current) {
       clearTimeout(transcodeSeekTimerRef.current);
       transcodeSeekTimerRef.current = null;
@@ -2171,43 +2151,65 @@ export default function VideoPlayer({
     await savePlaybackProgress(filePath, snapshot.position, snapshot.duration);
   }, [filePath, streamIsTranscoded, updatePlaybackSnapshot]);
 
-  const shutdownPlayback = useCallback(async () => {
-    cancelPendingSurfaceClick();
-    await persistFinalPlaybackProgress();
-    playerActiveRef.current = false;
-    userPausedRef.current = true;
-    loadTokenRef.current += 1;
-    sourceLoadTokenRef.current += 1;
-    clearNextEpisodeCountdown();
-    clearHls();
-    const engine = playbackEngineRef.current;
-    playbackEngineRef.current = null;
-    await engine?.destroy();
-    setNativePlaybackActive(false);
-    setNativeEngineKind(null);
-    document.documentElement.classList.remove('loom-native-active');
-    const video = videoRef.current;
-    if (video) {
-      video.autoplay = false;
-      clearVideoElement(video);
-    }
-    await stopTranscodeSession();
+  const shutdownPlayback = useCallback((): Promise<void> => {
+    if (shutdownPromiseRef.current) return shutdownPromiseRef.current;
+
+    const request = (async () => {
+      cancelPendingSurfaceClick();
+      playerActiveRef.current = false;
+      userPausedRef.current = true;
+      loadTokenRef.current += 1;
+      sourceLoadTokenRef.current += 1;
+      clearNextEpisodeCountdown();
+
+      try {
+        await persistFinalPlaybackProgress();
+      } catch (error) {
+        console.warn('[player] Could not persist final playback progress:', error);
+      }
+
+      clearHls();
+      const engine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
+      try {
+        await engine?.destroy();
+      } catch (error) {
+        console.warn('[player] Could not destroy the playback engine cleanly:', error);
+      }
+      setNativePlaybackActive(false);
+      setNativeEngineKind(null);
+      document.documentElement.classList.remove('loom-native-active');
+      const video = videoRef.current;
+      if (video) {
+        video.autoplay = false;
+        clearVideoElement(video);
+      }
+      try {
+        await stopTranscodeSession();
+      } catch (error) {
+        console.warn('[player] Could not stop the transcode session cleanly:', error);
+      }
+    })();
+
+    shutdownPromiseRef.current = request;
+    return request;
   }, [cancelPendingSurfaceClick, clearHls, clearNextEpisodeCountdown, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
 
-  useEffect(() => registerPlaybackShutdown(async () => {
-    await shutdownPlayback();
+  useEffect(() => registerPlaybackShutdown(() => {
+    const shutdown = shutdownPlayback();
     onClose();
+    return shutdown;
   }), [onClose, shutdownPlayback]);
 
-  const handleClose = useCallback(async (event?: React.SyntheticEvent) => {
+  const handleClose = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    await shutdownPlayback();
+    void shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
 
-  const handleBack = useCallback(async (event?: React.SyntheticEvent) => {
+  const handleBack = useCallback((event?: React.SyntheticEvent) => {
     event?.preventDefault();
-    await shutdownPlayback();
+    void shutdownPlayback();
     onClose();
   }, [onClose, shutdownPlayback]);
 
@@ -2498,137 +2500,18 @@ export default function VideoPlayer({
     }
   }, [duration, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
 
-  const flushNativeScrubPreview = useCallback(() => {
-    nativeScrubSeekTimerRef.current = null;
-    const target = pendingNativeScrubSeekRef.current;
-    const engine = playbackEngineRef.current;
-    if (!isScrubbingRef.current || target === null || !engine) {
-      pendingNativeScrubSeekRef.current = null;
-      return;
-    }
-    pendingNativeScrubSeekRef.current = null;
-    lastNativeScrubSeekAtRef.current = performance.now();
-    // Preview seeks are intentionally coalesced. LibVLC renders the frame at
-    // each sampled target while Loom remains the source of truth for the bar
-    // and subtitle clock; the exact release target is sent separately below.
-    void engine.seek(target);
-  }, []);
-
-  const requestNativeScrubPreview = useCallback((target: number) => {
-    if (!playbackEngineRef.current) return;
-    pendingNativeScrubSeekRef.current = target;
-    if (nativeScrubSeekTimerRef.current) return;
-    const elapsed = performance.now() - lastNativeScrubSeekAtRef.current;
-    const delay = Math.max(0, NATIVE_SCRUB_PREVIEW_INTERVAL_MS - elapsed);
-    if (delay === 0) {
-      flushNativeScrubPreview();
-      return;
-    }
-    nativeScrubSeekTimerRef.current = setTimeout(flushNativeScrubPreview, delay);
-  }, [flushNativeScrubPreview]);
-
-  const cancelNativeScrubPreview = useCallback(() => {
-    if (nativeScrubSeekTimerRef.current) {
-      clearTimeout(nativeScrubSeekTimerRef.current);
-      nativeScrubSeekTimerRef.current = null;
-    }
-    pendingNativeScrubSeekRef.current = null;
-  }, []);
-
-  const handleProgressPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const bar = event.currentTarget;
-    const pointerId = event.pointerId;
-    const rect = bar.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    bar.setPointerCapture(event.pointerId);
-    setDismissedNextPromptKey(null);
-    clearNextEpisodeCountdown();
-    let pendingPosition = playbackPositionRef.current;
-    isScrubbingRef.current = true;
-    bar.dataset.scrubbing = 'true';
-    if (scrubHudHideTimerRef.current) {
-      clearTimeout(scrubHudHideTimerRef.current);
-      scrubHudHideTimerRef.current = null;
-    }
-    if (scrubTimeHudRef.current) scrubTimeHudRef.current.style.opacity = '1';
-    const previewFromClientX = (clientX: number) => {
-      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      pendingPosition = ratio * duration;
-      requestNativeScrubPreview(pendingPosition);
-      if (scrubPreviewRafRef.current !== null) return;
-      scrubPreviewRafRef.current = requestAnimationFrame(() => {
-        scrubPreviewRafRef.current = null;
-        updatePlaybackSnapshot(pendingPosition, duration, { forceReact: false });
-      });
-    };
-    previewFromClientX(event.clientX);
-    const handleMove = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId === pointerId) previewFromClientX(moveEvent.clientX);
-    };
-    let removeScrubListeners = () => undefined;
-    const finishScrub = (finishEvent: PointerEvent, updateFromPointer: boolean) => {
-      if (finishEvent.pointerId !== pointerId) return;
-      if (updateFromPointer) previewFromClientX(finishEvent.clientX);
-      cancelNativeScrubPreview();
-      if (scrubPreviewRafRef.current !== null) {
-        cancelAnimationFrame(scrubPreviewRafRef.current);
-        scrubPreviewRafRef.current = null;
-      }
-      updatePlaybackSnapshot(pendingPosition, duration, { forceReact: true });
-      seekTo(pendingPosition);
-      isScrubbingRef.current = false;
-      delete bar.dataset.scrubbing;
-      scrubHudHideTimerRef.current = setTimeout(() => {
-        scrubHudHideTimerRef.current = null;
-        if (scrubTimeHudRef.current) scrubTimeHudRef.current.style.opacity = '0';
-      }, 180);
-      if (bar.hasPointerCapture(pointerId)) bar.releasePointerCapture(pointerId);
-      removeScrubListeners();
-    };
-    const handleUp = (upEvent: PointerEvent) => finishScrub(upEvent, true);
-    // pointercancel coordinates are frequently 0/0. Commit the last valid
-    // preview target instead of turning a cancelled drag into a jump to zero.
-    const handleCancel = (cancelEvent: PointerEvent) => finishScrub(cancelEvent, false);
-    removeScrubListeners = () => {
-      bar.removeEventListener('pointermove', handleMove);
-      bar.removeEventListener('pointerup', handleUp);
-      bar.removeEventListener('pointercancel', handleCancel);
-      if (scrubListenerCleanupRef.current === removeScrubListeners) scrubListenerCleanupRef.current = null;
-    };
-    scrubListenerCleanupRef.current?.();
-    scrubListenerCleanupRef.current = removeScrubListeners;
-    bar.addEventListener('pointermove', handleMove);
-    bar.addEventListener('pointerup', handleUp);
-    bar.addEventListener('pointercancel', handleCancel);
-  }, [cancelNativeScrubPreview, clearNextEpisodeCountdown, duration, requestNativeScrubPreview, seekTo, updatePlaybackSnapshot]);
-
-  const handleProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    const big = event.shiftKey ? 60 : 10;
-    const small = 5;
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
-      event.preventDefault();
-      seekTo(playbackPositionRef.current - (event.shiftKey ? big : small));
-    } else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      seekTo(playbackPositionRef.current + (event.shiftKey ? big : small));
-    } else if (event.key === 'PageDown') {
-      event.preventDefault();
-      seekTo(playbackPositionRef.current - duration * 0.1);
-    } else if (event.key === 'PageUp') {
-      event.preventDefault();
-      seekTo(playbackPositionRef.current + duration * 0.1);
-    } else if (event.key === 'Home') {
-      event.preventDefault();
-      seekTo(0);
-    } else if (event.key === 'End') {
-      event.preventDefault();
-      seekTo(duration);
-    }
-  }, [duration, seekTo]);
+  const { handleProgressKeyDown, handleProgressPointerDown } = usePlayerScrubbing({
+    clearNextEpisodeCountdown,
+    duration,
+    isScrubbingRef,
+    playbackEngineRef,
+    playbackPositionRef,
+    resetNextEpisodePrompt: () => setDismissedNextPromptKey(null),
+    scopeKey: filePath,
+    scrubTimeHudRef,
+    seekTo,
+    updatePlaybackSnapshot,
+  });
 
   const handleVolume = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
@@ -3533,7 +3416,7 @@ export default function VideoPlayer({
                 firstButton?.focus();
               }
             }}
-            className="absolute inset-0 z-20 bg-black/70 flex flex-col items-center justify-center gap-3 px-6 text-center"
+            className="loom-modal-surface absolute inset-0 z-20 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center"
           >
             <p id="loom-player-error-title" className="text-sm text-white/90">Playback failed</p>
             <p id="loom-player-error-description" className="text-xs text-white/70 max-w-xl">{errorMessage || 'Unable to play this file.'}</p>

@@ -233,7 +233,7 @@ const Dialog = React.forwardRef<HTMLDivElement, DialogProps>(
             aria-labelledby={titleId}
             aria-describedby={descriptionId}
             tabIndex={-1}
-            className={cn('relative z-50 max-h-[85vh] w-full max-w-4xl overflow-auto rounded-lg border bg-card p-6 shadow-lg', contentClassName)}
+            className={cn('loom-modal-surface relative z-50 max-h-[85vh] w-full max-w-4xl overflow-auto rounded-lg border bg-card p-6 shadow-lg', contentClassName)}
           >
             <DialogLabelContext.Provider value={{ titleId, descriptionId }}>
               {children}

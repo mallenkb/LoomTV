@@ -17,7 +17,7 @@ import {
   aniListGenreResponseSchema,
   type AniListMediaResult,
 } from '@/lib/anilistSchemas';
-import { parseStoredValue, readJsonResponse } from '@/lib/desktopDecoders';
+import { parseStoredValue } from '@/lib/desktopDecoders';
 import {
   tmdbContentRatingsResponseSchema,
   tmdbDetailResponseSchema,
@@ -62,8 +62,6 @@ import {
 const PROVIDER_SEARCH_DEBOUNCE_MS = 450;
 const DISCOVER_RESULT_LIMIT = 30;
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
-const ANILIST_API_URL = 'https://graphql.anilist.co';
-const OMDB_API_URL = 'https://www.omdbapi.com/';
 type GenreSourceType = Exclude<DiscoverType, 'anime'>;
 
 const omdbDiscoverResponseSchema = z.object({
@@ -285,30 +283,20 @@ async function enrichCatalogItemWithOmdbRatings(
   const apiKey = credential.trim();
   if (!apiKey) return item;
 
-  const url = new URL(OMDB_API_URL);
-  url.searchParams.set('apikey', apiKey);
+  const query: Record<string, string> = {};
   if (item.imdbId?.startsWith('tt')) {
-    url.searchParams.set('i', item.imdbId);
+    query.i = item.imdbId;
   } else {
-    url.searchParams.set('t', item.title);
-    url.searchParams.set('type', item.type === 'movie' ? 'movie' : 'series');
+    query.t = item.title;
+    query.type = item.type === 'movie' ? 'movie' : 'series';
     const year = parseYearFromItem(item);
-    if (year > 0) url.searchParams.set('y', String(year));
+    if (year > 0) query.y = String(year);
   }
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`OMDb request failed: ${response.status} ${response.statusText}`);
-  }
-  const metadata = await readJsonResponse(response, omdbDiscoverResponseSchema, 'OMDb ratings');
+  const metadata = omdbDiscoverResponseSchema.parse(await desktopApi.requestMetadataProvider({ provider: 'omdb', query }));
   if (metadata.Response === 'False') return item;
 
   const providerRatings = providerRatingsFromOmdb(metadata);
   return Object.keys(providerRatings).length > 0 ? { ...item, providerRatings } : item;
-}
-
-function isTMDBReadAccessToken(value: string): boolean {
-  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value);
 }
 
 function stripHtml(value: string): string {
@@ -619,22 +607,7 @@ async function requestTmdbJson<TSchema extends z.ZodType>(
     throw new Error('TMDB API key is missing. Add it in Settings → Metadata API keys.');
   }
 
-  const url = new URL(`https://api.themoviedb.org/3/${path}`);
-  url.searchParams.set('language', 'en-US');
-  Object.entries(query).forEach(([key, value]) => url.searchParams.set(key, String(value)));
-  const requestInit: RequestInit = isTMDBReadAccessToken(normalized)
-    ? { headers: { Authorization: `Bearer ${normalized}` } }
-    : { };
-  if (!isTMDBReadAccessToken(normalized)) {
-    url.searchParams.set('api_key', normalized);
-  }
-
-  const response = await fetch(url, requestInit);
-  if (!response.ok) {
-    throw new Error(`TMDB request failed: ${response.status} ${response.statusText}`);
-  }
-
-  return readJsonResponse(response, schema, `TMDB ${path}`);
+  return schema.parse(await desktopApi.requestMetadataProvider({ provider: 'tmdb', path, query }));
 }
 
 async function discoverTmdbGenres(type: GenreSourceType, credential: string): Promise<GenreOption[]> {
@@ -690,20 +663,10 @@ async function discoverTmdbProviders(
 }
 
 async function discoverAniListGenres(): Promise<GenreOption[]> {
-  const response = await fetch(ANILIST_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ query: ANILIST_GENRE_QUERY }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`AniList request failed: ${response.status} ${response.statusText}`);
-  }
-
-  const payload = await readJsonResponse(response, aniListGenreResponseSchema, 'AniList genres');
+  const payload = aniListGenreResponseSchema.parse(await desktopApi.requestMetadataProvider({
+    provider: 'anilist',
+    query: ANILIST_GENRE_QUERY,
+  }));
   if (payload.errors?.length) {
     throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
   }
@@ -998,30 +961,18 @@ async function discoverAnime(
   const selectedGenres = genre.split(',').map((entry) => entry.trim()).filter(Boolean);
   const genresToRequest = selectedGenres.length > 0 ? selectedGenres : [''];
   const responses = await Promise.all(genresToRequest.map(async (selectedGenre) => {
-    const response = await fetch(ANILIST_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
+    const payload = aniListDiscoverResponseSchema.parse(await desktopApi.requestMetadataProvider({
+      provider: 'anilist',
+      query: ANILIST_DISCOVER_QUERY,
+      variables: {
+        page: 1,
+        perPage: DISCOVER_RESULT_LIMIT,
+        sort: ANILIST_SECTION_SORT[section],
+        ...(query.trim() ? { search: query.trim() } : {}),
+        ...(selectedGenre ? { genre: selectedGenre } : {}),
+        ...(year.trim() ? { seasonYear: Number(year) } : {}),
       },
-      body: JSON.stringify({
-        query: ANILIST_DISCOVER_QUERY,
-        variables: {
-          page: 1,
-          perPage: DISCOVER_RESULT_LIMIT,
-          sort: ANILIST_SECTION_SORT[section],
-          ...(query.trim() ? { search: query.trim() } : {}),
-          ...(selectedGenre ? { genre: selectedGenre } : {}),
-          ...(year.trim() ? { seasonYear: Number(year) } : {}),
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`AniList request failed: ${response.status} ${response.statusText}`);
-    }
-
-    const payload = await readJsonResponse(response, aniListDiscoverResponseSchema, 'AniList discovery');
+    }));
     if (payload.errors?.length) {
       throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
     }

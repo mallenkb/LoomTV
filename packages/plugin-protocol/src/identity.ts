@@ -1,9 +1,9 @@
-export const PLUGIN_ITEM_IDENTITY_VERSION: 1;
-export const PLUGIN_ITEM_IDENTITY_KIND: 'plugin-item-identity';
-export const PLUGIN_CATALOG_MEMBERSHIP_KIND: 'catalog-membership';
-export const PLUGIN_CATALOG_RESULT_KIND: 'plugin-catalog-result';
-export const PLUGIN_ITEM_KEY_PREFIX: 'loom-plugin:item:v1';
-export const LEGACY_STREMIO_ITEM_KEY_PREFIX: 'loomtv-stremio-item-v1';
+export declare const PLUGIN_ITEM_IDENTITY_VERSION: 1;
+export declare const PLUGIN_ITEM_IDENTITY_KIND: 'plugin-item-identity';
+export declare const PLUGIN_CATALOG_MEMBERSHIP_KIND: 'catalog-membership';
+export declare const PLUGIN_CATALOG_RESULT_KIND: 'plugin-catalog-result';
+export declare const PLUGIN_ITEM_KEY_PREFIX: 'loom-plugin:item:v1';
+export declare const LEGACY_STREMIO_ITEM_KEY_PREFIX: 'loomtv-stremio-item-v1';
 
 export interface PluginIdentityIssue {
   path: string;
@@ -11,7 +11,7 @@ export interface PluginIdentityIssue {
   message: string;
 }
 
-export class PluginIdentityError extends Error {
+export declare class PluginIdentityError extends Error {
   readonly name: 'PluginIdentityError';
   readonly code: 'PLUGIN_IDENTITY_INVALID';
   readonly issues: readonly PluginIdentityIssue[];
@@ -65,21 +65,21 @@ export interface LegacyCatalogItemIdentityMigration {
   membership: PluginCatalogMembership;
 }
 
-export function createPluginItemIdentity(input: {
+export declare function createPluginItemIdentity(input: {
   addonId: string;
   type: string;
   providerId: string;
 }): PluginItemIdentity;
 
-export function parseWirePluginItemIdentity(input: unknown): PluginItemIdentity;
-export function parseWireCatalogMembership(input: unknown): PluginCatalogMembership;
-export function parseWireCatalogResult(input: unknown): PluginCatalogResult;
-export function canonicalPluginItemKey(input: PluginItemIdentity | {
+export declare function parseWirePluginItemIdentity(input: unknown): PluginItemIdentity;
+export declare function parseWireCatalogMembership(input: unknown): PluginCatalogMembership;
+export declare function parseWireCatalogResult(input: unknown): PluginCatalogResult;
+export declare function canonicalPluginItemKey(input: PluginItemIdentity | {
   addonId: string;
   type: string;
   providerId: string;
 }): string;
-export function migrateLegacyCatalogItemIdentity(input: {
+export declare function migrateLegacyCatalogItemIdentity(input: {
   pluginId: string;
   catalogType: string;
   catalogId: string;

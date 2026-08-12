@@ -2034,7 +2034,7 @@ export function createStyles(theme: MobileThemeColors) {
     minHeight: 32,
   },
   playerMenuPanel: {
-    backgroundColor: 'rgba(14,14,14,0.96)',
+    backgroundColor: panel2,
     borderColor: 'rgba(255,255,255,0.09)',
     borderRadius: 16,
     borderWidth: 1,
@@ -2101,7 +2101,7 @@ export function createStyles(theme: MobileThemeColors) {
   },
   playerGestureHint: {
     alignItems: 'center',
-    backgroundColor: 'rgba(12,12,12,0.82)',
+    backgroundColor: panel2,
     borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: 16,
     borderWidth: 1,
@@ -2116,7 +2116,7 @@ export function createStyles(theme: MobileThemeColors) {
   },
   playerSegmentSkip: {
     alignItems: 'center',
-    backgroundColor: 'rgba(12,12,12,0.86)',
+    backgroundColor: panel2,
     borderColor: 'rgba(255,255,255,0.28)',
     borderRadius: 10,
     borderWidth: 1,

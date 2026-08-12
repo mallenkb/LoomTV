@@ -44,7 +44,7 @@ export const savedConnectionSchema = z.object({
   accessTokenExpiresAt: finiteTimestamp,
   refreshToken: z.string().min(1),
   refreshTokenExpiresAt: finiteTimestamp,
-  certFingerprint: z.string(),
+  certFingerprint: z.string().regex(/^[0-9a-f]{64}$/i),
   hostDeviceId: z.string().min(1),
   hostDeviceName: z.string(),
   clientDeviceName: z.string(),

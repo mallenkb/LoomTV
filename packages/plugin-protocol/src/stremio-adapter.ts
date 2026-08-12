@@ -1,9 +1,9 @@
-export const STREMIO_ADAPTER_PROTOCOL_VERSION: 1;
-export const STREMIO_INSTALL_STATE_VERSION: 1;
-export const STREMIO_RESOURCES: readonly ['catalog', 'meta', 'stream', 'subtitles'];
-export const STREMIO_INSTALL_STATES: readonly ['pending-review', 'enabled', 'disabled', 'broken'];
-export const STREMIO_DEFAULT_LIMITS: Readonly<StremioAdapterLimits>;
-export const STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON: string;
+export declare const STREMIO_ADAPTER_PROTOCOL_VERSION: 1;
+export declare const STREMIO_INSTALL_STATE_VERSION: 1;
+export declare const STREMIO_RESOURCES: readonly ['catalog', 'meta', 'stream', 'subtitles'];
+export declare const STREMIO_INSTALL_STATES: readonly ['pending-review', 'enabled', 'disabled', 'broken'];
+export declare const STREMIO_DEFAULT_LIMITS: Readonly<StremioAdapterLimits>;
+export declare const STREMIO_PEER_TO_PEER_UNSUPPORTED_REASON: string;
 
 export type StremioResourceName = (typeof STREMIO_RESOURCES)[number];
 export type StremioInstallState = (typeof STREMIO_INSTALL_STATES)[number];
@@ -81,7 +81,7 @@ export interface LoomStremioManifest {
   unsupportedResources: readonly string[];
   compatibilityWarnings: readonly StremioCompatibilityWarning[];
   config?: readonly StremioConfigDefinition[];
-  supportedLoomCapabilities: readonly Array<'metadata.catalog' | 'playback.provider' | 'subtitle.provider'>;
+  supportedLoomCapabilities: ReadonlyArray<'metadata.catalog' | 'playback.provider' | 'subtitle.provider'>;
 }
 
 export interface StremioInstallRecord {
@@ -309,23 +309,23 @@ export interface StremioAdapterIssue {
   message: string;
 }
 
-export class StremioAdapterError extends Error {
+export declare class StremioAdapterError extends Error {
   readonly name: 'StremioAdapterError';
   readonly code: string;
   readonly retryable: boolean;
   readonly issues: readonly StremioAdapterIssue[];
 }
 
-export function normalizeStremioManifest(
+export declare function normalizeStremioManifest(
   input: unknown,
   manifestUrl: string,
   options?: Partial<StremioAdapterLimits>,
 ): LoomStremioManifest;
 
-export function redactStremioUrl(value: unknown): string;
-export function redactStremioResourceUrl(value: unknown): string;
+export declare function redactStremioUrl(value: unknown): string;
+export declare function redactStremioResourceUrl(value: unknown): string;
 
-export class StremioAddonRegistry {
+export declare class StremioAddonRegistry {
   constructor(options?: StremioAddonRegistryOptions);
   static fromPersistedState(snapshot: unknown, options?: StremioAddonRegistryOptions): StremioAddonRegistry;
   reviewManifestUrl(manifestUrl: string): Promise<StremioManifestReview>;
@@ -345,8 +345,8 @@ export class StremioAddonRegistry {
   fetchSubtitles(addonId: string, request: StremioVideoRequest, signal?: unknown): Promise<StremioSubtitleResult>;
 }
 
-export function createStremioAddonRegistry(options?: StremioAddonRegistryOptions): StremioAddonRegistry;
+export declare function createStremioAddonRegistry(options?: StremioAddonRegistryOptions): StremioAddonRegistry;
 
-export function serializeStremioAddonState(
+export declare function serializeStremioAddonState(
   registry: StremioAddonRegistry,
 ): StremioAddonStateSnapshot;

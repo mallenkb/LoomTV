@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { AppSettings, LibraryData } from './appContracts.ts';
 import {
+  metadataRefreshCategories,
+  type MetadataRefreshCategory,
+} from './databaseMetadataRefreshRepository.ts';
+import {
   bestSeriesTitleFromEpisodeFiles,
   chooseMetadataSearchTitle,
   cleanMediaTitle,
@@ -34,6 +38,11 @@ export type OfficialArtworkRefreshResult = {
   cover?: string;
   summary?: string;
   rating?: number;
+  contentRating?: string;
+  trailerUrl?: string;
+  runtime?: string;
+  seasonCount?: number;
+  episodeCount?: number;
   providerRatings?: MediaItem['providerRatings'];
   genres?: string[];
   seasons?: { number: number; title: string; episodeCount: number }[];
@@ -66,8 +75,22 @@ export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
 export type OfficialMetadataServiceDependencies = {
   loadLibrary: () => LibraryData;
   saveLibraryItem: (item: MediaItem) => void;
-  getMetadataRefreshState: (mediaId: string) => { attemptedAt: number; refreshedAt: number | null; lastError: string | null } | null;
-  recordMetadataRefresh: (mediaId: string, result: { refreshedAt?: number; error?: string }) => void;
+  getMetadataRefreshState: (mediaId: string, category: MetadataRefreshCategory) => {
+    attemptedAt: number;
+    refreshedAt: number | null;
+    lastError: string | null;
+    locked: boolean;
+  } | null;
+  recordMetadataRefresh: (
+    mediaId: string,
+    category: MetadataRefreshCategory,
+    result: { refreshedAt?: number; error?: string },
+  ) => void;
+  setMetadataRefreshCategoryLocked: (
+    mediaId: string,
+    category: MetadataRefreshCategory,
+    locked: boolean,
+  ) => void;
   cacheArtworkNow: (library: LibraryData) => Promise<void>;
   loadSettings: () => AppSettings;
   getMetadataApiKey: typeof import('./settings.ts').getMetadataApiKey;
@@ -181,22 +204,25 @@ function mergeAnimeCastMissingFields(
   ];
 }
 
-function itemNeedsIncompleteMetadata(item: MediaItem): boolean {
-  if (!hasText(item.title) || !hasText(item.summary) || !item.genres?.length || item.rating <= 0) return true;
-  if (!hasProviderRatings(item.providerRatings)) return true;
-  if (!hasContentRatings(item.contentRatings) && !hasText((item as MediaItem & { contentRating?: string }).contentRating)) return true;
-  if (item.providerIds?.tmdbId && !item.streamingProviders?.length && !item.originPlatform) return true;
-  if (item.type !== 'movie' && !item.originPlatform && !item.streamingProviders?.length) return true;
-
+function missingMetadataCategories(item: MediaItem): MetadataRefreshCategory[] {
+  const missing = new Set<MetadataRefreshCategory>();
+  if (!hasText(item.title) || !hasText(item.summary) || !item.genres?.length || !item.year) missing.add('core');
+  if (item.rating <= 0 || !hasProviderRatings(item.providerRatings)) missing.add('ratings');
+  if (!hasContentRatings(item.contentRatings) && !hasText((item as MediaItem & { contentRating?: string }).contentRating)) {
+    missing.add('ratings');
+  }
+  if (!hasText(item.poster) || !hasText(item.backdrop)) missing.add('artwork');
+  if (item.providerIds?.tmdbId && !item.streamingProviders?.length && !item.originPlatform) missing.add('streaming-providers');
+  if (item.type !== 'movie' && !item.originPlatform && !item.streamingProviders?.length) missing.add('streaming-providers');
   if (item.type === 'anime') {
     const cast = normalizeAnimeCast(item.cast);
     if (cast.length === 0 || cast.some((credit) => (
       !hasText(credit.characterImage)
       || !isMeaningfulAnimeRole(credit.characterRole)
       || !hasText(credit.voiceActorName)
-    ))) return true;
+    ))) missing.add('cast');
   } else if (!item.cast?.length) {
-    return true;
+    missing.add('cast');
   }
 
   const episodeFiles = item.episodeFiles || [];
@@ -210,25 +236,34 @@ function itemNeedsIncompleteMetadata(item: MediaItem): boolean {
         || !hasText(episode.airDate)
         || !hasText(episode.still)
         || episode.rating <= 0;
-    })) return true;
+    })) missing.add('episodes');
   }
 
-  return false;
+  return [...missing];
+}
+
+function itemNeedsIncompleteMetadata(item: MediaItem): boolean {
+  return missingMetadataCategories(item).length > 0;
 }
 
 const STREAMING_PROVIDER_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const METADATA_REFRESH_INTERVALS: Record<MetadataRefreshCategory, number> = {
+  core: 30 * DAY_MS,
+  cast: 30 * DAY_MS,
+  artwork: 90 * DAY_MS,
+  ratings: 7 * DAY_MS,
+  episodes: 7 * DAY_MS,
+  'streaming-providers': DAY_MS,
+};
 const streamingProviderRefreshState = new Map<string, {
-  nextAttemptAt: number;
   pending?: Promise<StreamingProvider[]>;
 }>();
 const INCOMPLETE_METADATA_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
-const DISPLAY_METADATA_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const incompleteMetadataRefreshState = new Map<string, {
-  nextAttemptAt: number;
   pending?: Promise<boolean>;
 }>();
 const displayMetadataRefreshState = new Map<string, {
-  nextAttemptAt: number;
   pending?: Promise<boolean>;
 }>();
 
@@ -262,7 +297,39 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     probeMediaFile,
     recordMetadataRefresh,
     saveLibraryItem,
+    setMetadataRefreshCategoryLocked,
   } = deps;
+
+  const metadataRequestsAllowed = () => !loadSettings().metadataOfflineMode;
+
+  function metadataCategoryIsLocked(mediaId: string, category: MetadataRefreshCategory): boolean {
+    return getMetadataRefreshState(mediaId, category)?.locked === true;
+  }
+
+  function metadataCategoryIsDue(
+    mediaId: string,
+    category: MetadataRefreshCategory,
+    now: number,
+    retryCooldownMs = METADATA_REFRESH_INTERVALS[category],
+    ignoreLock = false,
+  ): boolean {
+    const state = getMetadataRefreshState(mediaId, category);
+    if (state?.locked && !ignoreLock) return false;
+    const lastActivityAt = Math.max(state?.refreshedAt || 0, state?.attemptedAt || 0);
+    return lastActivityAt + retryCooldownMs <= now;
+  }
+
+  function lockMetadataCategories(mediaId: string, categories: MetadataRefreshCategory[]): void {
+    for (const category of categories) setMetadataRefreshCategoryLocked(mediaId, category, true);
+  }
+
+  function recordMetadataCategories(
+    mediaId: string,
+    categories: MetadataRefreshCategory[],
+    result: { refreshedAt?: number; error?: string },
+  ): void {
+    for (const category of categories) recordMetadataRefresh(mediaId, category, result);
+  }
 
   function movieMetadataRating(
     tmdbMeta?: Partial<MediaItem> | null,
@@ -345,6 +412,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       cover: backdropCandidates[0] || posterCandidates[0] || '',
       summary: metadata.summary || '',
       rating: numericRating(metadata.rating),
+      contentRating: metadata.contentRating,
+      trailerUrl: metadata.trailerUrl,
+      runtime: metadata.runtime,
+      seasonCount: metadata.seasonCount,
+      episodeCount: metadata.episodeCount,
       providerRatings: metadata.providerRatings,
       genres: Array.isArray(metadata.genres) ? metadata.genres.filter(Boolean) : [],
       seasons: metadata.seasons,
@@ -567,6 +639,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
   }
 
   async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<OfficialMetadataCandidate[]> {
+    if (!metadataRequestsAllowed()) return [];
     const settings = loadSettings();
     const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
@@ -619,6 +692,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
   }
 
   async function fetchOfficialArtworkForItem(item: MediaItem): Promise<OfficialArtworkRefreshResult> {
+    if (!metadataRequestsAllowed()) return {};
     const settings = loadSettings();
     const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
@@ -656,6 +730,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         cover: backdropCandidates[0] || posterCandidates[0] || '',
         summary: tmdbMeta?.summary || omdbMeta?.Plot || '',
         rating: movieMetadataRating(tmdbMeta, omdbMeta, matchedTV),
+        trailerUrl: tmdbMeta?.trailerUrl,
+        runtime: tmdbMeta?.runtime,
         providerRatings: omdbProviderRatings(omdbMeta),
         genres: tmdbMeta?.genres || [],
         contentRatings: mergeContentRatings(tmdbMeta?.contentRatings, omdbContentRatings(omdbMeta)),
@@ -737,6 +813,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       rating: numericRating(omdbMeta?.imdbRating)
         || (likelyAnime ? numericRating(matchedAniList?.rating) : 0)
         || showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
+      trailerUrl: tmdbMeta?.trailerUrl || matchedAniList?.trailerUrl || matchedJikan?.trailerUrl,
+      runtime: tmdbMeta?.runtime || matchedAniList?.runtime || matchedJikan?.runtime,
+      seasonCount: tmdbMeta?.seasonCount || matchedTV?.seasonCount || matchedJikan?.seasonCount,
+      episodeCount: tmdbMeta?.episodeCount || matchedTV?.episodeCount || matchedJikan?.episodeCount,
       providerRatings: omdbProviderRatings(omdbMeta),
       genres: (likelyAnime ? matchedAniList?.genres || matchedJikan?.genres : undefined) || tmdbMeta?.genres || matchedTV?.genres || [],
       seasons: mergeOfficialSeasonMetadata(
@@ -771,6 +851,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     candidate: OfficialMetadataCandidate,
   ): Promise<MediaItem['providerRatings']> {
     if (hasProviderRatings(candidate.providerRatings)) return candidate.providerRatings;
+    if (!metadataRequestsAllowed()) return {};
     const imdbId = candidate.providerIds?.imdbId;
     if (!imdbId) return {};
     const omdbApiKey = getMetadataApiKey(loadSettings(), 'omdb');
@@ -813,6 +894,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (applyAll && candidate.title) target.title = candidate.title;
     if (applyAll && candidate.year) target.year = candidate.year;
     if (applyAll && candidate.format) target.format = candidate.format;
+    if (applyAll && candidate.contentRating) target.contentRating = candidate.contentRating;
+    if (applyAll && candidate.trailerUrl) target.trailerUrl = candidate.trailerUrl;
+    if (applyAll && candidate.runtime) target.runtime = candidate.runtime;
+    if (applyAll && candidate.seasonCount !== undefined) target.seasonCount = candidate.seasonCount;
+    if (applyAll && candidate.episodeCount !== undefined) target.episodeCount = candidate.episodeCount;
     if (applyAll) {
       target.providerIds = mergeProviderIds(candidate.providerIds || {}, target.providerIds || {});
     }
@@ -865,12 +951,22 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       );
     }
     saveLibraryItem(target);
+    lockMetadataCategories(mediaId, applyAll
+      ? ['core', 'cast', 'artwork', 'ratings', 'episodes']
+      : applyTarget === 'episodes'
+        ? ['episodes']
+        : ['artwork']);
     if (applyPoster || applyCover || applyAll) await cacheArtworkNow(library);
 
     return {
       thumbnail: target.poster || '',
       cover: target.backdrop || target.poster || '',
       format: target.format,
+      contentRating: target.contentRating,
+      trailerUrl: target.trailerUrl,
+      runtime: target.runtime,
+      seasonCount: target.seasonCount,
+      episodeCount: target.episodeCount,
       summary: target.summary || '',
       rating: target.rating || 0,
       providerRatings: target.providerRatings,
@@ -894,6 +990,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (!target) {
       throw new Error('Media item was not found in the library.');
     }
+    if (!metadataRequestsAllowed()) {
+      throw new Error('Metadata offline mode is enabled. Turn it off to search metadata providers.');
+    }
     return fetchOfficialMetadataCandidatesForItem(target);
   }
 
@@ -906,6 +1005,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     if (!target) {
       throw new Error('Media item was not found in the library.');
+    }
+    if (!metadataRequestsAllowed()) {
+      throw new Error('Metadata offline mode is enabled. Turn it off to refresh provider artwork.');
     }
 
     const refreshed = await fetchOfficialArtworkForItem(target);
@@ -925,6 +1027,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       || (refreshCover && refreshedCover)
       || (refreshMetadata && (
         refreshed.format
+        || refreshed.contentRating
+        || refreshed.trailerUrl
+        || refreshed.runtime
+        || refreshed.seasonCount !== undefined
+        || refreshed.episodeCount !== undefined
         || refreshed.logo
         || refreshed.summary
         || refreshed.rating
@@ -942,6 +1049,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       if (refreshPoster && refreshedPoster) target.poster = refreshedPoster;
       if (refreshCover && refreshedCover) target.backdrop = refreshedCover;
       if (refreshMetadata && refreshed.format) target.format = refreshed.format;
+      if (refreshMetadata && refreshed.contentRating) target.contentRating = refreshed.contentRating;
+      if (refreshMetadata && refreshed.trailerUrl) target.trailerUrl = refreshed.trailerUrl;
+      if (refreshMetadata && refreshed.runtime) target.runtime = refreshed.runtime;
+      if (refreshMetadata && refreshed.seasonCount !== undefined) target.seasonCount = refreshed.seasonCount;
+      if (refreshMetadata && refreshed.episodeCount !== undefined) target.episodeCount = refreshed.episodeCount;
       if (refreshMetadata && refreshed.logo) target.logo = refreshed.logo;
       if (refreshMetadata && refreshed.summary) target.summary = refreshed.summary;
       if (refreshMetadata && refreshed.rating) target.rating = refreshed.rating;
@@ -968,6 +1080,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         target.logo,
       );
       saveLibraryItem(target);
+      lockMetadataCategories(mediaId, refreshMetadata
+        ? ['core', 'cast', 'artwork', 'ratings', 'episodes']
+        : ['artwork']);
       await cacheArtworkNow(library);
     }
 
@@ -1001,108 +1116,127 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
   }
 
   async function refreshIncompleteMetadata(mediaId: string): Promise<boolean> {
+    if (!metadataRequestsAllowed()) return false;
     const initialLibrary = loadLibrary();
     const initialTarget = findLibraryMediaItem(initialLibrary, mediaId);
     if (!initialTarget || !itemNeedsIncompleteMetadata(initialTarget)) return false;
 
     const now = Date.now();
-    const persistedAttempt = getMetadataRefreshState(mediaId);
-    if (persistedAttempt && persistedAttempt.attemptedAt + INCOMPLETE_METADATA_RETRY_COOLDOWN_MS > now) return false;
+    const initialCategories = missingMetadataCategories(initialTarget).filter((category) => (
+      metadataCategoryIsDue(
+        mediaId,
+        category,
+        now,
+        INCOMPLETE_METADATA_RETRY_COOLDOWN_MS,
+        category === 'episodes',
+      )
+    ));
+    if (initialCategories.length === 0) return false;
     const previousAttempt = incompleteMetadataRefreshState.get(mediaId);
     if (previousAttempt?.pending) return previousAttempt.pending;
-    if (previousAttempt && previousAttempt.nextAttemptAt > now) return false;
 
     const request = (async () => {
       const library = loadLibrary();
       const target = findLibraryMediaItem(library, mediaId);
       if (!target || !itemNeedsIncompleteMetadata(target)) return false;
+      const categories = missingMetadataCategories(target).filter((category) => (
+        metadataCategoryIsDue(
+          mediaId,
+          category,
+          Date.now(),
+          INCOMPLETE_METADATA_RETRY_COOLDOWN_MS,
+          category === 'episodes',
+        )
+      ));
+      if (categories.length === 0) return false;
+      const needs = (category: MetadataRefreshCategory) => categories.includes(category);
 
       const before = JSON.stringify(target);
       const refreshed = await fetchOfficialArtworkForItem(target);
 
-      if (!hasText(target.title) && hasText(refreshed.title)) target.title = refreshed.title || target.title;
-      if (!hasText(target.summary) && hasText(refreshed.summary)) target.summary = refreshed.summary || target.summary;
-      if (target.rating <= 0 && (refreshed.rating || 0) > 0) target.rating = refreshed.rating || target.rating;
-      if (!target.year && refreshed.year) target.year = refreshed.year;
-      if (!target.format && refreshed.format) target.format = refreshed.format;
-      if (!target.poster && refreshed.thumbnail) target.poster = refreshed.thumbnail;
-      if (!target.backdrop && refreshed.cover) target.backdrop = refreshed.cover;
-      if (!target.logo && refreshed.logo) target.logo = refreshed.logo;
-      if (!target.genres?.length && refreshed.genres?.length) target.genres = refreshed.genres;
-      if (!hasProviderRatings(target.providerRatings) && hasProviderRatings(refreshed.providerRatings)) {
-        target.providerRatings = refreshed.providerRatings;
+      if (needs('core')) {
+        if (!hasText(target.title) && hasText(refreshed.title)) target.title = refreshed.title || target.title;
+        if (!hasText(target.summary) && hasText(refreshed.summary)) target.summary = refreshed.summary || target.summary;
+        if (!target.year && refreshed.year) target.year = refreshed.year;
+        if (!target.format && refreshed.format) target.format = refreshed.format;
+        if (!target.trailerUrl && refreshed.trailerUrl) target.trailerUrl = refreshed.trailerUrl;
+        if (!target.runtime && refreshed.runtime) target.runtime = refreshed.runtime;
+        if (target.seasonCount === undefined && refreshed.seasonCount !== undefined) target.seasonCount = refreshed.seasonCount;
+        if (target.episodeCount === undefined && refreshed.episodeCount !== undefined) target.episodeCount = refreshed.episodeCount;
+        if (!target.genres?.length && refreshed.genres?.length) target.genres = refreshed.genres;
+        if (refreshed.providerIds) target.providerIds = mergeProviderIds(target.providerIds || {}, refreshed.providerIds);
       }
-      if (!hasContentRatings(target.contentRatings) && hasContentRatings(refreshed.contentRatings)) {
-        target.contentRatings = refreshed.contentRatings;
+      if (needs('ratings')) {
+        if (target.rating <= 0 && (refreshed.rating || 0) > 0) target.rating = refreshed.rating || target.rating;
+        if (!hasProviderRatings(target.providerRatings) && hasProviderRatings(refreshed.providerRatings)) {
+          target.providerRatings = refreshed.providerRatings;
+        }
+        if (!hasContentRatings(target.contentRatings) && hasContentRatings(refreshed.contentRatings)) {
+          target.contentRatings = refreshed.contentRatings;
+        }
+        if (!target.contentRating && refreshed.contentRating) target.contentRating = refreshed.contentRating;
       }
-      if (!target.streamingProviders?.length && refreshed.streamingProviders?.length) {
-        target.streamingProviders = refreshed.streamingProviders;
+      if (needs('artwork')) {
+        if (!target.poster && refreshed.thumbnail) target.poster = refreshed.thumbnail;
+        if (!target.backdrop && refreshed.cover) target.backdrop = refreshed.cover;
+        if (!target.logo && refreshed.logo) target.logo = refreshed.logo;
+        if (!target.posterCandidates?.length && refreshed.posterCandidates?.length) target.posterCandidates = refreshed.posterCandidates;
+        if (!target.backdropCandidates?.length && refreshed.backdropCandidates?.length) target.backdropCandidates = refreshed.backdropCandidates;
+        if (!target.logoCandidates?.length && refreshed.logoCandidates?.length) target.logoCandidates = refreshed.logoCandidates;
       }
-      if (!target.originPlatform && refreshed.originPlatform) {
-        target.originPlatform = refreshed.originPlatform;
-      }
-      if (!target.posterCandidates?.length && refreshed.posterCandidates?.length) {
-        target.posterCandidates = refreshed.posterCandidates;
-      }
-      if (!target.backdropCandidates?.length && refreshed.backdropCandidates?.length) {
-        target.backdropCandidates = refreshed.backdropCandidates;
-      }
-      if (!target.logoCandidates?.length && refreshed.logoCandidates?.length) {
-        target.logoCandidates = refreshed.logoCandidates;
+      if (needs('streaming-providers')) {
+        if (!target.streamingProviders?.length && refreshed.streamingProviders?.length) target.streamingProviders = refreshed.streamingProviders;
+        if (!target.originPlatform && refreshed.originPlatform) target.originPlatform = refreshed.originPlatform;
       }
 
-      if (target.type === 'anime') {
+      if (needs('cast') && target.type === 'anime') {
         const mergedCast = mergeAnimeCastMissingFields(
           normalizeAnimeCast(target.cast),
           normalizeAnimeCast(refreshed.cast),
         );
         target.cast = mergedCast;
-      } else if (target.cast.length === 0 && refreshed.cast?.length) {
+      } else if (needs('cast') && target.cast.length === 0 && refreshed.cast?.length) {
         target.cast = refreshed.cast;
       }
 
-      applyOfficialSeasons(target, refreshed.seasons);
+      if (needs('episodes')) {
+        applyOfficialSeasons(target, refreshed.seasons);
+        mergeEpisodeMetadataForTarget(
+          target,
+          refreshed.episodes,
+          refreshed.episodeSource || 'refresh',
+          true,
+        );
+      }
 
-      mergeEpisodeMetadataForTarget(
-        target,
-        refreshed.episodes,
-        refreshed.episodeSource || 'refresh',
-        true,
-      );
-
-      let changed = JSON.stringify(target) !== before;
+      const changed = JSON.stringify(target) !== before;
       if (changed) {
         saveLibraryItem(target);
-        await cacheArtworkNow(library);
+        if (needs('artwork') || needs('episodes') || needs('cast')) await cacheArtworkNow(library);
       }
-
-      if (target.providerIds?.tmdbId && !target.streamingProviders?.length) {
-        const providers = await getStreamingProviders(mediaId);
-        changed = changed || providers.length > 0;
-      }
-      recordMetadataRefresh(mediaId, { refreshedAt: Date.now() });
+      const observedCategories = [...new Set([
+        ...metadataRefreshCategories.filter((category) => !metadataCategoryIsLocked(mediaId, category)),
+        ...categories,
+      ])];
+      recordMetadataCategories(mediaId, observedCategories, { refreshedAt: Date.now() });
       return changed;
     })().catch((error) => {
       const message = error instanceof Error ? error.message : 'Unknown metadata refresh failure';
-      recordMetadataRefresh(mediaId, { error: message.slice(0, 500) });
+      recordMetadataCategories(mediaId, initialCategories, { error: message.slice(0, 500) });
       console.warn(`[metadata] Incomplete refresh failed for ${mediaId}:`, error);
       return false;
     });
 
-    incompleteMetadataRefreshState.set(mediaId, {
-      nextAttemptAt: now + INCOMPLETE_METADATA_RETRY_COOLDOWN_MS,
-      pending: request,
-    });
+    incompleteMetadataRefreshState.set(mediaId, { pending: request });
     void request.finally(() => {
       const current = incompleteMetadataRefreshState.get(mediaId);
-      if (current?.pending === request) {
-        incompleteMetadataRefreshState.set(mediaId, { nextAttemptAt: current.nextAttemptAt });
-      }
+      if (current?.pending === request) incompleteMetadataRefreshState.delete(mediaId);
     });
     return request;
   }
 
   async function refreshIncompleteMetadataQueue(library: LibraryData, concurrency = 2): Promise<number> {
+    if (!metadataRequestsAllowed()) return 0;
     const pending = [...(library.movies || []), ...(library.tvShows || []), ...(library.animeShows || [])]
       .filter(itemNeedsIncompleteMetadata);
     let refreshed = 0;
@@ -1119,73 +1253,127 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
   }
 
   async function refreshDisplayMetadata(mediaId: string): Promise<boolean> {
+    if (!metadataRequestsAllowed()) return false;
     const initialTarget = findLibraryMediaItem(loadLibrary(), mediaId);
     if (!initialTarget) return false;
 
     const now = Date.now();
+    const displayCategories: MetadataRefreshCategory[] = ['core', 'cast', 'artwork', 'ratings', 'episodes'];
+    const initialCategories = displayCategories.filter((category) => metadataCategoryIsDue(mediaId, category, now));
+    if (initialCategories.length === 0) return false;
     const previousAttempt = displayMetadataRefreshState.get(mediaId);
     if (previousAttempt?.pending) return previousAttempt.pending;
-    if (previousAttempt && previousAttempt.nextAttemptAt > now) return false;
 
     const request = (async () => {
       const library = loadLibrary();
       const target = findLibraryMediaItem(library, mediaId);
       if (!target) return false;
+      const categories = displayCategories.filter((category) => metadataCategoryIsDue(mediaId, category, Date.now()));
+      if (categories.length === 0) return false;
+      const refreshes = (category: MetadataRefreshCategory) => categories.includes(category);
 
       const before = JSON.stringify(target);
       const refreshed = await fetchOfficialArtworkForItem(target);
 
-      if (hasText(refreshed.summary)) target.summary = refreshed.summary || target.summary;
-      if ((refreshed.rating || 0) > 0) target.rating = refreshed.rating || target.rating;
-      if (refreshed.genres?.length) target.genres = refreshed.genres;
-      if (refreshed.format) target.format = refreshed.format;
-      if (!target.year && refreshed.year) target.year = refreshed.year;
-      if (hasProviderRatings(refreshed.providerRatings)) target.providerRatings = refreshed.providerRatings;
-      if (hasContentRatings(refreshed.contentRatings)) target.contentRatings = refreshed.contentRatings;
-      if (refreshed.providerIds) {
+      if (refreshes('core')) {
+        if (hasText(refreshed.summary)) target.summary = refreshed.summary || target.summary;
+        if (refreshed.genres?.length) target.genres = refreshed.genres;
+        if (refreshed.format) target.format = refreshed.format;
+        if (refreshed.contentRating) target.contentRating = refreshed.contentRating;
+        if (refreshed.trailerUrl) target.trailerUrl = refreshed.trailerUrl;
+        if (refreshed.runtime) target.runtime = refreshed.runtime;
+        if (refreshed.seasonCount !== undefined) target.seasonCount = refreshed.seasonCount;
+        if (refreshed.episodeCount !== undefined) target.episodeCount = refreshed.episodeCount;
+        if (!target.year && refreshed.year) target.year = refreshed.year;
+      }
+      if (refreshes('core') && refreshed.providerIds) {
         target.providerIds = mergeProviderIds(target.providerIds || {}, refreshed.providerIds);
       }
-      if (refreshed.cast?.length) {
+      if (refreshes('ratings')) {
+        if ((refreshed.rating || 0) > 0) target.rating = refreshed.rating || target.rating;
+        if (hasProviderRatings(refreshed.providerRatings)) target.providerRatings = refreshed.providerRatings;
+        if (hasContentRatings(refreshed.contentRatings)) target.contentRatings = refreshed.contentRatings;
+      }
+      if (refreshes('cast') && refreshed.cast?.length) {
         target.cast = target.type === 'anime'
           ? normalizeAnimeCast(refreshed.cast)
           : refreshed.cast;
       }
-      applyOfficialSeasons(target, refreshed.seasons);
+      if (refreshes('episodes')) {
+        applyOfficialSeasons(target, refreshed.seasons);
+        mergeEpisodeMetadataForTarget(target, refreshed.episodes, refreshed.episodeSource || 'refresh');
+      }
+      if (refreshes('artwork')) {
+        if (!target.poster && refreshed.thumbnail) target.poster = refreshed.thumbnail;
+        if (!target.backdrop && refreshed.cover) target.backdrop = refreshed.cover;
+        if (!target.logo && refreshed.logo) target.logo = refreshed.logo;
+        target.posterCandidates = orderedArtworkCandidates(
+          ...(refreshed.posterCandidates || []),
+          ...officialArtworkOnly(target.posterCandidates || []),
+          target.poster,
+        );
+        target.backdropCandidates = orderedArtworkCandidates(
+          ...(refreshed.backdropCandidates || []),
+          ...officialArtworkOnly(target.backdropCandidates || []),
+          target.backdrop,
+        );
+      }
 
       const changed = JSON.stringify(target) !== before;
-      if (changed) saveLibraryItem(target);
+      if (changed) {
+        saveLibraryItem(target);
+        if (refreshes('artwork') || refreshes('cast') || refreshes('episodes')) await cacheArtworkNow(library);
+      }
+      recordMetadataCategories(mediaId, categories, { refreshedAt: Date.now() });
       return changed;
     })().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Unknown display metadata refresh failure';
+      recordMetadataCategories(mediaId, initialCategories, { error: message.slice(0, 500) });
       console.warn(`[metadata] Display refresh failed for ${mediaId}:`, error);
       return false;
     });
 
-    displayMetadataRefreshState.set(mediaId, {
-      nextAttemptAt: now + DISPLAY_METADATA_REFRESH_INTERVAL_MS,
-      pending: request,
-    });
+    displayMetadataRefreshState.set(mediaId, { pending: request });
     void request.finally(() => {
       const current = displayMetadataRefreshState.get(mediaId);
-      if (current?.pending === request) {
-        displayMetadataRefreshState.set(mediaId, { nextAttemptAt: current.nextAttemptAt });
-      }
+      if (current?.pending === request) displayMetadataRefreshState.delete(mediaId);
     });
     return request;
+  }
+
+  async function refreshDisplayMetadataQueue(library: LibraryData, concurrency = 2): Promise<number> {
+    if (!metadataRequestsAllowed()) return 0;
+    const pending = [...(library.movies || []), ...(library.tvShows || []), ...(library.animeShows || [])];
+    let refreshed = 0;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(Math.max(1, concurrency), pending.length) }, async () => {
+      while (cursor < pending.length) {
+        const item = pending[cursor];
+        cursor += 1;
+        if (item && await refreshDisplayMetadata(item.id)) refreshed += 1;
+      }
+    });
+    await Promise.all(workers);
+    return refreshed;
   }
 
   async function getStreamingProviders(mediaId: string): Promise<StreamingProvider[]> {
     const library = loadLibrary();
     const target = findLibraryMediaItem(library, mediaId);
     if (!target) return [];
-    if (target.streamingProviders?.length) return target.streamingProviders;
+    const existingProviders = target.streamingProviders || [];
+    if (!metadataRequestsAllowed() || metadataCategoryIsLocked(mediaId, 'streaming-providers')) return existingProviders;
 
     const tmdbId = target.providerIds?.tmdbId;
-    if (!tmdbId) return [];
+    if (!tmdbId) return existingProviders;
 
     const now = Date.now();
+    const retryCooldown = existingProviders.length > 0
+      ? METADATA_REFRESH_INTERVALS['streaming-providers']
+      : STREAMING_PROVIDER_RETRY_COOLDOWN_MS;
+    if (!metadataCategoryIsDue(mediaId, 'streaming-providers', now, retryCooldown)) return existingProviders;
     const previousAttempt = streamingProviderRefreshState.get(mediaId);
     if (previousAttempt?.pending) return previousAttempt.pending;
-    if (previousAttempt && previousAttempt.nextAttemptAt > now) return [];
 
     const settings = loadSettings();
     const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
@@ -1196,37 +1384,29 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         tmdbApiKey,
       ) || [];
 
-      const nextAttemptAt = Date.now() + STREAMING_PROVIDER_RETRY_COOLDOWN_MS;
-      streamingProviderRefreshState.set(mediaId, { nextAttemptAt });
-
-      // Empty or failed provider responses are deliberately not persisted as
-      // final metadata. A later detail/catalog load can retry after cooldown.
-      if (providers.length === 0) return providers;
-
       const latestLibrary = loadLibrary();
       const latestTarget = findLibraryMediaItem(latestLibrary, mediaId);
-      if (latestTarget && !latestTarget.streamingProviders?.length) {
+      if (latestTarget && providers.length > 0) {
         latestTarget.streamingProviders = providers;
         saveLibraryItem(latestTarget);
       }
-      return providers;
-    })().catch(() => {
-      streamingProviderRefreshState.set(mediaId, {
-        nextAttemptAt: Date.now() + STREAMING_PROVIDER_RETRY_COOLDOWN_MS,
-      });
-      return [];
+      recordMetadataRefresh(mediaId, 'streaming-providers', { refreshedAt: Date.now() });
+      return providers.length > 0 ? providers : existingProviders;
+    })().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Unknown streaming provider refresh failure';
+      recordMetadataRefresh(mediaId, 'streaming-providers', { error: message.slice(0, 500) });
+      return existingProviders;
     });
 
-    streamingProviderRefreshState.set(mediaId, {
-      nextAttemptAt: now + STREAMING_PROVIDER_RETRY_COOLDOWN_MS,
-      pending: request,
-    });
+    streamingProviderRefreshState.set(mediaId, { pending: request });
     void request.finally(() => {
       const current = streamingProviderRefreshState.get(mediaId);
-      if (current?.pending === request) {
-        streamingProviderRefreshState.set(mediaId, { nextAttemptAt: current.nextAttemptAt });
-      }
+      if (current?.pending === request) streamingProviderRefreshState.delete(mediaId);
     });
+    if (existingProviders.length > 0) {
+      void request;
+      return existingProviders;
+    }
     return request;
   }
 
@@ -1244,6 +1424,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (existing.length > 0) {
       const delivered = artworkDeliveryUrls(existing);
       return { logo: delivered[0] || artworkDeliveryUrl(existing[0]), logoCandidates: delivered };
+    }
+    if (!metadataRequestsAllowed() || metadataCategoryIsLocked(mediaId, 'artwork')) {
+      return { logo: undefined, logoCandidates: [] };
     }
 
     const refreshed = await fetchOfficialArtworkForItem(target);
@@ -1274,6 +1457,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     fetchOfficialMetadataCandidatesForItem,
     getOfficialMetadataCandidates,
     refreshDisplayMetadata,
+    refreshDisplayMetadataQueue,
     refreshIncompleteMetadata,
     refreshIncompleteMetadataQueue,
     getPlaybackLogo,

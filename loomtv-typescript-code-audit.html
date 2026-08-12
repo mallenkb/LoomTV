@@ -353,21 +353,21 @@
         <div>
           <p class="kicker">LoomTV · TypeScript code audit</p>
           <h1>The gates are green.<br>Ownership is becoming visible.</h1>
-          <p class="deck">The four selected recommendations are implemented. TVmaze narrowing is sound, mobile consumes canonical inferred media contracts, database and IPC boundaries parse unknown values into named results, and focused controllers now own catalog, lifecycle, modal, episode-navigation, discover-state, and media-server concerns. The largest remaining opportunity is continuing that extraction through mobile App, VideoPlayer, and mobile styles.</p>
+          <p class="deck">The selected recommendations are implemented and release-checked. Mobile playback, gestures, and desktop scrubbing now have focused typed owners; the remaining SQLite repositories parse unknown rows through named schemas; and the full suite, static gates, desktop build, native mobile builds, and production bundles pass. The largest remaining opportunity is continuing that extraction through mobile App, VideoPlayer, and mobile styles.</p>
         </div>
         <aside class="stamp" aria-label="Overall score">
           <div class="stamp-small">Overall score</div>
-          <div class="stamp-score">8.4<span> / 10</span></div>
+          <div class="stamp-score">8.7<span> / 10</span></div>
         </aside>
       </section>
 
       <section class="overview">
         <div class="sheet">
           <div class="overview-grid">
-            <article class="overview-card"><div class="overview-score">8.4 <span>&rarr; 9.0</span></div><div class="overview-label">Overall &middot; no open high-priority issue</div><div class="overview-bar"><i style="width:84%"></i><span class="tick" style="left:90%"></span></div></article>
-            <article class="overview-card"><div class="overview-score">9.0 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 10 &middot; Quality gates</div><div class="overview-bar"><i style="width:90%"></i><span class="tick" style="left:90%"></span></div></article>
-            <article class="overview-card state-critical"><div class="overview-score">7.2 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 08 &middot; Simplicity and architecture</div><div class="overview-bar"><i style="width:72%"></i><span class="tick" style="left:90%"></span></div></article>
-            <article class="overview-card state-critical"><div class="overview-score">7.4 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 04 &middot; Module ownership</div><div class="overview-bar"><i style="width:74%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-warning"><div class="overview-score">8.7 <span>&rarr; 9.0</span></div><div class="overview-label">Overall &middot; no open high-priority issue</div><div class="overview-bar"><i style="width:87%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-good"><div class="overview-score">9.3 <span>&rarr; 9.5</span></div><div class="overview-label">Ledger 10 &middot; Quality gates</div><div class="overview-bar"><i style="width:93%"></i><span class="tick" style="left:95%"></span></div></article>
+            <article class="overview-card state-warning"><div class="overview-score">7.7 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 08 &middot; Simplicity and architecture</div><div class="overview-bar"><i style="width:77%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-warning"><div class="overview-score">7.8 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 04 &middot; Module ownership</div><div class="overview-bar"><i style="width:78%"></i><span class="tick" style="left:90%"></span></div></article>
           </div>
         </div>
       </section>
@@ -376,12 +376,12 @@
         <div class="sheet">
           <div class="evidence-layout">
             <div class="observations">
-              <p class="capture-note sans observations-head">Scope: 261 production TypeScript and TSX files, TypeScript configuration, lint policy, Electron IPC, LAN and provider decoders, persistence adapters, and representative React orchestration. Checks run: workspace typecheck, workspace lint, 8 desktop boundary fixtures, and 13 mobile catalog/lifecycle tests. Not performed: full test suite, production builds, runtime playback, device testing, visual QA, dependency vulnerability scanning, or exhaustive dead-export analysis.</p>
+              <p class="capture-note sans observations-head">Scope: production TypeScript and TSX, TypeScript configuration, lint policy, Electron IPC, LAN and provider decoders, persistence adapters, and representative React orchestration. Checks run: workspace typecheck, lint, full workspace suite, production dependency audit, desktop production build, iOS and Android production bundles, native iOS simulator build, desktop playback smoke test, and mobile background/resume smoke test. Not performed: a connected mobile playback session with profile and track switching, exhaustive visual QA, or exhaustive dead-export analysis.</p>
               <div class="finding-group issues observations-head">Issues to address next</div>
-              <article class="observation" id="observation-1"><span class="obs-no">1</span><div><h3>Three major modules still carry too many responsibilities.</h3><span class="tag category">Architecture</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>apps/mobile/App.tsx</code> is 6,936 lines, <code>VideoPlayer.tsx</code> is 3,765, and <code>mobileStyles.ts</code> is 2,161. The first extraction moved catalog synchronization, connection lifecycle decisions, modal stack state, episode navigation, discover state, and media-server HTTP concerns into focused typed modules. <code>mediaServer.ts</code> is now 1,999 lines and <code>PluginDiscover.tsx</code> is 1,970.</p><p><b>Problem.</b> Mobile connection, profile, and playback state still share one renderer, while desktop player transport, tracks, subtitles, seeking, overlays, and native coordination remain tightly coupled.</p><p><b>Why it matters.</b> Strict types cannot fully compensate for distant state transitions and closure dependencies. These files remain the primary source of procedural, Python-like module structure.</p><div class="quick-win"><b>Recommendation.</b> Continue extracting by state owner. Give each controller an explicit input contract, discriminated events, narrow effects, and a typed result. Split <code>mobileStyles.ts</code> by feature boundary only when the related component moves.</div></div></article>
-              <article class="observation" id="observation-2"><span class="obs-no">2</span><div><h3>Assertion debt remains concentrated in database and native adapters.</h3><span class="tag category">Type discipline</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> AST inspection found 402 production type assertions, down from 565 in the original report and 412 before this pass. The primary desktop library repository now parses count, folder, media, season, episode, episode-file, and scan-cache rows with named Zod schemas. Mobile media contracts are aliases and projections of canonical LAN types rather than duplicate interfaces.</p><p><b>Problem.</b> Other profile, segment, and native playback adapters still assert database or platform-owned values locally.</p><p><b>Why it matters.</b> Assertions at trusted library seams can be necessary, but repeated row-shape assertions turn schema drift into delayed runtime failures.</p><div class="quick-win"><b>Recommendation.</b> Extend the same repository parser pattern to the remaining SQLite result families, and isolate unavoidable native casts behind one typed adapter per platform API. Do not introduce generic casting helpers.</div></div></article>
+              <article class="observation" id="observation-1"><span class="obs-no">1</span><div><h3>Two major renderers and the mobile style module remain large.</h3><span class="tag category">Architecture</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> Mobile playback controls and progress now live in <code>useMobilePlayerSession.ts</code>, brightness and volume gestures live in <code>useMobilePlayerGestures.ts</code>, and desktop seek behavior lives in <code>usePlayerScrubbing.ts</code>. This reduced <code>App.tsx</code> to 6,752 lines and <code>VideoPlayer.tsx</code> to 3,622 lines without generic controller wrappers.</p><p><b>Problem.</b> Connection and profile orchestration still share the mobile renderer, while desktop transport, tracks, subtitles, and overlays remain coupled.</p><p><b>Why it matters.</b> The extracted hooks have explicit typed contracts and narrow effects, but distant state transitions remain in the parent modules.</p><div class="quick-win"><b>Recommendation.</b> Continue the same state-owner pattern for mobile connection/profile state and desktop transport/tracks. Move feature styles only with their owning component.</div></div></article>
+              <article class="observation preserve" id="observation-2"><span class="obs-no">2</span><div><h3>SQLite result families now parse at repository boundaries.</h3><span class="tag category">Type discipline</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> Playback, artwork, thumbnail, plugin, profile, and segment repositories now validate SQLite rows with named Zod schemas. Production assertions fell from 402 to 347, with unavoidable platform values kept inside native adapter modules.</p><p><b>Why it works.</b> Database values enter application code as parsed results rather than claimed shapes, so schema drift fails locally and carries repository context.</p><div class="quick-win"><b>What to preserve.</b> Add one named schema for each new row family and keep native interop casts inside the platform adapter that owns them.</div></div></article>
               <div class="finding-group verify observations-head">Needs verification</div>
-              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>Boundary and lifecycle tests pass; end-to-end playback remains unproved.</h3><span class="tag category">Verification</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> Eight desktop tests cover invalid and truncated LAN JSON, malformed LAN shapes, provider results, database rows, and IPC arguments. Thirteen mobile tests cover malformed catalogs, profile requirements, credential refresh, unauthorized retry, offline recovery, backgrounding, pairing, resume clocks, and stale player replacement. All 21 targeted tests pass.</p><p><b>Risk.</b> These deterministic tests do not exercise Electron windows, an Expo device, native player replacement, actual network transitions, or production bundles.</p><p><b>Why verify.</b> Native lifecycle behavior and media playback depend on platform timing and integration points that unit tests intentionally model rather than execute.</p><div class="quick-win"><b>Recommendation.</b> Before release, run the full suite and production builds, then smoke-test desktop playback and one physical or simulator mobile session through disconnect, background, resume, profile switch, and track change.</div></div></article>
+              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>Release verification is broad; one connected mobile path remains.</h3><span class="tag category">Verification</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> The full workspace suite passes. Lint, typecheck, production dependency policy, desktop production build, iOS and Android production bundles, and a native iOS simulator build all pass. Computer Use confirmed desktop local playback plus progress persistence, and mobile cached-library disconnect, background, and resume behavior.</p><p><b>Remaining proof.</b> Local Network Sharing was disabled in the running desktop profile, so the simulator could not exercise connected playback, profile switching, or audio/subtitle track switching.</p><div class="quick-win"><b>Recommendation.</b> Before release, enable Local Network Sharing and complete one simulator or physical-device pass covering pair, play, profile switch, track switch, disconnect, and resume.</div></div></article>
               <div class="finding-group working observations-head">Working well to preserve</div>
               <article class="observation preserve" id="observation-4"><span class="obs-no">4</span><div><h3>The repository's static TypeScript gates are green.</h3><span class="tag category">Quality gate</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> The TVmaze platform value is narrowed to a non-null local before its fields are read. <code>pnpm typecheck</code> and <code>pnpm lint</code> both complete successfully across the workspace. Production TypeScript contains zero explicit <code>any</code> keywords, zero non-null assertions, and zero exhaustive-dependency suppressions.</p><p><b>Why it works.</b> Ordinary narrowing and inferred values carry the implementation. Exceptions remain visible instead of disappearing into broad casts or framework-shaped wrappers.</p><p><b>What to preserve.</b> Keep strictness and hook rules at error level in every package, and require both commands before release.</p></div></article>
               <article class="observation preserve" id="observation-5"><span class="obs-no">5</span><div><h3>Canonical schemas now own cross-platform media contracts.</h3><span class="tag category">Domain modeling</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>packages/lan-protocol/src/schemas.ts</code> exports inferred types for ratings, providers, platforms, tracks, local details, subtitles, episodes, cast, and media items. Mobile derives its required identity and optional metadata view from <code>LanMediaItem</code>. Named parsers validate database rows and IPC argument tuples at their boundaries.</p><p><b>Why it works.</b> Runtime validation and compile-time types originate from one schema, then application state narrows that contract instead of copying it.</p><p><b>What to preserve.</b> Keep wire types canonical, view state local, and mapping explicit. Avoid a universal domain object that mixes persistence, transport, and UI concerns.</p></div></article>
@@ -393,29 +393,29 @@
 
       <section class="sheet memo" aria-label="Executive summary">
         <article class="memo-block"><div class="label">What improved</div><h2>Types now come from runtime truth.</h2><p>Canonical schemas, row parsers, and IPC tuple parsing replaced parallel models and unchecked adapter values.</p></article>
-        <article class="memo-block"><div class="label">Verification</div><h2>Static gates and 21 focused tests pass.</h2><p>The selected malformed-input and lifecycle scenarios now have deterministic proof.</p></article>
+        <article class="memo-block"><div class="label">Verification</div><h2>Full tests and production bundles pass.</h2><p>Desktop playback and mobile disconnect/background/resume were also exercised through the real UIs.</p></article>
         <article class="memo-block"><div class="label">Primary investment</div><h2>Continue splitting state ownership.</h2><p>App, VideoPlayer, and mobile styles remain the major concentration points.</p></article>
         <article class="memo-block"><div class="label">Expected outcome</div><h2>Small, local, explainable changes.</h2><p>Typed controllers make state transitions visible and reduce regressions across platforms.</p></article>
       </section>
 
       <section class="chapter" id="score">
         <div class="sheet">
-          <div class="chapter-head"><p class="kicker">02 · Score ledger</p><div><h2>Ten TypeScript quality categories, tied to current evidence.</h2><p class="lead">The category mean and reported overall score are both 8.4. No high-priority finding caps the result; the remaining ceiling comes from module ownership and integration verification.</p></div></div>
+          <div class="chapter-head"><p class="kicker">02 · Score ledger</p><div><h2>Ten TypeScript quality categories, tied to current evidence.</h2><p class="lead">The reported overall score is 8.7. No high-priority finding caps the result; the remaining ceiling comes from module ownership and one connected mobile lifecycle pass.</p></div></div>
           <table class="ledger" aria-label="TypeScript code quality scores">
             <thead><tr class="ledger-head"><th class="ledger-no" scope="col">No.</th><th class="ledger-title" scope="col">Category</th><th class="ledger-score" scope="col">Score</th><th class="ledger-copy" scope="col">Evidence</th></tr></thead>
             <tbody>
               <tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">Runtime boundary validation</td><td class="ledger-score band-good">9.1 / 10</td><td class="ledger-copy">Named schemas cover LAN, providers, stored JSON, database rows, HTTP, ffprobe, and IPC argument tuples.</td></tr>
               <tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Domain model clarity</td><td class="ledger-score band-good">8.8 / 10</td><td class="ledger-copy">Canonical schema-inferred media contracts now feed desktop and mobile without duplicate wire interfaces.</td></tr>
               <tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">Control-flow legibility</td><td class="ledger-score band-med">7.7 / 10</td><td class="ledger-copy">Catalog, lifecycle, modal, and episode navigation flows have typed owners; major renderers remain large.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Module ownership</td><td class="ledger-score band-med">7.4 / 10</td><td class="ledger-copy">The first state-owner extraction is complete, but App, VideoPlayer, and mobile styles remain concentration points.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Module ownership</td><td class="ledger-score band-med">7.8 / 10</td><td class="ledger-copy">Playback, gestures, and scrubbing gained typed owners, but App, VideoPlayer, and mobile styles remain concentration points.</td></tr>
               <tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Boundary decoders reject malformed values, and 21 focused negative-path and lifecycle tests pass.</td></tr>
               <tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Type inference and narrowing</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Zero explicit any, non-null assertions, or hook suppressions; TVmaze now uses stable local narrowing.</td></tr>
               <tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">API consistency</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">LAN schemas, mobile catalog results, lifecycle actions, database parsing, and IPC parsing expose named contracts.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and architecture</td><td class="ledger-score band-med">7.2 / 10</td><td class="ledger-copy">Two former 2,000-line modules crossed below that mark, while three major modules still require extraction.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and architecture</td><td class="ledger-score band-med">7.7 / 10</td><td class="ledger-copy">State-owner hooks removed three cohesive behavior graphs from the major renderers without hiding control flow.</td></tr>
               <tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-good">8.8 / 10</td><td class="ledger-copy">Boundary failures carry local context; retry and stale-player outcomes are explicit and covered.</td></tr>
-              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Quality gates and documentation</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Workspace typecheck and lint pass, with focused tests documenting malformed and lifecycle behavior.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Quality gates and documentation</td><td class="ledger-score band-good">9.3 / 10</td><td class="ledger-copy">Lint, typecheck, the full suite, production audit, desktop build, native iOS build, and both mobile bundles pass.</td></tr>
             </tbody>
-            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Reported overall</th><td class="ledger-score band-good">8.4 / 10</td><td class="ledger-copy">Raw mean 8.4. Medium-priority architecture findings keep the current ceiling below 9.0.</td></tr></tfoot>
+            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Reported overall</th><td class="ledger-score band-good">8.7 / 10</td><td class="ledger-copy">Architecture remains the limiting category; release verification is otherwise green apart from connected mobile playback.</td></tr></tfoot>
           </table>
         </div>
       </section>
@@ -427,51 +427,51 @@
           <p class="decision-intro">The selected fixes are complete and the repository has a sound TypeScript direction. No framework rewrite or universal controller abstraction is justified. Continue the same pattern through the remaining orchestration modules, extend typed row parsing at actual database boundaries, and verify the native integrations before release.</p>
           <div class="score-lifts" aria-label="Path to 9.0 by code quality dimension">
             <article class="score-lift">
-              <div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">8.4 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:84%"></i><span class="tick" style="left:90%"></span></div>
+              <div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">8.7 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:87%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
                 <li>Continue controller extraction from the two largest renderers. <span class="score-ref">Fix 1</span></li>
-                <li>Extend parsed database and native adapters. <span class="score-ref">Fix 2</span></li>
-                <li>Run full build and integration verification. <span class="score-ref">Verify 3</span></li>
+                <li>Preserve parsed database and native adapter boundaries. <span class="score-ref">Keep 2</span></li>
+                <li>Complete connected mobile playback verification. <span class="score-ref">Verify 3</span></li>
               </ul>
               <div class="score-ceiling">A 9.0 rating requires focused ownership throughout the major renderers and successful native integration proof, not simply fewer lines.</div>
             </article>
             <article class="score-lift weak">
-              <div class="score-lift-top"><span class="score-lift-name">Architecture &amp; ownership</span><span class="score-lift-jump">7.4 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:74%"></i><span class="tick" style="left:90%"></span></div>
+              <div class="score-lift-top"><span class="score-lift-name">Architecture &amp; ownership</span><span class="score-lift-jump">7.8 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:78%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
                 <li>Extract mobile connection and profile orchestration. <span class="score-ref">Next</span></li>
-                <li>Extract mobile playback ownership and colocate its feature styles. <span class="score-ref">Next</span></li>
-                <li>Split desktop transport, track, subtitle, and seek state. <span class="score-ref">Next</span></li>
+                <li>Colocate playback feature styles with the extracted owner. <span class="score-ref">Next</span></li>
+                <li>Split desktop transport, track, subtitle, and overlay state. <span class="score-ref">Next</span></li>
               </ul>
             </article>
             <article class="score-lift weak">
               <div class="score-lift-top"><span class="score-lift-name">Adapter safety</span><span class="score-lift-jump">8.8 → <em>9.0</em></span></div>
               <div class="score-lift-bar"><i style="width:88%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
-                <li>Parse remaining profile and segment row families. <span class="score-ref">Fix 2</span></li>
+                <li>Keep profile and segment row families schema-backed. <span class="score-ref">Done</span></li>
                 <li>Keep native casts inside narrow platform adapters. <span class="score-ref">Fix 2</span></li>
                 <li>Add named fixtures whenever a new untrusted boundary appears. <span class="score-ref">Keep 5</span></li>
               </ul>
             </article>
             <article class="score-lift weak">
-              <div class="score-lift-top"><span class="score-lift-name">Release confidence</span><span class="score-lift-jump">8.2 → <em>9.0</em></span></div>
-              <div class="score-lift-bar"><i style="width:82%"></i><span class="tick" style="left:90%"></span></div>
+              <div class="score-lift-top"><span class="score-lift-name">Release confidence</span><span class="score-lift-jump">8.8 → <em>9.0</em></span></div>
+              <div class="score-lift-bar"><i style="width:88%"></i><span class="tick" style="left:90%"></span></div>
               <ul>
-                <li>Run the full suite and production builds. <span class="score-ref">Verify 3</span></li>
-                <li>Smoke-test desktop and mobile playback lifecycle. <span class="score-ref">Verify 3</span></li>
+                <li>Keep the full suite and production builds in the release gate. <span class="score-ref">Done</span></li>
+                <li>Smoke-test connected mobile profile and track switching. <span class="score-ref">Verify 3</span></li>
                 <li>Add dead-export reporting as a separate reviewable gate. <span class="score-ref">Follow-up</span></li>
               </ul>
-              <div class="score-ceiling">The targeted tests prove the new units. Platform testing must still prove their real integrations.</div>
+              <div class="score-ceiling">Desktop playback and mobile background/resume are proven. Connected mobile playback still needs one real integration pass.</div>
             </article>
           </div>
           <table class="path" aria-label="Path to 9.0">
             <tbody>
               <tr class="path-row"><td class="path-step">Step 01</td><td class="path-title">Split mobile connection</td><td class="path-copy">Move connection, profile, and session transitions behind typed events and discriminated outcomes.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Split mobile playback</td><td class="path-copy">Give player source, progress, tracks, and recovery one explicit state owner, then colocate related styles.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Split desktop playback</td><td class="path-copy">Separate transport, track, subtitle, seek, and overlay behavior without hiding state behind generic hooks.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Finish adapter parsing</td><td class="path-copy">Extend named row parsers to profiles and segments, and isolate native platform assertions.</td></tr>
-              <tr class="path-row"><td class="path-step">Step 05</td><td class="path-title">Verify release behavior</td><td class="path-copy">Run the full suite and builds, smoke-test native lifecycle paths, and report dead exports separately.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Continue mobile ownership</td><td class="path-copy">Playback and gesture owners are complete; move the next cohesive state graph and its feature styles together.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Continue desktop playback</td><td class="path-copy">Scrubbing is extracted; separate transport, track, subtitle, and overlay behavior without generic hooks.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Preserve adapter parsing</td><td class="path-copy">Profile and segment rows are parsed. Keep new row families and native assertions behind their owned boundaries.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 05</td><td class="path-title">Finish connected mobile proof</td><td class="path-copy">Enable desktop sharing and exercise pair, play, profile switch, track switch, disconnect, and resume.</td></tr>
             </tbody>
           </table>
           <div class="validation"><b>9.0 gate.</b> Typecheck and lint remain green; malformed external, persisted, and IPC payloads fail with named errors; canonical schemas continue to own wire types; App and VideoPlayer delegate major state graphs to focused typed controllers; explicit any, non-null assertions, and hook suppressions remain at zero; full tests, production builds, native lifecycle smoke tests, and dead-export reporting pass.</div>
@@ -479,7 +479,7 @@
       </section>
     </main>
 
-    <footer><div class="sheet footer-inner"><p>Work Report · Evidence-led TypeScript evaluation.</p><p class="footer-meta">Static code audit · 8.4 / 10 · Confidence: high</p></div></footer>
+    <footer><div class="sheet footer-inner"><p>Work Report · Evidence-led TypeScript evaluation.</p><p class="footer-meta">Static and runtime code audit · 8.7 / 10 · Confidence: high</p></div></footer>
   </div>
 </body>
 </html>

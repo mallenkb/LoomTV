@@ -41,8 +41,13 @@ export type LanLibraryCard = {
   rating: number;
   providerRatings?: LanProviderRatings;
   contentRatings?: Record<string, LanContentRating>;
+  contentRating?: string;
   streamingProviders?: LanStreamingProvider[];
   originPlatform?: LanOriginPlatform;
+  trailerUrl?: string;
+  runtime?: string;
+  seasonCount?: number;
+  episodeCount?: number;
   genres: string[];
   lastPlayed?: number;
   seasons?: Array<{ number: number; title: string; episodeCount: number }>;
@@ -234,6 +239,7 @@ export type LanProfilePreferences = {
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   appHomeStyle?: 'default' | 'modern';
   appModernHeroMode?: 'continue-watching' | 'featured';
+  showProviderRatingBadges?: boolean;
   sidebarNavOrder?: string[];
   autoplayNextEnabled?: boolean;
   playbackSkipBackSeconds?: number;

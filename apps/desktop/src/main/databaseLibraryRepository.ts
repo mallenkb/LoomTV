@@ -42,6 +42,11 @@ const mediaItemRowSchema = z.object({
   logo: z.string(),
   summary: z.string(),
   rating: z.number().finite(),
+  content_rating: z.string(),
+  trailer_url: z.string(),
+  runtime: z.string(),
+  season_count: nullableNumber,
+  episode_count: nullableNumber,
   provider_ratings_json: nullableString,
   file_path: z.string(),
   file_size: nullableNumber,
@@ -83,6 +88,8 @@ const episodeFileRowSchema = z.object({
   episode: z.number().finite(),
   file_path: z.string(),
   title: nullableString,
+  thumbnail: nullableString,
+  still: nullableString,
   subtitles_json: nullableString,
   local_metadata_json: nullableString,
 });
@@ -142,6 +149,12 @@ function applyDurableState(
   next.posterCandidates = durableArtworkSources(next.posterCandidates);
   next.backdropCandidates = durableArtworkSources(next.backdropCandidates);
   next.logoCandidates = durableArtworkSources(next.logoCandidates);
+  next.cast = next.cast.map((credit) => ({
+    ...credit,
+    image: durableArtworkSource(credit.image),
+    characterImage: durableArtworkSource(credit.characterImage),
+    voiceActorImage: durableArtworkSource(credit.voiceActorImage),
+  }));
   next.episodes = (next.episodes || []).map((episode) => ({
     ...episode,
     still: durableArtworkSource(episode.still),
@@ -221,6 +234,8 @@ export function loadLibrary(
       episode: row.episode,
       filePath: row.file_path,
       title: row.title || undefined,
+      thumbnail: row.thumbnail ? durableArtworkSource(row.thumbnail) : undefined,
+      still: row.still ? durableArtworkSource(row.still) : undefined,
       subtitles: parseStoredJson(row.subtitles_json, z.array(lanSubtitleRecordSchema), []),
       localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
     });
@@ -265,6 +280,11 @@ export function loadLibrary(
       logoCandidates: parseStoredJson(row.logo_candidates_json, stringArraySchema, []),
       summary: row.summary,
       rating: row.rating,
+      contentRating: row.content_rating || undefined,
+      trailerUrl: row.trailer_url || undefined,
+      runtime: row.runtime || undefined,
+      seasonCount: row.season_count ?? undefined,
+      episodeCount: row.episode_count ?? undefined,
       providerRatings: parseStoredJson(row.provider_ratings_json, lanProviderRatingsSchema, {}),
       contentRatings: parseStoredJson(row.content_ratings_json, contentRatingsSchema, {}),
       streamingProviders: parseStoredJson(row.streaming_providers_json, z.array(lanStreamingProviderSchema).optional(), undefined),
@@ -310,6 +330,15 @@ export function remapLibraryMediaReferences(
       WHERE media_id = ?
     `);
     const deleteCustomArtwork = database.prepare('DELETE FROM custom_artwork WHERE media_id = ?');
+    const copyMetadataRefreshState = database.prepare(`
+      INSERT OR IGNORE INTO media_metadata_refresh_state (
+        media_id, category, refreshed_at, attempted_at, last_error, locked
+      )
+      SELECT ?, category, refreshed_at, attempted_at, last_error, locked
+      FROM media_metadata_refresh_state
+      WHERE media_id = ?
+    `);
+    const deleteMetadataRefreshState = database.prepare('DELETE FROM media_metadata_refresh_state WHERE media_id = ?');
 
     for (const [sourceId, targetId] of aliases) {
       if (!sourceId || !targetId || sourceId === targetId) continue;
@@ -317,6 +346,8 @@ export function remapLibraryMediaReferences(
       deleteListEntries.run(sourceId);
       copyCustomArtwork.run(targetId, sourceId);
       deleteCustomArtwork.run(sourceId);
+      copyMetadataRefreshState.run(targetId, sourceId);
+      deleteMetadataRefreshState.run(sourceId);
     }
   });
   tx();
@@ -336,12 +367,11 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
 
     const insertItem = database.prepare(`
       INSERT OR REPLACE INTO media_items (
-        id, type, format, title, year, poster, backdrop, logo, summary, rating, provider_ratings_json, file_path, file_size, last_played,
+        id, type, format, title, year, poster, backdrop, logo, summary, rating, content_rating, trailer_url, runtime, season_count, episode_count, provider_ratings_json, file_path, file_size, last_played,
         genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
     const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
@@ -350,8 +380,8 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertEpisodeFile = database.prepare(`
-      INSERT OR REPLACE INTO episode_files (media_id, season, episode, file_path, title, subtitles_json, local_metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO episode_files (media_id, season, episode, file_path, title, thumbnail, still, subtitles_json, local_metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const item of [...(data.movies || []), ...(data.tvShows || []), ...(data.animeShows || [])]) {
@@ -366,12 +396,22 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         durableArtworkSource(item.logo),
         item.summary || '',
         item.rating || 0,
+        item.contentRating || '',
+        item.trailerUrl || '',
+        item.runtime || '',
+        item.seasonCount ?? null,
+        item.episodeCount ?? null,
         jsonString(item.providerRatings || {}),
         item.filePath || '',
         item.fileSize || null,
         null,
         jsonString(item.genres || []),
-        jsonString(item.cast || []),
+        jsonString((item.cast || []).map((credit) => ({
+          ...credit,
+          image: durableArtworkSource(credit.image),
+          characterImage: durableArtworkSource(credit.characterImage),
+          voiceActorImage: durableArtworkSource(credit.voiceActorImage),
+        }))),
         jsonString(item.subtitles || []),
         item.localMetadata ? jsonString(item.localMetadata) : null,
         item.providerIds ? jsonString(item.providerIds) : null,
@@ -407,6 +447,8 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
           episodeFile.episode,
           episodeFile.filePath,
           episodeFile.title || null,
+          durableArtworkSource(episodeFile.thumbnail),
+          durableArtworkSource(episodeFile.still),
           jsonString(episodeFile.subtitles || []),
           episodeFile.localMetadata ? jsonString(episodeFile.localMetadata) : null,
         );
@@ -448,12 +490,11 @@ export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaIte
   const tx = database.transaction(() => {
     database.prepare(`
       INSERT INTO media_items (
-        id, type, format, title, year, poster, backdrop, logo, summary, rating, provider_ratings_json, file_path, file_size, last_played,
+        id, type, format, title, year, poster, backdrop, logo, summary, rating, content_rating, trailer_url, runtime, season_count, episode_count, provider_ratings_json, file_path, file_size, last_played,
         genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(id) DO UPDATE SET
         type = excluded.type,
@@ -465,6 +506,11 @@ export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaIte
         logo = excluded.logo,
         summary = excluded.summary,
         rating = excluded.rating,
+        content_rating = excluded.content_rating,
+        trailer_url = excluded.trailer_url,
+        runtime = excluded.runtime,
+        season_count = excluded.season_count,
+        episode_count = excluded.episode_count,
         provider_ratings_json = excluded.provider_ratings_json,
         file_path = excluded.file_path,
         file_size = excluded.file_size,
@@ -491,12 +537,22 @@ export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaIte
       durableArtworkSource(item.logo),
       item.summary || '',
       item.rating || 0,
+      item.contentRating || '',
+      item.trailerUrl || '',
+      item.runtime || '',
+      item.seasonCount ?? null,
+      item.episodeCount ?? null,
       jsonString(item.providerRatings || {}),
       item.filePath || '',
       item.fileSize || null,
       null,
       jsonString(item.genres || []),
-      jsonString(item.cast || []),
+      jsonString((item.cast || []).map((credit) => ({
+        ...credit,
+        image: durableArtworkSource(credit.image),
+        characterImage: durableArtworkSource(credit.characterImage),
+        voiceActorImage: durableArtworkSource(credit.voiceActorImage),
+      }))),
       jsonString(item.subtitles || []),
       item.localMetadata ? jsonString(item.localMetadata) : null,
       item.providerIds ? jsonString(item.providerIds) : null,
@@ -519,8 +575,8 @@ export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaIte
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertEpisodeFile = database.prepare(`
-      INSERT INTO episode_files (media_id, season, episode, file_path, title, subtitles_json, local_metadata_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO episode_files (media_id, season, episode, file_path, title, thumbnail, still, subtitles_json, local_metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const season of item.seasons || []) {
@@ -546,6 +602,8 @@ export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaIte
         episodeFile.episode,
         episodeFile.filePath,
         episodeFile.title || null,
+        durableArtworkSource(episodeFile.thumbnail),
+        durableArtworkSource(episodeFile.still),
         jsonString(episodeFile.subtitles || []),
         episodeFile.localMetadata ? jsonString(episodeFile.localMetadata) : null,
       );

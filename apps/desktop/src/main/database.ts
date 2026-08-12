@@ -28,6 +28,8 @@ import {
 import {
   getMetadataRefreshState as getMetadataRefreshStateRecord,
   recordMetadataRefresh as recordMetadataRefreshRecord,
+  setMetadataRefreshCategoryLocked as setMetadataRefreshCategoryLockedRecord,
+  type MetadataRefreshCategory,
 } from './databaseMetadataRefreshRepository.ts';
 import {
   getAllProgress as getAllProgressRecord,
@@ -381,15 +383,24 @@ export function saveLibraryItemToDatabase(item: import('./metadata/types.ts').Me
   saveLibraryItemRecord(getDb(), item);
 }
 
-export function getMetadataRefreshState(mediaId: string) {
-  return getMetadataRefreshStateRecord(getDb(), mediaId);
+export function getMetadataRefreshState(mediaId: string, category: MetadataRefreshCategory) {
+  return getMetadataRefreshStateRecord(getDb(), mediaId, category);
 }
 
 export function recordMetadataRefresh(
   mediaId: string,
+  category: MetadataRefreshCategory,
   result: { refreshedAt?: number; error?: string },
 ): void {
-  recordMetadataRefreshRecord(getDb(), mediaId, result);
+  recordMetadataRefreshRecord(getDb(), mediaId, category, result);
+}
+
+export function setMetadataRefreshCategoryLocked(
+  mediaId: string,
+  category: MetadataRefreshCategory,
+  locked: boolean,
+): void {
+  setMetadataRefreshCategoryLockedRecord(getDb(), mediaId, category, locked);
 }
 
 export function remapLibraryMediaReferences(aliases: ReadonlyMap<string, string>): void {

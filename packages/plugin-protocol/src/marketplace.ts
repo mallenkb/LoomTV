@@ -1,17 +1,17 @@
-export const PLUGIN_MARKETPLACE_WIRE_VERSION: 1;
-export const PLUGIN_MARKETPLACE_INDEX_KIND: 'plugin-marketplace-index';
-export const PLUGIN_PLUGIN_UPDATE_KIND: 'plugin-update';
-export const PLUGIN_RENDERER_MARKETPLACE_KIND: 'marketplace-index-renderer';
-export const PLUGIN_RENDERER_UPDATE_KIND: 'plugin-update-renderer';
-export const PLUGIN_CAPABILITY_TYPES: readonly ['metadata.catalog', 'subtitle.provider', 'playback.provider'];
-export const PLUGIN_MARKETPLACE_RISK_LEVELS: readonly ['low', 'medium', 'high', 'critical'];
-export const PLUGIN_REVIEW_STATES: readonly ['unreviewed', 'pending', 'approved', 'rejected', 'expired'];
-export const PLUGIN_REVOCATION_STATES: readonly ['active', 'revoked'];
-export const PLUGIN_UPDATE_CHANNELS: readonly ['stable', 'beta', 'canary'];
-export const PLUGIN_UPDATE_ARTIFACT_KINDS: readonly ['declarative-index', 'executable-plugin'];
-export const PLUGIN_UPDATE_STATUS: readonly ['verified', 'quarantined-phase9'];
-export const PLUGIN_MARKETPLACE_MAX_LIFETIME_MS: 604800000;
-export const PLUGIN_UPDATE_MAX_LIFETIME_MS: 604800000;
+export declare const PLUGIN_MARKETPLACE_WIRE_VERSION: 1;
+export declare const PLUGIN_MARKETPLACE_INDEX_KIND: 'plugin-marketplace-index';
+export declare const PLUGIN_PLUGIN_UPDATE_KIND: 'plugin-update';
+export declare const PLUGIN_RENDERER_MARKETPLACE_KIND: 'marketplace-index-renderer';
+export declare const PLUGIN_RENDERER_UPDATE_KIND: 'plugin-update-renderer';
+export declare const PLUGIN_CAPABILITY_TYPES: readonly ['metadata.catalog', 'subtitle.provider', 'playback.provider'];
+export declare const PLUGIN_MARKETPLACE_RISK_LEVELS: readonly ['low', 'medium', 'high', 'critical'];
+export declare const PLUGIN_REVIEW_STATES: readonly ['unreviewed', 'pending', 'approved', 'rejected', 'expired'];
+export declare const PLUGIN_REVOCATION_STATES: readonly ['active', 'revoked'];
+export declare const PLUGIN_UPDATE_CHANNELS: readonly ['stable', 'beta', 'canary'];
+export declare const PLUGIN_UPDATE_ARTIFACT_KINDS: readonly ['declarative-index', 'executable-plugin'];
+export declare const PLUGIN_UPDATE_STATUS: readonly ['verified', 'quarantined-phase9'];
+export declare const PLUGIN_MARKETPLACE_MAX_LIFETIME_MS: 604800000;
+export declare const PLUGIN_UPDATE_MAX_LIFETIME_MS: 604800000;
 
 export type PluginMarketplaceCapabilityType = (typeof PLUGIN_CAPABILITY_TYPES)[number];
 export type PluginMarketplaceRiskLevel = (typeof PLUGIN_MARKETPLACE_RISK_LEVELS)[number];
@@ -27,7 +27,7 @@ export interface PluginMarketplaceContractIssue {
   message: string;
 }
 
-export class PluginMarketplaceContractError extends Error {
+export declare class PluginMarketplaceContractError extends Error {
   readonly name: 'PluginMarketplaceContractError';
   readonly code: 'PLUGIN_MARKETPLACE_CONTRACT_INVALID';
   readonly issues: readonly PluginMarketplaceContractIssue[];
@@ -230,18 +230,18 @@ export interface HostUpdateAuthorizationContext {
   readonly kind: 'host-update-authorization-context';
 }
 
-export function parseWireMarketplaceIndex(input: unknown): WireMarketplaceIndex;
-export function createHostMarketplaceVerificationContext(input: HostMarketplaceVerificationContextInput): HostMarketplaceVerificationContext;
-export function verifyWireMarketplaceIndex(input: unknown, hostContext: HostMarketplaceVerificationContext): VerifiedMarketplaceIndex;
-export function isVerifiedMarketplaceIndex(value: unknown): value is VerifiedMarketplaceIndex;
-export function isVerifiedMarketplaceAddon(value: unknown): value is VerifiedMarketplaceAddon;
-export function readVerifiedMarketplaceAddon(value: VerifiedMarketplaceAddon): VerifiedMarketplaceAddon;
-export function projectMarketplaceIndexForRenderer(value: VerifiedMarketplaceIndex): RendererMarketplaceIndex;
+export declare function parseWireMarketplaceIndex(input: unknown): WireMarketplaceIndex;
+export declare function createHostMarketplaceVerificationContext(input: HostMarketplaceVerificationContextInput): HostMarketplaceVerificationContext;
+export declare function verifyWireMarketplaceIndex(input: unknown, hostContext: HostMarketplaceVerificationContext): VerifiedMarketplaceIndex;
+export declare function isVerifiedMarketplaceIndex(value: unknown): value is VerifiedMarketplaceIndex;
+export declare function isVerifiedMarketplaceAddon(value: unknown): value is VerifiedMarketplaceAddon;
+export declare function readVerifiedMarketplaceAddon(value: VerifiedMarketplaceAddon): VerifiedMarketplaceAddon;
+export declare function projectMarketplaceIndexForRenderer(value: VerifiedMarketplaceIndex): RendererMarketplaceIndex;
 
-export function parseWireSignedCatalog(input: unknown): WireSignedCatalog;
-export function verifyWireSignedCatalog(input: unknown, hostContext: HostMarketplaceVerificationContext, verifiedAddon: VerifiedMarketplaceAddon): VerifiedSignedCatalog;
-export function isVerifiedSignedCatalog(value: unknown): value is VerifiedSignedCatalog;
-export function projectSignedCatalogForRenderer(value: VerifiedSignedCatalog): {
+export declare function parseWireSignedCatalog(input: unknown): WireSignedCatalog;
+export declare function verifyWireSignedCatalog(input: unknown, hostContext: HostMarketplaceVerificationContext, verifiedAddon: VerifiedMarketplaceAddon): VerifiedSignedCatalog;
+export declare function isVerifiedSignedCatalog(value: unknown): value is VerifiedSignedCatalog;
+export declare function projectSignedCatalogForRenderer(value: VerifiedSignedCatalog): {
   wireVersion: 2;
   kind: 'signed-catalog-renderer';
   addonId: string;
@@ -251,14 +251,14 @@ export function projectSignedCatalogForRenderer(value: VerifiedSignedCatalog): {
   items: readonly import('./identity').PluginCatalogItem[];
 };
 
-export function parseWirePluginUpdate(input: unknown): WirePluginUpdate;
-export function verifyWirePluginUpdate(input: unknown, hostContext: HostMarketplaceVerificationContext, verifiedAddon: VerifiedMarketplaceAddon): VerifiedPluginUpdate;
-export function isVerifiedPluginUpdate(value: unknown): value is VerifiedPluginUpdate;
-export function createHostUpdateAuthorizationContext(input: {
+export declare function parseWirePluginUpdate(input: unknown): WirePluginUpdate;
+export declare function verifyWirePluginUpdate(input: unknown, hostContext: HostMarketplaceVerificationContext, verifiedAddon: VerifiedMarketplaceAddon): VerifiedPluginUpdate;
+export declare function isVerifiedPluginUpdate(value: unknown): value is VerifiedPluginUpdate;
+export declare function createHostUpdateAuthorizationContext(input: {
   now: number;
   approveDeclarativeUpdate(input: { addonId: string; version: string; sequence: number }): boolean;
 }): HostUpdateAuthorizationContext;
-export function authorizeVerifiedPluginUpdate(value: VerifiedPluginUpdate, hostContext: HostUpdateAuthorizationContext): {
+export declare function authorizeVerifiedPluginUpdate(value: VerifiedPluginUpdate, hostContext: HostUpdateAuthorizationContext): {
   kind: 'authorized-plugin-update';
   addonId: string;
   version: string;
@@ -268,8 +268,8 @@ export function authorizeVerifiedPluginUpdate(value: VerifiedPluginUpdate, hostC
   status: 'host-staging-approved';
   installable: false;
 };
-export function projectPluginUpdateForRenderer(value: VerifiedPluginUpdate): RendererPluginUpdate;
-export function signedPayloadJson(value: WireMarketplaceIndex | WirePluginUpdate | WireSignedCatalog): string;
+export declare function projectPluginUpdateForRenderer(value: VerifiedPluginUpdate): RendererPluginUpdate;
+export declare function signedPayloadJson(value: WireMarketplaceIndex | WirePluginUpdate | WireSignedCatalog): string;
 
 export interface WirePluginUpdate {
   wireVersion: 1;

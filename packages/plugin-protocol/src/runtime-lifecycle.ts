@@ -1,8 +1,8 @@
-export const PLUGIN_RUNTIME_LIFECYCLE_VERSION: 1;
-export const PLUGIN_RUNTIME_STATES: readonly ['absent', 'starting', 'ready', 'draining', 'stopped', 'failed', 'revoked'];
+export declare const PLUGIN_RUNTIME_LIFECYCLE_VERSION: 1;
+export declare const PLUGIN_RUNTIME_STATES: readonly ['absent', 'starting', 'ready', 'draining', 'stopped', 'failed', 'revoked'];
 export type PluginRuntimeState = (typeof PLUGIN_RUNTIME_STATES)[number];
 
-export class PluginRuntimeLifecycleError extends Error {
+export declare class PluginRuntimeLifecycleError extends Error {
   readonly name: 'PluginRuntimeLifecycleError';
   readonly code: 'PLUGIN_RUNTIME_LIFECYCLE_INVALID';
   readonly issues: readonly { path: string; code: string; message: string }[];
@@ -20,7 +20,7 @@ export interface HostRuntimeLease {
   reasonCode?: string;
 }
 
-export function createHostRuntimeLease(input: {
+export declare function createHostRuntimeLease(input: {
   addonId: string;
   runtimeId: string;
   state: 'absent';
@@ -29,10 +29,10 @@ export function createHostRuntimeLease(input: {
   revocationEpoch: number;
   reasonCode?: string;
 }): HostRuntimeLease;
-export function transitionHostRuntimeLease(currentLease: HostRuntimeLease, nextState: PluginRuntimeState, reasonCode?: string): HostRuntimeLease;
-export function isHostRuntimeLease(value: unknown): value is HostRuntimeLease;
-export function isReadyHostRuntimeLease(value: unknown): value is HostRuntimeLease & { state: 'ready' };
-export function readCurrentReadyHostRuntimeLease(value: unknown, expected: {
+export declare function transitionHostRuntimeLease(currentLease: HostRuntimeLease, nextState: PluginRuntimeState, reasonCode?: string): HostRuntimeLease;
+export declare function isHostRuntimeLease(value: unknown): value is HostRuntimeLease;
+export declare function isReadyHostRuntimeLease(value: unknown): value is HostRuntimeLease & { state: 'ready' };
+export declare function readCurrentReadyHostRuntimeLease(value: unknown, expected: {
   addonId: string;
   authorizationEpoch: number;
   revocationEpoch: number;

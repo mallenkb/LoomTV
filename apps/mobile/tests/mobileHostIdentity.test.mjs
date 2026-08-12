@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import test from 'node:test';
 import { normalizeCertFingerprint } from '../mobileDomain.ts';
-import { reconcileSavedHost } from '../mobileHostIdentity.ts';
+import { savedConnectionSchema } from '../mobileDecoders.ts';
+import { reconcileSavedHost, validatePairIdentity } from '../mobileHostIdentity.ts';
+
+import fs from 'node:fs';
 
 const appSource = fs.readFileSync(new URL('../App.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const connectionSource = fs.readFileSync(new URL('../mobileConnection.ts', import.meta.url), 'utf8');
@@ -53,14 +55,21 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
 });
 
 test('saved sessions require a pinned fingerprint before restore', () => {
-  const restore = sourceSection(appSource, 'App.tsx',
-    'const saved = JSON.parse(stored) as SavedConnection;',
-    '.finally(() => {',
-  );
-
-  assert.match(restore, /normalizeCertFingerprint\(saved\.certFingerprint\)/);
-  assert.match(restore, /!certFingerprint\s*\|\|\s*!saved\.hostDeviceId/);
-  assert.match(restore, /SecureStore\.deleteItemAsync\(SAVED_CONNECTION_KEY\)/);
+  const valid = {
+    baseUrl: 'https://192.168.1.10:3848',
+    deviceId: 'phone',
+    deviceToken: 'access',
+    accessTokenExpiresAt: Date.now() + 1000,
+    refreshToken: 'refresh',
+    refreshTokenExpiresAt: Date.now() + 2000,
+    certFingerprint: 'ab'.repeat(32),
+    hostDeviceId: 'desktop-a',
+    hostDeviceName: 'Living Room',
+    clientDeviceName: 'Phone',
+  };
+  assert.equal(savedConnectionSchema.safeParse(valid).success, true);
+  assert.equal(savedConnectionSchema.safeParse({ ...valid, hostDeviceId: '' }).success, false);
+  assert.equal(savedConnectionSchema.safeParse({ ...valid, certFingerprint: '' }).success, false);
 });
 
 test('mDNS can update a saved address only when host ID and certificate pin both match', () => {
@@ -98,14 +107,11 @@ test('mDNS can update a saved address only when host ID and certificate pin both
 });
 
 test('pairing binds the response identity to discovery before credentials are persisted', () => {
-  const pairing = sourceSection(appSource, 'App.tsx',
-    'const payload = (await response.json()) as PairResponse;',
-    'await initializeProfiles(nextConnection)',
-  );
-
-  assert.match(pairing, /normalizeCertFingerprint\(payload\.certFingerprint\)/);
-  assert.match(pairing, /discoveredFingerprint\s*&&\s*discoveredFingerprint\s*!==\s*certFingerprint/);
-  assert.match(pairing, /discoveredPairHost\?\.deviceId\s*&&\s*payload\.hostDeviceId/);
-  assert.match(pairing, /certFingerprint:\s*nextConnection\.certFingerprint/);
-  assert.match(pairing, /SecureStore\.setItemAsync\(SAVED_CONNECTION_KEY/);
+  const fingerprint = 'ab'.repeat(32);
+  const payload = { certFingerprint: fingerprint, hostDeviceId: 'desktop-a' };
+  const discovered = { certFingerprint: fingerprint, deviceId: 'desktop-a' };
+  assert.equal(validatePairIdentity(payload, fingerprint, discovered), fingerprint);
+  assert.throws(() => validatePairIdentity(payload, 'cd'.repeat(32), discovered), /TLS identity changed/);
+  assert.throws(() => validatePairIdentity(payload, fingerprint, { ...discovered, certFingerprint: 'cd'.repeat(32) }), /security fingerprint changed/);
+  assert.throws(() => validatePairIdentity(payload, fingerprint, { ...discovered, deviceId: 'desktop-b' }), /desktop identity changed/);
 });

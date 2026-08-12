@@ -111,6 +111,7 @@ import {
 } from './mediaServerHttp.ts';
 import { libraryItemIdFromPath, libraryItemPathForId } from './mediaServerLibrary.ts';
 import { resolveMediaAccessIdentity } from './mediaAccessIdentity.ts';
+import { httpBodyParsers } from './httpOperationRegistry.ts';
 import type {
   LibraryIndexPayload,
   LibraryItemDetailsPayload,
@@ -136,6 +137,7 @@ export interface MediaServerDependencies {
   getLibraryRevision: () => number;
   getMediaSegments: (request: { mediaId: string; season?: number; episode?: number }) => Promise<MediaSegmentResponse>;
   getOfficialMetadataCandidates: (mediaId: string) => Promise<OfficialMetadataCandidate[]>;
+  requestMetadataProvider: (request: import('../shared/desktopProtocol.ts').MetadataProviderRequest) => Promise<unknown>;
   applyOfficialMetadataCandidate: (
     mediaId: string,
     candidate: OfficialMetadataCandidate,
@@ -215,6 +217,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     getLibraryRevision,
     getMediaSegments,
     getOfficialMetadataCandidates,
+    requestMetadataProvider,
     applyOfficialMetadataCandidate,
     getWebRendererDevServerUrl,
     getWebRendererRoot,
@@ -537,15 +540,8 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           writeJson(res, 401, { error: 'A paired-device credential is required to revoke this device.' });
           return;
         }
-        readJsonBody(req)
-          .then((body) => {
-            if (Object.prototype.hasOwnProperty.call(body, 'deviceId')) {
-              writeJson(res, 409, {
-                error: 'device_identity_is_credential_bound',
-                message: 'Update LoomTV and retry without a caller-supplied deviceId.',
-              });
-              return;
-            }
+        readJsonBody(req).then(httpBodyParsers.lanUnpair)
+          .then(() => {
             const settings = loadSettings();
             if (!(settings.localNetworkPairedDevices || []).some((device) => device.id === authenticatedDevice.id)) {
               writeJson(res, 401, { error: 'The paired-device credential has already been revoked.' });
@@ -557,8 +553,8 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             writeJson(res, 200, { ok: true });
           })
           .catch((error) => {
-            console.error('[lan/unpair] error', error);
-            writeJson(res, 500, { error: 'Unpair failed' });
+            console.warn('[lan/unpair] invalid request', error);
+            writeJson(res, 400, { error: 'invalid_unpair_payload' });
           });
         return;
       }
@@ -622,7 +618,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/v2/playback-plan' && req.method === 'POST') {
         if (!requireV2Scope('media:stream')) return;
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanPlaybackPlan)
           .then(async (body) => {
             assertCurrentSelectionRevision(body);
             const mediaResourceId = String(body.mediaId || '');
@@ -691,7 +687,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/v2/start-hls' && req.method === 'POST') {
         if (!requireV2Scope('media:stream')) return;
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanStartHls)
           .then(async (body) => {
             assertCurrentSelectionRevision(body);
             if (lanDeviceId) {
@@ -737,7 +733,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             const identity = requireProfileMediaAccess(filePath);
             if (!identity) return;
 
-            const options = { ...((body.options || {}) as TranscodeOptions) };
+            const options: TranscodeOptions = { ...(body.options || {}) };
             for (const field of ['subtitleFilePath', 'secondarySubtitleFilePath'] as const) {
               const subtitleResourceId = options[field];
               if (!subtitleResourceId) continue;
@@ -885,7 +881,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             writeProfileError(error);
             return;
           }
-          readJsonBody(req)
+          readJsonBody(req).then(httpBodyParsers.rendererSettingsSave)
             .then((patch) => {
               saveSettings({
                 ...loadSettings(),
@@ -914,10 +910,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       }
 
       if (reqUrl.pathname === '/api/renderer/media/probe' && req.method === 'POST') {
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.rendererMediaProbe)
           .then(async (body) => {
             try {
-              const requestedFilePath = String(body.filePath || '');
+              const requestedFilePath = body.filePath;
               assertProfileCanAccessPath(requireDesktopProfileId(), requestedFilePath);
               const data = await probeMedia(requestedFilePath);
               writeJson(res, 200, { ok: true, data });
@@ -930,11 +926,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       }
 
       if (reqUrl.pathname === '/api/renderer/media/subtitle-resource' && req.method === 'POST') {
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.rendererSubtitleResource)
           .then((body) => {
             try {
-              const mediaFilePath = String(body.mediaFilePath || '');
-              const subtitleFilePath = String(body.subtitleFilePath || '');
+              const { mediaFilePath, subtitleFilePath } = body;
               const profileId = requireDesktopProfileId();
               assertProfileCanAccessPath(profileId, mediaFilePath);
               assertSubtitleCanAccessMediaPath(profileId, mediaFilePath, subtitleFilePath);
@@ -959,14 +954,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       }
 
       if (reqUrl.pathname === '/api/renderer/media/start-transcode' && req.method === 'POST') {
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.rendererStartTranscode)
           .then(async (body) => {
             try {
-              const requestedFilePath = String(body.filePath || '');
+              const requestedFilePath = body.filePath;
               assertProfileCanAccessPath(requireDesktopProfileId(), requestedFilePath);
               const session = await startTranscode(
                 requestedFilePath,
-                (body.options || {}) as TranscodeOptions,
+                body.options || {},
                 `http://127.0.0.1:${mediaServerPort}`,
               );
               writeJson(res, 200, {
@@ -982,9 +977,19 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       }
 
       if (reqUrl.pathname === '/api/renderer/media/stop-transcode' && req.method === 'POST') {
-        readJsonBody(req)
-          .then((body) => writeJson(res, 200, { ok: true, data: stopTranscode(String(body.sessionId || '')) }))
+        readJsonBody(req).then(httpBodyParsers.rendererStopTranscode)
+          .then((body) => writeJson(res, 200, { ok: true, data: stopTranscode(body.sessionId) }))
           .catch(() => writeJson(res, 400, { ok: false, error: 'Invalid transcode payload.' }));
+        return;
+      }
+
+      if (reqUrl.pathname === '/api/renderer/metadata/provider' && req.method === 'POST') {
+        readJsonBody(req).then(httpBodyParsers.rendererMetadataProvider)
+          .then(async (request) => writeJson(res, 200, await requestMetadataProvider(request)))
+          .catch((error) => {
+            console.warn('[metadata] Renderer provider request failed:', error);
+            writeJson(res, 502, { error: 'metadata_provider_request_failed' });
+          });
         return;
       }
 
@@ -1048,14 +1053,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanProfileCreate)
           .then((body) => {
             requireOwner(profileDeviceId);
             const created = createProfile({
-              name: String(body.name || ''),
-              avatarKey: typeof body.avatarKey === 'string' ? body.avatarKey : undefined,
-              colorKey: typeof body.colorKey === 'string' ? body.colorKey : undefined,
-              type: body.type === 'kid' ? 'kid' : 'standard',
+              name: body.name,
+              avatarKey: body.avatarKey,
+              colorKey: body.colorKey,
+              type: body.type,
             });
             broadcastProfilesChanged();
             writeJson(res, 201, { profile: created, profiles: profileSummaries() });
@@ -1087,11 +1092,11 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
         const deviceId = profileDeviceId;
-        readJsonBody(req).then(async (body) => {
-          const profileId = String(body.profileId || '');
+        readJsonBody(req).then(httpBodyParsers.lanProfileSelect).then(async (body) => {
+          const profileId = body.profileId;
           const selected = profileId === 'guest'
             ? createAndSelectGuest(deviceId)
-            : await selectProfile(deviceId, profileId, typeof body.pin === 'string' ? body.pin : undefined, req.socket.remoteAddress || 'lan');
+            : await selectProfile(deviceId, profileId, body.pin, req.socket.remoteAddress || 'lan');
           writeJson(res, 200, { profile: selected, active: getActiveProfileState(deviceId) });
         }).catch(writeProfileError);
         return;
@@ -1116,8 +1121,8 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
         const deviceId = profileDeviceId;
-        readJsonBody(req)
-          .then((body) => writeJson(res, 200, setAutomaticSignIn(deviceId, Boolean(body.enabled))))
+        readJsonBody(req).then(httpBodyParsers.lanAutomaticSignIn)
+          .then((body) => writeJson(res, 200, setAutomaticSignIn(deviceId, body.enabled)))
           .catch(writeProfileError);
         return;
       }
@@ -1131,7 +1136,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
         if (req.method === 'PATCH') {
-          readJsonBody(req)
+          readJsonBody(req).then(httpBodyParsers.lanProfilePreferences)
             .then((body) => { assertCurrentSelectionRevision(body); writeJson(res, 200, saveProfilePreferences(profileId, body)); })
             .catch((error) => error instanceof ProfileError ? writeProfileError(error) : writeJson(res, 400, { error: 'invalid_profile_preferences' }));
           return;
@@ -1152,16 +1157,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           return;
         }
         if (req.method === 'PUT' || req.method === 'DELETE') {
-          readJsonBody(req).then((body) => {
+          readJsonBody(req).then(httpBodyParsers.lanProfileListMutation).then((body) => {
             assertCurrentSelectionRevision(body);
-            const bodyKind = body.kind === 'watchlist' || body.kind === 'favorite' || body.kind === 'watched'
-              ? body.kind as ProfileListKind
-              : null;
-            if (!bodyKind || !body.mediaId) {
-              writeJson(res, 400, { error: 'mediaId_and_kind_required' });
-              return;
-            }
-            const mediaId = String(body.mediaId);
+            const bodyKind: ProfileListKind = body.kind;
+            const mediaId = body.mediaId;
             if (req.method === 'PUT' && !(bodyKind === 'watched' && mediaId.startsWith('discover:')) && !canProfileAccessMediaId(profileId, mediaId)) {
               writeJson(res, 404, { error: 'media_not_found' });
               return;
@@ -1182,15 +1181,11 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanArtworkCandidates)
           .then(async (body) => {
             assertCurrentSelectionRevision(body);
             requireOwner(profileDeviceId);
-            const mediaId = String(body.mediaId || '').trim();
-            if (!mediaId || mediaId.length > 512) {
-              writeJson(res, 400, { error: 'mediaId is required' });
-              return;
-            }
+            const mediaId = body.mediaId;
             writeJson(res, 200, await getOfficialMetadataCandidates(mediaId));
           })
           .catch(writeProfileError);
@@ -1204,29 +1199,19 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           writeJson(res, 409, { error: 'profile_required' });
           return;
         }
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanArtworkApply)
           .then(async (body) => {
             assertCurrentSelectionRevision(body);
             requireOwner(profileDeviceId);
-            const mediaId = String(body.mediaId || '').trim();
-            const rawCandidate = body.candidate;
-            const candidateId = rawCandidate && typeof rawCandidate === 'object' && !Array.isArray(rawCandidate)
-              && typeof (rawCandidate as { id?: unknown }).id === 'string'
-              ? String((rawCandidate as { id: string }).id).trim()
-              : '';
-            if (!mediaId || mediaId.length > 512 || !candidateId || candidateId.length > 512) {
-              writeJson(res, 400, { error: 'mediaId and a candidate id are required' });
-              return;
-            }
+            const mediaId = body.mediaId;
+            const candidateId = body.candidate.id;
             const candidates = await getOfficialMetadataCandidates(mediaId);
             const candidate = candidates.find((entry) => entry.id === candidateId);
             if (!candidate) {
               writeJson(res, 400, { error: 'The selected metadata candidate is no longer available.' });
               return;
             }
-            const target = body.target === 'poster' || body.target === 'cover' || body.target === 'episodes'
-              ? body.target as OfficialMetadataApplyTarget
-              : 'all';
+            const target: OfficialMetadataApplyTarget = body.target || 'all';
             writeJson(res, 200, await applyOfficialMetadataCandidate(mediaId, candidate, target));
           })
           .catch(writeProfileError);
@@ -1256,12 +1241,12 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         if (!requireV2Scope('playback:write')) return;
         const profileId = profileIdForRequest();
         if (!profileId) return;
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanProgressSave)
           .then((body) => {
             assertCurrentSelectionRevision(body);
             let file = '';
             try {
-              file = resolveLocalResource(String(body.mediaId || ''), MEDIA_RESOURCE_KIND, getLibraryRoots());
+              file = resolveLocalResource(body.mediaId, MEDIA_RESOURCE_KIND, getLibraryRoots());
             } catch {
               // Avoid revealing whether a resource identifier exists.
             }
@@ -1275,7 +1260,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               writeJson(res, 404, { error: 'media_not_found' });
               return;
             }
-            writeJson(res, 200, saveProgress(profileId, file, Number(body.position) || 0, Number(body.duration) || 0));
+            writeJson(res, 200, saveProgress(profileId, file, body.position, body.duration));
           })
           .catch((error) => {
             if (error instanceof ProfileError) {
@@ -1302,14 +1287,10 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         if (!requireV2Scope('playback:write')) return;
         const profileId = profileIdForRequest();
         if (!profileId) return;
-        readJsonBody(req)
+        readJsonBody(req).then(httpBodyParsers.lanTrackPreferencesSave)
           .then((body) => {
             assertCurrentSelectionRevision(body);
-            const scope = String(body.scope || '').trim();
-            if (!scope) {
-              writeJson(res, 400, { error: 'scope is required' });
-              return;
-            }
+            const scope = body.scope;
             writeJson(res, 200, savePlaybackTrackPreferences(profileId, scope, body.preferences || {}));
           })
           .catch((error) => {

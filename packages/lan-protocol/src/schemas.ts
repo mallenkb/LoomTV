@@ -151,8 +151,10 @@ export const lanMediaItemSchema = z.object({
   rating: finiteNumber,
   providerRatings: lanProviderRatingsSchema.optional(),
   contentRatings: z.record(z.string(), lanContentRatingSchema).optional(),
+  contentRating: z.string().optional(),
   streamingProviders: z.array(lanStreamingProviderSchema).optional(),
   originPlatform: lanOriginPlatformSchema.optional(),
+  trailerUrl: z.string().optional(),
   runtime: z.string().optional(),
   seasonCount: nonNegativeNumber.optional(),
   episodeCount: nonNegativeNumber.optional(),
@@ -208,8 +210,13 @@ export const lanLibraryCardSchema = z.object({
   rating: finiteNumber,
   providerRatings: lanProviderRatingsSchema.optional(),
   contentRatings: z.record(z.string(), lanContentRatingSchema).optional(),
+  contentRating: z.string().optional(),
   streamingProviders: z.array(lanStreamingProviderSchema).optional(),
   originPlatform: lanOriginPlatformSchema.optional(),
+  trailerUrl: z.string().optional(),
+  runtime: z.string().optional(),
+  seasonCount: nonNegativeNumber.optional(),
+  episodeCount: nonNegativeNumber.optional(),
   genres: z.array(z.string()),
   lastPlayed: nonNegativeNumber.optional(),
   seasons: z.array(z.object({ number: finiteNumber, title: z.string(), episodeCount: nonNegativeNumber })).optional(),
@@ -309,6 +316,7 @@ export const lanProfilePreferencesSchema = z.object({
   appLoaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
   appHomeStyle: z.enum(['default', 'modern']).optional(),
   appModernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
+  showProviderRatingBadges: z.boolean().optional(),
   sidebarNavOrder: z.array(z.string()).optional(),
   autoplayNextEnabled: z.boolean().optional(),
   playbackSkipBackSeconds: nonNegativeNumber.optional(),
@@ -320,6 +328,105 @@ export const lanProfileListEntrySchema = z.object({
   kind: z.enum(['watchlist', 'favorite', 'watched']),
   createdAt: nonNegativeNumber,
 });
+
+const selectionRevisionSchema = nonNegativeNumber.int().optional();
+
+export const lanPlaybackCapabilitiesSchema = z.object({
+  containers: z.array(z.string()).optional(),
+  videoCodecs: z.array(z.string()).optional(),
+  audioCodecs: z.array(z.string()).optional(),
+  supportsHls: z.boolean().optional(),
+  supportsHdr: z.boolean().optional(),
+  supportsTextSubtitles: z.boolean().optional(),
+  maxWidth: nonNegativeNumber.optional(),
+  maxHeight: nonNegativeNumber.optional(),
+  maxVideoBitrateKbps: nonNegativeNumber.optional(),
+});
+
+export const lanStreamOptionsSchema = z.object({
+  forceTranscode: z.boolean().optional(),
+  startSeconds: nonNegativeNumber.optional(),
+  targetVideoCodec: z.enum(['h264', 'hevc', 'av1']).optional(),
+  maxWidth: nonNegativeNumber.optional(),
+  maxHeight: nonNegativeNumber.optional(),
+  videoBitrateKbps: nonNegativeNumber.optional(),
+  audioBitrateKbps: nonNegativeNumber.optional(),
+  toneMap: z.boolean().optional(),
+  preset: z.enum(['auto', 'software', 'videotoolbox', 'nvenc', 'qsv', 'vaapi', 'amf', 'rkmpp']).optional(),
+  audioTrackIndex: finiteNumber.int().optional(),
+  subtitleTrackIndex: finiteNumber.int().optional(),
+  subtitleStreamOrdinal: finiteNumber.int().optional(),
+  subtitleCodec: z.string().optional(),
+  subtitleFilePath: z.string().optional(),
+  subtitleStyle: z.object({ fontSize: finiteNumber.positive().optional() }).optional(),
+});
+
+export const lanUnpairRequestSchema = z.object({}).strict();
+export const lanPlaybackPlanRequestSchema = z.object({
+  mediaId: nonEmptyString.max(512),
+  capabilities: lanPlaybackCapabilitiesSchema.optional(),
+  selectionRevision: selectionRevisionSchema,
+});
+export const lanStartHlsRequestSchema = z.object({
+  mediaId: nonEmptyString.max(512),
+  options: lanStreamOptionsSchema.optional(),
+  selectionRevision: selectionRevisionSchema,
+});
+export const lanProfileCreateRequestSchema = z.object({
+  name: nonEmptyString.max(120),
+  avatarKey: z.string().max(120).optional(),
+  colorKey: z.string().max(120).optional(),
+  type: z.enum(['standard', 'kid']).default('standard'),
+});
+export const lanProfileSelectRequestSchema = z.object({
+  profileId: nonEmptyString.max(240),
+  pin: z.string().max(64).optional(),
+});
+export const lanAutomaticSignInRequestSchema = z.object({ enabled: z.boolean() });
+export const lanProfilePreferencesRequestSchema = lanProfilePreferencesSchema.extend({
+  selectionRevision: selectionRevisionSchema,
+});
+export const lanProfileListMutationRequestSchema = z.object({
+  selectionRevision: selectionRevisionSchema,
+  kind: z.enum(['watchlist', 'favorite', 'watched']),
+  mediaId: nonEmptyString.max(512),
+});
+export const lanArtworkCandidatesRequestSchema = z.object({
+  selectionRevision: selectionRevisionSchema,
+  mediaId: nonEmptyString.max(512),
+});
+export const lanArtworkApplyRequestSchema = lanArtworkCandidatesRequestSchema.extend({
+  candidate: z.object({ id: nonEmptyString.max(512) }),
+  target: z.enum(['all', 'poster', 'cover', 'episodes']).optional(),
+});
+export const lanProgressSaveRequestSchema = z.object({
+  selectionRevision: selectionRevisionSchema,
+  mediaId: nonEmptyString.max(512),
+  position: nonNegativeNumber,
+  duration: nonNegativeNumber,
+});
+export const lanTrackPreferenceSchema = z.object({
+  enabled: z.boolean(),
+  index: finiteNumber.int().optional(),
+  language: z.string().optional(),
+  title: z.string().optional(),
+  codec: z.string().optional(),
+  forced: z.boolean().optional(),
+});
+export const lanPlaybackTrackPreferencesSaveRequestSchema = z.object({
+  selectionRevision: selectionRevisionSchema,
+  scope: nonEmptyString.max(512),
+  preferences: z.object({
+    audio: lanTrackPreferenceSchema.optional(),
+    subtitle: lanTrackPreferenceSchema.optional(),
+  }),
+});
+
+export type LanPlaybackPlanRequestPayload = z.output<typeof lanPlaybackPlanRequestSchema>;
+export type LanStartHlsRequestPayload = z.output<typeof lanStartHlsRequestSchema>;
+export type LanProfileCreateRequest = z.output<typeof lanProfileCreateRequestSchema>;
+export type LanProfileSelectRequest = z.output<typeof lanProfileSelectRequestSchema>;
+export type LanProgressSaveRequest = z.output<typeof lanProgressSaveRequestSchema>;
 
 export const lanErrorPayloadSchema = z.object({
   error: z.string().optional(),

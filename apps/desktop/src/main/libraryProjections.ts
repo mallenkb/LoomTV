@@ -45,9 +45,20 @@ export function stripInlineArtworkFromItem(item: MediaItem): MediaItem {
     posterCandidates: durableArtworkSources(item.posterCandidates),
     backdropCandidates: durableArtworkSources(item.backdropCandidates),
     logoCandidates: durableArtworkSources(item.logoCandidates),
+    cast: item.cast.map((credit) => ({
+      ...credit,
+      image: durableArtworkSource(credit.image),
+      characterImage: durableArtworkSource(credit.characterImage),
+      voiceActorImage: durableArtworkSource(credit.voiceActorImage),
+    })),
     episodes: item.episodes?.map((episode) => ({
       ...episode,
       still: durableArtworkSource(episode.still),
+    })),
+    episodeFiles: item.episodeFiles?.map((episodeFile) => ({
+      ...episodeFile,
+      ...(episodeFile.still ? { still: durableArtworkSource(episodeFile.still) } : {}),
+      ...(episodeFile.thumbnail ? { thumbnail: durableArtworkSource(episodeFile.thumbnail) } : {}),
     })),
   };
 }
@@ -188,8 +199,13 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       rating: item.rating,
       providerRatings: item.providerRatings,
       contentRatings: item.contentRatings,
+      contentRating: item.contentRating,
       streamingProviders: item.streamingProviders,
       originPlatform: item.originPlatform,
+      trailerUrl: item.trailerUrl,
+      runtime: item.runtime,
+      seasonCount: item.seasonCount,
+      episodeCount: item.episodeCount,
       genres: item.genres,
       lastPlayed: item.lastPlayed,
       seasons: item.seasons,
@@ -250,8 +266,13 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       rating: item.rating,
       providerRatings: item.providerRatings,
       contentRatings: item.contentRatings,
+      contentRating: item.contentRating,
       streamingProviders: item.streamingProviders,
       originPlatform: item.originPlatform,
+      trailerUrl: item.trailerUrl,
+      runtime: item.runtime,
+      seasonCount: item.seasonCount,
+      episodeCount: item.episodeCount,
       genres: item.genres,
       lastPlayed: item.lastPlayed,
       seasons: item.seasons,
@@ -310,6 +331,12 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       || backdropCandidates[0]
       || poster;
     const logo = remoteArtworkDeliveryUrl(artworkDeliveryUrl(item.logo), base, identity);
+    const cast = item.cast.map((credit) => ({
+      ...credit,
+      image: remoteArtworkDeliveryUrl(artworkDeliveryUrl(credit.image), base, identity),
+      characterImage: remoteArtworkDeliveryUrl(artworkDeliveryUrl(credit.characterImage), base, identity),
+      voiceActorImage: remoteArtworkDeliveryUrl(artworkDeliveryUrl(credit.voiceActorImage), base, identity),
+    }));
 
     const stillByEpisode = new Map(
       (item.episodes || []).map((episode) => [
@@ -327,6 +354,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       posterCandidates,
       backdropCandidates,
       logoCandidates,
+      cast,
       localMetadata: localMetadataWithTracks(item.filePath, item.localMetadata),
       subtitles: subtitleRecordsForLocalNetwork(item.subtitles, base, identity, item.filePath),
       episodes: item.episodes?.map((episode) => ({

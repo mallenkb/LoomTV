@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
+import { z } from 'zod';
 import type { LibraryData } from './appContracts.ts';
 import { artworkCacheFileName, collectArtworkSourcesForCache } from './artworkCache.ts';
+import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 
 export type CachedArtwork = {
   dataUrl?: string;
@@ -25,6 +27,24 @@ type ArtworkRepositoryDependencies = {
   fetchArtworkBytes: (sourceUrl: string) => Promise<FetchedArtworkBytes | null>;
 };
 
+const customArtworkRowSchema = z.object({ target: z.string(), data_url: z.string() });
+const customArtworkMapRowSchema = customArtworkRowSchema.extend({ media_id: z.string() });
+const customArtworkDataRowSchema = z.object({ data_url: z.string(), updated_at: z.number().finite() });
+const cachedArtworkRowSchema = z.object({
+  data_url: z.string(),
+  cache_path: z.string().nullable().optional(),
+  mime_type: z.string(),
+  byte_length: z.number().finite(),
+  content_hash: z.string().nullable().optional(),
+});
+const artworkQuotaRowSchema = z.object({ count: z.number().finite(), bytes: z.number().finite() });
+const artworkCacheEntryRowSchema = z.object({
+  source_url: z.string(),
+  cache_path: z.string().nullable().optional(),
+  byte_length: z.number().finite(),
+});
+const artworkCachePathRowSchema = artworkCacheEntryRowSchema.pick({ source_url: true, cache_path: true });
+
 export function createDatabaseArtworkRepository(
   database: BetterSqlite3.Database,
   deps: ArtworkRepositoryDependencies,
@@ -39,14 +59,21 @@ export function createDatabaseArtworkRepository(
   }
 
   function getCustomArtwork(mediaId: string): Record<string, string> {
-    return Object.fromEntries((database.prepare('SELECT target, data_url FROM custom_artwork WHERE media_id = ?').all(mediaId) as Array<{ target: string; data_url: string }>)
+    const rows = parseDatabaseRows(
+      database.prepare('SELECT target, data_url FROM custom_artwork WHERE media_id = ?').all(mediaId),
+      customArtworkRowSchema,
+      'custom artwork',
+    );
+    return Object.fromEntries(rows
       .map((row): [string, string] => [row.target, row.data_url]));
   }
 
   function getCustomArtworkData(mediaId: string, target: string): { dataUrl: string; updatedAt: number } | null {
-    const row = database.prepare('SELECT data_url, updated_at FROM custom_artwork WHERE media_id = ? AND target = ?').get(mediaId, target) as
-      | { data_url: string; updated_at: number }
-      | undefined;
+    const row = parseDatabaseRow(
+      database.prepare('SELECT data_url, updated_at FROM custom_artwork WHERE media_id = ? AND target = ?').get(mediaId, target),
+      customArtworkDataRowSchema.optional(),
+      'custom artwork data',
+    );
     return row ? { dataUrl: row.data_url, updatedAt: row.updated_at } : null;
   }
 
@@ -63,9 +90,11 @@ export function createDatabaseArtworkRepository(
 
   function getCustomArtworkMap(): Map<string, Map<string, string>> {
     const result = new Map<string, Map<string, string>>();
-    const rows = database
-      .prepare('SELECT media_id, target, data_url FROM custom_artwork')
-      .all() as Array<{ media_id: string; target: string; data_url: string }>;
+    const rows = parseDatabaseRows(
+      database.prepare('SELECT media_id, target, data_url FROM custom_artwork').all(),
+      customArtworkMapRowSchema,
+      'custom artwork map',
+    );
     for (const row of rows) {
       let targetMap = result.get(row.media_id);
       if (!targetMap) {
@@ -78,9 +107,11 @@ export function createDatabaseArtworkRepository(
   }
 
   function getCachedArtwork(sourceUrl: string): CachedArtwork | null {
-    const row = database.prepare('SELECT data_url, cache_path, mime_type, byte_length, content_hash FROM artwork_cache WHERE source_url = ?').get(sourceUrl) as
-      | { data_url: string; cache_path?: string | null; mime_type: string; byte_length: number; content_hash?: string | null }
-      | undefined;
+    const row = parseDatabaseRow(
+      database.prepare('SELECT data_url, cache_path, mime_type, byte_length, content_hash FROM artwork_cache WHERE source_url = ?').get(sourceUrl),
+      cachedArtworkRowSchema.optional(),
+      'artwork cache',
+    );
     if (!row) return null;
     const cachePath = row.cache_path || undefined;
     let bytes: Buffer;
@@ -125,9 +156,17 @@ export function createDatabaseArtworkRepository(
   function enforceQuota(incomingBytes: number, sourceUrl: string): void {
     const MAX_ENTRIES = 4_096;
     const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
-    const current = database.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(byte_length), 0) AS bytes FROM artwork_cache WHERE source_url <> ?').get(sourceUrl) as { count: number; bytes: number };
+    const current = parseDatabaseRow(
+      database.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(byte_length), 0) AS bytes FROM artwork_cache WHERE source_url <> ?').get(sourceUrl),
+      artworkQuotaRowSchema,
+      'artwork cache quota',
+    );
     if (current.count + 1 <= MAX_ENTRIES && current.bytes + incomingBytes <= MAX_TOTAL_BYTES) return;
-    const rows = database.prepare('SELECT source_url, cache_path, byte_length FROM artwork_cache WHERE source_url <> ? ORDER BY updated_at ASC').all(sourceUrl) as Array<{ source_url: string; cache_path?: string | null; byte_length: number }>;
+    const rows = parseDatabaseRows(
+      database.prepare('SELECT source_url, cache_path, byte_length FROM artwork_cache WHERE source_url <> ? ORDER BY updated_at ASC').all(sourceUrl),
+      artworkCacheEntryRowSchema,
+      'artwork cache entry',
+    );
     let count = current.count;
     let bytes = current.bytes;
     const remove = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
@@ -191,7 +230,11 @@ export function createDatabaseArtworkRepository(
     const cacheDir = deps.cacheDirectory;
     fs.mkdirSync(cacheDir, { recursive: true });
     const sourceSet = new Set(sources);
-    const rows = database.prepare('SELECT source_url, cache_path FROM artwork_cache').all() as Array<{ source_url: string; cache_path?: string | null }>;
+    const rows = parseDatabaseRows(
+      database.prepare('SELECT source_url, cache_path FROM artwork_cache').all(),
+      artworkCachePathRowSchema,
+      'artwork cache path',
+    );
     const deleteStale = database.prepare('DELETE FROM artwork_cache WHERE source_url = ?');
     const pruneStale = database.transaction(() => {
       for (const row of rows) {

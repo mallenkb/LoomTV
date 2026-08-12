@@ -14,6 +14,7 @@ import type {
   ManualMediaSegmentInput,
   MediaSegmentRequest,
   MediaSegmentType,
+  MetadataProviderRequest,
   MpvCommand,
   MpvPlaybackState,
   MpvStartOptions,
@@ -141,6 +142,7 @@ const desktopApi = {
     omdbApiKey?: string;
     tmdbApiKey?: string;
     metadataApiKeys?: Record<string, string>;
+    metadataOfflineMode?: boolean;
     openSubtitlesUsername?: string;
     openSubtitlesPassword?: string;
     openSubtitlesLanguages?: string;
@@ -234,6 +236,7 @@ const desktopApi = {
   refreshOfficialArtwork: (mediaId: string, target?: OfficialArtworkRefreshTarget) => ipcRenderer.invoke('artwork:refresh-official', mediaId, target),
   getPlaybackLogo: (mediaId: string) => ipcRenderer.invoke('artwork:playback-logo', mediaId),
   refreshIncompleteMetadata: (mediaId: string) => ipcRenderer.invoke('metadata:refresh-incomplete', mediaId),
+  requestMetadataProvider: (request: MetadataProviderRequest) => ipcRenderer.invoke('metadata:provider-request', request),
   getStreamingProviders: (mediaId: string) => ipcRenderer.invoke('metadata:streaming-providers', mediaId),
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => ipcRenderer.invoke('artwork:import', entries),
   backupDatabase: () => ipcRenderer.invoke('database:backup'),

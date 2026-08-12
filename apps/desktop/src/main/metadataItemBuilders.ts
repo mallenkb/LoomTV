@@ -368,6 +368,12 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
+      runtime: finalType === 'movie'
+        ? matchedTmdbData?.runtime
+        : matchedTmdbTVMeta?.runtime,
+      seasonCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.seasonCount,
+      episodeCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.episodeCount,
+      trailerUrl: (finalType === 'movie' ? matchedTmdbData?.trailerUrl : matchedTmdbTVMeta?.trailerUrl),
       providerRatings: omdbProviderRatings(matchedOmdbData),
       contentRatings: mergeContentRatings(
         matchedTmdbTVMeta?.contentRatings,
@@ -603,6 +609,12 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
+      runtime: finalType === 'movie'
+        ? matchedTmdbData?.runtime
+        : matchedTmdbTVMeta?.runtime,
+      seasonCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.seasonCount,
+      episodeCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.episodeCount,
+      trailerUrl: finalType === 'movie' ? matchedTmdbData?.trailerUrl : matchedTmdbTVMeta?.trailerUrl,
       providerRatings: omdbProviderRatings(matchedOmdbData),
       contentRatings: mergeContentRatings(
         useMovieMetadata ? matchedTmdbData?.contentRatings : undefined,

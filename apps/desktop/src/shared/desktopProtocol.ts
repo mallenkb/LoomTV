@@ -30,6 +30,10 @@ export type PlaybackPlanResponse = LanPlaybackPlanResponse;
 export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 export type LibraryScanMode = 'quick' | 'metadata' | 'full';
 export type MetadataApiKeys = Record<string, string>;
+export type MetadataProviderRequest =
+  | { provider: 'omdb'; query: Record<string, string | number | boolean> }
+  | { provider: 'tmdb'; path: string; query?: Record<string, string | number | boolean> }
+  | { provider: 'anilist'; query: string; variables?: Record<string, unknown> };
 
 export interface LibraryFolderGroups { movies: string[]; tvShows: string[]; anime: string[]; others: string[] }
 export interface LibraryFolderStatus {
@@ -212,8 +216,10 @@ export interface WireMediaItem {
   rating: number;
   providerRatings?: LanProviderRatings;
   contentRatings?: Record<string, LanContentRating>;
+  contentRating?: string;
   streamingProviders?: LanStreamingProvider[];
   originPlatform?: LanOriginPlatform;
+  trailerUrl?: string;
   runtime?: string;
   seasonCount?: number;
   episodeCount?: number;
@@ -279,6 +285,7 @@ export interface SettingsPayload {
   omdbApiKey?: string;
   tmdbApiKey?: string;
   metadataApiKeys?: MetadataApiKeys;
+  metadataOfflineMode?: boolean;
   openSubtitlesUsername?: string;
   openSubtitlesPassword?: string;
   openSubtitlesLanguages?: string;

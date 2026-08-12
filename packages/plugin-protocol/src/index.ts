@@ -1,12 +1,12 @@
-export const PLUGIN_MANIFEST_VERSION: 1;
-export const PLUGIN_MANIFEST_SCHEMA_ID: 'https://loomtv.app/schemas/plugin-manifest.v1.schema.json';
-export const LOOM_PLUGIN_API_VERSION: '1.0.0';
-export const SUPPORTED_PLUGIN_CAPABILITIES: readonly [
+export declare const PLUGIN_MANIFEST_VERSION: 1;
+export declare const PLUGIN_MANIFEST_SCHEMA_ID: 'https://loomtv.app/schemas/plugin-manifest.v1.schema.json';
+export declare const LOOM_PLUGIN_API_VERSION: '1.0.0';
+export declare const SUPPORTED_PLUGIN_CAPABILITIES: readonly [
   'metadata.catalog',
   'subtitle.provider',
   'playback.provider',
 ];
-export const APPROVED_PLAYBACK_PROVIDER_HOOKS: readonly ['resolve-source', 'list-variants'];
+export declare const APPROVED_PLAYBACK_PROVIDER_HOOKS: readonly ['resolve-source', 'list-variants'];
 
 export type PluginCapabilityType = (typeof SUPPORTED_PLUGIN_CAPABILITIES)[number];
 export type ApprovedPlaybackProviderHook = (typeof APPROVED_PLAYBACK_PROVIDER_HOOKS)[number];
@@ -52,7 +52,7 @@ export interface PluginManifestValidationIssue {
   message: string;
 }
 
-export class PluginManifestValidationError extends Error {
+export declare class PluginManifestValidationError extends Error {
   readonly name: 'PluginManifestValidationError';
   readonly code: 'PLUGIN_MANIFEST_INVALID';
   readonly issues: readonly PluginManifestValidationIssue[];
@@ -63,22 +63,22 @@ export interface PluginManifestValidationOptions {
   checkCompatibility?: boolean;
 }
 
-export function isLoomApiRangeCompatible(
+export declare function isLoomApiRangeCompatible(
   range: string,
   loomApiVersion?: string,
 ): boolean;
 
-export function validatePluginManifest(
+export declare function validatePluginManifest(
   input: unknown,
   options?: PluginManifestValidationOptions,
 ): LoomPluginManifest;
 
-export function installPluginManifest(
+export declare function installPluginManifest(
   input: unknown,
   options?: PluginManifestValidationOptions,
 ): LoomPluginManifest;
 
-export function loadPluginManifest(
+export declare function loadPluginManifest(
   input: unknown,
   options?: PluginManifestValidationOptions,
 ): LoomPluginManifest;

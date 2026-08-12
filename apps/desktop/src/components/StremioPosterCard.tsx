@@ -1,9 +1,10 @@
 import { memo } from 'react';
-import { Play, Star } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import ContentRatingBadge from '@/components/ContentRatingBadge';
 import WatchedToggle from '@/components/WatchedToggle';
+import RatingBadge from '@/components/RatingBadge';
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { mediaFormatLabel } from '@/shared/mediaFormat';
 import { cacheWatchedDiscoverItem, discoverWatchedKey } from '@/lib/watched';
@@ -26,16 +27,6 @@ function artworkSources(item: StremioPluginCatalogItem): string[] {
     item.backgroundUrl,
     item.logoUrl,
   ].filter((value): value is string => Boolean(value))));
-}
-
-function RatingBadge({ rating }: { rating?: number }) {
-  if (!rating || rating <= 0) return null;
-  return (
-    <div className="loom-chip absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-full border px-2 text-[11px] font-semibold backdrop-blur-md">
-      <Star className="h-3 w-3" fill="currentColor" />
-      {rating.toFixed(1)}
-    </div>
-  );
 }
 
 function fallbackArtwork(title: string) {
@@ -81,7 +72,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
           imgClassName="object-cover"
           fallback={fallbackArtwork(item.title)}
         />
-        <RatingBadge rating={item.rating} />
+        <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
         <div className={BACKDROP_CLASS} />
         <div className={PLAY_OVERLAY_CLASS}>
           <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
@@ -107,6 +98,8 @@ const StremioPosterCard = memo(function StremioPosterCard({
           void setWatched(watchedKey, !watched);
         }}
         className="absolute left-2 top-2 z-20"
+        iconClassName="h-4 w-4"
+        size="compact"
       />
     </div>
   );

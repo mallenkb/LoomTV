@@ -1,5 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { z } from 'zod';
+import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 import { parseStoredJson, unknownRecordSchema } from './runtimeValidation.ts';
 
 export type SettingsData = Record<string, unknown>;
@@ -25,19 +26,19 @@ export type PlaybackTrackPreferences = {
   subtitle?: TrackPreference;
 };
 
-type ProgressRow = {
-  file_path: string;
-  position: number;
-  duration: number;
-  updated_at: number;
-  watched: number;
-};
-
-type PlaybackTrackPreferenceRow = {
-  scope: string;
-  preferences_json: string;
-  updated_at: number;
-};
+const progressRowSchema = z.object({
+  file_path: z.string(),
+  position: z.number().finite(),
+  duration: z.number().finite(),
+  updated_at: z.number().finite(),
+  watched: z.number().finite(),
+});
+const playbackTrackPreferenceRowSchema = z.object({
+  scope: z.string(),
+  preferences_json: z.string(),
+  updated_at: z.number().finite(),
+});
+const settingsRowSchema = z.object({ data_json: z.string() });
 
 const trackPreferenceInputSchema = z.object({
   enabled: z.boolean().optional(),
@@ -80,7 +81,11 @@ function normalizeTrackPreferences(value: unknown): PlaybackTrackPreferences {
 }
 
 export function loadSettings(database: BetterSqlite3.Database): SettingsData | null {
-  const row = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
+  const row = parseDatabaseRow(
+    database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get(),
+    settingsRowSchema.optional(),
+    'application settings',
+  );
   return row ? parseStoredJson(row.data_json, unknownRecordSchema, {}) : null;
 }
 
@@ -89,13 +94,22 @@ export function saveSettings(database: BetterSqlite3.Database, settings: Setting
 }
 
 export function getProgress(database: BetterSqlite3.Database, profileId: string, filePath: string): StoredProgress | null {
-  const row = database.prepare('SELECT * FROM playback_progress WHERE profile_id = ? AND file_path = ?').get(profileId, filePath) as ProgressRow | undefined;
+  const row = parseDatabaseRow(
+    database.prepare('SELECT * FROM playback_progress WHERE profile_id = ? AND file_path = ?').get(profileId, filePath),
+    progressRowSchema.optional(),
+    'playback progress',
+  );
   if (!row) return null;
   return { position: row.position, duration: row.duration, updatedAt: row.updated_at, watched: Boolean(row.watched) };
 }
 
 export function getAllProgress(database: BetterSqlite3.Database, profileId: string): Record<string, StoredProgress> {
-  return Object.fromEntries((database.prepare('SELECT * FROM playback_progress WHERE profile_id = ?').all(profileId) as ProgressRow[]).map((row): [string, StoredProgress] => [
+  const rows = parseDatabaseRows(
+    database.prepare('SELECT * FROM playback_progress WHERE profile_id = ?').all(profileId),
+    progressRowSchema,
+    'playback progress',
+  );
+  return Object.fromEntries(rows.map((row): [string, StoredProgress] => [
     row.file_path,
     { position: row.position, duration: row.duration, updatedAt: row.updated_at, watched: Boolean(row.watched) },
   ]));
@@ -107,11 +121,20 @@ export function getPlaybackTrackPreferences(
   scope?: string,
 ): PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> {
   if (scope) {
-    const row = database.prepare('SELECT preferences_json FROM playback_track_preferences WHERE profile_id = ? AND scope = ?').get(profileId, scope) as Pick<PlaybackTrackPreferenceRow, 'preferences_json'> | undefined;
+    const row = parseDatabaseRow(
+      database.prepare('SELECT preferences_json FROM playback_track_preferences WHERE profile_id = ? AND scope = ?').get(profileId, scope),
+      playbackTrackPreferenceRowSchema.pick({ preferences_json: true }).optional(),
+      'playback track preference',
+    );
     return row ? normalizeTrackPreferences(parseStoredJson(row.preferences_json, unknownRecordSchema, {})) : {};
   }
 
-  return Object.fromEntries((database.prepare('SELECT * FROM playback_track_preferences WHERE profile_id = ?').all(profileId) as PlaybackTrackPreferenceRow[])
+  const rows = parseDatabaseRows(
+    database.prepare('SELECT * FROM playback_track_preferences WHERE profile_id = ?').all(profileId),
+    playbackTrackPreferenceRowSchema,
+    'playback track preference',
+  );
+  return Object.fromEntries(rows
     .map((row): [string, PlaybackTrackPreferences] => [
       row.scope,
       normalizeTrackPreferences(parseStoredJson(row.preferences_json, unknownRecordSchema, {})),

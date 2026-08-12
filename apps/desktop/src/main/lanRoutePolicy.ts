@@ -1,4 +1,5 @@
 import { RENDERER_SESSION_ROUTE } from './rendererHttpAccess.ts';
+import { httpOperationFor } from './httpOperationRegistry.ts';
 
 export type LanRouteScope = 'catalog:read' | 'media:stream' | 'playback:write' | 'device:self';
 export type MediaServerRouteAccess =
@@ -12,26 +13,20 @@ export type MediaServerRouteAccess =
   | { kind: 'desktop' };
 
 export function lanRouteScope(pathname: string, method = 'GET'): LanRouteScope | null {
+  const registered = httpOperationFor(pathname, method);
+  if (registered && registered.scope !== 'desktop') return registered.scope;
   if (pathname === '/api/v2/library' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/library/index' && method === 'GET') return 'catalog:read';
   if (pathname.startsWith('/api/v2/library/items/') && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/client-config' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/profiles' && method === 'GET') return 'catalog:read';
-  if (pathname === '/api/v2/profiles' && method === 'POST') return 'playback:write';
   if (pathname === '/api/v2/profiles/active' && method === 'GET') return 'catalog:read';
-  if (pathname === '/api/v2/profiles/select' && method === 'POST') return 'catalog:read';
   if (pathname === '/api/v2/profiles/lock' && method === 'POST') return 'catalog:read';
-  if (pathname === '/api/v2/profiles/auto-sign-in' && method === 'POST') return 'catalog:read';
-  if (pathname === '/api/v2/profile-preferences' && (method === 'GET' || method === 'PATCH')) return 'playback:write';
-  if (pathname === '/api/v2/profile-lists' && (method === 'GET' || method === 'PUT' || method === 'DELETE')) return 'playback:write';
-  if (pathname === '/api/v2/start-hls' && method === 'POST') return 'media:stream';
-  if (pathname === '/api/v2/playback-plan' && method === 'POST') return 'media:stream';
-  if (pathname === '/api/v2/progress' && (method === 'GET' || method === 'POST')) return 'playback:write';
-  if (pathname === '/api/v2/playback-track-preferences' && (method === 'GET' || method === 'POST')) return 'playback:write';
-  if (pathname === '/api/v2/artwork/official-candidates' && method === 'POST') return 'catalog:read';
-  if (pathname === '/api/v2/artwork/apply-official' && method === 'POST') return 'catalog:read';
+  if (pathname === '/api/v2/profile-preferences' && method === 'GET') return 'playback:write';
+  if (pathname === '/api/v2/profile-lists' && method === 'GET') return 'playback:write';
+  if (pathname === '/api/v2/progress' && method === 'GET') return 'playback:write';
+  if (pathname === '/api/v2/playback-track-preferences' && method === 'GET') return 'playback:write';
   if (pathname === '/api/v2/playback/segments' && method === 'GET') return 'catalog:read';
-  if (pathname === '/api/v2/unpair' && method === 'POST') return 'device:self';
   return null;
 }
 

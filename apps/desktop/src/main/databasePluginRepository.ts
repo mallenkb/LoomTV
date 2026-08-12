@@ -1,11 +1,14 @@
 import type BetterSqlite3 from 'better-sqlite3';
+import { z } from 'zod';
+import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 
 const ADAPTER_STATE_VERSION = 1;
 const STORAGE_STATE_VERSION = 2;
 const MAX_STREMIO_ADDONS = 64;
 const MAX_STORED_RECORD_BYTES = 1024 * 1024;
 const MAX_ADDON_ID_LENGTH = 240;
-const INSTALL_STATES = new Set(['pending-review', 'enabled', 'disabled', 'broken']);
+const installStateSchema = z.enum(['pending-review', 'enabled', 'disabled', 'broken']);
+const trustStateSchema = z.enum(['review-required', 'update-review-required', 'trusted', 'disabled', 'broken']);
 
 export type PersistedStremioInstallState = 'pending-review' | 'enabled' | 'disabled' | 'broken';
 export type PersistedStremioTrustState = 'review-required' | 'update-review-required' | 'trusted' | 'disabled' | 'broken';
@@ -52,6 +55,21 @@ type StremioAddonRow = {
   manifest_last_checked: number | null;
 };
 
+const stremioAddonRowSchema = z.object({
+  addon_id: z.string(),
+  record_json: z.string(),
+  state: installStateSchema,
+  record_revision: z.number().int(),
+  integrity_mac: z.string(),
+  manifest_secret_ref: z.string().nullable(),
+  manifest_url_redacted: z.string(),
+  trust_state: trustStateSchema,
+  last_successful_request: z.number().finite().nullable(),
+  manifest_last_checked: z.number().finite().nullable(),
+});
+const revisionRowSchema = z.object({ revision: z.number().int() });
+const addonAccessRowSchema = z.object({ addon_id: z.string() });
+
 type StoredV2Envelope = {
   persistenceVersion: 2;
   record: Omit<PersistedStremioAddonRecord, 'manifestUrl'>;
@@ -86,10 +104,11 @@ function validateAddonId(value: unknown): string {
 }
 
 function validateInstallState(value: unknown): PersistedStremioInstallState {
-  if (!INSTALL_STATES.has(String(value))) {
+  const result = installStateSchema.safeParse(value);
+  if (!result.success) {
     throw new StremioPluginStorageError('A persisted Stremio add-on has an invalid install state.');
   }
-  return value as PersistedStremioInstallState;
+  return result.data;
 }
 
 function validateRecord(value: unknown): PersistedStremioAddonRecord {
@@ -174,12 +193,16 @@ function rowRecord(row: StremioAddonRow, secure?: StremioSecurePersistence): Per
 }
 
 function selectRows(database: BetterSqlite3.Database): StremioAddonRow[] {
-  return database.prepare(`
-    SELECT addon_id, record_json, state, record_revision, integrity_mac,
-      manifest_secret_ref, manifest_url_redacted, trust_state,
-      last_successful_request, manifest_last_checked
-    FROM stremio_addons ORDER BY addon_id COLLATE NOCASE
-  `).all() as StremioAddonRow[];
+  return parseDatabaseRows(
+    database.prepare(`
+      SELECT addon_id, record_json, state, record_revision, integrity_mac,
+        manifest_secret_ref, manifest_url_redacted, trust_state,
+        last_successful_request, manifest_last_checked
+      FROM stremio_addons ORDER BY addon_id COLLATE NOCASE
+    `).all(),
+    stremioAddonRowSchema,
+    'Stremio add-on',
+  );
 }
 
 export function hasLegacyStremioAddonState(database: BetterSqlite3.Database): boolean {
@@ -221,7 +244,11 @@ export function saveStremioAddonState(
     const existing = selectRows(database);
     const incomingIds = new Set(snapshot.addons.map(({ addonId }) => addonId));
     const incomingById = new Map(snapshot.addons.map((record) => [record.addonId, record]));
-    const priorGlobal = (database.prepare('SELECT revision FROM stremio_plugin_state_metadata WHERE id = 1').get() as { revision: number } | undefined)?.revision || 0;
+    const priorGlobal = parseDatabaseRow(
+      database.prepare('SELECT revision FROM stremio_plugin_state_metadata WHERE id = 1').get(),
+      revisionRowSchema.optional(),
+      'Stremio state revision',
+    )?.revision ?? 0;
     const newGlobal = priorGlobal + 1;
     database.prepare('UPDATE stremio_plugin_state_metadata SET revision = ?, updated_at = ? WHERE id = 1').run(newGlobal, now);
 
@@ -309,9 +336,13 @@ export function saveStremioAddonState(
 }
 
 export function listProfileStremioAccess(database: BetterSqlite3.Database, profileId: string): string[] {
-  return (database.prepare(`
-    SELECT addon_id FROM profile_stremio_access WHERE profile_id = ? ORDER BY addon_id COLLATE NOCASE
-  `).all(profileId) as Array<{ addon_id: string }>).map(({ addon_id: addonId }) => addonId);
+  return parseDatabaseRows(
+    database.prepare(`
+      SELECT addon_id FROM profile_stremio_access WHERE profile_id = ? ORDER BY addon_id COLLATE NOCASE
+    `).all(profileId),
+    addonAccessRowSchema,
+    'profile Stremio access',
+  ).map(({ addon_id: addonId }) => addonId);
 }
 
 export function hasProfileStremioAccess(database: BetterSqlite3.Database, profileId: string, addonId: string): boolean {

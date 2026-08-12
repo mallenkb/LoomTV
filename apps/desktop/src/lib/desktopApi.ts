@@ -313,6 +313,7 @@ export type DesktopBridgeApi = {
       refreshOfficialArtwork?: (mediaId: string, target?: OfficialArtworkRefreshTarget) => Promise<OfficialArtworkResult>;
       getPlaybackLogo?: (mediaId: string) => Promise<PlaybackLogoResult>;
       refreshIncompleteMetadata?: (mediaId: string) => Promise<boolean>;
+      requestMetadataProvider?: (request: import('@/shared/desktopProtocol').MetadataProviderRequest) => Promise<unknown>;
       getStreamingProviders?: (mediaId: string) => Promise<StreamingProvider[]>;
       importCustomArtwork?: (entries: Record<string, Record<string, string>>) => Promise<boolean>;
       backupDatabase?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
@@ -707,6 +708,12 @@ function remoteLibrarySources(library: LibraryPayload, remoteBaseUrl?: string): 
     posterCandidates: item.posterCandidates?.map(rewrite),
     backdropCandidates: item.backdropCandidates?.map(rewrite),
     logoCandidates: item.logoCandidates?.map(rewrite),
+    cast: item.cast?.map((credit) => ({
+      ...credit,
+      image: rewrite(credit.image),
+      characterImage: rewrite(credit.characterImage),
+      voiceActorImage: rewrite(credit.voiceActorImage),
+    })),
     subtitles: item.subtitles?.map((subtitle) => ({ ...subtitle, url: rewrite(subtitle.url) })),
     episodes: item.episodes?.map((episode) => ({ ...episode, still: rewrite(episode.still) })),
     episodeFiles: item.episodeFiles?.map((episode) => ({
@@ -721,6 +728,7 @@ function remoteLibrarySources(library: LibraryPayload, remoteBaseUrl?: string): 
     movies: library.movies.map(rewriteItem),
     tvShows: library.tvShows.map(rewriteItem),
     animeShows: library.animeShows?.map(rewriteItem),
+    others: library.others?.map(rewriteItem),
   };
 }
 
@@ -740,6 +748,7 @@ function remoteLibraryIndexSources(index: LibraryIndexPayload): LibraryIndexPayl
     movies: index.movies.map(rewriteCard),
     tvShows: index.tvShows.map(rewriteCard),
     animeShows: index.animeShows.map(rewriteCard),
+    others: index.others?.map(rewriteCard),
   };
 }
 
@@ -1620,6 +1629,14 @@ export const desktopApi = {
     return fetchJson('/api/metadata/refresh-incomplete', z.boolean(), {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
+    });
+  },
+
+  async requestMetadataProvider(request: import('@/shared/desktopProtocol').MetadataProviderRequest): Promise<unknown> {
+    if (window.desktopApi?.requestMetadataProvider) return window.desktopApi.requestMetadataProvider(request);
+    return fetchJson('/api/renderer/metadata/provider', z.unknown(), {
+      method: 'POST',
+      body: JSON.stringify(request),
     });
   },
 

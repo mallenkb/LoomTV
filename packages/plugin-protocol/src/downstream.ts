@@ -1,10 +1,10 @@
-export const PLUGIN_DOWNSTREAM_PROTOCOL_VERSION: 2;
-export const PLUGIN_WIRE_VERSION: 2;
-export const PLUGIN_HOST_TRANSPORT: 'host-mediated';
-export const PLUGIN_PROXY_TRANSPORT: 'host-mediated-proxy';
-export const PLUGIN_NAMESPACE_PREFIX: 'loom-plugin';
-export const PLUGIN_HOST_RUNTIME_KINDS: readonly ['desktop', 'headless'];
-export const PLUGIN_HOST_SURFACE_IDS: readonly [
+export declare const PLUGIN_DOWNSTREAM_PROTOCOL_VERSION: 2;
+export declare const PLUGIN_WIRE_VERSION: 2;
+export declare const PLUGIN_HOST_TRANSPORT: 'host-mediated';
+export declare const PLUGIN_PROXY_TRANSPORT: 'host-mediated-proxy';
+export declare const PLUGIN_NAMESPACE_PREFIX: 'loom-plugin';
+export declare const PLUGIN_HOST_RUNTIME_KINDS: readonly ['desktop', 'headless'];
+export declare const PLUGIN_HOST_SURFACE_IDS: readonly [
   'catalog.read',
   'catalog.search',
   'metadata.read',
@@ -14,12 +14,12 @@ export const PLUGIN_HOST_SURFACE_IDS: readonly [
   'update.signature',
   'executable.sandbox',
 ];
-export const PLUGIN_HOST_SURFACE_STATES: readonly ['available', 'scaffolded', 'blocked'];
-export const PLUGIN_PLAYBACK_SOURCE_KINDS: readonly ['https-media', 'hls'];
-export const PLUGIN_PLAYBACK_MODES: readonly ['direct-proxy', 'hls-proxy'];
-export const PLUGIN_SIGNING_ALGORITHMS: readonly ['ed25519'];
-export const PLUGIN_TICKET_MAX_LIFETIME_MS: 900000;
-export const PLUGIN_CATALOG_MAX_LIFETIME_MS: 86400000;
+export declare const PLUGIN_HOST_SURFACE_STATES: readonly ['available', 'scaffolded', 'blocked'];
+export declare const PLUGIN_PLAYBACK_SOURCE_KINDS: readonly ['https-media', 'hls'];
+export declare const PLUGIN_PLAYBACK_MODES: readonly ['direct-proxy', 'hls-proxy'];
+export declare const PLUGIN_SIGNING_ALGORITHMS: readonly ['ed25519'];
+export declare const PLUGIN_TICKET_MAX_LIFETIME_MS: 900000;
+export declare const PLUGIN_CATALOG_MAX_LIFETIME_MS: 86400000;
 
 export type PluginHostRuntimeKind = (typeof PLUGIN_HOST_RUNTIME_KINDS)[number];
 export type PluginHostSurfaceId = (typeof PLUGIN_HOST_SURFACE_IDS)[number];
@@ -33,7 +33,7 @@ export interface PluginDownstreamContractIssue {
   message: string;
 }
 
-export class PluginDownstreamContractError extends Error {
+export declare class PluginDownstreamContractError extends Error {
   readonly name: 'PluginDownstreamContractError';
   readonly code: 'PLUGIN_DOWNSTREAM_CONTRACT_INVALID';
   readonly issues: readonly PluginDownstreamContractIssue[];
@@ -258,7 +258,7 @@ export interface PluginSearchNamespace {
   namespaceKey: string;
 }
 
-export interface PluginCatalogItemNamespace extends PluginSearchNamespace {
+export interface PluginCatalogItemNamespace extends Omit<PluginSearchNamespace, 'kind'> {
   kind: 'plugin-catalog-item-namespace';
   type: string;
   providerId: string;
@@ -276,42 +276,42 @@ export interface PluginHostParityDescriptor {
   prohibited: readonly ['raw-url-playback', 'raw-url-subtitles', 'executable-plugin-code'];
 }
 
-export function parseWireSearchRequest(input: unknown): WirePluginSearchRequest;
-export function parseWireSubtitleAttachmentRequest(input: unknown): WireSubtitleAttachmentRequest;
-export function parseWirePlaybackTicketRequest(input: unknown): WirePlaybackTicketRequest;
-export function verifyWireSearchRequest(input: unknown, verifiedAddon: import('./marketplace').VerifiedMarketplaceAddon): VerifiedPluginSearchRequest;
-export function verifyWireSubtitleAttachmentRequest(input: unknown, verifiedAddon: import('./marketplace').VerifiedMarketplaceAddon): VerifiedSubtitleAttachmentRequest;
-export function verifyWirePlaybackTicketRequest(input: unknown, verifiedAddon: import('./marketplace').VerifiedMarketplaceAddon): VerifiedPlaybackTicketRequest;
-export function createHostOnlyAuthorizationContext(input: HostAuthorizationContextInput): HostAuthorizationContext;
-export function authorizeVerifiedSearchRequest(value: VerifiedPluginSearchRequest, hostContext: HostAuthorizationContext): AuthorizedPluginSearchRequest;
-export function authorizeVerifiedSubtitleAttachmentRequest(value: VerifiedSubtitleAttachmentRequest, hostContext: HostAuthorizationContext): AuthorizedSubtitleAttachmentRequest;
-export function authorizeVerifiedPlaybackTicketRequest(value: VerifiedPlaybackTicketRequest, hostContext: HostAuthorizationContext): AuthorizedPlaybackTicketRequest;
-export function isAuthorizedPluginRequest(value: unknown): value is AuthorizedPluginSearchRequest | AuthorizedSubtitleAttachmentRequest | AuthorizedPlaybackTicketRequest;
-export function createSubtitleAttachmentPlan(value: AuthorizedSubtitleAttachmentRequest): SubtitleAttachmentPlan;
-export function createPlaybackProxyPlan(value: AuthorizedPlaybackTicketRequest): PlaybackProxyPlan;
-export function createSubtitleAttachmentReceipt(value: AuthorizedSubtitleAttachmentRequest, input: {
+export declare function parseWireSearchRequest(input: unknown): WirePluginSearchRequest;
+export declare function parseWireSubtitleAttachmentRequest(input: unknown): WireSubtitleAttachmentRequest;
+export declare function parseWirePlaybackTicketRequest(input: unknown): WirePlaybackTicketRequest;
+export declare function verifyWireSearchRequest(input: unknown, verifiedAddon: import('./marketplace').VerifiedMarketplaceAddon): VerifiedPluginSearchRequest;
+export declare function verifyWireSubtitleAttachmentRequest(input: unknown, verifiedAddon: import('./marketplace').VerifiedMarketplaceAddon): VerifiedSubtitleAttachmentRequest;
+export declare function verifyWirePlaybackTicketRequest(input: unknown, verifiedAddon: import('./marketplace').VerifiedMarketplaceAddon): VerifiedPlaybackTicketRequest;
+export declare function createHostOnlyAuthorizationContext(input: HostAuthorizationContextInput): HostAuthorizationContext;
+export declare function authorizeVerifiedSearchRequest(value: VerifiedPluginSearchRequest, hostContext: HostAuthorizationContext): AuthorizedPluginSearchRequest;
+export declare function authorizeVerifiedSubtitleAttachmentRequest(value: VerifiedSubtitleAttachmentRequest, hostContext: HostAuthorizationContext): AuthorizedSubtitleAttachmentRequest;
+export declare function authorizeVerifiedPlaybackTicketRequest(value: VerifiedPlaybackTicketRequest, hostContext: HostAuthorizationContext): AuthorizedPlaybackTicketRequest;
+export declare function isAuthorizedPluginRequest(value: unknown): value is AuthorizedPluginSearchRequest | AuthorizedSubtitleAttachmentRequest | AuthorizedPlaybackTicketRequest;
+export declare function createSubtitleAttachmentPlan(value: AuthorizedSubtitleAttachmentRequest): SubtitleAttachmentPlan;
+export declare function createPlaybackProxyPlan(value: AuthorizedPlaybackTicketRequest): PlaybackProxyPlan;
+export declare function createSubtitleAttachmentReceipt(value: AuthorizedSubtitleAttachmentRequest, input: {
   status: 'accepted' | 'rejected';
   attachmentRef?: string;
   reasonCode?: string;
 }): SubtitleAttachmentReceipt;
-export function createHostPlaybackTicket(value: AuthorizedPlaybackTicketRequest, runtimeLease: import('./runtime-lifecycle').HostRuntimeLease & { state: 'ready' }, input: {
+export declare function createHostPlaybackTicket(value: AuthorizedPlaybackTicketRequest, runtimeLease: import('./runtime-lifecycle').HostRuntimeLease & { state: 'ready' }, input: {
   ticketRef: string;
   issuedAt: number;
   expiresAt: number;
 }): PlaybackTicket;
-export function createPluginSearchNamespace(input: { addonId: string; catalogType: string; catalogId: string }): PluginSearchNamespace;
-export function namespacePluginCatalogItem(input: {
+export declare function createPluginSearchNamespace(input: { addonId: string; catalogType: string; catalogId: string }): PluginSearchNamespace;
+export declare function namespacePluginCatalogItem(input: {
   addonId: string;
   catalogType: string;
   catalogId: string;
   type: string;
   providerId: string;
 }): PluginCatalogItemNamespace;
-export function createPluginHostParityDescriptor(input: {
+export declare function createPluginHostParityDescriptor(input: {
   runtime: PluginHostRuntimeKind;
   hostApiVersion: string;
   surfaces: readonly { id: PluginHostSurfaceId; state: PluginHostSurfaceState; gate?: string }[];
 }): PluginHostParityDescriptor;
-export function canonicalizeSignedDocument(value: unknown): string;
-export function isWireRequest(value: unknown): boolean;
-export function isHostOnlyAuthorizationContext(value: unknown): value is HostAuthorizationContext;
+export declare function canonicalizeSignedDocument(value: unknown): string;
+export declare function isWireRequest(value: unknown): boolean;
+export declare function isHostOnlyAuthorizationContext(value: unknown): value is HostAuthorizationContext;

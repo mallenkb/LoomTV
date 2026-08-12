@@ -165,6 +165,7 @@ import {
   loadLibraryFromDatabase,
   remapLibraryMediaReferences,
   recordMetadataRefresh,
+  setMetadataRefreshCategoryLocked,
   saveCustomArtwork,
   saveLibraryItemToDatabase,
   saveLibraryToDatabase,
@@ -261,6 +262,8 @@ import { createMetadataItemBuilders } from './main/metadataItemBuilders.ts';
 import {
   createOfficialMetadataService,
 } from './main/officialMetadataService.ts';
+import { metadataRefreshCategories } from './main/databaseMetadataRefreshRepository.ts';
+import { createMetadataProviderGateway } from './main/metadataProviderGateway.ts';
 import type {
   AppSettings,
   LibraryData,
@@ -540,22 +543,33 @@ function libraryFolderKindForScanKind(folderKind: ScanCacheFolderKind): LibraryF
 
 // ─── Library scanning ─────────────────────────────────────────────────────────
 
+function metadataRequestWhenOnline<TArgs extends unknown[], TResult>(
+  request: (...args: TArgs) => Promise<TResult>,
+  offlineResult: () => TResult,
+): (...args: TArgs) => Promise<TResult> {
+  return async (...args) => loadSettings().metadataOfflineMode
+    ? offlineResult()
+    : request(...args);
+}
 
 const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuilders({
   downloadMissingOpenSubtitlesForFolder,
   extractSeasons,
-  fetchFanartMovieLogos,
-  fetchFanartTVLogos,
-  fetchAniListAnimeMetadata,
-  fetchJikanEpisodesForLocalAnimeSeasons,
-  fetchJikanMetadata,
-  fetchOMDbMetadata,
-  fetchOMDbMetadataById,
-  fetchTMDBMovieMetadata,
-  fetchTMDBMovieMetadataById,
-  fetchTMDBTVMetadata,
-  fetchTMDBTVMetadataById,
-  fetchTVMetadata,
+  fetchFanartMovieLogos: metadataRequestWhenOnline(fetchFanartMovieLogos, () => []),
+  fetchFanartTVLogos: metadataRequestWhenOnline(fetchFanartTVLogos, () => []),
+  fetchAniListAnimeMetadata: metadataRequestWhenOnline(fetchAniListAnimeMetadata, () => null),
+  fetchJikanEpisodesForLocalAnimeSeasons: metadataRequestWhenOnline(
+    fetchJikanEpisodesForLocalAnimeSeasons,
+    () => ({ episodes: [], malIdBySeason: {} }),
+  ),
+  fetchJikanMetadata: metadataRequestWhenOnline(fetchJikanMetadata, () => null),
+  fetchOMDbMetadata: metadataRequestWhenOnline(fetchOMDbMetadata, () => null),
+  fetchOMDbMetadataById: metadataRequestWhenOnline(fetchOMDbMetadataById, () => null),
+  fetchTMDBMovieMetadata: metadataRequestWhenOnline(fetchTMDBMovieMetadata, () => null),
+  fetchTMDBMovieMetadataById: metadataRequestWhenOnline(fetchTMDBMovieMetadataById, () => null),
+  fetchTMDBTVMetadata: metadataRequestWhenOnline(fetchTMDBTVMetadata, () => null),
+  fetchTMDBTVMetadataById: metadataRequestWhenOnline(fetchTMDBTVMetadataById, () => null),
+  fetchTVMetadata: metadataRequestWhenOnline(fetchTVMetadata, () => null),
   getEmbeddedArtworkUrl,
   getLocalFolderArtworkUrl,
   getLocalMovieArtworkUrl,
@@ -855,7 +869,9 @@ async function scanLibrary(
     scannedFolders,
     totalFolders,
   });
-  void refreshIncompleteMetadataQueue(repaired.data).catch((error) => {
+  void refreshIncompleteMetadataQueue(repaired.data).then(() => (
+    refreshDisplayMetadataQueue(repaired.data)
+  )).catch((error) => {
     console.warn('[metadata] Background refresh after scan failed:', error);
   });
   return repaired.data;
@@ -1175,6 +1191,63 @@ function saveLibraryItemMutation(item: MediaItem): void {
   saveLibraryItemToDatabase(item);
 }
 
+function preserveLockedMetadata(previous: LibraryData, next: LibraryData): void {
+  const previousItems = new Map(
+    [...(previous.movies || []), ...(previous.tvShows || []), ...(previous.animeShows || [])]
+      .map((item) => [item.id, item]),
+  );
+  const nextItems = [...(next.movies || []), ...(next.tvShows || []), ...(next.animeShows || [])];
+
+  for (const item of nextItems) {
+    const existing = previousItems.get(item.id);
+    if (!existing) continue;
+    const locked = new Set(metadataRefreshCategories.filter((category) => (
+      getMetadataRefreshState(item.id, category)?.locked
+    )));
+    if (locked.has('core')) {
+      item.title = existing.title;
+      item.summary = existing.summary;
+      item.year = existing.year;
+      item.format = existing.format;
+      item.genres = existing.genres;
+      item.providerIds = existing.providerIds;
+    }
+    if (locked.has('cast')) item.cast = existing.cast;
+    if (locked.has('artwork')) {
+      item.poster = existing.poster;
+      item.backdrop = existing.backdrop;
+      item.logo = existing.logo;
+      item.posterCandidates = existing.posterCandidates;
+      item.backdropCandidates = existing.backdropCandidates;
+      item.logoCandidates = existing.logoCandidates;
+    }
+    if (locked.has('ratings')) {
+      item.rating = existing.rating;
+      item.providerRatings = existing.providerRatings;
+      item.contentRatings = existing.contentRatings;
+    }
+    if (locked.has('episodes')) {
+      const existingSeasons = new Map((existing.seasons || []).map((season) => [season.number, season]));
+      const scannedSeasons = item.seasons?.length ? item.seasons : existing.seasons || [];
+      item.seasons = scannedSeasons.map((season) => {
+        const selected = existingSeasons.get(season.number);
+        return selected ? { ...season, title: selected.title || season.title } : season;
+      });
+      const existingEpisodes = new Map((existing.episodes || []).map((episode) => (
+        [`${episode.season}-${episode.number}`, episode]
+      )));
+      const scannedEpisodes = item.episodes?.length ? item.episodes : existing.episodes || [];
+      item.episodes = scannedEpisodes.map((episode) => (
+        existingEpisodes.get(`${episode.season}-${episode.number}`) || episode
+      ));
+    }
+    if (locked.has('streaming-providers')) {
+      item.streamingProviders = existing.streamingProviders;
+      item.originPlatform = existing.originPlatform;
+    }
+  }
+}
+
 function stremioTypesMatch(requestedType: unknown, itemType: string): boolean {
   if (requestedType === itemType) return true;
   return (requestedType === 'series' || requestedType === 'tv')
@@ -1187,6 +1260,7 @@ let reconcileSkipAnalysisAfterScan: (previous: LibraryData, next: LibraryData) =
 function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
   const previous = loadLibrary();
+  preserveLockedMetadata(previous, data);
   if (!saveLibrary(data)) return false;
   advanceLibraryMutationVersion();
   cleanupOrphanedAutomaticSegments();
@@ -1197,6 +1271,7 @@ function saveLibraryFromScan(data: LibraryData, scanVersion: number): boolean {
 
 function saveLibraryScanCheckpoint(data: LibraryData, scanVersion: number): boolean {
   if (scanVersion !== libraryMutationVersion) return false;
+  preserveLockedMetadata(loadLibrary(), data);
   return saveLibrary(data);
 }
 
@@ -1205,6 +1280,7 @@ const {
   getOfficialMetadataCandidates,
   getPlaybackLogo,
   getStreamingProviders,
+  refreshDisplayMetadataQueue,
   refreshIncompleteMetadata,
   refreshIncompleteMetadataQueue,
   refreshOfficialArtwork,
@@ -1237,6 +1313,7 @@ const {
   probeMediaFile,
   recordMetadataRefresh,
   saveLibraryItem: saveLibraryItemMutation,
+  setMetadataRefreshCategoryLocked,
 });
 
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
@@ -1405,6 +1482,7 @@ const analysisCoordinator = createAnalysisCoordinator({
 warmSkipSegmentsAfterScan = (library) => skipSegmentService.warmLibrary(library);
 reconcileSkipAnalysisAfterScan = analysisCoordinator.onLibrarySaved;
 const stremioPluginService = createDesktopStremioPluginService();
+const requestMetadataProvider = createMetadataProviderGateway({ loadSettings, getMetadataApiKey });
 
 const stremioPluginSummaryForRenderer = (record: Parameters<typeof stremioPluginSummary>[0]) => (
   stremioPluginSummary(record, getStremioAddonConfigurationState(record.addonId))
@@ -1755,6 +1833,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
   getPlaybackLogo,
   getStreamingProviders,
   refreshIncompleteMetadata,
+  requestMetadataProvider,
   importCustomArtwork,
   backupDatabase,
   clearAppData,
@@ -1826,6 +1905,7 @@ export const mediaServerDeps = {
   getLibraryRevision: () => libraryMutationVersion,
   getMediaSegments: skipSegmentService.getSegments,
   getOfficialMetadataCandidates,
+  requestMetadataProvider,
   applyOfficialMetadataCandidate,
   getWebRendererDevServerUrl: () => MAIN_WINDOW_DEV_SERVER_URL || null,
   getWebRendererRoot: () => path.join(__dirname, '../renderer/main_window'),
@@ -1926,7 +2006,9 @@ async function startBackgroundServices(): Promise<void> {
   // Detail pages never need to fetch provider artwork as part of opening a
   // local title, including after an app restart.
   await cacheArtworkNow(persistedLibrary);
-  void refreshIncompleteMetadataQueue(persistedLibrary).catch((error) => {
+  void refreshIncompleteMetadataQueue(persistedLibrary).then(() => (
+    refreshDisplayMetadataQueue(persistedLibrary)
+  )).catch((error) => {
     console.warn('[metadata] Background refresh at startup failed:', error);
   });
   await cleanupOldTranscodes();

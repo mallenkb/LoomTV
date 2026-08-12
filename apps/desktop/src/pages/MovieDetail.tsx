@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
-import { Bookmark, Play, ArrowLeft } from 'lucide-react';
+import { Play, ArrowLeft } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, MediaItem } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
-import WatchedToggle from '@/components/WatchedToggle';
+import DetailHeroActions from '@/components/DetailHeroActions';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKey } from '@/lib/watched';
 
 type MovieDetailRouteState = {
@@ -397,14 +397,16 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
         <button
           type="button"
           onClick={handleBack}
+          aria-label="Back"
           className="loom-detail-back loom-no-drag fixed top-6 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ArrowLeft className="w-5 h-5" />
-          Back
+          <span className="loom-detail-back-label">Back</span>
         </button>
 
         <div className="loom-detail-hero-content-wrap absolute bottom-0 left-0 right-0">
           <div className="loom-detail-hero-content mx-auto flex w-full max-w-[var(--loom-frame-max-width)] items-end gap-6 p-8">
+          <div className="loom-detail-hero-identity flex min-w-0 flex-1 items-end gap-6">
           <SafeArtwork
             key={posterKey}
             src={posterArtwork}
@@ -425,6 +427,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             <h1 className="text-4xl font-bold text-white">{movie.title}</h1>
             <HeroMetadata item={movie} />
           </div>
+          </div>
           <div className="loom-detail-hero-controls flex shrink-0 items-center gap-[6px]">
           {movie.trailerUrl && <Button
             variant="outline"
@@ -436,6 +439,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
           </Button>}
           {canPlayMovie && <Button
             onClick={handlePlay}
+            aria-label={hasResumeProgress ? 'Resume movie' : 'Play movie'}
             className="loom-detail-hero-play relative h-14 shrink-0 overflow-hidden rounded-lg bg-[var(--loom-accent)] px-6 text-base font-semibold text-[var(--loom-accent-foreground)] shadow-[0_16px_38px_rgba(0,0,0,0.38)] hover:bg-[var(--loom-accent-hover)] gap-3"
           >
             {hasResumeProgress && progressPercent > 0 && (
@@ -446,7 +450,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             )}
             <span className="relative z-10 flex items-center gap-3">
               <Play className="h-7 w-7 fill-current" />
-              <span className="flex min-w-28 flex-col items-start leading-tight">
+              <span className="loom-detail-hero-play-label flex min-w-28 flex-col items-start leading-tight">
                 <span>{hasResumeProgress ? 'Resume' : 'Play'}</span>
                 {hasResumeProgress && progressCopy && (
                   <span className="text-[11px] font-medium text-[var(--loom-accent-foreground-muted)]">{progressCopy}</span>
@@ -454,37 +458,21 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
               </span>
             </span>
           </Button>}
-            <div className="loom-detail-hero-actions inline-flex h-14 shrink-0 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
-              {!isRemoteContent && (
-                <>
-                  <button
-                    type="button"
-                    aria-pressed={inMyList}
-                    onClick={() => void (async () => {
-                      await setListEntry(movie.id, 'watchlist', !inMyList);
-                      if (inMyList) await setListEntry(movie.id, 'favorite', false);
-                    })()}
-                    className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
-                    title={inMyList ? 'Remove from My List' : 'Add to My List'}
-                  >
-                    <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
-                  </button>
-                  <span className="my-auto inline-block h-7 w-px bg-white/20" />
-                </>
-              )}
-              <WatchedToggle
-                watched={isWatched}
-                onToggle={() => {
-                  if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
-                  const present = !isWatched;
-                  if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(movie));
-                  void setWatched(watchedKey, present);
-                }}
-                surface="plain"
-                className="h-14 w-14 rounded-full bg-transparent text-white/80"
-                label={isWatched ? 'Mark as unwatched' : 'Mark as watched'}
-              />
-            </div>
+            <DetailHeroActions
+              canBookmark={!isRemoteContent}
+              inMyList={inMyList}
+              watched={isWatched}
+              onToggleList={() => void (async () => {
+                await setListEntry(movie.id, 'watchlist', !inMyList);
+                if (inMyList) await setListEntry(movie.id, 'favorite', false);
+              })()}
+              onToggleWatched={() => {
+                if (routeCatalogItem) cacheWatchedDiscoverItem(routeCatalogItem);
+                const present = !isWatched;
+                if (!present && watchedByProgress) void resetProgress(localProgressPathsForItem(movie));
+                void setWatched(watchedKey, present);
+              }}
+            />
           </div>
           </div>
         </div>

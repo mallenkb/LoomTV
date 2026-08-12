@@ -3,6 +3,7 @@ import LoomBrandLockup from '@/components/LoomBrandLockup';
 import LoomLoader from '@/components/LoomLoader';
 import LoomLogo from '@/components/LoomLogo';
 import LoomPlayMark from '@/components/LoomPlayMark';
+import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -16,9 +17,16 @@ import { LOADER_OPTIONS } from './Settings.helpers';
 type ThemeSettingsSectionProps = {
   theme: AppThemeSettings;
   setTheme: (settings: Partial<AppThemeSettings>) => Promise<void>;
+  showProviderRatingBadges: boolean;
+  setShowProviderRatingBadges: (show: boolean) => Promise<void>;
 };
 
-export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsSectionProps) {
+export default function ThemeSettingsSection({
+  theme,
+  setTheme,
+  showProviderRatingBadges,
+  setShowProviderRatingBadges,
+}: ThemeSettingsSectionProps) {
   const canChooseAppearance = theme.homeStyle === 'default';
 
   return (
@@ -96,6 +104,42 @@ export default function ThemeSettingsSection({ theme, setTheme }: ThemeSettingsS
               </button>
             </div>
           )}
+
+          <div>
+            <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Ratings</p>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showProviderRatingBadges}
+              onClick={() => void setShowProviderRatingBadges(!showProviderRatingBadges)}
+              className="flex w-full items-center justify-between gap-4 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] p-4 text-left outline-none transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)]"
+            >
+              <span>
+                <span className="flex items-center gap-2 text-sm font-semibold text-[var(--loom-text)]">
+                  Show provider rating badges
+                  <span className="inline-flex items-center gap-1 rounded-md bg-black/20 px-1.5 py-1 text-xs font-medium text-[var(--loom-text)]">
+                    <ProviderRatingLogo provider="imdb" className="h-3.5 w-7 object-contain" />
+                    <span>8.1</span>
+                  </span>
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-[var(--loom-muted)]">
+                  Use IMDb, Tomatometer, Popcornmeter, and Metacritic logos with their scores. Turn this off to use the normal star rating.
+                </span>
+              </span>
+              <span
+                aria-hidden="true"
+                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                  showProviderRatingBadges ? 'bg-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)]'
+                }`}
+              >
+                <span
+                  className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                    showProviderRatingBadges ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </span>
+            </button>
+          </div>
 
           {canChooseAppearance && (
             <div>

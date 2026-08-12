@@ -14,6 +14,7 @@ import type { IpcInvokeChannel } from '../shared/ipcChannels';
 import type { IpcContract } from '../shared/ipcContract';
 import type {
   OfficialStremioAddon,
+  MetadataProviderRequest,
   StremioPluginCatalogRequest,
   StremioPluginCatalogResult,
   StremioPluginConfigurationState,
@@ -52,6 +53,7 @@ import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 import { z } from 'zod';
 import { lanProviderRatingsSchema } from '@loom-media-server/lan-protocol';
 import { parseIpcArguments } from './ipcValidation.ts';
+import { metadataProviderRequestSchema } from './metadataProviderGateway.ts';
 
 const finiteNumber = z.number().finite();
 const nonEmptyString = z.string().trim().min(1);
@@ -126,6 +128,7 @@ const profilePreferencesSchema = z.object({
   appLoaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
   appHomeStyle: z.enum(['default', 'modern']).optional(),
   appModernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
+  showProviderRatingBadges: z.boolean().optional(),
   sidebarNavOrder: z.array(z.string()).optional(),
   autoplayNextEnabled: z.boolean().optional(),
   playbackSkipBackSeconds: finiteNumber.optional(),
@@ -401,6 +404,7 @@ export interface IpcHandlerDependencies<
   getPlaybackLogo: (mediaId: string) => IpcResult<'artwork:playback-logo'> | Promise<IpcResult<'artwork:playback-logo'>>;
   getStreamingProviders: (mediaId: string) => IpcResult<'metadata:streaming-providers'> | Promise<IpcResult<'metadata:streaming-providers'>>;
   refreshIncompleteMetadata: (mediaId: string) => IpcResult<'metadata:refresh-incomplete'> | Promise<IpcResult<'metadata:refresh-incomplete'>>;
+  requestMetadataProvider: (request: MetadataProviderRequest) => unknown | Promise<unknown>;
   importCustomArtwork: (entries: Record<string, Record<string, string>>) => void;
   backupDatabase: () => IpcResult<'database:backup'> | Promise<IpcResult<'database:backup'>>;
   clearAppData: () => TLibraryData;
@@ -770,6 +774,7 @@ export function registerIpcHandlers<
     deps.authorizeSettingsWrite();
     return deps.refreshIncompleteMetadata(String(mediaId || ''));
   }, z.tuple([nonEmptyString]));
+  handle('metadata:provider-request', (_event, request) => deps.requestMetadataProvider(request), z.tuple([metadataProviderRequestSchema]));
   handle('metadata:streaming-providers', (_event, mediaId: string) => deps.getStreamingProviders(mediaId), z.tuple([nonEmptyString]));
 
   handleNoArgs('mpv:availability', () => mpvAvailability());

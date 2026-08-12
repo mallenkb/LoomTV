@@ -13,6 +13,8 @@ import {
 type ThemeContextValue = {
   theme: AppThemeSettings;
   setTheme: (settings: Partial<AppThemeSettings>) => Promise<void>;
+  showProviderRatingBadges: boolean;
+  setShowProviderRatingBadges: (show: boolean) => Promise<void>;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -24,6 +26,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyTheme(initialTheme);
     return initialTheme;
   });
+  const [showProviderRatingBadges, setShowProviderRatingBadgesState] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -51,6 +54,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             })
           : cachedTheme || DEFAULT_THEME_SETTINGS;
         setThemeState(loadedTheme);
+        setShowProviderRatingBadgesState(preferences.showProviderRatingBadges ?? true);
         applyTheme(loadedTheme);
         writeCachedTheme(loadedTheme);
         if (!hasSavedTheme && cachedTheme) {
@@ -94,7 +98,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }, activeProfile?.id);
   }, [activeProfile?.id, theme]);
 
-  const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
+  const setShowProviderRatingBadges = useCallback(async (show: boolean) => {
+    setShowProviderRatingBadgesState(show);
+    await desktopApi.saveProfilePreferences({ showProviderRatingBadges: show }, activeProfile?.id);
+  }, [activeProfile?.id]);
+
+  const value = useMemo(() => ({
+    theme,
+    setTheme,
+    showProviderRatingBadges,
+    setShowProviderRatingBadges,
+  }), [setShowProviderRatingBadges, setTheme, showProviderRatingBadges, theme]);
 
   return (
     <ThemeContext.Provider value={value}>
@@ -109,6 +123,8 @@ export function useTheme() {
     return {
       theme: DEFAULT_THEME_SETTINGS,
       setTheme: async () => undefined,
+      showProviderRatingBadges: true,
+      setShowProviderRatingBadges: async () => undefined,
     };
   }
   return context;

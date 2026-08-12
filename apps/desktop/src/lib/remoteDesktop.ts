@@ -1,5 +1,5 @@
-import type { RemoteLibraryConnection } from '../shared/desktopProtocol';
-import { parseStoredValue, remoteDesktopSessionSchema } from './desktopDecoders';
+import type { RemoteLibraryConnection } from '../shared/desktopProtocol.ts';
+import { parseStoredValue, remoteDesktopSessionSchema } from './desktopDecoders.ts';
 
 export type DesktopLibraryMode = 'host' | 'remote';
 

@@ -1,5 +1,4 @@
 import { StatusBar } from 'expo-status-bar';
-import * as Brightness from 'expo-brightness';
 import * as Device from 'expo-device';
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
 import {
@@ -14,7 +13,6 @@ import {
   type ImageStyle,
   Keyboard,
   KeyboardAvoidingView,
-  PanResponder,
   Platform,
   Pressable,
   type PressableProps,
@@ -86,7 +84,8 @@ import {
   restorePortraitWithRetry,
   type PlaybackFailure,
 } from './playbackRecovery';
-import { mobileAbsoluteMediaSeconds, mobilePlayerSecondsForAbsolute } from './playbackClock';
+import { useMobilePlayerGestures } from './useMobilePlayerGestures';
+import { useMobilePlayerSession } from './useMobilePlayerSession';
 import {
   createStyles,
   settingsContentMaxWidth,
@@ -96,6 +95,7 @@ import { createMobileLanClient } from './mobileLanClient';
 import { fetchMobileCatalog, synchronizeMobileCatalog } from './mobileCatalog';
 import { captureMobileFocus, clearCapturedMobileFocus, topMobileModalLayer, useMobileModalLayer } from './mobileModalStack';
 import { mobileConnectionLifecycleAction, replaceMobilePlayerSource } from './mobileLifecycle';
+import { validatePairIdentity } from './mobileHostIdentity';
 import {
   connectionErrorFor,
   discoveredHostFromService,
@@ -194,7 +194,6 @@ import {
   savedConnectionSchema,
 } from './mobileDecoders';
 
-type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
 type PlayerRotation = 0 | 90 | 180 | 270;
@@ -368,11 +367,6 @@ function formatDuration(seconds?: number): string {
 function formatShortMinutes(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0m';
   return `${Math.max(1, Math.round(seconds / 60))}m`;
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(1, Math.max(0, value));
 }
 
 // Stable empty list so the library feed keeps the same `data` reference in rails
@@ -2686,20 +2680,7 @@ function AppRoot() {
 
       const payload = await readJsonResponse(response, mobilePairResponseSchema, 'Pairing');
       const discoveredPairHost = host || discoveredHosts.find((candidate) => candidate.baseUrl === nextBaseUrl);
-      const certFingerprint = normalizeCertFingerprint(payload.certFingerprint);
-      const discoveredFingerprint = normalizeCertFingerprint(discoveredPairHost?.certFingerprint);
-      if (!certFingerprint) {
-        throw new Error('This desktop does not provide a secure host identity. Update LoomTV on the desktop, then pair again.');
-      }
-      if (certFingerprint !== observedFingerprint) {
-        throw new Error('The desktop TLS identity changed during pairing. Refresh discovery and try again.');
-      }
-      if (discoveredFingerprint && discoveredFingerprint !== certFingerprint) {
-        throw new Error('The desktop security fingerprint changed during pairing. Refresh devices and approve the connection again.');
-      }
-      if (discoveredPairHost?.deviceId && payload.hostDeviceId && discoveredPairHost.deviceId !== payload.hostDeviceId) {
-        throw new Error('The desktop identity changed during pairing. Refresh devices and approve the connection again.');
-      }
+      const certFingerprint = validatePairIdentity(payload, observedFingerprint, discoveredPairHost);
       const nextConnection = {
         baseUrl: nextBaseUrl,
         deviceId: payload.deviceId,
@@ -5154,19 +5135,37 @@ function PlayerContent({
   const { colors: { accent }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const { width: playerWidth } = useWindowDimensions();
-  const [controlsVisible, setControlsVisible] = useState(true);
   const [aspectRatio, setAspectRatio] = useState<PlayerAspectRatio>('default');
   const [cropMode, setCropMode] = useState<PlayerCropMode>('none');
   const [rotation, setRotation] = useState<PlayerRotation>(0);
   const entrance = useEntrance();
-  const controlsOpacity = useRef(new Animated.Value(1)).current;
-  const [isPlaying, setIsPlaying] = useState(() => Boolean(player.playing));
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [trackWidth, setTrackWidth] = useState(0);
-  const [interactionTick, setInteractionTick] = useState(0);
   const [menu, setMenu] = useState<'none' | 'video' | 'speed' | 'audio' | 'subtitles'>('none');
   const playerMenuOpen = menu !== 'none';
+  const {
+    controlsOpacity,
+    controlsVisible,
+    duration,
+    isPlaying,
+    markInteraction,
+    nativeAudioTracks,
+    nativeSubtitleTracks,
+    position,
+    seekToFraction,
+    seekToSeconds,
+    setControlsVisible,
+    showControls,
+    skipBy,
+    toggleControls,
+    togglePlay,
+  } = useMobilePlayerSession({ menuOpen: playerMenuOpen, playbackUrl, player });
+  const { gestureLevel, panHandlers } = useMobilePlayerGestures({
+    closeMenu: () => setMenu('none'),
+    markInteraction,
+    player,
+    playerWidth,
+    setControlsVisible,
+  });
   const playerUnderlayAccessibilityProps = {
     accessibilityElementsHidden: playerMenuOpen,
     importantForAccessibility: playerMenuOpen ? 'no-hide-descendants' as const : 'auto' as const,
@@ -5184,29 +5183,17 @@ function PlayerContent({
     onBack: () => setMenu('none'),
   });
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [nativeAudioTracks, setNativeAudioTracks] = useState<AudioTrack[]>([]);
-  const [nativeSubtitleTracks, setNativeSubtitleTracks] = useState<SubtitleTrack[]>([]);
   const [activeAudioKey, setActiveAudioKey] = useState('');
   const [activeSubtitleKey, setActiveSubtitleKey] = useState('off');
   const [subtitleFontSize, setSubtitleFontSize] = useState(DEFAULT_MOBILE_SUBTITLE_FONT_SIZE);
   const [mediaSegments, setMediaSegments] = useState<MediaSegment[]>([]);
   const recoveryAction = failure ? recoveryActionFor(failure) : null;
   const [trackPreferences, setTrackPreferences] = useState<PlaybackTrackPreferences>({});
-  const [gestureLevel, setGestureLevel] = useState<{ kind: PlayerVerticalGesture; value: number } | null>(null);
   const preferenceScope = useMemo(
     () => playbackPreferenceScope({ mediaId: target.mediaId, streamPath: target.streamPath }),
     [target.mediaId, target.streamPath],
   );
   const appliedPreferenceKeyRef = useRef('');
-  const gestureStateRef = useRef<{
-    kind: PlayerVerticalGesture | null;
-    startValue: number;
-    started: boolean;
-  }>({ kind: null, startValue: 0, started: false });
-  const brightnessRef = useRef(0.5);
-  const volumeRef = useRef(1);
-  const restoreBrightnessRef = useRef<number | null>(null);
-  const gestureHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -5219,27 +5206,6 @@ function PlayerContent({
     }).catch(() => {});
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    Brightness.getBrightnessAsync()
-      .then((value) => {
-        if (cancelled) return;
-        const nextValue = clamp01(value);
-        brightnessRef.current = nextValue;
-        restoreBrightnessRef.current = nextValue;
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-      if (gestureHintTimerRef.current) clearTimeout(gestureHintTimerRef.current);
-      const restoreValue = restoreBrightnessRef.current;
-      if (restoreValue !== null) {
-        void Brightness.setBrightnessAsync(restoreValue).catch(() => {});
-      }
     };
   }, []);
 
@@ -5359,178 +5325,16 @@ function PlayerContent({
   }, [activeAudioKey, audioOptions]);
 
   useEffect(() => {
-    if (!playbackUrl) return;
-
-    const refreshTracks = (payload?: { availableAudioTracks?: AudioTrack[]; availableSubtitleTracks?: SubtitleTrack[]; duration?: number }) => {
-      try {
-        setNativeAudioTracks(payload?.availableAudioTracks || player.availableAudioTracks || []);
-        setNativeSubtitleTracks(payload?.availableSubtitleTracks || player.availableSubtitleTracks || []);
-        const nextDuration = Number(payload?.duration || player.duration || 0);
-        if (Number.isFinite(nextDuration) && nextDuration > 0) setDuration(nextDuration);
-      } catch {
-        // Track APIs can reject while the native player is still loading.
-      }
-    };
-
-    const timeSubscription = player.addListener?.('timeUpdate', (event: { currentTime: number }) => {
-      setPosition(mobileAbsoluteMediaSeconds(Number(event.currentTime) || 0));
-      const nextDuration = Number(player.duration || 0);
-      if (Number.isFinite(nextDuration) && nextDuration > 0) setDuration(nextDuration);
-    });
-    const playingSubscription = player.addListener?.('playingChange', (event: { isPlaying: boolean }) => {
-      setIsPlaying(event.isPlaying);
-    });
-    const volumeSubscription = player.addListener?.('volumeChange', (event: { volume: number }) => {
-      volumeRef.current = clamp01(event.volume);
-    });
-    const statusSubscription = player.addListener?.('statusChange', (payload: { status: string }) => {
-      if (payload.status === 'readyToPlay') refreshTracks();
-    });
-    const sourceLoadSubscription = player.addListener?.('sourceLoad', refreshTracks);
-    const trackSubscriptions = [
-      player.addListener?.('availableAudioTracksChange', (payload: { availableAudioTracks: AudioTrack[] }) => refreshTracks(payload)),
-      player.addListener?.('availableSubtitleTracksChange', (payload: { availableSubtitleTracks: SubtitleTrack[] }) => refreshTracks(payload)),
-      player.addListener?.('audioTrackChange', () => refreshTracks()),
-      player.addListener?.('subtitleTrackChange', () => refreshTracks()),
-    ];
-    refreshTracks();
-    return () => {
-      timeSubscription?.remove?.();
-      playingSubscription?.remove?.();
-      volumeSubscription?.remove?.();
-      statusSubscription?.remove?.();
-      sourceLoadSubscription?.remove?.();
-      trackSubscriptions.forEach((subscription) => subscription?.remove?.());
-    };
-  }, [playbackUrl, player]);
-
-  // Auto-hide the controls while playing; any interaction restarts the timer,
-  // and an open settings menu keeps them up.
-  useEffect(() => {
-    if (!controlsVisible || !isPlaying || menu !== 'none') return;
-    const timer = setTimeout(() => setControlsVisible(false), 4000);
-    return () => clearTimeout(timer);
-  }, [controlsVisible, isPlaying, interactionTick, menu]);
-
-  useEffect(() => {
     if (!controlsVisible) setMenu('none');
   }, [controlsVisible]);
 
-  // Fade the control overlay in/out instead of a hard cut when it auto-hides.
-  useEffect(() => {
-    Animated.timing(controlsOpacity, {
-      toValue: controlsVisible ? 1 : 0,
-      duration: controlsVisible ? 150 : 220,
-      useNativeDriver: true,
-    }).start();
-  }, [controlsOpacity, controlsVisible]);
-
-  const bumpControls = () => {
-    setControlsVisible(true);
-    setInteractionTick((tick) => tick + 1);
-  };
-
-  const togglePlay = () => {
-    bumpControls();
-    try {
-      if (isPlaying) player.pause();
-      else player.play();
-    } catch {
-      // The native player can briefly reject commands during teardown.
-    }
-  };
-
-  const seekToSeconds = (seconds: number) => {
-    bumpControls();
-    const absoluteTime = Math.max(0, duration > 0 ? Math.min(duration, seconds) : seconds);
-    const nextTime = mobilePlayerSecondsForAbsolute(absoluteTime);
-    // Transcoded streams are served as a full VOD playlist whose segments the
-    // desktop materializes on demand, so every jump — direct-play or HLS — is a
-    // native player seek. Restarting the transcode per skip (the old path) forced
-    // a full stream reload and re-primed A/V on each jump; a native seek just
-    // pulls the target segment, which is far lighter on mobile. Changing the
-    // audio/subtitle track is the only thing that still rebuilds the stream.
-    setPosition(nextTime);
-    try {
-      player.currentTime = nextTime;
-    } catch {
-      // Seeking before the stream is ready is a no-op.
-    }
-  };
-
-  const skipBy = (delta: number) => {
-    const currentTime = Number(player.currentTime || position || 0);
-    seekToSeconds(currentTime + delta);
-  };
-
-  const seekToFraction = (fraction: number) => {
-    if (duration <= 0) return;
-    seekToSeconds(Math.min(duration, Math.max(0, fraction * duration)));
-  };
-
-  const showGestureLevel = useCallback((kind: PlayerVerticalGesture, value: number) => {
-    setGestureLevel({ kind, value });
-    if (gestureHintTimerRef.current) clearTimeout(gestureHintTimerRef.current);
-    gestureHintTimerRef.current = setTimeout(() => setGestureLevel(null), 700);
-  }, []);
-
-  const setPlayerVolume = useCallback((value: number) => {
-    const nextValue = clamp01(value);
-    volumeRef.current = nextValue;
-    try {
-      player.volume = nextValue;
-      player.muted = nextValue === 0;
-    } catch {
-      // Volume changes can be rejected while the native player is loading.
-    }
-    showGestureLevel('volume', nextValue);
-  }, [player, showGestureLevel]);
-
-  const setPlayerBrightness = useCallback((value: number) => {
-    const nextValue = clamp01(value);
-    brightnessRef.current = nextValue;
-    void Brightness.setBrightnessAsync(nextValue).catch(() => {});
-    showGestureLevel('brightness', nextValue);
-  }, [showGestureLevel]);
-
-  const playerPanResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => (
-      Math.abs(gesture.dy) > 12
-      && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.35
-    ),
-    onPanResponderGrant: (event) => {
-      const kind: PlayerVerticalGesture = event.nativeEvent.locationX < playerWidth / 2 ? 'brightness' : 'volume';
-      gestureStateRef.current = {
-        kind,
-        startValue: kind === 'brightness' ? brightnessRef.current : volumeRef.current,
-        started: true,
-      };
-      setControlsVisible(true);
-      setMenu('none');
-    },
-    onPanResponderMove: (_, gesture) => {
-      const state = gestureStateRef.current;
-      if (!state.started || !state.kind) return;
-      const nextValue = state.startValue - (gesture.dy / 220);
-      if (state.kind === 'brightness') setPlayerBrightness(nextValue);
-      else setPlayerVolume(nextValue);
-    },
-    onPanResponderRelease: () => {
-      gestureStateRef.current = { kind: null, startValue: 0, started: false };
-      setInteractionTick((tick) => tick + 1);
-    },
-    onPanResponderTerminate: () => {
-      gestureStateRef.current = { kind: null, startValue: 0, started: false };
-    },
-  }), [playerWidth, setPlayerBrightness, setPlayerVolume]);
-
   const toggleMenu = (nextMenu: 'video' | 'speed' | 'audio' | 'subtitles') => {
-    bumpControls();
+    showControls();
     setMenu((current) => (current === nextMenu ? 'none' : nextMenu));
   };
 
   const selectRate = (rate: number) => {
-    bumpControls();
+    showControls();
     try {
       player.playbackRate = rate;
     } catch {
@@ -5581,7 +5385,7 @@ function PlayerContent({
   };
 
   const selectSubtitleFontSize = (fontSize: number) => {
-    bumpControls();
+    showControls();
     setSubtitleFontSize(fontSize);
     void SecureStore.setItemAsync(MOBILE_SUBTITLE_FONT_SIZE_KEY, String(fontSize)).catch(() => {});
 
@@ -5682,7 +5486,7 @@ function PlayerContent({
   };
 
   const selectAudioOption = (option: PlayerAudioOption) => {
-    bumpControls();
+    showControls();
     setActiveAudioKey(option.key);
     saveTrackPreferences({ audio: audioPreference(option, true) });
     const activeSubtitleOption = subtitleOptions.find((candidate) => candidate.key === activeSubtitleKey);
@@ -5699,7 +5503,7 @@ function PlayerContent({
   };
 
   const selectSubtitleOption = (option: PlayerSubtitleOption | null) => {
-    bumpControls();
+    showControls();
     const nextSubtitleKey = option?.key || 'off';
     setActiveSubtitleKey(nextSubtitleKey);
     saveTrackPreferences({ subtitle: subtitlePreference(option, Boolean(option)) });
@@ -5762,9 +5566,9 @@ function PlayerContent({
           <Pressable
             {...playerUnderlayAccessibilityProps}
             style={StyleSheet.absoluteFill}
-            onPress={() => setControlsVisible((visible) => !visible)}
+            onPress={toggleControls}
             accessibilityLabel={controlsVisible ? 'Hide player controls' : 'Show player controls'}
-            {...playerPanResponder.panHandlers}
+            {...panHandlers}
           />
           {gestureLevel ? (
             <View {...playerUnderlayAccessibilityProps} style={styles.playerGestureHint} pointerEvents="none">
@@ -5975,7 +5779,7 @@ function PlayerContent({
                             options={PLAYER_ASPECT_OPTIONS}
                             value={aspectRatio}
                             onChange={(value) => {
-                              bumpControls();
+                              showControls();
                               setAspectRatio(value);
                             }}
                           />
@@ -5986,7 +5790,7 @@ function PlayerContent({
                             options={PLAYER_CROP_OPTIONS}
                             value={cropMode}
                             onChange={(value) => {
-                              bumpControls();
+                              showControls();
                               setCropMode(value);
                             }}
                           />
@@ -5997,7 +5801,7 @@ function PlayerContent({
                             options={PLAYER_ROTATION_OPTIONS}
                             value={rotation}
                             onChange={(value) => {
-                              bumpControls();
+                              showControls();
                               setRotation(value);
                             }}
                           />

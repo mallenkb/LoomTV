@@ -20,6 +20,7 @@ import type {
   MediaSegmentType,
   MetadataApiKeys,
   MetadataKeyTestResult,
+  MetadataProviderRequest,
   OfficialArtworkResult,
   OfficialArtworkRefreshTarget,
   OfficialMetadataApplyTarget,
@@ -92,6 +93,7 @@ export interface IpcContract {
   'media:stop-transcode': { args: [sessionId: string]; result: ApiResult<boolean> };
   'metadata:test-keys': { args: [keys: MetadataApiKeys]; result: MetadataKeyTestResult[] };
   'metadata:refresh-incomplete': { args: [mediaId: string]; result: boolean };
+  'metadata:provider-request': { args: [request: MetadataProviderRequest]; result: unknown };
   'metadata:streaming-providers': { args: [mediaId: string]; result: StreamingProvider[] };
   'mpv:availability': { args: []; result: MpvAvailability };
   'mpv:choose-executable': { args: []; result: MpvAvailability };
