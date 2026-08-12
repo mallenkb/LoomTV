@@ -60,6 +60,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.123](docs/releases/v1.0.123.md): refreshes every desktop package and gives the multi-platform publisher enough time to upload the complete release safely.
 - [LoomTV 1.0.122](docs/releases/v1.0.122.md): adds custom media libraries, improves responsive artwork selection and desktop browsing, and fixes Windows native-module release packaging.
 - [LoomTV 1.0.120](docs/releases/v1.0.120.md): improves desktop metadata refresh, provider artwork and ratings persistence, detail information, and series-folder reconciliation.
 - [LoomTV 1.0.89](docs/releases/v1.0.89.md): fixes real-time audio and subtitle switching so selected tracks remain active during stream replacement.

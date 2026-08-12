@@ -316,7 +316,7 @@ jobs:
       - attest-windows
       - attest-linux
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     environment: production-release
     permissions:
       contents: write
