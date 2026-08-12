@@ -60,6 +60,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.125](docs/releases/v1.0.125.md): fixes browser-host detection and artwork API routing, improves custom-folder navigation state, and refines desktop artwork presentation.
 - [LoomTV 1.0.124](docs/releases/v1.0.124.md): makes desktop packaging resilient to transient dependency-download failures and retains the longer multi-platform publishing window.
 - [LoomTV 1.0.123](docs/releases/v1.0.123.md): refreshes every desktop package and gives the multi-platform publisher enough time to upload the complete release safely.
 - [LoomTV 1.0.122](docs/releases/v1.0.122.md): adds custom media libraries, improves responsive artwork selection and desktop browsing, and fixes Windows native-module release packaging.
