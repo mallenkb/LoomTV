@@ -18,6 +18,7 @@ export interface OMDbResponse {
   Language?: string;
   Plot?: string;
   Poster?: string;
+  imdbID?: string;
   imdbRating?: string;
   imdbVotes?: string;
   Metascore?: string;
@@ -40,6 +41,7 @@ const omdbResponseSchema: z.ZodType<OMDbResponse> = z.object({
   Language: z.string().optional(),
   Plot: z.string().optional(),
   Poster: z.string().optional(),
+  imdbID: z.string().optional(),
   imdbRating: z.string().optional(),
   imdbVotes: z.string().optional(),
   Metascore: z.string().optional(),

@@ -8,7 +8,7 @@ import {
   parseCustomArtworkReference,
 } from '../src/main/artworkCache.ts';
 
-test('artwork cache only keeps bounded external artwork fallbacks', () => {
+test('artwork cache keeps bounded title fallbacks and every local episode still', () => {
   const sources = collectArtworkSourcesForCache({
     movies: [{
       poster: 'https://images.example/poster-primary.jpg',
@@ -51,6 +51,8 @@ test('artwork cache only keeps bounded external artwork fallbacks', () => {
     'https://images.example/episode-4.jpg',
     'https://images.example/episode-5.jpg',
     'https://images.example/episode-6.jpg',
+    'https://images.example/episode-7.jpg',
+    'https://images.example/episode-8.jpg',
   ]);
 });
 

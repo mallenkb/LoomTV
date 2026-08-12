@@ -384,7 +384,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover') || isRemoteStremioShow);
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(shouldOpenDetailsFirst ? 'details' : 'episodes');
   const metadataFetchKeyRef = useRef('');
-  const localRatingsRefreshKeyRef = useRef('');
 
   useEffect(() => {
     let cancelled = false;
@@ -448,25 +447,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     }
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, kind, mediaId, progressTick, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
-
-  useEffect(() => {
-    if (!show?.id || isRemoteStremioShow || Object.keys(show.providerRatings || {}).length > 0) return;
-    if (localRatingsRefreshKeyRef.current === show.id) return;
-
-    localRatingsRefreshKeyRef.current = show.id;
-    let cancelled = false;
-    void desktopApi.refreshIncompleteMetadata(show.id)
-      .then(async (changed) => {
-        if (cancelled || !changed) return;
-        const refreshed = await hydrateLibraryItem(show.id);
-        if (!cancelled && refreshed) setShow(refreshed as TVShow);
-      })
-      .catch((error) => console.warn('Could not refresh local series ratings:', error));
-
-    return () => {
-      cancelled = true;
-    };
-  }, [hydrateLibraryItem, isRemoteStremioShow, show?.id, show?.providerRatings]);
 
   const toggleSeason = (seasonNumber: number) => {
     accordionWasToggledRef.current = true;

@@ -72,6 +72,13 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
     CREATE INDEX IF NOT EXISTS idx_media_items_type ON media_items(type);
     CREATE INDEX IF NOT EXISTS idx_media_items_file_path ON media_items(file_path);
 
+    CREATE TABLE IF NOT EXISTS media_metadata_refresh_state (
+      media_id TEXT PRIMARY KEY,
+      refreshed_at INTEGER,
+      attempted_at INTEGER NOT NULL,
+      last_error TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS seasons (
       media_id TEXT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
       number INTEGER NOT NULL,

@@ -23,7 +23,12 @@ import {
   loadLibrary as loadLibraryRecord,
   remapLibraryMediaReferences as remapLibraryMediaReferencesRecord,
   saveLibrary as saveLibraryRecord,
+  saveLibraryItem as saveLibraryItemRecord,
 } from './databaseLibraryRepository.ts';
+import {
+  getMetadataRefreshState as getMetadataRefreshStateRecord,
+  recordMetadataRefresh as recordMetadataRefreshRecord,
+} from './databaseMetadataRefreshRepository.ts';
 import {
   getAllProgress as getAllProgressRecord,
   getPlaybackTrackPreferences as getPlaybackTrackPreferencesRecord,
@@ -370,6 +375,21 @@ export function loadLibraryFromDatabase(): LibraryData | null {
 
 export function saveLibraryToDatabase(data: LibraryData): void {
   saveLibraryRecord(getDb(), data);
+}
+
+export function saveLibraryItemToDatabase(item: import('./metadata/types.ts').MediaItem): void {
+  saveLibraryItemRecord(getDb(), item);
+}
+
+export function getMetadataRefreshState(mediaId: string) {
+  return getMetadataRefreshStateRecord(getDb(), mediaId);
+}
+
+export function recordMetadataRefresh(
+  mediaId: string,
+  result: { refreshedAt?: number; error?: string },
+): void {
+  recordMetadataRefreshRecord(getDb(), mediaId, result);
 }
 
 export function remapLibraryMediaReferences(aliases: ReadonlyMap<string, string>): void {

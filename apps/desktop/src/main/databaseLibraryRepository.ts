@@ -430,6 +430,126 @@ export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData)
         entry.ratingsRefreshedAt || entry.scannedAt || now,
       );
     }
+    database.prepare(`
+      DELETE FROM media_metadata_refresh_state
+      WHERE media_id NOT IN (SELECT id FROM media_items)
+    `).run();
+  });
+  tx();
+}
+
+/**
+ * Persist one catalog item without rewriting unrelated titles or scan state.
+ * Child rows are reconciled in the same transaction so readers never observe
+ * a partially updated season or episode graph.
+ */
+export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaItem): void {
+  const now = Date.now();
+  const tx = database.transaction(() => {
+    database.prepare(`
+      INSERT INTO media_items (
+        id, type, format, title, year, poster, backdrop, logo, summary, rating, provider_ratings_json, file_path, file_size, last_played,
+        genres_json, cast_json, subtitles_json, local_metadata_json, provider_ids_json, streaming_providers_json, origin_platform_json, poster_candidates_json, backdrop_candidates_json, logo_candidates_json, content_ratings_json, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        type = excluded.type,
+        format = excluded.format,
+        title = excluded.title,
+        year = excluded.year,
+        poster = excluded.poster,
+        backdrop = excluded.backdrop,
+        logo = excluded.logo,
+        summary = excluded.summary,
+        rating = excluded.rating,
+        provider_ratings_json = excluded.provider_ratings_json,
+        file_path = excluded.file_path,
+        file_size = excluded.file_size,
+        genres_json = excluded.genres_json,
+        cast_json = excluded.cast_json,
+        subtitles_json = excluded.subtitles_json,
+        local_metadata_json = excluded.local_metadata_json,
+        provider_ids_json = excluded.provider_ids_json,
+        streaming_providers_json = excluded.streaming_providers_json,
+        origin_platform_json = excluded.origin_platform_json,
+        poster_candidates_json = excluded.poster_candidates_json,
+        backdrop_candidates_json = excluded.backdrop_candidates_json,
+        logo_candidates_json = excluded.logo_candidates_json,
+        content_ratings_json = excluded.content_ratings_json,
+        updated_at = excluded.updated_at
+    `).run(
+      item.id,
+      item.type,
+      item.format || '',
+      item.title || '',
+      item.year || 0,
+      durableArtworkSource(item.poster),
+      durableArtworkSource(item.backdrop),
+      durableArtworkSource(item.logo),
+      item.summary || '',
+      item.rating || 0,
+      jsonString(item.providerRatings || {}),
+      item.filePath || '',
+      item.fileSize || null,
+      null,
+      jsonString(item.genres || []),
+      jsonString(item.cast || []),
+      jsonString(item.subtitles || []),
+      item.localMetadata ? jsonString(item.localMetadata) : null,
+      item.providerIds ? jsonString(item.providerIds) : null,
+      item.streamingProviders ? jsonString(item.streamingProviders) : null,
+      item.originPlatform ? jsonString(item.originPlatform) : null,
+      jsonString(durableArtworkSources(item.posterCandidates || [])),
+      jsonString(durableArtworkSources(item.backdropCandidates || [])),
+      jsonString(durableArtworkSources(item.logoCandidates || [])),
+      jsonString(item.contentRatings || {}),
+      now,
+    );
+
+    database.prepare('DELETE FROM episode_files WHERE media_id = ?').run(item.id);
+    database.prepare('DELETE FROM episodes WHERE media_id = ?').run(item.id);
+    database.prepare('DELETE FROM seasons WHERE media_id = ?').run(item.id);
+
+    const insertSeason = database.prepare('INSERT INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
+    const insertEpisode = database.prepare(`
+      INSERT INTO episodes (media_id, season, number, title, summary, still, rating, air_date, local_metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertEpisodeFile = database.prepare(`
+      INSERT INTO episode_files (media_id, season, episode, file_path, title, subtitles_json, local_metadata_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const season of item.seasons || []) {
+      insertSeason.run(item.id, season.number, season.title || '', season.episodeCount || 0);
+    }
+    for (const episode of item.episodes || []) {
+      insertEpisode.run(
+        item.id,
+        episode.season,
+        episode.number,
+        episode.title || '',
+        episode.summary || '',
+        durableArtworkSource(episode.still),
+        episode.rating || 0,
+        episode.airDate || '',
+        episode.localMetadata ? jsonString(episode.localMetadata) : null,
+      );
+    }
+    for (const episodeFile of item.episodeFiles || []) {
+      insertEpisodeFile.run(
+        item.id,
+        episodeFile.season,
+        episodeFile.episode,
+        episodeFile.filePath,
+        episodeFile.title || null,
+        jsonString(episodeFile.subtitles || []),
+        episodeFile.localMetadata ? jsonString(episodeFile.localMetadata) : null,
+      );
+    }
   });
   tx();
 }

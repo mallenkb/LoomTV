@@ -149,6 +149,7 @@ import {
   exportProfileData,
   getAllProgress,
   getManagedSegmentCandidates,
+  getMetadataRefreshState,
   getPlaybackTrackPreferences,
   getProgress,
   getProfileLists,
@@ -163,7 +164,9 @@ import {
   eraseAutomaticSegmentCandidates,
   loadLibraryFromDatabase,
   remapLibraryMediaReferences,
+  recordMetadataRefresh,
   saveCustomArtwork,
+  saveLibraryItemToDatabase,
   saveLibraryToDatabase,
   savePlaybackTrackPreferences,
   saveProfilePreferences,
@@ -852,6 +855,9 @@ async function scanLibrary(
     scannedFolders,
     totalFolders,
   });
+  void refreshIncompleteMetadataQueue(repaired.data).catch((error) => {
+    console.warn('[metadata] Background refresh after scan failed:', error);
+  });
   return repaired.data;
 }
 
@@ -1164,6 +1170,11 @@ function saveLibraryMutation(data: LibraryData): void {
   if (saveLibrary(data)) reconcileSkipAnalysisAfterScan(previous, data);
 }
 
+function saveLibraryItemMutation(item: MediaItem): void {
+  advanceLibraryMutationVersion();
+  saveLibraryItemToDatabase(item);
+}
+
 function stremioTypesMatch(requestedType: unknown, itemType: string): boolean {
   if (requestedType === itemType) return true;
   return (requestedType === 'series' || requestedType === 'tv')
@@ -1195,6 +1206,7 @@ const {
   getPlaybackLogo,
   getStreamingProviders,
   refreshIncompleteMetadata,
+  refreshIncompleteMetadataQueue,
   refreshOfficialArtwork,
 } = createOfficialMetadataService({
   artworkDeliveryUrl,
@@ -1217,12 +1229,14 @@ const {
   fetchTVMetadata,
   fetchTVMetadataCandidates,
   getMetadataApiKey,
+  getMetadataRefreshState,
   loadLibrary,
   loadSettings,
   localTitleFromPath,
   orderedArtworkCandidates,
   probeMediaFile,
-  saveLibrary: saveLibraryMutation,
+  recordMetadataRefresh,
+  saveLibraryItem: saveLibraryItemMutation,
 });
 
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
@@ -1912,6 +1926,9 @@ async function startBackgroundServices(): Promise<void> {
   // Detail pages never need to fetch provider artwork as part of opening a
   // local title, including after an app restart.
   await cacheArtworkNow(persistedLibrary);
+  void refreshIncompleteMetadataQueue(persistedLibrary).catch((error) => {
+    console.warn('[metadata] Background refresh at startup failed:', error);
+  });
   await cleanupOldTranscodes();
 }
 

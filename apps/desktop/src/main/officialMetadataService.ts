@@ -65,7 +65,9 @@ export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
 
 export type OfficialMetadataServiceDependencies = {
   loadLibrary: () => LibraryData;
-  saveLibrary: (library: LibraryData) => void;
+  saveLibraryItem: (item: MediaItem) => void;
+  getMetadataRefreshState: (mediaId: string) => { attemptedAt: number; refreshedAt: number | null; lastError: string | null } | null;
+  recordMetadataRefresh: (mediaId: string, result: { refreshedAt?: number; error?: string }) => void;
   cacheArtworkNow: (library: LibraryData) => Promise<void>;
   loadSettings: () => AppSettings;
   getMetadataApiKey: typeof import('./settings.ts').getMetadataApiKey;
@@ -252,12 +254,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     fetchTVMetadata,
     fetchTVMetadataCandidates,
     getMetadataApiKey,
+    getMetadataRefreshState,
     loadLibrary,
     loadSettings,
     localTitleFromPath,
     orderedArtworkCandidates,
     probeMediaFile,
-    saveLibrary,
+    recordMetadataRefresh,
+    saveLibraryItem,
   } = deps;
 
   function movieMetadataRating(
@@ -330,6 +334,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const episodes = (metadata.episodes || []).filter((episode) => episode.title);
     const candidateWithoutId: Omit<OfficialMetadataCandidate, 'id'> = {
       source,
+      /* The ids travel with the candidate so applying it can adopt the match's
+         identity. Without them every later refresh searches by title again and
+         can land on a different release than the one the user picked. */
+      providerIds: metadata.providerIds,
       format: metadata.format,
       title,
       year: metadata.year || undefined,
@@ -365,6 +373,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     return metadataCandidate('OMDb', {
       title: metadata.Title || fallbackTitle,
       year: metadata.Year ? parseInt(String(metadata.Year), 10) : 0,
+      providerIds: metadata.imdbID ? { imdbId: metadata.imdbID } : undefined,
       poster,
       backdrop: poster,
       summary: metadata.Plot && metadata.Plot !== 'N/A' ? metadata.Plot : '',
@@ -753,6 +762,21 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     };
   }
 
+  /* Only OMDb hands us IMDb, Rotten Tomatoes and Metacritic scores, so a TMDB,
+     AniList, Jikan or TVmaze candidate carries none. Look them up by the id the
+     chosen match came with, rather than leaving whatever the previous match
+     stored: the hero badges read from providerRatings first, so a stale entry
+     there makes an applied candidate look like it did nothing. */
+  async function providerRatingsForCandidate(
+    candidate: OfficialMetadataCandidate,
+  ): Promise<MediaItem['providerRatings']> {
+    if (hasProviderRatings(candidate.providerRatings)) return candidate.providerRatings;
+    const imdbId = candidate.providerIds?.imdbId;
+    if (!imdbId) return {};
+    const omdbApiKey = getMetadataApiKey(loadSettings(), 'omdb');
+    return omdbProviderRatings(await fetchOMDbMetadataById(imdbId, omdbApiKey));
+  }
+
   async function applyOfficialMetadataCandidate(
     mediaId: string,
     candidate: OfficialMetadataCandidate,
@@ -777,15 +801,33 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const selectedPoster = candidate.thumbnail || candidate.posterCandidates?.find(Boolean) || '';
     const selectedCover = candidate.cover || candidate.backdropCandidates?.find(Boolean) || '';
 
+    /* Ratings are replaced as a block rather than merged. The user picked this
+       match precisely because the stored one was wrong, so anything the old
+       match left behind has to go with it — an 8.6 sitting next to a stale IMDb
+       3.4 badge is the failure this guards against. Only a candidate that
+       carries no rating at all leaves the existing scores alone. */
+    const candidateRating = numericRating(candidate.rating);
+    const resolvedProviderRatings = applyAll ? await providerRatingsForCandidate(candidate) : {};
+    const hasResolvedProviderRatings = hasProviderRatings(resolvedProviderRatings);
+
     if (applyAll && candidate.title) target.title = candidate.title;
     if (applyAll && candidate.year) target.year = candidate.year;
     if (applyAll && candidate.format) target.format = candidate.format;
+    if (applyAll) {
+      target.providerIds = mergeProviderIds(candidate.providerIds || {}, target.providerIds || {});
+    }
     if (applyPoster && selectedPoster) target.poster = selectedPoster;
     if (applyCover && selectedCover) target.backdrop = selectedCover;
     if (applyAll && candidate.logo) target.logo = candidate.logo;
     if (applyAll && candidate.summary) target.summary = candidate.summary;
-    if (applyAll && candidate.rating) target.rating = candidate.rating;
-    if (applyAll && hasProviderRatings(candidate.providerRatings)) target.providerRatings = candidate.providerRatings;
+    if (applyAll && candidateRating > 0) target.rating = candidateRating;
+    if (applyAll && hasResolvedProviderRatings) {
+      target.providerRatings = resolvedProviderRatings;
+      const imdbRating = resolvedProviderRatings?.imdb?.value || 0;
+      if (candidateRating <= 0 && imdbRating > 0) target.rating = imdbRating;
+    } else if (applyAll && candidateRating > 0) {
+      target.providerRatings = {};
+    }
     if (applyAll && candidate.genres?.length) target.genres = candidate.genres;
     if (applyAll && hasContentRatings(candidate.contentRatings)) target.contentRatings = candidate.contentRatings;
     if (applyAll && candidate.streamingProviders?.length) target.streamingProviders = candidate.streamingProviders;
@@ -822,7 +864,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         target.logo,
       );
     }
-    saveLibrary(library);
+    saveLibraryItem(target);
     if (applyPoster || applyCover || applyAll) await cacheArtworkNow(library);
 
     return {
@@ -925,7 +967,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         ...officialArtworkOnly(target.logoCandidates || []),
         target.logo,
       );
-      saveLibrary(library);
+      saveLibraryItem(target);
       await cacheArtworkNow(library);
     }
 
@@ -964,6 +1006,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     if (!initialTarget || !itemNeedsIncompleteMetadata(initialTarget)) return false;
 
     const now = Date.now();
+    const persistedAttempt = getMetadataRefreshState(mediaId);
+    if (persistedAttempt && persistedAttempt.attemptedAt + INCOMPLETE_METADATA_RETRY_COOLDOWN_MS > now) return false;
     const previousAttempt = incompleteMetadataRefreshState.get(mediaId);
     if (previousAttempt?.pending) return previousAttempt.pending;
     if (previousAttempt && previousAttempt.nextAttemptAt > now) return false;
@@ -1028,7 +1072,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
       let changed = JSON.stringify(target) !== before;
       if (changed) {
-        saveLibrary(library);
+        saveLibraryItem(target);
         await cacheArtworkNow(library);
       }
 
@@ -1036,8 +1080,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         const providers = await getStreamingProviders(mediaId);
         changed = changed || providers.length > 0;
       }
+      recordMetadataRefresh(mediaId, { refreshedAt: Date.now() });
       return changed;
     })().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Unknown metadata refresh failure';
+      recordMetadataRefresh(mediaId, { error: message.slice(0, 500) });
       console.warn(`[metadata] Incomplete refresh failed for ${mediaId}:`, error);
       return false;
     });
@@ -1053,6 +1100,22 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       }
     });
     return request;
+  }
+
+  async function refreshIncompleteMetadataQueue(library: LibraryData, concurrency = 2): Promise<number> {
+    const pending = [...(library.movies || []), ...(library.tvShows || []), ...(library.animeShows || [])]
+      .filter(itemNeedsIncompleteMetadata);
+    let refreshed = 0;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(Math.max(1, concurrency), pending.length) }, async () => {
+      while (cursor < pending.length) {
+        const item = pending[cursor];
+        cursor += 1;
+        if (item && await refreshIncompleteMetadata(item.id)) refreshed += 1;
+      }
+    });
+    await Promise.all(workers);
+    return refreshed;
   }
 
   async function refreshDisplayMetadata(mediaId: string): Promise<boolean> {
@@ -1090,7 +1153,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       applyOfficialSeasons(target, refreshed.seasons);
 
       const changed = JSON.stringify(target) !== before;
-      if (changed) saveLibrary(library);
+      if (changed) saveLibraryItem(target);
       return changed;
     })().catch((error) => {
       console.warn(`[metadata] Display refresh failed for ${mediaId}:`, error);
@@ -1144,7 +1207,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       const latestTarget = findLibraryMediaItem(latestLibrary, mediaId);
       if (latestTarget && !latestTarget.streamingProviders?.length) {
         latestTarget.streamingProviders = providers;
-        saveLibrary(latestLibrary);
+        saveLibraryItem(latestTarget);
       }
       return providers;
     })().catch(() => {
@@ -1194,7 +1257,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         ...logoCandidates,
         ...officialArtworkOnly(target.logoCandidates || []),
       );
-      saveLibrary(library);
+      saveLibraryItem(target);
       void cacheArtworkNow(library).catch((error) => {
         console.error('playback logo artwork cache error:', error);
       });
@@ -1212,6 +1275,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     getOfficialMetadataCandidates,
     refreshDisplayMetadata,
     refreshIncompleteMetadata,
+    refreshIncompleteMetadataQueue,
     getPlaybackLogo,
     getStreamingProviders,
     refreshOfficialArtwork,

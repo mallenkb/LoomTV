@@ -61,7 +61,7 @@ test('decorated season folders group numbered anime files under the parent serie
   }
 });
 
-test('official season names replace local folder subtitles by season number', () => {
+test('official season names replace local folder subtitles unless the API name is generic', () => {
   const localSeasons = [
     { number: 1, title: 'Season 01', episodeCount: 26 },
     { number: 2, title: 'Season 02 - Entertainment Resort', episodeCount: 11 },
@@ -71,11 +71,11 @@ test('official season names replace local folder subtitles by season number', ()
   assert.deepEqual(mergeLocalSeasonsWithMetadata(localSeasons, [
     { number: 1, title: 'Unwavering Resolve Arc', episodeCount: 26 },
     { number: 2, title: 'Season 2 - Entertainment District Arc', episodeCount: 11 },
-    { number: 3, title: 'Season 3', episodeCount: 11 },
+    { number: 3, title: 'Season 03 - Swordsmith Village Arc', episodeCount: 11 },
   ]), [
     { number: 1, title: 'Season 1: Unwavering Resolve Arc', episodeCount: 26 },
     { number: 2, title: 'Season 2: Entertainment District Arc', episodeCount: 11 },
-    { number: 3, title: 'Season 3', episodeCount: 11 },
+    { number: 3, title: 'Season 3: Swordsmith Village Arc', episodeCount: 11 },
   ]);
 });
 
