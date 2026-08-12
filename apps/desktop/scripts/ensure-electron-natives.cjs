@@ -6,7 +6,7 @@ const path = require('node:path');
 const desktopRoot = path.resolve(__dirname, '..');
 const workspaceRoot = path.resolve(desktopRoot, '../..');
 const electronExecutable = require('electron');
-const electronRebuildExecutable = path.join(desktopRoot, 'node_modules', '.bin', 'electron-rebuild');
+const electronRebuildCli = path.join(path.dirname(require.resolve('@electron/rebuild')), 'cli.js');
 const probeScript = "const Database = require('better-sqlite3'); new Database(':memory:').close();";
 
 function electronNativeModuleLoads() {
@@ -35,7 +35,7 @@ if (/\s/.test(workspaceRoot)) {
 }
 
 try {
-  execFileSync(electronRebuildExecutable, ['-f', '-w', 'better-sqlite3'], {
+  execFileSync(process.execPath, [electronRebuildCli, '-f', '-w', 'better-sqlite3'], {
     cwd: rebuildRoot,
     env: { ...process.env, PWD: rebuildRoot },
     stdio: 'inherit',
@@ -51,4 +51,3 @@ if (!electronNativeModuleLoads()) {
   console.error('[desktop] better-sqlite3 is not compatible with this Electron runtime.');
   process.exit(1);
 }
-
