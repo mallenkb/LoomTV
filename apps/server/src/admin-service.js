@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { createHeadlessLibraryScanner } from './library-scanner.js';
+import { normalizeIpAddress } from './trusted-proxy.js';
 import {
   AUTH_PERMISSIONS,
   USER_ROLES,
@@ -26,6 +27,7 @@ const MAX_ROOTS = 128;
 const MAX_USERS = 128;
 const MAX_SESSIONS = 64;
 const MAX_LOGIN_ATTEMPTS = 5;
+const MAX_SHARED_ADDRESS_FAILURES = 20;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 const LOGIN_DELAY_MS = 250;
@@ -212,8 +214,7 @@ function normalizedIdentity(value) {
 }
 
 function requestAddress(value) {
-  const normalized = String(value || 'unknown').trim();
-  return normalized.slice(0, 128) || 'unknown';
+  return normalizeIpAddress(value) || 'unknown';
 }
 
 function authAttemptKey(kind, value) {
@@ -222,6 +223,12 @@ function authAttemptKey(kind, value) {
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export function loginThrottleDelayMs(addressFailures) {
+  const failures = Number.isFinite(Number(addressFailures)) ? Math.max(0, Math.floor(Number(addressFailures))) : 0;
+  const bucket = Math.min(3, Math.floor(failures / MAX_LOGIN_ATTEMPTS));
+  return LOGIN_DELAY_MS * (2 ** bucket);
 }
 
 function publicOwnerPrincipal(owner) {
@@ -353,7 +360,7 @@ function normalizeState(raw) {
       .filter((entry) => entry && typeof entry.key === 'string' && Number.isFinite(entry.lastAttemptAt))
       .map((entry) => ({
         key: entry.key.slice(0, 128),
-        failures: Math.max(0, Math.min(MAX_LOGIN_ATTEMPTS, Number(entry.failures) || 0)),
+        failures: Math.max(0, Math.min(MAX_SHARED_ADDRESS_FAILURES, Number(entry.failures) || 0)),
         firstAttemptAt: Number(entry.firstAttemptAt) || Number(entry.lastAttemptAt),
         lastAttemptAt: Number(entry.lastAttemptAt),
         lockedUntil: Number(entry.lockedUntil) || 0,
@@ -432,6 +439,7 @@ export function createHeadlessAdminService(options) {
   const getSessions = options.getSessions || (async () => []);
   const getClientState = options.getClientState || (async () => null);
   const replaceClientState = options.replaceClientState || (async () => undefined);
+  const loginDelay = options.loginDelay || wait;
   let statePromise;
   let writeQueue = Promise.resolve();
   let ownerCreationPromise = null;
@@ -597,11 +605,27 @@ export function createHeadlessAdminService(options) {
     return user ? { record: user, principal: publicUserPrincipal(user), type: 'user' } : null;
   }
 
-  function loginKeys(identity, address) {
-    return [
-      authAttemptKey('identity', identity || 'owner'),
-      authAttemptKey('address', requestAddress(address)),
-    ];
+  function loginKeys(identity, address, match) {
+    const submittedIdentity = identity || 'owner';
+    const canonicalIdentity = match?.record?.id
+      ? authAttemptKey('identity', `account:${match.record.id}`)
+      : authAttemptKey('identity', `name:${submittedIdentity}`);
+    const legacyNames = match?.type === 'owner'
+      ? ['owner', submittedIdentity, String(match.record.name || '').trim()]
+      : [submittedIdentity];
+    return {
+      // The owner can sign in as either `owner` or their chosen display name.
+      // Bucket a resolved account by its immutable ID so aliases cannot double
+      // the number of password guesses before the per-identity lock engages.
+      identity: canonicalIdentity,
+      // Fold transient attempts written by pre-upgrade versions under a
+      // submitted-name key into the stable account key on the next login.
+      identityCandidates: [...new Set([
+        canonicalIdentity,
+        ...legacyNames.filter(Boolean).map((name) => authAttemptKey('identity', name)),
+      ])],
+      address: authAttemptKey('address', requestAddress(address)),
+    };
   }
 
   function pruneLoginAttempts(state, now = Date.now()) {
@@ -610,23 +634,53 @@ export function createHeadlessAdminService(options) {
     ));
   }
 
-  function loginLock(state, keys, now = Date.now()) {
+  function loginLock(state, identityKeys, now = Date.now()) {
     pruneLoginAttempts(state, now);
-    const locked = state.loginAttempts.find((entry) => keys.includes(entry.key) && entry.lockedUntil > now);
+    const candidates = Array.isArray(identityKeys) ? identityKeys : [identityKeys];
+    const locked = state.loginAttempts.find((entry) => candidates.includes(entry.key) && entry.lockedUntil > now);
     return locked ? Math.ceil((locked.lockedUntil - now) / 1000) : 0;
+  }
+
+  function loginFailureCount(state, key, now = Date.now()) {
+    pruneLoginAttempts(state, now);
+    const entry = state.loginAttempts.find((candidate) => candidate.key === key);
+    return entry && entry.lastAttemptAt > now - LOGIN_WINDOW_MS ? entry.failures : 0;
+  }
+
+  function reconcileIdentityAttempts(state, keys, now = Date.now()) {
+    pruneLoginAttempts(state, now);
+    const candidates = new Set(keys.identityCandidates);
+    const entries = state.loginAttempts.filter((entry) => candidates.has(entry.key));
+    if (!entries.length || (entries.length === 1 && entries[0].key === keys.identity)) return;
+    const failures = Math.min(
+      MAX_LOGIN_ATTEMPTS,
+      entries.reduce((total, entry) => total + entry.failures, 0),
+    );
+    const lockedUntil = Math.max(0, ...entries.map((entry) => entry.lockedUntil));
+    state.loginAttempts = state.loginAttempts.filter((entry) => !candidates.has(entry.key));
+    state.loginAttempts.push({
+      key: keys.identity,
+      failures,
+      firstAttemptAt: Math.min(...entries.map((entry) => entry.firstAttemptAt)),
+      lastAttemptAt: Math.max(...entries.map((entry) => entry.lastAttemptAt)),
+      lockedUntil: failures >= MAX_LOGIN_ATTEMPTS && lockedUntil <= now
+        ? now + LOGIN_LOCKOUT_MS
+        : lockedUntil,
+    });
   }
 
   function rememberLoginFailure(state, keys, now = Date.now()) {
     pruneLoginAttempts(state, now);
-    for (const key of keys) {
+    for (const [kind, key] of Object.entries(keys)) {
       const current = state.loginAttempts.find((entry) => entry.key === key);
       if (!current || current.lastAttemptAt <= now - LOGIN_WINDOW_MS) {
         state.loginAttempts.push({ key, failures: 1, firstAttemptAt: now, lastAttemptAt: now, lockedUntil: 0 });
         continue;
       }
-      current.failures = Math.min(MAX_LOGIN_ATTEMPTS, current.failures + 1);
+      const limit = kind === 'identity' ? MAX_LOGIN_ATTEMPTS : MAX_SHARED_ADDRESS_FAILURES;
+      current.failures = Math.min(limit, current.failures + 1);
       current.lastAttemptAt = now;
-      if (current.failures >= MAX_LOGIN_ATTEMPTS) current.lockedUntil = now + LOGIN_LOCKOUT_MS;
+      if (kind === 'identity' && current.failures >= MAX_LOGIN_ATTEMPTS) current.lockedUntil = now + LOGIN_LOCKOUT_MS;
     }
     state.loginAttempts = state.loginAttempts.slice(-256);
   }
@@ -800,9 +854,11 @@ export function createHeadlessAdminService(options) {
       const deviceId = typeof input.deviceId === 'string' && input.deviceId.trim()
         ? input.deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH)
         : null;
-      const keys = loginKeys(identity || 'owner', address);
+      const match = userByName(state, identity || 'owner');
+      const keys = loginKeys(identity || 'owner', address, match);
       const now = Date.now();
-      const retryAfter = loginLock(state, keys, now);
+      reconcileIdentityAttempts(state, keys, now);
+      const retryAfter = loginLock(state, keys.identityCandidates, now);
       if (retryAfter) {
         await saveState(state);
         throw Object.assign(new Error('Too many sign-in attempts. Try again later.'), {
@@ -812,17 +868,16 @@ export function createHeadlessAdminService(options) {
         });
       }
 
-      const match = userByName(state, identity || 'owner');
       const credential = match?.record;
-      await wait(LOGIN_DELAY_MS);
+      await loginDelay(loginThrottleDelayMs(loginFailureCount(state, keys.address, now)));
       const passwordValid = credential
         ? await verifyPassword(input.password, credential.salt, credential.hash)
         : await scrypt(input.password, 'loomtv-invalid-login-salt', PASSWORD_BYTES).then(() => false);
       if (!match || !passwordValid || (match.type === 'user' && match.record.disabled)) {
-        rememberLoginFailure(state, keys, now);
+        rememberLoginFailure(state, { identity: keys.identity, address: keys.address }, now);
         await saveState(state);
         await appendLog('warn', 'Rejected sign-in attempt.', { identity: identity || 'owner' });
-        const lockedRetryAfter = loginLock(state, keys, now);
+        const lockedRetryAfter = loginLock(state, keys.identityCandidates, now);
         throw Object.assign(new Error(lockedRetryAfter
           ? 'Too many sign-in attempts. Try again later.'
           : 'The account name or password is incorrect.'), {
@@ -831,7 +886,10 @@ export function createHeadlessAdminService(options) {
           ...(lockedRetryAfter ? { retryAfter: lockedRetryAfter } : {}),
         });
       }
-      clearLoginAttempts(state, keys);
+      // A valid login clears its identity failures, but not failures shared by
+      // every client behind the same address. The latter decay as a throttle;
+      // they never create a global hard lock for a NAT or reverse proxy.
+      clearLoginAttempts(state, keys.identityCandidates);
       await saveState(state);
       return issueToken(state, match.principal, deviceId);
     },

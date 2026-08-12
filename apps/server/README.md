@@ -46,6 +46,8 @@ which are convenient for containers, and the `LOOMTV_*` aliases are supported:
 | Persistent data | `--data-dir` | `DATA_DIR`, `LOOMTV_DATA_DIR` | platform app-data/LoomTV |
 | Cache | `--cache-dir` | `CACHE_DIR`, `LOOMTV_CACHE_DIR` | `<data-dir>/cache` |
 | Media root | `--media-dir` | `MEDIA_DIR`, `LOOMTV_MEDIA_DIR` | not configured |
+| Require secure requests | `--require-secure-transport` | `REQUIRE_SECURE_TRANSPORT`, `LOOMTV_REQUIRE_SECURE_TRANSPORT` | `false` |
+| Trusted proxy allowlist | `--trusted-proxies` | `TRUSTED_PROXIES`, `LOOMTV_TRUSTED_PROXIES` | empty |
 
 ## Health contract
 
@@ -98,12 +100,29 @@ SQLite mount of the desktop database. Shared media IDs and playback-profile
 normalization keep the two runtimes portable while the database extraction is
 staged.
 
-Sign-in attempts are throttled and locked for a short window after repeated
-failures. Set `--require-secure-transport --trust-proxy` (or the matching
-environment variables) only when LoomTV is behind a trusted TLS reverse
-proxy; `--trust-proxy` accepts that proxy's `X-Forwarded-Proto` signal. The
-server also adds browser security headers and never stores plaintext passwords
-or tokens.
+Sign-in attempts keep a short per-account lockout. Repeated failures from a
+shared address use a bounded progressive delay instead, so one client cannot
+hard-lock every account behind the same NAT or reverse proxy.
+
+Forwarded addresses and transport are ignored by default. When LoomTV is behind
+a TLS reverse proxy, set `--require-secure-transport` and list only the immediate
+proxy peers, for example `--trusted-proxies 127.0.0.1/32,::1/128` for a proxy on
+the same host. The equivalent environment value is
+`TRUSTED_PROXIES=127.0.0.1/32,::1/128`. IPv4, IPv6, and CIDR entries are accepted;
+malformed entries fail startup. LoomTV walks `X-Forwarded-For` from the trusted
+immediate peer toward the client and stops at the first untrusted hop. Never add
+a client/LAN range merely because requests originate there: allowlisting a peer
+authorizes that peer to supply forwarding headers.
+
+The trusted proxy must replace `X-Forwarded-Proto` with one value (`https` for
+secure client requests); LoomTV rejects missing, comma-separated, or malformed
+transport values. This keeps a client-supplied header from becoming a trust
+signal when proxies are chained or reconfigured.
+
+The former boolean `--trust-proxy`/`TRUST_PROXY=true` mode is intentionally not
+accepted because it did not identify which peer was trusted. The server adds
+browser security headers and never stores or logs plaintext passwords or
+tokens.
 
 Do not expose this first headless boundary directly to the public Internet.
 Use a VPN or a separately authenticated reverse proxy, and keep the owner

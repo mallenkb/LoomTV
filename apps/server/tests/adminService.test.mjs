@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createHeadlessAdminService, headlessAdminStateFilename } from '../src/admin-service.js';
+import {
+  createHeadlessAdminService,
+  headlessAdminStateFilename,
+  loginThrottleDelayMs,
+} from '../src/admin-service.js';
 
 const OWNER_PASSWORD = 'correct-horse-battery';
 
@@ -79,6 +84,115 @@ test('sign-in rejects bad credentials with a generic error and locks out after r
   await assert.rejects(
     () => service.createSession({ password: OWNER_PASSWORD }),
     (error) => error.code === 'login_locked',
+  );
+});
+
+test('shared address failures throttle without hard-locking another identity', async () => {
+  const delays = [];
+  const { service } = await onboardedService({
+    options: { loginDelay: async (milliseconds) => { delays.push(milliseconds); } },
+  });
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await assert.rejects(
+      () => service.createSession({
+        username: `unknown-${attempt}`,
+        password: 'wrong-password',
+        address: attempt % 2 === 0 ? '192.0.2.50' : '::ffff:192.0.2.50',
+      }),
+      (error) => error.code === 'invalid_credentials',
+    );
+  }
+
+  const valid = await service.createSession({
+    username: 'owner',
+    password: OWNER_PASSWORD,
+    address: '::ffff:192.0.2.50',
+  });
+  assert.equal(typeof valid.adminToken, 'string');
+
+  await service.createSession({
+    username: 'owner',
+    password: OWNER_PASSWORD,
+    address: '192.0.2.51',
+  });
+  assert.deepEqual(delays, [250, 250, 250, 250, 250, 500, 250]);
+});
+
+test('owner aliases share one per-account lockout bucket', async () => {
+  const { service } = await makeService({ options: { loginDelay: async () => {} } });
+  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD });
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await assert.rejects(
+      () => service.createSession({ username: 'owner', password: `wrong-password-${attempt}` }),
+      (error) => error.code === 'invalid_credentials',
+    );
+  }
+  await assert.rejects(
+    () => service.createSession({ username: 'Alice', password: 'wrong-password-final' }),
+    (error) => error.code === 'login_locked',
+  );
+  await assert.rejects(
+    () => service.createSession({ username: 'owner', password: OWNER_PASSWORD }),
+    (error) => error.code === 'login_locked',
+  );
+});
+
+test('pre-upgrade owner lockouts remain effective across owner aliases', async () => {
+  const { service, dataDir } = await makeService({ options: { loginDelay: async () => {} } });
+  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD });
+  const statePath = path.join(dataDir, headlessAdminStateFilename);
+  const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  const now = Date.now();
+  state.loginAttempts = [{
+    key: createHash('sha256').update('identity:owner').digest('hex'),
+    failures: 5,
+    firstAttemptAt: now,
+    lastAttemptAt: now,
+    lockedUntil: now + 60_000,
+  }];
+  await fs.writeFile(statePath, JSON.stringify(state));
+
+  const { service: reloaded } = await makeService({
+    dataDir,
+    options: { loginDelay: async () => {} },
+  });
+  await assert.rejects(
+    () => reloaded.createSession({ username: 'Alice', password: OWNER_PASSWORD }),
+    (error) => error.code === 'login_locked',
+  );
+});
+
+test('pre-upgrade owner failures contribute to the stable account bucket', async () => {
+  const { service, dataDir } = await makeService({ options: { loginDelay: async () => {} } });
+  await service.createOwner({ name: 'Alice', password: OWNER_PASSWORD });
+  const statePath = path.join(dataDir, headlessAdminStateFilename);
+  const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+  const now = Date.now();
+  state.loginAttempts = [{
+    key: createHash('sha256').update('identity:owner').digest('hex'),
+    failures: 4,
+    firstAttemptAt: now,
+    lastAttemptAt: now,
+    lockedUntil: 0,
+  }];
+  await fs.writeFile(statePath, JSON.stringify(state));
+
+  const { service: reloaded } = await makeService({
+    dataDir,
+    options: { loginDelay: async () => {} },
+  });
+  await assert.rejects(
+    () => reloaded.createSession({ username: 'Alice', password: 'wrong-password-final' }),
+    (error) => error.code === 'login_locked',
+  );
+});
+
+test('shared address throttle delay uses deterministic bounded buckets', () => {
+  assert.deepEqual(
+    [0, 4, 5, 9, 10, 14, 15, 100].map(loginThrottleDelayMs),
+    [250, 250, 500, 500, 1_000, 1_000, 2_000, 2_000],
   );
 });
 

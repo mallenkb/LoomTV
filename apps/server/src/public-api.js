@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { isOwnerPrincipal } from './auth-policy.js';
+import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import {
   MEDIA_CORE_CONTRACT_VERSION,
   normalizeClientPlaybackCapabilities,
@@ -253,14 +254,11 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
  * Versioned viewer/client API. Existing `/api/admin` and `/api/media` routes
  * remain intact; this handler is a stable adapter around those services.
  */
-export function createPublicApiHandler({ service, clientState, mediaService, getRuntimeHealth, version, requireSecureTransport = false, trustProxy = false }) {
+export function createPublicApiHandler({ service, clientState, mediaService, getRuntimeHealth, version, requireSecureTransport = false, proxyPolicy = createTrustedProxyPolicy() }) {
   if (!service || !clientState || !mediaService) throw new Error('createPublicApiHandler requires server services.');
 
   function isSecureRequest(req) {
-    if (req.socket?.encrypted) return true;
-    if (!trustProxy) return false;
-    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
-    return forwardedProto === 'https';
+    return proxyPolicy.isSecureRequest(req);
   }
 
   async function principalForRequest(req) {
@@ -365,7 +363,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeData(res, 200, await service.createSession({
           username: optionalString(body.username, 'username', 80),
           password: requiredString(body.password, 'password', 256),
-          address: req.socket?.remoteAddress,
+          address: proxyPolicy.clientAddress(req),
           deviceId: optionalString(req.headers['x-loom-device-id'], 'deviceId', 128),
         }));
         return true;
