@@ -213,8 +213,10 @@ export function createAdminApiHandler(options = {}) {
   const log = options.log || ((message, error) => console.error(`[headless-admin] ${message}`, error || ''));
   const requireSecureTransport = options.requireSecureTransport === true;
   const trustProxy = options.trustProxy === true;
+  const requestIsSecure = options.requestIsSecure;
 
   function isSecureRequest(req) {
+    if (typeof requestIsSecure === 'function') return requestIsSecure(req);
     if (req.socket?.encrypted) return true;
     if (!trustProxy) return false;
     const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
@@ -294,6 +296,8 @@ export function createAdminApiHandler(options = {}) {
         writeJson(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
+          bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
+          address: req.socket?.remoteAddress,
         }));
         return true;
       }

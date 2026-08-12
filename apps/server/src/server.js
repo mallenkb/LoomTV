@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
+import { createPrivateKey, X509Certificate } from 'node:crypto';
 import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import process from 'node:process';
 import { MEDIA_CORE_CONTRACT_VERSION } from '@loom-media-server/media-core';
@@ -8,11 +10,39 @@ import { createHeadlessAdminService } from './admin-service.js';
 import { createHeadlessClientState } from './client-state.js';
 import { createHeadlessMediaService } from './media-service.js';
 import { createPublicApiHandler } from './public-api.js';
+import { createBootstrapSecurity } from './secure-bootstrap.js';
 import { createHeadlessTranscoder } from './transcoder.js';
+import { assertTransportConfiguration, requestUsesSecureTransport } from './transport-security.js';
 import { createWebAppPage } from './web-app.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
 const CONTRACT_VERSION = 1;
+
+function verifyDirectTls(tls) {
+  if (!tls) return false;
+  if (!tls.cert || !tls.key) {
+    throw Object.assign(new Error('Direct TLS requires both certificate and private-key material.'), {
+      code: 'TLS_CONFIGURATION_INVALID',
+    });
+  }
+  try {
+    const certificate = new X509Certificate(tls.cert);
+    const privateKey = createPrivateKey(tls.key);
+    if (!certificate.checkPrivateKey(privateKey)) throw new Error('The TLS certificate does not match the private key.');
+    const validFrom = Date.parse(certificate.validFrom);
+    const validTo = Date.parse(certificate.validTo);
+    const now = Date.now();
+    if (!Number.isFinite(validFrom) || !Number.isFinite(validTo) || now < validFrom || now > validTo) {
+      throw new Error('The TLS certificate is not currently valid.');
+    }
+    return true;
+  } catch (error) {
+    throw Object.assign(new Error(`Direct TLS configuration is invalid: ${error.message}`), {
+      code: 'TLS_CONFIGURATION_INVALID',
+      cause: error,
+    });
+  }
+}
 
 function jsonResponse(res, status, payload, method = 'GET') {
   const body = JSON.stringify(payload);
@@ -66,11 +96,21 @@ async function inspectMediaPath(mediaDir) {
 export function createHeadlessServer(options) {
   const startedAt = new Date().toISOString();
   const startedAtMs = Date.now();
+  const directTls = verifyDirectTls(options.tls);
+  const transport = directTls ? 'https' : 'http';
   let server;
   let stopPromise;
   const transcoder = createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath });
   let mediaService;
   const clientState = createHeadlessClientState({ dataDir: options.paths.dataDir });
+  const bootstrapSecurity = options.bootstrapSecurity || createBootstrapSecurity({
+    dataDir: options.paths.dataDir,
+    secret: options.bootstrapSecret,
+    secretFile: options.bootstrapSecretFile,
+    onGenerated: options.onBootstrapSecretGenerated,
+    onWarning: options.onBootstrapWarning,
+  });
+  const requestIsSecure = (req) => requestUsesSecureTransport(req, options.trustProxy === true);
 
   const healthPayload = async () => {
     const address = formatAddress(server, options.host);
@@ -85,7 +125,7 @@ export function createHeadlessServer(options) {
       version: options.version,
       headless: true,
       port,
-      transport: 'http',
+      transport,
       pid: process.pid,
       hostname: os.hostname(),
       startedAt,
@@ -93,8 +133,8 @@ export function createHeadlessServer(options) {
       server: {
         host: options.host,
         port,
-        address: `http://${address.host}:${port}`,
-        transport: 'http',
+        address: `${transport}://${address.host}:${port}`,
+        transport,
       },
       paths: {
         data: options.paths.dataDir,
@@ -123,11 +163,12 @@ export function createHeadlessServer(options) {
     dataDir: options.paths.dataDir,
     mediaDir: options.paths.mediaDir,
     version: options.version,
-    baseUrl: options.host === '0.0.0.0' ? undefined : `http://${options.host}:${options.port}`,
+    baseUrl: options.host === '0.0.0.0' ? undefined : `${transport}://${options.host}:${options.port}`,
     getRuntimeHealth: healthPayload,
     getSessions: () => mediaService?.listSessions() || [],
     getClientState: () => clientState.exportState(),
     replaceClientState: (snapshot) => clientState.importState(snapshot),
+    bootstrapSecurity,
   });
   mediaService = createHeadlessMediaService({
     adminService,
@@ -142,6 +183,7 @@ export function createHeadlessServer(options) {
     ownerConfigured: adminService.isOwnerConfigured,
     requireSecureTransport: options.requireSecureTransport === true,
     trustProxy: options.trustProxy === true,
+    requestIsSecure,
   });
   const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath });
   const publicApi = createPublicApiHandler({
@@ -152,12 +194,33 @@ export function createHeadlessServer(options) {
     version: options.version,
     requireSecureTransport: options.requireSecureTransport === true,
     trustProxy: options.trustProxy === true,
+    requestIsSecure,
   });
 
-  server = http.createServer(async (req, res) => {
+  const handleRequest = async (req, res) => {
     try {
       applySecurityHeaders(res);
-      const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const requestUrl = new URL(req.url || '/', `${transport}://${req.headers.host || 'localhost'}`);
+      const isPublicCleartextRoute = (req.method === 'GET' || req.method === 'HEAD') && (
+        requestUrl.pathname === '/'
+        || requestUrl.pathname === '/healthz'
+        || requestUrl.pathname === '/api/health'
+        || requestUrl.pathname === '/api/ping'
+        || requestUrl.pathname === '/api/v1'
+        || requestUrl.pathname === '/api/v1/discovery'
+        || requestUrl.pathname === '/api/v1/health'
+        || requestUrl.pathname === '/api/v1/auth/onboarding'
+        || requestUrl.pathname === '/api/v1/openapi.json'
+        || requestUrl.pathname === '/api/admin/bootstrap'
+      );
+      if (options.requireSecureTransport === true && !isPublicCleartextRoute && !requestIsSecure(req)) {
+        jsonResponse(res, 426, {
+          ok: false,
+          error: 'secure_transport_required',
+          message: 'Use HTTPS for credential, API, and media requests.',
+        }, req.method);
+        return;
+      }
       if (await webApp(req, res)) return;
       if (await adminPage(req, res)) return;
       if (await adminApi(req, res)) return;
@@ -204,7 +267,10 @@ export function createHeadlessServer(options) {
       if (!res.headersSent) jsonResponse(res, 500, { ok: false, error: 'internal_error' });
       else res.destroy();
     }
-  });
+  };
+  server = directTls
+    ? https.createServer({ cert: options.tls.cert, key: options.tls.key, minVersion: 'TLSv1.2' }, handleRequest)
+    : http.createServer(handleRequest);
 
   return {
     address() {
@@ -212,6 +278,14 @@ export function createHeadlessServer(options) {
     },
     async start() {
       if (server.listening) return this.address();
+      assertTransportConfiguration({
+        host: options.host,
+        directTls,
+        trustProxy: options.trustProxy === true,
+        requireSecureTransport: options.requireSecureTransport === true,
+        developmentAllowInsecureNonLoopback: options.developmentAllowInsecureNonLoopback === true,
+      });
+      await bootstrapSecurity.initialize({ ownerConfigured: await adminService.isOwnerConfigured() });
       await new Promise((resolve, reject) => {
         const onError = (error) => {
           server.off('listening', onListening);
