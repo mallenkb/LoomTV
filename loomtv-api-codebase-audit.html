@@ -1,0 +1,478 @@
+<!doctype html>
+<!--
+  CANONICAL WORK REPORT AUDIT TEMPLATE (html-artifacts skill)
+  How to use: copy this file mechanically, then replace only content.
+  1. Replace the placeholder <img> src with the prepared base64 screenshot (measure real pixel size first).
+  2. Replace all example copy (a Grab delivery-tracking audit) with the current audit's content.
+  3. Keep every class name, section order, and CSS rule. Do not restyle.
+  4. capture-tall (default, portrait screenshots) vs capture-wide (landscape/desktop): set on the .report div.
+  5. Pins are <a> links to #observation-{n} with aria-labels; status classes: status-high / status-medium / status-verify / status-working.
+  6. Ledger: score only categories with visible evidence; mark the rest N/O; tfoot shows the applicable-category mean.
+  7. Home link: point to the library page when the report lives in the library's reports/ folder; otherwise remove the link.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A static audit of LoomTV's API architecture, codebase structure, contracts, security boundaries, persistence, and provider integrations.">
+  <meta name="keywords" content="LoomTV, API audit, codebase architecture, TypeScript, Electron, LAN protocol, metadata providers">
+  <meta name="generator" content="Work Report">
+  <title>LoomTV API and Codebase Architecture Audit</title>
+  <style>
+    :root{
+      --canvas:rgb(251,250,247);
+      --ivory:rgb(251,250,247);
+      --sand:#e8e6dc;
+      --ring:#cfccbf;
+      --ink:#141413;
+      --charcoal:#3d3d3a;
+      --olive:#504e49;
+      --stone:#6b6a64;
+      --brand:#1b365d;
+      --brand-light:#2d5a8a;
+      --brand-tint:#e4ecf5;
+      --deep:#141413;
+      --deep-surface:#30302e;
+      --content:1180px;
+      --geist:Geist,"Geist Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{background:var(--canvas);scroll-behavior:smooth}
+    body{
+      margin:0;
+      min-width:0;
+      color:var(--ink);
+      background:var(--canvas);
+      font-family:var(--geist);
+      font-size:16px;
+      line-height:1.55;
+    }
+    a{color:var(--brand);text-underline-offset:3px}
+    :focus-visible{outline:3px solid rgba(27,54,93,.28);outline-offset:3px}
+    .sans,.kicker,.folio,.label,.tag,.legend,.note,.stamp-small,.footer-meta{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    }
+    .sheet{width:min(calc(100% - 40px),var(--content));margin-inline:auto}
+    .folio-bar{position:fixed;inset:0 0 auto;z-index:50;border-bottom:1px solid rgba(80,78,73,.2);background:rgb(251,250,247);backdrop-filter:blur(12px)}
+    .report{padding-top:52px}
+    .folio-inner{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+    .folio{color:var(--stone);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+    .folio b{margin-right:10px;color:var(--ink);font-family:Georgia,"Times New Roman",serif;font-size:17px;font-weight:500;letter-spacing:0;text-transform:none}
+    .folio .home-link{color:var(--ink);text-decoration:none}
+    .folio-links{display:flex;gap:18px}
+    .folio-links a{min-height:42px;display:inline-flex;align-items:center;color:var(--olive);font-size:11px;text-decoration:none}
+
+    .cover{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:70px;padding:76px 0 58px;border-bottom:1px solid rgba(80,78,73,.2)}
+    .kicker{margin:0 0 14px;color:var(--brand);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+    h1,h2,h3,p{margin-top:0}
+    h1{max-width:820px;margin-bottom:22px;font-size:clamp(45px,7vw,78px);font-weight:500;letter-spacing:-.045em;line-height:.98}
+    .deck{max-width:720px;margin-bottom:0;color:var(--charcoal);font-size:19px;line-height:1.55}
+    .stamp{align-self:start;padding:24px;border:1px solid var(--brand);border-radius:16px;background:var(--ivory);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+    .stamp-small{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+    .stamp-score{margin-top:12px;color:var(--brand);font-size:62px;font-variant-numeric:tabular-nums;line-height:.9}
+    .stamp-score span{font-size:19px;color:var(--stone)}
+    .stamp p{margin:0;color:var(--olive);font-size:13px}
+    .cover-meta{display:flex;flex-wrap:wrap;gap:7px 24px;margin-top:32px;color:var(--stone);font:11px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.04em;text-transform:uppercase}
+    .cover-meta span::before{content:"·";margin-right:7px;color:var(--brand)}
+
+    .memo{display:grid;grid-template-columns:repeat(4,1fr);gap:28px;border-bottom:0}
+    .memo-block{padding:28px 0 30px;border-right:0}
+    .memo-block:first-child{padding-left:0}
+    .memo-block:last-child{padding-right:0;border-right:0}
+    .label{margin-bottom:8px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .memo-block h2{margin-bottom:7px;font-size:19px;font-weight:500;line-height:1.25}
+    .memo-block p{margin:0;color:var(--stone);font-size:13px;line-height:1.5}
+
+    .overview{padding:30px 0;border-bottom:1px solid var(--border)}
+    .overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .overview-card{display:flex;flex-direction:column;min-height:134px;padding:20px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .overview-score{display:flex;align-items:baseline;gap:7px;font-family:var(--serif);font-size:30px;font-weight:750;line-height:1}
+    .overview-score span{color:var(--stone);font:650 13px/1 var(--geist)}
+    .overview-label{margin-top:10px;color:var(--stone);font-size:13px;font-weight:400;line-height:1.35}
+    .overview-bar{position:relative;height:6px;margin-top:auto;border-radius:99px;background:var(--sand)}
+    .overview-bar i{display:block;height:100%;border-radius:inherit}
+    .overview-card.state-critical .overview-score{color:#9b352f}
+    .overview-card.state-critical .overview-bar i{background:#c94b43}
+    .overview-card.state-warning .overview-score{color:#8a5709}
+    .overview-card.state-warning .overview-bar i{background:#c47f12}
+    .overview-card.state-good .overview-score{color:#17644f}
+    .overview-card.state-good .overview-bar i{background:#0a8f7a}
+    .overview-bar .tick{position:absolute;top:-3px;width:2px;height:11px;border-radius:2px;background:var(--ink);opacity:.4;transform:translateX(-1px)}
+
+    .chapter{padding:62px 0;border-bottom:0}
+    .chapter-head{display:grid;grid-template-columns:150px minmax(0,1fr);gap:34px;margin-bottom:30px}
+    .chapter-head h2{max-width:760px;margin:0;font-size:clamp(29px,4vw,44px);font-weight:500;letter-spacing:-.03em;line-height:1.08}
+    .chapter-head .lead{max-width:700px;margin:11px 0 0;color:var(--stone)}
+
+    .ledger{width:100%;table-layout:fixed;border-collapse:collapse;border-top:2px solid var(--brand)}
+    .ledger th,.ledger td{padding:14px 7px;border-bottom:1px solid rgba(80,78,73,.18);vertical-align:middle;text-align:left}
+    .ledger-no{width:48px;color:var(--brand);font-size:12px;font-variant-numeric:tabular-nums}
+    .ledger-title{font-size:16px;font-weight:500;line-height:1.25}
+    .ledger-score{width:76px;text-align:right;color:var(--brand);font-size:18px;font-variant-numeric:tabular-nums}
+    .ledger-score.na{color:var(--stone);font:700 10px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em}
+    .ledger-copy{color:var(--stone);font-size:13px;line-height:1.4}
+
+    .evidence-layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:56px;align-items:start}
+    .capture-col{position:sticky;top:68px}
+    .capture{border:1px solid var(--ring);border-radius:24px;background:var(--ivory);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+    .capture-inner{border-radius:inherit}
+    .capture img{border-radius:inherit}
+    .capture-inner{position:relative;line-height:0}
+    .capture img{display:block;width:100%;height:auto}
+    .pin{position:absolute;width:27px;height:27px;display:grid;place-items:center;border:2px solid var(--ivory);border-radius:50%;transform:translate(-50%,-50%);color:#fff;background:var(--brand);font:700 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.14)}
+    .pin.secondary{background:var(--olive)}
+    .legend{display:flex;gap:16px;margin-top:14px;color:var(--stone);font-size:11px}
+    .legend span{display:flex;align-items:center;gap:6px}
+    .legend i{width:9px;height:9px;border-radius:50%;background:var(--brand)}
+    .legend i.secondary{background:var(--olive)}
+    .capture-note{margin:13px 0 0;color:var(--stone);font-size:11px;line-height:1.5}
+
+    .observations{min-width:0}
+    .observation{display:grid;grid-template-columns:31px minmax(0,1fr);gap:16px;margin:0 0 12px;padding:18px;border:0;border-radius:20px;background:#fff;box-shadow:0 1px 0 rgba(20,20,19,.03)}
+    .obs-no{width:31px;height:31px;display:grid;place-items:center;border:1px solid var(--brand);border-radius:50%;color:var(--brand);font:700 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .observation h3{margin:2px 0 8px;font-size:21px;font-weight:500;letter-spacing:-.015em;line-height:1.2}
+    .observation p{margin:0;color:var(--olive);font-size:14px}
+    .observation p+p{margin-top:10px}
+    .observation .tag+p{margin-top:12px}
+    .observation b{color:var(--ink);font-weight:500}
+    .tag{display:inline-block;margin-top:12px;padding:4px 8px;border-radius:99px;color:var(--brand);background:var(--brand-tint);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+    .preserve .obs-no{color:var(--ivory);background:var(--brand)}
+
+    .decision{padding:68px 0;color:var(--canvas);background:var(--deep)}
+    .decision .kicker{color:#9cb6d1}
+    .decision h2{max-width:800px;margin-bottom:16px;font-size:clamp(34px,5vw,52px);font-weight:500;letter-spacing:-.035em;line-height:1.04}
+    .decision-intro{max-width:730px;margin-bottom:0;color:#c8c6bd;font-size:17px}
+    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:34px}
+    .action{padding:19px;border:1px solid #454540;border-radius:12px;background:var(--deep-surface)}
+    .action-no{display:inline-flex;padding:3px 8px;border-radius:99px;color:var(--deep);background:var(--canvas);font:700 9px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase}
+    .action h3{margin:14px 0 6px;font-size:18px;font-weight:500}
+    .action p{margin:0;color:#c8c6bd;font-size:13px}
+    .score-lifts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:34px}
+    .score-lift{padding:20px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .score-lift-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
+    .score-lift-name{font-size:17px;font-weight:600}
+    .score-lift-jump{color:var(--olive);font-size:15px;font-weight:650;white-space:nowrap}
+    .score-lift-jump em{color:#087c6c;font-style:normal}
+    .score-lift-bar{position:relative;height:6px;margin:14px 0 4px;border-radius:99px;background:var(--sand)}
+    .score-lift-bar i{display:block;height:100%;border-radius:99px;background:#b67818}
+    .score-lift.weak .score-lift-bar i{background:#c64b42}
+    .score-lift-bar .tick{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);border-radius:2px;background:var(--ink);opacity:.42}
+    .score-lift ul{margin:14px 0 0;padding:0;list-style:none}
+    .score-lift li{position:relative;padding:9px 0 9px 18px;border-top:1px solid var(--border-soft);color:var(--olive);font-size:14px}
+    .score-lift li:first-child{border-top:0}
+    .score-lift li::before{content:"›";position:absolute;left:2px;color:#087c6c;font-weight:800}
+    .score-ref{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:99px;color:#087c6c;background:#e3f2ef;font-size:10px;font-weight:650;white-space:nowrap}
+    .score-ceiling{margin-top:12px;padding:9px 11px;border:1px dashed var(--border);border-radius:9px;color:var(--stone);background:#f7f6f1;font-size:12px;line-height:1.45}
+    .path{width:100%;margin-top:38px;table-layout:fixed;border-collapse:collapse;border-top:1px solid #454540}
+    .path-row td{padding:18px 0;border-bottom:1px solid #333330;vertical-align:top;text-align:left}
+    .path-step{width:70px;color:#9cb6d1;font:700 10px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+    .path-title{width:190px;font-size:16px;font-weight:500}
+    .path-copy{color:#aaa8a0;font-size:13px}
+    .validation{margin-top:24px;padding:15px 17px;border:1px dashed #55554f;border-radius:9px;color:#aaa8a0;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .validation b{color:var(--canvas)}
+
+    footer{padding:28px 0 38px;border-top:0}
+    .footer-inner{display:flex;justify-content:space-between;gap:20px;color:var(--stone)}
+    .footer-inner p{margin:0}
+    .footer-meta{font-size:11px}
+
+    /* Capture layout modes:
+       Tall/mobile: class="report capture-tall"
+       Desktop/web: class="report capture-wide" */
+    .report.capture-wide .evidence-layout{display:block}
+    .report.capture-wide .capture-col{position:static;margin-bottom:44px}
+    .report.capture-wide .capture{width:100%;border-radius:12px}
+    .report.capture-wide .observations{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 36px}
+    .report.capture-wide .observations-head{grid-column:1/-1}
+
+    @media(max-width:900px){
+      .cover{grid-template-columns:1fr;gap:34px}
+      .stamp{width:min(100%,280px)}
+      .memo{grid-template-columns:1fr}
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:24px 0;border-right:0;border-bottom:0}
+      .chapter-head{grid-template-columns:1fr;gap:8px}
+      .ledger th,.ledger td{padding:13px 5px}
+      .ledger-no{width:38px}
+      .ledger-score{width:84px}
+      .evidence-layout{grid-template-columns:1fr;gap:36px}
+      .capture-col{position:static}
+      .capture{width:min(100%,392px);margin-inline:auto}
+      .actions{grid-template-columns:1fr}
+      .score-lifts{grid-template-columns:1fr}
+      .report.capture-wide .observations{grid-template-columns:1fr}
+    }
+    @media(max-width:620px){
+      .sheet{width:min(calc(100% - 24px),var(--content))}
+      .folio-links{display:none}
+      .cover{padding-top:50px}
+      .ledger th,.ledger td{padding:13px 3px}
+      .ledger-no{width:34px}
+      .ledger-score{width:84px}
+      .path-step{width:45px}
+      .path-title{width:120px}
+      .footer-inner{flex-direction:column}
+    }
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+    /* Report alignment: long-document rhythm, warm solid rules,
+       restrained radii, and one continuous paper surface. */
+    :root{
+      --serif:var(--geist);
+      --border:#e8e6dc;
+      --border-soft:#e5e3d8;
+    }
+    body{font-family:var(--geist);font-weight:400;line-height:1.55}
+    .report>main{display:flex;flex-direction:column}
+    .report>main>.cover{order:1}
+    .report>main>.overview{order:2}
+    .report>main>#evidence{order:3}
+    .report>main>#decision{order:4}
+    .report>main>.memo{order:5}
+    .report>main>#score{order:6}
+    h1,h2,h3,.folio b,.stamp-score,.ledger-title,.ledger-score,.path-title{font-family:var(--serif)}
+    .sans,.kicker,.folio,.label,.tag,.legend,.note,.stamp-small,.footer-meta,
+    .ledger-score.na,.observations-head span,.pin,.obs-no,.action-no,.path-step,
+    .validation{font-family:var(--geist)}
+    :focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+    .folio-bar,.cover,.memo,.chapter,footer{border-color:var(--border)}
+    .cover,.overview{border-bottom:0}
+    .folio-inner{min-height:52px}
+    .folio{font-size:10px;letter-spacing:.08em}
+    .folio-links{gap:22px}
+    .folio-links a{font-size:12px}
+    .cover{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:44px;padding:64px 0 48px}
+    .cover h1,.cover .deck{max-width:none}
+    h1{max-width:760px;font-size:clamp(42px,6vw,64px);font-weight:500;letter-spacing:-.025em;line-height:1.08}
+    .deck{max-width:690px;font-size:18px}
+    .kicker,.label,.stamp-small{font-weight:500}
+    .stamp{padding:20px;border:0;border-radius:14px;background:#f8ecd5;box-shadow:none}
+    .stamp-small{color:#8a5709}
+    .stamp-score{color:#8a5709;font-size:52px}
+    .stamp-score span{color:#8a5709}
+    .cover-meta{font-family:var(--serif);letter-spacing:.03em;text-transform:none}
+    .memo-block{padding:24px 22px 26px;border-color:var(--border)}
+    .chapter{padding:54px 0}
+    .chapter-head{display:block;max-width:760px;margin-bottom:28px}
+    .chapter-head h2{font-size:clamp(28px,3.5vw,38px);letter-spacing:-.015em;line-height:1.18}
+    .chapter-head>.kicker{margin-bottom:10px;white-space:nowrap}
+    #score .chapter-head,#score .chapter-head>div,#score .chapter-head h2,#score .chapter-head .lead{width:100%;max-width:none}
+    .ledger{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff;border-collapse:separate;border-spacing:0}
+    .ledger th,.ledger td{padding:13px 10px;border-color:var(--border-soft)}
+    .ledger-no{width:42px}
+    .ledger-score{width:92px;white-space:nowrap}
+    .ledger-score{font-size:17px;font-weight:700}
+    .ledger-score.band-high{color:#9b352f}
+    .ledger-score.band-med{color:#8a5709}
+    .ledger-score.band-good{color:#17644f}
+    .ledger-total th,.ledger-total td{padding-top:16px;padding-bottom:16px;border-bottom:0;background:#f7f6f1}
+    .ledger-total th{font-weight:650}
+    .ledger-total .ledger-score{font-weight:750}
+    .ledger-head th{color:var(--stone);font:650 10px/1.3 var(--geist);letter-spacing:.1em;text-transform:uppercase}
+    .capture{border:.5px solid var(--border);border-radius:30px;box-shadow:0 24px 60px rgba(20,20,19,.14)}
+    .pin{color:#fff;text-decoration:none;cursor:pointer}
+    .pin:hover{transform:translate(-50%,-50%) scale(1.08)}
+    .pin:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
+    .pin.status-working{background:#0a8f7a}
+    .pin.status-medium{background:#c47f12}
+    .pin.status-verify{background:#2d5a8a}
+    .pin.status-high{background:#c94b43}
+    .observation{scroll-margin-top:68px;border:1px solid var(--border)}
+    section[id]{scroll-margin-top:68px}
+    .observation:target{box-shadow:0 0 0 2px var(--brand)}
+    .observation{padding:14px 12px;border:1px solid var(--border);box-shadow:none}
+    .observation:target{background:#fff;outline:0;box-shadow:0 0 0 1px #6b7280}
+    .observation>div{min-width:0}
+    .observation h3{font-size:19px;letter-spacing:0}
+    .obs-no{border-radius:50%;font-weight:750}
+    .tag{border-radius:3px;font-weight:500}
+    .tag+.tag{margin-left:6px}
+    .tag.category{color:var(--brand);background:var(--brand-tint)}
+    .tag.status-working{color:#17644f;background:#e4f1eb}
+    .tag.status-improve{color:#8a5709;background:#f8ecd5}
+    .tag.status-verify{color:#2d5680;background:#e4ecf5}
+    .tag.status-high{color:#9b352f;background:#f6e3e1}
+    .quick-win{display:block;width:fit-content;max-width:100%;margin-top:12px;padding:8px 11px;border-radius:10px;color:#0a4f44;background:#e6f4f1;font-size:13px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:normal}
+    .quick-win b{color:#073a32;font-weight:650}
+    .finding-group{margin:30px 0 12px;padding:0;border:0;font-size:18px;font-weight:650;letter-spacing:-.01em;line-height:1.25;text-transform:none}
+    .finding-group.issues{color:#9b352f}
+    .finding-group.verify{color:#2d5680}
+    .finding-group.working{color:#17644f}
+    #evidence .observations{padding-block:0}
+    #evidence .finding-group{margin-top:0}
+    #evidence .observation:last-of-type{margin-bottom:0}
+    #observation-4 .obs-no{color:#fff;border-color:#c94b43;background:#c94b43}
+    #observation-2 .obs-no{color:#fff;border-color:#c47f12;background:#c47f12}
+    #observation-3 .obs-no{color:#fff;border-color:#2d5a8a;background:#2d5a8a}
+    #observation-1 .obs-no,#observation-5 .obs-no{color:#fff;border-color:#0a8f7a;background:#0a8f7a}
+    .legend i.status-high{background:#c94b43}
+    .legend i.status-medium{background:#c47f12}
+    .legend i.status-verify{background:#2d5a8a}
+    .legend i.status-working{background:#0a8f7a}
+    .decision{padding:58px 0;color:var(--ink);background:var(--canvas);border-top:0}
+    .decision .kicker{color:var(--brand)}
+    .decision h2{font-size:clamp(30px,4vw,44px);letter-spacing:-.02em;line-height:1.12}
+    .decision h2,.decision-intro{width:100%;max-width:none}
+    .decision-intro,.action p,.path-copy{color:var(--olive)}
+    .actions{gap:12px;margin-top:30px}
+    .action{padding:18px;border:.5px solid var(--border);border-radius:14px;background:var(--ivory)}
+    .action-no{color:var(--brand);background:var(--brand-tint);border-radius:3px;font-weight:500}
+    .path{border-color:var(--border)}
+    .path-row td{padding:16px 0;border-color:var(--border-soft)}
+    .path-step{color:var(--brand);font-weight:500}
+    .validation{border:0;border-radius:14px;color:var(--olive);background:#efefec}
+    .cover,.overview{border-bottom:0}
+    .validation b{color:var(--ink)}
+    @media(max-width:900px){.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:620px){.overview-grid{grid-template-columns:1fr}}
+
+    /* Re-assert stacked-memo padding: the alignment layer above re-adds
+       side padding after the 900px breakpoint has already removed it. */
+    @media(max-width:900px){
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:24px 0}
+    }
+
+    @media print{
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:20px 0}
+      @page{margin:14mm}
+      html,body{background:#fff}
+      .folio-bar{position:static;background:none;backdrop-filter:none;border-bottom:1px solid #ddd}
+      .report{padding-top:0}
+      .folio-links{display:none}
+      .capture-col{position:static}
+      .evidence-layout{display:block}
+      .capture{width:min(100%,340px);margin:0 auto 24px;box-shadow:none}
+      .observation{border:1px solid #e5e3d8;box-shadow:none}
+      .observation,.overview-card,.memo-block,.score-lift,.path-row,.validation,.quick-win,.ledger-row{break-inside:avoid}
+      h1,h2,h3,.finding-group,.chapter-head{break-after:avoid}
+      .chapter,.decision{border-top:0}
+      a{color:inherit;text-decoration:none}
+      .pin{box-shadow:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="report capture-wide">
+    <header class="folio-bar">
+      <div class="sheet folio-inner">
+        <div class="folio"><b>Work Report</b> API and codebase audit &middot; 2026.08</div>
+        <nav class="folio-links sans" aria-label="Report navigation"><a href="#evidence">Evidence</a><a href="#score">Score</a><a href="#decision">Decision</a></nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="sheet cover">
+        <div>
+          <p class="kicker">LoomTV &middot; Static architecture audit</p>
+          <h1>Secure boundaries.<br>Fragmented ownership.</h1>
+          <p class="deck">LoomTV has unusually careful IPC, LAN, provider-fetch, and persistence controls. Its next reliability gain comes from making one contract and one service own each operation across Electron, browser, mobile, and plugin clients.</p>
+        </div>
+        <aside class="stamp" aria-label="Overall score">
+          <div class="stamp-small">Overall score</div>
+          <div class="stamp-score">6.8<span> / 10</span></div>
+        </aside>
+      </section>
+
+      <section class="overview">
+        <div class="sheet">
+          <div class="overview-grid">
+            <article class="overview-card state-warning"><div class="overview-score">6.8 <span>&rarr; 9.0</span></div><div class="overview-label">Overall &middot; static code evidence</div><div class="overview-bar"><i style="width:68%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">5.9 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 08 &middot; module simplicity</div><div class="overview-bar"><i style="width:59%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-critical"><div class="overview-score">6.4 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 04 &middot; contract consistency</div><div class="overview-bar"><i style="width:64%"></i><span class="tick" style="left:90%"></span></div></article>
+            <article class="overview-card state-warning"><div class="overview-score">8.6 <span>&rarr; 9.0</span></div><div class="overview-label">Ledger 05 &middot; boundary safety</div><div class="overview-bar"><i style="width:86%"></i><span class="tick" style="left:90%"></span></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter" id="evidence">
+        <div class="sheet">
+          <div class="evidence-layout">
+            <div class="observations">
+              <div class="observations-head"><p class="kicker">01 &middot; Evidence</p><h2>Five API planes, three strong boundaries, one ownership problem.</h2><p class="lead">Static inspection traced Electron IPC, local renderer HTTP, authenticated LAN HTTP, external metadata services, and Stremio/plugin contracts. No runtime traffic was captured.</p></div>
+              <div class="finding-group issues">Issues to address first</div>
+
+              <article class="observation" id="observation-1"><span class="obs-no">1</span><div><h3>LAN request bodies are not contract-validated.</h3><span class="tag category">Runtime validation</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>mediaServer.ts</code> has 17 <code>readJsonBody(req)</code> call sites. The parser only proves that JSON is an object; handlers then coerce fields with <code>String</code>, <code>Number</code>, <code>Boolean</code>, and type assertions.</p><p><b>Problem.</b> IPC arguments are Zod-validated, but equivalent LAN mutations do not share request schemas. Invalid values can silently become defaults, such as a non-boolean value becoming <code>true</code>.</p><p><b>Why it matters.</b> Desktop, browser, and mobile behavior can diverge, and future fields can cross a network boundary without a reliable runtime contract.</p><div class="quick-win"><b>Quick win.</b> Define request and response schemas in <code>@loom-media-server/lan-protocol</code>, then parse every route before calling a service.</div></div></article>
+
+              <article class="observation" id="observation-2"><span class="obs-no">2</span><div><h3>Renderer pages bypass the provider gateway.</h3><span class="tag category">Provider architecture</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> <code>PluginDiscover.tsx</code> calls OMDb, TMDB, and AniList directly. <code>TVDetail.tsx</code> also calls AniList directly, while main-process provider modules use <code>safeFetch</code>.</p><p><b>Problem.</b> Those calls skip centralized host allowlists, DNS rebinding protection, bounded responses, retries, durable caching, and consistent error mapping. TMDB and OMDb credentials also enter renderer code paths.</p><p><b>Why it matters.</b> Discover and local details do not share one reliability, security, or offline model.</p><div class="quick-win"><b>Quick win.</b> Move Discover and cast enrichment behind one main-process metadata service and expose typed operations over IPC and LAN.</div></div></article>
+
+              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>The transport layer is represented in several places.</h3><span class="tag category">Contract ownership</span><span class="tag status-high">High-priority issue</span><p><b>Evidence.</b> The code defines 111 IPC invoke channels, 5 IPC events, at least 45 literal HTTP route branches, a LAN route policy, a remote-client allowlist, a mobile client, preload bindings, desktop decoders, and shared protocol types.</p><p><b>Problem.</b> A route can require coordinated edits across policy, server dispatch, client wrappers, schemas, and fallback paths. These are manually synchronized instead of derived from one operation registry.</p><p><b>Why it matters.</b> Missing one representation can create an authorization mismatch, stale client, or silent fallback to the legacy full-library transport.</p><div class="quick-win"><b>Quick win.</b> Introduce a typed operation registry containing method, path or channel, scope, request schema, response schema, and handler ownership.</div></div></article>
+
+              <article class="observation" id="observation-4"><span class="obs-no">4</span><div><h3>Core orchestration files are change hotspots.</h3><span class="tag category">Code structure</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>mediaServer.ts</code> is 1,999 lines, <code>main.ts</code> 1,993, <code>desktopApi.ts</code> 1,911, <code>ipcHandlers.ts</code> 1,232, and <code>officialMetadataService.ts</code> 1,217.</p><p><b>Problem.</b> Authentication, routing, transport adaptation, domain orchestration, and response formatting remain adjacent in large files even though useful helpers and repositories have been extracted.</p><p><b>Why it matters.</b> Review scope grows with each feature, local reasoning becomes expensive, and unrelated operations can regress together.</p><div class="quick-win"><b>Quick win.</b> Split by operation family: catalog, profiles, playback, artwork, metadata, and administration. Keep the composition root declarative.</div></div></article>
+
+              <article class="observation" id="observation-5"><span class="obs-no">5</span><div><h3>Metadata completion is triggered by opening details.</h3><span class="tag category">Offline behavior</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> Movie and TV detail pages call <code>refreshIncompleteMetadata</code> after rendering when provider ratings are missing. The service then fetches, saves the library, caches artwork, and rehydrates the item.</p><p><b>Problem.</b> The database does persist summaries, episodes, cast, providers, artwork references, and IDs, but incomplete records are repaired in the user-facing detail flow.</p><p><b>Why it matters.</b> Users see placeholders for several seconds, and offline use preserves whatever completeness existed before the page was opened.</p><div class="quick-win"><b>Quick win.</b> Queue incomplete metadata at scan completion and startup, record freshness and last error per item, and let details read stored state immediately.</div></div></article>
+
+              <article class="observation" id="observation-6"><span class="obs-no">6</span><div><h3>Library persistence rewrites the entire catalog.</h3><span class="tag category">Persistence</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>saveLibrary</code> opens a transaction, deletes episode files, episodes, seasons, media items, folders, and scan cache, then inserts every current row again.</p><p><b>Problem.</b> Atomicity protects correctness, but one metadata refresh or artwork change can produce catalog-wide write amplification and revision churn.</p><p><b>Why it matters.</b> The cost and lock duration scale with the whole library, not the changed item.</p><div class="quick-win"><b>Quick win.</b> Add item-level upserts with child-row reconciliation; reserve full replacement for rebuild and migration flows.</div></div></article>
+
+              <article class="observation" id="observation-7"><span class="obs-no">7</span><div><h3>The plugin protocol has parallel JavaScript and declaration sources.</h3><span class="tag category">TypeScript quality</span><span class="tag status-improve">Medium-priority issue</span><p><b>Evidence.</b> <code>@loom-media-server/plugin-protocol</code> ships handwritten <code>.mjs</code> implementations beside handwritten <code>.d.ts</code> declarations, while the LAN protocol derives several types from Zod schemas.</p><p><b>Problem.</b> Runtime behavior and TypeScript declarations can drift because neither is generated from the other.</p><p><b>Why it matters.</b> A trust-boundary package should make invalid divergence mechanically difficult.</p><div class="quick-win"><b>Quick win.</b> Author the package in TypeScript, generate declarations, and keep JSON Schema compatibility tests at the boundary.</div></div></article>
+
+              <div class="finding-group verify">Needs verification</div>
+              <article class="observation" id="observation-8"><span class="obs-no">8</span><div><h3>Operational diagnosis is mostly console-based.</h3><span class="tag category">Observability</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> Server and metadata failures use route-specific <code>console.error</code> and <code>console.warn</code> calls. Static inspection found no request correlation ID, provider timing field, cache outcome, or structured error envelope shared across planes.</p><p><b>Risk.</b> A slow detail page can require reconstructing IPC, provider, database, and renderer events manually.</p><div class="quick-win"><b>Recommendation.</b> Add privacy-safe structured events with operation ID, duration, cache status, provider, retry count, result code, and redacted context.</div></div></article>
+
+              <div class="finding-group working">Working well to preserve</div>
+              <article class="observation preserve" id="observation-9"><span class="obs-no">9</span><div><h3>Security boundaries are explicit and unusually careful.</h3><span class="tag category">Security</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> IPC verifies trusted senders and validates arguments. LAN access uses TLS, short-lived access tokens, hashed refresh credentials, device scopes, profile selection revisions, rate-limited pairing, signed resource URLs, and timing-safe comparisons.</p><p><b>What to preserve.</b> Keep route scope decisions separate from handler business logic, and keep local renderer credentials unavailable through public HTTP.</p></div></article>
+
+              <article class="observation preserve" id="observation-10"><span class="obs-no">10</span><div><h3>Provider transport is hardened.</h3><span class="tag category">External APIs</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>safeFetch</code> requires HTTPS, supports host allowlists, rejects non-global addresses, pins the validated DNS result, strips secrets on cross-origin redirects, bounds response size and time, and retries idempotent failures.</p><p><b>What to preserve.</b> Make this gateway mandatory for every external metadata and artwork request.</p></div></article>
+
+              <article class="observation preserve" id="observation-11"><span class="obs-no">11</span><div><h3>The stored catalog already supports fast offline details.</h3><span class="tag category">Data model</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> SQLite stores title, summary, provider ratings, streaming providers, origin platform, cast, provider IDs, seasons, episode summaries and stills, artwork candidates, and local technical metadata. Catalog index and item routes use revision-aware ETags.</p><p><b>What to preserve.</b> Keep SQLite as the source for local detail rendering. Treat providers as asynchronous refresh inputs, not page-load dependencies.</p></div></article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sheet memo" aria-label="Executive summary">
+        <article class="memo-block"><div class="label">Current structure</div><h2>Five planes converge on the desktop host.</h2><p>Renderer and mobile clients reach catalog, playback, profile, metadata, and plugin services through IPC or authenticated HTTP. SQLite is the durable local source.</p></article>
+        <article class="memo-block"><div class="label">Primary issue</div><h2>Operations lack one canonical definition.</h2><p>Contracts, routes, policies, decoders, and clients are spread across files, and some renderer pages call providers directly.</p></article>
+        <article class="memo-block"><div class="label">Recommended structure</div><h2>One domain service, many thin adapters.</h2><p>Define each operation once, validate at every boundary, call one service implementation, and project the result to IPC, local HTTP, LAN, or plugin consumers.</p></article>
+        <article class="memo-block"><div class="label">Expected outcome</div><h2>Immediate details, safer changes, easier debugging.</h2><p>Background enrichment fills SQLite, pages stay offline-first, and one request ID explains the complete path when an operation fails.</p></article>
+      </section>
+
+      <section class="chapter" id="score">
+        <div class="sheet">
+          <div class="chapter-head"><p class="kicker">02 &middot; Score ledger</p><div><h2>Architecture scored from static evidence.</h2><p class="lead">Scores assess the developer and operational experience of the API system. They are not runtime benchmarks or penetration-test results.</p></div></div>
+          <table class="ledger" aria-label="Architecture category scores">
+            <thead><tr class="ledger-head"><th class="ledger-no" scope="col">No.</th><th class="ledger-title" scope="col">Category</th><th class="ledger-score" scope="col">Score</th><th class="ledger-copy" scope="col">Evidence</th></tr></thead>
+            <tbody>
+              <tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">System status and observability</td><td class="ledger-score band-high">6.2 / 10</td><td class="ledger-copy">Useful logs exist, but no shared request correlation or structured provider timing was found.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Domain model and ownership</td><td class="ledger-score band-high">6.6 / 10</td><td class="ledger-copy">Domain concepts are rich; transport and service ownership overlap.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">Control and reversibility</td><td class="ledger-score band-med">7.5 / 10</td><td class="ledger-copy">Transactions, cancellation, retries, and refresh cooldowns exist; metadata jobs lack durable queue state.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Contract consistency</td><td class="ledger-score band-high">6.4 / 10</td><td class="ledger-copy">IPC is strongly typed; LAN bodies, route policy, clients, and protocol types are manually synchronized.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention and security</td><td class="ledger-score band-good">8.6 / 10</td><td class="ledger-copy">Trusted sender checks, scoped LAN auth, TLS pinning, SSRF controls, and bounded bodies are strong.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Discoverability and inventory</td><td class="ledger-score band-high">6.1 / 10</td><td class="ledger-copy">No single machine-readable inventory describes all operations, scopes, schemas, and owners.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">Efficiency and caching</td><td class="ledger-score band-med">7.8 / 10</td><td class="ledger-copy">Compact catalogs, item hydration, ETags, retries, and artwork caching work well; whole-catalog writes remain.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and modularity</td><td class="ledger-score band-high">5.9 / 10</td><td class="ledger-copy">Several boundary and orchestration files exceed 1,200 lines and carry multiple responsibilities.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-high">6.5 / 10</td><td class="ledger-copy">Defensive fallbacks are common, but swallowed provider failures and console-only context hinder diagnosis.</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Documentation and evolution</td><td class="ledger-score band-high">6.3 / 10</td><td class="ledger-copy">Comments explain security decisions well; versioning and generated contract documentation are incomplete.</td></tr>
+            </tbody>
+            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Average score</th><td class="ledger-score band-high">6.8 / 10</td><td class="ledger-copy">Mean of all 10 applicable categories, rounded to one decimal place.</td></tr></tfoot>
+          </table>
+        </div>
+      </section>
+
+      <section class="decision" id="decision">
+        <div class="sheet">
+          <p class="kicker">03 &middot; Decision memo</p>
+          <h2>Make providers asynchronous.<br>Make contracts canonical.</h2>
+          <p class="decision-intro">The fastest path to 9.0 is architectural consolidation, not another API. Keep the existing security and SQLite foundations, then make every UI and client go through one validated operation layer.</p>
+          <div class="score-lifts" aria-label="Path to 9.0 by architecture category">
+            <article class="score-lift weak"><div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">6.8 &rarr; <em>9.0</em></span></div><div class="score-lift-bar"><i style="width:68%"></i><span class="tick" style="left:90%"></span></div><ul><li>Adopt one operation registry for IPC and HTTP. <span class="score-ref">Fixes 1, 3</span></li><li>Move every external provider call behind the host gateway. <span class="score-ref">Fixes 2, 5</span></li><li>Split boundary files by domain operation family. <span class="score-ref">Fix 4</span></li></ul><div class="score-ceiling">A 9.0 rating requires runtime contract tests, failure injection, performance measurements, and an offline scenario matrix.</div></article>
+            <article class="score-lift weak"><div class="score-lift-top"><span class="score-lift-name">Contracts</span><span class="score-lift-jump">6.4 &rarr; <em>9.0</em></span></div><div class="score-lift-bar"><i style="width:64%"></i><span class="tick" style="left:90%"></span></div><ul><li>Derive request and response types from runtime schemas.</li><li>Generate route policy, client bindings, and API documentation from the registry.</li><li>Remove coercive parsing from network handlers.</li></ul></article>
+            <article class="score-lift weak"><div class="score-lift-top"><span class="score-lift-name">Modularity</span><span class="score-lift-jump">5.9 &rarr; <em>9.0</em></span></div><div class="score-lift-bar"><i style="width:59%"></i><span class="tick" style="left:90%"></span></div><ul><li>Make route modules thin adapters over domain services.</li><li>Keep <code>main.ts</code> as composition only.</li><li>Replace whole-library saves with targeted repository operations.</li></ul></article>
+            <article class="score-lift"><div class="score-lift-top"><span class="score-lift-name">Security</span><span class="score-lift-jump">8.6 &rarr; <em>9.0</em></span></div><div class="score-lift-bar"><i style="width:86%"></i><span class="tick" style="left:90%"></span></div><ul><li>Preserve trusted-sender IPC, scoped LAN auth, TLS, resource capabilities, and <code>safeFetch</code>.</li><li>Apply schemas before authorization-sensitive service calls.</li><li>Add boundary-focused contract and abuse-case verification.</li></ul></article>
+          </div>
+          <table class="path" aria-label="Implementation sequence">
+            <tbody>
+              <tr class="path-row"><td class="path-step">Step 01</td><td class="path-title">Freeze the inventory</td><td class="path-copy">List every IPC and HTTP operation, owner, scope, schema, client, and legacy fallback.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Centralize contracts</td><td class="path-copy">Create shared runtime schemas and generate types, route policy, and thin client bindings.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Centralize providers</td><td class="path-copy">Route Discover, local details, cast, provider availability, and artwork through the same host service.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Make metadata offline-first</td><td class="path-copy">Persist freshness, queue enrichment after scans, and render only stored detail state.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 05</td><td class="path-title">Split and instrument</td><td class="path-copy">Extract domain route modules, add targeted upserts, and emit correlated operation events.</td></tr>
+            </tbody>
+          </table>
+          <div class="validation"><b>9.0 gate.</b> One registry describes every public operation; every untrusted payload is parsed by a runtime schema; no renderer page contacts metadata providers directly; a fully enriched item opens with no network; and one correlation ID explains an operation across adapter, service, provider, and database logs.</div>
+        </div>
+      </section>
+    </main>
+
+    <footer><div class="sheet footer-inner"><p>Work Report &middot; LoomTV API and codebase architecture.</p><p class="footer-meta">Static inspection &middot; 6.8 / 10 &middot; Runtime verification not performed</p></div></footer>
+  </div>
+</body>
+</html>
