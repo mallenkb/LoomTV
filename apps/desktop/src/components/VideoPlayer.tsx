@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
+import { Info, X } from 'lucide-react';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -15,6 +16,7 @@ import {
   type ManagedMediaSegment,
   type MediaSegment,
   type MediaSegmentType,
+  type MpvPlaybackDiagnostics,
   type MpvPlaybackState,
 } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
@@ -234,6 +236,9 @@ export default function VideoPlayer({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [mpvActive, setMpvActive] = useState(false);
+  const [transcodeBackend, setTranscodeBackend] = useState<string | null>(null);
+  const [mpvDiagnostics, setMpvDiagnostics] = useState<MpvPlaybackDiagnostics | null>(null);
+  const [showPlaybackInfo, setShowPlaybackInfo] = useState(false);
 
   const libraryDurationHint = useMemo(() => {
     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
@@ -938,6 +943,7 @@ export default function VideoPlayer({
         transcodeStartSecondsRef.current = nextTranscodeStartSeconds;
       }
       setStreamIsTranscoded(true);
+      setTranscodeBackend(transcodeResult.data.preset || null);
       setStreamUrl(transcodeResult.data.playlistUrl);
       if (!keepReady) {
         setPlayerState('loading');
@@ -1043,6 +1049,7 @@ export default function VideoPlayer({
       transcodeStartSecondsRef.current = initialStreamOffset(safeStartSeconds, requiresSeekRestart);
       suppressPauseIntentUntilMsRef.current = performance.now() + 1500;
       setStreamIsTranscoded(requiresSeekRestart);
+      setTranscodeBackend(null);
       setStreamUrl(stream.url);
     } catch (error) {
       if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
@@ -1054,6 +1061,8 @@ export default function VideoPlayer({
 
   const handleMpvState = useCallback((state: MpvPlaybackState) => {
     if (!playerActiveRef.current) return;
+
+    if (state.diagnostics) setMpvDiagnostics(state.diagnostics);
 
     if (typeof state.duration === 'number' || typeof state.position === 'number') {
       const nextDuration = state.duration ?? playbackDurationRef.current ?? probedDurationRef.current;
@@ -1172,6 +1181,8 @@ export default function VideoPlayer({
     hlsRecoveryAttemptsRef.current = 0;
     hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
+    setTranscodeBackend(null);
+    setMpvDiagnostics(null);
     setMpvActive(false);
     setSelectedSecondarySubtitleTrackIndex(-1);
     mpvInitialTracksAppliedRef.current = false;
@@ -1232,6 +1243,8 @@ export default function VideoPlayer({
     streamIsSeekableRef.current = false;
     streamUsesBrowserPipelineRef.current = false;
     setStreamIsTranscoded(false);
+    setTranscodeBackend(null);
+    setMpvDiagnostics(null);
     updatePlaybackSnapshot(
       requestedStartPosition,
       probedDurationRef.current || getStoredDuration(filePath),
@@ -1445,12 +1458,13 @@ export default function VideoPlayer({
           return;
         }
 
+        const remoteBufferProfile = desktopApi.isRemoteLibraryMode();
         const hls = new Hls({
           autoStartLoad: false,
           startPosition: hlsStartPosition,
-          maxBufferLength: 45,
-          maxMaxBufferLength: 90,
-          backBufferLength: 30,
+          maxBufferLength: remoteBufferProfile ? 45 : 20,
+          maxMaxBufferLength: remoteBufferProfile ? 90 : 45,
+          backBufferLength: remoteBufferProfile ? 30 : 15,
           manifestLoadingMaxRetry: 20,
           manifestLoadingRetryDelay: 500,
           fragLoadingMaxRetry: 20,
@@ -2785,6 +2799,11 @@ export default function VideoPlayer({
       setMarkerSaving(false);
     }
   };
+  const playbackEngineLabel = mpvActive
+    ? 'mpv · external native playback'
+    : streamIsTranscoded
+      ? 'Chromium · HLS transcode'
+      : 'Chromium · HTML5';
   return (
     <div
       className={`loom-player-root fixed inset-0 z-[70] flex ${mpvActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
@@ -2812,6 +2831,40 @@ export default function VideoPlayer({
           onBack={handleBack}
           onClose={handleClose}
         />
+
+        {(mpvActive || streamUrl) && showTopControls && (
+          <div className="absolute right-4 top-4 z-30">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setShowPlaybackInfo((visible) => !visible);
+              }}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 bg-black/55 px-3 text-xs font-medium text-white/85 shadow-lg backdrop-blur-md transition-colors hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-expanded={showPlaybackInfo}
+              aria-controls="loom-playback-info"
+            >
+              {showPlaybackInfo ? <X className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
+              Playback info
+            </button>
+            {showPlaybackInfo && (
+              <div id="loom-playback-info" className="mt-2 w-64 rounded-xl border border-white/15 bg-black/80 p-3 text-xs text-white/75 shadow-2xl backdrop-blur-xl" onClick={(event) => event.stopPropagation()}>
+                <p className="font-semibold text-white">{playbackEngineLabel}</p>
+                <dl className="mt-2 space-y-1.5">
+                  <div className="flex justify-between gap-3"><dt>Mode</dt><dd className="text-right text-white/90">{mpvActive ? 'Direct file' : streamIsTranscoded ? 'HLS' : 'Direct stream'}</dd></div>
+                  <div className="flex justify-between gap-3"><dt>Hardware decode</dt><dd className="text-right text-white/90">{mpvDiagnostics?.hardwareDecoder || (mpvActive ? 'Auto' : 'Chromium managed')}</dd></div>
+                  {!mpvActive && streamIsTranscoded && <div className="flex justify-between gap-3"><dt>Encode backend</dt><dd className="text-right text-white/90">{transcodeBackend || 'Host auto'}</dd></div>}
+                  {mpvDiagnostics?.videoCodec && <div className="flex justify-between gap-3"><dt>Video codec</dt><dd className="text-right text-white/90">{mpvDiagnostics.videoCodec}</dd></div>}
+                  {typeof mpvDiagnostics?.bufferSeconds === 'number' && <div className="flex justify-between gap-3"><dt>Buffer</dt><dd className="text-right text-white/90">{mpvDiagnostics.bufferSeconds.toFixed(1)}s</dd></div>}
+                  {typeof mpvDiagnostics?.frameDrops === 'number' && <div className="flex justify-between gap-3"><dt>Frame drops</dt><dd className="text-right text-white/90">{mpvDiagnostics.frameDrops}</dd></div>}
+                  {typeof mpvDiagnostics?.decoderFrameDrops === 'number' && <div className="flex justify-between gap-3"><dt>Decoder drops</dt><dd className="text-right text-white/90">{mpvDiagnostics.decoderFrameDrops}</dd></div>}
+                  {mpvDiagnostics?.buffering && <div className="pt-1 text-amber-200">Buffering</div>}
+                </dl>
+                {!mpvActive && <p className="mt-2 border-t border-white/10 pt-2 text-[11px] text-white/50">HLS backend details are reported by the host transcoder.</p>}
+              </div>
+            )}
+          </div>
+        )}
 
         <div
           className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : ''} ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}

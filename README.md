@@ -296,7 +296,7 @@ The Forge configuration packages the desktop app with ASAR enabled and includes 
 
 ## Third-Party Notices
 
-Loom Media Server depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, Lucide React, ffmpeg-static, and ffprobe-static.
+Loom Media Server depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, and Lucide React. Desktop playback may also use an external user-installed mpv executable, which LoomTV does not bundle, download, or link.
 
 The application also includes local UI component patterns inspired by shadcn/ui.
 

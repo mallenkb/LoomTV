@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import type { LocalSegmentAnalysisStatus, SkipAnalysisSettings } from '@/lib/desktopApi';
+import type { LocalSegmentAnalysisStatus, MpvAvailability, SkipAnalysisSettings } from '@/lib/desktopApi';
 import SkipTimestampManager from './SkipTimestampManager';
 
 type PlaybackSettingsSectionProps = {
@@ -20,6 +20,10 @@ type PlaybackSettingsSectionProps = {
     scope?: { mediaId?: string; season?: number; mode?: 'quick' | 'full' },
   ) => Promise<{ queued: number } | undefined> | void;
   onSave: () => void | boolean | Promise<void | boolean>;
+  mpvAvailability?: MpvAvailability | null;
+  onMpvChoose?: () => void | Promise<void>;
+  onMpvReset?: () => void | Promise<void>;
+  onMpvRefresh?: () => void | Promise<void>;
 };
 
 const INTRO_TYPES = ['intro', 'recap'] as const;
@@ -47,6 +51,10 @@ export default function PlaybackSettingsSection({
   analysisStatus,
   onAnalysisAction,
   onSave,
+  mpvAvailability = null,
+  onMpvChoose,
+  onMpvReset,
+  onMpvRefresh,
 }: PlaybackSettingsSectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -133,6 +141,42 @@ export default function PlaybackSettingsSection({
           <div className="mt-4 flex justify-end">
             <Button type="button" disabled={!playbackSettingsDirty} onClick={onSave}>Save playback settings</Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="text-white">Native playback (mpv)</CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Use an external mpv installation for local files that need broader codec, subtitle, or HDR support. LoomTV never bundles mpv.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] p-4 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="font-medium text-white">
+                {mpvAvailability === null
+                  ? 'Checking mpv…'
+                  : mpvAvailability.available
+                    ? `Available${mpvAvailability.version ? ` · ${mpvAvailability.version}` : ''}`
+                    : 'Not detected'}
+              </span>
+              <span className={mpvAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'}>
+                {mpvAvailability?.runtimeSource === 'user-selected' ? 'Selected executable' : mpvAvailability?.runtimeSource === 'environment' ? 'Environment' : 'System search'}
+              </span>
+            </div>
+            <p className="mt-2 break-all text-xs text-[var(--loom-muted)]">
+              {mpvAvailability?.executablePath || mpvAvailability?.warning || mpvAvailability?.reason || 'The desktop app is checking for an external runtime.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={() => void onMpvChoose?.()} disabled={!onMpvChoose}>Choose mpv executable</Button>
+            <Button type="button" variant="outline" onClick={() => void onMpvReset?.()} disabled={!onMpvReset || mpvAvailability?.runtimeSource !== 'user-selected'}>Use system mpv</Button>
+            <Button type="button" variant="outline" onClick={() => void onMpvRefresh?.()} disabled={!onMpvRefresh}>Refresh</Button>
+          </div>
+          <p className="text-xs text-[var(--loom-faint)]">
+            Hardware decoding stays on mpv&apos;s safe automatic default. If mpv cannot start, LoomTV falls back to its Chromium/HLS path.
+          </p>
         </CardContent>
       </Card>
 

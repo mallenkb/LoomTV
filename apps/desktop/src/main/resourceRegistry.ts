@@ -40,7 +40,11 @@ export function registerResource(
     ? `${kind}\0${normalized}\0scope\0${normalizedResourceScope}`
     : `${kind}\0${normalized}`;
   const id = createHmac('sha256', secret).update(identity).digest('base64url');
-  if (resources.size >= MAX_REGISTERED_RESOURCES && !resources.has(id)) {
+  if (resources.has(id)) {
+    // Re-registering an existing capability is a use and should refresh its
+    // position in the bounded registry rather than leaving it FIFO-stale.
+    resources.delete(id);
+  } else if (resources.size >= MAX_REGISTERED_RESOURCES) {
     const oldest = resources.keys().next().value;
     if (oldest) resources.delete(oldest);
   }
@@ -63,6 +67,8 @@ export function resolveLocalResource(
   if (!resource || !allowedKinds.has(resource.kind) || resource.kind === 'external-artwork') {
     throw new Error('Unknown local resource. Refresh the paired library and try again.');
   }
+  resources.delete(id);
+  resources.set(id, resource);
   if (
     expectedScopePath
     && (
@@ -89,5 +95,7 @@ export function resolveLocalResource(
 export function resolveExternalArtworkResource(id: string): string {
   const resource = resources.get(id);
   if (!resource || resource.kind !== 'external-artwork') throw new Error('Unknown artwork resource.');
+  resources.delete(id);
+  resources.set(id, resource);
   return resource.value;
 }

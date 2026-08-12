@@ -88,10 +88,10 @@ export default function NetworkSettingsSection({
               </p>
               <p className="text-xs text-[var(--loom-muted)]">
                 {isTogglingNetworkSharing
-                  ? 'Preparing the pairing address and code.'
+                  ? 'Preparing one-tap approval and PIN fallback.'
                   : isNetworkSharingOn
-                  ? 'Pair devices with the address and code below.'
-                  : 'Turn on to get a pairing address and code.'}
+                  ? 'Tap Connect in LoomTV mobile, then approve the device here.'
+                  : 'Turn on to approve nearby devices or use a pairing PIN.'}
               </p>
             </div>
             <Button
@@ -122,7 +122,7 @@ export default function NetworkSettingsSection({
                 <div className="settings-network-card rounded-xl bg-[var(--loom-accent)]/10 p-4">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
                     <CheckCircle2 className="h-4 w-4 text-[var(--loom-accent)]" />
-                    Pair a phone or tablet
+                    Connect a phone or tablet
                   </div>
                   <div className="grid gap-3 md:grid-cols-[1.3fr_.7fr]">
                     <div className="settings-network-card rounded-lg bg-[var(--loom-bg)] p-3">
@@ -161,7 +161,7 @@ export default function NetworkSettingsSection({
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-[var(--loom-muted)]">
-                    This secret expires after five minutes and rotates immediately after a successful pairing.
+                    A discovered device can request one-tap approval. Once approved, it stays paired until you revoke it. The PIN is a manual fallback; it expires after five minutes and rotates immediately after successful pairing.
                   </p>
                 </div>
 

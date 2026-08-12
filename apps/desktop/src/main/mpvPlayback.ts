@@ -8,6 +8,7 @@ import path from 'node:path';
 import type {
   MpvAvailability,
   MpvCommand,
+  MpvPlaybackDiagnostics,
   MpvPlaybackState,
   MpvStartOptions,
 } from '../shared/desktopProtocol.ts';
@@ -17,6 +18,7 @@ import {
   normalizeMpvTracks,
   unexpectedMpvExitMessage,
 } from './mpvPlaybackHelpers.ts';
+import { loadSettings } from './settings.ts';
 
 type MpvJsonMessage = {
   event?: string;
@@ -29,7 +31,7 @@ type MpvJsonMessage = {
 
 type MpvRuntime = {
   executablePath: string;
-  source: 'configured' | 'bundled' | 'system';
+  source: 'environment' | 'user-selected' | 'system';
 };
 
 const OBSERVED_PROPERTIES = [
@@ -41,20 +43,17 @@ const OBSERVED_PROPERTIES = [
   'speed',
   'track-list',
   'video-params',
+  'hwdec-current',
+  'frame-drop-count',
+  'decoder-frame-drop-count',
+  'demuxer-cache-duration',
+  'cache-buffering-state',
+  'video-codec',
+  'estimated-vf-fps',
 ] as const;
 
 function executableName(): string {
   return process.platform === 'win32' ? 'mpv.exe' : 'mpv';
-}
-
-function packagedCandidates(): string[] {
-  const platform = process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux';
-  const name = executableName();
-  return [
-    path.join(process.resourcesPath, 'mpv', platform, process.arch, name),
-    path.join(process.resourcesPath, 'mpv', platform, name),
-    path.join(process.resourcesPath, 'mpv', name),
-  ];
 }
 
 function systemCandidates(): string[] {
@@ -80,13 +79,14 @@ type MpvRuntimeCache = {
   key: string;
   runtime: MpvRuntime | null;
   version?: string;
+  warning?: string;
   resolvedAt: number;
 };
 let runtimeCache: MpvRuntimeCache | null = null;
 const MISSING_RUNTIME_CACHE_MS = 5000;
 
 function runtimeCacheKey(): string {
-  return process.env.LOOMTV_MPV_PATH?.trim() || '';
+  return `${process.env.LOOMTV_MPV_PATH?.trim() || ''}\0${loadSettings().mpvExecutablePath || ''}`;
 }
 
 export function invalidateMpvRuntimeCache(): void {
@@ -103,37 +103,71 @@ function cachedMpvRuntime(): MpvRuntimeCache {
   const runtime = resolveMpvRuntime();
   runtimeCache = {
     key,
-    runtime,
-    version: runtime ? mpvVersion(runtime.executablePath) : undefined,
+    runtime: runtime.runtime,
+    version: runtime.version,
+    warning: runtime.warning,
     resolvedAt: Date.now(),
   };
   return runtimeCache;
 }
 
-function resolveMpvRuntime(): MpvRuntime | null {
-  const configured = process.env.LOOMTV_MPV_PATH?.trim();
-  const directCandidates = [
-    ...(configured ? [{ executablePath: configured, source: 'configured' as const }] : []),
-    ...packagedCandidates().map((executablePath) => ({ executablePath, source: 'bundled' as const })),
-    ...systemCandidates().map((executablePath) => ({ executablePath, source: 'system' as const })),
-  ];
-  const directMatch = directCandidates.find((candidate) => {
-    try {
-      return fs.statSync(candidate.executablePath).isFile();
-    } catch {
-      return false;
-    }
-  });
-  if (directMatch) return directMatch;
+function selectedMpvPath(): string {
+  try {
+    return loadSettings().mpvExecutablePath || '';
+  } catch {
+    return '';
+  }
+}
 
+function normalizeMpvPath(candidate: string): string {
+  const resolved = path.resolve(candidate);
+  if (process.platform === 'darwin' && resolved.toLowerCase().endsWith('.app')) {
+    return path.join(resolved, 'Contents', 'MacOS', executableName());
+  }
+  return resolved;
+}
+
+export function validateMpvExecutable(candidate: string): { executablePath: string; version: string } {
+  const executablePath = normalizeMpvPath(candidate);
+  try {
+    if (!fs.statSync(executablePath).isFile()) throw new Error('The selected path is not an executable file.');
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'The selected mpv path is unavailable.', { cause: error });
+  }
+  const version = mpvVersion(executablePath);
+  if (!version) throw new Error('The selected file is not a working mpv executable.');
+  return { executablePath, version };
+}
+
+function resolveMpvRuntime(): { runtime: MpvRuntime | null; version?: string; warning?: string } {
+  const configured = process.env.LOOMTV_MPV_PATH?.trim();
+  const selected = selectedMpvPath();
+  const discovered = [...systemCandidates()];
   try {
     const locator = process.platform === 'win32' ? 'where' : 'which';
     const output = execFileSync(locator, [executableName()], { encoding: 'utf8', windowsHide: true });
-    const executablePath = output.split(/\r?\n/).map((value) => value.trim()).find(Boolean);
-    return executablePath ? { executablePath, source: 'system' } : null;
+    discovered.push(...output.split(/\r?\n/).map((value) => value.trim()).filter(Boolean));
   } catch {
-    return null;
+    // Standard paths above are enough when the app was launched without PATH.
   }
+  const directCandidates = [
+    ...(configured ? [{ executablePath: configured, source: 'environment' as const }] : []),
+    ...(selected ? [{ executablePath: selected, source: 'user-selected' as const }] : []),
+    ...[...new Set(discovered)].map((executablePath) => ({ executablePath, source: 'system' as const })),
+  ];
+  const rejected: string[] = [];
+  for (const candidate of directCandidates) {
+    try {
+      const validated = validateMpvExecutable(candidate.executablePath);
+      return { runtime: { executablePath: validated.executablePath, source: candidate.source }, version: validated.version };
+    } catch (error) {
+      if (candidate.source !== 'system') rejected.push(`${candidate.source}: ${error instanceof Error ? error.message : 'unavailable'}`);
+    }
+  }
+  return {
+    runtime: null,
+    warning: rejected.length > 0 ? `Configured mpv paths could not be used: ${rejected.join('; ')}` : undefined,
+  };
 }
 
 function mpvVersion(executablePath: string): string | undefined {
@@ -178,6 +212,9 @@ class MpvPlaybackSession {
   private requestId = 1;
   private lastPositionEventAt = 0;
   private lastStderr = '';
+  private lastDiagnosticsEventAt = 0;
+  private diagnosticsTimer: NodeJS.Timeout | null = null;
+  private diagnostics: MpvPlaybackDiagnostics = {};
   private geometryTimer: NodeJS.Timeout | null = null;
   private exitGraceTimer: NodeJS.Timeout | null = null;
   private readonly pendingRequests = new Map<number, string>();
@@ -404,6 +441,33 @@ class MpvPlaybackSession {
       const params = message.data as Record<string, unknown>;
       this.emit({ videoWidth: finiteNumber(params.w), videoHeight: finiteNumber(params.h) });
     }
+    else if (message.name === 'hwdec-current') this.updateDiagnostics({
+      hardwareDecoder: typeof message.data === 'string' ? message.data : undefined,
+      hardwareDecode: typeof message.data === 'string' && message.data !== 'no',
+    });
+    else if (message.name === 'frame-drop-count') this.updateDiagnostics({ frameDrops: finiteNumber(message.data) });
+    else if (message.name === 'decoder-frame-drop-count') this.updateDiagnostics({ decoderFrameDrops: finiteNumber(message.data) });
+    else if (message.name === 'demuxer-cache-duration') this.updateDiagnostics({ bufferSeconds: finiteNumber(message.data) });
+    else if (message.name === 'cache-buffering-state') this.updateDiagnostics({ buffering: message.data === true });
+    else if (message.name === 'video-codec') this.updateDiagnostics({ videoCodec: typeof message.data === 'string' ? message.data : undefined });
+    else if (message.name === 'estimated-vf-fps') this.updateDiagnostics({ estimatedFps: finiteNumber(message.data) });
+  }
+
+  private updateDiagnostics(patch: MpvPlaybackDiagnostics): void {
+    this.diagnostics = { ...this.diagnostics, ...patch };
+    const now = Date.now();
+    const emitDiagnostics = () => {
+      this.diagnosticsTimer = null;
+      this.lastDiagnosticsEventAt = Date.now();
+      this.emit({ diagnostics: this.diagnostics });
+    };
+    const delay = Math.max(0, 250 - (now - this.lastDiagnosticsEventAt));
+    if (this.diagnosticsTimer) return;
+    if (delay === 0) emitDiagnostics();
+    else {
+      this.diagnosticsTimer = setTimeout(emitDiagnostics, delay);
+      this.diagnosticsTimer.unref?.();
+    }
   }
 
   private emit(patch: Partial<MpvPlaybackState>): void {
@@ -490,6 +554,8 @@ class MpvPlaybackSession {
   private cleanup(): void {
     if (this.geometryTimer) clearTimeout(this.geometryTimer);
     this.geometryTimer = null;
+    if (this.diagnosticsTimer) clearTimeout(this.diagnosticsTimer);
+    this.diagnosticsTimer = null;
     if (this.exitGraceTimer) clearTimeout(this.exitGraceTimer);
     this.exitGraceTimer = null;
     this.socket?.destroy();
@@ -524,18 +590,25 @@ export function mpvAvailability(): MpvAvailability {
       reason: 'Native mpv playback is disabled by LOOMTV_DISABLE_MPV. LoomTV is using compatible fallback playback.',
     };
   }
-  const { runtime, version } = cachedMpvRuntime();
+  const { runtime, version, warning } = cachedMpvRuntime();
   return runtime
     ? {
       available: true,
       executablePath: runtime.executablePath,
       runtimeSource: runtime.source,
       version,
+      warning,
     }
     : {
       available: false,
-      reason: 'Install mpv or set LOOMTV_MPV_PATH to enable native desktop playback. LoomTV will use compatible fallback playback until mpv is available.',
+      reason: 'Install mpv or choose an existing mpv executable to enable native desktop playback. LoomTV will use compatible fallback playback until mpv is available.',
+      warning,
     };
+}
+
+export function refreshMpvAvailability(): MpvAvailability {
+  invalidateMpvRuntimeCache();
+  return mpvAvailability();
 }
 
 /** One line describing the resolved playback runtime, for startup diagnostics. */

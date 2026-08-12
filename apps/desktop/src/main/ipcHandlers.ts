@@ -19,9 +19,19 @@ import { sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import {
   commandMpvPlayback,
   mpvAvailability,
+  refreshMpvAvailability,
   startMpvPlayback,
   stopMpvPlayback,
+  validateMpvExecutable,
 } from './mpvPlayback.ts';
+import {
+  commandLibVlcPlayback,
+  libVlcAvailability,
+  refreshLibVlcAvailability,
+  startLibVlcPlayback,
+  stopLibVlcPlayback,
+} from './libvlcPlayback.ts';
+import type { LibVlcCommand, LibVlcStartOptions } from './libvlcPlayback.ts';
 
 type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -41,6 +51,7 @@ type LanPairedDevice = {
 };
 
 type NetworkSettings = {
+  mpvExecutablePath?: string;
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
   localNetworkPairedDevices?: LanPairedDevice[];
@@ -79,6 +90,7 @@ export interface IpcHandlerDependencies<
   saveLibraryMutation: (library: TLibraryData) => void;
   assertLocalMediaPath: (filePath: string) => void;
   authorizeMediaPath: (filePath: string) => void;
+  assertSubtitleCanAccessMediaPath?: (mediaFilePath: string, subtitleFilePath: string) => void;
   registerSubtitleResource: (mediaFilePath: string, subtitleFilePath: string) => string;
   needsBrowserTranscoding: (filePath: string) => boolean;
   browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
@@ -256,6 +268,20 @@ export function registerIpcHandlers<
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
       return listener(event, ...(args as IpcContract[C]['args']));
+    });
+  };
+
+  // LibVLC is deliberately kept out of the stable shared contract until the
+  // experimental renderer pilot is ready. It still uses the same trusted
+  // sender boundary as every typed handler, so a future renderer can opt in
+  // without widening the generic IPC surface prematurely.
+  const handleExperimental = (
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>,
+  ) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
+      return listener(event, ...args);
     });
   };
 
@@ -440,6 +466,34 @@ export function registerIpcHandlers<
 
   handle('mpv:availability', () => mpvAvailability());
 
+  handle('mpv:refresh-availability', () => refreshMpvAvailability());
+
+  handle('mpv:choose-executable', async () => {
+    deps.authorizeSettingsWrite();
+    const result = await deps.showOpenFolderDialog({
+      title: 'Choose mpv executable',
+      properties: ['openFile'],
+      filters: process.platform === 'win32'
+        ? [{ name: 'mpv executable', extensions: ['exe'] }]
+        : [{ name: 'mpv executable', extensions: ['*'] }],
+    });
+    const selectedPath = result.filePaths[0];
+    if (result.canceled || !selectedPath) return mpvAvailability();
+    const validated = validateMpvExecutable(selectedPath);
+    deps.saveSettings({ ...deps.loadSettings(), mpvExecutablePath: validated.executablePath });
+    deps.onSettingsSaved?.();
+    return refreshMpvAvailability();
+  });
+
+  handle('mpv:reset-executable', () => {
+    deps.authorizeSettingsWrite();
+    const settings = deps.loadSettings();
+    const { mpvExecutablePath: _mpvExecutablePath, ...rest } = settings;
+    deps.saveSettings(rest as TSettings);
+    deps.onSettingsSaved?.();
+    return refreshMpvAvailability();
+  });
+
   handle('mpv:start', (event, filePath, options) => {
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
@@ -453,6 +507,30 @@ export function registerIpcHandlers<
   handle('mpv:command', (_event, sessionId, command) => commandMpvPlayback(sessionId, command));
 
   handle('mpv:stop', (_event, sessionId) => stopMpvPlayback(sessionId));
+
+  handleExperimental('libvlc:availability', () => libVlcAvailability());
+
+  handleExperimental('libvlc:refresh-availability', () => refreshLibVlcAvailability());
+
+  handleExperimental('libvlc:start', (event, filePath, rawOptions) => {
+    const mediaPath = String(filePath || '');
+    deps.authorizeMediaPath(mediaPath);
+    deps.assertLocalMediaPath(mediaPath);
+    const options = (rawOptions && typeof rawOptions === 'object' ? rawOptions : {}) as LibVlcStartOptions;
+    for (const subtitleFile of options.subtitleFiles || []) {
+      const subtitlePath = String(subtitleFile?.path || '');
+      deps.authorizeMediaPath(subtitlePath);
+      deps.assertLocalMediaPath(subtitlePath);
+      deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitlePath);
+    }
+    return startLibVlcPlayback(event.sender, mediaPath, options);
+  });
+
+  handleExperimental('libvlc:command', (_event, sessionId, command) =>
+    commandLibVlcPlayback(String(sessionId || ''), command as LibVlcCommand));
+
+  handleExperimental('libvlc:stop', (_event, sessionId) =>
+    stopLibVlcPlayback(sessionId ? String(sessionId) : undefined));
 
   handle('network:status', () => {
     const status = buildNetworkStatus(deps);

@@ -1,7 +1,7 @@
 export type TranscodeCodec = 'h264' | 'hevc' | 'av1';
 export type ProfileType = 'owner' | 'standard' | 'kid' | 'guest';
 
-export const MEDIA_CORE_CONTRACT_VERSION: 1;
+export const MEDIA_CORE_CONTRACT_VERSION: 2;
 export const VIDEO_EXTENSIONS: readonly string[];
 export const TRANSCODE_CODECS: readonly TranscodeCodec[];
 export const PROFILE_TYPES: readonly ProfileType[];
@@ -30,6 +30,52 @@ export interface NormalizedPlaybackProfile {
 }
 
 export function normalizePlaybackProfile(input?: PlaybackProfileInput): NormalizedPlaybackProfile;
+
+export interface ClientPlaybackCapabilitiesInput {
+  containers?: unknown;
+  videoCodecs?: unknown;
+  audioCodecs?: unknown;
+  supportsHls?: unknown;
+  supportsHdr?: unknown;
+  supportsTextSubtitles?: unknown;
+  maxWidth?: unknown;
+  maxHeight?: unknown;
+  maxVideoBitrateKbps?: unknown;
+}
+
+export interface NormalizedClientPlaybackCapabilities {
+  containers: string[];
+  videoCodecs: string[];
+  audioCodecs: string[];
+  supportsHls: boolean;
+  supportsHdr: boolean;
+  supportsTextSubtitles: boolean;
+  maxWidth: number;
+  maxHeight: number;
+  maxVideoBitrateKbps: number;
+}
+
+export type PlaybackPlanMode = 'direct' | 'remux' | 'direct-stream' | 'transcode';
+
+export interface PlaybackPlan {
+  mode: PlaybackPlanMode;
+  reason: string;
+  sourceAction: 'direct' | 'transcode';
+  codec?: string;
+  backend?: string;
+  facts?: {
+    container: string;
+    videoCodec: string;
+    audioCodec: string;
+    width: number;
+    height: number;
+    bitrate: number;
+    hdr: boolean;
+  };
+}
+
+export function normalizeClientPlaybackCapabilities(input?: ClientPlaybackCapabilitiesInput): NormalizedClientPlaybackCapabilities;
+export function playbackPlanForMedia(media?: Record<string, unknown>, input?: ClientPlaybackCapabilitiesInput): PlaybackPlan;
 export function normalizeProfileType(value: unknown, fallback?: ProfileType): ProfileType;
 
 export interface PortableProfile {
