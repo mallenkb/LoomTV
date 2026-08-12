@@ -1,3 +1,5 @@
+import { RENDERER_SESSION_ROUTE } from './rendererHttpAccess.ts';
+
 export type LanRouteScope = 'catalog:read' | 'media:stream' | 'playback:write' | 'device:self';
 export type MediaServerRouteAccess =
   | { kind: 'public' }
@@ -38,6 +40,10 @@ export function deviceHasLanScope(scopes: readonly string[], requiredScope: LanR
 }
 
 const IPC_ONLY_HTTP_ROUTES = new Set([
+  // The renderer's local access token is handed out over sender-validated
+  // Electron IPC only. Classifying the retired HTTP route as IPC-only keeps it
+  // refused for every method, origin, and credential (audit A.2).
+  RENDERER_SESSION_ROUTE,
   '/api/lan/status',
   '/api/lan/artwork/refresh',
   '/api/library',
@@ -83,9 +89,6 @@ export function isLegacyLanRoute(pathname: string): boolean {
 
 export function mediaServerRouteAccess(pathname: string, method = 'GET'): MediaServerRouteAccess {
   if (method === 'GET' && (pathname === '/' || pathname === '/pair' || pathname === '/api/ping' || pathname === '/api/lan/info')) {
-    return { kind: 'public' };
-  }
-  if (method === 'POST' && pathname === '/api/renderer/session') {
     return { kind: 'public' };
   }
   if (isLegacyLanRoute(pathname)) return { kind: 'legacy' };

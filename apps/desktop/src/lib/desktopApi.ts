@@ -46,6 +46,7 @@ import type {
   RemoteLibraryRequest,
   RemoteLibraryResponse,
   RemoteLibrarySessionState,
+  RendererSession,
   SettingsPayload,
   SkipAnalysisRunScope,
   StoredProgress,
@@ -162,6 +163,7 @@ export type DesktopBridgeApi = {
       getThumbnail: (filePath: string, time?: string) => Promise<{ url: string }>;
       getFileInfo: (filePath: string) => Promise<{ size: number; path: string; exists: boolean }>;
       getServerBase: () => Promise<string>;
+      getRendererSession?: () => Promise<RendererSession>;
       setFullscreen?: (enabled: boolean) => Promise<boolean>;
       setWindowChromeVisible?: (visible: boolean) => Promise<boolean>;
       onFullscreenChanged?: (callback: (fullscreen: boolean) => void) => () => void;
@@ -281,26 +283,29 @@ let remoteCatalogCache: { identity: string; etag: string; index: LibraryIndexPay
 async function discoverServerBase(): Promise<string> {
   if (resolvedServerBase) return resolvedServerBase;
 
+  // Electron renderers receive the port and the local access token over
+  // sender-validated IPC. No HTTP route hands out that credential, because HTTP
+  // could only identify this renderer by a header any local process can forge.
+  const bridge = window.desktopApi;
+  if (bridge?.getRendererSession) {
+    const session = await bridge.getRendererSession().catch(() => null);
+    if (session && typeof session.localAccessToken === 'string' && session.port > 0) {
+      resolvedServerBase = `http://127.0.0.1:${session.port}`;
+      resolvedLocalAccessToken = session.localAccessToken;
+      return resolvedServerBase;
+    }
+  }
+
+  // A browser-only session has no preload bridge and therefore no credential.
+  // Port discovery stays credential-free; token-bearing routes fail closed with
+  // 401 rather than being handed authority over an attacker-set header.
   const candidatePorts = Array.from({ length: 8 }, (_, index) => DEFAULT_MEDIA_PORT + index);
   for (const port of candidatePorts) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/ping`);
       if (response.ok) {
-        let localAccessToken: string | null = null;
-        if (!window.desktopApi) {
-          // Browser-only development sessions obtain renderer authority from
-          // an origin-checked endpoint. Generic health discovery never returns
-          // credentials to originless localhost callers.
-          const sessionResponse = await fetch(`http://127.0.0.1:${port}/api/renderer/session`, {
-            method: 'POST',
-          });
-          if (!sessionResponse.ok) continue;
-          const session = await sessionResponse.json().catch(() => null) as { localAccessToken?: string } | null;
-          if (typeof session?.localAccessToken !== 'string') continue;
-          localAccessToken = session.localAccessToken;
-        }
         resolvedServerBase = `http://127.0.0.1:${port}`;
-        resolvedLocalAccessToken = localAccessToken;
+        resolvedLocalAccessToken = null;
         return resolvedServerBase;
       }
     } catch {
@@ -349,8 +354,11 @@ async function fetchLocalResponse(pathname: string, init?: RequestInit): Promise
     });
   };
 
+  // A 401 means the cached port or token no longer matches the running main
+  // process — a restarted main process mints a new token. Re-resolve once and
+  // retry, in both the bridged and browser-only cases.
   let response = await request();
-  if (!window.desktopApi && response.status === 401) {
+  if (response.status === 401) {
     resolvedServerBase = null;
     resolvedLocalAccessToken = null;
     response = await request();

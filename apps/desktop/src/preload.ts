@@ -95,6 +95,7 @@ const desktopApi = {
   getThumbnail: (filePath: string, time?: string) => ipcRenderer.invoke('media:get-thumbnail', filePath, time),
   getFileInfo: (filePath: string) => ipcRenderer.invoke('media:get-file-info', filePath),
   getServerBase: () => ipcRenderer.invoke('media:get-server-port').then((port) => `http://127.0.0.1:${port}`),
+  getRendererSession: () => ipcRenderer.invoke('renderer:session'),
   setFullscreen: (enabled: boolean) => electronIpcRenderer.invoke('window:set-fullscreen', enabled) as Promise<boolean>,
   setWindowChromeVisible: (visible: boolean) => electronIpcRenderer.invoke('window:set-chrome-visible', visible) as Promise<boolean>,
   onFullscreenChanged: (callback: (fullscreen: boolean) => void) => {

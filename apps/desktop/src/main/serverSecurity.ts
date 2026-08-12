@@ -63,6 +63,42 @@ export function allowedCorsOrigin(
   return allowedOrigins.has(origin) ? origin : null;
 }
 
+// Query parameters that carry a bearer-equivalent secret. Any one of them is
+// enough to replay a loopback or LAN request, so none may reach a log file.
+// `streamToken` mirrors HLS_STREAM_TOKEN_QUERY_PARAM in transcodeManager; it is
+// spelled out here to keep this module free of transport dependencies.
+const REDACTED_QUERY_PARAMS = [LOCAL_ACCESS_QUERY_PARAM, 'token', 'streamToken'];
+
+const REDACTED_QUERY_PATTERN = new RegExp(
+  `([?&](?:${REDACTED_QUERY_PARAMS.join('|')})=)[^&#\\s"']+`,
+  'gi',
+);
+
+const REDACTED_HEADER_PATTERN = new RegExp(
+  `((?:${LOCAL_ACCESS_HEADER}|authorization)["']?\\s*[:=]\\s*["']?)(?:Bearer\\s+)?[^\\s,;"'}]+`,
+  'gi',
+);
+
+/**
+ * Strip credential-bearing query parameters and headers from text about to be
+ * logged. Errors raised by `fetch`, HTTP plumbing, and child processes
+ * routinely embed the full request URL, and those URLs carry the local access
+ * token that authorizes every loopback media route.
+ */
+export function redactRequestSecrets(value: string): string {
+  return value
+    .replace(REDACTED_QUERY_PATTERN, '$1[redacted]')
+    .replace(REDACTED_HEADER_PATTERN, '$1[redacted]');
+}
+
+/**
+ * Render an unknown thrown value as loggable text with its secrets removed.
+ */
+export function describeErrorForLog(error: unknown): string {
+  const detail = error instanceof Error ? (error.stack || error.message) : String(error);
+  return redactRequestSecrets(detail);
+}
+
 export function localAccessQuery(token: string): string {
   const params = new URLSearchParams({ [LOCAL_ACCESS_QUERY_PARAM]: token });
   return params.toString();

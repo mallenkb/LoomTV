@@ -393,6 +393,15 @@ export function registerIpcHandlers<
 
   handle('media:get-server-port', () => deps.getMediaServerPort());
 
+  // The renderer's loopback credential. It is delivered here, behind the same
+  // sender and frame validation as every other channel, because an HTTP route
+  // could only authenticate the caller by a header the caller writes — and any
+  // local process can write it (audit A.2).
+  handle('renderer:session', () => ({
+    port: deps.getMediaServerPort(),
+    localAccessToken: deps.localAccessToken,
+  }));
+
   handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);

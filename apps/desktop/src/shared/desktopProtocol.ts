@@ -374,6 +374,19 @@ export interface StreamUrlResult {
   decisionReason?: string;
 }
 
+/**
+ * Loopback bootstrap for the renderer: the media-server port plus the local
+ * access token that authorizes token-bearing loopback routes.
+ *
+ * This payload only ever crosses sender-validated Electron IPC. No HTTP route
+ * returns it, because HTTP could authenticate the caller only by a header the
+ * caller writes.
+ */
+export interface RendererSession {
+  port: number;
+  localAccessToken: string;
+}
+
 export interface LocalNetworkPairedDevice {
   id: string;
   name: string;
