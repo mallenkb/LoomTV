@@ -187,3 +187,85 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     assert.equal(me.status, 401);
   });
 });
+
+test('public and admin password routes share the credential-reset policy', async (t) => {
+  const { server, baseUrl } = await startServer();
+  t.after(() => server.stop());
+  const anonymous = api(baseUrl);
+  const ownerCreated = await anonymous('POST', '/api/v1/auth/owner', {
+    name: 'Owner',
+    password: 'route-owner-password-1',
+  });
+  assert.equal(ownerCreated.status, 201);
+  const owner = api(baseUrl, ownerCreated.payload.data.adminToken);
+
+  const managerCreated = await owner('POST', '/api/v1/users', {
+    name: 'Manager',
+    password: 'route-manager-password-1',
+    role: 'user',
+    permissions: ['users.manage', 'account.password'],
+    rootIds: null,
+  });
+  const adminCreated = await owner('POST', '/api/v1/users', {
+    name: 'Administrator',
+    password: 'route-admin-password-1',
+    role: 'admin',
+    rootIds: null,
+  });
+  const selfCreated = await owner('POST', '/api/v1/users', {
+    name: 'Self service',
+    password: 'route-self-password-1',
+    role: 'viewer',
+    permissions: [],
+    rootIds: null,
+  });
+  assert.equal(managerCreated.status, 201);
+  assert.equal(adminCreated.status, 201);
+  assert.equal(selfCreated.status, 201);
+  const managerId = managerCreated.payload.data.user.id;
+  const adminId = adminCreated.payload.data.user.id;
+
+  const managerSignedIn = await anonymous('POST', '/api/v1/auth/session', {
+    username: 'Manager',
+    password: 'route-manager-password-1',
+  });
+  const manager = api(baseUrl, managerSignedIn.payload.data.adminToken);
+  const deniedPublic = await manager('POST', '/api/v1/account/password', {
+    userId: adminId,
+    newPassword: 'route-stolen-password-1',
+  });
+  assert.equal(deniedPublic.status, 403);
+  assert.equal(deniedPublic.payload.error.code, 'permission_denied');
+  const deniedAdmin = await manager('POST', '/api/admin/account/password', {
+    userId: adminId,
+    newPassword: 'route-stolen-password-2',
+  });
+  assert.equal(deniedAdmin.status, 403);
+  assert.equal(deniedAdmin.payload.error, 'permission_denied');
+
+  const selfSignedIn = await anonymous('POST', '/api/v1/auth/session', {
+    username: 'Self service',
+    password: 'route-self-password-1',
+  });
+  const selfPublic = api(baseUrl, selfSignedIn.payload.data.adminToken);
+  const changedPublic = await selfPublic('POST', '/api/v1/account/password', {
+    currentPassword: 'route-self-password-1',
+    newPassword: 'route-self-password-2',
+  });
+  assert.equal(changedPublic.status, 200);
+  const selfAdmin = api(baseUrl, changedPublic.payload.data.adminToken);
+  const changedAdmin = await selfAdmin('POST', '/api/admin/account/password', {
+    currentPassword: 'route-self-password-2',
+    newPassword: 'route-self-password-3',
+  });
+  assert.equal(changedAdmin.status, 200, 'the admin route must not impose a different permission gate on self-service');
+
+  const ownerReset = await owner('POST', '/api/admin/account/password', {
+    userId: managerId,
+    newPassword: 'route-manager-password-2',
+  });
+  assert.equal(ownerReset.status, 200);
+  assert.deepEqual(ownerReset.payload, { changed: true });
+  const revokedManager = await manager('GET', '/api/v1/auth/me');
+  assert.equal(revokedManager.status, 401, 'an authorized owner reset must revoke the target session');
+});
