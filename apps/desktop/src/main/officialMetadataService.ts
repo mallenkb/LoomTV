@@ -291,6 +291,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         return host.includes('image.tmdb.org')
           || host.includes('assets.fanart.tv')
           || host.includes('fanart.tv')
+          || host === 'anilist.co'
+          || host.endsWith('.anilist.co')
           || host.includes('media-amazon.com')
           || host.includes('m.media-amazon.com')
           || host.includes('cdn.myanimelist.net')

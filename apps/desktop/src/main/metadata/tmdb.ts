@@ -43,6 +43,12 @@ interface TMDBEpisode {
   air_date?: string;
 }
 
+interface TMDBImage {
+  file_path?: string | null;
+  iso_639_1?: string | null;
+  vote_average?: number;
+}
+
 interface TMDBWatchProvider {
   provider_id?: number;
   provider_name?: string;
@@ -78,6 +84,11 @@ interface TMDBMedia {
   genres?: TMDBGenre[];
   credits?: { cast?: TMDBPerson[] };
   external_ids?: TMDBExternalIds;
+  images?: {
+    posters?: TMDBImage[];
+    backdrops?: TMDBImage[];
+    logos?: TMDBImage[];
+  };
   seasons?: TMDBSeasonSummary[];
   release_dates?: {
     results?: Array<{ iso_3166_1?: string; release_dates?: Array<{ certification?: string }> }>;
@@ -117,6 +128,11 @@ const tmdbEpisodeSchema: z.ZodType<TMDBEpisode> = z.object({
   vote_average: z.number().finite().optional(),
   air_date: z.string().optional(),
 });
+const tmdbImageSchema: z.ZodType<TMDBImage> = z.object({
+  file_path: z.string().nullable().optional(),
+  iso_639_1: z.string().nullable().optional(),
+  vote_average: z.number().finite().optional(),
+});
 const tmdbWatchProviderSchema: z.ZodType<TMDBWatchProvider> = z.object({
   provider_id: z.number().finite().optional(),
   provider_name: z.string().optional(),
@@ -148,6 +164,11 @@ const tmdbMediaSchema: z.ZodType<TMDBMedia> = z.object({
   external_ids: z.object({
     imdb_id: z.string().optional(),
     tvdb_id: z.union([z.string(), z.number().finite()]).optional(),
+  }).optional(),
+  images: z.object({
+    posters: z.array(tmdbImageSchema).optional(),
+    backdrops: z.array(tmdbImageSchema).optional(),
+    logos: z.array(tmdbImageSchema).optional(),
   }).optional(),
   seasons: z.array(tmdbSeasonSummarySchema).optional(),
   release_dates: z.object({
@@ -218,6 +239,37 @@ function tmdbPoster(path: string | null | undefined): string {
 }
 function tmdbBackdrop(path: string | null | undefined): string {
   return path ? `${TMDB_IMAGE_BASE}/w1280${path}` : '';
+}
+
+function tmdbArtworkCandidates(
+  primaryPath: string | null | undefined,
+  images: TMDBImage[] | undefined,
+  size: 'w500' | 'w1280',
+): string[] {
+  const orderedPaths = [
+    primaryPath,
+    ...(images || [])
+      .filter((image) => image.file_path)
+      .sort((left, right) => {
+        const leftLanguage = left.iso_639_1 === 'en' ? 1 : left.iso_639_1 === null ? 0 : -1;
+        const rightLanguage = right.iso_639_1 === 'en' ? 1 : right.iso_639_1 === null ? 0 : -1;
+        return rightLanguage - leftLanguage
+          || (right.vote_average || 0) - (left.vote_average || 0);
+      })
+      .map((image) => image.file_path),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  return [...new Set(orderedPaths)]
+    .map((candidate) => `${TMDB_IMAGE_BASE}/${size}${candidate}`)
+    .slice(0, 20);
+}
+
+function tmdbPosterCandidates(d: TMDBMedia): string[] {
+  return tmdbArtworkCandidates(d.poster_path, d.images?.posters, 'w500');
+}
+
+function tmdbBackdropCandidates(d: TMDBMedia): string[] {
+  return tmdbArtworkCandidates(d.backdrop_path, d.images?.backdrops, 'w1280');
 }
 
 function tmdbContentRatings(d: TMDBMedia): Record<string, ContentRating> {
@@ -362,8 +414,10 @@ function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<Me
       tmdbId: d.id ? String(d.id) : undefined,
       imdbId: d.imdb_id || d.external_ids?.imdb_id || undefined,
     },
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
+    poster: tmdbPosterCandidates(d)[0] || tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdropCandidates(d)[0] || tmdbBackdrop(d.backdrop_path),
+    posterCandidates: tmdbPosterCandidates(d),
+    backdropCandidates: tmdbBackdropCandidates(d),
     logo: tmdbLogoCandidates(d)[0] || '',
     logoCandidates: tmdbLogoCandidates(d),
     summary: d.overview || '',
@@ -381,8 +435,10 @@ function tmdbMovieSearchResult(d: TMDBMedia | null, fallbackTitle: string): Part
   return {
     title: d.title || fallbackTitle,
     providerIds: { tmdbId: d.id ? String(d.id) : undefined },
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
+    poster: tmdbPosterCandidates(d)[0] || tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdropCandidates(d)[0] || tmdbBackdrop(d.backdrop_path),
+    posterCandidates: tmdbPosterCandidates(d),
+    backdropCandidates: tmdbBackdropCandidates(d),
     summary: d.overview || '',
     rating: d.vote_average ?? 0,
     genres: [],
@@ -522,8 +578,10 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
       imdbId: d.external_ids?.imdb_id || undefined,
       tvdbId: d.external_ids?.tvdb_id ? String(d.external_ids.tvdb_id) : undefined,
     },
-    poster: tmdbPoster(d.poster_path),
-    backdrop: tmdbBackdrop(d.backdrop_path),
+    poster: tmdbPosterCandidates(d)[0] || tmdbPoster(d.poster_path),
+    backdrop: tmdbBackdropCandidates(d)[0] || tmdbBackdrop(d.backdrop_path),
+    posterCandidates: tmdbPosterCandidates(d),
+    backdropCandidates: tmdbBackdropCandidates(d),
     logo: tmdbLogoCandidates(d)[0] || '',
     logoCandidates: tmdbLogoCandidates(d),
     summary: d.overview || '',
