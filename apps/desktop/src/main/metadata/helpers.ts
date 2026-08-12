@@ -58,8 +58,10 @@ export function normalizeTitleForMatch(value?: string | null): string {
 }
 
 function isGenericMediaFolderTitle(value: string): boolean {
-  return /^(movie|movies|film|films|tv|tv shows|shows|series|season|season \d+|anime|animations?)$/i
-    .test(normalizeTitleForMatch(value));
+  const normalized = normalizeTitleForMatch(value);
+  return /^(movie|movies|film|films|tv|tv shows|shows|series|season|anime|animations?)$/i
+    .test(normalized)
+    || /^(?:season|series|s)\s*0*\d{1,2}(?:\s|$)/i.test(normalized);
 }
 
 export function isGenericGroupingFolderTitle(value: string): boolean {

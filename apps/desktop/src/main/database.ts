@@ -21,6 +21,7 @@ import {
 import { createDatabaseThumbnailRepository, type CachedThumbnail } from './databaseThumbnailRepository.ts';
 import {
   loadLibrary as loadLibraryRecord,
+  remapLibraryMediaReferences as remapLibraryMediaReferencesRecord,
   saveLibrary as saveLibraryRecord,
 } from './databaseLibraryRepository.ts';
 import {
@@ -369,6 +370,10 @@ export function loadLibraryFromDatabase(): LibraryData | null {
 
 export function saveLibraryToDatabase(data: LibraryData): void {
   saveLibraryRecord(getDb(), data);
+}
+
+export function remapLibraryMediaReferences(aliases: ReadonlyMap<string, string>): void {
+  remapLibraryMediaReferencesRecord(getDb(), aliases);
 }
 export function loadSettingsFromDatabase(): SettingsData | null {
   return loadSettingsRecord(getDb());

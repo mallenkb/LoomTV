@@ -289,6 +289,39 @@ export function loadLibrary(
   return data;
 }
 
+export function remapLibraryMediaReferences(
+  database: BetterSqlite3.Database,
+  aliases: ReadonlyMap<string, string>,
+): void {
+  if (aliases.size === 0) return;
+
+  const tx = database.transaction(() => {
+    const copyListEntries = database.prepare(`
+      INSERT OR IGNORE INTO profile_media_lists (profile_id, media_id, list_kind, created_at)
+      SELECT profile_id, ?, list_kind, created_at
+      FROM profile_media_lists
+      WHERE media_id = ?
+    `);
+    const deleteListEntries = database.prepare('DELETE FROM profile_media_lists WHERE media_id = ?');
+    const copyCustomArtwork = database.prepare(`
+      INSERT OR IGNORE INTO custom_artwork (media_id, target, data_url, updated_at)
+      SELECT ?, target, data_url, updated_at
+      FROM custom_artwork
+      WHERE media_id = ?
+    `);
+    const deleteCustomArtwork = database.prepare('DELETE FROM custom_artwork WHERE media_id = ?');
+
+    for (const [sourceId, targetId] of aliases) {
+      if (!sourceId || !targetId || sourceId === targetId) continue;
+      copyListEntries.run(targetId, sourceId);
+      deleteListEntries.run(sourceId);
+      copyCustomArtwork.run(targetId, sourceId);
+      deleteCustomArtwork.run(sourceId);
+    }
+  });
+  tx();
+}
+
 export function saveLibrary(database: BetterSqlite3.Database, data: LibraryData): void {
   const now = Date.now();
   const folderGroups = data.libraryFolderGroups || { movies: [], tvShows: [], anime: [], others: [] };

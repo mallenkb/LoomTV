@@ -119,7 +119,10 @@ import {
   cachedItemsAreComplete,
   createMediaItemId,
 } from './main/libraryItemHelpers';
-import { preserveExistingItemDuringScan } from './main/libraryScanReconciliation';
+import {
+  preserveExistingItemDuringScan,
+  repairSeasonFolderItems,
+} from './main/libraryScanReconciliation';
 import {
   getLocalNetworkAddresses,
   getLocalNetworkNameFast,
@@ -159,6 +162,7 @@ import {
   updateProfile,
   eraseAutomaticSegmentCandidates,
   loadLibraryFromDatabase,
+  remapLibraryMediaReferences,
   saveCustomArtwork,
   saveLibraryToDatabase,
   savePlaybackTrackPreferences,
@@ -829,7 +833,7 @@ async function scanLibrary(
   await scanGroup(folderGroups.anime, 'anime');
   await scanGroup(folderGroups.others, 'auto');
 
-  const nextLibrary = {
+  const nextLibrary: LibraryData = {
     movies,
     tvShows,
     animeShows,
@@ -838,8 +842,17 @@ async function scanLibrary(
     libraryFolderStatuses: folderStatusSnapshot(),
     scanCache: nextScanCache,
   };
-  await publishProgress(true);
-  return nextLibrary;
+  const repaired = repairSeasonFolderItems(nextLibrary);
+  if (repaired.mediaIdAliases.size > 0) {
+    remapLibraryMediaReferences(repaired.mediaIdAliases);
+  }
+  await options.onProgress?.({
+    ...repaired.data,
+    isComplete: true,
+    scannedFolders,
+    totalFolders,
+  });
+  return repaired.data;
 }
 
 // ─── Library persistence ──────────────────────────────────────────────────────
@@ -906,9 +919,20 @@ function sanitizeStoredItem(item: MediaItem): MediaItem | null {
   return withStableIdentity({ ...item, episodeFiles, episodes, seasons });
 }
 
+function persistSeasonFolderRepair(data: LibraryData, forcePersist = false): LibraryData {
+  const repaired = repairSeasonFolderItems(data);
+  if (repaired.mediaIdAliases.size > 0) {
+    remapLibraryMediaReferences(repaired.mediaIdAliases);
+  }
+  if (!repaired.changed && !forcePersist) return data;
+
+  saveLibraryToDatabase(repaired.data);
+  return loadLibraryFromDatabase() || repaired.data;
+}
+
 function loadLibrary(): LibraryData {
   const databaseLibrary = loadLibraryFromDatabase();
-  if (databaseLibrary) return databaseLibrary;
+  if (databaseLibrary) return persistSeasonFolderRepair(databaseLibrary);
 
   try {
     if (fs.existsSync(LIBRARY_FILE)) {
@@ -931,8 +955,7 @@ function loadLibrary(): LibraryData {
           .map(sanitizeStoredItem)
           .filter((item): item is MediaItem => Boolean(item))
           .map((item) => ({ ...item, type: 'anime' }));
-        saveLibraryToDatabase(normalized);
-        return loadLibraryFromDatabase() || normalized;
+        return persistSeasonFolderRepair(normalized, true);
       }
 
       const existingAnimeShows = normalized.animeShows || [];
@@ -965,8 +988,7 @@ function loadLibrary(): LibraryData {
       }
       normalized.movies = stillMovies;
       normalized.tvShows = stillSeries;
-      saveLibraryToDatabase(normalized);
-      return loadLibraryFromDatabase() || normalized;
+      return persistSeasonFolderRepair(normalized, true);
     }
   } catch (e) {
     console.error('loadLibrary error:', e);
