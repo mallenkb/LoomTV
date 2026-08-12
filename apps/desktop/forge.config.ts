@@ -2,6 +2,7 @@ import type { ForgeConfig, IForgeMaker } from '@electron-forge/shared-types';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import * as asar from '@electron/asar';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
 import { MakerDMG } from '@electron-forge/maker-dmg';
@@ -103,6 +104,84 @@ function prunePackagedFfmpegResources(outputPath: string, platform: string): voi
   }
 }
 
+function packagedMpvPath(value: string): boolean {
+  return /(?:^|[\\/])(?:mpv(?:[-_.][^\\/]*)?|libmpv(?:[-_.][^\\/]*)?)(?:$|[\\/])/i.test(value);
+}
+
+function assertNoPackagedMpv(outputPath: string, platform: string): void {
+  const matches: string[] = [];
+  const pending = [outputPath];
+
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const candidate = path.join(current, entry.name);
+      if (packagedMpvPath(candidate)) matches.push(candidate);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(candidate);
+    }
+  }
+
+  const resources = resourcesPath(outputPath, platform);
+  const appAsar = path.join(resources, 'app.asar');
+  if (fs.existsSync(appAsar)) {
+    try {
+      for (const entry of asar.listPackage(appAsar, { isPack: false })) {
+        if (packagedMpvPath(entry)) matches.push(`${appAsar}:${entry}`);
+      }
+    } catch (error) {
+      throw new Error(`Could not inspect packaged app.asar for mpv files: ${String(error)}`, { cause: error });
+    }
+  }
+
+  if (matches.length > 0) {
+    throw new Error(`Packaged mpv files are prohibited by the external-mpv distribution policy:\n${matches.join('\n')}`);
+  }
+}
+
+function requireRuntimeManifest(outputPath: string, platform: string): void {
+  const manifestPath = path.join(resourcesPath(outputPath, platform), 'ffmpeg', 'runtime-provenance.json');
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`Missing FFmpeg runtime provenance manifest: ${manifestPath}`);
+  }
+
+  let manifest: {
+    manifestVersion?: number;
+    application?: { license?: string };
+    pathsAreRelativeTo?: string;
+    distributionPolicy?: {
+      mpvBundled?: boolean;
+      mpvDownloadedByLoomTV?: boolean;
+      mpvLinkedByLoomTV?: boolean;
+    };
+    components?: unknown[];
+  };
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as typeof manifest;
+  } catch (error) {
+    throw new Error(`Invalid FFmpeg runtime provenance manifest ${manifestPath}: ${String(error)}`, { cause: error });
+  }
+  if (
+    manifest.manifestVersion !== 1
+    || manifest.application?.license !== 'MIT'
+    || manifest.pathsAreRelativeTo !== 'resources'
+    || manifest.distributionPolicy?.mpvBundled !== false
+    || manifest.distributionPolicy?.mpvDownloadedByLoomTV !== false
+    || manifest.distributionPolicy?.mpvLinkedByLoomTV !== false
+    || !Array.isArray(manifest.components)
+    || manifest.components.length === 0
+  ) {
+    throw new Error(`FFmpeg runtime provenance manifest is missing required fields: ${manifestPath}`);
+  }
+}
+
 function copyRuntimeModule(moduleName: string, targetNodeModules: string, copied = new Set<string>()): void {
   if (copied.has(moduleName)) return;
   copied.add(moduleName);
@@ -142,6 +221,8 @@ const config: ForgeConfig = {
     postPackage: async (_config, packageResult) => {
       for (const outputPath of packageResult.outputPaths) {
         prunePackagedFfmpegResources(outputPath, packageResult.platform);
+        requireRuntimeManifest(outputPath, packageResult.platform);
+        assertNoPackagedMpv(outputPath, packageResult.platform);
       }
     },
   },
@@ -162,12 +243,13 @@ const config: ForgeConfig = {
       'resources/lmtv-icon-nobg.svg.png',
       'resources/trayIcon.png',
       'resources/trayIcon@2x.png',
+      'resources/libvlc',
       'resources/DICEBEAR_GLYPHS_LICENSE.md',
     ],
     afterPrune: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
         try {
-          const directRuntimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path', 'ffmpeg-static', 'ffprobe-static'];
+          const directRuntimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path'];
           const targetNodeModules = path.join(buildPath, 'node_modules');
           fs.mkdirSync(targetNodeModules, { recursive: true });
 

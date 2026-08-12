@@ -50,8 +50,6 @@ export const THIRD_PARTY_DEPENDENCIES = [
   { name: 'better-sqlite3', owner: 'Joshua Wise and contributors', license: 'MIT', url: 'https://github.com/WiseLibs/better-sqlite3' },
   { name: 'clsx', owner: 'Luke Edwards', license: 'MIT', url: 'https://github.com/lukeed/clsx' },
   { name: 'electron-squirrel-startup', owner: 'MongoDB, Inc. and contributors', license: 'Apache-2.0', url: 'https://github.com/mongodb-js/electron-squirrel-startup' },
-  { name: 'ffmpeg-static', owner: 'Eugene Ware, Jannis R, and contributors', license: 'GPL-3.0-or-later', url: 'https://github.com/eugeneware/ffmpeg-static' },
-  { name: 'ffprobe-static', owner: 'joshwnj and contributors', license: 'MIT', url: 'https://github.com/joshwnj/ffprobe-static' },
   { name: 'hls.js', owner: 'video-dev contributors', license: 'Apache-2.0', url: 'https://github.com/video-dev/hls.js' },
   { name: 'Lucide React', owner: 'Eric Fennis and Lucide contributors', license: 'ISC', url: 'https://lucide.dev/' },
   { name: 'Motion', owner: 'Motion Division', license: 'MIT', url: 'https://motion.dev/' },

@@ -16,7 +16,7 @@ type RendererSettingsModule = {
 };
 
 type LanTlsIdentityModule = {
-  loadOrCreateLanTlsIdentity: (userDataPath: string) => {
+  loadOrCreateLanTlsIdentity: (userDataPath: string, sanAddresses?: readonly string[]) => {
     certificatePem: string;
     privateKeyPem: string;
     certFingerprint: string;
@@ -61,7 +61,7 @@ test('LAN TLS identity is valid, pinned, private on disk, and stable across rest
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'loomtv-lan-tls-'));
   t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
 
-  const first = loadOrCreateLanTlsIdentity(temporaryRoot);
+  const first = loadOrCreateLanTlsIdentity(temporaryRoot, ['192.168.1.25', 'not-an-ip']);
   const certificate = new X509Certificate(first.certificatePem);
   const second = loadOrCreateLanTlsIdentity(temporaryRoot);
 
@@ -70,6 +70,12 @@ test('LAN TLS identity is valid, pinned, private on disk, and stable across rest
   assert.equal(second.certFingerprint, first.certFingerprint);
   assert.equal(second.certificatePem, first.certificatePem);
   assert.equal(second.privateKeyPem, first.privateKeyPem);
+  assert.match(certificate.subjectAltName || '', /DNS:localhost/);
+  assert.match(certificate.subjectAltName || '', /192\.168\.1\.25/);
+  assert.ok(
+    Date.parse(certificate.validTo) - Date.parse(certificate.validFrom) <= 398 * 24 * 60 * 60 * 1000,
+    'LAN certificate validity must stay within Apple\'s 398-day limit',
+  );
   if (process.platform !== 'win32') {
     const mode = fs.statSync(path.join(temporaryRoot, 'lan-tls-identity.json')).mode & 0o777;
     assert.equal(mode, 0o600);

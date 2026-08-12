@@ -19,8 +19,10 @@ import { sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import {
   commandMpvPlayback,
   mpvAvailability,
+  refreshMpvAvailability,
   startMpvPlayback,
   stopMpvPlayback,
+  validateMpvExecutable,
 } from './mpvPlayback.ts';
 
 type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
@@ -41,6 +43,7 @@ type LanPairedDevice = {
 };
 
 type NetworkSettings = {
+  mpvExecutablePath?: string;
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
   localNetworkPairedDevices?: LanPairedDevice[];
@@ -439,6 +442,34 @@ export function registerIpcHandlers<
   });
 
   handle('mpv:availability', () => mpvAvailability());
+
+  handle('mpv:refresh-availability', () => refreshMpvAvailability());
+
+  handle('mpv:choose-executable', async () => {
+    deps.authorizeSettingsWrite();
+    const result = await deps.showOpenFolderDialog({
+      title: 'Choose mpv executable',
+      properties: ['openFile'],
+      filters: process.platform === 'win32'
+        ? [{ name: 'mpv executable', extensions: ['exe'] }]
+        : [{ name: 'mpv executable', extensions: ['*'] }],
+    });
+    const selectedPath = result.filePaths[0];
+    if (result.canceled || !selectedPath) return mpvAvailability();
+    const validated = validateMpvExecutable(selectedPath);
+    deps.saveSettings({ ...deps.loadSettings(), mpvExecutablePath: validated.executablePath });
+    deps.onSettingsSaved?.();
+    return refreshMpvAvailability();
+  });
+
+  handle('mpv:reset-executable', () => {
+    deps.authorizeSettingsWrite();
+    const settings = deps.loadSettings();
+    const { mpvExecutablePath: _mpvExecutablePath, ...rest } = settings;
+    deps.saveSettings(rest as TSettings);
+    deps.onSettingsSaved?.();
+    return refreshMpvAvailability();
+  });
 
   handle('mpv:start', (event, filePath, options) => {
     deps.authorizeMediaPath(filePath);

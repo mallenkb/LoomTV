@@ -94,8 +94,6 @@
     "clsx": "2.1.1",
     "electron-squirrel-startup": "1.0.1",
     "electron-updater": "6.8.9",
-    "ffmpeg-static": "5.3.0",
-    "ffprobe-static": "3.1.0",
     "hls.js": "1.6.16",
     "lucide-react": "1.14.0",
     "motion": "12.38.0",
@@ -140,6 +138,22 @@
       {
         "from": "resources/trayIcon@2x.png",
         "to": "trayIcon@2x.png"
+      },
+      {
+        "from": "resources/libvlc",
+        "to": "libvlc"
+      },
+      {
+        "from": "resources/ffmpeg/runtime-provenance.json",
+        "to": "ffmpeg/runtime-provenance.json"
+      },
+      {
+        "from": "resources/ffmpeg/NOTICE.md",
+        "to": "ffmpeg/NOTICE.md"
+      },
+      {
+        "from": "resources/ffmpeg/COPYING.GPLv3.txt",
+        "to": "ffmpeg/COPYING.GPLv3.txt"
       },
       {
         "from": "resources/fpcalc/NOTICE.md",

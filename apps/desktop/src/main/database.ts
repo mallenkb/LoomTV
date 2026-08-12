@@ -163,7 +163,7 @@ function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkReposito
 export function loadLibraryFromDatabase(): LibraryData | null {
   // The library payload is profile-neutral: viewer recency is derived from the
   // selected profile's progress by each client, never baked into the catalog.
-  return loadLibraryRecord(getDb(), new Map(), getCustomArtworkMap());
+  return loadLibraryRecord(getDb(), getCustomArtworkMap());
 }
 
 export function saveLibraryToDatabase(data: LibraryData): void {

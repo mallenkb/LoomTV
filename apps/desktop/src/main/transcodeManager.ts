@@ -12,11 +12,11 @@ import { findFFmpeg, getTranscodeCapabilities } from './mediaBinaries';
 import { pipeResponse } from './httpResponses';
 import { assertLocalMediaPath, probeMedia } from './mediaProbe';
 import {
-  HLS_SEGMENT_SECONDS,
-  HLS_WINDOW_SEGMENTS,
+  HLS_SEGMENT_PROFILES,
   buildHlsArgs,
   buildVodPlaylist,
   frameAlignedSegmentSeconds,
+  hlsSegmentProfileForScope,
   shouldRepositionEncoder,
   transcodeSegmentCount,
   transcodeSegmentName,
@@ -29,6 +29,7 @@ import type { MediaTrack, TranscodeOptions, TranscodeSession } from './mediaType
 interface ActiveSession {
   sessionId: string;
   sessionKey: string;
+  scope: string;
   filePath: string;
   outputDir: string;
   playlistUrl: string;
@@ -37,6 +38,8 @@ interface ActiveSession {
   mediaInfo?: HlsMediaInfo;
   durationSeconds: number;
   segmentSeconds: number;
+  windowSegments: number;
+  maxCachedSegments: number;
   segmentCount: number;
   seekable: boolean;
   process: ChildProcess | null;
@@ -54,14 +57,13 @@ interface ActiveSession {
 }
 
 const sessions = new Map<string, ActiveSession>();
-const SEGMENT_SECONDS = HLS_SEGMENT_SECONDS;
 // One in-app viewer plus one LAN viewer; a third session evicts the least
 // recently active one instead of stacking more encoders.
 const MAX_ACTIVE_TRANSCODE_SESSIONS = 2;
 const ENCODER_IDLE_TIMEOUT_MS = 30000;
 const SESSION_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const CACHE_PRUNE_INTERVAL_MS = 5000;
-const MAX_CACHED_SEGMENTS_PER_SESSION = HLS_WINDOW_SEGMENTS * 3;
+const MAX_CACHED_BYTES_PER_SESSION = 256 * 1024 * 1024;
 // hls.js fetches fragments roughly in order; allow this much slack before a
 // non-contiguous request counts as a seek that repositions the encoder.
 const SEGMENT_REQUEST_CONTIGUITY = 3;
@@ -387,6 +389,7 @@ function spawnWindow(
     seekable,
     startNumber: index,
     segmentSeconds: session.segmentSeconds,
+    windowSegments: session.windowSegments,
   });
 
   console.log(`[transcode] ${path.basename(session.filePath)} window@${index} | preset:${preset} seekable:${seekable}`);
@@ -601,17 +604,31 @@ function pruneCachedSegments(session: ActiveSession, centerIndex: number): void 
   if (now - session.lastPrunedAt < CACHE_PRUNE_INTERVAL_MS) return;
   session.lastPrunedAt = now;
 
-  const radius = Math.floor(MAX_CACHED_SEGMENTS_PER_SESSION / 2);
+  const radius = Math.floor(session.maxCachedSegments / 2);
   const minIndex = Math.max(0, centerIndex - radius);
   const maxIndex = centerIndex + radius;
   try {
+    const retained: Array<{ index: number; filePath: string; size: number }> = [];
     for (const entry of fs.readdirSync(session.outputDir)) {
       const match = entry.match(/^segment-(\d+)\.ts$/);
       if (!match) continue;
       const index = Number.parseInt(match[1], 10);
-      if (Number.isFinite(index) && (index < minIndex || index > maxIndex)) {
-        fs.rmSync(path.join(session.outputDir, entry), { force: true });
-      }
+      if (!Number.isFinite(index)) continue;
+      const filePath = path.join(session.outputDir, entry);
+      const size = fs.statSync(filePath).size;
+      if (index < minIndex || index > maxIndex) fs.rmSync(filePath, { force: true });
+      else retained.push({ index, filePath, size });
+    }
+    let retainedBytes = retained.reduce((total, entry) => total + entry.size, 0);
+    if (retainedBytes > MAX_CACHED_BYTES_PER_SESSION) {
+      retained
+        .sort((left, right) => Math.abs(right.index - centerIndex) - Math.abs(left.index - centerIndex))
+        .some((entry) => {
+          if (retainedBytes <= MAX_CACHED_BYTES_PER_SESSION) return true;
+          fs.rmSync(entry.filePath, { force: true });
+          retainedBytes -= entry.size;
+          return false;
+        });
     }
   } catch {
     // Cache pruning is best effort; playback can continue without it.
@@ -673,7 +690,9 @@ export async function startTranscode(
   // the playlist must be built on the same frame-aligned length or a segment's
   // declared start drifts away from the content it actually holds.
   const mediaInfo = await hlsMediaInfo(filePath, effectiveOptions);
-  const segmentSeconds = frameAlignedSegmentSeconds(SEGMENT_SECONDS, mediaInfo?.frameRate);
+  const segmentProfile = HLS_SEGMENT_PROFILES[hlsSegmentProfileForScope(sessionScope)];
+  const segmentSeconds = frameAlignedSegmentSeconds(segmentProfile.segmentSeconds, mediaInfo?.frameRate);
+  const windowSegments = segmentProfile.windowSegments;
   const seekable = durationSeconds > 0;
   const segmentCount = transcodeSegmentCount(durationSeconds, segmentSeconds);
   const sessionId = randomUUID();
@@ -688,6 +707,7 @@ export async function startTranscode(
   const session: ActiveSession = {
     sessionId,
     sessionKey,
+    scope: sessionScope,
     filePath,
     outputDir,
     playlistUrl: playlistUrlFor(serverBase, sessionId),
@@ -696,6 +716,8 @@ export async function startTranscode(
     mediaInfo,
     durationSeconds,
     segmentSeconds,
+    windowSegments,
+    maxCachedSegments: windowSegments * 2,
     segmentCount,
     seekable,
     process: null,
@@ -739,6 +761,13 @@ export function stopTranscode(sessionId: string): boolean {
   const session = sessions.get(sessionId);
   if (!session) return false;
   return stopSession(session);
+}
+
+/** Stop sessions whose caller-owned scope begins with the supplied prefix. */
+export function stopTranscodesForScope(scopePrefix: string): void {
+  for (const session of [...sessions.values()]) {
+    if (session.scope.startsWith(scopePrefix)) stopTranscode(session.sessionId);
+  }
 }
 
 export function stopAllTranscodes(): void {

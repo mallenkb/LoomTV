@@ -22,8 +22,14 @@ import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 const MAX_SIGNED_LAN_URL_TTL_SECONDS = 15 * 60;
 const IMAGE_CACHE_BUST_QUERY_PARAM = 'loomtvImageBust';
 const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
-const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// A paired device stays trusted until it is explicitly revoked. The short-lived
+// access token is still rotated frequently; this durable, hashed refresh
+// credential is what lets a device reconnect after a desktop restart without
+// asking for approval again.
+const PERSISTENT_REFRESH_TOKEN_EXPIRY = Number.MAX_SAFE_INTEGER;
 const PAIRING_SESSION_TTL_MS = 5 * 60 * 1000;
+const PAIRING_APPROVAL_TTL_MS = 60 * 1000;
+const MAX_PENDING_PAIRING_APPROVALS = 8;
 const MAX_PAIRED_DEVICES = 64;
 const PAIRED_DEVICE_TOUCH_FLUSH_MS = 30 * 1000;
 const DEVICE_SCOPES: LanPairedDevice['scopes'] = ['catalog:read', 'media:stream', 'playback:write'];
@@ -32,16 +38,51 @@ type SignedLanUrlOptions = {
   stable?: boolean;
 };
 
+export type LanPairingApprovalPrompt = {
+  requestId: string;
+  deviceName: string;
+  address: string;
+  expiresAt: number;
+};
+
+type PairingSuccess = {
+  status: 200;
+  body: Record<string, unknown>;
+};
+
+type PairingFailure = {
+  status: 409;
+  body: { error: string; message: string };
+};
+
+type PendingPairingApproval = {
+  secretHash: string;
+  address: string;
+  deviceName: string;
+  expiresAt: number;
+  supportsProfiles: boolean;
+  state: 'pending' | 'approved' | 'denied';
+  result?: PairingSuccess | PairingFailure;
+};
+
 export interface LanSecurityDeps {
   loadSettings: () => AppSettings;
   saveSettings: (settings: AppSettings) => void;
   localAccessToken: string;
   libraryForLocalNetwork: (profileId?: string, deviceId?: string) => unknown;
+  requestPairingApproval?: (request: LanPairingApprovalPrompt) => Promise<boolean>;
 }
 
 export function createLanSecurity(deps: LanSecurityDeps) {
-  const { loadSettings, saveSettings, localAccessToken, libraryForLocalNetwork } = deps;
+  const {
+    loadSettings,
+    saveSettings,
+    localAccessToken,
+    libraryForLocalNetwork,
+    requestPairingApproval,
+  } = deps;
   let pairingSecretExpiresAt = 0;
+  const pendingPairingApprovals = new Map<string, PendingPairingApproval>();
   const requestAuthorizations = new WeakMap<IncomingMessage, { ok: boolean; device?: LanPairedDevice }>();
   const pendingPairedDeviceTouches = new Map<string, { lastSeenAt: number; lastAddress: string }>();
   let pairedDeviceTouchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -86,7 +127,11 @@ export function createLanSecurity(deps: LanSecurityDeps) {
   }
 
   function getLanHmacSecret(): string {
-    return loadSettings().localNetworkHmacSecret || '';
+    const secret = loadSettings().localNetworkHmacSecret;
+    if (typeof secret !== 'string' || !/^[0-9a-f]{32,}$/i.test(secret)) {
+      throw new Error('The local-network signing secret is unavailable or invalid.');
+    }
+    return secret;
   }
 
   function requestToken(reqUrl: URL, req: IncomingMessage): string {
@@ -105,6 +150,12 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       ) return device;
     }
     return null;
+  }
+
+  function findPairedDeviceById(deviceId: string): LanPairedDevice | null {
+    if (!deviceId) return null;
+    const device = (loadSettings().localNetworkPairedDevices || []).find((candidate) => candidate.id === deviceId);
+    return device?.securityEpoch === 2 ? device : null;
   }
 
   function schedulePairedDeviceTouchFlush(): void {
@@ -183,13 +234,24 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const expSeconds = Number(exp);
     if (!Number.isFinite(expSeconds) || expSeconds < Math.floor(Date.now() / 1000)) return false;
 
+    // Signed media URLs are reusable bearer capabilities until expiry, but
+    // they must remain bound to a currently paired device. This makes owner
+    // revocation effective without breaking image caching, retries, ranges,
+    // or HLS segment requests that legitimately reuse the same URL.
+    const deviceId = reqUrl.searchParams.get('deviceId') || '';
+    if (!findPairedDeviceById(deviceId)) return false;
+
     const params = new URLSearchParams(reqUrl.searchParams);
     params.delete('sig');
     params.delete('exp');
     params.delete('nonce');
     params.delete(IMAGE_CACHE_BUST_QUERY_PARAM);
     const signingInput = `${reqUrl.pathname}?${params.toString()}|exp=${expSeconds}|nonce=${nonce}`;
-    return timingSafeStringEqual(sig, signLanPayload(signingInput));
+    try {
+      return timingSafeStringEqual(sig, signLanPayload(signingInput));
+    } catch {
+      return false;
+    }
   }
 
   function authorizeLanRequest(reqUrl: URL, req: IncomingMessage): { ok: boolean; device?: LanPairedDevice } {
@@ -245,6 +307,78 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     return false;
   }
 
+  function prunePairingApprovals(): void {
+    const now = Date.now();
+    for (const [id, pending] of pendingPairingApprovals) {
+      if (pending.expiresAt <= now) pendingPairingApprovals.delete(id);
+    }
+  }
+
+  function issuePairingCredentials(
+    deviceName: string,
+    address: string,
+    supportsProfiles: boolean,
+  ): PairingSuccess | PairingFailure {
+    const settings = loadSettings();
+    const pairedDevices = settings.localNetworkPairedDevices || [];
+    if (pairedDevices.length >= MAX_PAIRED_DEVICES) {
+      return {
+        status: 409,
+        body: {
+          error: 'paired_device_limit_reached',
+          message: 'Revoke an existing paired device in Settings before pairing another one.',
+        },
+      };
+    }
+
+    const deviceId = randomUUID();
+    const accessToken = randomBytes(32).toString('base64url');
+    const refreshToken = randomBytes(32).toString('base64url');
+    const now = Date.now();
+    const updated: LanPairedDevice = {
+      id: deviceId,
+      name: deviceName,
+      accessTokenHash: tokenHash(accessToken),
+      accessTokenExpiresAt: now + ACCESS_TOKEN_TTL_MS,
+      refreshTokenHash: tokenHash(refreshToken),
+      refreshTokenExpiresAt: PERSISTENT_REFRESH_TOKEN_EXPIRY,
+      scopes: DEVICE_SCOPES,
+      securityEpoch: 2,
+      createdAt: now,
+      lastSeenAt: now,
+      lastAddress: address,
+    };
+    saveSettings({
+      ...settings,
+      localNetworkShareToken: createLanShareCode(),
+      localNetworkPairedDevices: [...pairedDevices, updated],
+      localNetworkSecurityEpoch: 2,
+    });
+    pairingSecretExpiresAt = 0;
+    recordPairSuccess(address);
+
+    const payload = supportsProfiles
+      ? { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] } }
+      : libraryForLocalNetwork(undefined, deviceId);
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        deviceId,
+        accessToken,
+        accessTokenExpiresAt: updated.accessTokenExpiresAt,
+        refreshToken,
+        refreshTokenExpiresAt: updated.refreshTokenExpiresAt,
+        scopes: updated.scopes,
+        hostDeviceId: settings.localNetworkDeviceId,
+        hostDeviceName: settings.localNetworkDeviceName || os.hostname(),
+        certFingerprint: getLanCertificateFingerprint(),
+        library: payload,
+        libraryEtag: libraryEtagFor(payload),
+      },
+    };
+  }
+
   async function handleLanPairRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!isLanSharingEnabled()) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -253,9 +387,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     }
 
     const address = getRequestRemoteAddress(req);
-    // Refresh an expired PIN session before applying its attempt limits. A new
-    // PIN invalidates every previous guess, so old lockouts can safely reset.
-    const expectedCode = getLanShareToken();
     const limit = checkPairRateLimit(address);
     if (!limit.allowed) {
       res.writeHead(429, {
@@ -276,14 +407,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       }
       throw error;
     }
-    const code = String(body.code || '').trim().slice(0, 128);
-    const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
-
-    if (!timingSafeStringEqual(code, expectedCode)) {
-      recordPairFailure(address);
-      writeJson(res, 401, { error: 'The sharing code was not accepted.' });
-      return;
-    }
 
     if (Object.prototype.hasOwnProperty.call(body, 'deviceId')) {
       writeJson(res, 409, {
@@ -293,59 +416,139 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       return;
     }
 
-    recordPairSuccess(address);
-    const settings = loadSettings();
-    const pairedDevices = settings.localNetworkPairedDevices || [];
-    if (pairedDevices.length >= MAX_PAIRED_DEVICES) {
-      writeJson(res, 409, {
-        error: 'paired_device_limit_reached',
-        message: 'Revoke an existing paired device in Settings before pairing another one.',
+    const code = String(body.code || '').trim().slice(0, 128);
+    const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
+    const approvalRequested = body.approvalRequested === true && !code;
+    const supportsProfiles = req.headers['x-loom-profile-api-version'] === '1';
+
+    if (approvalRequested) {
+      if (!requestPairingApproval) {
+        writeJson(res, 409, {
+          error: 'approval_unavailable',
+          message: 'Approval is unavailable on this host. Use the current pairing PIN instead.',
+        });
+        return;
+      }
+
+      prunePairingApprovals();
+      if (pendingPairingApprovals.size >= MAX_PENDING_PAIRING_APPROVALS) {
+        writeJson(res, 429, {
+          error: 'approval_queue_full',
+          message: 'Too many device approvals are already waiting. Try again shortly.',
+        });
+        return;
+      }
+      if ([...pendingPairingApprovals.values()].some((pending) => pending.address === address && pending.state === 'pending')) {
+        writeJson(res, 409, {
+          error: 'approval_already_pending',
+          message: 'This device already has an approval request waiting on the desktop.',
+        });
+        return;
+      }
+
+      const requestId = randomUUID();
+      const requestSecret = randomBytes(32).toString('base64url');
+      const pending: PendingPairingApproval = {
+        secretHash: tokenHash(requestSecret),
+        address,
+        deviceName,
+        expiresAt: Date.now() + PAIRING_APPROVAL_TTL_MS,
+        supportsProfiles,
+        state: 'pending',
+      };
+      pendingPairingApprovals.set(requestId, pending);
+      writeJson(res, 202, {
+        requestId,
+        requestSecret,
+        expiresAt: pending.expiresAt,
+        status: 'pending',
       });
+
+      const settleApproval = (approved: boolean) => {
+        const current = pendingPairingApprovals.get(requestId);
+        if (!current || current.expiresAt <= Date.now() || current.state !== 'pending') {
+          pendingPairingApprovals.delete(requestId);
+          return;
+        }
+        current.state = approved ? 'approved' : 'denied';
+        if (!approved) recordPairFailure(address);
+      };
+      void requestPairingApproval({
+        requestId,
+        deviceName,
+        address,
+        expiresAt: pending.expiresAt,
+      }).then(settleApproval, () => settleApproval(false));
       return;
     }
-    const deviceId = randomUUID();
-    const accessToken = randomBytes(32).toString('base64url');
-    const refreshToken = randomBytes(32).toString('base64url');
-    const now = Date.now();
-    const updated: LanPairedDevice = {
-      id: deviceId,
-      name: deviceName,
-      accessTokenHash: tokenHash(accessToken),
-      accessTokenExpiresAt: now + ACCESS_TOKEN_TTL_MS,
-      refreshTokenHash: tokenHash(refreshToken),
-      refreshTokenExpiresAt: now + REFRESH_TOKEN_TTL_MS,
-      scopes: DEVICE_SCOPES,
-      securityEpoch: 2,
-      createdAt: now,
-      lastSeenAt: now,
-      lastAddress: address,
-    };
-    saveSettings({
-      ...settings,
-      localNetworkShareToken: createLanShareCode(),
-      localNetworkPairedDevices: [...pairedDevices, updated],
-      localNetworkSecurityEpoch: 2,
-    });
-    pairingSecretExpiresAt = 0;
 
-    const supportsProfiles = req.headers['x-loom-profile-api-version'] === '1';
-    const payload = supportsProfiles
-      ? { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] } }
-      : libraryForLocalNetwork(undefined, deviceId);
-    writeJson(res, 200, {
-      ok: true,
-      deviceId,
-      accessToken,
-      accessTokenExpiresAt: updated.accessTokenExpiresAt,
-      refreshToken,
-      refreshTokenExpiresAt: updated.refreshTokenExpiresAt,
-      scopes: updated.scopes,
-      hostDeviceId: settings.localNetworkDeviceId,
-      hostDeviceName: settings.localNetworkDeviceName || os.hostname(),
-      certFingerprint: getLanCertificateFingerprint(),
-      library: payload,
-      libraryEtag: libraryEtagFor(payload),
-    });
+    // Refresh an expired PIN session only for explicit PIN pairing. Approval
+    // requests must never rotate the fallback PIN or reset failed-PIN limits.
+    const expectedCode = getLanShareToken();
+    if (!timingSafeStringEqual(code, expectedCode)) {
+      recordPairFailure(address);
+      writeJson(res, 401, { error: 'The sharing code was not accepted.' });
+      return;
+    }
+
+    const result = issuePairingCredentials(deviceName, address, supportsProfiles);
+    writeJson(res, result.status, result.body);
+  }
+
+  async function handleLanPairStatusRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isLanSharingEnabled()) {
+      writeJson(res, 403, { error: 'Local network sharing is disabled.' });
+      return;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonBody(req, { maxBytes: 16 * 1024, timeoutMs: 10_000 });
+    } catch (error) {
+      if (error instanceof HttpBodyError) {
+        writeJson(res, error.statusCode, { error: error.message });
+        return;
+      }
+      throw error;
+    }
+
+    const requestId = String(body.requestId || '').trim();
+    const requestSecret = String(body.requestSecret || '').trim();
+    const pending = pendingPairingApprovals.get(requestId);
+    if (pending && pending.expiresAt <= Date.now()) {
+      pendingPairingApprovals.delete(requestId);
+      writeJson(res, 410, { status: 'expired', error: 'Pairing approval expired.' });
+      return;
+    }
+    prunePairingApprovals();
+
+    const address = getRequestRemoteAddress(req);
+    if (
+      !pending
+      || !requestSecret
+      || pending.address !== address
+      || !timingSafeStringEqual(pending.secretHash, tokenHash(requestSecret))
+    ) {
+      writeJson(res, 404, { error: 'Pairing approval request was not found.' });
+      return;
+    }
+
+    if (pending.state === 'pending') {
+      writeJson(res, 202, { status: 'pending', expiresAt: pending.expiresAt });
+      return;
+    }
+    if (pending.state === 'denied') {
+      pendingPairingApprovals.delete(requestId);
+      writeJson(res, 403, { status: 'denied', error: 'The desktop denied this connection.' });
+      return;
+    }
+
+    pending.result ||= issuePairingCredentials(
+      pending.deviceName,
+      pending.address,
+      pending.supportsProfiles,
+    );
+    writeJson(res, pending.result.status, pending.result.body);
   }
 
   async function handleLanRefreshRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -388,7 +591,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       accessTokenHash: tokenHash(nextAccessToken),
       accessTokenExpiresAt: now + ACCESS_TOKEN_TTL_MS,
       refreshTokenHash: tokenHash(nextRefreshToken),
-      refreshTokenExpiresAt: now + REFRESH_TOKEN_TTL_MS,
+      refreshTokenExpiresAt: PERSISTENT_REFRESH_TOKEN_EXPIRY,
       lastSeenAt: now,
       lastAddress: getRequestRemoteAddress(req),
     };
@@ -435,6 +638,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     getLanHmacSecret,
     requestToken,
     findPairedDeviceByToken,
+    findPairedDeviceById,
     touchPairedDevice,
     flushPairedDeviceTouches,
     signLanPayload,
@@ -445,6 +649,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     requireLocalOrLanAccess,
     requireStreamAccess,
     handleLanPairRequest,
+    handleLanPairStatusRequest,
     handleLanRefreshRequest,
     libraryEtagFor,
     syncLanAdvertisement,

@@ -18,6 +18,31 @@ function fail(message) {
   process.exitCode = 1;
 }
 
+function isPackagedMpvPath(value) {
+  return /(?:^|[\\/])(?:mpv(?:[-_.][^\\/]*)?|libmpv(?:[-_.][^\\/]*)?)(?:$|[\\/])/i.test(value);
+}
+
+function findPackagedMpvFiles(rootPath) {
+  const matches = [];
+  const pending = [rootPath];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) continue;
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const candidate = path.join(current, entry.name);
+      if (isPackagedMpvPath(candidate)) matches.push(candidate);
+      if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(candidate);
+    }
+  }
+  return matches;
+}
+
 function resourcesDir(packageDir) {
   if (platform === 'darwin') {
     return path.join(appBundlePath(packageDir), 'Contents', 'Resources');
@@ -140,8 +165,6 @@ const requiredAsarEntries = [
   '/node_modules/builder-util-runtime/out/index.js',
   '/node_modules/electron-updater/out/main.js',
   '/node_modules/file-uri-to-path/index.js',
-  '/node_modules/ffmpeg-static/index.js',
-  '/node_modules/ffprobe-static/index.js',
   '/node_modules/fs-extra/lib/index.js',
   '/node_modules/js-yaml/index.js',
   '/node_modules/lazy-val/out/main.js',
@@ -153,6 +176,14 @@ const requiredAsarEntries = [
 
 for (const entry of requiredAsarEntries) {
   if (!appFiles.has(entry)) fail(`Missing ${entry} in app.asar`);
+}
+
+const prohibitedMpvEntries = [
+  ...[...appFiles].filter(isPackagedMpvPath),
+  ...findPackagedMpvFiles(packageDir),
+];
+if (prohibitedMpvEntries.length > 0) {
+  fail(`Packaged mpv files are prohibited by the external-mpv distribution policy:\n${[...new Set(prohibitedMpvEntries)].join('\n')}`);
 }
 
 const requiredUnpacked = [
@@ -183,28 +214,65 @@ const bundledFfmpeg = path.join(resources, 'ffmpeg', platformFolder(), binaryNam
 const bundledFfprobe = path.join(resources, 'ffmpeg', platformFolder(), binaryName('ffprobe'));
 const bundledFpcalc = path.join(resources, 'fpcalc', platformFolder(), platform === 'win32' ? 'fpcalc.exe' : 'fpcalc');
 const fpcalcNotice = path.join(resources, 'fpcalc', 'NOTICE.md');
-const staticFfmpeg = path.join(
-  unpacked,
-  'node_modules',
-  'ffmpeg-static',
-  platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
-);
-const staticFfprobe = path.join(
-  unpacked,
-  'node_modules',
-  'ffprobe-static',
-  'bin',
-  platform,
-  arch,
-  binaryName('ffprobe'),
-);
+const libVlcPilotNotice = path.join(resources, 'libvlc', 'NOTICE.md');
 
-if (!exists(bundledFfmpeg) && !exists(staticFfmpeg)) {
-  fail(`Missing bundled ffmpeg. Checked ${bundledFfmpeg} and ${staticFfmpeg}`);
+const runtimeManifestPath = path.join(resources, 'ffmpeg', 'runtime-provenance.json');
+let runtimeManifest = null;
+if (!exists(runtimeManifestPath)) {
+  fail(`Missing FFmpeg runtime provenance manifest. Checked ${runtimeManifestPath}`);
+} else {
+  try {
+    runtimeManifest = JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8'));
+  } catch (error) {
+    fail(`Invalid FFmpeg runtime provenance manifest ${runtimeManifestPath}: ${String(error)}`);
+  }
 }
 
-if (!exists(bundledFfprobe) && !exists(staticFfprobe)) {
-  fail(`Missing bundled ffprobe. Checked ${bundledFfprobe} and ${staticFfprobe}`);
+const manifestComponents = runtimeManifest && Array.isArray(runtimeManifest.components)
+  ? runtimeManifest.components
+  : [];
+if (
+  !runtimeManifest
+  || runtimeManifest.manifestVersion !== 1
+  || runtimeManifest.application?.license !== 'MIT'
+  || runtimeManifest.pathsAreRelativeTo !== 'resources'
+  || runtimeManifest.distributionPolicy?.mpvBundled !== false
+  || runtimeManifest.distributionPolicy?.mpvDownloadedByLoomTV !== false
+  || runtimeManifest.distributionPolicy?.mpvLinkedByLoomTV !== false
+  || manifestComponents.length === 0
+) {
+  fail(`FFmpeg runtime provenance manifest is missing required fields: ${runtimeManifestPath}`);
+}
+
+const manifestFiles = manifestComponents.flatMap((component) => (
+  Array.isArray(component.files)
+    ? component.files.map((file) => ({ ...file, componentId: component.id }))
+    : []
+));
+for (const file of manifestFiles) {
+  if (!Object.prototype.hasOwnProperty.call(file, 'sha256') || typeof file.hashStatus !== 'string') {
+    fail(`Runtime manifest file entry must declare sha256 and hashStatus: ${file.path || '<unknown>'}`);
+  }
+  if (file.sha256 !== null && !/^[a-f0-9]{64}$/i.test(file.sha256)) {
+    fail(`Runtime manifest has an invalid SHA-256 value: ${file.path || '<unknown>'}`);
+  }
+}
+
+const currentPlatformManifestFiles = manifestFiles.filter((file) => file.platform === platform);
+const declaredFfmpegFiles = new Set(currentPlatformManifestFiles.map((file) => file.path));
+if (platform === 'darwin' || platform === 'win32') {
+  for (const name of ['ffmpeg', 'ffprobe']) {
+    const expectedPath = `ffmpeg/${platformFolder()}/${binaryName(name)}`;
+    if (!declaredFfmpegFiles.has(expectedPath)) {
+      fail(`Runtime manifest does not declare the authoritative ${name} binary for ${platform}: ${expectedPath}`);
+    }
+  }
+}
+if (declaredFfmpegFiles.has(`ffmpeg/${platformFolder()}/${binaryName('ffmpeg')}`) && !exists(bundledFfmpeg)) {
+  fail(`Missing authoritative bundled ffmpeg. Checked ${bundledFfmpeg}`);
+}
+if (declaredFfmpegFiles.has(`ffmpeg/${platformFolder()}/${binaryName('ffprobe')}`) && !exists(bundledFfprobe)) {
+  fail(`Missing authoritative bundled ffprobe. Checked ${bundledFfprobe}`);
 }
 
 if (!exists(bundledFpcalc)) {
@@ -213,6 +281,10 @@ if (!exists(bundledFpcalc)) {
 
 if (!exists(fpcalcNotice)) {
   fail(`Missing fpcalc distribution notice. Checked ${fpcalcNotice}`);
+}
+
+if (!exists(libVlcPilotNotice)) {
+  fail(`Missing LibVLC pilot status notice. Checked ${libVlcPilotNotice}`);
 }
 
 // When these are absent the tray silently falls back to the full-colour app

@@ -278,6 +278,77 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+interface MacAppPublisherIdentity {
+  bundleIdentifier: string;
+  teamIdentifier: string;
+}
+
+function describeSubprocessError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (typeof error !== 'object' || error === null || !('stderr' in error)) return message;
+
+  const stderr = String((error as { stderr?: unknown }).stderr || '').trim();
+  return stderr && !message.includes(stderr) ? `${message}: ${stderr}` : message;
+}
+
+async function verifyMacAppSignature(appPath: string, label: string): Promise<void> {
+  try {
+    await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath]);
+  } catch (error) {
+    throw new Error(
+      `${label} failed macOS code-signature verification (--verify --deep --strict): ${describeSubprocessError(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+async function getMacAppPublisherIdentity(appPath: string, label: string): Promise<MacAppPublisherIdentity> {
+  let output: string;
+  try {
+    const result = await execFileAsync('/usr/bin/codesign', ['--display', '--verbose=4', appPath]);
+    output = `${result.stdout}\n${result.stderr}`;
+  } catch (error) {
+    throw new Error(
+      `${label} does not have a usable macOS publisher identity: ${describeSubprocessError(error)}`,
+      { cause: error },
+    );
+  }
+
+  const bundleIdentifier = output.match(/^Identifier=(.+)$/m)?.[1]?.trim();
+  const teamIdentifier = output.match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim();
+  const unusableIdentity = /^(?:not set|none|adhoc|ad hoc|-|unknown)$/i;
+
+  if (
+    !bundleIdentifier
+    || !teamIdentifier
+    || unusableIdentity.test(bundleIdentifier)
+    || unusableIdentity.test(teamIdentifier)
+  ) {
+    throw new Error(
+      `${label} does not have a usable macOS publisher identity; a bundle identifier and TeamIdentifier are required, and ad-hoc signatures are not accepted.`,
+    );
+  }
+
+  return { bundleIdentifier, teamIdentifier };
+}
+
+async function verifyMacAppPublisher(sourceAppPath: string, runningAppPath: string): Promise<void> {
+  await verifyMacAppSignature(runningAppPath, 'Installed LoomTV app');
+  const runningIdentity = await getMacAppPublisherIdentity(runningAppPath, 'Installed LoomTV app');
+
+  await verifyMacAppSignature(sourceAppPath, 'Downloaded update app');
+  const sourceIdentity = await getMacAppPublisherIdentity(sourceAppPath, 'Downloaded update app');
+
+  if (
+    sourceIdentity.bundleIdentifier !== runningIdentity.bundleIdentifier
+    || sourceIdentity.teamIdentifier !== runningIdentity.teamIdentifier
+  ) {
+    throw new Error(
+      `Downloaded update publisher identity does not match the installed LoomTV app (bundle identifier ${sourceIdentity.bundleIdentifier} vs ${runningIdentity.bundleIdentifier}; TeamIdentifier ${sourceIdentity.teamIdentifier} vs ${runningIdentity.teamIdentifier}).`,
+    );
+  }
+}
+
 async function extractMacUpdate(updateFilePath: string, extractDir: string): Promise<string> {
   await fs.promises.mkdir(extractDir, { recursive: true });
   await execFileAsync('/usr/bin/ditto', ['-x', '-k', updateFilePath, extractDir]);
@@ -303,6 +374,10 @@ async function waitForChildToSpawn(child: ReturnType<typeof spawn>): Promise<voi
 }
 
 async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<void> {
+  if (process.platform !== 'darwin') {
+    throw new Error('The custom macOS updater was invoked on a non-macOS platform.');
+  }
+
   await verifyMacUpdateZip(updateFilePath);
 
   const helperDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'loomtv-update-install-'));
@@ -323,6 +398,7 @@ async function installMacUpdateWithoutSquirrel(updateFilePath: string): Promise<
 
   try {
     sourceAppPath = await extractMacUpdate(updateFilePath, extractDir);
+    await verifyMacAppPublisher(sourceAppPath, runningAppPath);
 
     // Fail while the current app is still open, so a permissions problem can
     // be shown instead of silently quitting and stranding the update.
