@@ -2037,7 +2037,6 @@ function AppRoot() {
 
   useEffect(() => {
     let cancelled = false;
-    const requestController = new AbortController();
 
     async function loadSource() {
       const source = playbackUrl
@@ -3761,7 +3760,7 @@ function PairingScreen({
             </Text>
           ) : manualVisible ? (
             <Text selectable style={styles.manualHint}>
-              On your desktop, open Settings > Network. Enter the HTTPS address and 6-digit PIN shown there. Do not use the address beginning with 127.0.0.1.
+              {'On your desktop, open Settings > Network. Enter the HTTPS address and 6-digit PIN shown there. Do not use the address beginning with 127.0.0.1.'}
             </Text>
           ) : null}
           <Pressable
