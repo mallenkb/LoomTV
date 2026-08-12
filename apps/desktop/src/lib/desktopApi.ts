@@ -22,8 +22,8 @@ import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
   LocalSegmentAnalysisStatus,
-  MpvAvailability,
   MpvCommand,
+  MpvAvailability,
   MpvPlaybackState,
   MpvStartOptions,
   ManualMediaSegmentInput,
@@ -38,6 +38,8 @@ import type {
   OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
   PlaybackLogoResult,
+  PlaybackCapabilities,
+  PlaybackPlanResponse,
   PlaybackMode,
   PlaybackTrackPreferences,
   RemoteLibraryConnection,
@@ -86,6 +88,7 @@ export type {
   MetadataKeyTestResult,
   MpvAvailability,
   MpvCommand,
+  MpvPlaybackDiagnostics,
   MpvPlaybackState,
   MpvStartOptions,
   OfficialArtworkResult,
@@ -93,6 +96,8 @@ export type {
   OfficialMetadataApplyTarget,
   OfficialMetadataCandidate,
   PlaybackLogoResult,
+  PlaybackCapabilities,
+  PlaybackPlanResponse,
   PlaybackTrackPreferences,
   ProfileCreateInput,
   ProfileListEntry,
@@ -118,6 +123,29 @@ export type {
 } from '../shared/desktopProtocol.ts';
 export type { MpvPlaybackTrack } from '../shared/desktopProtocol.ts';
 export type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
+
+/**
+ * Optional renderer contract for the experimental LibVLC pilot. The bridge is
+ * intentionally optional: the current Electron main process does not expose
+ * LibVLC, and a renderer must not infer a native surface from availability
+ * alone.
+ */
+export type LibVlcSurface = 'external-window' | 'embedded' | 'unavailable';
+export type LibVlcSurfaceDescriptor = LibVlcSurface | { kind: LibVlcSurface };
+export type LibVlcAvailability = MpvAvailability & {
+  enabled?: boolean;
+  surface?: LibVlcSurfaceDescriptor;
+};
+export type LibVlcPlaybackState = Omit<MpvPlaybackState, 'sessionId'> & {
+  sessionId?: string;
+};
+export type LibVlcStartResult = {
+  ok: boolean;
+  sessionId?: string;
+  surface?: LibVlcSurface;
+  error?: string;
+};
+export type LibVlcCommand = MpvCommand;
 declare const __APP_VERSION__: string | undefined;
 
 export const APP_VERSION = typeof __APP_VERSION__ === 'string' && __APP_VERSION__
@@ -211,14 +239,25 @@ export type DesktopBridgeApi = {
       onUpdateState?: (callback: (state: UpdateState) => void) => () => void;
       mpv?: {
         availability: () => Promise<MpvAvailability>;
+        chooseExecutable: () => Promise<MpvAvailability>;
+        resetExecutable: () => Promise<MpvAvailability>;
+        refreshAvailability: () => Promise<MpvAvailability>;
         start: (filePath: string, options?: MpvStartOptions) => Promise<{ ok: boolean; sessionId?: string; error?: string }>;
         command: (sessionId: string, command: MpvCommand) => Promise<boolean>;
         stop: (sessionId: string) => Promise<boolean>;
         onState: (callback: (state: MpvPlaybackState) => void) => () => void;
       };
+      libvlc?: {
+        availability: () => Promise<LibVlcAvailability>;
+        start: (filePath: string, options?: MpvStartOptions) => Promise<LibVlcStartResult>;
+        command: (sessionId: string, command: LibVlcCommand) => Promise<boolean>;
+        stop: (sessionId: string) => Promise<boolean>;
+        onState: (callback: (state: LibVlcPlaybackState) => void) => () => void;
+      };
       media?: {
         probe: (filePath: string) => Promise<ApiResult<unknown>>;
         canDirectPlay: (filePath: string, backend?: 'html5' | 'hls') => Promise<ApiResult<boolean>>;
+        getPlaybackPlan?: (filePath: string, capabilities?: PlaybackCapabilities) => Promise<PlaybackPlanResponse | null>;
         startTranscode: (filePath: string, options?: TranscodeOptions) => Promise<ApiResult<TranscodeSession>>;
         stopTranscode: (sessionId: string) => Promise<ApiResult<boolean>>;
       };
@@ -403,6 +442,33 @@ async function remoteJson<T>(pathname: string, init?: RequestInit): Promise<T> {
     throw new Error(payload?.error || `The host returned ${response.status}.`);
   }
   return response.json() as Promise<T>;
+}
+
+const DEFAULT_REMOTE_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
+  containers: ['mp4', 'webm'],
+  videoCodecs: ['h264', 'vp8', 'vp9', 'av1'],
+  audioCodecs: ['aac', 'mp3', 'opus', 'vorbis'],
+  supportsHls: true,
+  supportsHdr: false,
+  supportsTextSubtitles: true,
+};
+
+async function remotePlaybackPlan(
+  filePath: string,
+  capabilities: PlaybackCapabilities = DEFAULT_REMOTE_PLAYBACK_CAPABILITIES,
+): Promise<PlaybackPlanResponse | null> {
+  if (!isRemoteDesktopMode() || !/^https?:\/\//i.test(filePath)) return null;
+  const result = await remoteJson<{ ok: boolean; data?: PlaybackPlanResponse; error?: string }>('/api/v2/playback-plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mediaId: remoteResourceId(filePath),
+      capabilities,
+      selectionRevision: getRemoteDesktopSession()?.selectionRevision,
+    }),
+  });
+  if (!result.ok || !result.data) throw new Error(result.error || 'The host could not choose a playback plan.');
+  return result.data;
 }
 
 function remoteProgressByStreamUrl(progress: Record<string, StoredProgress>): Record<string, StoredProgress> {
@@ -597,14 +663,16 @@ export const desktopApi = {
     if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
       let fileName = 'Remote stream';
       try { fileName = new URL(filePath).pathname.split('/').pop() || fileName; } catch { /* Keep fallback. */ }
+      const playbackPlan = await remotePlaybackPlan(filePath).catch(() => null);
+      const plan = playbackPlan?.plan;
       return {
         url: remoteMediaSource(filePath),
         contentType: 'video/mp4',
         fileName,
-        isTranscoded: false,
-        isRemuxed: false,
-        playbackMode: 'direct-stream',
-        decisionReason: 'Signed stream supplied by the paired LoomTV host',
+        isTranscoded: plan?.sourceAction === 'transcode',
+        isRemuxed: plan?.mode === 'remux',
+        playbackMode: plan?.mode || 'direct-stream',
+        decisionReason: plan?.reason || 'Signed stream supplied by the paired LoomTV host',
       };
     }
     if (window.desktopApi) {
@@ -1379,6 +1447,27 @@ export const desktopApi = {
       return window.desktopApi.mpv.availability();
     },
 
+    async chooseExecutable(): Promise<MpvAvailability> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
+        return { available: false, reason: 'mpv configuration is available in the local desktop app.' };
+      }
+      return window.desktopApi.mpv.chooseExecutable();
+    },
+
+    async resetExecutable(): Promise<MpvAvailability> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
+        return { available: false, reason: 'mpv configuration is available in the local desktop app.' };
+      }
+      return window.desktopApi.mpv.resetExecutable();
+    },
+
+    async refreshAvailability(): Promise<MpvAvailability> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
+        return { available: false, reason: 'mpv playback is available for local files in the desktop app.' };
+      }
+      return window.desktopApi.mpv.refreshAvailability();
+    },
+
     async start(filePath: string, options?: MpvStartOptions): Promise<{ ok: boolean; sessionId?: string; error?: string }> {
       if (isRemoteDesktopMode() || !window.desktopApi?.mpv) {
         return { ok: false, error: 'mpv playback is unavailable for this media source.' };
@@ -1399,6 +1488,39 @@ export const desktopApi = {
     },
   },
 
+  libvlc: {
+    async availability(): Promise<LibVlcAvailability> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.libvlc) {
+        return {
+          available: false,
+          enabled: false,
+          surface: 'unavailable',
+          reason: 'The experimental LibVLC bridge is not available for this desktop session.',
+        };
+      }
+      return window.desktopApi.libvlc.availability();
+    },
+
+    async start(filePath: string, options?: MpvStartOptions): Promise<LibVlcStartResult> {
+      if (isRemoteDesktopMode() || !window.desktopApi?.libvlc) {
+        return { ok: false, error: 'LibVLC playback is unavailable for this media source.' };
+      }
+      return window.desktopApi.libvlc.start(filePath, options);
+    },
+
+    async command(sessionId: string, command: LibVlcCommand): Promise<boolean> {
+      return window.desktopApi?.libvlc?.command(sessionId, command) ?? false;
+    },
+
+    async stop(sessionId: string): Promise<boolean> {
+      return window.desktopApi?.libvlc?.stop(sessionId) ?? false;
+    },
+
+    onState(callback: (state: LibVlcPlaybackState) => void): () => void {
+      return window.desktopApi?.libvlc?.onState(callback) || (() => undefined);
+    },
+  },
+
   media: {
     async probe(filePath: string): Promise<ApiResult<unknown>> {
       if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
@@ -1416,6 +1538,10 @@ export const desktopApi = {
       if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
       const probeResult = await this.probe(filePath);
       return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };
+    },
+
+    async getPlaybackPlan(filePath: string, capabilities?: PlaybackCapabilities): Promise<PlaybackPlanResponse | null> {
+      return remotePlaybackPlan(filePath, capabilities);
     },
 
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {

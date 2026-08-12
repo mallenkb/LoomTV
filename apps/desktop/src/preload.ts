@@ -213,6 +213,9 @@ const desktopApi = {
 
   mpv: {
     availability: () => ipcRenderer.invoke('mpv:availability'),
+    chooseExecutable: () => ipcRenderer.invoke('mpv:choose-executable'),
+    resetExecutable: () => ipcRenderer.invoke('mpv:reset-executable'),
+    refreshAvailability: () => ipcRenderer.invoke('mpv:refresh-availability'),
     start: (filePath: string, options?: MpvStartOptions) => ipcRenderer.invoke('mpv:start', filePath, options || {}),
     command: (sessionId: string, command: MpvCommand) => ipcRenderer.invoke('mpv:command', sessionId, command),
     stop: (sessionId: string) => ipcRenderer.invoke('mpv:stop', sessionId),

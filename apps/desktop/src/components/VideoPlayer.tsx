@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
+import { Info, X } from 'lucide-react';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -15,7 +16,7 @@ import {
   type ManagedMediaSegment,
   type MediaSegment,
   type MediaSegmentType,
-  type MpvPlaybackState,
+  type MpvPlaybackDiagnostics,
 } from '@/lib/desktopApi';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
@@ -118,7 +119,9 @@ import {
 } from './VideoPlayer/playerControls';
 import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
+import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
+import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
@@ -224,7 +227,7 @@ export default function VideoPlayer({
   // intent across the final seek so an ended event advances instead of being
   // treated as an interrupted transcode that should restart this file.
   const pendingCreditsCompletionRef = useRef(false);
-  const mpvEngineRef = useRef<MpvPlaybackEngine | null>(null);
+  const playbackEngineRef = useRef<PlaybackEngine | null>(null);
   const mpvInitialTracksAppliedRef = useRef(false);
 
   const [streamUrl, setStreamUrl] = useState<string>('');
@@ -233,7 +236,11 @@ export default function VideoPlayer({
   const [statusMessage, setStatusMessage] = useState('Preparing player...');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const [mpvActive, setMpvActive] = useState(false);
+  const [nativePlaybackActive, setNativePlaybackActive] = useState(false);
+  const [nativePlaybackKind, setNativePlaybackKind] = useState<PlaybackEngineKind | null>(null);
+  const [transcodeBackend, setTranscodeBackend] = useState<string | null>(null);
+  const [mpvDiagnostics, setMpvDiagnostics] = useState<MpvPlaybackDiagnostics | null>(null);
+  const [showPlaybackInfo, setShowPlaybackInfo] = useState(false);
 
   const libraryDurationHint = useMemo(() => {
     const items = [...libraryState.movies, ...libraryState.tvShows, ...libraryState.animeShows];
@@ -739,7 +746,7 @@ export default function VideoPlayer({
     userPausedRef.current = false;
     suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
     const video = videoRef.current;
-    if (mpvEngineRef.current) void mpvEngineRef.current.pause();
+    if (playbackEngineRef.current) void playbackEngineRef.current.pause();
     if (video) {
       video.autoplay = false;
       video.pause();
@@ -938,6 +945,7 @@ export default function VideoPlayer({
         transcodeStartSecondsRef.current = nextTranscodeStartSeconds;
       }
       setStreamIsTranscoded(true);
+      setTranscodeBackend(transcodeResult.data.preset || null);
       setStreamUrl(transcodeResult.data.playlistUrl);
       if (!keepReady) {
         setPlayerState('loading');
@@ -1043,6 +1051,7 @@ export default function VideoPlayer({
       transcodeStartSecondsRef.current = initialStreamOffset(safeStartSeconds, requiresSeekRestart);
       suppressPauseIntentUntilMsRef.current = performance.now() + 1500;
       setStreamIsTranscoded(requiresSeekRestart);
+      setTranscodeBackend(null);
       setStreamUrl(stream.url);
     } catch (error) {
       if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
@@ -1052,8 +1061,10 @@ export default function VideoPlayer({
     }
   }, [clearHls, filePath, startTranscodedFallback, stopTranscodeSession]);
 
-  const handleMpvState = useCallback((state: MpvPlaybackState) => {
+  const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
+
+    if (state.diagnostics) setMpvDiagnostics(state.diagnostics);
 
     if (typeof state.duration === 'number' || typeof state.position === 'number') {
       const nextDuration = state.duration ?? playbackDurationRef.current ?? probedDurationRef.current;
@@ -1116,9 +1127,9 @@ export default function VideoPlayer({
         setSelectedVideoTrackIndex(selectedVideo);
         setSelectedAudioTrackIndex(selectedAudio);
         setSelectedSubtitleTrackIndex(selectedSubtitle);
-        void mpvEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
-        void mpvEngineRef.current?.selectAudio(selectedAudio >= 0 ? selectedAudio : null);
-        void mpvEngineRef.current?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
+        void playbackEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
+        void playbackEngineRef.current?.selectAudio(selectedAudio >= 0 ? selectedAudio : null);
+        void playbackEngineRef.current?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
       } else {
         const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id ?? -1;
         const selectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id ?? -1;
@@ -1140,10 +1151,10 @@ export default function VideoPlayer({
       setPlayerState('ready');
       setStatusMessage('');
       setErrorMessage(null);
-      // A transient pause property while mpv opens is engine state, not user
+      // A transient pause property while a native engine opens is engine state, not user
       // intent. Every explicit Play/Resume action enters with this ref false,
       // so reaffirm autoplay once the native file is actually ready.
-      if (!userPausedRef.current) void mpvEngineRef.current?.play();
+      if (!userPausedRef.current) void playbackEngineRef.current?.play();
     } else if (state.status === 'ended') {
       const totalDuration = state.duration || playbackDurationRef.current || probedDurationRef.current;
       if (totalDuration > 0) {
@@ -1156,10 +1167,11 @@ export default function VideoPlayer({
       }
     } else if (state.status === 'error') {
       const fallbackPosition = playbackPositionRef.current;
-      const engine = mpvEngineRef.current;
-      mpvEngineRef.current = null;
+      const engine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
       void engine?.destroy();
-      setMpvActive(false);
+      setNativePlaybackActive(false);
+      setNativePlaybackKind(null);
       document.documentElement.classList.remove('loom-mpv-active');
       setStatusMessage('Falling back to the compatible player...');
       setErrorMessage(state.error || null);
@@ -1172,7 +1184,10 @@ export default function VideoPlayer({
     hlsRecoveryAttemptsRef.current = 0;
     hlsTranscodeRestartAttemptsRef.current = 0;
     setStreamIsTranscoded(false);
-    setMpvActive(false);
+    setTranscodeBackend(null);
+    setMpvDiagnostics(null);
+    setNativePlaybackActive(false);
+    setNativePlaybackKind(null);
     setSelectedSecondarySubtitleTrackIndex(-1);
     mpvInitialTracksAppliedRef.current = false;
     document.documentElement.classList.remove('loom-mpv-active');
@@ -1232,6 +1247,11 @@ export default function VideoPlayer({
     streamIsSeekableRef.current = false;
     streamUsesBrowserPipelineRef.current = false;
     setStreamIsTranscoded(false);
+    setTranscodeBackend(null);
+    setMpvDiagnostics(null);
+    setNativePlaybackActive(false);
+    setNativePlaybackKind(null);
+    document.documentElement.classList.remove('loom-mpv-active');
     updatePlaybackSnapshot(
       requestedStartPosition,
       probedDurationRef.current || getStoredDuration(filePath),
@@ -1257,10 +1277,15 @@ export default function VideoPlayer({
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data, preferences);
 
-        const canUseLocalMpv = !/^(?:https?|plexserver):/i.test(filePath)
-          && await MpvPlaybackEngine.available();
+        const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath);
+        let NativePlaybackEngine: (new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine) | null = null;
+        if (isLocalFile && await LibVlcPlaybackEngine.available().catch(() => false)) {
+          NativePlaybackEngine = LibVlcPlaybackEngine;
+        } else if (isLocalFile && await MpvPlaybackEngine.available().catch(() => false)) {
+          NativePlaybackEngine = MpvPlaybackEngine;
+        }
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-        if (canUseLocalMpv) {
+        if (NativePlaybackEngine) {
           const subtitleFiles = visibleSubtitles.flatMap((subtitle) => {
             try {
               const parsed = new URL(subtitle.url, 'http://127.0.0.1');
@@ -1273,8 +1298,8 @@ export default function VideoPlayer({
               return [];
             }
           });
-          const engine = new MpvPlaybackEngine(handleMpvState);
-          mpvEngineRef.current = engine;
+          const engine = new NativePlaybackEngine(handleNativePlaybackState);
+          playbackEngineRef.current = engine;
           const initialSubtitleStyle = subtitleStyleRef.current;
           let loaded = false;
           try {
@@ -1302,17 +1327,19 @@ export default function VideoPlayer({
             return;
           }
           if (loaded) {
-            setMpvActive(true);
+            setNativePlaybackActive(true);
+            setNativePlaybackKind(engine.kind);
             setStreamUrl('');
             document.documentElement.classList.add('loom-mpv-active');
-            setStatusMessage('Opening with mpv...');
+            setStatusMessage(`Opening with ${engine.kind}...`);
             return;
           }
-          mpvEngineRef.current = null;
+          playbackEngineRef.current = null;
           await engine.destroy();
         }
 
-        setMpvActive(false);
+        setNativePlaybackActive(false);
+        setNativePlaybackKind(null);
         document.documentElement.classList.remove('loom-mpv-active');
         await startBrowserStreamAt(requestedStartPosition);
       } catch (error) {
@@ -1327,8 +1354,8 @@ export default function VideoPlayer({
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
       browserStreamGenerationRef.current += 1;
-      const engine = mpvEngineRef.current;
-      mpvEngineRef.current = null;
+      const engine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
       void engine?.destroy();
       document.documentElement.classList.remove('loom-mpv-active');
       void stopTranscodeSession();
@@ -1336,7 +1363,7 @@ export default function VideoPlayer({
   }, [
     applyProbeData,
     filePath,
-    handleMpvState,
+    handleNativePlaybackState,
     reloadToken,
     startBrowserStreamAt,
     startPosition,
@@ -1445,12 +1472,13 @@ export default function VideoPlayer({
           return;
         }
 
+        const remoteBufferProfile = desktopApi.isRemoteLibraryMode();
         const hls = new Hls({
           autoStartLoad: false,
           startPosition: hlsStartPosition,
-          maxBufferLength: 45,
-          maxMaxBufferLength: 90,
-          backBufferLength: 30,
+          maxBufferLength: remoteBufferProfile ? 45 : 20,
+          maxMaxBufferLength: remoteBufferProfile ? 90 : 45,
+          backBufferLength: remoteBufferProfile ? 30 : 15,
           manifestLoadingMaxRetry: 20,
           manifestLoadingRetryDelay: 500,
           fragLoadingMaxRetry: 20,
@@ -1821,9 +1849,9 @@ export default function VideoPlayer({
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       userPausedRef.current = !paused;
-      void (paused ? mpvEngineRef.current.play() : mpvEngineRef.current.pause());
+      void (paused ? playbackEngineRef.current.play() : playbackEngineRef.current.pause());
       return;
     }
     const video = videoRef.current;
@@ -1840,7 +1868,7 @@ export default function VideoPlayer({
   }, [paused, playerState]);
 
   const persistFinalPlaybackProgress = useCallback(async () => {
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       const snapshotPosition = playbackPositionRef.current;
       const snapshotDuration = playbackDurationRef.current || probedDurationRef.current;
       if (snapshotPosition > 10 && snapshotDuration > 0) {
@@ -1871,10 +1899,11 @@ export default function VideoPlayer({
     sourceLoadTokenRef.current += 1;
     clearNextEpisodeCountdown();
     clearHls();
-    const engine = mpvEngineRef.current;
-    mpvEngineRef.current = null;
+    const engine = playbackEngineRef.current;
+    playbackEngineRef.current = null;
     await engine?.destroy();
-    setMpvActive(false);
+    setNativePlaybackActive(false);
+    setNativePlaybackKind(null);
     document.documentElement.classList.remove('loom-mpv-active');
     const video = videoRef.current;
     if (video) {
@@ -1934,38 +1963,38 @@ export default function VideoPlayer({
   }, [showMediaPanel, mediaPanelTab]);
 
   useEffect(() => {
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setSpeed(playbackRate);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setSpeed(playbackRate);
       return;
     }
     const video = videoRef.current;
     if (video) {
       video.playbackRate = playbackRate;
     }
-  }, [mpvActive, playbackRate, streamUrl]);
+  }, [nativePlaybackActive, playbackRate, streamUrl]);
 
   useEffect(() => {
-    if (!mpvActive || !mpvEngineRef.current) return;
+    if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const normalizeRatio = (value: string) => value.replace(/\s*\/\s*/, ':');
-    void mpvEngineRef.current.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode));
-  }, [aspectMode, mpvActive]);
+    void playbackEngineRef.current.setVideoAspect(aspectMode === 'default' ? null : normalizeRatio(aspectMode));
+  }, [aspectMode, nativePlaybackActive]);
 
   useEffect(() => {
-    if (!mpvActive || !mpvEngineRef.current) return;
+    if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const crop = cropMode === 'none' || cropMode === 'custom' ? null : cropMode.replace(/\s*\/\s*/, ':');
-    void mpvEngineRef.current.setVideoCrop(crop);
-  }, [cropMode, mpvActive]);
+    void playbackEngineRef.current.setVideoCrop(crop);
+  }, [cropMode, nativePlaybackActive]);
 
   useEffect(() => {
-    if (mpvActive) void mpvEngineRef.current?.setVideoRotation(rotation);
-  }, [mpvActive, rotation]);
+    if (nativePlaybackActive) void playbackEngineRef.current?.setVideoRotation(rotation);
+  }, [nativePlaybackActive, rotation]);
 
   useEffect(() => {
-    if (!mpvActive || !mpvEngineRef.current) return;
+    if (!nativePlaybackActive || !playbackEngineRef.current) return;
     const style = subtitleStyleRef.current;
-    void mpvEngineRef.current.setSubtitleDelay(style.delaySeconds);
-    void mpvEngineRef.current.setAudioDelay(audioDelay);
-    void mpvEngineRef.current.setSubtitleStyle({
+    void playbackEngineRef.current.setSubtitleDelay(style.delaySeconds);
+    void playbackEngineRef.current.setAudioDelay(audioDelay);
+    void playbackEngineRef.current.setSubtitleStyle({
       fontSize: Math.round(style.fontSize * style.scale),
       color: style.fontColor,
       borderColor: style.borderColor,
@@ -1973,7 +2002,7 @@ export default function VideoPlayer({
       backgroundColor: style.backgroundEnabled ? style.backgroundColor : '#00000000',
       position: style.position,
     });
-  }, [audioDelay, mpvActive]);
+  }, [audioDelay, nativePlaybackActive]);
 
   useEffect(() => {
     applyNativeTextTrackVisibility();
@@ -1985,8 +2014,8 @@ export default function VideoPlayer({
       updatePlaybackSnapshot(nextPosition, duration || playbackDurationRef.current, { forceReact: true });
     }
 
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.seek(nextPosition);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.seek(nextPosition);
       return;
     }
 
@@ -2205,9 +2234,9 @@ export default function VideoPlayer({
     const v = parseFloat(e.target.value);
     setVolume(v);
     setMuted(v === 0);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setVolume(v);
-      void mpvEngineRef.current.setMuted(v === 0);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setVolume(v);
+      void playbackEngineRef.current.setMuted(v === 0);
       return;
     }
     const video = videoRef.current;
@@ -2217,8 +2246,8 @@ export default function VideoPlayer({
   }, []);
 
   const toggleMute = useCallback(() => {
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setMuted(!muted);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setMuted(!muted);
       return;
     }
     const video = videoRef.current;
@@ -2226,7 +2255,7 @@ export default function VideoPlayer({
   }, [muted]);
 
   const restartForTrackChange = useCallback(() => {
-    if (mpvEngineRef.current) return;
+    if (playbackEngineRef.current) return;
     if (!streamUrl) return;
     applyNativeTextTrackVisibility();
     didTryTranscodeRef.current = false;
@@ -2247,10 +2276,10 @@ export default function VideoPlayer({
       clearTimeout(subtitleStyleApplyTimerRef.current);
       subtitleStyleApplyTimerRef.current = null;
     }
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       const style = subtitleStyleRef.current;
-      void mpvEngineRef.current.setSubtitleDelay(style.delaySeconds);
-      void mpvEngineRef.current.setSubtitleStyle({
+      void playbackEngineRef.current.setSubtitleDelay(style.delaySeconds);
+      void playbackEngineRef.current.setSubtitleStyle({
         fontSize: Math.round(style.fontSize * style.scale),
         color: style.fontColor,
         borderColor: style.borderColor,
@@ -2275,7 +2304,7 @@ export default function VideoPlayer({
   }, [applyNativeTextTrackVisibility, selectedSubtitleIsBurnedIn, startTranscodedFallback]);
 
   const scheduleSubtitleStyleToStream = useCallback(() => {
-    if (mpvEngineRef.current) {
+    if (playbackEngineRef.current) {
       applySubtitleStyleToStream();
       return;
     }
@@ -2324,15 +2353,15 @@ export default function VideoPlayer({
     const nextDelay = Math.max(-60, Math.min(60, seconds));
     audioDelayRef.current = nextDelay;
     setAudioDelay(nextDelay);
-    void mpvEngineRef.current?.setAudioDelay(nextDelay);
+    void playbackEngineRef.current?.setAudioDelay(nextDelay);
   }, []);
 
   const selectVideoTrack = useCallback((trackIndex: number) => {
     if (selectedVideoTrackIndexRef.current === trackIndex) return;
     selectedVideoTrackIndexRef.current = trackIndex;
     setSelectedVideoTrackIndex(trackIndex);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.selectVideo(trackIndex >= 0 ? trackIndex : null);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.selectVideo(trackIndex >= 0 ? trackIndex : null);
       return;
     }
     restartForTrackChange();
@@ -2346,8 +2375,8 @@ export default function VideoPlayer({
     sharedTrackPreferencesRef.current = nextPreferences;
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
       return;
     }
     restartForTrackChange();
@@ -2370,8 +2399,8 @@ export default function VideoPlayer({
     saveSubtitlesDefaultEnabled(enabled);
     selectedSubtitleTrackIndexRef.current = trackIndex;
     setSelectedSubtitleTrackIndex(trackIndex);
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.selectSubtitle(enabled ? trackIndex : null);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.selectSubtitle(enabled ? trackIndex : null);
       return;
     }
     if (playbackAction === 'burn-in') {
@@ -2395,20 +2424,20 @@ export default function VideoPlayer({
   ]);
 
   const selectSecondarySubtitleTrack = useCallback((trackIndex: number) => {
-    if (!mpvEngineRef.current) return;
+    if (!playbackEngineRef.current) return;
     setSelectedSecondarySubtitleTrackIndex(trackIndex);
-    void mpvEngineRef.current.selectSecondarySubtitle(trackIndex >= 0 ? trackIndex : null);
+    void playbackEngineRef.current.selectSecondarySubtitle(trackIndex >= 0 ? trackIndex : null);
   }, []);
 
   const changeVolume = useCallback((delta: number) => {
-    const currentVolume = mpvEngineRef.current ? volume : videoRef.current?.volume ?? volume;
+    const currentVolume = playbackEngineRef.current ? volume : videoRef.current?.volume ?? volume;
     const nextVolume = Math.min(1, Math.max(0, currentVolume + delta));
     setVolume(nextVolume);
     setMuted(nextVolume === 0);
 
-    if (mpvEngineRef.current) {
-      void mpvEngineRef.current.setVolume(nextVolume);
-      void mpvEngineRef.current.setMuted(nextVolume === 0);
+    if (playbackEngineRef.current) {
+      void playbackEngineRef.current.setVolume(nextVolume);
+      void playbackEngineRef.current.setMuted(nextVolume === 0);
       return;
     }
 
@@ -2785,9 +2814,16 @@ export default function VideoPlayer({
       setMarkerSaving(false);
     }
   };
+  const playbackEngineLabel = nativePlaybackKind === 'libvlc'
+    ? 'LibVLC · external native playback'
+    : nativePlaybackActive
+      ? 'mpv · external native playback'
+    : streamIsTranscoded
+      ? 'Chromium · HLS transcode'
+      : 'Chromium · HTML5';
   return (
     <div
-      className={`loom-player-root fixed inset-0 z-[70] flex ${mpvActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
+      className={`loom-player-root fixed inset-0 z-[70] flex ${nativePlaybackActive ? 'loom-player-mpv bg-transparent' : 'bg-black'} ${isModern ? 'loom-player-modern' : ''}`}
       ref={containerRef}
     >
       <style>
@@ -2799,7 +2835,7 @@ export default function VideoPlayer({
         }`}
       </style>
       <div
-        className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : 'bg-black'} ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
+        className={`relative z-0 flex min-w-0 flex-1 items-center justify-center overflow-hidden ${nativePlaybackActive ? 'bg-transparent' : 'bg-black'} ${!showControls && !showTopControls ? 'cursor-none' : ''}`}
         onPointerMove={handlePointerMove}
         onClick={handleSurfaceClick}
         onDoubleClickCapture={handleSurfaceDoubleClickCapture}
@@ -2813,11 +2849,45 @@ export default function VideoPlayer({
           onClose={handleClose}
         />
 
+        {(nativePlaybackActive || streamUrl) && showTopControls && (
+          <div className="absolute right-4 top-4 z-30">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setShowPlaybackInfo((visible) => !visible);
+              }}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 bg-black/55 px-3 text-xs font-medium text-white/85 shadow-lg backdrop-blur-md transition-colors hover:bg-black/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-expanded={showPlaybackInfo}
+              aria-controls="loom-playback-info"
+            >
+              {showPlaybackInfo ? <X className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
+              Playback info
+            </button>
+            {showPlaybackInfo && (
+              <div id="loom-playback-info" className="mt-2 w-64 rounded-xl border border-white/15 bg-black/80 p-3 text-xs text-white/75 shadow-2xl backdrop-blur-xl" onClick={(event) => event.stopPropagation()}>
+                <p className="font-semibold text-white">{playbackEngineLabel}</p>
+                <dl className="mt-2 space-y-1.5">
+                  <div className="flex justify-between gap-3"><dt>Mode</dt><dd className="text-right text-white/90">{nativePlaybackActive ? 'Direct file' : streamIsTranscoded ? 'HLS' : 'Direct stream'}</dd></div>
+                  <div className="flex justify-between gap-3"><dt>Hardware decode</dt><dd className="text-right text-white/90">{mpvDiagnostics?.hardwareDecoder || (nativePlaybackActive ? 'Auto' : 'Chromium managed')}</dd></div>
+                  {!nativePlaybackActive && streamIsTranscoded && <div className="flex justify-between gap-3"><dt>Encode backend</dt><dd className="text-right text-white/90">{transcodeBackend || 'Host auto'}</dd></div>}
+                  {mpvDiagnostics?.videoCodec && <div className="flex justify-between gap-3"><dt>Video codec</dt><dd className="text-right text-white/90">{mpvDiagnostics.videoCodec}</dd></div>}
+                  {typeof mpvDiagnostics?.bufferSeconds === 'number' && <div className="flex justify-between gap-3"><dt>Buffer</dt><dd className="text-right text-white/90">{mpvDiagnostics.bufferSeconds.toFixed(1)}s</dd></div>}
+                  {typeof mpvDiagnostics?.frameDrops === 'number' && <div className="flex justify-between gap-3"><dt>Frame drops</dt><dd className="text-right text-white/90">{mpvDiagnostics.frameDrops}</dd></div>}
+                  {typeof mpvDiagnostics?.decoderFrameDrops === 'number' && <div className="flex justify-between gap-3"><dt>Decoder drops</dt><dd className="text-right text-white/90">{mpvDiagnostics.decoderFrameDrops}</dd></div>}
+                  {mpvDiagnostics?.buffering && <div className="pt-1 text-amber-200">Buffering</div>}
+                </dl>
+                {!nativePlaybackActive && <p className="mt-2 border-t border-white/10 pt-2 text-[11px] text-white/50">HLS backend details are reported by the host transcoder.</p>}
+              </div>
+            )}
+          </div>
+        )}
+
         <div
-          className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${mpvActive ? 'bg-transparent' : ''} ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
+          className={`relative flex min-h-0 min-w-0 items-center justify-center overflow-hidden ${nativePlaybackActive ? 'bg-transparent' : ''} ${videoFrameRatio ? 'max-h-full max-w-full' : 'h-full w-full'}`}
           style={videoFrameStyle}
         >
-          {!mpvActive && (
+          {!nativePlaybackActive && (
             <video
               ref={videoRef}
               className="h-full w-full"
@@ -3051,12 +3121,12 @@ export default function VideoPlayer({
           selectAudioTrack={selectAudioTrack}
           audioDelay={audioDelay}
           updateAudioDelay={updateAudioDelay}
-          audioDelayAvailable={mpvActive}
+          audioDelayAvailable={nativePlaybackActive}
           subtitlesDefaultEnabled={subtitlesDefaultEnabled}
           subtitleTracks={subtitleTracks}
           selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
           selectSubtitleTrack={selectSubtitleTrack}
-          secondarySubtitlesAvailable={mpvActive}
+          secondarySubtitlesAvailable={nativePlaybackActive}
           selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
           selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
           subtitleStyle={subtitleStyle}

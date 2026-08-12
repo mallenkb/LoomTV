@@ -183,7 +183,10 @@ function transcodeArgs(filePath, outputDir, health, profile) {
     if (profile.codec === 'av1') args.push('-preset', '8', '-crf', '32', '-pix_fmt', 'yuv420p');
     if (profile.videoBitrateKbps) args.push('-b:v', `${profile.videoBitrateKbps}k`, '-maxrate', `${profile.videoBitrateKbps}k`, '-bufsize', `${profile.videoBitrateKbps * 2}k`);
   }
-  args.push('-c:a', 'aac', '-b:a', `${profile.audioBitrateKbps}k`, '-ac', '2', '-f', 'hls', '-hls_time', '4', '-hls_list_size', '8', '-hls_flags', 'delete_segments+independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
+  // LAN playback favors a short startup while retaining enough runway for
+  // normal network jitter. The client keeps a smaller local buffer profile;
+  // this headless service is the stable two-second LAN profile.
+  args.push('-c:a', 'aac', '-b:a', `${profile.audioBitrateKbps}k`, '-ac', '2', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '45', '-hls_flags', 'delete_segments+independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
   return args;
 }
 
