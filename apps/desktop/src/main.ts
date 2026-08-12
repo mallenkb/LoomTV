@@ -165,7 +165,6 @@ import {
   loadLibraryFromDatabase,
   remapLibraryMediaReferences,
   recordMetadataRefresh,
-  setMetadataRefreshCategoryLocked,
   saveCustomArtwork,
   saveLibraryItemToDatabase,
   saveLibraryToDatabase,
@@ -1313,7 +1312,6 @@ const {
   probeMediaFile,
   recordMetadataRefresh,
   saveLibraryItem: saveLibraryItemMutation,
-  setMetadataRefreshCategoryLocked,
 });
 
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {

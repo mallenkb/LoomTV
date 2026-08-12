@@ -63,17 +63,19 @@ export function recordMetadataRefresh(
   database: BetterSqlite3.Database,
   mediaId: string,
   category: MetadataRefreshCategory,
-  result: { refreshedAt?: number; error?: string },
+  result: { refreshedAt?: number; error?: string; locked?: boolean },
 ): void {
   const attemptedAt = Date.now();
+  const locked = result.locked === undefined ? null : result.locked ? 1 : 0;
   database.prepare(`
     INSERT INTO media_metadata_refresh_state (media_id, category, refreshed_at, attempted_at, last_error, locked)
-    VALUES (?, ?, ?, ?, ?, 0)
+    VALUES (?, ?, ?, ?, ?, COALESCE(?, 0))
     ON CONFLICT(media_id, category) DO UPDATE SET
       refreshed_at = COALESCE(excluded.refreshed_at, media_metadata_refresh_state.refreshed_at),
       attempted_at = excluded.attempted_at,
-      last_error = excluded.last_error
-  `).run(mediaId, category, result.refreshedAt ?? null, attemptedAt, result.error ?? null);
+      last_error = excluded.last_error,
+      locked = COALESCE(?, media_metadata_refresh_state.locked)
+  `).run(mediaId, category, result.refreshedAt ?? null, attemptedAt, result.error ?? null, locked, locked);
 }
 
 export function setMetadataRefreshCategoryLocked(

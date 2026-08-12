@@ -390,7 +390,7 @@ export function getMetadataRefreshState(mediaId: string, category: MetadataRefre
 export function recordMetadataRefresh(
   mediaId: string,
   category: MetadataRefreshCategory,
-  result: { refreshedAt?: number; error?: string },
+  result: { refreshedAt?: number; error?: string; locked?: boolean },
 ): void {
   recordMetadataRefreshRecord(getDb(), mediaId, category, result);
 }

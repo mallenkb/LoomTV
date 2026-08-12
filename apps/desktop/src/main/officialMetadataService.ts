@@ -84,12 +84,7 @@ export type OfficialMetadataServiceDependencies = {
   recordMetadataRefresh: (
     mediaId: string,
     category: MetadataRefreshCategory,
-    result: { refreshedAt?: number; error?: string },
-  ) => void;
-  setMetadataRefreshCategoryLocked: (
-    mediaId: string,
-    category: MetadataRefreshCategory,
-    locked: boolean,
+    result: { refreshedAt?: number; error?: string; locked?: boolean },
   ) => void;
   cacheArtworkNow: (library: LibraryData) => Promise<void>;
   loadSettings: () => AppSettings;
@@ -297,7 +292,6 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     probeMediaFile,
     recordMetadataRefresh,
     saveLibraryItem,
-    setMetadataRefreshCategoryLocked,
   } = deps;
 
   const metadataRequestsAllowed = () => !loadSettings().metadataOfflineMode;
@@ -320,7 +314,10 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
   }
 
   function lockMetadataCategories(mediaId: string, categories: MetadataRefreshCategory[]): void {
-    for (const category of categories) setMetadataRefreshCategoryLocked(mediaId, category, true);
+    const refreshedAt = Date.now();
+    for (const category of categories) {
+      recordMetadataRefresh(mediaId, category, { refreshedAt, locked: true });
+    }
   }
 
   function recordMetadataCategories(
