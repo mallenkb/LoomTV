@@ -15,6 +15,9 @@ interface MediaPosterCardProps {
   from: string;
   variant: MediaPosterCardVariant;
   metaLine?: string;
+  /** Use the library card visual for non-library items without creating a local media route. */
+  onSelect?: () => void;
+  selectLabel?: string;
 }
 
 /* Home rail cards are approximately 200x340. VirtualPosterGrid gives library
@@ -96,15 +99,13 @@ const MediaPosterCard = memo(function MediaPosterCard({
   from,
   variant,
   metaLine = '',
+  onSelect,
+  selectLabel,
 }: MediaPosterCardProps) {
   const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
 
-  return (
-    <Link
-      to={mediaLink(item)}
-      state={{ from, artwork: routeArtwork }}
-      className={ROOT_CLASS[variant]}
-    >
+  const cardContent = (
+    <>
       <div className="loom-poster-frame relative aspect-[2/3] min-h-0 shrink overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
           src={cardSources}
@@ -128,6 +129,29 @@ const MediaPosterCard = memo(function MediaPosterCard({
         <h4 className="line-clamp-2 text-sm font-semibold leading-tight text-[var(--loom-text)]">{item.title}</h4>
         {metaLine && <p className="truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
       </div>
+    </>
+  );
+
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-label={selectLabel || `Open ${item.title}`}
+        className={`${ROOT_CLASS[variant]} border-0 bg-transparent p-0 text-left`}
+      >
+        {cardContent}
+      </button>
+    );
+  }
+
+  return (
+    <Link
+      to={mediaLink(item)}
+      state={{ from, artwork: routeArtwork }}
+      className={ROOT_CLASS[variant]}
+    >
+      {cardContent}
     </Link>
   );
 });

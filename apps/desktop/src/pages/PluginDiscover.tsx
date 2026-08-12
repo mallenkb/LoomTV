@@ -3,6 +3,9 @@ import { Compass, Info, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
+import MediaPosterCard from '@/components/MediaPosterCard';
+import VirtualPosterGrid from '@/components/VirtualPosterGrid';
+import type { MediaItem } from '@/contexts/LibraryContext';
 import {
   desktopApi,
   type StremioPluginCatalogDefinition,
@@ -22,6 +25,37 @@ function requiredCatalogExtra(catalog: StremioPluginCatalogDefinition): Record<s
   return Object.fromEntries(catalog.extra
     .filter((extra) => extra.isRequired && extra.options?.length)
     .map((extra) => [extra.name, String(extra.options?.[0] || '')]));
+}
+
+function catalogMediaItem(addonId: string, item: StremioPluginCatalogItem): MediaItem {
+  const type: MediaItem['type'] = item.type === 'movie'
+    ? 'movie'
+    : item.type === 'anime' ? 'anime' : 'tv';
+  const yearMatch = (item.releaseInfo || item.released || '').match(/\b(\d{4})\b/);
+  const year = yearMatch ? Number(yearMatch[1]) : 0;
+  const stableId = `stremio:${addonId}:${item.type}:${item.id}`;
+  return {
+    id: stableId,
+    type,
+    title: item.title,
+    year,
+    poster: item.posterUrl || '',
+    backdrop: item.backgroundUrl || '',
+    logo: item.logoUrl,
+    posterCandidates: item.posterUrl ? [item.posterUrl] : [],
+    backdropCandidates: item.backgroundUrl ? [item.backgroundUrl] : [],
+    logoCandidates: item.logoUrl ? [item.logoUrl] : [],
+    summary: item.description || '',
+    rating: item.rating || 0,
+    genres: [...item.genres],
+    cast: [],
+    filePath: '',
+    catalogRevision: 1,
+  };
+}
+
+function catalogMetaLine(item: StremioPluginCatalogItem): string {
+  return item.releaseInfo || item.released || item.runtime || '';
 }
 
 export default function PluginDiscover() {
@@ -222,21 +256,23 @@ export default function PluginDiscover() {
             ) : visibleItems.length === 0 ? (
               <p className="py-16 text-center text-sm text-[var(--loom-muted)]">No titles returned for this catalog.</p>
             ) : (
-              <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {visibleItems.map((item) => (
-                  <button
-                    key={`${item.type}:${item.id}`}
-                    type="button"
-                    onClick={() => void inspectItem(item)}
-                    className="min-h-44 rounded-2xl border border-[var(--loom-border)] bg-[var(--loom-panel)] p-4 text-left transition-colors hover:border-[var(--loom-accent)]/50 hover:bg-[var(--loom-surface-2)]"
-                  >
-                    <p className="text-xs uppercase tracking-wide text-[var(--loom-accent)]">{item.type}</p>
-                    <h2 className="mt-2 line-clamp-2 text-base font-semibold text-white">{item.title}</h2>
-                    <p className="mt-2 text-xs text-[var(--loom-faint)]">{item.releaseInfo || item.released || 'Release date unavailable'}</p>
-                    {item.genres.length > 0 && <p className="mt-3 line-clamp-2 text-xs leading-5 text-[var(--loom-muted)]">{item.genres.join(' · ')}</p>}
-                    {item.rating !== undefined && <p className="mt-3 text-xs font-medium text-yellow-200">Rating {item.rating}</p>}
-                  </button>
-                ))}
+              <div className="mt-6">
+                <VirtualPosterGrid
+                  items={[...visibleItems]}
+                  renderItem={(item) => {
+                    const mediaItem = catalogMediaItem(plugin?.addonId || addonId, item);
+                    return (
+                      <MediaPosterCard
+                        item={mediaItem}
+                        from="/discover"
+                        variant={mediaItem.type === 'movie' ? 'movies' : 'tv'}
+                        metaLine={catalogMetaLine(item)}
+                        onSelect={() => void inspectItem(item)}
+                        selectLabel={`Preview metadata for ${item.title}`}
+                      />
+                    );
+                  }}
+                />
               </div>
             )}
           </>

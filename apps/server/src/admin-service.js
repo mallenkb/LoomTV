@@ -556,6 +556,7 @@ function normalizeState(raw) {
 }
 
 export function createHeadlessAdminService(options) {
+  if (!options.bootstrapSecurity) throw new Error('createHeadlessAdminService requires bootstrapSecurity.');
   const dataDir = path.resolve(options.dataDir);
   const statePath = path.join(dataDir, STATE_FILENAME);
   const mediaDir = options.mediaDir ? path.resolve(options.mediaDir) : null;
@@ -1008,10 +1009,14 @@ export function createHeadlessAdminService(options) {
     },
 
     async createOwner(input) {
-      if (ownerCreationPromise) return ownerCreationPromise;
+      // Never hand a concurrent caller the first request's newly issued
+      // owner token. Wait for the in-flight attempt, then re-evaluate owner
+      // state and the one-time capability for this caller independently.
+      while (ownerCreationPromise) await ownerCreationPromise.catch(() => undefined);
       ownerCreationPromise = (async () => {
         const state = await loadState();
         if (state.owner) throw Object.assign(new Error('The LoomTV owner has already been created.'), { status: 409 });
+        options.bootstrapSecurity.authorize(input.bootstrapSecret, input.address);
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 80) {
           throw invalidInput('The owner name must be between 1 and 80 characters.');
         }
@@ -1021,6 +1026,7 @@ export function createHeadlessAdminService(options) {
         const credentials = await hashPassword(input.password);
         state.owner = { id: randomUUID(), name: input.name.trim(), ...credentials };
         await saveState(state);
+        await options.bootstrapSecurity.invalidate();
         await appendLog('info', 'Owner account created.');
         return issueToken(state, publicOwnerPrincipal(state.owner));
       })();

@@ -10,16 +10,21 @@ import {
   headlessAdminStateFilename,
   loginThrottleDelayMs,
 } from '../src/admin-service.js';
+import { createBootstrapSecurity } from '../src/secure-bootstrap.js';
 
 const OWNER_PASSWORD = 'correct-horse-battery';
+const BOOTSTRAP_SECRET = 'test-bootstrap-secret-32-bytes-minimum';
 
 async function makeService(overrides = {}) {
   const dataDir = overrides.dataDir || await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-admin-'));
+  const bootstrapSecurity = createBootstrapSecurity({ dataDir, secret: BOOTSTRAP_SECRET });
+  await bootstrapSecurity.initialize({ ownerConfigured: false });
   const service = createHeadlessAdminService({
     dataDir,
     version: '0.0.0-test',
     getRuntimeHealth: async () => ({ media: { state: 'online' } }),
     getSessions: async () => [],
+    bootstrapSecurity,
     ...overrides.options,
   });
   return { service, dataDir };
@@ -31,7 +36,7 @@ function bearer(token) {
 
 async function onboardedService(overrides = {}) {
   const { service, dataDir } = await makeService(overrides);
-  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD });
+  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   const principal = await service.authenticateRequest(bearer(session.adminToken));
   return { service, dataDir, token: session.adminToken, principal };
 }
@@ -228,14 +233,62 @@ test('owner onboarding issues a usable session and cannot run twice', async () =
   const { service } = await makeService();
   assert.equal(await service.isOwnerConfigured(), false);
 
-  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD });
+  await assert.rejects(
+    () => service.createOwner({ name: 'Owner', password: OWNER_PASSWORD }),
+    (error) => error.status === 401 && error.code === 'bootstrap_secret_invalid',
+  );
+  const session = await service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET });
   assert.equal(typeof session.adminToken, 'string');
   assert.equal(session.user.type, 'owner');
   assert.equal(await service.isOwnerConfigured(), true);
 
   const principal = await service.authenticateRequest(bearer(session.adminToken));
   assert.equal(principal.type, 'owner');
-  await assert.rejects(() => service.createOwner({ name: 'Second', password: OWNER_PASSWORD }), (error) => error.status === 409);
+  await assert.rejects(
+    () => service.createOwner({ name: 'Second', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET }),
+    (error) => error.status === 409,
+  );
+});
+
+test('concurrent owner bootstrap never shares the winning session token', async () => {
+  const { service } = await makeService();
+  const attempts = await Promise.allSettled([
+    service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET, address: '192.0.2.20' }),
+    service.createOwner({ name: 'Owner', password: OWNER_PASSWORD, bootstrapSecret: BOOTSTRAP_SECRET, address: '192.0.2.21' }),
+  ]);
+  assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
+  const rejected = attempts.find((attempt) => attempt.status === 'rejected');
+  assert.equal(rejected.reason.status, 409);
+});
+
+test('bootstrap lockout is independent from normal login attempts', async () => {
+  const { service } = await makeService();
+  let bootstrapLock;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await service.createOwner({
+        name: 'Owner',
+        password: OWNER_PASSWORD,
+        bootstrapSecret: `invalid-bootstrap-secret-${attempt}`,
+        address: '192.0.2.30',
+      });
+    } catch (error) {
+      if (error.code === 'bootstrap_locked') bootstrapLock = error;
+      else assert.equal(error.code, 'bootstrap_secret_invalid');
+    }
+  }
+  assert.equal(bootstrapLock?.status, 429);
+
+  await service.createOwner({
+    name: 'Owner',
+    password: OWNER_PASSWORD,
+    bootstrapSecret: BOOTSTRAP_SECRET,
+    address: '192.0.2.31',
+  });
+  await assert.rejects(
+    () => service.createSession({ password: 'wrong-password', address: '192.0.2.30' }),
+    (error) => error.status === 401 && error.code === 'invalid_credentials',
+  );
 });
 
 test('sign-in rejects bad credentials with a generic error and locks out after repeated failures', async () => {

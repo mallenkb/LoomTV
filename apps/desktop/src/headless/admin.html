@@ -334,6 +334,11 @@
             <label id="ownerNameLabel" for="ownerName">Owner name</label>
             <input id="ownerName" type="text" autocomplete="username" placeholder="Your name">
           </div>
+          <div class="field full" id="bootstrapSecretField" style="display:none">
+            <label for="bootstrapSecret">One-time bootstrap secret</label>
+            <input id="bootstrapSecret" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the secret from the LoomTV startup log">
+            <p class="field-hint">Required only for the first owner. The secret stops working after setup.</p>
+          </div>
           <div class="field full">
             <label for="ownerPassword">Password</label>
             <div class="password-control">
@@ -579,9 +584,9 @@
       }
       function closeRootPicker() { $('rootPicker').hidden = true; }
       function setAuthError(message = '') { text('authError', message); show('authError', Boolean(message)); }
-      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || Boolean($('ownerName').value.trim())); $('authSubmit').disabled = !ready; }
+      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || (Boolean($('ownerName').value.trim()) && Boolean($('bootstrapSecret').value.trim()))); $('authSubmit').disabled = !ready; }
       function setPasswordVisibility(visible) { const input = $('ownerPassword'); const toggle = $('toggleOwnerPassword'); input.type = visible ? 'text' : 'password'; toggle.setAttribute('aria-label', visible ? 'Hide password' : 'Show password'); toggle.title = visible ? 'Hide password' : 'Show password'; toggle.setAttribute('aria-pressed', String(visible)); $('passwordIconUse').setAttribute('href', `/admin/lucide-icons.svg#${visible ? 'eye-off' : 'eye'}`); }
-      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Create the owner account used to protect this browser control plane.' : 'Use a LoomTV account password to create a short-lived session.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
+      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; $('bootstrapSecretField').style.display = firstRun ? 'grid' : 'none'; $('bootstrapSecret').required = firstRun; $('bootstrapSecret').value = ''; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Paste the one-time secret from the startup log, then create the protected owner account.' : 'Use a LoomTV account password to create a short-lived session.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
       function closeAuth() { $('authModal').classList.remove('show'); }
       function openRoot(kind) { $('rootModal').classList.add('show'); closeRootPicker(); if (kind) $('rootKind').value = kind; $('rootPath').focus(); }
       function closeRoot() { closeRootPicker(); $('rootModal').classList.remove('show'); }
@@ -593,6 +598,7 @@
       $('authButton').addEventListener('click', () => state.token ? setToken('') : openAuth(state.bootstrap?.ownerConfigured === false));
       $('toggleOwnerPassword').addEventListener('click', () => setPasswordVisibility($('ownerPassword').type === 'password'));
       $('ownerName').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
+      $('bootstrapSecret').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('ownerPassword').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('closeAuthButton').addEventListener('click', closeAuth);
       $('closeRootButton').addEventListener('click', closeRoot);
@@ -651,7 +657,7 @@
       $('logFilterButton').addEventListener('click', () => { void loadLogs(true); });
       $('logsNextButton').addEventListener('click', () => { if (state.logPage?.nextOffset !== null) { state.logOffset = state.logPage.nextOffset; void loadLogs(false); } });
       $('rootForm').addEventListener('submit', async (event) => { event.preventDefault(); try { await request('/library/roots', { method: 'POST', body: { path: $('rootPath').value.trim(), kind: $('rootKind').value } }); closeRoot(); $('rootPath').value = ''; toast('Library root added.'); await loadRoots(); await loadBootstrap(); } catch (err) { error(err.message); } });
-      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
+      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password, bootstrapSecret: $('bootstrapSecret').value.trim() } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); if (firstRun) $('bootstrapSecret').value = ''; closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
       updateAuthButton();
       loadBootstrap();
     })();

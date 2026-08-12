@@ -652,6 +652,10 @@ export interface StremioPluginCatalogItem {
   type: string;
   title: string;
   genres: readonly string[];
+  posterUrl?: string;
+  backgroundUrl?: string;
+  logoUrl?: string;
+  posterShape?: 'poster' | 'square' | 'landscape';
   description?: string;
   releaseInfo?: string;
   released?: string;

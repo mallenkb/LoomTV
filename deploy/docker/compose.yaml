@@ -25,12 +25,23 @@ services:
       CACHE_DIR: /cache
       MEDIA_DIR: /media
       FFMPEG_PATH: /usr/bin/ffmpeg
+      # Direct TLS is the default LAN path. Mount a certificate/key in /tls,
+      # or explicitly configure the trusted reverse-proxy mode documented in
+      # docs/nas-deployment.md. Cleartext 0.0.0.0 startup otherwise fails.
+      # `-` (not `:-`) lets the reverse-proxy setup explicitly set these to
+      # empty while retaining direct TLS as the default when they are unset.
+      TLS_CERT_FILE: ${LOOMTV_TLS_CERT_FILE-/tls/fullchain.pem}
+      TLS_KEY_FILE: ${LOOMTV_TLS_KEY_FILE-/tls/privkey.pem}
+      REQUIRE_SECURE_TRANSPORT: ${LOOMTV_REQUIRE_SECURE_TRANSPORT:-false}
+      TRUST_PROXY: ${LOOMTV_TRUST_PROXY:-false}
+      LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK: ${LOOMTV_DEVELOPMENT_ALLOW_INSECURE_NON_LOOPBACK:-false}
       # Set this only when the container has /dev/dri mounted.
       LOOMTV_VAAPI_DEVICE: ${LOOMTV_VAAPI_DEVICE:-}
       TZ: ${TZ:-UTC}
     volumes:
       - "${LOOMTV_CONFIG_DIR:-./data/config}:/config"
       - "${LOOMTV_CACHE_DIR:-./data/cache}:/cache"
+      - "${LOOMTV_TLS_DIR:-./tls}:/tls:ro"
       # Keep media read-only.  Mount the host's SMB/NFS path here; LoomTV
       # should not receive NAS credentials or manage the network share.
       - "${LOOMTV_MEDIA_DIR:-./data/media}:/media:ro"
@@ -41,7 +52,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3847)+'/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        - node -e "const h=require(process.env.TLS_CERT_FILE?'node:https':'node:http');const r=h.get({host:'127.0.0.1',port:process.env.PORT||3847,path:'/healthz',rejectUnauthorized:false},(x)=>process.exit(x.statusCode===200?0:1));r.on('error',()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       start_period: 15s
