@@ -292,6 +292,12 @@ importers:
 
   packages/media-core: {}
 
+  packages/plugin-protocol:
+    devDependencies:
+      typescript:
+        specifier: 5.7.3
+        version: 5.7.3
+
   packages/runtime-paths: {}
 
   packages/transcode-capabilities: {}

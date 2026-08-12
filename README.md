@@ -46,6 +46,11 @@ remain desktop-only.
   systemd, mounted SMB/NFS shares, backups, permissions, and hardware access.
 - See the [feature status matrix](docs/loomtv-vs-jellyfin-feature-status.md) for
   current completion percentages, remaining gaps, and recommended priorities.
+- See the [plugin protocol foundation](docs/plugin-protocol.md) for the
+  declaration schema, capability allowlist, and validation boundary.
+- See the [Stremio add-on adapter guide](docs/stremio-addon-adapter.md) for
+  HTTPS manifest review, normalized resources, source classification, and
+  consent limitations.
 - Generate thumbnails and inspect local media details with bundled FFmpeg/FFprobe resources.
 - Customize artwork, theme color, loader style, and sidebar ordering.
 - Back up the local database from Settings.
