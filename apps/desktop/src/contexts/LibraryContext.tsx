@@ -17,8 +17,6 @@ import type {
 } from '../shared/desktopProtocol';
 
 export interface MediaItem extends WireMediaItem {
-  contentRating?: string;
-  trailerUrl?: string;
   /** Present only on lightweight catalog cards. Full details are fetched on demand. */
   catalogRevision?: number;
 }

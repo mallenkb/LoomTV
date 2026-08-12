@@ -708,7 +708,7 @@ function remoteLibrarySources(library: LibraryPayload, remoteBaseUrl?: string): 
     posterCandidates: item.posterCandidates?.map(rewrite),
     backdropCandidates: item.backdropCandidates?.map(rewrite),
     logoCandidates: item.logoCandidates?.map(rewrite),
-    cast: item.cast?.map((credit) => ({
+    cast: item.cast.map((credit) => ({
       ...credit,
       image: rewrite(credit.image),
       characterImage: rewrite(credit.characterImage),

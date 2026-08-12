@@ -1208,6 +1208,11 @@ function preserveLockedMetadata(previous: LibraryData, next: LibraryData): void 
       item.summary = existing.summary;
       item.year = existing.year;
       item.format = existing.format;
+      item.contentRating = existing.contentRating;
+      item.trailerUrl = existing.trailerUrl;
+      item.runtime = existing.runtime;
+      item.seasonCount = existing.seasonCount;
+      item.episodeCount = existing.episodeCount;
       item.genres = existing.genres;
       item.providerIds = existing.providerIds;
     }

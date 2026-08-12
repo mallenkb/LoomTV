@@ -203,7 +203,7 @@ function missingMetadataCategories(item: MediaItem): MetadataRefreshCategory[] {
   const missing = new Set<MetadataRefreshCategory>();
   if (!hasText(item.title) || !hasText(item.summary) || !item.genres?.length || !item.year) missing.add('core');
   if (item.rating <= 0 || !hasProviderRatings(item.providerRatings)) missing.add('ratings');
-  if (!hasContentRatings(item.contentRatings) && !hasText((item as MediaItem & { contentRating?: string }).contentRating)) {
+  if (!hasContentRatings(item.contentRatings) && !hasText(item.contentRating)) {
     missing.add('ratings');
   }
   if (!hasText(item.poster) || !hasText(item.backdrop)) missing.add('artwork');
@@ -413,12 +413,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       trailerUrl: metadata.trailerUrl,
       runtime: metadata.runtime,
       seasonCount: metadata.seasonCount,
-      episodeCount: metadata.episodeCount,
+      episodeCount: metadata.episodeCount ?? (episodes.length || undefined),
       providerRatings: metadata.providerRatings,
       genres: Array.isArray(metadata.genres) ? metadata.genres.filter(Boolean) : [],
       seasons: metadata.seasons,
       episodes,
-      episodeCount: episodes.length || undefined,
       episodePreview: episodes.slice(0, 4).map((episode) => {
         const code = `S${String(episode.season || 1).padStart(2, '0')}E${String(episode.number).padStart(2, '0')}`;
         return `${code} ${episode.title}`;

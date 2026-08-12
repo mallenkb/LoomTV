@@ -4442,11 +4442,22 @@ function DetailContent({
     }
   };
 
+  const contentRating = item.contentRating
+    || Object.values(item.contentRatings || {}).find((rating) => rating.code.trim())?.code;
+  const reportedEpisodeCount = item.episodeCount || episodes.length || 0;
+  const reportedSeasonCount = item.seasonCount || new Set(episodes.map((episode) => episode.season)).size;
   const metaLine = [
     item.year ? String(item.year) : null,
+    item.format || null,
+    contentRating || null,
     item.type === 'movie'
-      ? (item.localMetadata?.durationSeconds ? formatDuration(item.localMetadata.durationSeconds) : null)
-      : `${episodes.length || '–'} episodes`,
+      ? (item.localMetadata?.durationSeconds
+        ? formatDuration(item.localMetadata.durationSeconds)
+        : item.runtime || null)
+      : [
+          reportedSeasonCount > 0 ? `${reportedSeasonCount} season${reportedSeasonCount === 1 ? '' : 's'}` : null,
+          reportedEpisodeCount > 0 ? `${reportedEpisodeCount} episode${reportedEpisodeCount === 1 ? '' : 's'}` : null,
+        ].filter(Boolean).join(' · ') || 'Episodes',
     item.genres?.slice(0, 2).join(', ') || null,
   ].filter(Boolean).join('   ');
   const detailBottomPadding = 48

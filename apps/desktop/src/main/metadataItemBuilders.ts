@@ -368,12 +368,10 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
       logoCandidates,
       summary,
       rating,
-      runtime: finalType === 'movie'
-        ? matchedTmdbData?.runtime
-        : matchedTmdbTVMeta?.runtime,
-      seasonCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.seasonCount,
-      episodeCount: finalType === 'movie' ? undefined : matchedTmdbTVMeta?.episodeCount,
-      trailerUrl: (finalType === 'movie' ? matchedTmdbData?.trailerUrl : matchedTmdbTVMeta?.trailerUrl),
+      runtime: matchedTmdbTVMeta?.runtime,
+      seasonCount: matchedTmdbTVMeta?.seasonCount,
+      episodeCount: matchedTmdbTVMeta?.episodeCount,
+      trailerUrl: matchedTmdbTVMeta?.trailerUrl,
       providerRatings: omdbProviderRatings(matchedOmdbData),
       contentRatings: mergeContentRatings(
         matchedTmdbTVMeta?.contentRatings,
