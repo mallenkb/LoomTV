@@ -35,7 +35,7 @@ const ROOT_CLASS: Record<MediaPosterCardVariant, string> = {
   home: `loom-poster-link group block w-[200px] flex-none ${SKIPPED_CARD_SIZE}`,
   movies: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
   tv: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
-  others: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-visible ${SKIPPED_CARD_SIZE}`,
+  others: `loom-poster-link loom-virtual-poster-card group flex h-full w-full flex-col overflow-hidden ${SKIPPED_CARD_SIZE}`,
 };
 
 const FALLBACK_CLASS = 'flex h-full w-full flex-col items-center justify-center gap-2 bg-[var(--loom-surface)] p-3';
