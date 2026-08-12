@@ -65,6 +65,11 @@ type LibraryAction = {
   run: () => Promise<void>;
 };
 
+type LibraryAction = {
+  operation: LibraryMutationOperation;
+  run: () => Promise<void>;
+};
+
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
   return [
     {
