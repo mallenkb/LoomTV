@@ -160,7 +160,7 @@ export function collections(library: LibraryPayload) {
 
 export function allItems(library: LibraryPayload): MediaItem[] {
   const grouped = collections(library);
-  const items = [...grouped.anime, ...grouped.tv, ...grouped.movies];
+  const items = [...grouped.anime, ...grouped.tv, ...grouped.movies, ...grouped.others];
   const seenIds = new Set<string>();
   return items.filter((item) => {
     if (seenIds.has(item.id)) return false;

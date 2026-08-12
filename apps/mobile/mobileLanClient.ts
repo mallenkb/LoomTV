@@ -167,9 +167,12 @@ export type MobileLanClient = ReturnType<typeof createMobileLanClient>;
 
 
 export class MobileLanTimeoutError extends Error {
-  constructor(readonly timeoutMs: number) {
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
     super(`The desktop did not respond within ${timeoutMs}ms.`);
     this.name = 'MobileLanTimeoutError';
+    this.timeoutMs = timeoutMs;
   }
 }
 

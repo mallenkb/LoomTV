@@ -47,7 +47,7 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
   assert.match(discovery, /\^\[0-9a-f\]\{64\}\$/i);
   assert.match(discovery, /baseUrl:\s*`https:\/\//);
   assert.match(appSource, /createMobileLanClient\(\(input, init\) => fetch\(secureLanUrl\(input\), init\)\)/);
-  assert.match(lanClientSource, /fetch\(input, init\)/);
+  assert.match(lanClientSource, /fetch\(input, \{ \.\.\.init, signal: controller\.signal \}\)/);
   assert.match(secureTransportSource, /parsed\.protocol\s*!==\s*'https:'/);
   assert.match(secureTransportSource, /transport\.start\(remoteOrigin, fingerprint\)/);
   assert.match(secureTransportSource, /proxy\.protocol\s*!==\s*'http:'/);
