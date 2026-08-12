@@ -1,4 +1,5 @@
 import type { MediaSegment, MediaSegmentType } from '@/lib/desktopApi';
+import type { RefObject } from 'react';
 
 interface PlayerMarkerEditorProps {
   editorSegment?: MediaSegment;
@@ -20,6 +21,7 @@ interface PlayerMarkerEditorProps {
   onUndo: () => void;
   onUseCurrentAsEnd: () => void;
   onUseCurrentAsStart: () => void;
+  dialogRef?: RefObject<HTMLElement | null>;
 }
 
 export default function PlayerMarkerEditor({
@@ -42,17 +44,25 @@ export default function PlayerMarkerEditor({
   onUndo,
   onUseCurrentAsEnd,
   onUseCurrentAsStart,
+  dialogRef,
 }: PlayerMarkerEditorProps) {
   return (
     <div
       className="absolute inset-0 z-50 grid place-items-center bg-black/65 px-6 backdrop-blur-sm"
       onClick={(event) => event.stopPropagation()}
     >
-      <section className="w-full max-w-md rounded-xl border border-white/15 bg-zinc-950 p-5 text-white shadow-2xl" role="dialog" aria-modal="true" aria-label="Edit skip marker">
+      <section
+        ref={dialogRef}
+        className="w-full max-w-md rounded-xl border border-white/15 bg-zinc-950 p-5 text-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="loom-marker-editor-title"
+        aria-describedby="loom-marker-editor-description"
+      >
         <div className="mb-5 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Correct skip timing</h2>
-            <p className="mt-1 text-xs text-white/55">Optional file-specific correction for automatic markers.</p>
+            <h2 id="loom-marker-editor-title" className="text-lg font-semibold">Correct skip timing</h2>
+            <p id="loom-marker-editor-description" className="mt-1 text-xs text-white/55">Optional file-specific correction for automatic markers.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded px-2 py-1 text-white/65 hover:bg-white/10 hover:text-white" aria-label="Close marker editor">Close</button>
         </div>

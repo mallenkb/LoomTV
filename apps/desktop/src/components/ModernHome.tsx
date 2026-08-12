@@ -17,6 +17,7 @@ import { mediaLink, mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import type { StoredProgress } from '@/lib/desktopApi';
 import LibraryFilterBar from '@/components/LibraryFilterBar';
 import { createLibraryListState, matchesLibraryFilter, type LibraryFilter } from '@/lib/libraryFilters';
+import { useModalLayer } from '@/components/ui/dialog';
 
 export default function ModernHome() {
   const { state, addLibraryFolder } = useLibrary();
@@ -32,6 +33,7 @@ export default function ModernHome() {
   const [heroHovered, setHeroHovered] = useState(false);
   const prefersReducedMotion = useReducedMotion();
   const searchControlRef = useRef<HTMLDivElement | null>(null);
+  const searchOverlayRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const resultsGridRef = useRef<HTMLDivElement | null>(null);
   const { movies, tvShows, animeShows, isLoading, isScanning } = state;
@@ -132,17 +134,18 @@ export default function ModernHome() {
     const dismissSearch = (event: PointerEvent) => {
       if (!searchControlRef.current?.contains(event.target as Node)) setSearchOpen(false);
     };
-    const dismissSearchOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSearchOpen(false);
-    };
-
     document.addEventListener('pointerdown', dismissSearch);
-    document.addEventListener('keydown', dismissSearchOnEscape);
     return () => {
       document.removeEventListener('pointerdown', dismissSearch);
-      document.removeEventListener('keydown', dismissSearchOnEscape);
     };
   }, [searchOpen]);
+
+  useModalLayer({
+    open: searchOpen,
+    contentRef: searchOverlayRef,
+    onEscape: () => setSearchOpen(false),
+    initialFocusRef: searchInputRef,
+  });
 
   return (
     <div className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
@@ -155,12 +158,21 @@ export default function ModernHome() {
         {searchOpen && (
           <motion.div
             key="library-search-overlay"
+            ref={searchOverlayRef}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="loom-modern-search-overlay fixed inset-0 z-[60] overflow-y-auto px-6 pb-12 pt-[12vh] backdrop-blur-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-search-title"
+            aria-describedby="library-search-description"
+            tabIndex={-1}
+            data-modal-layer="library-search"
+            className="loom-no-drag loom-modern-search-overlay fixed inset-0 z-[60] overflow-y-auto px-6 pb-12 pt-[12vh] backdrop-blur-xl"
           >
             <div ref={searchControlRef} className="mx-auto w-full max-w-5xl">
+              <h2 id="library-search-title" className="sr-only">Search your library</h2>
+              <p id="library-search-description" className="sr-only">Search titles in the local library and move through matching results.</p>
               <div className="loom-modern-search-control flex h-16 items-center rounded-2xl border px-5 shadow-2xl">
                 <Search className="h-6 w-6 shrink-0 text-[var(--loom-muted)]" />
                 <input

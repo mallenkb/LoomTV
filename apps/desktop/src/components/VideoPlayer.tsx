@@ -9,6 +9,7 @@ import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
 import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
+import { useModalLayer } from '@/components/ui/dialog';
 import { useLibrary } from '@/contexts/LibraryContext';
 import {
   desktopApi,
@@ -206,6 +207,10 @@ export default function VideoPlayer({
   const durationTimeTextRef = useRef<HTMLSpanElement>(null);
   const errorRetryButtonRef = useRef<HTMLButtonElement>(null);
   const errorCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const errorDialogRef = useRef<HTMLDivElement>(null);
+  const mediaPanelDialogRef = useRef<HTMLDivElement>(null);
+  const episodePanelDialogRef = useRef<HTMLDivElement>(null);
+  const markerDialogRef = useRef<HTMLElement>(null);
   const showRemainingTimeRef = useRef(false);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceSingleClickActionRef = useRef<{ wasPaused: boolean; executedAt: number } | null>(null);
@@ -2204,6 +2209,49 @@ export default function VideoPlayer({
     onClose();
   }, [onClose, shutdownPlayback]);
 
+  const handlePlayerEscape = useCallback(() => {
+    if (showMarkerEditor) {
+      setShowMarkerEditor(false);
+      return;
+    }
+    if (showMediaPanel) {
+      setShowMediaPanel(false);
+      return;
+    }
+    if (showSidebar) {
+      setShowSidebar(false);
+      return;
+    }
+    if (fullscreen) {
+      toggleFullscreen();
+      return;
+    }
+    void handleBack();
+  }, [fullscreen, handleBack, showMarkerEditor, showMediaPanel, showSidebar, toggleFullscreen]);
+
+  useModalLayer({ contentRef: containerRef, onEscape: handlePlayerEscape });
+  useModalLayer({
+    open: playerState === 'error',
+    contentRef: errorDialogRef,
+    onEscape: () => { void handleClose(); },
+    initialFocusRef: errorRetryButtonRef,
+  });
+  useModalLayer({
+    open: showMediaPanel,
+    contentRef: mediaPanelDialogRef,
+    onEscape: () => setShowMediaPanel(false),
+  });
+  useModalLayer({
+    open: hasEpisodes && showSidebar,
+    contentRef: episodePanelDialogRef,
+    onEscape: () => setShowSidebar(false),
+  });
+  useModalLayer({
+    open: showMarkerEditor,
+    contentRef: markerDialogRef,
+    onEscape: () => setShowMarkerEditor(false),
+  });
+
   const openMediaPanel = useCallback(() => {
     if (showMediaPanel && mediaPanelTab === 'video') {
       setShowMediaPanel(false);
@@ -3349,6 +3397,12 @@ export default function VideoPlayer({
   return (
     <div
       className={`loom-player-root fixed inset-0 z-[70] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''}`}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="loom-player-title"
+      aria-describedby="loom-player-description"
+      tabIndex={-1}
+      data-modal-layer="video-player"
       onPointerDownCapture={handleRootPointerDownCapture}
       // Reveal the chrome from anywhere in the player, not just the video
       // surface. The surface excludes the letterboxed margins and sits under
@@ -3357,7 +3411,9 @@ export default function VideoPlayer({
       // them back.
       onPointerMove={handlePointerMove}
       ref={containerRef}
-    >
+      >
+      <h1 id="loom-player-title" className="sr-only">Playing {title}</h1>
+      <p id="loom-player-description" className="sr-only">Playback controls, episode selection, subtitle settings, and close controls.</p>
       <style>
         {`video::cue {
           color: ${subtitleStyle.fontColor};
@@ -3452,6 +3508,7 @@ export default function VideoPlayer({
 
         {playerState === 'error' && (
           <div
+            ref={errorDialogRef}
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="loom-player-error-title"
@@ -3548,6 +3605,7 @@ export default function VideoPlayer({
 
         {showMarkerEditor && (
           <PlayerMarkerEditor
+            dialogRef={markerDialogRef}
             editorSegment={editorSegment}
             error={markerError}
             markerEnd={markerEnd}
@@ -3611,68 +3669,88 @@ export default function VideoPlayer({
       </div>
 
       {showMediaPanel && (
-        <PlayerSettingsPanel
-          mediaPanelWidth={mediaPanelWidth}
-          setMediaPanelWidth={setMediaPanelWidth}
-          startSidePanelResize={startSidePanelResize}
-          onClose={() => setShowMediaPanel(false)}
-          mediaPanelTab={mediaPanelTab}
-          setMediaPanelTab={setMediaPanelTab}
-          videoTracks={videoTracks}
-          selectedVideoTrackIndex={selectedVideoTrackIndex}
-          selectVideoTrack={selectVideoTrack}
-          aspectMode={aspectMode}
-          setAspectMode={setAspectMode}
-          cropMode={cropMode}
-          setCropMode={setCropMode}
-          rotation={rotation}
-          setRotation={setRotation}
-          playbackRate={playbackRate}
-          setPlaybackRate={setPlaybackRate}
-          playbackInformation={playbackInformation}
-          audioTracks={audioTracks}
-          selectedAudioTrackIndex={selectedAudioTrackIndex}
-          selectAudioTrack={selectAudioTrack}
-          audioDelay={audioDelay}
-          updateAudioDelay={updateAudioDelay}
-          audioDelayAvailable={nativePlaybackActive}
-          subtitlesDefaultEnabled={subtitlesDefaultEnabled}
-          subtitleTracks={subtitleTracks}
-          selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
-          selectSubtitleTrack={selectSubtitleTrack}
-          secondarySubtitlesAvailable={nativePlaybackActive && nativeEngineKind === 'mpv'}
-          selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
-          selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
-          subtitleStyle={subtitleStyle}
-          subtitleCueFontSize={subtitleCueFontSize}
-          subtitleStyleCompatibilityMessage={subtitleStyleCompatibilityMessage}
-          updateSubtitleStyle={updateSubtitleStyle}
-          applySubtitleStyleToStream={applySubtitleStyleToStream}
-          onCorrectSkipTiming={() => {
-            setShowMediaPanel(false);
-            openMarkerEditor();
-          }}
-        />
+        <div
+          ref={mediaPanelDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Playback settings"
+          tabIndex={-1}
+          data-modal-layer="playback-settings"
+          className="contents"
+        >
+          <PlayerSettingsPanel
+            mediaPanelWidth={mediaPanelWidth}
+            setMediaPanelWidth={setMediaPanelWidth}
+            startSidePanelResize={startSidePanelResize}
+            onClose={() => setShowMediaPanel(false)}
+            mediaPanelTab={mediaPanelTab}
+            setMediaPanelTab={setMediaPanelTab}
+            videoTracks={videoTracks}
+            selectedVideoTrackIndex={selectedVideoTrackIndex}
+            selectVideoTrack={selectVideoTrack}
+            aspectMode={aspectMode}
+            setAspectMode={setAspectMode}
+            cropMode={cropMode}
+            setCropMode={setCropMode}
+            rotation={rotation}
+            setRotation={setRotation}
+            playbackRate={playbackRate}
+            setPlaybackRate={setPlaybackRate}
+            playbackInformation={playbackInformation}
+            audioTracks={audioTracks}
+            selectedAudioTrackIndex={selectedAudioTrackIndex}
+            selectAudioTrack={selectAudioTrack}
+            audioDelay={audioDelay}
+            updateAudioDelay={updateAudioDelay}
+            audioDelayAvailable={nativePlaybackActive}
+            subtitlesDefaultEnabled={subtitlesDefaultEnabled}
+            subtitleTracks={subtitleTracks}
+            selectedSubtitleTrackIndex={selectedSubtitleTrackIndex}
+            selectSubtitleTrack={selectSubtitleTrack}
+            secondarySubtitlesAvailable={nativePlaybackActive && nativeEngineKind === 'mpv'}
+            selectedSecondarySubtitleTrackIndex={selectedSecondarySubtitleTrackIndex}
+            selectSecondarySubtitleTrack={selectSecondarySubtitleTrack}
+            subtitleStyle={subtitleStyle}
+            subtitleCueFontSize={subtitleCueFontSize}
+            subtitleStyleCompatibilityMessage={subtitleStyleCompatibilityMessage}
+            updateSubtitleStyle={updateSubtitleStyle}
+            applySubtitleStyleToStream={applySubtitleStyleToStream}
+            onCorrectSkipTiming={() => {
+              setShowMediaPanel(false);
+              openMarkerEditor();
+            }}
+          />
+        </div>
       )}
 
       {hasEpisodes && showSidebar && (
-        <PlayerEpisodePanel
-          episodePanelWidth={episodePanelWidth}
-          setEpisodePanelWidth={setEpisodePanelWidth}
-          startSidePanelResize={startSidePanelResize}
-          title={title}
-          onClose={() => setShowSidebar(false)}
-          tick={tick}
-          sortedSeasons={sortedSeasons}
-          groupedEpisodes={groupedEpisodes}
-          episodeFiles={episodeFiles}
-          currentSeason={currentSeason}
-          currentEpisode={currentEpisode}
-          duration={duration}
-          position={position}
-          displayEpisodeTitle={displayEpisodeTitle}
-          goToEpisode={goToEpisode}
-        />
+        <div
+          ref={episodePanelDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Episodes"
+          tabIndex={-1}
+          data-modal-layer="episode-list"
+          className="contents"
+        >
+          <PlayerEpisodePanel
+            episodePanelWidth={episodePanelWidth}
+            setEpisodePanelWidth={setEpisodePanelWidth}
+            startSidePanelResize={startSidePanelResize}
+            title={title}
+            onClose={() => setShowSidebar(false)}
+            tick={tick}
+            sortedSeasons={sortedSeasons}
+            groupedEpisodes={groupedEpisodes}
+            episodeFiles={episodeFiles}
+            currentSeason={currentSeason}
+            currentEpisode={currentEpisode}
+            duration={duration}
+            position={position}
+            displayEpisodeTitle={displayEpisodeTitle}
+            goToEpisode={goToEpisode}
+          />
+        </div>
       )}
     </div>
   );
