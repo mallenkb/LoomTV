@@ -10,6 +10,18 @@ const MAIN_WINDOW_NAME =
 
 let mainWindow: BrowserWindow | null = null;
 
+function presentMainWindow(window: BrowserWindow): void {
+  if (process.platform === 'darwin') {
+    void app.dock?.show();
+    // A hidden/background Electron process can otherwise keep the window on a
+    // different Space even after the second-instance event reaches it.
+    app.focus({ steal: true });
+  }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
 }
@@ -42,12 +54,8 @@ export function getTrayIconPath(): string | null {
 }
 
 export function createWindow(): void {
-  if (process.platform === 'darwin') void app.dock?.show();
-
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    presentMainWindow(mainWindow);
     return;
   }
 
@@ -63,6 +71,9 @@ export function createWindow(): void {
     // screens remain opaque; only the player becomes transparent while the
     // existing React controls remain above the video.
     transparent: true,
+    // Keep the BrowserWindow backing transparent so the viewport-sized native
+    // LibVLC child can be seen beneath the renderer's transparent player
+    // chrome. The native host supplies the opaque player backdrop.
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -79,6 +90,16 @@ export function createWindow(): void {
 
   mainWindow = new BrowserWindow(windowOptions);
 
+  // `ready-to-show` is not guaranteed for every transparent/accelerated
+  // renderer startup (especially after a Vite reload). Keep it as the fast
+  // path, but also reveal on the first completed document load and via a short
+  // timeout so the app cannot remain as an invisible process with a live
+  // renderer.
+  const revealWindow = (): void => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    presentMainWindow(mainWindow);
+  };
+
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
     const expectedUrl = MAIN_WINDOW_DEV_SERVER_URL
@@ -87,10 +108,11 @@ export function createWindow(): void {
   });
 
   mainWindow.on('ready-to-show', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.show();
-    mainWindow.focus();
+    revealWindow();
   });
+
+  mainWindow.webContents.once('did-finish-load', revealWindow);
+  setTimeout(revealWindow, 1500).unref();
 
   if (MAIN_WINDOW_DEV_SERVER_URL) {
     const rendererUrl = new URL(MAIN_WINDOW_DEV_SERVER_URL);
@@ -103,6 +125,7 @@ export function createWindow(): void {
   }
 
   mainWindow.webContents.on('did-finish-load', () => {
+    revealWindow();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const platformClass = `platform-${process.platform}`;
     void mainWindow.webContents.executeJavaScript(

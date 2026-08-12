@@ -6,6 +6,9 @@ import type {
   LanLibraryItemDetailsPayload,
   LanLibraryPayload,
   LanLibraryPlaybackReference,
+  LanPlaybackCapabilities,
+  LanPlaybackPlan,
+  LanPlaybackPlanResponse,
   LanProfileListEntry,
   LanProfileListKind,
   LanProfilePreferences,
@@ -16,6 +19,10 @@ import type {
   LanStreamOptions,
 } from '@loom-media-server/lan-protocol';
 import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
+
+export type PlaybackCapabilities = LanPlaybackCapabilities;
+export type PlaybackPlan = LanPlaybackPlan;
+export type PlaybackPlanResponse = LanPlaybackPlanResponse;
 
 export type LibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 export type LibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -108,14 +115,27 @@ export type MpvPlaybackState = {
   tracks?: MpvPlaybackTrack[];
   videoWidth?: number;
   videoHeight?: number;
+  diagnostics?: MpvPlaybackDiagnostics;
   error?: string;
+};
+
+export type MpvPlaybackDiagnostics = {
+  hardwareDecoder?: string;
+  hardwareDecode?: boolean;
+  frameDrops?: number;
+  decoderFrameDrops?: number;
+  bufferSeconds?: number;
+  buffering?: boolean;
+  videoCodec?: string;
+  estimatedFps?: number;
 };
 
 export type MpvAvailability = {
   available: boolean;
   executablePath?: string;
-  runtimeSource?: 'configured' | 'bundled' | 'system';
+  runtimeSource?: 'environment' | 'user-selected' | 'bundled' | 'system';
   version?: string;
+  warning?: string;
   reason?: string;
 };
 

@@ -4,6 +4,7 @@ import { Play, Star } from 'lucide-react';
 import type { MediaItem } from '@/contexts/LibraryContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import { posterSources, routeArtworkState } from '@/lib/artwork';
+import { artworkVariant } from '@/lib/artworkVariants';
 import { desktopApi } from '@/lib/desktopApi';
 import { firstPlayableMediaPath, mediaLink } from '@/components/MediaPosterCard.helpers';
 
@@ -46,6 +47,15 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
     () => posterSources(item, undefined, generatedSources),
     [generatedSources, item],
   );
+  // Grid and rail posters paint into roughly a 150px-wide box, which is 300
+  // device pixels on a 2x display. w342 is the smallest TMDB rendition that
+  // still covers that, and it decodes to well under half the resident memory
+  // of w500 (342x513 vs 500x750 of RGBA). routeArtwork deliberately keeps the
+  // full-size sources, because the detail view it hands off to paints large.
+  const cardSources = useMemo(
+    () => imageSources.map((source) => artworkVariant(source, 'w342')),
+    [imageSources],
+  );
   const routeArtwork = useMemo(
     () => routeArtworkState(item, imageSources),
     [imageSources, item],
@@ -69,7 +79,7 @@ export function usePosterArtwork(item: MediaItem, fallbackFilePath: string) {
     };
   }, [baseImageSources.length, fallbackFilePath]);
 
-  return { imageSources, routeArtwork };
+  return { imageSources, cardSources, routeArtwork };
 }
 
 function RatingBadge({ rating }: { rating?: number }) {
@@ -88,7 +98,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
   variant,
   metaLine = '',
 }: MediaPosterCardProps) {
-  const { imageSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
+  const { cardSources, routeArtwork } = usePosterArtwork(item, firstPlayableMediaPath(item));
 
   return (
     <Link
@@ -98,7 +108,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
     >
       <div className="loom-poster-frame relative aspect-[2/3] overflow-hidden rounded-lg transition-all duration-200">
         <SafeArtwork
-          src={imageSources}
+          src={cardSources}
           alt={item.title}
           className="h-full w-full transition-transform group-hover:scale-105"
           imgClassName="object-cover"

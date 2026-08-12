@@ -109,10 +109,6 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
   );
 }
 
-function isModernDetailRoute(pathname: string): boolean {
-  return pathname.startsWith('/anime/') || pathname.startsWith('/tv/') || pathname.startsWith('/movie/');
-}
-
 function AnimeIcon({ className, solid = false }: { className?: string; solid?: boolean }) {
   return (
     <svg
@@ -503,7 +499,7 @@ export default function Sidebar() {
           )}
           <SidebarProfileSwitcher compact />
         </aside>
-        {!isModernDetailRoute(location.pathname) && !location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
+        {!location.pathname.startsWith('/settings') && <ModernCategoryPill pathname={location.pathname} />}
       </>
     );
   }

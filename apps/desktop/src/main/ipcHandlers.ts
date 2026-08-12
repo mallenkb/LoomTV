@@ -19,9 +19,23 @@ import { sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import {
   commandMpvPlayback,
   mpvAvailability,
+  refreshMpvAvailability,
   startMpvPlayback,
   stopMpvPlayback,
+  validateMpvExecutable,
 } from './mpvPlayback.ts';
+import {
+  commandLibVlcPlayback,
+  libVlcAvailability,
+  refreshLibVlcAvailability,
+  startLibVlcPlayback,
+  setLibVlcPlaybackFullscreenTransition,
+  stopLibVlcPlayback,
+  setLibVlcPlaybackViewport,
+  syncLibVlcPlaybackSurface,
+} from './libvlcPlayback.ts';
+import type { LibVlcCommand, LibVlcStartOptions } from './libvlcPlayback.ts';
+import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
 
 type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -41,6 +55,7 @@ type LanPairedDevice = {
 };
 
 type NetworkSettings = {
+  mpvExecutablePath?: string;
   localNetworkDeviceId?: string;
   localNetworkDeviceName?: string;
   localNetworkPairedDevices?: LanPairedDevice[];
@@ -79,6 +94,7 @@ export interface IpcHandlerDependencies<
   saveLibraryMutation: (library: TLibraryData) => void;
   assertLocalMediaPath: (filePath: string) => void;
   authorizeMediaPath: (filePath: string) => void;
+  assertSubtitleCanAccessMediaPath?: (mediaFilePath: string, subtitleFilePath: string) => void;
   registerSubtitleResource: (mediaFilePath: string, subtitleFilePath: string) => string;
   needsBrowserTranscoding: (filePath: string) => boolean;
   browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
@@ -256,6 +272,16 @@ export function registerIpcHandlers<
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
       return listener(event, ...(args as IpcContract[C]['args']));
+    });
+  };
+
+  const handleExperimental = (
+    channel: string,
+    listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>,
+  ) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
+      return listener(event, ...args);
     });
   };
 
@@ -440,6 +466,34 @@ export function registerIpcHandlers<
 
   handle('mpv:availability', () => mpvAvailability());
 
+  handle('mpv:refresh-availability', () => refreshMpvAvailability());
+
+  handle('mpv:choose-executable', async () => {
+    deps.authorizeSettingsWrite();
+    const result = await deps.showOpenFolderDialog({
+      title: 'Choose mpv executable',
+      properties: ['openFile'],
+      filters: process.platform === 'win32'
+        ? [{ name: 'mpv executable', extensions: ['exe'] }]
+        : [{ name: 'mpv executable', extensions: ['*'] }],
+    });
+    const selectedPath = result.filePaths[0];
+    if (result.canceled || !selectedPath) return mpvAvailability();
+    const validated = validateMpvExecutable(selectedPath);
+    deps.saveSettings({ ...deps.loadSettings(), mpvExecutablePath: validated.executablePath });
+    deps.onSettingsSaved?.();
+    return refreshMpvAvailability();
+  });
+
+  handle('mpv:reset-executable', () => {
+    deps.authorizeSettingsWrite();
+    const settings = deps.loadSettings();
+    const { mpvExecutablePath: _mpvExecutablePath, ...rest } = settings;
+    deps.saveSettings(rest as TSettings);
+    deps.onSettingsSaved?.();
+    return refreshMpvAvailability();
+  });
+
   handle('mpv:start', (event, filePath, options) => {
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
@@ -453,6 +507,146 @@ export function registerIpcHandlers<
   handle('mpv:command', (_event, sessionId, command) => commandMpvPlayback(sessionId, command));
 
   handle('mpv:stop', (_event, sessionId) => stopMpvPlayback(sessionId));
+
+  handleExperimental('libvlc:availability', () => libVlcAvailability());
+
+  handleExperimental('libvlc:refresh-availability', () => refreshLibVlcAvailability());
+
+  handleExperimental('libvlc:start', (event, filePath, rawOptions) => {
+    const mediaPath = String(filePath || '');
+    deps.authorizeMediaPath(mediaPath);
+    deps.assertLocalMediaPath(mediaPath);
+    const options = (rawOptions && typeof rawOptions === 'object' ? rawOptions : {}) as LibVlcStartOptions;
+    for (const subtitleFile of options.subtitleFiles || []) {
+      const subtitlePath = String(subtitleFile?.path || '');
+      deps.authorizeMediaPath(subtitlePath);
+      deps.assertLocalMediaPath(subtitlePath);
+      deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitlePath);
+    }
+    return startLibVlcPlayback(event.sender, mediaPath, options);
+  });
+
+  handleExperimental('libvlc:command', (_event, sessionId, command) =>
+    commandLibVlcPlayback(String(sessionId || ''), command as LibVlcCommand));
+
+  handleExperimental('libvlc:stop', (_event, sessionId) =>
+    stopLibVlcPlayback(sessionId ? String(sessionId) : undefined));
+
+  handleExperimental('libvlc:sync-surface', (event) => syncLibVlcPlaybackSurface(event.sender));
+
+  handleExperimental('libvlc:set-fullscreen-transition', (event, transitioning, waitForFinalViewport) =>
+    setLibVlcPlaybackFullscreenTransition(
+      event.sender,
+      Boolean(transitioning),
+      waitForFinalViewport === undefined ? true : Boolean(waitForFinalViewport),
+    ));
+
+  handleExperimental('libvlc:set-viewport', (event, rawViewport) => {
+    const raw = rawViewport && typeof rawViewport === 'object' ? rawViewport as Partial<PlaybackViewport> : {};
+    const viewport = {
+      x: Number(raw.x),
+      y: Number(raw.y),
+      width: Number(raw.width),
+      height: Number(raw.height),
+    } satisfies PlaybackViewport;
+    if (![viewport.x, viewport.y, viewport.width, viewport.height].every(Number.isFinite)) return false;
+    if (viewport.x < -10_000 || viewport.y < -10_000 || viewport.width <= 0 || viewport.height <= 0 || viewport.width > 100_000 || viewport.height > 100_000) return false;
+    return setLibVlcPlaybackViewport(event.sender, viewport);
+  });
+
+  // The window uses titleBarStyle 'hiddenInset', so the macOS traffic lights
+  // float over whatever is beneath them — in the player that is the video.
+  // Tie them to the player's own chrome so they fade out with the controls
+  // instead of sitting permanently on top of the picture.
+  handleExperimental('window:set-chrome-visible', (event, visible) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!ownerWindow || ownerWindow.isDestroyed()) return false;
+    if (process.platform !== 'darwin') return false;
+    ownerWindow.setWindowButtonVisibility(Boolean(visible));
+    return true;
+  });
+
+  handleExperimental('window:set-fullscreen', async (event, enabled) => {
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!ownerWindow || ownerWindow.isDestroyed()) return false;
+    const nextFullscreen = Boolean(enabled);
+    // This IPC route is retained as a compatibility fallback, but it must use
+    // macOS's normal fullscreen lifecycle. `setSimpleFullScreen` expands the
+    // window over the current desktop and bypasses the proven Loom player
+    // behavior, which made LibVLC feel like a second application.
+    const isFullscreen = () => ownerWindow.isFullScreen();
+    const setFullscreen = (value: boolean) => ownerWindow.setFullScreen(value);
+    if (isFullscreen() === nextFullscreen) {
+      if (!event.sender.isDestroyed()) event.sender.send('window:fullscreen-changed', nextFullscreen);
+      return true;
+    }
+    // Electron types on/once/removeListener as per-event overloads, so a union
+    // of event names matches none of them. Branch on the literal instead of
+    // casting, which keeps the listener signature checked.
+    const onceTransition = (listener: () => void): void => {
+      if (nextFullscreen) ownerWindow.once('enter-full-screen', listener);
+      else ownerWindow.once('leave-full-screen', listener);
+    };
+    const offTransition = (listener: () => void): void => {
+      if (nextFullscreen) ownerWindow.removeListener('enter-full-screen', listener);
+      else ownerWindow.removeListener('leave-full-screen', listener);
+    };
+    setLibVlcPlaybackFullscreenTransition(event.sender, true);
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      let pollTimer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (changed: boolean) => {
+        if (settled) return;
+        // AppKit can deliver enter/leave-full-screen just before Electron's
+        // isFullScreen() value catches up. Do not resolve the renderer's
+        // readiness handshake until the state agrees with the requested
+        // transition; otherwise the native surface receives the opposite
+        // window geometry and playback can remain stuck after exit.
+        if (changed && !ownerWindow.isDestroyed() && isFullscreen() !== nextFullscreen) {
+          if (!pollTimer) {
+            pollTimer = setTimeout(() => {
+              pollTimer = null;
+              finish(true);
+            }, 16);
+            pollTimer.unref();
+          }
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        if (pollTimer) clearTimeout(pollTimer);
+        offTransition(onTransition);
+        const actual = !ownerWindow.isDestroyed() && isFullscreen() === nextFullscreen;
+        setLibVlcPlaybackFullscreenTransition(event.sender, false, Boolean(changed && actual));
+        if (!event.sender.isDestroyed()) event.sender.send('window:fullscreen-changed', isFullscreen());
+        resolve(Boolean(changed && actual));
+      };
+      const onTransition = () => finish(true);
+      const poll = () => {
+        pollTimer = null;
+        if (ownerWindow.isDestroyed()) {
+          finish(false);
+          return;
+        }
+        if (isFullscreen() === nextFullscreen) {
+          finish(true);
+          return;
+        }
+        pollTimer = setTimeout(poll, 50);
+        pollTimer.unref();
+      };
+      const timeout = setTimeout(() => finish(false), 5_000);
+      timeout.unref();
+      onceTransition(onTransition);
+      try {
+        setFullscreen(nextFullscreen);
+        pollTimer = setTimeout(poll, 50);
+        pollTimer.unref();
+      } catch {
+        finish(false);
+      }
+    });
+  });
 
   handle('network:status', () => {
     const status = buildNetworkStatus(deps);

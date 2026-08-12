@@ -19,7 +19,10 @@ export interface ProbeMediaFileResult {
   providerIds?: MetadataProviderIds;
 }
 
-const mediaProbeCache = new Map<string, ProbeMediaFileResult>();
+const MEDIA_PROBE_CACHE_LIMIT = 5_000;
+const MEDIA_PROBE_CACHE_TTL_MS = 30 * 60 * 1_000;
+type MediaProbeCacheEntry = { result: ProbeMediaFileResult; lastAccessAt: number };
+const mediaProbeCache = new Map<string, MediaProbeCacheEntry>();
 type MediaProbeCacheIdentity = { key: string; size: number; modifiedAtMs: number };
 
 function streamType(value?: string): LocalMediaTrack['type'] {
@@ -53,10 +56,33 @@ async function mediaProbeCacheIdentityAsync(filePath: string): Promise<MediaProb
   }
 }
 
+function getCachedProbeResult(cacheKey: string | null): ProbeMediaFileResult | undefined {
+  if (!cacheKey) return undefined;
+  const entry = mediaProbeCache.get(cacheKey);
+  if (!entry) return undefined;
+
+  const now = Date.now();
+  if (now - entry.lastAccessAt >= MEDIA_PROBE_CACHE_TTL_MS) {
+    mediaProbeCache.delete(cacheKey);
+    return undefined;
+  }
+
+  // Map iteration order provides the LRU queue. Refresh the entry when it is read.
+  mediaProbeCache.delete(cacheKey);
+  entry.lastAccessAt = now;
+  mediaProbeCache.set(cacheKey, entry);
+  return entry.result;
+}
+
 function cacheProbeResult(cacheKey: string | null, result: ProbeMediaFileResult): ProbeMediaFileResult {
   if (!cacheKey) return result;
-  if (mediaProbeCache.size > 5000) mediaProbeCache.clear();
-  mediaProbeCache.set(cacheKey, result);
+  mediaProbeCache.delete(cacheKey);
+  while (mediaProbeCache.size >= MEDIA_PROBE_CACHE_LIMIT) {
+    const oldestKey = mediaProbeCache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) break;
+    mediaProbeCache.delete(oldestKey);
+  }
+  mediaProbeCache.set(cacheKey, { result, lastAccessAt: Date.now() });
   return result;
 }
 
@@ -95,10 +121,8 @@ function probeMediaFileFromOutput(
 ): ProbeMediaFileResult {
   const identity = knownIdentity === undefined ? mediaProbeCacheIdentity(filePath) : knownIdentity;
   const cacheKey = identity?.key || null;
-  if (cacheKey) {
-    const cached = mediaProbeCache.get(cacheKey);
-    if (cached) return cached;
-  }
+  const cached = getCachedProbeResult(cacheKey);
+  if (cached !== undefined) return cached;
 
   const ffprobePath = findFFprobe();
   if (!ffprobePath) return {};
@@ -241,10 +265,8 @@ export function probeMediaFile(filePath: string): ProbeMediaFileResult {
 export async function probeMediaFileAsync(filePath: string): Promise<ProbeMediaFileResult> {
   const identity = await mediaProbeCacheIdentityAsync(filePath);
   const cacheKey = identity?.key || null;
-  if (cacheKey) {
-    const cached = mediaProbeCache.get(cacheKey);
-    if (cached) return cached;
-  }
+  const cached = getCachedProbeResult(cacheKey);
+  if (cached !== undefined) return cached;
 
   const ffprobePath = findFFprobe();
   if (!ffprobePath) return {};

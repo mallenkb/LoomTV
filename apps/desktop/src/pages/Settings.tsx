@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
 import { useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
-import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LocalSegmentAnalysisStatus, type SkipAnalysisSettings } from '@/lib/desktopApi';
+import { APP_VERSION, desktopApi, MetadataKeyTestResult, UpdateState, type LibVlcAvailability, type LocalSegmentAnalysisStatus, type MpvAvailability, type SkipAnalysisSettings } from '@/lib/desktopApi';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
@@ -160,6 +160,8 @@ export default function Settings() {
   const [isTestingKeys, setIsTestingKeys] = useState(false);
   const [metadataKeyTestResults, setMetadataKeyTestResults] = useState<MetadataKeyTestResult[]>([]);
   const [ffmpegStatus, setFfmpegStatus] = useState<{ available: boolean; path: string | null } | null>(null);
+  const [libvlcAvailability, setLibvlcAvailability] = useState<LibVlcAvailability | null>(null);
+  const [mpvAvailability, setMpvAvailability] = useState<MpvAvailability | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSection>(() => {
     const savedSection = localStorage.getItem(SETTINGS_SECTION_STORAGE_KEY);
     return isSettingsSection(savedSection) ? savedSection : 'library';
@@ -220,6 +222,36 @@ export default function Settings() {
     } catch (error) {
       setSettingsPersistenceError(error instanceof Error ? error.message : 'Settings could not be saved.');
       return false;
+    }
+  }, []);
+
+  const refreshMpvAvailability = useCallback(async () => {
+    if (isRemoteLibraryMode) {
+      setMpvAvailability(null);
+      return;
+    }
+    try {
+      setMpvAvailability(await desktopApi.mpv.refreshAvailability());
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not check mpv availability.');
+    }
+  }, [isRemoteLibraryMode]);
+
+  const chooseMpvExecutable = useCallback(async () => {
+    try {
+      setMpvAvailability(await desktopApi.mpv.chooseExecutable());
+      setSettingsPersistenceError('');
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not select an mpv executable.');
+    }
+  }, []);
+
+  const resetMpvExecutable = useCallback(async () => {
+    try {
+      setMpvAvailability(await desktopApi.mpv.resetExecutable());
+      setSettingsPersistenceError('');
+    } catch (error) {
+      setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not reset the mpv executable.');
     }
   }, []);
 
@@ -292,6 +324,22 @@ export default function Settings() {
     const timer = window.setInterval(refresh, analysisIsActive ? 2000 : 5000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [activeSection, analysisIsActive]);
+
+  useEffect(() => {
+    if (activeSection !== 'playback' || isRemoteLibraryMode) return;
+    void refreshMpvAvailability();
+  }, [activeSection, isRemoteLibraryMode, refreshMpvAvailability]);
+
+  useEffect(() => {
+    if (activeSection !== 'playback') return undefined;
+    let cancelled = false;
+    void desktopApi.libvlc.availability().then((availability) => {
+      if (!cancelled) setLibvlcAvailability(availability);
+    }).catch(() => {
+      if (!cancelled) setLibvlcAvailability({ available: false, enabled: false, surface: 'unavailable', reason: 'LibVLC availability could not be read.' });
+    });
+    return () => { cancelled = true; };
+  }, [activeSection]);
 
   const renameFolder = useCallback((folder: string, name: string) => {
     const trimmed = name.trim();
@@ -861,6 +909,15 @@ export default function Settings() {
                   analysisStatus={localAnalysisStatus}
                   onAnalysisAction={handleAnalysisAction}
                   onSave={handleSavePlaybackSettings}
+                  libvlcAvailability={isRemoteLibraryMode
+                    ? { available: false, enabled: false, surface: 'unavailable', reason: 'Native LibVLC playback is available only for local files on this laptop.' }
+                    : libvlcAvailability}
+                  mpvAvailability={isRemoteLibraryMode
+                    ? { available: false, reason: 'Native mpv playback is available only for local files on this laptop.' }
+                    : mpvAvailability}
+                  onMpvChoose={isRemoteLibraryMode ? undefined : chooseMpvExecutable}
+                  onMpvReset={isRemoteLibraryMode ? undefined : resetMpvExecutable}
+                  onMpvRefresh={isRemoteLibraryMode ? undefined : refreshMpvAvailability}
                 />
               )}
 

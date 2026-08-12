@@ -180,15 +180,6 @@ export function createStyles(theme: MobileThemeColors) {
     lineHeight: 19,
     textAlign: 'center',
   },
-  codePrompt: {
-    gap: 9,
-    paddingTop: 4,
-  },
-  codePromptTitle: {
-    color: muted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
   manualForm: {
     gap: 11,
   },
@@ -199,23 +190,6 @@ export function createStyles(theme: MobileThemeColors) {
     color: muted,
     fontSize: 12,
     fontWeight: '700',
-  },
-  manualDivider: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    marginVertical: 4,
-  },
-  manualDividerLine: {
-    backgroundColor: border,
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-  },
-  manualDividerText: {
-    color: faint,
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
   },
   manualHint: {
     color: faint,
@@ -279,22 +253,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 16,
     fontWeight: '700',
   },
-  reconnectButton: {
-    backgroundColor: panel2,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 8,
-    minHeight: 42,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-    alignSelf: 'flex-start',
-  },
-  reconnectButtonText: {
-    color: text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
   errorText: {
     color: errorTextColor,
     fontSize: 14,
@@ -308,76 +266,75 @@ export function createStyles(theme: MobileThemeColors) {
     gap: 4,
     padding: 12,
   },
-  shell: {
-    flex: 1,
-  },
-  shellTablet: {
-    flexDirection: 'row',
-  },
-  sideNav: {
-    backgroundColor: surface,
-    borderRightColor: border,
-    borderRightWidth: 1,
-    gap: 18,
-    padding: 18,
-    width: 220,
-  },
-  sideHost: {
-    color: faint,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  sideNavItems: {
-    gap: 6,
-  },
-  sideNavButton: {
-    alignItems: 'center',
-    borderRadius: 10,
-    flexDirection: 'row',
+  offlineNotice: {
+    backgroundColor: isDarkTheme ? 'rgba(245, 196, 81, 0.10)' : '#fff8e7',
+    borderColor: isDarkTheme ? 'rgba(245, 196, 81, 0.30)' : '#efc86c',
+    borderRadius: 16,
+    borderWidth: 1,
     gap: 12,
-    minHeight: 44,
-    paddingHorizontal: 12,
+    padding: 14,
   },
-  sideNavButtonActive: {
-    backgroundColor: panel2,
+  offlineNoticeHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 11,
   },
-  navGlyph: {
+  offlineNoticeIcon: {
     alignItems: 'center',
-    width: 24,
+    backgroundColor: isDarkTheme ? 'rgba(245, 196, 81, 0.16)' : '#ffedbd',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
   },
-  sideNavLabel: {
-    color: muted,
+  offlineNoticeCopy: {
     flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
+    gap: 3,
+    minWidth: 0,
   },
-  sideNavLabelActive: {
-    color: accent,
+  offlineNoticeTitle: {
+    color: text,
+    fontSize: 16,
+    fontWeight: '800',
   },
-  sideNavCount: {
-    color: faint,
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-    fontWeight: '600',
+  offlineNoticeBody: {
+    color: muted,
+    fontSize: 13,
+    lineHeight: 19,
   },
-  refreshButton: {
+  offlineNoticeActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  offlineNoticeAction: {
     alignItems: 'center',
+    backgroundColor: panel2,
     borderColor: border,
     borderRadius: 10,
     borderWidth: 1,
-    marginTop: 'auto',
-    minHeight: 42,
+    flexDirection: 'row',
+    gap: 7,
     justifyContent: 'center',
+    minHeight: 40,
+    paddingHorizontal: 12,
   },
-  refreshButtonText: {
+  offlineNoticeActionPrimary: {
+    backgroundColor: accent,
+    borderColor: accent,
+  },
+  offlineNoticeActionText: {
     color: text,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  main: {
+  offlineNoticeActionTextPrimary: {
+    color: accentForeground,
+  },
+  shell: {
     flex: 1,
   },
-  swipeContainer: {
+  main: {
     flex: 1,
   },
   scrollContent: {
@@ -461,33 +418,6 @@ export function createStyles(theme: MobileThemeColors) {
     gap: 4,
     minHeight: 32,
   },
-  headerTop: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 16,
-  },
-  screenTitle: {
-    color: text,
-    fontSize: 32,
-    fontWeight: '700',
-    lineHeight: 36,
-  },
-  headerMeta: {
-    color: faint,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  iconButton: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
   searchHeader: {
     gap: 12,
   },
@@ -545,34 +475,6 @@ export function createStyles(theme: MobileThemeColors) {
   },
   sections: {
     gap: 20,
-  },
-  homeTabStrip: {
-    marginHorizontal: -16,
-  },
-  homeTabRow: {
-    gap: 8,
-    paddingHorizontal: 16,
-  },
-  homeTab: {
-    alignItems: 'center',
-    backgroundColor: panel,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: 7,
-    minHeight: 40,
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-  },
-  homeTabActive: {
-    backgroundColor: isDarkTheme ? '#ffffff' : '#171717',
-  },
-  homeTabText: {
-    color: muted,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  homeTabTextActive: {
-    color: isDarkTheme ? '#171717' : '#ffffff',
   },
   heroCarousel: {
     alignItems: 'center',
@@ -683,10 +585,6 @@ export function createStyles(theme: MobileThemeColors) {
   railContent: {
     gap: 14,
     paddingRight: 20,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
   },
   posterCard: {
   },
@@ -830,9 +728,6 @@ export function createStyles(theme: MobileThemeColors) {
     maxWidth: 300,
     textAlign: 'center',
   },
-  settingsList: {
-    paddingTop: 2,
-  },
   settingsGroupTitle: {
     color: muted,
     fontSize: 13,
@@ -868,17 +763,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 17,
     fontWeight: '600',
     textAlign: 'center',
-  },
-  settingsListItem: {
-    alignItems: 'center',
-    borderBottomColor: 'rgba(148,163,184,0.18)',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    gap: 16,
-    minHeight: 56,
-  },
-  settingsAppearanceRow: {
-    borderBottomWidth: 0,
   },
   settingsListValue: {
     color: muted,
@@ -1084,22 +968,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontWeight: '700',
     lineHeight: 20,
     textAlign: 'center',
-  },
-  settingsDangerButton: {
-    alignItems: 'center',
-    borderColor: 'rgba(239,68,68,0.45)',
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  settingsDangerButtonText: {
-    color: dangerText,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  settingsDisconnectButton: {
-    marginTop: 12,
   },
   bottomNav: {
     backgroundColor: colorWithOpacity(panel, 0.88),
@@ -1317,30 +1185,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontWeight: '800',
     textAlign: 'center',
   },
-  detailBack: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.9)',
-    borderRadius: 22,
-    height: 44,
-    justifyContent: 'center',
-    left: 16,
-    position: 'absolute',
-    width: 44,
-    zIndex: 5,
-  },
-  detailRefreshPosterButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(16,16,16,0.9)',
-    borderColor: border,
-    borderRadius: 22,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: 16,
-    width: 44,
-    zIndex: 5,
-  },
   posterSheetOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -1482,47 +1326,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 12,
     lineHeight: 17,
     marginTop: 7,
-  },
-  posterCandidateCover: {
-    backgroundColor: surface,
-    borderRadius: 9,
-    height: 52,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  posterCandidateCoverFallback: {
-    alignItems: 'center',
-    backgroundColor: surface,
-    borderRadius: 9,
-    height: 52,
-    justifyContent: 'center',
-    width: '100%',
-  },
-  posterCandidateCoverFallbackText: {
-    color: faint,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  posterCandidateEpisodes: {
-    backgroundColor: panel,
-    borderColor: border,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  posterCandidateEpisodesLabel: {
-    color: faint,
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 14,
-    textTransform: 'uppercase',
-  },
-  posterCandidateEpisodeName: {
-    color: muted,
-    fontSize: 12,
-    lineHeight: 16,
   },
   posterCandidateGenres: {
     flex: 1,
@@ -1770,12 +1573,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 21,
     fontWeight: '700',
   },
-  episodesSubheading: {
-    color: text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginTop: 4,
-  },
   seasonPicker: {
     alignItems: 'center',
     backgroundColor: panel,
@@ -1844,52 +1641,6 @@ export function createStyles(theme: MobileThemeColors) {
     fontSize: 12,
     fontWeight: '600',
   },
-  seasonRailContent: {
-    gap: 12,
-    paddingRight: 20,
-  },
-  seasonCard: {
-    gap: 6,
-    width: 148,
-  },
-  seasonCardFrame: {
-    aspectRatio: 16 / 9,
-    backgroundColor: panel2,
-    borderColor: 'transparent',
-    borderRadius: 10,
-    borderWidth: 2,
-    overflow: 'hidden',
-  },
-  seasonCardFrameActive: {
-    borderColor: accent,
-  },
-  seasonCardImage: {
-    height: '100%',
-    width: '100%',
-  },
-  seasonCardFallback: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
-  seasonCardFallbackText: {
-    color: accent,
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  seasonCardTitle: {
-    color: muted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  seasonCardTitleActive: {
-    color: text,
-  },
-  seasonCardMeta: {
-    color: faint,
-    fontSize: 11,
-    fontWeight: '600',
-  },
   episodeList: {
     gap: 14,
   },
@@ -1930,14 +1681,6 @@ export function createStyles(theme: MobileThemeColors) {
     marginTop: -18,
     position: 'absolute',
     top: '50%',
-    width: 36,
-  },
-  episodeIndex: {
-    alignItems: 'center',
-    backgroundColor: panel2,
-    borderRadius: 8,
-    height: 36,
-    justifyContent: 'center',
     width: 36,
   },
   episodeIndexText: {

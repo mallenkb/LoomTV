@@ -25,7 +25,7 @@ Record the device, OS version, build URL, tester, date, and result for each row.
 
 ## Required scenarios on every platform
 
-- Fresh install: local-network permission, automatic discovery, manual HTTPS address fallback, and 6-digit PIN pairing.
+- Fresh install: local-network permission, automatic discovery, desktop Allow/Deny approval, approval expiry/denial, manual HTTPS address fallback, and 6-digit PIN pairing.
 - Relaunch: saved credential restore, token refresh, profile picker, automatic sign-in, PIN rejection, lockout copy, profile lock, and device disconnect.
 - Library: Home rails, Movies, TV Shows, Anime, Others, search, filters, favorites/My List, detail pages, seasons, and empty-library states.
 - Playback: direct play, HLS fallback, resume, seek, pause, audio/subtitle selection, subtitle sizing, skip markers, next-episode autoplay, background/foreground, orientation changes, failure retry, and return to portrait.

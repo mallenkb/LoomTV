@@ -222,7 +222,7 @@ export default function AboutSettingsSection({
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white">Third-Party Libraries</CardTitle>
           <CardDescription className="text-[var(--loom-faint)] text-xs">
-            Direct dependencies and major development tools. Packaged builds also include Chromium/Electron notices.
+            Direct dependencies and major development tools. Packaged builds also include Chromium/Electron and native media notices.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -256,6 +256,19 @@ export default function AboutSettingsSection({
               ))}
             </div>
           </div>
+          <p className="mt-3 text-xs leading-5 text-[var(--loom-faint)]">
+            * LibVLC/libvlccore are generally distributed under LGPL-2.1-or-later; VLC
+            plugins and bundled dependencies can carry different terms. The exact bundled
+            payload provenance and applicable notices are recorded in
+            <span className="text-[var(--loom-muted)]"> apps/desktop/resources/libvlc/NOTICE.md</span>.
+            <button
+              type="button"
+              onClick={() => desktopApi.openExternal('https://www.videolan.org/legal.html')}
+              className="ml-1 inline-flex items-center gap-1 text-[var(--loom-accent)] hover:underline"
+            >
+              View VideoLAN legal notices <ExternalLink className="h-3 w-3" />
+            </button>
+          </p>
         </CardContent>
       </Card>
     </div>

@@ -1,10 +1,14 @@
-import type { MpvPlaybackState, MpvStartOptions } from '@/lib/desktopApi';
+import type { PlaybackCommand, PlaybackStartOptions, PlaybackState } from '@/shared/playbackProtocol';
 
-export type PlaybackEngineKind = 'browser' | 'mpv';
+export type PlaybackEngineKind = 'browser' | 'mpv' | 'libvlc';
+export type PlaybackEngineState = PlaybackState;
+export type PlaybackEngineSurface = 'composited-window' | 'external-window';
+export type { PlaybackCommand, PlaybackStartOptions };
 
 export interface PlaybackEngine {
   readonly kind: PlaybackEngineKind;
-  load(filePath: string, options?: MpvStartOptions): Promise<boolean>;
+  readonly surface: PlaybackEngineSurface;
+  load(filePath: string, options?: PlaybackStartOptions): Promise<boolean>;
   play(): Promise<void>;
   pause(): Promise<void>;
   seek(seconds: number): Promise<void>;
@@ -24,4 +28,4 @@ export interface PlaybackEngine {
   destroy(): Promise<void>;
 }
 
-export type PlaybackEngineStateListener = (state: MpvPlaybackState) => void;
+export type PlaybackEngineStateListener = (state: PlaybackEngineState) => void;

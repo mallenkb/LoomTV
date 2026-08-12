@@ -23,8 +23,11 @@ export function lanRouteScope(pathname: string, method = 'GET'): LanRouteScope |
   if (pathname === '/api/v2/profile-preferences' && (method === 'GET' || method === 'PATCH')) return 'playback:write';
   if (pathname === '/api/v2/profile-lists' && (method === 'GET' || method === 'PUT' || method === 'DELETE')) return 'playback:write';
   if (pathname === '/api/v2/start-hls' && method === 'POST') return 'media:stream';
+  if (pathname === '/api/v2/playback-plan' && method === 'POST') return 'media:stream';
   if (pathname === '/api/v2/progress' && (method === 'GET' || method === 'POST')) return 'playback:write';
   if (pathname === '/api/v2/playback-track-preferences' && (method === 'GET' || method === 'POST')) return 'playback:write';
+  if (pathname === '/api/v2/artwork/official-candidates' && method === 'POST') return 'catalog:read';
+  if (pathname === '/api/v2/artwork/apply-official' && method === 'POST') return 'catalog:read';
   if (pathname === '/api/v2/playback/segments' && method === 'GET') return 'catalog:read';
   if (pathname === '/api/v2/unpair' && method === 'POST') return 'device:self';
   return null;
@@ -86,7 +89,11 @@ export function mediaServerRouteAccess(pathname: string, method = 'GET'): MediaS
     return { kind: 'public' };
   }
   if (isLegacyLanRoute(pathname)) return { kind: 'legacy' };
-  if (method === 'POST' && (pathname === '/api/v2/pair' || pathname === '/api/v2/auth/refresh')) {
+  if (method === 'POST' && (
+    pathname === '/api/v2/pair'
+    || pathname === '/api/v2/pair/status'
+    || pathname === '/api/v2/auth/refresh'
+  )) {
     return { kind: 'pairing' };
   }
   if (isIpcOnlyHttpRoute(pathname)) return { kind: 'ipc-only' };

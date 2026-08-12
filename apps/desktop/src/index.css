@@ -140,6 +140,27 @@ body {
   cursor: pointer;
 }
 
+/* This is an app surface, not a document. Dragging the scrubber, swiping a
+   rail, or double-clicking the player would otherwise select the titles,
+   badges, and subtitle text it passes over and leave them highlighted. Keep
+   selection available only where a user genuinely types or copies. */
+body,
+#root,
+#root * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#root :where(input, textarea, select, [contenteditable="true"], [contenteditable=""]) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* A drag that begins on the video surface must never start a selection. */
+::selection {
+  background: color-mix(in srgb, var(--loom-accent, #FC9C03) 30%, transparent);
+}
+
 :where(button:disabled, [aria-disabled="true"]) {
   cursor: not-allowed;
 }
@@ -167,18 +188,35 @@ body {
   width: 100vw;
 }
 
-/* mpv renders in its own borderless window directly behind Electron. During
-   native playback, LoomTV becomes the transparent control/overlay layer while
-   the library screen underneath the player is hidden. */
-html.loom-mpv-active,
-html.loom-mpv-active body,
-html.loom-mpv-active #root,
-html.loom-mpv-active .loom-app-shell {
+/* The established MPV fallback renders in its own borderless window behind
+   Electron. During native playback, LoomTV becomes the transparent
+   control/overlay layer while the library screen underneath the player is
+   hidden. The experimental LibVLC child surface is additionally gated in the
+   main process because window-manager ordering is not true renderer
+   compositing. */
+html.loom-native-active,
+html.loom-native-active body,
+html.loom-native-active #root,
+html.loom-native-active .loom-app-shell {
   background: transparent !important;
 }
 
-html.loom-mpv-active .loom-app-underlay {
+html.loom-native-active .loom-app-underlay {
   visibility: hidden;
+}
+
+/* Chromium gives an HTML fullscreen element an opaque black backdrop by
+   default. LibVLC lives in the AppKit sibling beneath WebContents, so that
+   backdrop hides the picture while audio and Loom's renderer subtitles keep
+   running. Keep only the native-player fullscreen backdrop transparent; the
+   normal browser/HLS player retains its established black canvas. */
+html.loom-native-active .loom-player-root:fullscreen,
+html.loom-native-active .loom-player-root:-webkit-full-screen {
+  background: transparent !important;
+}
+
+html.loom-native-active .loom-player-root:fullscreen::backdrop {
+  background: transparent;
 }
 
 .line-clamp-2 {
@@ -191,7 +229,13 @@ html.loom-mpv-active .loom-app-underlay {
 .loom-volume-slider {
   -webkit-appearance: none;
   appearance: none;
-  height: 7px;
+  height: 24px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.loom-volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
   border-radius: 9999px;
   background:
     linear-gradient(
@@ -201,24 +245,37 @@ html.loom-mpv-active .loom-app-underlay {
       rgba(255, 255, 255, 0.28) var(--loom-volume-pct, 100%),
       rgba(255, 255, 255, 0.28) 100%
     );
-  cursor: pointer;
 }
 
 .loom-volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 22px;
+  width: 14px;
   height: 14px;
-  border-radius: 9999px;
+  margin-top: -5px;
+  border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
+.loom-volume-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--loom-accent) 0%,
+      var(--loom-accent) var(--loom-volume-pct, 100%),
+      rgba(255, 255, 255, 0.28) var(--loom-volume-pct, 100%),
+      rgba(255, 255, 255, 0.28) 100%
+    );
+}
+
 .loom-volume-slider::-moz-range-thumb {
-  width: 22px;
+  width: 14px;
   height: 14px;
   border: none;
-  border-radius: 9999px;
+  border-radius: 50%;
   background: #ffffff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
@@ -1005,6 +1062,12 @@ body.platform-darwin .loom-main-drag-region {
   display: none;
 }
 
+/* An -webkit-app-region: drag band is an OS-level window handle: the web
+   content receives no clicks and no pointermove inside it. At 5.4rem it
+   covered the whole top of the player, which is why clicks there did nothing
+   and why moving the pointer across it failed to reveal the controls.
+   2.75rem still gives a comfortable grab strip beside the traffic lights
+   without claiming the space the controls sit in. */
 body.platform-darwin .loom-player-drag-region {
   -webkit-app-region: drag;
   position: absolute;
@@ -1013,10 +1076,14 @@ body.platform-darwin .loom-player-drag-region {
   top: 0;
   z-index: 39;
   display: block;
-  height: 5.4rem;
+  height: 2.75rem;
 }
 
-body.platform-darwin .loom-player-root:fullscreen .loom-player-drag-region {
+/* The player's original HTML fullscreen route makes the player root the DOM
+   fullscreen element. Keep the state-class fallback for browsers that report
+   the change one frame before :fullscreen updates. */
+body.platform-darwin .loom-player-root:fullscreen .loom-player-drag-region,
+body.platform-darwin .loom-player-is-fullscreen .loom-player-drag-region {
   display: none;
 }
 
@@ -1028,8 +1095,16 @@ body.platform-darwin .loom-player-top-control {
   top: 2.5rem;
 }
 
-:fullscreen .loom-player-top-control {
+/* Keep the old player chrome's horizontal placement, but leave a safe top
+   band for the notch/camera region in macOS fullscreen. */
+.loom-player-root:fullscreen .loom-player-top-control,
+.loom-player-is-fullscreen .loom-player-top-control {
   top: 1.5rem;
+}
+
+body.platform-darwin .loom-player-root:fullscreen .loom-player-top-control,
+body.platform-darwin .loom-player-is-fullscreen .loom-player-top-control {
+  top: 2.75rem;
 }
 
 .loom-detail-hero-fade {
