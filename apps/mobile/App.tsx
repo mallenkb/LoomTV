@@ -131,6 +131,7 @@ import {
   type ResolvedMobileThemeMode,
 } from './mobileTheme';
 import {
+  allItems,
   collections,
   episodeCode,
   episodePlayTarget,
@@ -2183,6 +2184,7 @@ function AppRoot() {
   // browsing the library no longer kicks off a transcode for every tap.
   useEffect(() => {
     let cancelled = false;
+    const requestController = new AbortController();
 
     async function prepareStream() {
       if (!connection?.baseUrl || !connection.deviceToken || !playTarget) {
@@ -3370,7 +3372,7 @@ function AppRoot() {
                         myList={mobileMyListItems}
                         onOpenKind={navigateToKind}
                         onResume={playHomeItem}
-                        onSelect={activeKind === 'others' ? playHomeItem : openDetailItem}
+                        onSelect={openDetailItem}
                       />
                     ) : null}
                   </View>
