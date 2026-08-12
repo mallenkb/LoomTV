@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { classifyVideoFile, createMediaItemId, isVideoFilePath } from '@loom-media-server/media-core';
+import { isPathWithin } from './media-path-guard.js';
 const CHECKPOINT_EVERY_FILES = 50;
 
 function mediaRecord(root, filePath, stats) {
@@ -33,10 +34,28 @@ function mediaRecord(root, filePath, stats) {
   };
 }
 
-async function walkVideoFiles(rootPath, onFile, onError) {
+/**
+ * Walk the root for video files without ever leaving it.
+ *
+ * `readdir` Dirents carry lstat semantics, so a symlinked file or directory is
+ * neither indexed nor descended into and the catalog cannot acquire an entry
+ * that points outside the root in the first place. `containmentRoot` adds the
+ * second half of that guarantee: every path handed to `onFile` is checked
+ * against the root's canonical path, so a directory replaced mid-scan cannot
+ * smuggle an entry into the catalog either.
+ */
+async function walkVideoFiles(rootPath, containmentRoot, onFile, onError) {
   const pending = [rootPath];
   while (pending.length > 0) {
     const current = pending.pop();
+    // One canonicalization per directory rather than per file: the Dirent
+    // filter already rules out symlinked files, so a directory that resolves
+    // outside the root is the only way a discovered path can escape.
+    const currentReal = await fs.realpath(current).catch(() => null);
+    if (currentReal === null || !isPathWithin(containmentRoot, currentReal)) {
+      onError(current, Object.assign(new Error('Directory escapes its library root.'), { code: 'EESCAPE' }));
+      continue;
+    }
     let entries;
     try {
       entries = await fs.readdir(current, { withFileTypes: true });
@@ -80,14 +99,18 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
     let scannedFiles = 0;
 
     for (const root of roots) {
-      let rootStat;
+      let rootReal;
       try {
-        rootStat = await fs.stat(root.path);
+        rootReal = await fs.realpath(root.path);
+        const rootStat = await fs.stat(rootReal);
         if (!rootStat.isDirectory()) throw Object.assign(new Error('Path is not a directory.'), { code: 'ENOTDIR' });
-        await fs.access(root.path);
+        await fs.access(rootReal);
       } catch (error) {
         offlineRoots.push(root.id);
-        errors.push({ rootId: root.id, path: root.path, code: error?.code || 'EUNAVAILABLE', message: 'Library root is unavailable; existing records were preserved.' });
+        // Scan status is readable by any account holding library.read, so the
+        // reported path stays root-relative. The root itself is identified by
+        // rootId, which the caller is already allowed to see.
+        errors.push({ rootId: root.id, path: '.', code: error?.code || 'EUNAVAILABLE', message: 'Library root is unavailable; existing records were preserved.' });
         continue;
       }
 
@@ -95,6 +118,7 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
       let rootHadTraversalErrors = false;
       await walkVideoFiles(
         root.path,
+        rootReal,
         async (filePath, stats) => {
           discovered.push(mediaRecord(root, filePath, stats));
           scannedFiles += 1;
@@ -108,7 +132,13 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         },
         (failedPath, error) => {
           rootHadTraversalErrors = true;
-          errors.push({ rootId: root.id, path: failedPath, code: error?.code || 'EIO', message: 'A folder or file could not be read; existing records were preserved for that root.' });
+          const relative = path.relative(root.path, failedPath);
+          errors.push({
+            rootId: root.id,
+            path: !relative || relative.startsWith('..') || path.isAbsolute(relative) ? path.basename(failedPath) : relative,
+            code: error?.code || 'EIO',
+            message: 'A folder or file could not be read; existing records were preserved for that root.',
+          });
         },
       );
       discoveredByRoot.set(root.id, { records: discovered, preserveExisting: rootHadTraversalErrors });

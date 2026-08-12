@@ -1,10 +1,10 @@
-import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { normalizePlaybackProfile } from '@loom-media-server/media-core';
 import { backendEncoder } from '@loom-media-server/transcode-capabilities';
+import { openContainedFile, resolveContainedPath, statContainedFile } from './media-path-guard.js';
 
 const MIME_TYPES = {
   '.mp4': 'video/mp4',
@@ -34,7 +34,22 @@ function json(res, status, payload) {
       ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}),
     });
   }
-  res.end(body);
+  // Returning the response matters: `/api/v1/media/:id/download` forwards this
+  // handler's return value as "did you handle it", and a bare `res.end()`
+  // returned undefined, so every error response fell through to the outer 404
+  // and wrote a second set of headers. Containment rejections take this path.
+  return res.end(body);
+}
+
+/**
+ * The versioned API strips `path` from every catalog DTO. This legacy listing
+ * route did not, so any account with library.read — a viewer, by default —
+ * could read absolute server paths for the whole library.
+ */
+function redactedLibraryItem(item) {
+  if (!item || typeof item !== 'object') return item;
+  const { path: _path, ...safeItem } = item;
+  return safeItem;
 }
 
 function mimeFor(filePath) {
@@ -69,11 +84,11 @@ function tokenFromRequest(req, url) {
   return req.headers['x-loom-admin-token'] || url.searchParams.get('token') || '';
 }
 
-async function waitForFile(filePath, timeoutMs) {
+async function waitForFile(rootPath, filePath, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const stats = await fsPromises.stat(filePath);
+      const { stats } = await statContainedFile(rootPath, filePath);
       if (stats.size > 0) return true;
     } catch {
       // FFmpeg is still starting.
@@ -193,7 +208,21 @@ function transcodeArgs(filePath, outputDir, health, profile) {
 export function createHeadlessMediaService({ adminService, transcoder, cacheDir, authorize }) {
   const sessions = new Map();
   const mediaTokens = new Map();
-  const root = path.join(path.resolve(cacheDir), 'headless-transcodes');
+  const configuredCacheDir = path.resolve(cacheDir);
+  const root = path.join(configuredCacheDir, 'headless-transcodes');
+
+  /**
+   * Transcode output is a media decision point too: every segment this service
+   * later serves is written here. Creating the directory and then proving the
+   * created directory still resolves inside the cache root stops a symlinked
+   * `headless-transcodes` from redirecting FFmpeg's writes outside it.
+   */
+  async function ensureTranscodeRoot() {
+    await fsPromises.mkdir(root, { recursive: true });
+    const cacheRoot = await resolveContainedPath(configuredCacheDir, configuredCacheDir);
+    const verified = await resolveContainedPath(cacheRoot.realPath, root);
+    return verified.realPath;
+  }
 
   function pruneMediaTokens(now = Date.now()) {
     for (const [token, entry] of mediaTokens) {
@@ -254,10 +283,22 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
     if (session.cleanupTimer) clearTimeout(session.cleanupTimer);
     if (session.process && !session.process.killed) session.process.kill('SIGTERM');
     sessions.delete(session.id);
-    void fsPromises.rm(session.outputDir, { recursive: true, force: true }).catch(() => undefined);
+    // Never let a replaced session directory redefine the deletion root.
+    // Resolve it against the configured cache immediately before removal; an
+    // escaped or already-missing path is deliberately left alone.
+    void resolveContainedPath(configuredCacheDir, session.outputDir)
+      .then(({ realPath }) => fsPromises.rm(realPath, { recursive: true, force: true }))
+      .catch(() => undefined);
   }
 
-  function startProcess(session, profile) {
+  async function startProcess(session, profile) {
+    // FFmpeg opens both paths by name. Recheck the authorized input identity
+    // and anchor the output to the configured cache at the last async boundary
+    // before spawn, including hardware-to-software fallback attempts.
+    const input = await statContainedFile(session.mediaRootPath, session.filePath, { expectedFileId: session.fileId });
+    const output = await resolveContainedPath(configuredCacheDir, session.outputDir);
+    session.filePath = input.realPath;
+    session.outputDir = output.realPath;
     session.backend = profile.backend;
     session.profile = profile;
     session.stderr = '';
@@ -273,8 +314,11 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       session.exitCode = code;
       if (code !== 0 && !session.ready && profile.backend !== 'software' && !session.fallbackAttempted) {
         session.fallbackAttempted = true;
-        void fsPromises.rm(session.outputDir, { recursive: true, force: true })
+        void resolveContainedPath(configuredCacheDir, session.outputDir)
+          .then(({ realPath }) => fsPromises.rm(realPath, { recursive: true, force: true }))
+          .then(() => resolveContainedPath(configuredCacheDir, session.outputDir, { allowMissing: true }))
           .then(() => fsPromises.mkdir(session.outputDir, { recursive: true }))
+          .then(() => resolveContainedPath(configuredCacheDir, session.outputDir))
           .then(() => startProcess(session, { ...profile, backend: 'software', hardware: false }))
           .catch((error) => { session.error = error instanceof Error ? error.message : String(error); });
       }
@@ -284,22 +328,31 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
 
   async function startTranscode(itemId, requestedProfile = {}, principal) {
     const item = await adminService.resolveMediaPath(itemId, principal);
-    const stats = await fsPromises.stat(item.path).catch(() => null);
-    if (!stats?.isFile()) throw Object.assign(new Error('Media file is unavailable.'), { status: 409 });
     if (!transcoder.path) throw Object.assign(new Error('FFmpeg is not available on this host.'), { status: 503 });
-    await fsPromises.mkdir(root, { recursive: true });
+    // FFmpeg reopens the input by name, so the strongest check available here
+    // is to prove — immediately before the spawn — that the name still
+    // resolves inside the root to the same file authorization saw.
+    const verified = await statContainedFile(item.rootPath, item.path, { expectedFileId: item.fileId });
+    const transcodeRoot = await ensureTranscodeRoot();
     const id = randomUUID();
-    const outputDir = path.join(root, id);
+    const outputDir = path.join(transcodeRoot, id);
+    await resolveContainedPath(configuredCacheDir, outputDir, { allowMissing: true });
     await fsPromises.mkdir(outputDir, { recursive: true });
+    const containedOutputDir = (await resolveContainedPath(configuredCacheDir, outputDir)).realPath;
     const health = transcoder.getHealth();
     const profile = normalizeProfile(requestedProfile, health);
-    const session = { id, itemId, userId: principal.id, filePath: item.path, outputDir, backend: profile.backend, profile, token: randomBytes(24).toString('base64url'), createdAt: Date.now(), lastActivityAt: Date.now(), ready: false, fallbackAttempted: false, cleaned: false };
+    const session = { id, itemId, userId: principal.id, mediaRootPath: verified.rootRealPath, filePath: verified.realPath, fileId: verified.fileId, outputDir: containedOutputDir, backend: profile.backend, profile, token: randomBytes(24).toString('base64url'), createdAt: Date.now(), lastActivityAt: Date.now(), ready: false, fallbackAttempted: false, cleaned: false };
     session.cleanupTimer = setTimeout(() => cleanupSession(session), SESSION_TTL_MS);
     session.cleanupTimer.unref?.();
     sessions.set(id, session);
-    startProcess(session, profile);
-    const playlistPath = path.join(outputDir, 'index.m3u8');
-    if (!await waitForFile(playlistPath, PLAYLIST_WAIT_MS)) {
+    try {
+      await startProcess(session, profile);
+    } catch (error) {
+      cleanupSession(session);
+      throw error;
+    }
+    const playlistPath = path.join(session.outputDir, 'index.m3u8');
+    if (!await waitForFile(configuredCacheDir, playlistPath, PLAYLIST_WAIT_MS)) {
       cleanupSession(session);
       throw new Error(session.error || 'FFmpeg did not produce an HLS playlist.');
     }
@@ -315,18 +368,42 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
     };
   }
 
-  async function serveFile(req, res, filePath, contentType, allowRange = false, extraHeaders = {}) {
-    const stats = await fsPromises.stat(filePath).catch(() => null);
-    if (!stats?.isFile()) return json(res, 404, { ok: false, error: 'not_found' });
+  /**
+   * Serve a file that has been proven to live inside `rootPath`.
+   *
+   * The response body comes from the descriptor `openContainedFile` returned,
+   * not from a second open by name, so the size in the headers and the bytes on
+   * the wire are the same file — even if the path is replaced mid-response.
+   */
+  async function serveFile(req, res, rootPath, filePath, contentType, allowRange = false, extraHeaders = {}, expectedFileId = null) {
+    let opened;
+    try {
+      opened = await openContainedFile(rootPath, filePath, { expectedFileId });
+    } catch (error) {
+      // A containment failure is reported as such; everything else stays the
+      // indistinguishable 404 this route has always returned for a file that
+      // is simply not there.
+      if (error?.code === 'media_path_escape') return json(res, 403, { ok: false, error: 'media_path_escape' });
+      if (error?.code === 'media_path_substituted') return json(res, 409, { ok: false, error: 'media_path_substituted' });
+      return json(res, 404, { ok: false, error: 'not_found' });
+    }
+    const { handle, stats } = opened;
+    const closeHandle = () => { void handle.close().catch(() => undefined); };
+    const pipeFrom = (streamOptions) => {
+      const stream = handle.createReadStream({ autoClose: false, ...streamOptions });
+      stream.once('error', () => { if (!res.destroyed) res.destroy(); });
+      stream.once('close', closeHandle);
+      res.once('close', closeHandle);
+      return stream.pipe(res);
+    };
     if (!allowRange) {
       res.writeHead(200, { 'Content-Type': contentType, 'Content-Length': stats.size, 'Cache-Control': 'no-store', ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}), ...extraHeaders });
-      if (req.method === 'HEAD') return res.end();
-      const stream = fs.createReadStream(filePath);
-      stream.once('error', () => { if (!res.destroyed) res.destroy(); });
-      return stream.pipe(res);
+      if (req.method === 'HEAD') { closeHandle(); return res.end(); }
+      return pipeFrom({});
     }
     const range = parseRange(req.headers.range, stats.size);
     if (range === 'invalid') {
+      closeHandle();
       res.writeHead(416, { 'Content-Range': `bytes */${stats.size}`, ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}) });
       return res.end();
     }
@@ -341,15 +418,18 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}),
       ...extraHeaders,
     });
-    if (req.method === 'HEAD') return res.end();
-    const stream = fs.createReadStream(filePath, { start, end });
-    stream.once('error', () => { if (!res.destroyed) res.destroy(); });
-    return stream.pipe(res);
+    if (req.method === 'HEAD') { closeHandle(); return res.end(); }
+    if (stats.size === 0) { closeHandle(); return res.end(); }
+    return pipeFrom({ start, end });
   }
 
   async function servePlaylist(req, res, session) {
     const filePath = path.join(session.outputDir, 'index.m3u8');
-    const source = await fsPromises.readFile(filePath, 'utf8').catch(() => null);
+    const source = await openContainedFile(configuredCacheDir, filePath)
+      .then(async (opened) => {
+        try { return await opened.handle.readFile('utf8'); } finally { await opened.handle.close().catch(() => undefined); }
+      })
+      .catch(() => null);
     if (source === null) return json(res, 404, { ok: false, error: 'playlist_not_ready' });
     const token = encodeURIComponent(session.token);
     const playlist = source.replace(/^(segment-\d+\.ts)$/gm, `$1?token=${token}`);
@@ -369,7 +449,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       const authorization = await authorizedFor(req, url, 'library.read');
       if (!authorization.ok) return json(res, authorization.status, { ok: false, error: authorization.status === 403 ? 'permission_denied' : 'admin_auth_required' });
       const principal = authorization.principal;
-      return json(res, 200, { ok: true, items: await adminService.listLibraryItems(principal) });
+      return json(res, 200, { ok: true, items: (await adminService.listLibraryItems(principal)).map(redactedLibraryItem) });
     }
     if (pathname === '/api/media/transcode' && req.method === 'POST') {
       const authorization = await authorizedFor(req, url, 'transcode');
@@ -414,7 +494,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       const filePath = path.join(session.outputDir, transcodeMatch[2]);
       if (transcodeMatch[2] === 'index.m3u8') session.ready = true;
       if (transcodeMatch[2] === 'index.m3u8') return servePlaylist(req, res, session);
-      return serveFile(req, res, filePath, mimeFor(filePath));
+      return serveFile(req, res, configuredCacheDir, filePath, mimeFor(filePath));
     }
     const itemMatch = pathname.match(/^\/api\/media\/items\/([a-f0-9]{32})(?:\/(download))?$/i);
     if (itemMatch && req.method === 'DELETE' && !itemMatch[2]) {
@@ -431,7 +511,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       if (!authorization.ok) return json(res, authorization.status, { ok: false, error: authorization.status === 403 ? 'permission_denied' : 'admin_auth_required' });
       try {
         const item = await adminService.resolveMediaPath(itemMatch[1], authorization.principal);
-        return serveFile(req, res, item.path, 'application/octet-stream', true, { 'Content-Disposition': downloadDisposition(item.path) });
+        return serveFile(req, res, item.rootPath, item.path, 'application/octet-stream', true, { 'Content-Disposition': downloadDisposition(item.path) }, item.fileId);
       } catch (error) {
         return json(res, error?.status || 404, { ok: false, error: error instanceof Error ? error.message : 'media_not_found' });
       }
@@ -444,7 +524,7 @@ export function createHeadlessMediaService({ adminService, transcoder, cacheDir,
       try {
         const item = await adminService.resolveMediaPath(directMatch[1], principal);
         if (!DIRECT_EXTENSIONS.has(path.extname(item.path).toLowerCase())) return json(res, 415, { ok: false, error: 'direct_stream_not_supported', message: 'Start an HLS transcode for this media type.' });
-        return serveFile(req, res, item.path, mimeFor(item.path), true);
+        return serveFile(req, res, item.rootPath, item.path, mimeFor(item.path), true, {}, item.fileId);
       } catch (error) { return json(res, error?.status || 404, { ok: false, error: error instanceof Error ? error.message : 'media_not_found' }); }
     }
     return false;
