@@ -35,6 +35,8 @@ test('database migrations create the complete schema and remain idempotent', () 
       'profile_media_lists',
       'device_profile_selections',
       'device_profile_selection_revisions',
+      'stremio_addons',
+      'profile_stremio_access',
     ]) {
       assert.equal(tables.has(table), true, `Expected ${table} to exist.`);
     }
@@ -183,7 +185,57 @@ test('the profiles migration backfills legacy viewer state onto the Owner exactl
     assert.equal((database.prepare('SELECT COUNT(*) AS n FROM playback_progress').get() as { n: number }).n, 2);
 
     const ledger = database.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{ version: number }>;
-    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2, 3, 4, 5, 6, 7]);
+    assert.deepEqual(ledger.map((row) => row.version), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  } finally {
+    database.close();
+  }
+});
+
+test('mandatory LAN profile migration clears network selections and advances their URL revisions once', () => {
+  const database = new BetterSqlite3(':memory:');
+  database.pragma('foreign_keys = ON');
+  try {
+    migrateDatabase(database);
+    const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string };
+    database.prepare('DELETE FROM schema_migrations WHERE version = 9').run();
+    database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision)
+      VALUES ('desktop-primary', 3), ('paired-phone', 7)
+    `).run();
+    database.prepare(`
+      INSERT INTO device_profile_selections (
+        device_id, profile_id, selected_at, automatic_sign_in, selection_revision
+      ) VALUES
+        ('desktop-primary', ?, 1, 1, 3),
+        ('paired-phone', ?, 1, 1, 7),
+        ('paired-tablet', ?, 1, 1, 0)
+    `).run(owner.id, owner.id, owner.id);
+
+    migrateDatabase(database);
+
+    const remaining = database.prepare(`
+      SELECT device_id FROM device_profile_selections ORDER BY device_id
+    `).all() as Array<{ device_id: string }>;
+    assert.deepEqual(remaining.map(({ device_id: deviceId }) => deviceId), ['desktop-primary']);
+    assert.equal(
+      (database.prepare('SELECT revision FROM device_profile_selection_revisions WHERE device_id = ?').get('paired-phone') as { revision: number }).revision,
+      8,
+    );
+    assert.equal(
+      (database.prepare('SELECT revision FROM device_profile_selection_revisions WHERE device_id = ?').get('paired-tablet') as { revision: number }).revision,
+      1,
+    );
+    assert.equal(
+      (database.prepare('SELECT revision FROM device_profile_selection_revisions WHERE device_id = ?').get('desktop-primary') as { revision: number }).revision,
+      3,
+    );
+
+    migrateDatabase(database);
+    assert.equal(
+      (database.prepare('SELECT revision FROM device_profile_selection_revisions WHERE device_id = ?').get('paired-phone') as { revision: number }).revision,
+      8,
+      'the one-time migration must not advance revisions again on later boots',
+    );
   } finally {
     database.close();
   }

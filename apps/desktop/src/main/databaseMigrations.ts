@@ -10,6 +10,10 @@ export const PROFILE_GUEST_TYPE_MIGRATION_VERSION = 4;
 export const PROFILE_GLYPH_AVATAR_MIGRATION_VERSION = 5;
 export const PROFILE_AUTOMATIC_SIGN_IN_MIGRATION_VERSION = 6;
 export const OUTRO_SEGMENT_MIGRATION_VERSION = 7;
+export const STREMIO_PLUGIN_STATE_MIGRATION_VERSION = 8;
+export const LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION = 9;
+
+const DESKTOP_DEVICE_ID = 'desktop-primary';
 
 function ensureColumn(database: BetterSqlite3.Database, tableName: string, columnName: string, definition: string): void {
   const columns = database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[];
@@ -274,6 +278,61 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateProfileGlyphAvatars(database);
   migrateProfileAutomaticSignIn(database);
   migrateOutroSegments(database);
+  migrateStremioPluginState(database);
+  migrateLanProfileSelections(database);
+}
+
+/**
+ * Rows created before mandatory LAN profile selection have no provenance: an
+ * Owner row written by the former fallback is indistinguishable from a profile
+ * the user deliberately chose. Clear every network-device selection once and
+ * advance its revision so previously issued profile-bound URLs are rejected.
+ * The local desktop selection is explicit UI state and remains intact.
+ */
+function migrateLanProfileSelections(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION)) return;
+  database.transaction(() => {
+    const affectedDevices = database.prepare(`
+      SELECT device_id
+      FROM device_profile_selections
+      WHERE device_id <> ?
+    `).all(DESKTOP_DEVICE_ID) as Array<{ device_id: string }>;
+    const advanceRevision = database.prepare(`
+      INSERT INTO device_profile_selection_revisions (device_id, revision) VALUES (?, 1)
+      ON CONFLICT(device_id) DO UPDATE SET revision = device_profile_selection_revisions.revision + 1
+    `);
+    for (const { device_id: deviceId } of affectedDevices) advanceRevision.run(deviceId);
+    database.prepare('DELETE FROM device_profile_selections WHERE device_id <> ?').run(DESKTOP_DEVICE_ID);
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+function migrateStremioPluginState(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(STREMIO_PLUGIN_STATE_MIGRATION_VERSION)) return;
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS stremio_addons (
+        addon_id TEXT PRIMARY KEY CHECK (length(addon_id) BETWEEN 1 AND 240),
+        record_json TEXT NOT NULL CHECK (length(record_json) <= 1048576),
+        state TEXT NOT NULL CHECK (state IN ('pending-review', 'enabled', 'disabled')),
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS profile_stremio_access (
+        profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+        addon_id TEXT NOT NULL REFERENCES stremio_addons(addon_id) ON DELETE CASCADE,
+        granted_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (profile_id, addon_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_profile_stremio_access_addon
+        ON profile_stremio_access(addon_id);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(STREMIO_PLUGIN_STATE_MIGRATION_VERSION, Date.now());
+  })();
 }
 
 function migrateOutroSegments(database: BetterSqlite3.Database): void {

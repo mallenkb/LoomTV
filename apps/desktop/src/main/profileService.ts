@@ -5,7 +5,6 @@ import {
   createGuestProfile,
   getDeviceProfileSelectionState,
   getDeviceSelectionRevision,
-  getOwnerProfile,
   getProfile,
   getProfilePinCredentials,
   listProfiles,
@@ -14,7 +13,8 @@ import {
   setDeviceAutomaticSignIn,
   setProfilePinCredentials,
   type ProfileRecord,
-} from './database';
+} from './database.ts';
+import { resolveLanProfileAuthorization } from './lanProfileAuthorization.ts';
 import { hashProfilePin, verifyProfilePin } from './profilePin.ts';
 
 export const DESKTOP_DEVICE_ID = 'desktop-primary';
@@ -149,12 +149,17 @@ async function unlockProfile(deviceId: string, profile: ProfileRecord, pin: stri
 export function getActiveProfileState(deviceId: string): ActiveProfileState {
   pruneProfileSecurityState();
   const selection = getDeviceProfileSelectionState(deviceId);
-  if (selection && getProfile(selection.profileId)) {
+  const authorization = resolveLanProfileAuthorization({
+    deviceId,
+    selection,
+    selectedProfileExists: Boolean(selection && getProfile(selection.profileId)),
+  });
+  if (authorization.kind === 'device-profile') {
     return {
-      profileId: selection.profileId,
+      profileId: authorization.selection.profileId,
       selectionRequired: false,
-      selectionRevision: selection.selectionRevision,
-      automaticSignIn: selection.automaticSignIn,
+      selectionRevision: authorization.selection.selectionRevision,
+      automaticSignIn: authorization.selection.automaticSignIn,
     };
   }
 
@@ -251,22 +256,27 @@ export function requireDesktopProfileId(expectedProfileId?: string): string {
   return profileId;
 }
 
-export function resolveLanProfileId(deviceId: string | null, requireExplicitSelection = false): string {
-  if (!deviceId) return requireDesktopProfileId();
-  const selection = getDeviceProfileSelectionState(deviceId);
-  if (selection && getProfile(selection.profileId)) return selection.profileId;
-  if (requireExplicitSelection) throw new ProfileError('profile_required', 'Select a profile to continue.');
-  const owner = getOwnerProfile();
-  if (owner) {
-    selectDeviceProfile(deviceId, owner.id);
-    return owner.id;
+/**
+ * Resolve the profile a request may read. `deviceId` is `null` only for a
+ * request already verified as local to this desktop; every network device must
+ * hold an explicit selection of its own. This never writes a selection, so an
+ * unselected device stays unselected instead of silently acquiring Owner.
+ */
+export function resolveLanProfileId(deviceId: string | null): string {
+  const selection = deviceId ? getDeviceProfileSelectionState(deviceId) : null;
+  const authorization = resolveLanProfileAuthorization({
+    deviceId,
+    selection,
+    selectedProfileExists: Boolean(selection && getProfile(selection.profileId)),
+  });
+  switch (authorization.kind) {
+    case 'desktop-profile':
+      return requireDesktopProfileId();
+    case 'device-profile':
+      return authorization.selection.profileId;
+    default:
+      throw new ProfileError('profile_required', 'Select a profile to continue.');
   }
-  const first = listProfiles()[0];
-  if (first) {
-    selectDeviceProfile(deviceId, first.id);
-    return first.id;
-  }
-  throw new ProfileError('profile_required', 'No profiles exist.');
 }
 
 export function requireOwner(deviceId = DESKTOP_DEVICE_ID): ProfileRecord {

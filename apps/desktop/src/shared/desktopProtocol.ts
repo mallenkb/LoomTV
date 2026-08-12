@@ -243,6 +243,8 @@ export interface SettingsPayload {
   autoSyncIntervalHours?: number;
   playbackSkipBackSeconds?: number;
   playbackSkipForwardSeconds?: number;
+  /** Minutes to keep the display awake during active native playback. Zero means until playback ends. */
+  playbackDisplaySleepTimeoutMinutes?: number;
   localSkipAnalysisEnabled?: boolean;
   skipAnalysis?: SkipAnalysisSettings;
   sidebarNavOrder?: string[];
@@ -575,3 +577,85 @@ export type OfficialMetadataCandidate = OfficialArtworkResult & {
   episodeCount?: number;
   episodePreview?: string[];
 };
+
+export type StremioPluginState = 'pending-review' | 'enabled' | 'disabled';
+
+export interface StremioPluginCatalogExtra {
+  name: string;
+  isRequired: boolean;
+  options?: readonly string[];
+  optionsLimit?: number;
+}
+
+export interface StremioPluginCatalogDefinition {
+  type: string;
+  id: string;
+  name: string;
+  extra: readonly StremioPluginCatalogExtra[];
+}
+
+export interface StremioPluginSummary {
+  addonId: string;
+  name: string;
+  version: string;
+  description: string;
+  manifestOrigin: string;
+  manifestUrlRedacted: string;
+  state: StremioPluginState;
+  trusted: boolean;
+  resources: readonly string[];
+  types: readonly string[];
+  catalogs: readonly StremioPluginCatalogDefinition[];
+  warnings: readonly string[];
+  reviewedAt: number;
+  approvedAt?: number;
+}
+
+export interface StremioPluginReview extends StremioPluginSummary {
+  reviewToken: string;
+  approvalRequired: true;
+}
+
+export interface OfficialStremioAddon {
+  id: 'cinemeta' | 'opensubtitles-v3';
+  addonId: 'com.linvo.cinemeta' | 'org.stremio.opensubtitlesv3';
+  name: string;
+  description: string;
+  capability: 'catalog' | 'subtitles';
+}
+
+export interface StremioPluginCatalogRequest {
+  type: string;
+  catalogId: string;
+  extra?: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface StremioPluginMetaRequest {
+  type: string;
+  id: string;
+  extra?: Readonly<Record<string, string | number | boolean>>;
+}
+
+export interface StremioPluginCatalogItem {
+  id: string;
+  type: string;
+  title: string;
+  genres: readonly string[];
+  description?: string;
+  releaseInfo?: string;
+  released?: string;
+  rating?: number;
+  runtime?: string;
+}
+
+export interface StremioPluginCatalogResult {
+  addonId: string;
+  type: string;
+  catalogId: string;
+  items: readonly StremioPluginCatalogItem[];
+}
+
+export interface StremioPluginMetaResult {
+  addonId: string;
+  item: StremioPluginCatalogItem | null;
+}

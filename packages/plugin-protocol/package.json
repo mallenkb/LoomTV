@@ -1,0 +1,33 @@
+{
+  "name": "@loom-media-server/plugin-protocol",
+  "version": "1.0.0",
+  "description": "Versioned, capability-scoped LoomTV plugin manifest contracts and boundary validation",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    },
+    "./schema": "./schema/plugin-manifest.v1.schema.json",
+    "./stremio-schema": "./schema/stremio-addon-manifest.v3.schema.json",
+    "./stremio-adapter": {
+      "types": "./src/stremio-adapter.d.ts",
+      "import": "./src/stremio-adapter.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "schema",
+    "examples"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
+}

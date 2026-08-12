@@ -7,6 +7,12 @@ import BetterSqlite3 from 'better-sqlite3';
 import type { LibraryData } from '../src/main/appContracts.ts';
 import { createDatabaseArtworkRepository } from '../src/main/databaseArtworkRepository.ts';
 import { migrateDatabase } from '../src/main/databaseMigrations.ts';
+import {
+  listProfileStremioAccess,
+  saveStremioAddonState,
+  setProfileStremioAccess,
+} from '../src/main/databasePluginRepository.ts';
+import { createProfile } from '../src/main/databaseProfilesRepository.ts';
 import { createDatabaseSegmentsRepository } from '../src/main/databaseSegmentsRepository.ts';
 import type { MediaSegmentCandidate, ProviderCacheEntry } from '../src/main/skipSegments/types.ts';
 import type { SegmentAnalysisJob } from '../src/main/skipSegments/analysisJobs.ts';
@@ -97,6 +103,33 @@ test('a manual analysis request supersedes every parked request for the same rev
     assert.equal(states.get('incremental'), 'cancelled');
     assert.equal(states.get('manual-old'), 'cancelled');
     assert.equal(states.get('manual-new'), 'pending');
+  } finally {
+    database.close();
+  }
+});
+
+test('Stremio persistence revokes profile grants when an add-on is disabled or re-reviewed', () => {
+  const database = createDatabase();
+  try {
+    const profile = createProfile(database, { name: 'Standard profile' });
+    const record = {
+      addonId: 'org.example.catalog',
+      state: 'enabled' as const,
+      reviewToken: 'review-one',
+    };
+    saveStremioAddonState(database, { stateVersion: 1, addons: [record] });
+    assert.equal(setProfileStremioAccess(database, profile.id, record.addonId, true), true);
+    assert.deepEqual(listProfileStremioAccess(database, profile.id), [record.addonId]);
+
+    saveStremioAddonState(database, {
+      stateVersion: 1,
+      addons: [{ ...record, state: 'pending-review', reviewToken: 'review-two' }],
+    });
+    assert.deepEqual(
+      listProfileStremioAccess(database, profile.id),
+      [],
+      'a new review must not inherit a standard profile grant from an older approval',
+    );
   } finally {
     database.close();
   }

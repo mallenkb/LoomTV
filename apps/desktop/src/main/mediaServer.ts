@@ -137,6 +137,7 @@ export interface MediaServerDependencies {
   libraryEtagFor: (payload: unknown) => string;
   compactLibraryIndexForLocalNetwork: (profileId: string, deviceId: string | undefined, revision: number) => LibraryIndexPayload;
   compactLibraryItemForLocalNetwork: (mediaId: string, profileId: string, deviceId: string | undefined, revision: number) => LibraryItemDetailsPayload | null;
+  canProfileAccessMediaId: (profileId: string, mediaId: string) => boolean;
   compactLibraryIndexForRenderer: (revision: number) => LibraryIndexPayload;
   compactLibraryItemForRenderer: (mediaId: string, revision: number) => LibraryItemDetailsPayload | null;
   getRendererCatalogIdentity: () => string;
@@ -486,6 +487,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     libraryEtagFor,
     compactLibraryIndexForLocalNetwork,
     compactLibraryItemForLocalNetwork,
+    canProfileAccessMediaId,
     compactLibraryIndexForRenderer,
     compactLibraryItemForRenderer,
     getRendererCatalogIdentity,
@@ -552,7 +554,6 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         }
         return authorized;
       };
-      const usesProfileApi = req.headers['x-loom-profile-api-version'] === '1';
       const writeProfileError = (error: unknown): void => {
         if (error instanceof ProfileError) {
           const status = error.code === 'profile_required' || error.code === 'stale_profile_selection'
@@ -568,17 +569,22 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         }
         writeJson(res, 500, { error: 'profile_operation_failed' });
       };
+      const profileDeviceIdForRequest = (): string | null => (
+        lanDeviceId || (authorizeLocalRequest(reqUrl, req) ? DESKTOP_DEVICE_ID : null)
+      );
       const profileIdForRequest = (): string | null => {
         try {
-          return resolveLanProfileId(lanDeviceId, usesProfileApi);
+          // The device comes from the credential that authenticated this
+          // request, never from a caller-supplied header and never from an
+          // unauthenticated loopback fallback.
+          const deviceId = profileDeviceIdForRequest();
+          if (!deviceId) throw new ProfileError('profile_required', 'Select a profile to continue.');
+          return resolveLanProfileId(deviceId === DESKTOP_DEVICE_ID ? null : deviceId);
         } catch (error) {
           writeProfileError(error);
           return null;
         }
       };
-      const profileDeviceIdForRequest = (): string | null => (
-        lanDeviceId || (authorizeLocalRequest(reqUrl, req) ? DESKTOP_DEVICE_ID : null)
-      );
       const catalogProfileIdentity = (profileId: string): object => ({
         restrictions: profileRestrictionIdentity(profileId),
         deviceId: lanDeviceId || DESKTOP_DEVICE_ID,
@@ -613,7 +619,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         writeJson(res, 200, payload());
       };
       const assertCurrentSelectionRevision = (body: Record<string, unknown>): void => {
-        if (!usesProfileApi || !lanDeviceId) return;
+        // Every network device is held to its current selection revision. A
+        // client cannot opt out of the check by omitting a version header.
+        if (!lanDeviceId) return;
         const expected = Number(body.selectionRevision);
         const active = getActiveProfileState(lanDeviceId);
         if (!Number.isSafeInteger(expected) || expected !== active.selectionRevision) {
@@ -1236,9 +1244,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/v2/client-config' && req.method === 'GET') {
         if (!requireV2Scope('catalog:read')) return;
-        const profileId = usesProfileApi && lanDeviceId
-          ? getActiveProfileState(lanDeviceId).profileId
-          : resolveLanProfileId(lanDeviceId, false);
+        // Client bootstrap stays reachable before a profile is chosen; it just
+        // carries no profile-specific preferences until the device selects one.
+        const profileId = getActiveProfileState(lanDeviceId || DESKTOP_DEVICE_ID).profileId;
         const settings = loadSettings();
         const preferences = profileId ? getProfilePreferences(profileId) : {};
         writeJson(res, 200, {
@@ -1391,7 +1399,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         const kindValue = reqUrl.searchParams.get('kind');
         const kind = kindValue === 'watchlist' || kindValue === 'favorite' ? kindValue : undefined;
         if (req.method === 'GET') {
-          writeJson(res, 200, getProfileLists(profileId, kind));
+          writeJson(res, 200, getProfileLists(profileId, kind).filter((entry) => (
+            canProfileAccessMediaId(profileId, entry.mediaId)
+          )));
           return;
         }
         if (req.method === 'PUT' || req.method === 'DELETE') {
@@ -1402,7 +1412,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
               writeJson(res, 400, { error: 'mediaId_and_kind_required' });
               return;
             }
-            writeJson(res, 200, setProfileListEntry(profileId, String(body.mediaId), bodyKind, req.method === 'PUT'));
+            const mediaId = String(body.mediaId);
+            if (req.method === 'PUT' && !canProfileAccessMediaId(profileId, mediaId)) {
+              writeJson(res, 404, { error: 'media_not_found' });
+              return;
+            }
+            writeJson(res, 200, setProfileListEntry(profileId, mediaId, bodyKind, req.method === 'PUT').filter((entry) => (
+              canProfileAccessMediaId(profileId, entry.mediaId)
+            )));
           }).catch((error) => error instanceof ProfileError ? writeProfileError(error) : writeJson(res, 400, { error: 'invalid_profile_list_entry' }));
           return;
         }
@@ -1473,10 +1490,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         if (!profileId) return;
         const secret = getLanHmacSecret();
         writeJson(res, 200, Object.fromEntries(
-          Object.entries(getAllProgress(profileId)).map(([storedPath, progress]) => [
-            registerResource(secret, 'media', storedPath),
-            progress,
-          ]),
+          Object.entries(getAllProgress(profileId)).flatMap(([storedPath, progress]) => {
+            try {
+              assertProfileCanAccessPath(profileId, storedPath);
+              return [[registerResource(secret, 'media', storedPath), progress]];
+            } catch {
+              return [];
+            }
+          }),
         ));
         return;
       }
@@ -1496,6 +1517,12 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             }
             if (!file) {
               writeJson(res, 400, { error: 'mediaId is required' });
+              return;
+            }
+            try {
+              assertProfileCanAccessPath(profileId, file);
+            } catch {
+              writeJson(res, 404, { error: 'media_not_found' });
               return;
             }
             writeJson(res, 200, saveProgress(profileId, file, Number(body.position) || 0, Number(body.duration) || 0));
@@ -1548,9 +1575,15 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
       if (reqUrl.pathname === '/api/v2/playback/segments' && req.method === 'GET') {
         if (!requireV2Scope('catalog:read')) return;
+        const profileId = profileIdForRequest();
+        if (!profileId) return;
         const mediaId = reqUrl.searchParams.get('mediaId') || '';
         if (!mediaId) {
           writeJson(res, 400, { error: 'mediaId is required' });
+          return;
+        }
+        if (!canProfileAccessMediaId(profileId, mediaId)) {
+          writeJson(res, 404, { error: 'media_not_found' });
           return;
         }
         const seasonValue = reqUrl.searchParams.get('season');

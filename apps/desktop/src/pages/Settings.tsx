@@ -24,6 +24,7 @@ import LibrarySettingsSection from './LibrarySettingsSection';
 import MetadataSettingsSection from './MetadataSettingsSection';
 import NetworkSettingsSection from './NetworkSettingsSection';
 import PlaybackSettingsSection from './PlaybackSettingsSection';
+import PluginsSettingsSection from './PluginsSettingsSection';
 import ProfilesSettingsSection from './ProfilesSettingsSection';
 import SettingsTabs from './SettingsTabs';
 import ThemeSettingsSection from './ThemeSettingsSection';
@@ -56,6 +57,7 @@ const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
 type SavedPlaybackSettings = {
   skipBackSeconds: number;
   skipForwardSeconds: number;
+  displaySleepTimeoutMinutes: number;
 };
 
 function makeMetadataProviders(openExternal: (url: string) => void): MetadataProvider[] {
@@ -171,6 +173,7 @@ export default function Settings() {
   const [customFolderNames, setCustomFolderNames] = useState<Record<string, string>>({});
   const [playbackSkipBackSeconds, setPlaybackSkipBackSeconds] = useState(10);
   const [playbackSkipForwardSeconds, setPlaybackSkipForwardSeconds] = useState(15);
+  const [playbackDisplaySleepTimeoutMinutes, setPlaybackDisplaySleepTimeoutMinutes] = useState(0);
   const [savedPlaybackSettings, setSavedPlaybackSettings] = useState<SavedPlaybackSettings | null>(null);
   const [skipAnalysis, setSkipAnalysis] = useState<SkipAnalysisSettings>(DEFAULT_SKIP_ANALYSIS);
   const [localAnalysisStatus, setLocalAnalysisStatus] = useState<LocalSegmentAnalysisStatus | null>(null);
@@ -291,9 +294,14 @@ export default function Settings() {
       const loadedSkipForward = Number.isFinite(skipForward) && (skipForward || 0) > 0 ? (skipForward || 15) : 15;
       setPlaybackSkipBackSeconds(loadedSkipBack);
       setPlaybackSkipForwardSeconds(loadedSkipForward);
+      const loadedDisplaySleepTimeout = Number.isFinite(Number(s.playbackDisplaySleepTimeoutMinutes))
+        ? Math.max(0, Math.min(480, Math.round(Number(s.playbackDisplaySleepTimeoutMinutes))))
+        : 0;
+      setPlaybackDisplaySleepTimeoutMinutes(loadedDisplaySleepTimeout);
       setSavedPlaybackSettings({
         skipBackSeconds: loadedSkipBack,
         skipForwardSeconds: loadedSkipForward,
+        displaySleepTimeoutMinutes: loadedDisplaySleepTimeout,
       });
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
     });
@@ -462,17 +470,26 @@ export default function Settings() {
       setSettingsPersistenceError(error instanceof Error ? error.message : 'Could not save profile playback settings.');
       return false;
     }
-    if (activeProfile?.type === 'owner') {
+    if (activeProfile?.type === 'owner' && !isRemoteLibraryMode) {
       if (!await persistSettings({
         localSkipAnalysisEnabled: skipAnalysis.enabled,
         skipAnalysis,
       })) return false;
       setLocalAnalysisStatus(await desktopApi.getLocalSegmentAnalysisStatus());
     }
-    setSavedPlaybackSettings({
+    setSavedPlaybackSettings((saved) => saved && ({
+      ...saved,
       skipBackSeconds: normalizedBack,
       skipForwardSeconds: normalizedForward,
-    });
+    }));
+    return true;
+  };
+
+  const handleSaveDisplaySleepSettings = async (): Promise<boolean> => {
+    const normalized = Math.max(0, Math.min(480, Math.round(Number(playbackDisplaySleepTimeoutMinutes) || 0)));
+    setPlaybackDisplaySleepTimeoutMinutes(normalized);
+    if (!isRemoteLibraryMode && !await persistSettings({ playbackDisplaySleepTimeoutMinutes: normalized })) return false;
+    setSavedPlaybackSettings((saved) => saved && ({ ...saved, displaySleepTimeoutMinutes: normalized }));
     return true;
   };
 
@@ -480,6 +497,8 @@ export default function Settings() {
     playbackSkipBackSeconds !== savedPlaybackSettings.skipBackSeconds
     || playbackSkipForwardSeconds !== savedPlaybackSettings.skipForwardSeconds
   );
+  const displaySleepSettingsDirty = savedPlaybackSettings !== null
+    && playbackDisplaySleepTimeoutMinutes !== savedPlaybackSettings.displaySleepTimeoutMinutes;
 
   const handleAnalysisAction = async (
     action: 'run' | 'pause' | 'resume' | 'cancel' | 'cancel-manual' | 'cleanup' | 'rebuild',
@@ -710,7 +729,7 @@ export default function Settings() {
   }, [activeSection, refreshLocalNetworkStatus, scanForPeers]);
 
   useEffect(() => {
-    if (activeSection !== 'about') return undefined;
+    if (activeSection !== 'about' && activeSection !== 'playback') return undefined;
 
     let cancelled = false;
     if (!ffmpegStatus) {
@@ -724,16 +743,18 @@ export default function Settings() {
         });
     }
 
-    desktopApi.getUpdateState()
+    if (activeSection === 'about') desktopApi.getUpdateState()
       .then((state) => {
         if (!cancelled) setUpdateState(state);
       })
       .catch((error) => {
         console.error('Failed to read update state:', error);
       });
-    const unsubscribeUpdates = desktopApi.onUpdateState((state) => {
-      if (!cancelled) setUpdateState(state);
-    });
+    const unsubscribeUpdates = activeSection === 'about'
+      ? desktopApi.onUpdateState((state) => {
+        if (!cancelled) setUpdateState(state);
+      })
+      : () => {};
 
     return () => {
       cancelled = true;
@@ -891,25 +912,31 @@ export default function Settings() {
                 </div>
               )}
               {activeSection === 'profiles' && <ProfilesSettingsSection />}
+              {activeSection === 'plugins' && <PluginsSettingsSection />}
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
                   showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}
                   skipBackSeconds={playbackSkipBackSeconds}
                   skipForwardSeconds={playbackSkipForwardSeconds}
+                  displaySleepTimeoutMinutes={playbackDisplaySleepTimeoutMinutes}
                   onSkipBackChange={setPlaybackSkipBackSeconds}
                   onSkipForwardChange={setPlaybackSkipForwardSeconds}
+                  onDisplaySleepTimeoutChange={setPlaybackDisplaySleepTimeoutMinutes}
                   playbackSettingsDirty={playbackSettingsDirty}
+                  displaySleepSettingsDirty={displaySleepSettingsDirty}
                   skipAnalysis={skipAnalysis}
                   onSkipAnalysisChange={setSkipAnalysis}
                   analysisStatus={localAnalysisStatus}
                   onAnalysisAction={handleAnalysisAction}
                   onSave={handleSavePlaybackSettings}
+                  onDisplaySleepSave={handleSaveDisplaySleepSettings}
                   libvlcAvailability={isRemoteLibraryMode
                     ? { available: false, enabled: false, surface: 'unavailable', reason: 'Native LibVLC playback is available only for local files on this laptop.' }
                     : libvlcAvailability}
                   mpvAvailability={isRemoteLibraryMode
                     ? { available: false, reason: 'Native mpv playback is available only for local files on this laptop.' }
                     : mpvAvailability}
+                  ffmpegStatus={ffmpegStatus}
                   onMpvChoose={isRemoteLibraryMode ? undefined : chooseMpvExecutable}
                   onMpvReset={isRemoteLibraryMode ? undefined : resetMpvExecutable}
                   onMpvRefresh={isRemoteLibraryMode ? undefined : refreshMpvAvailability}

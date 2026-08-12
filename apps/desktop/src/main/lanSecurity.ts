@@ -60,7 +60,6 @@ type PendingPairingApproval = {
   address: string;
   deviceName: string;
   expiresAt: number;
-  supportsProfiles: boolean;
   state: 'pending' | 'approved' | 'denied';
   result?: PairingSuccess | PairingFailure;
 };
@@ -69,7 +68,6 @@ export interface LanSecurityDeps {
   loadSettings: () => AppSettings;
   saveSettings: (settings: AppSettings) => void;
   localAccessToken: string;
-  libraryForLocalNetwork: (profileId?: string, deviceId?: string) => unknown;
   requestPairingApproval?: (request: LanPairingApprovalPrompt) => Promise<boolean>;
 }
 
@@ -78,7 +76,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     loadSettings,
     saveSettings,
     localAccessToken,
-    libraryForLocalNetwork,
     requestPairingApproval,
   } = deps;
   let pairingSecretExpiresAt = 0;
@@ -317,7 +314,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
   function issuePairingCredentials(
     deviceName: string,
     address: string,
-    supportsProfiles: boolean,
   ): PairingSuccess | PairingFailure {
     const settings = loadSettings();
     const pairedDevices = settings.localNetworkPairedDevices || [];
@@ -357,9 +353,17 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     pairingSecretExpiresAt = 0;
     recordPairSuccess(address);
 
-    const payload = supportsProfiles
-      ? { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] } }
-      : libraryForLocalNetwork(undefined, deviceId);
+    // A device that just paired has not selected a profile yet, so pairing
+    // carries no library content for any client. Clients that omit the profile
+    // API version used to receive the Owner library here; they now have to
+    // select a profile like every other device.
+    const payload = {
+      movies: [],
+      tvShows: [],
+      animeShows: [],
+      libraryFolders: [],
+      libraryFolderGroups: { movies: [], tvShows: [], anime: [], others: [] },
+    };
     return {
       status: 200,
       body: {
@@ -419,7 +423,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
     const code = String(body.code || '').trim().slice(0, 128);
     const deviceName = String(body.deviceName || '').trim().slice(0, 80) || 'Paired device';
     const approvalRequested = body.approvalRequested === true && !code;
-    const supportsProfiles = req.headers['x-loom-profile-api-version'] === '1';
 
     if (approvalRequested) {
       if (!requestPairingApproval) {
@@ -453,7 +456,6 @@ export function createLanSecurity(deps: LanSecurityDeps) {
         address,
         deviceName,
         expiresAt: Date.now() + PAIRING_APPROVAL_TTL_MS,
-        supportsProfiles,
         state: 'pending',
       };
       pendingPairingApprovals.set(requestId, pending);
@@ -491,7 +493,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       return;
     }
 
-    const result = issuePairingCredentials(deviceName, address, supportsProfiles);
+    const result = issuePairingCredentials(deviceName, address);
     writeJson(res, result.status, result.body);
   }
 
@@ -543,11 +545,7 @@ export function createLanSecurity(deps: LanSecurityDeps) {
       return;
     }
 
-    pending.result ||= issuePairingCredentials(
-      pending.deviceName,
-      pending.address,
-      pending.supportsProfiles,
-    );
+    pending.result ||= issuePairingCredentials(pending.deviceName, pending.address);
     writeJson(res, pending.result.status, pending.result.body);
   }
 

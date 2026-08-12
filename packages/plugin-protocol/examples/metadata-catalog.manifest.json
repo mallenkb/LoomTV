@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "org.example.loom.metadata",
+  "name": "Example catalog metadata provider",
+  "version": "0.1.0",
+  "loomApi": {
+    "range": ">=1.0.0 <2.0.0"
+  },
+  "description": "A declaration-only example for a catalog provider.",
+  "author": "Example Contributors",
+  "homepage": "https://example.org/loom-metadata",
+  "capabilities": [
+    {
+      "type": "metadata.catalog",
+      "apiVersion": 1
+    }
+  ]
+}

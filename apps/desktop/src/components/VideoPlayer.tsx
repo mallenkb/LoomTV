@@ -346,6 +346,9 @@ export default function VideoPlayer({
   const [cropMode, setCropMode] = useState<CropMode>('none');
   const [rotation, setRotation] = useState<RotationMode>(0);
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [displaySleepTimeoutMinutes, setDisplaySleepTimeoutMinutes] = useState(0);
+  const [displaySleepTimerRemainingSeconds, setDisplaySleepTimerRemainingSeconds] = useState<number | null>(null);
+  const [displaySleepTimeoutError, setDisplaySleepTimeoutError] = useState('');
   const [audioDelay, setAudioDelay] = useState(0);
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
@@ -607,6 +610,11 @@ export default function VideoPlayer({
         );
         if (settings.skipAnalysis?.promptTypes) setSkipPromptTypes(settings.skipAnalysis.promptTypes);
         setOpenSubtitlesEnabled(Boolean(settings.openSubtitlesAutoDownload));
+        setDisplaySleepTimeoutMinutes(
+          Number.isFinite(Number(settings.playbackDisplaySleepTimeoutMinutes))
+            ? Math.max(0, Math.min(480, Math.round(Number(settings.playbackDisplaySleepTimeoutMinutes))))
+            : 0,
+        );
       })
       .catch(() => {
         if (cancelled) return;
@@ -617,6 +625,39 @@ export default function VideoPlayer({
       cancelled = true;
     };
   }, []);
+
+  const updateDisplaySleepTimeout = useCallback(async (minutes: number) => {
+    const normalized = Math.max(0, Math.min(480, Math.round(Number(minutes) || 0)));
+    const previous = displaySleepTimeoutMinutes;
+    setDisplaySleepTimeoutMinutes(normalized);
+    setDisplaySleepTimeoutError('');
+    try {
+      const saved = await desktopApi.saveSettings({ playbackDisplaySleepTimeoutMinutes: normalized });
+      if (!saved) throw new Error('The display sleep timer could not be saved.');
+    } catch (error) {
+      setDisplaySleepTimeoutMinutes(previous);
+      setDisplaySleepTimeoutError(error instanceof Error ? error.message : 'The display sleep timer could not be saved.');
+    }
+  }, [displaySleepTimeoutMinutes]);
+
+  useEffect(() => {
+    if (displaySleepTimeoutMinutes <= 0) {
+      setDisplaySleepTimerRemainingSeconds(null);
+      return undefined;
+    }
+    const fullDurationSeconds = displaySleepTimeoutMinutes * 60;
+    if (paused) {
+      setDisplaySleepTimerRemainingSeconds(fullDurationSeconds);
+      return undefined;
+    }
+    const deadline = Date.now() + fullDurationSeconds * 1_000;
+    const updateRemaining = () => {
+      setDisplaySleepTimerRemainingSeconds(Math.max(0, Math.ceil((deadline - Date.now()) / 1_000)));
+    };
+    updateRemaining();
+    const timer = window.setInterval(updateRemaining, 1_000);
+    return () => window.clearInterval(timer);
+  }, [displaySleepTimeoutMinutes, paused]);
 
   const hasEpisodes = episodes.length > 0 && episodeFiles.length > 0;
   const videoTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'video'), [mediaTracks]);
@@ -3629,6 +3670,11 @@ export default function VideoPlayer({
           setRotation={setRotation}
           playbackRate={playbackRate}
           setPlaybackRate={setPlaybackRate}
+          displaySleepTimeoutMinutes={displaySleepTimeoutMinutes}
+          displaySleepTimerRemainingSeconds={displaySleepTimerRemainingSeconds}
+          playbackPaused={paused}
+          displaySleepTimeoutError={displaySleepTimeoutError}
+          setDisplaySleepTimeoutMinutes={(minutes) => { void updateDisplaySleepTimeout(minutes); }}
           playbackInformation={playbackInformation}
           audioTracks={audioTracks}
           selectedAudioTrackIndex={selectedAudioTrackIndex}
