@@ -459,13 +459,3 @@ export function createAdminApiHandler(options = {}) {
     }
   };
 }
-
-/** Compose the browser page and API routes into one fall-through handler. */
-export function createHeadlessAdminHandler(options = {}) {
-  const page = createAdminPage(options);
-  const api = createAdminApiHandler(options);
-  return async function handleHeadlessAdmin(req, res) {
-    if (await page(req, res)) return true;
-    return api(req, res);
-  };
-}

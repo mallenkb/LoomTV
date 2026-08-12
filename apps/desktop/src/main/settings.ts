@@ -33,13 +33,19 @@ function normalizePairedDevices(value: unknown): LanPairedDevice[] {
       || typeof entry.refreshTokenHash !== 'string'
       || !/^[0-9a-f]{64}$/i.test(entry.refreshTokenHash)
     ) continue;
+    // LAN approvals are explicit device grants. Keep the refresh credential
+    // durable so a paired phone reconnects after restarts until an owner
+    // revokes it; the credential itself remains stored only as a hash.
     const device: LanPairedDevice = {
       id: entry.id,
       name: typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim().slice(0, 80) : 'Unnamed device',
       accessTokenHash: entry.accessTokenHash,
       accessTokenExpiresAt: Number(entry.accessTokenExpiresAt) || 0,
       refreshTokenHash: entry.refreshTokenHash,
-      refreshTokenExpiresAt: Number(entry.refreshTokenExpiresAt) || 0,
+      refreshTokenExpiresAt: Number.isFinite(Number(entry.refreshTokenExpiresAt))
+        && Number(entry.refreshTokenExpiresAt) > 0
+        ? Number.MAX_SAFE_INTEGER
+        : 0,
       scopes: ['catalog:read', 'media:stream', 'playback:write'],
       securityEpoch: 2,
       createdAt: Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : Date.now(),
@@ -143,8 +149,12 @@ function normalizeSettings(raw: AppSettings): AppSettings {
   if (raw.tmdbApiKey?.trim()) metadataApiKeys.tmdb = raw.tmdbApiKey.trim();
 
   const skipAnalysis = normalizeSkipAnalysis(raw);
+  const mpvExecutablePath = typeof raw.mpvExecutablePath === 'string' && raw.mpvExecutablePath.trim()
+    ? path.resolve(raw.mpvExecutablePath.trim())
+    : undefined;
   return {
     ...raw,
+    mpvExecutablePath,
     omdbApiKey: metadataApiKeys.omdb || '',
     tmdbApiKey: metadataApiKeys.tmdb || '',
     metadataApiKeys,
@@ -230,7 +240,9 @@ export function loadSettings(): AppSettings {
   } catch (error) {
     console.error('[settings] Failed to migrate legacy settings:', error);
   }
-  return normalizeSettings({});
+  const initialSettings = normalizeSettings({});
+  saveSettingsToDatabase(initialSettings as unknown as Record<string, unknown>);
+  return initialSettings;
 }
 
 export function saveSettings(settings: AppSettings): void {

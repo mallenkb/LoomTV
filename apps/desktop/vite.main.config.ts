@@ -12,8 +12,7 @@ export default defineConfig({
         'electron-squirrel-startup',
         'better-sqlite3',
         'electron-updater',
-        'ffmpeg-static',
-        'ffprobe-static',
+        'koffi',
       ],
       output: {
         format: 'cjs',

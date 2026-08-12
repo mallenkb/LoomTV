@@ -94,10 +94,6 @@ test('library repository round-trips the existing schema, ordering, and durable 
     saveLibrary(database, library());
     const result = loadLibrary(
       database,
-      new Map([
-        ['/library/show.s01e01.mkv', { position: 10, duration: 100, updatedAt: 100, watched: false }],
-        ['/library/show.s02e01.mkv', { position: 20, duration: 100, updatedAt: 200, watched: false }],
-      ]),
       new Map([['show', new Map([['poster', 'data:image/png;base64,custom']])]]),
     );
 

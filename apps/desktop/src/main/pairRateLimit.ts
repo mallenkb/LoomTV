@@ -8,19 +8,30 @@ const PAIR_LOCKOUT_DURATION_MS = 5 * 60 * 1000;
 type PairAttemptState = { fails: number[]; lockedUntil?: number };
 const pairAttempts = new Map<string, PairAttemptState>();
 
+function prunePairAttempts(now: number): void {
+  for (const [address, state] of pairAttempts) {
+    if (state.lockedUntil && state.lockedUntil > now) continue;
+    state.fails = state.fails.filter((timestamp) => now - timestamp < PAIR_LOCKOUT_WINDOW_MS);
+    if (state.fails.length === 0) pairAttempts.delete(address);
+  }
+}
+
 export function checkPairRateLimit(address: string): { allowed: boolean; retryAfterMs?: number } {
   const now = Date.now();
+  prunePairAttempts(now);
   const state = pairAttempts.get(address) || { fails: [] };
   if (state.lockedUntil && state.lockedUntil > now) {
     return { allowed: false, retryAfterMs: state.lockedUntil - now };
   }
   state.fails = state.fails.filter((timestamp) => now - timestamp < PAIR_LOCKOUT_WINDOW_MS);
-  pairAttempts.set(address, state);
+  if (state.fails.length > 0) pairAttempts.set(address, state);
+  else pairAttempts.delete(address);
   return { allowed: true };
 }
 
 export function recordPairFailure(address: string): void {
   const now = Date.now();
+  prunePairAttempts(now);
   const state = pairAttempts.get(address) || { fails: [] };
   state.fails = state.fails.filter((timestamp) => now - timestamp < PAIR_LOCKOUT_WINDOW_MS);
   state.fails.push(now);

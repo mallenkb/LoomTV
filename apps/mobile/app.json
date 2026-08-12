@@ -2,6 +2,7 @@
   "expo": {
     "name": "LoomTV Mobile",
     "slug": "loomtv-mobile",
+    "scheme": "loomtv",
     "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/icon.png",

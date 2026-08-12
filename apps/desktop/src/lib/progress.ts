@@ -128,17 +128,6 @@ export async function hydrateProgressFromDatabase(): Promise<void> {
   }
 }
 
-/**
- * Discards the in-memory viewer state and rehydrates for the newly selected
- * profile. Progress subscribers re-render with the new profile's history.
- */
-export async function resetProgressForProfileSwitch(): Promise<void> {
-  progressCache = {};
-  hydrated = false;
-  writeLocalProgress();
-  await hydrateProgressFromDatabase();
-}
-
 export async function setProgressProfile(profileId: string | null): Promise<void> {
   if (activeProfileId === profileId && hydrated) return;
   activeProfileId = profileId;
