@@ -5,6 +5,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const VERSION = '1.6.0';
+const DOWNLOAD_ATTEMPTS = 4;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
 const assets = {
   'darwin-arm64': ['chromaprint-fpcalc-1.6.0-macos-universal.tar.gz', '31f654cce8308fcb22869d043770eb66afffed95e8a548fd877f0e670c16d7ec'],
   'darwin-x64': ['chromaprint-fpcalc-1.6.0-macos-universal.tar.gz', '31f654cce8308fcb22869d043770eb66afffed95e8a548fd877f0e670c16d7ec'],
@@ -32,6 +34,39 @@ function findFile(root, fileName) {
   return null;
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function downloadArchive(url, name) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        const error = new Error(`Could not download ${name}: HTTP ${response.status}`);
+        error.retryable = response.status === 408
+          || response.status === 425
+          || response.status === 429
+          || response.status >= 500;
+        throw error;
+      }
+      return Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      lastError = error;
+      if (error?.retryable === false || attempt === DOWNLOAD_ATTEMPTS) throw error;
+      const delay = 1_000 * (2 ** (attempt - 1));
+      console.warn(`Download attempt ${attempt} for ${name} failed; retrying in ${delay}ms.`);
+      await sleep(delay);
+    }
+  }
+
+  throw lastError;
+}
+
 async function main() {
   const asset = assets[`${process.platform}-${process.arch}`];
   if (!asset) throw new Error(`No pinned fpcalc build for ${process.platform}-${process.arch}.`);
@@ -43,9 +78,10 @@ async function main() {
     if (version.status === 0 && `${version.stdout}${version.stderr}`.includes(VERSION)) return;
   }
 
-  const response = await fetch(`https://github.com/acoustid/chromaprint/releases/download/v${VERSION}/${name}`);
-  if (!response.ok) throw new Error(`Could not download ${name}: HTTP ${response.status}`);
-  const archive = Buffer.from(await response.arrayBuffer());
+  const archive = await downloadArchive(
+    `https://github.com/acoustid/chromaprint/releases/download/v${VERSION}/${name}`,
+    name,
+  );
   const digest = crypto.createHash('sha256').update(archive).digest('hex');
   if (digest !== expectedHash) throw new Error(`Checksum mismatch for ${name}.`);
 

@@ -186,7 +186,7 @@ jobs:
             echo 'signed=false' >> "$GITHUB_OUTPUT"
           fi
           node apps/desktop/scripts/fetch-fpcalc.cjs
-          corepack pnpm --filter loom-media-server-desktop run dist
+          node apps/desktop/scripts/run-release-dist.cjs
 
       - name: Build Windows installers
         id: build-windows
@@ -215,7 +215,7 @@ jobs:
             echo 'signed=false' >> "$GITHUB_OUTPUT"
           fi
           node apps/desktop/scripts/fetch-fpcalc.cjs
-          corepack pnpm --filter loom-media-server-desktop run dist
+          node apps/desktop/scripts/run-release-dist.cjs
 
       - name: Verify final macOS signature and notarization
         if: runner.os == 'macOS' && steps.build-macos.outputs.signed == 'true'
@@ -238,7 +238,7 @@ jobs:
         shell: bash
         run: |
           node apps/desktop/scripts/fetch-fpcalc.cjs
-          corepack pnpm --filter loom-media-server-desktop run dist
+          node apps/desktop/scripts/run-release-dist.cjs
 
       - name: Verify packaged runtime dependencies
         run: corepack pnpm --filter loom-media-server-desktop run verify:runtime
