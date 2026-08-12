@@ -41,7 +41,7 @@ the current completion percentage and status.
 
 A compact status view for quick scanning. Full “Left” and “Why it matters” details are listed in the expanded notes below.
 
-| ✅ Done (33) | 🟡 Partial (17) | 🔴 Not started (15) |
+| ✅ Done (33) | 🟡 Partial (18) | 🔴 Not started (14) |
 | :--- | :--- | :--- |
 | **Local-first / self-hosted — 100%** | **Architecture — 95%** | **Music libraries — 0%**; **Internet remote streaming — 0%** |
 | **Desktop platforms — 100%** | **Headless / always-on server — 95%** | **Photos — 0%** |
@@ -56,7 +56,7 @@ A compact status view for quick scanning. Full “Left” and “Why it matters�
 | **Artwork control — 100%** | **Credentials & lockout — 90%** | **Offline downloads — 0%** |
 | **Search & library filters — 100%** | **Mobile clients — 95%** | **Casting, DLNA & device control — 0%** |
 | **Favorites / watchlist — 100%** | **Hosted web client — 75%** | **TV & console clients — 0%** |
-| **Direct play — 100%** | **TLS, proxy & network policy — 70%** | **Plugin system — 0%** |
+| **Direct play — 100%** | **TLS, proxy & network policy — 70%** | &nbsp; |
 | **Remux & transcoding — 100%** | **Multiple saved servers — 45%** | **Notifications & webhooks — 0%** |
 | **Native desktop engine — 100%** | **Backup & restore — 85%** | &nbsp; |
 | **Audio & subtitle tracks — 100%** | **Device & session management — 75%** | &nbsp; |
@@ -68,7 +68,7 @@ A compact status view for quick scanning. Full “Left” and “Why it matters�
 | **Next-episode autoplay — 100%** | &nbsp; | &nbsp; |
 | **Skip intro / recap / outro / credits — 100%** | &nbsp; | &nbsp; |
 | **Multiple viewers — 100%** | &nbsp; | &nbsp; |
-| **Admin separation — 100%** | &nbsp; | &nbsp; |
+| **Admin separation — 100%** | **Plugin system — 15%** | &nbsp; |
 | **Parental controls — 100%** | &nbsp; | &nbsp; |
 | **Temporary Guest profile — 100%** | &nbsp; | &nbsp; |
 | **Profile export & import — 100%** | &nbsp; | &nbsp; |
@@ -187,7 +187,7 @@ linear backlog view.
   - **What's left:** No core gap; keep headless theme tokens aligned with desktop.
   - **Why it matters:** Preserves a cohesive LoomTV identity across clients.
 
-### 🟡 Partial (17)
+### 🟡 Partial (18)
 
 - [ ] **Architecture — 95%**
   - **What's left:** Unify the desktop and headless database, scanner, playback, and profile core.
@@ -234,6 +234,9 @@ linear backlog view.
 - [ ] **Device & session management — 75%**
   - **What's left:** Add richer stream history, device naming/approval, termination from the dashboard, and reports.
   - **Why it matters:** Helps owners diagnose and control concurrent playback.
+- [ ] **Plugin system — 15%**
+  - **What's left:** Add a secure provider transport/sandbox, installer UI, packaging/signature policy, lifecycle, and concrete request/response contracts. The v1 manifest schema, capability allowlist, and install/load validator are now documented in `docs/plugin-protocol.md`.
+  - **Why it matters:** Would close Jellyfin's largest ecosystem advantage without weakening LoomTV's authorization boundary.
 - [ ] **Public API & integrations — 80%**
   - **What's left:** No core API gap; `/api/v1`, discovery, OpenAPI metadata, bearer scopes, profile/progress resources, media links, diagnostics, and compatibility examples are documented. Webhooks remain a separate notifications feature.
   - **Why it matters:** Lets automation and third-party clients build on LoomTV safely.
@@ -241,7 +244,7 @@ linear backlog view.
   - **What's left:** Add export formats and long-term analytics beyond the retained operational log window.
   - **Why it matters:** Reduces time to diagnose NAS and playback failures.
 
-### 🔴 Not started (15)
+### 🔴 Not started (14)
 
 - [ ] **Music libraries — 0%**
   - **What's left:** Add albums, artists, tags, queues, lyrics, and an audio player.
@@ -279,9 +282,6 @@ linear backlog view.
 - [ ] **TV & console clients — 0%**
   - **What's left:** Build Android TV/Fire TV first, then target a major TV or console platform.
   - **Why it matters:** Expands LoomTV into the living room where Jellyfin is strongest.
-- [ ] **Plugin system — 0%**
-  - **What's left:** Define a sandboxed extension API, permissions, packaging, and lifecycle.
-  - **Why it matters:** Would close Jellyfin's largest ecosystem advantage.
 - [ ] **Notifications & webhooks — 0%**
   - **What's left:** Add event subscriptions for scans, failures, backups, sessions, and updates.
   - **Why it matters:** Makes an always-on server observable without constant polling.
@@ -379,7 +379,7 @@ linear backlog view.
 | --- | ---: | --- | --- | --- |
 | Backup & restore | 85% | 🟡 Partial | Checksummed snapshots, rollback artifacts, hosted profile/progress inclusion, and session revocation are implemented and round-trip tested; a restore drill on a real deployment and cross-version compatibility remain. | An unattended NAS needs recovery, not only backup creation. |
 | Device & session management | 75% | 🟡 Partial | Add richer stream history, device naming/approval, termination from the dashboard, and reports. | Helps owners diagnose and control concurrent playback. |
-| Plugin system | 0% | 🔴 Not started | Define a sandboxed extension API, permissions, packaging, and lifecycle. | Would close Jellyfin's largest ecosystem advantage. |
+| Plugin system | 15% | 🟡 Partial | The declaration-only v1 manifest schema, safe capability allowlist, and install/load boundary validator are implemented; secure execution, installer packaging/signatures, lifecycle, and provider request/response contracts remain. | Would close Jellyfin's largest ecosystem advantage without weakening LoomTV's authorization boundary. |
 | Public API & integrations | 80% | 🟡 Partial | `/api/v1`, discovery, OpenAPI metadata, scopes, profile/progress/media resources, and series grouping are implemented and contract-tested; SDK examples, webhooks, and a written compatibility policy remain. | Lets automation and third-party clients build on LoomTV safely. |
 | Admin dashboard, logs & reports | 95% | 🟡 Partial | Add export formats and long-term analytics beyond the retained operational log window. | Reduces time to diagnose NAS and playback failures. |
 | Notifications & webhooks | 0% | 🔴 Not started | Add event subscriptions for scans, failures, backups, sessions, and updates. | Makes an always-on server observable without constant polling. |
