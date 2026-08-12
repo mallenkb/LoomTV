@@ -25,7 +25,6 @@ function expectedRendererAppUrl(): string {
   if (MAIN_WINDOW_DEV_SERVER_URL) return new URL(MAIN_WINDOW_DEV_SERVER_URL).origin;
   return pathToFileURL(path.resolve(packagedRendererFilePath())).toString();
 }
-
 function isAllowedYouTubeFrameUrl(value: string): boolean {
   try {
     const url = new URL(value);
