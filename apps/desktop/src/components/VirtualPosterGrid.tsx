@@ -1,5 +1,14 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { virtualGridRange } from '@/lib/virtualGrid';
+import {
+  virtualGridCardHeightDiverges,
+  virtualGridItemAttributes,
+  virtualGridLayout,
+  virtualGridRange,
+} from '@/lib/virtualGrid';
+
+const IS_DEVELOPMENT = (
+  import.meta as ImportMeta & { env?: { DEV?: boolean } }
+).env?.DEV === true;
 
 type VirtualPosterGridProps<T extends { id: string }> = {
   items: T[];
@@ -40,12 +49,16 @@ export default function VirtualPosterGrid<T extends { id: string }>({
   gap = 24,
 }: VirtualPosterGridProps<T>) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const itemsLayerRef = useRef<HTMLDivElement | null>(null);
+  const warnedAboutCardHeightRef = useRef(false);
   const [viewport, setViewport] = useState({ width: 0, scrollTop: 0, height: 720 });
-  const compactGrid = viewport.width > 0 && viewport.width < 640;
-  const effectiveMinColumnWidth = compactGrid ? Math.min(minColumnWidth, 104) : minColumnWidth;
-  const effectiveMaxColumnWidth = compactGrid ? Math.min(maxColumnWidth, 150) : maxColumnWidth;
-  const effectiveRowHeight = compactGrid ? Math.min(rowHeight, 250) : rowHeight;
-  const effectiveGap = compactGrid ? Math.min(gap, 14) : gap;
+  const layout = virtualGridLayout({
+    containerWidth: viewport.width,
+    minColumnWidth,
+    maxColumnWidth,
+    rowHeight,
+    gap,
+  });
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -98,26 +111,74 @@ export default function VirtualPosterGrid<T extends { id: string }>({
     containerWidth: viewport.width,
     scrollTop: viewport.scrollTop,
     viewportHeight: viewport.height,
-    minColumnWidth: effectiveMinColumnWidth,
-    maxColumnWidth: effectiveMaxColumnWidth,
-    rowHeight: effectiveRowHeight,
-    gap: effectiveGap,
+    minColumnWidth: layout.minColumnWidth,
+    maxColumnWidth: layout.maxColumnWidth,
+    rowHeight: layout.rowHeight,
+    gap: layout.gap,
     overscanRows: 2,
   });
   const visibleItems = items.slice(range.startIndex, range.endIndex);
+  const visibleItemIds = visibleItems.map((item) => item.id).join('\u0000');
+
+  useEffect(() => {
+    if (!IS_DEVELOPMENT || warnedAboutCardHeightRef.current) return undefined;
+    const itemsLayer = itemsLayerRef.current;
+    if (!itemsLayer) return undefined;
+
+    const renderedCards: HTMLElement[] = [];
+    for (const wrapper of itemsLayer.children) {
+      const card = wrapper.firstElementChild;
+      if (card instanceof HTMLElement) renderedCards.push(card);
+    }
+    if (renderedCards.length === 0) return undefined;
+
+    const warnIfCardHeightDiverges = (card: HTMLElement) => {
+      if (warnedAboutCardHeightRef.current) return true;
+      const measuredHeight = card.getBoundingClientRect().height;
+      if (!virtualGridCardHeightDiverges(range.itemHeight, measuredHeight)) return false;
+      warnedAboutCardHeightRef.current = true;
+      console.warn(
+        `[VirtualPosterGrid] Rendered card height (${measuredHeight}px) differs from the expected `
+        + `${range.itemHeight}px item height. Keep cards pinned to the row pitch minus its gap.`,
+      );
+      return true;
+    };
+
+    for (const card of renderedCards) {
+      if (warnIfCardHeightDiverges(card)) return undefined;
+    }
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (warnIfCardHeightDiverges(entry.target as HTMLElement)) {
+          resizeObserver.disconnect();
+          break;
+        }
+      }
+    });
+    renderedCards.forEach((card) => resizeObserver.observe(card));
+    return () => resizeObserver.disconnect();
+  }, [range.endIndex, range.itemHeight, range.startIndex, visibleItemIds]);
 
   return (
     <div ref={rootRef} className="relative w-full" style={{ height: range.totalHeight }}>
       <div
+        ref={itemsLayerRef}
         className="absolute left-0 right-0 top-0 grid justify-start"
+        role="list"
+        aria-label="Media items"
         style={{
-          gap: effectiveGap,
+          gap: layout.gap,
           gridTemplateColumns: `repeat(${range.columns}, minmax(0, ${range.columnWidth}px))`,
           transform: `translateY(${range.offsetY}px)`,
         }}
       >
-        {visibleItems.map((item) => (
-          <div key={item.id} style={{ width: range.columnWidth }}>
+        {visibleItems.map((item, visibleIndex) => (
+          <div
+            key={item.id}
+            className="h-full"
+            {...virtualGridItemAttributes(range, visibleIndex, items.length)}
+          >
             {renderItem(item)}
           </div>
         ))}
