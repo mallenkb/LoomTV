@@ -60,6 +60,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.120](docs/releases/v1.0.120.md): improves desktop metadata refresh, provider artwork and ratings persistence, detail information, and series-folder reconciliation.
 - [LoomTV 1.0.89](docs/releases/v1.0.89.md): fixes real-time audio and subtitle switching so selected tracks remain active during stream replacement.
 - [LoomTV 1.0.88](docs/releases/v1.0.88.md): speeds up desktop startup, improves tray packaging, and strengthens shared LAN support across desktop and mobile.
 - [LoomTV 1.0.87](docs/releases/v1.0.87.md): improves next-episode playback from preview skip prompts.
