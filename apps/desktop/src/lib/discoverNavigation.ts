@@ -1,8 +1,14 @@
 import type { StremioPluginCatalogItem } from '@/lib/desktopApi';
+import { parseStoredValue, stremioCatalogItemSchema } from '@/lib/desktopDecoders';
+import { z } from 'zod';
 
 export const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
 const EXPLORE_ITEM_CACHE_PREFIX = 'loomtv:explore-item-v2:';
 const DISCOVER_RETURN_ROUTE_TTL_MS = 7_200_000;
+const cachedDiscoverReturnRouteSchema = z.object({
+  at: z.number().int().nonnegative(),
+  route: z.string(),
+});
 
 type CachedDiscoverReturnRoute = { at: number; route: string };
 
@@ -31,7 +37,8 @@ export function getCachedDiscoverReturnRoute(): string | null {
   try {
     const raw = window.sessionStorage.getItem(DISCOVER_RETURN_ROUTE_CACHE_KEY);
     if (!raw) return null;
-    const cached = JSON.parse(raw) as Partial<CachedDiscoverReturnRoute>;
+    const cached = parseStoredValue(raw, cachedDiscoverReturnRouteSchema.nullable(), null);
+    if (!cached) return null;
     const route = normalizeDiscoverReturnRoute(cached.route);
     const cachedAt = cached.at;
     if (!route || typeof cachedAt !== 'number' || !Number.isSafeInteger(cachedAt)) return null;
@@ -60,7 +67,7 @@ export function getCachedExploreItem(type: string, id?: string): StremioPluginCa
   try {
     const raw = window.sessionStorage.getItem(`${EXPLORE_ITEM_CACHE_PREFIX}${type}:${id}`);
     if (!raw) return null;
-    const item = JSON.parse(raw) as StremioPluginCatalogItem;
+    const item = parseStoredValue(raw, stremioCatalogItemSchema.nullable(), null);
     return item && item.id === id && item.type === type ? item : null;
   } catch {
     return null;

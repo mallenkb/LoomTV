@@ -396,7 +396,7 @@ export function listPluginAudit(database: BetterSqlite3.Database, addonIdentity:
     detail_json: string; created_at: number;
   }>).flatMap((row) => {
     try {
-      const detail = JSON.parse(row.detail_json) as unknown;
+      const detail: unknown = JSON.parse(row.detail_json);
       if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return [];
       return [{
         id: row.id,

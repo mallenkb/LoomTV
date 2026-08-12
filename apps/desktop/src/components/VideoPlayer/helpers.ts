@@ -362,16 +362,17 @@ export function transcodeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === 'string') {
     try {
-      const parsed = JSON.parse(error) as { error?: unknown };
-      if (typeof parsed.error === 'string') return parsed.error;
+      const parsed: unknown = JSON.parse(error);
+      if (parsed && typeof parsed === 'object' && 'error' in parsed && typeof parsed.error === 'string') {
+        return parsed.error;
+      }
     } catch {
       return error;
     }
     return error;
   }
   if (error && typeof error === 'object' && 'error' in error) {
-    const nestedError = (error as { error?: unknown }).error;
-    if (typeof nestedError === 'string') return nestedError;
+    if (typeof error.error === 'string') return error.error;
   }
   return 'Unable to start transcoding fallback';
 }

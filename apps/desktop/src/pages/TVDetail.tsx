@@ -20,10 +20,11 @@ import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discov
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
-import { preferredContentRating } from '@/components/ContentRatingBadge';
 import { normalizeAnimeCast } from '@/shared/animeCast';
 import WatchedToggle from '@/components/WatchedToggle';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
+import { aniListCastResponseSchema, type AniListCharacterEdge } from '@/lib/anilistSchemas';
+import { readJsonResponse } from '@/lib/desktopDecoders';
 
 interface TVDetailProps {
   kind?: 'series' | 'anime';
@@ -199,28 +200,6 @@ const ANILIST_CAST_QUERY = `
   }
 `;
 
-type AniListCastEdge = {
-  node?: {
-    name?: { full?: string | null } | null;
-    image?: { large?: string | null; medium?: string | null } | null;
-  } | null;
-  role?: string | null;
-  voiceActors?: Array<{
-    name?: { full?: string | null } | null;
-    image?: { large?: string | null; medium?: string | null } | null;
-    languageV2?: string | null;
-  }> | null;
-};
-
-type AniListCastResponse = {
-  data?: {
-    Media?: {
-      characters?: { edges?: AniListCastEdge[] | null } | null;
-    } | null;
-  };
-  errors?: Array<{ message?: string }>;
-};
-
 function aniListImageUrl(image?: { large?: string | null; medium?: string | null } | null): string {
   return image?.large || image?.medium || '';
 }
@@ -229,7 +208,7 @@ function aniListVoiceActorPriority(language?: string | null): number {
   return language?.trim().toLowerCase() === 'japanese' ? 0 : 1;
 }
 
-function mapAniListCast(edges: AniListCastEdge[]): TVShow['cast'] {
+function mapAniListCast(edges: AniListCharacterEdge[]): TVShow['cast'] {
   return edges
     .filter((edge) => (
       (edge.role === 'MAIN' || edge.role === 'SUPPORTING')
@@ -273,7 +252,7 @@ async function fetchAniListCastById(mediaId: string): Promise<TVShow['cast']> {
   });
   if (!response.ok) throw new Error(`AniList request failed: ${response.status}`);
 
-  const payload = await response.json() as AniListCastResponse;
+  const payload = await readJsonResponse(response, aniListCastResponseSchema, 'AniList cast');
   if (payload.errors?.length) throw new Error(payload.errors[0]?.message || 'AniList cast request returned an error.');
   return mapAniListCast(payload.data?.Media?.characters?.edges || []);
 }
@@ -360,8 +339,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [detailsReady, setDetailsReady] = useState(false);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const animeCastRefreshKeyRef = useRef('');
-  const contentRatingRefreshKeyRef = useRef('');
   const routeState = (location.state as TVDetailRouteState | null) || null;
   // Explore/remote records use a provider-owned ID and artwork contract.
   // Keep that cache out of ordinary local routes so a colliding provider ID
@@ -456,31 +433,6 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, kind, mediaId, progressTick, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
 
-  useEffect(() => {
-    if (isRemoteStremioShow || !show?.id) return;
-    if (preferredContentRating(show.contentRatings, show.contentRating)) return;
-    if (contentRatingRefreshKeyRef.current === show.id) return;
-
-    contentRatingRefreshKeyRef.current = show.id;
-    let cancelled = false;
-    void desktopApi.refreshOfficialArtwork(show.id, 'all')
-      .then((refreshed) => {
-        if (cancelled) return;
-        const contentRatings = Object.keys(refreshed.contentRatings || {}).length > 0
-          ? refreshed.contentRatings
-          : undefined;
-        if (contentRatings) {
-          setShow((current) => current?.id === show.id ? { ...current, contentRatings } : current);
-        }
-        void refreshLibrary().catch((error) => console.warn('Could not refresh content rating:', error));
-      })
-      .catch((error) => {
-        if (!cancelled) console.warn('Could not load content rating:', error);
-      });
-
-    return () => { cancelled = true; };
-  }, [isRemoteStremioShow, refreshLibrary, show?.contentRating, show?.contentRatings, show?.id]);
-
   const toggleSeason = (seasonNumber: number) => {
     accordionWasToggledRef.current = true;
     setExpandedSeason((current) => current === seasonNumber ? null : seasonNumber);
@@ -494,11 +446,8 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   }, [show?.id, shouldOpenDetailsFirst]);
 
   useEffect(() => {
-    if (kind !== 'anime' || !show?.id) return;
+    if (kind !== 'anime' || !isRemoteStremioShow || !show?.id) return;
     if (!animeCastNeedsRefresh(show.cast)) return;
-    if (animeCastRefreshKeyRef.current === show.id) return;
-
-    animeCastRefreshKeyRef.current = show.id;
 
     if (Number.isSafeInteger(Number(show.id)) && Number(show.id) > 0) {
       let cancelled = false;
@@ -510,16 +459,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         .catch((error) => console.warn('Could not load AniList cast:', error));
       return () => { cancelled = true; };
     }
-
-    if (isRemoteStremioShow) return;
-    void desktopApi.refreshOfficialArtwork(show.id, 'all')
-      .then((refreshed) => {
-        if (!refreshed.cast?.length) return;
-        setShow((current) => current?.id === show.id ? { ...current, cast: refreshed.cast || current.cast } : current);
-        void refreshLibrary().catch((error) => console.warn('Could not refresh AniList cast:', error));
-      })
-      .catch((error) => console.warn('Could not load AniList cast:', error));
-  }, [isRemoteStremioShow, kind, refreshLibrary, show?.cast, show?.id]);
+  }, [isRemoteStremioShow, kind, show?.cast, show?.id]);
 
   const handleRefreshIncompleteMetadata = async () => {
     if (!show?.id || isRemoteStremioShow || metadataRefreshState === 'loading') return;
@@ -645,7 +585,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const findEpisodeFile = (season: number, episode: number): string | null =>
     show.episodeFiles?.find((ef) => ef.season === season && ef.episode === episode)?.filePath || null;
 
-  const cleanEpisodeTitle = (filePath: string, season: number, episode: number): string => {
+  const cleanEpisodeTitle = (filePath: string, _season: number, episode: number): string => {
     const name = filePath.split(/[\\/]/).pop() || `Episode ${episode}`;
     return name
       .replace(/\.[^.]+$/, '')
@@ -846,6 +786,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             alt={show.title}
             className="h-full w-full"
             imgClassName="object-cover"
+            priority
             fallback={<div className="h-full w-full" />}
           />
         </div>
@@ -882,6 +823,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
             alt={show.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
             imgClassName="object-cover"
+            priority
             fallback={
               <div className="flex h-full w-full items-center justify-center p-2">
                 <span className="line-clamp-4 text-center text-[10px] font-medium leading-tight text-white/60">

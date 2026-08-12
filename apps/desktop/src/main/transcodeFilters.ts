@@ -1,4 +1,19 @@
 import type { SubtitleStyleOptions, TranscodeOptions } from './mediaTypes';
+import { z } from 'zod';
+import { parseRequiredJson } from './runtimeValidation.ts';
+
+const subtitleStyleOptionsSchema = z.object({
+  delaySeconds: z.number().finite().optional(),
+  position: z.number().finite().optional(),
+  scale: z.number().finite().optional(),
+  fontSize: z.number().finite().optional(),
+  fontColor: z.string().optional(),
+  borderColor: z.string().optional(),
+  borderWidth: z.number().finite().optional(),
+  borderEnabled: z.boolean().optional(),
+  backgroundColor: z.string().optional(),
+  backgroundEnabled: z.boolean().optional(),
+});
 
 export type H264HardwareEncoder =
   | 'h264_videotoolbox'
@@ -290,8 +305,7 @@ export function subtitleFilterComplex(filePath: string, options: TranscodeOption
 export function parseSubtitleStyle(value: string | null): SubtitleStyleOptions | undefined {
   if (!value) return undefined;
   try {
-    const parsed = JSON.parse(value) as SubtitleStyleOptions;
-    if (!parsed || typeof parsed !== 'object') return undefined;
+    const parsed = parseRequiredJson(value, subtitleStyleOptionsSchema, 'Subtitle style');
     return {
       delaySeconds: clampStyleNumber(parsed.delaySeconds, 0, -5, 5),
       position: clampStyleNumber(parsed.position, 96, 0, 100),

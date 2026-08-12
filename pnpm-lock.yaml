@@ -9,6 +9,9 @@ catalogs:
     vite-plus:
       specifier: 0.2.3
       version: 0.2.3
+    zod:
+      specifier: 4.4.3
+      version: 4.4.3
 
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.3
@@ -91,6 +94,9 @@ importers:
       tailwind-merge:
         specifier: 3.5.0
         version: 3.5.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@electron-forge/cli':
         specifier: 7.11.1
@@ -254,6 +260,9 @@ importers:
       react-native-zeroconf:
         specifier: ^0.14.0
         version: 0.14.0(patch_hash=1fda3c41ebb5a91ed1c3542bda4ddb16c056b7fa5831b258443e0f660706b011)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.1.0)(supports-color@8.1.1))
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@types/react':
         specifier: ~19.1.10
@@ -285,6 +294,10 @@ importers:
         version: 5.7.3
 
   packages/lan-protocol:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       typescript:
         specifier: 5.7.3

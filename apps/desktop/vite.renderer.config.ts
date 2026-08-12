@@ -2,8 +2,10 @@ import { defineConfig, type Plugin } from 'vite-plus';
 import react from '@vitejs/plugin-react';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
+import { z } from 'zod';
 
-const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: string };
+const packageJsonPayload: unknown = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+const packageJson = z.object({ version: z.string().optional() }).parse(packageJsonPayload);
 const srcPath = fileURLToPath(new URL('./src', import.meta.url));
 const reactPath = (entry: string) => fileURLToPath(new URL(`../../node_modules/react-dom/node_modules/react/${entry}`, import.meta.url));
 const reactDomPath = (entry: string) => fileURLToPath(new URL(`../../node_modules/react-dom/${entry}`, import.meta.url));

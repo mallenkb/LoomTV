@@ -34,6 +34,27 @@ import type {
   MetadataProvider,
   SharedLibrarySnapshot,
 } from './Settings.types';
+import { parseStoredValue } from '@/lib/desktopDecoders';
+import { z } from 'zod';
+
+const savedRemoteLibrarySchema = z.object({ baseUrl: z.string() });
+const sharedLibrarySnapshotSchema = z.object({
+  baseUrl: z.string(),
+  deviceId: z.string(),
+  deviceToken: z.string(),
+  accessTokenExpiresAt: z.number().finite().optional(),
+  refreshToken: z.string().optional(),
+  refreshTokenExpiresAt: z.number().finite().optional(),
+  hostDeviceId: z.string().optional(),
+  hostDeviceName: z.string().optional(),
+  connectedAt: z.number().finite().default(0),
+  libraryEtag: z.string().optional(),
+  library: z.object({
+    movies: z.array(z.object({ title: z.string().optional(), year: z.number().optional() })).optional(),
+    tvShows: z.array(z.object({ title: z.string().optional(), year: z.number().optional() })).optional(),
+    animeShows: z.array(z.object({ title: z.string().optional(), year: z.number().optional() })).optional(),
+  }),
+});
 
 const DEFAULT_SKIP_ANALYSIS: SkipAnalysisSettings = {
   enabled: true,
@@ -369,15 +390,19 @@ export default function Settings() {
     if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
       void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
     }
-    try {
-      const savedRemoteLibrary = JSON.parse(localStorage.getItem('loomtv:last-remote-library') || 'null') as { baseUrl?: string } | null;
-      if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
-      const savedSharedLibrary = JSON.parse(localStorage.getItem('loomtv:shared-library') || 'null') as SharedLibrarySnapshot | null;
-      if (savedSharedLibrary?.library && (savedSharedLibrary.deviceToken || desktopApi.isRemoteLibraryMode())) {
-        setSharedLibrarySnapshot(savedSharedLibrary);
-      }
-    } catch {
-      // Ignore invalid saved pairing data.
+    const savedRemoteLibrary = parseStoredValue(
+      localStorage.getItem('loomtv:last-remote-library'),
+      savedRemoteLibrarySchema.nullable(),
+      null,
+    );
+    if (savedRemoteLibrary?.baseUrl) setRemoteLibraryAddress(savedRemoteLibrary.baseUrl);
+    const savedSharedLibrary = parseStoredValue(
+      localStorage.getItem('loomtv:shared-library'),
+      sharedLibrarySnapshotSchema.nullable(),
+      null,
+    );
+    if (savedSharedLibrary?.library && (savedSharedLibrary.deviceToken || desktopApi.isRemoteLibraryMode())) {
+      setSharedLibrarySnapshot(savedSharedLibrary);
     }
   }, [activeProfile?.id, activeProfile?.type]);
 

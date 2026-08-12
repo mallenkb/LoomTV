@@ -40,6 +40,24 @@ export interface LibraryFolderStatus {
   message: string;
 }
 
+export interface WireLocalMediaTrack {
+  index: number;
+  type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
+  codec?: string;
+  language?: string;
+  title?: string;
+  channels?: number;
+  width?: number;
+  height?: number;
+  profile?: string;
+  pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
+  default?: boolean;
+  forced?: boolean;
+}
+
 export interface WireLocalMediaDetails {
   fileSize?: number;
   modifiedAtMs?: number;
@@ -55,6 +73,7 @@ export interface WireLocalMediaDetails {
   audioCodec?: string;
   audioTracks?: number;
   subtitleTracks?: number;
+  tracks?: WireLocalMediaTrack[];
   bitrateKbps?: number;
   container?: string;
   chapters?: { startMs: number; endMs: number; title: string }[];
@@ -595,7 +614,7 @@ export interface OfficialArtworkResult {
   rating?: number;
   contentRatings?: Record<string, LanContentRating>;
   episodes?: WireEpisodeMeta[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logoCandidates?: string[];
@@ -618,7 +637,7 @@ export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episod
 
 export type OfficialMetadataCandidate = OfficialArtworkResult & {
   id: string;
-  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
   title: string;
   year?: number;
   genres?: string[];

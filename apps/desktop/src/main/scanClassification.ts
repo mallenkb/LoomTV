@@ -154,19 +154,73 @@ export async function fetchJikanEpisodesForLocalAnimeSeasons(
   return { episodes: results, malIdBySeason };
 }
 
-export function mergeLocalSeasonsWithMetadata(
-  localSeasons: { number: number; title: string; episodeCount: number }[],
-  remoteSeasons?: { number: number; title: string; episodeCount: number }[],
-): { number: number; title: string; episodeCount: number }[] {
-  if (!remoteSeasons || remoteSeasons.length === 0) return localSeasons;
+type SeasonMetadata = { number: number; title: string; episodeCount: number };
 
-  const remoteByNumber = new Map(remoteSeasons.map((season) => [season.number, season]));
+function genericSeasonTitle(seasonNumber: number): string {
+  return seasonNumber === 0 ? 'Specials' : `Season ${seasonNumber}`;
+}
+
+function officialSeasonSubtitle(title: string | undefined, seasonNumber: number): string | null {
+  const normalized = title?.trim();
+  if (!normalized) return null;
+
+  if (seasonNumber === 0) {
+    const specialsMatch = normalized.match(/^specials?(?:\s*[-–—:._]\s*|\s+)?(.*)$/i);
+    if (specialsMatch) return specialsMatch[1]?.trim() || null;
+  }
+
+  const numberedMatch = normalized.match(/^(?:season|series|s)\s*0*(\d{1,2})(?:\s*[-–—:._]\s*|\s+)?(.*)$/i);
+  if (numberedMatch) return numberedMatch[2]?.trim() || null;
+
+  return normalized;
+}
+
+function hasMeaningfulSeasonTitle(season: SeasonMetadata): boolean {
+  return officialSeasonSubtitle(season.title, season.number) !== null;
+}
+
+export function mergeOfficialSeasonMetadata(
+  ...sources: Array<SeasonMetadata[] | null | undefined>
+): SeasonMetadata[] {
+  const seasons = new Map<number, SeasonMetadata>();
+
+  for (const source of sources) {
+    for (const incoming of source || []) {
+      const current = seasons.get(incoming.number);
+      if (!current) {
+        seasons.set(incoming.number, incoming);
+        continue;
+      }
+
+      seasons.set(incoming.number, {
+        number: incoming.number,
+        title: hasMeaningfulSeasonTitle(current)
+          ? current.title
+          : hasMeaningfulSeasonTitle(incoming) ? incoming.title : current.title || incoming.title,
+        episodeCount: current.episodeCount > 0 ? current.episodeCount : incoming.episodeCount,
+      });
+    }
+  }
+
+  return [...seasons.values()].sort((left, right) => left.number - right.number);
+}
+
+export function officialSeasonDisplayTitle(seasonNumber: number, officialTitle?: string): string {
+  const baseTitle = genericSeasonTitle(seasonNumber);
+  const subtitle = officialSeasonSubtitle(officialTitle, seasonNumber);
+  return subtitle ? `${baseTitle}: ${subtitle}` : baseTitle;
+}
+
+export function mergeLocalSeasonsWithMetadata(
+  localSeasons: SeasonMetadata[],
+  remoteSeasons?: SeasonMetadata[],
+): SeasonMetadata[] {
+  const remoteByNumber = new Map((remoteSeasons || []).map((season) => [season.number, season]));
   return localSeasons.map((season) => {
     const remote = remoteByNumber.get(season.number);
-    if (!remote) return season;
     return {
       number: season.number,
-      title: remote.title || season.title,
+      title: officialSeasonDisplayTitle(season.number, remote?.title),
       episodeCount: season.episodeCount,
     };
   });

@@ -13,6 +13,8 @@ import {
 } from '@/lib/episodeTitles';
 import { logoSources, uniqueArtworkSources } from '@/lib/artwork';
 import { localEpisodeWatchedKey, localWatchedKey } from '@/lib/watched';
+import { parseStoredValue } from '@/lib/desktopDecoders';
+import { z } from 'zod';
 
 const WATCHED_THRESHOLD = 0.9;
 const DISMISSED_CONTINUE_WATCHING_STORAGE_KEY = 'loomtv.dismissedContinueWatching.v1';
@@ -23,6 +25,10 @@ type DismissedCandidate = {
 };
 
 type DismissedCandidates = Record<string, DismissedCandidate>;
+const dismissedCandidatesSchema = z.record(z.string(), z.object({
+  position: z.number().finite(),
+  updatedAt: z.number().finite(),
+}));
 
 function dismissedCandidatesStorageKey(profileId: string | null | undefined): string {
   return `${DISMISSED_CONTINUE_WATCHING_STORAGE_KEY}:${profileId || 'default'}`;
@@ -30,19 +36,11 @@ function dismissedCandidatesStorageKey(profileId: string | null | undefined): st
 
 function readDismissedCandidates(profileId: string | null | undefined): DismissedCandidates {
   if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem(dismissedCandidatesStorageKey(profileId));
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, Partial<DismissedCandidate>>;
-    return Object.fromEntries(Object.entries(parsed)
-      .filter(([, candidate]) => Number.isFinite(candidate.position) && Number.isFinite(candidate.updatedAt))
-      .map(([key, candidate]) => [key, {
-        position: Number(candidate.position),
-        updatedAt: Number(candidate.updatedAt),
-      }]));
-  } catch {
-    return {};
-  }
+  return parseStoredValue(
+    localStorage.getItem(dismissedCandidatesStorageKey(profileId)),
+    dismissedCandidatesSchema,
+    {},
+  );
 }
 
 function writeDismissedCandidates(profileId: string | null | undefined, candidates: DismissedCandidates): void {

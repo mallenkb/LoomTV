@@ -17,7 +17,6 @@ import { useTheme } from '@/components/ThemeProvider';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
-import { preferredContentRating } from '@/components/ContentRatingBadge';
 import WatchedToggle from '@/components/WatchedToggle';
 import { cacheWatchedDiscoverItem, discoverWatchedKey, localProgressPathsForItem, localWatchedKey } from '@/lib/watched';
 
@@ -149,7 +148,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const metadataFetchKeyRef = useRef('');
-  const contentRatingRefreshKeyRef = useRef('');
   const routeState = (location.state as MovieDetailRouteState | null) || null;
   // The Explore cache is a remote-provider detail bridge.  Never consult it
   // for an ordinary library route: local IDs are opaque and can legitimately
@@ -212,31 +210,6 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     }
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, mediaId, routeAddonId, routeFallbackMovie, routeState?.from, routeState?.fromDiscover, state.catalogRevision, state.movies]);
-
-  useEffect(() => {
-    if (isRemoteStremioMovie || !movie?.id) return;
-    if (preferredContentRating(movie.contentRatings, movie.contentRating)) return;
-    if (contentRatingRefreshKeyRef.current === movie.id) return;
-
-    contentRatingRefreshKeyRef.current = movie.id;
-    let cancelled = false;
-    void desktopApi.refreshOfficialArtwork(movie.id, 'all')
-      .then((refreshed) => {
-        if (cancelled) return;
-        const contentRatings = Object.keys(refreshed.contentRatings || {}).length > 0
-          ? refreshed.contentRatings
-          : undefined;
-        if (contentRatings) {
-          setMovie((current) => current?.id === movie.id ? { ...current, contentRatings } : current);
-        }
-        void refreshLibrary().catch((error) => console.warn('Could not refresh movie content rating:', error));
-      })
-      .catch((error) => {
-        if (!cancelled) console.warn('Could not load movie content rating:', error);
-      });
-
-    return () => { cancelled = true; };
-  }, [isRemoteStremioMovie, movie?.contentRating, movie?.contentRatings, movie?.id, refreshLibrary]);
 
   const handleRefreshIncompleteMetadata = async () => {
     if (!movie?.id || isRemoteStremioMovie || metadataRefreshState === 'loading') return;
@@ -395,6 +368,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             alt={movie.title}
             className="h-full w-full"
             imgClassName="object-cover"
+            priority
             fallback={<div className="h-full w-full" />}
           />
         </div>
@@ -432,6 +406,7 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
             alt={movie.title}
             className="loom-poster-frame hidden aspect-[2/3] w-28 shrink-0 rounded-lg shadow-xl md:block"
             imgClassName="object-cover"
+            priority
             fallback={
               <div className="flex h-full w-full items-center justify-center p-2">
                 <span className="line-clamp-4 text-center text-[10px] font-medium leading-tight text-white/60">

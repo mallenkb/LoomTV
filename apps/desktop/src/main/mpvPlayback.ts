@@ -23,6 +23,8 @@ import {
   syncNativePlaybackDisplaySleep,
 } from './nativePlaybackPower';
 import { loadSettings } from './settings.ts';
+import { parseRequiredJson } from './runtimeValidation.ts';
+import { z } from 'zod';
 
 type MpvJsonMessage = {
   event?: string;
@@ -32,6 +34,14 @@ type MpvJsonMessage = {
   reason?: string;
   request_id?: number;
 };
+const mpvJsonMessageSchema = z.object({
+  event: z.string().optional(),
+  name: z.string().optional(),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+  reason: z.string().optional(),
+  request_id: z.number().finite().optional(),
+});
 
 type MpvRuntime = {
   executablePath: string;
@@ -439,7 +449,7 @@ class MpvPlaybackSession {
       this.buffer = this.buffer.slice(newline + 1);
       if (line) {
         try {
-          this.handleMessage(JSON.parse(line) as MpvJsonMessage);
+          this.handleMessage(parseRequiredJson(line, mpvJsonMessageSchema, 'mpv IPC message'));
         } catch {
           console.warn('[mpv] Ignored malformed IPC message.');
         }

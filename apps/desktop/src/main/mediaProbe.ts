@@ -8,6 +8,7 @@ import {
   setSharedProbeResult,
 } from './sharedProbeCache';
 import type { MediaBackend, MediaTrack, ProbeResult } from './mediaTypes';
+import { parseFfprobeOutput } from './ffprobeValidation.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -74,26 +75,7 @@ export async function probeMedia(filePath: string): Promise<ProbeResult> {
     ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath],
     { encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true },
   );
-  const parsed = JSON.parse(raw) as {
-    format?: { duration?: string; bit_rate?: string; format_name?: string };
-    streams?: Array<{
-      index?: number;
-      codec_type?: string;
-      codec_name?: string;
-      profile?: string;
-      pix_fmt?: string;
-      color_transfer?: string;
-      color_primaries?: string;
-      color_space?: string;
-      avg_frame_rate?: string;
-      r_frame_rate?: string;
-      width?: number;
-      height?: number;
-      channels?: number;
-      disposition?: Record<string, number>;
-      tags?: Record<string, string>;
-    }>;
-  };
+  const parsed = parseFfprobeOutput(raw);
 
   const tracks: MediaTrack[] = (parsed.streams || []).map((stream) => ({
     index: stream.index || 0,

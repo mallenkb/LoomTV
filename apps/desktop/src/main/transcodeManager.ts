@@ -6,6 +6,8 @@ import path from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { z } from 'zod';
+import { parseRequiredJson } from './runtimeValidation.ts';
 import { appendQueryToHlsPlaylist } from './hlsPlaylist';
 import { killAllManagedFfmpeg, registerPlaybackProcess, touchPlaybackProcess } from './ffmpegGovernor';
 import { findFFmpeg, getTranscodeCapabilities } from './mediaBinaries';
@@ -97,7 +99,15 @@ function listProcessRows(): Array<{ pid: number; command: string }> {
         timeout: 3000,
       }).trim();
       if (!output) return [];
-      const parsed = JSON.parse(output) as Array<{ ProcessId?: number; CommandLine?: string }> | { ProcessId?: number; CommandLine?: string };
+      const processRowSchema = z.object({
+        ProcessId: z.number().finite().optional(),
+        CommandLine: z.string().nullable().optional(),
+      });
+      const parsed = parseRequiredJson(
+        output,
+        z.union([z.array(processRowSchema), processRowSchema]),
+        'PowerShell process list',
+      );
       const rows = Array.isArray(parsed) ? parsed : [parsed];
       return rows
         .map((row) => ({ pid: Number(row.ProcessId), command: String(row.CommandLine || '') }))

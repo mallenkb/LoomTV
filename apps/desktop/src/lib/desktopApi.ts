@@ -80,6 +80,46 @@ import {
   setDesktopLibraryMode,
   updateRemoteDesktopSession,
 } from './remoteDesktop';
+import {
+  browserPairResponseSchema,
+  apiResultSchema,
+  backupResultSchema,
+  desktopActiveProfileSchema,
+  desktopLibraryIndexSchema,
+  desktopLibraryItemDetailsSchema,
+  desktopLibrarySchema,
+  desktopProfileListSchema,
+  desktopProfilePreferencesSchema,
+  desktopProfileSelectionSchema,
+  desktopProfilesPayloadSchema,
+  desktopProgressMapSchema,
+  desktopProgressResultSchema,
+  desktopStoredProgressSchema,
+  ffmpegStatusSchema,
+  githubReleaseSchema,
+  localNetworkStatusSchema,
+  mediaSegmentResponseSchema,
+  metadataKeyTestResultsSchema,
+  officialArtworkResultSchema,
+  officialMetadataCandidateSchema,
+  okResultSchema,
+  playbackLogoResultSchema,
+  playbackPlanResultSchema,
+  playbackTrackPreferencesResultSchema,
+  playbackTrackPreferencesSchema,
+  portResultSchema,
+  profileCreateResponseSchema,
+  readErrorResponse,
+  readJsonResponse,
+  refreshedCredentialsSchema,
+  resourceIdResultSchema,
+  settingsPayloadSchema,
+  stringRecordSchema,
+  transcodeSessionSchema,
+  unknownApiResultSchema,
+} from './desktopDecoders';
+import { lanStreamingProviderSchema } from '@loom-media-server/lan-protocol';
+import { z } from 'zod';
 export type {
   ActiveProfileState,
   ApiResult,
@@ -443,7 +483,11 @@ async function localMediaUrl(pathname: string, params: URLSearchParams): Promise
   return `${base}${pathname}?${params.toString()}`;
 }
 
-async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
+async function fetchJson<TSchema extends z.ZodType>(
+  pathname: string,
+  schema: TSchema,
+  init?: RequestInit,
+): Promise<z.output<TSchema>> {
   const response = await fetchLocalResponse(pathname, init);
 
   if (!response.ok) {
@@ -451,7 +495,7 @@ async function fetchJson<T>(pathname: string, init?: RequestInit): Promise<T> {
     throw new Error(message || `Request failed: ${response.status}`);
   }
 
-  return response.json() as Promise<T>;
+  return readJsonResponse(response, schema, pathname);
 }
 
 async function fetchLocalResponse(pathname: string, init?: RequestInit): Promise<Response> {
@@ -516,8 +560,7 @@ async function refreshRemoteCredentials(): Promise<ReturnType<typeof getRemoteDe
     clearRemoteDesktopSession();
     throw new Error('The host pairing expired or was revoked. Pair this laptop again.');
   }
-  const credentials = await response.json() as Pick<RemoteLibraryConnection,
-    'deviceToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'> & { accessToken?: string };
+  const credentials = await readJsonResponse(response, refreshedCredentialsSchema, 'Credential refresh');
   return updateRemoteDesktopSession({
     deviceToken: credentials.accessToken || credentials.deviceToken,
     accessTokenExpiresAt: credentials.accessTokenExpiresAt,
@@ -560,13 +603,17 @@ async function remoteRequest(pathname: string, init: RequestInit = {}, retry = t
   return response;
 }
 
-async function remoteJson<T>(pathname: string, init?: RequestInit): Promise<T> {
+async function remoteJson<TSchema extends z.ZodType>(
+  pathname: string,
+  schema: TSchema,
+  init?: RequestInit,
+): Promise<z.output<TSchema>> {
   const response = await remoteRequest(pathname, init);
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    const payload = await readErrorResponse(response, pathname).catch(() => null);
     throw new Error(payload?.error || `The host returned ${response.status}.`);
   }
-  return response.json() as Promise<T>;
+  return readJsonResponse(response, schema, pathname);
 }
 
 const DEFAULT_REMOTE_PLAYBACK_CAPABILITIES: PlaybackCapabilities = {
@@ -583,7 +630,7 @@ async function remotePlaybackPlan(
   capabilities: PlaybackCapabilities = DEFAULT_REMOTE_PLAYBACK_CAPABILITIES,
 ): Promise<PlaybackPlanResponse | null> {
   if (!isRemoteDesktopMode() || !/^https?:\/\//i.test(filePath)) return null;
-  const result = await remoteJson<{ ok: boolean; data?: PlaybackPlanResponse; error?: string }>('/api/v2/playback-plan', {
+  const result = await remoteJson('/api/v2/playback-plan', playbackPlanResultSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -715,7 +762,7 @@ async function refreshRemoteActiveProfileState(): Promise<ActiveProfileState> {
     return { profileId: null, selectionRequired: true, selectionRevision: 0, automaticSignIn: false };
   }
   if (!response.ok) throw new Error('Could not read the active profile from the host.');
-  const state = await response.json() as ActiveProfileState;
+  const state = await readJsonResponse(response, desktopActiveProfileSchema, 'Active profile');
   updateRemoteDesktopSession(remoteProfileSessionPatch(state));
   return state;
 }
@@ -737,7 +784,7 @@ export const desktopApi = {
         if (response.status === 409) throw new Error('Select a profile from the host first.');
         throw new Error(response.status === 401 ? 'Pairing was revoked on the host.' : 'Could not load the shared catalog.');
       }
-      const index = remoteLibraryIndexSources(await response.json() as LibraryIndexPayload);
+      const index = remoteLibraryIndexSources(await readJsonResponse(response, desktopLibraryIndexSchema, 'Library index'));
       const etag = response.headers.get('ETag') || '';
       remoteCatalogCache = { identity, etag, index };
       updateRemoteDesktopSession({
@@ -750,7 +797,7 @@ export const desktopApi = {
     const response = await fetchLocalResponse('/api/renderer/library/index');
     if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
     if (!response.ok) throw new Error(`Could not load the local catalog (${response.status}).`);
-    return response.json() as Promise<LibraryIndexPayload>;
+    return readJsonResponse(response, desktopLibraryIndexSchema, 'Library index');
   },
 
   async getLibraryItem(mediaId: string): Promise<LibraryItemDetailsPayload | null> {
@@ -759,13 +806,13 @@ export const desktopApi = {
       const response = await remoteRequest(`/api/v2/library/items/${encodedId}`);
       if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
       if (!response.ok) throw new Error(`Could not load media details (${response.status}).`);
-      return remoteLibraryItemSources(await response.json() as LibraryItemDetailsPayload);
+      return remoteLibraryItemSources(await readJsonResponse(response, desktopLibraryItemDetailsSchema, 'Library item'));
     }
     if (window.desktopApi?.getLibraryItem) return window.desktopApi.getLibraryItem(mediaId);
     const response = await fetchLocalResponse(`/api/renderer/library/items/${encodedId}`);
     if (response.status === 403 || response.status === 404 || response.status === 410 || response.status === 501) return null;
     if (!response.ok) throw new Error(`Could not load media details (${response.status}).`);
-    return response.json() as Promise<LibraryItemDetailsPayload>;
+    return readJsonResponse(response, desktopLibraryItemDetailsSchema, 'Library item');
   },
 
   async getLibrary(): Promise<LibraryPayload> {
@@ -775,13 +822,13 @@ export const desktopApi = {
         if (response.status === 409) throw new Error('Select a profile from the host first.');
         throw new Error(response.status === 401 ? 'Pairing was revoked on the host.' : 'Could not load the shared library.');
       }
-      const library = remoteLibrarySources(await response.json() as LibraryPayload);
+      const library = remoteLibrarySources(await readJsonResponse(response, desktopLibrarySchema, 'Shared library'));
       const session = getRemoteDesktopSession();
       if (session) updateRemoteDesktopSession({ library, libraryEtag: response.headers.get('ETag') || session.libraryEtag });
       return library;
     }
     if (window.desktopApi) return window.desktopApi.getLibrary();
-    return fetchJson<LibraryPayload>('/api/renderer/library');
+    return fetchJson('/api/renderer/library', desktopLibrarySchema);
   },
 
   async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {
@@ -817,13 +864,13 @@ export const desktopApi = {
     if (options.subtitleCodec) params.set('subtitleCodec', options.subtitleCodec);
     const [subtitleResource, secondarySubtitleResource] = await Promise.all([
       options.subtitleFilePath
-        ? fetchJson<{ resourceId: string }>('/api/renderer/media/subtitle-resource', {
+        ? fetchJson('/api/renderer/media/subtitle-resource', resourceIdResultSchema, {
           method: 'POST',
           body: JSON.stringify({ mediaFilePath: filePath, subtitleFilePath: options.subtitleFilePath }),
         })
         : null,
       options.secondarySubtitleFilePath
-        ? fetchJson<{ resourceId: string }>('/api/renderer/media/subtitle-resource', {
+        ? fetchJson('/api/renderer/media/subtitle-resource', resourceIdResultSchema, {
           method: 'POST',
           body: JSON.stringify({ mediaFilePath: filePath, subtitleFilePath: options.secondarySubtitleFilePath }),
         })
@@ -895,7 +942,7 @@ export const desktopApi = {
 
   async getLocalNetworkStatus(): Promise<LocalNetworkStatus> {
     if (window.desktopApi?.getLocalNetworkStatus) return window.desktopApi.getLocalNetworkStatus();
-    return fetchJson<LocalNetworkStatus>('/api/lan/status');
+    return fetchJson('/api/lan/status', localNetworkStatusSchema);
   },
 
   async discoverLocalNetworkPeers(timeoutMs = 2500): Promise<LocalNetworkPeer[]> {
@@ -941,23 +988,10 @@ export const desktopApi = {
       }),
     }, REMOTE_REQUEST_TIMEOUT_MS);
     if (!response.ok) {
-      const payload = await response.json().catch(() => null) as { error?: string; message?: string } | null;
+      const payload = await readErrorResponse(response, 'Pairing').catch(() => null);
       throw new Error(payload?.message || payload?.error || `The host rejected pairing (${response.status}).`);
     }
-    const payload = await response.json() as {
-      deviceId?: string;
-      accessToken?: string;
-      accessTokenExpiresAt?: number;
-      refreshToken?: string;
-      refreshTokenExpiresAt?: number;
-      hostDeviceId?: string;
-      hostDeviceName?: string;
-      library?: LibraryPayload;
-      libraryEtag?: string;
-    };
-    if (!payload.deviceId || !payload.accessToken || !payload.refreshToken) {
-      throw new Error('The host returned an incomplete pairing session.');
-    }
+    const payload = await readJsonResponse(response, browserPairResponseSchema, 'Pairing');
     return {
       baseUrl: normalizedBaseUrl,
       deviceId: payload.deviceId,
@@ -1025,7 +1059,7 @@ export const desktopApi = {
       }
       const localSession = getRemoteDesktopSession();
       return {
-        library: remoteLibrarySources(await response.json() as LibraryPayload),
+        library: remoteLibrarySources(await readJsonResponse(response, desktopLibrarySchema, 'Shared library')),
         etag: response.headers.get('ETag') || '',
         deviceToken: '',
         accessTokenExpiresAt: localSession?.accessTokenExpiresAt || 0,
@@ -1045,12 +1079,7 @@ export const desktopApi = {
         body: JSON.stringify({ refreshToken: activeRefreshToken }),
       }, REMOTE_REQUEST_TIMEOUT_MS);
       if (!refreshResponse.ok) throw new Error('The secure pairing session expired. Pair again.');
-      const credentials = await refreshResponse.json() as {
-        accessToken: string;
-        accessTokenExpiresAt: number;
-        refreshToken: string;
-        refreshTokenExpiresAt: number;
-      };
+      const credentials = await readJsonResponse(refreshResponse, refreshedCredentialsSchema, 'Credential refresh');
       activeToken = credentials.accessToken;
       activeAccessExpiresAt = credentials.accessTokenExpiresAt;
       activeRefreshToken = credentials.refreshToken;
@@ -1064,7 +1093,7 @@ export const desktopApi = {
       if (response.status === 401) throw new Error('Pairing was revoked on the host.');
       throw new Error('Could not refresh the shared library.');
     }
-    const library = await response.json() as LibraryPayload;
+    const library = await readJsonResponse(response, desktopLibrarySchema, 'Shared library');
     return {
       library,
       etag: response.headers.get('ETag') || '',
@@ -1106,7 +1135,7 @@ export const desktopApi = {
 
   async addLibraryFolder(kind: LibraryFolderKind = 'movies'): Promise<LibraryIndexPayload | null> {
     if (window.desktopApi) return window.desktopApi.addLibraryFolder(kind);
-    return fetchJson<LibraryIndexPayload | null>('/api/library/add-folder', {
+    return fetchJson('/api/library/add-folder', desktopLibraryIndexSchema.nullable(), {
       method: 'POST',
       body: JSON.stringify({ kind }),
     });
@@ -1114,7 +1143,7 @@ export const desktopApi = {
 
   async removeLibraryFolder(folderPath: string): Promise<LibraryIndexPayload> {
     if (window.desktopApi) return window.desktopApi.removeLibraryFolder(folderPath);
-    return fetchJson<LibraryIndexPayload>('/api/library/remove-folder', {
+    return fetchJson('/api/library/remove-folder', desktopLibraryIndexSchema, {
       method: 'POST',
       body: JSON.stringify({ folderPath }),
     });
@@ -1126,18 +1155,18 @@ export const desktopApi = {
       const parsed = new URL(base);
       return Number(parsed.port || DEFAULT_MEDIA_PORT);
     }
-    const response = await fetchJson<{ port: number }>('/api/media-server-port');
+    const response = await fetchJson('/api/media-server-port', portResultSchema);
     return response.port;
   },
 
   async checkFFmpeg(): Promise<FFmpegStatus> {
     if (window.desktopApi) return window.desktopApi.checkFFmpeg();
-    return fetchJson<FFmpegStatus>('/api/renderer/ffmpeg');
+    return fetchJson('/api/renderer/ffmpeg', ffmpegStatusSchema);
   },
 
   async getSettings(): Promise<SettingsPayload> {
     if (window.desktopApi) return window.desktopApi.getSettings();
-    return fetchJson<SettingsPayload>('/api/renderer/settings');
+    return fetchJson('/api/renderer/settings', settingsPayloadSchema);
   },
 
   async listStremioPlugins(): Promise<StremioPluginSummary[]> {
@@ -1222,7 +1251,7 @@ export const desktopApi = {
 
   async saveSettings(settings: SettingsPayload): Promise<boolean> {
     if (window.desktopApi) return window.desktopApi.saveSettings(settings);
-    const response = await fetchJson<{ ok: boolean }>('/api/renderer/settings', {
+    const response = await fetchJson('/api/renderer/settings', okResultSchema, {
       method: 'POST',
       body: JSON.stringify(settings),
     });
@@ -1231,7 +1260,7 @@ export const desktopApi = {
 
   async testMetadataKeys(keys: MetadataApiKeys): Promise<MetadataKeyTestResult[]> {
     if (window.desktopApi?.testMetadataKeys) return window.desktopApi.testMetadataKeys(keys);
-    return fetchJson<MetadataKeyTestResult[]>('/api/metadata/test-keys', {
+    return fetchJson('/api/metadata/test-keys', metadataKeyTestResultsSchema, {
       method: 'POST',
       body: JSON.stringify({ keys }),
     });
@@ -1241,11 +1270,11 @@ export const desktopApi = {
   // endpoints as the Electron renderer instead of falling into an empty gate.
   async listProfiles(): Promise<ProfileSummary[]> {
     if (isRemoteDesktopMode()) {
-      const payload = await remoteJson<{ profiles: ProfileSummary[] }>('/api/v2/profiles');
+      const payload = await remoteJson('/api/v2/profiles', desktopProfilesPayloadSchema);
       return payload.profiles || [];
     }
     if (window.desktopApi?.listProfiles) return window.desktopApi.listProfiles();
-    const payload = await fetchJson<{ profiles: ProfileSummary[] }>('/api/v2/profiles');
+    const payload = await fetchJson('/api/v2/profiles', desktopProfilesPayloadSchema);
     return payload.profiles || [];
   },
 
@@ -1259,12 +1288,12 @@ export const desktopApi = {
       return refreshRemoteActiveProfileState();
     }
     if (window.desktopApi?.getActiveProfileState) return window.desktopApi.getActiveProfileState();
-    return fetchJson<ActiveProfileState>('/api/v2/profiles/active');
+    return fetchJson('/api/v2/profiles/active', desktopActiveProfileSchema);
   },
 
   async createProfile(input: ProfileCreateInput): Promise<ProfileSummary[]> {
     if (isRemoteDesktopMode()) {
-      const payload = await remoteJson<{ profile: ProfileSummary; profiles: ProfileSummary[] }>('/api/v2/profiles', {
+      const payload = await remoteJson('/api/v2/profiles', profileCreateResponseSchema, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -1293,7 +1322,7 @@ export const desktopApi = {
 
   async selectProfile(profileId: string, pin?: string): Promise<ProfileSummary> {
     if (isRemoteDesktopMode()) {
-      const payload = await remoteJson<{ profile: ProfileSummary; active: ActiveProfileState }>('/api/v2/profiles/select', {
+      const payload = await remoteJson('/api/v2/profiles/select', desktopProfileSelectionSchema, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ profileId, pin }),
@@ -1302,7 +1331,7 @@ export const desktopApi = {
       return payload.profile;
     }
     if (window.desktopApi?.selectProfile) return window.desktopApi.selectProfile(profileId, pin);
-    const payload = await fetchJson<{ profile: ProfileSummary; active: ActiveProfileState }>('/api/v2/profiles/select', {
+    const payload = await fetchJson('/api/v2/profiles/select', desktopProfileSelectionSchema, {
       method: 'POST',
       body: JSON.stringify({ profileId, pin }),
     });
@@ -1317,12 +1346,12 @@ export const desktopApi = {
 
   async lockProfile(): Promise<ActiveProfileState> {
     if (isRemoteDesktopMode()) {
-      const state = await remoteJson<ActiveProfileState>('/api/v2/profiles/lock', { method: 'POST' });
+      const state = await remoteJson('/api/v2/profiles/lock', desktopActiveProfileSchema, { method: 'POST' });
       updateRemoteDesktopSession({ selectedProfileId: null, selectionRevision: state.selectionRevision });
       return state;
     }
     if (window.desktopApi?.lockProfile) return window.desktopApi.lockProfile();
-    return fetchJson<ActiveProfileState>('/api/v2/profiles/lock', { method: 'POST' });
+    return fetchJson('/api/v2/profiles/lock', desktopActiveProfileSchema, { method: 'POST' });
   },
 
   async reorderProfiles(profileIds: string[]): Promise<ProfileSummary[]> {
@@ -1341,32 +1370,32 @@ export const desktopApi = {
   },
 
   async setAutomaticProfileSignIn(enabled: boolean): Promise<ActiveProfileState> {
-    if (isRemoteDesktopMode()) return remoteJson<ActiveProfileState>('/api/v2/profiles/auto-sign-in', {
+    if (isRemoteDesktopMode()) return remoteJson('/api/v2/profiles/auto-sign-in', desktopActiveProfileSchema, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     });
     if (window.desktopApi?.setAutomaticProfileSignIn) return window.desktopApi.setAutomaticProfileSignIn(enabled);
-    return fetchJson<ActiveProfileState>('/api/v2/profiles/auto-sign-in', {
+    return fetchJson('/api/v2/profiles/auto-sign-in', desktopActiveProfileSchema, {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     });
   },
 
   async getProfilePreferences(): Promise<ProfilePreferences> {
-    if (isRemoteDesktopMode()) return remoteJson<ProfilePreferences>('/api/v2/profile-preferences');
+    if (isRemoteDesktopMode()) return remoteJson('/api/v2/profile-preferences', desktopProfilePreferencesSchema);
     if (window.desktopApi?.getProfilePreferences) return window.desktopApi.getProfilePreferences();
-    return fetchJson<ProfilePreferences>('/api/v2/profile-preferences');
+    return fetchJson('/api/v2/profile-preferences', desktopProfilePreferencesSchema);
   },
 
   async saveProfilePreferences(patch: ProfilePreferences, expectedProfileId?: string): Promise<ProfilePreferences> {
-    if (isRemoteDesktopMode()) return remoteJson<ProfilePreferences>('/api/v2/profile-preferences', {
+    if (isRemoteDesktopMode()) return remoteJson('/api/v2/profile-preferences', desktopProfilePreferencesSchema, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...patch, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
     });
     if (window.desktopApi?.saveProfilePreferences) return window.desktopApi.saveProfilePreferences(patch, expectedProfileId);
-    return fetchJson<ProfilePreferences>('/api/v2/profile-preferences', {
+    return fetchJson('/api/v2/profile-preferences', desktopProfilePreferencesSchema, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     });
@@ -1383,19 +1412,19 @@ export const desktopApi = {
   },
 
   async getProfileLists(kind?: ProfileListKind): Promise<ProfileListEntry[]> {
-    if (isRemoteDesktopMode()) return remoteJson<ProfileListEntry[]>(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
+    if (isRemoteDesktopMode()) return remoteJson(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`, desktopProfileListSchema);
     if (window.desktopApi?.getProfileLists) return window.desktopApi.getProfileLists(kind);
-    return fetchJson<ProfileListEntry[]>(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`);
+    return fetchJson(`/api/v2/profile-lists${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`, desktopProfileListSchema);
   },
 
   async setProfileListEntry(mediaId: string, kind: ProfileListKind, present: boolean, expectedProfileId?: string): Promise<ProfileListEntry[]> {
-    if (isRemoteDesktopMode()) return remoteJson<ProfileListEntry[]>('/api/v2/profile-lists', {
+    if (isRemoteDesktopMode()) return remoteJson('/api/v2/profile-lists', desktopProfileListSchema, {
       method: present ? 'PUT' : 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mediaId, kind, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
     });
     if (window.desktopApi?.setProfileListEntry) return window.desktopApi.setProfileListEntry(mediaId, kind, present, expectedProfileId);
-    return fetchJson<ProfileListEntry[]>('/api/v2/profile-lists', {
+    return fetchJson('/api/v2/profile-lists', desktopProfileListSchema, {
       method: present ? 'PUT' : 'DELETE',
       body: JSON.stringify({ mediaId, kind }),
     });
@@ -1411,16 +1440,16 @@ export const desktopApi = {
 
   async getProgress(filePath?: string): Promise<Record<string, StoredProgress> | StoredProgress | null> {
     if (isRemoteDesktopMode()) {
-      const all = await remoteJson<Record<string, StoredProgress>>('/api/v2/progress');
+      const all = await remoteJson('/api/v2/progress', desktopProgressMapSchema);
       return filePath ? all[remoteResourceId(filePath)] || null : remoteProgressByStreamUrl(all);
     }
     if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
     const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
-    return fetchJson<Record<string, StoredProgress> | StoredProgress | null>(`/api/progress${query}`);
+    return fetchJson(`/api/progress${query}`, desktopProgressResultSchema);
   },
 
   async saveProgress(filePath: string, position: number, duration: number, expectedProfileId?: string): Promise<StoredProgress> {
-    if (isRemoteDesktopMode()) return remoteJson<StoredProgress>('/api/v2/progress', {
+    if (isRemoteDesktopMode()) return remoteJson('/api/v2/progress', desktopStoredProgressSchema, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1431,7 +1460,7 @@ export const desktopApi = {
       }),
     });
     if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration, expectedProfileId);
-    return fetchJson<StoredProgress>('/api/progress', {
+    return fetchJson('/api/progress', desktopStoredProgressSchema, {
       method: 'POST',
       body: JSON.stringify({ filePath, position, duration }),
     });
@@ -1440,7 +1469,7 @@ export const desktopApi = {
   async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string): Promise<boolean> {
     if (isRemoteDesktopMode()) return true;
     if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress, expectedProfileId);
-    const response = await fetchJson<{ ok: boolean }>('/api/progress/import', {
+    const response = await fetchJson('/api/progress/import', okResultSchema, {
       method: 'POST',
       body: JSON.stringify({ progress }),
     });
@@ -1450,21 +1479,21 @@ export const desktopApi = {
   async getPlaybackTrackPreferences(scope?: string): Promise<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>> {
     if (isRemoteDesktopMode()) {
       const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
-      return remoteJson<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>(`/api/v2/playback-track-preferences${query}`);
+      return remoteJson(`/api/v2/playback-track-preferences${query}`, playbackTrackPreferencesResultSchema);
     }
     if (window.desktopApi?.getPlaybackTrackPreferences) return window.desktopApi.getPlaybackTrackPreferences(scope);
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
-    return fetchJson<PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences>>(`/api/playback-track-preferences${query}`);
+    return fetchJson(`/api/playback-track-preferences${query}`, playbackTrackPreferencesResultSchema);
   },
 
   async savePlaybackTrackPreferences(scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string): Promise<PlaybackTrackPreferences> {
-    if (isRemoteDesktopMode()) return remoteJson<PlaybackTrackPreferences>('/api/v2/playback-track-preferences', {
+    if (isRemoteDesktopMode()) return remoteJson('/api/v2/playback-track-preferences', playbackTrackPreferencesSchema, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scope, preferences, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
     });
     if (window.desktopApi?.savePlaybackTrackPreferences) return window.desktopApi.savePlaybackTrackPreferences(scope, preferences, expectedProfileId);
-    return fetchJson<PlaybackTrackPreferences>('/api/playback-track-preferences', {
+    return fetchJson('/api/playback-track-preferences', playbackTrackPreferencesSchema, {
       method: 'POST',
       body: JSON.stringify({ scope, preferences }),
     });
@@ -1475,13 +1504,13 @@ export const desktopApi = {
       const params = new URLSearchParams({ mediaId: request.mediaId });
       if (typeof request.season === 'number') params.set('season', String(request.season));
       if (typeof request.episode === 'number') params.set('episode', String(request.episode));
-      return remoteJson<MediaSegmentResponse>(`/api/v2/playback/segments?${params.toString()}`);
+      return remoteJson(`/api/v2/playback/segments?${params.toString()}`, mediaSegmentResponseSchema);
     }
     if (window.desktopApi?.getMediaSegments) return window.desktopApi.getMediaSegments(request);
     const params = new URLSearchParams({ mediaId: request.mediaId });
     if (typeof request.season === 'number') params.set('season', String(request.season));
     if (typeof request.episode === 'number') params.set('episode', String(request.episode));
-    return fetchJson<MediaSegmentResponse>(`/api/playback/segments?${params.toString()}`);
+    return fetchJson(`/api/playback/segments?${params.toString()}`, mediaSegmentResponseSchema);
   },
 
   async saveManualMediaSegment(input: ManualMediaSegmentInput): Promise<MediaSegmentResponse> {
@@ -1559,12 +1588,12 @@ export const desktopApi = {
 
   async getCustomArtwork(mediaId: string): Promise<Record<string, string>> {
     if (window.desktopApi?.getCustomArtwork) return window.desktopApi.getCustomArtwork(mediaId);
-    return fetchJson<Record<string, string>>(`/api/artwork?mediaId=${encodeURIComponent(mediaId)}`);
+    return fetchJson(`/api/artwork?mediaId=${encodeURIComponent(mediaId)}`, stringRecordSchema);
   },
 
   async saveCustomArtwork(mediaId: string, target: string, dataUrl: string): Promise<Record<string, string>> {
     if (window.desktopApi?.saveCustomArtwork) return window.desktopApi.saveCustomArtwork(mediaId, target, dataUrl);
-    return fetchJson<Record<string, string>>('/api/artwork', {
+    return fetchJson('/api/artwork', stringRecordSchema, {
       method: 'POST',
       body: JSON.stringify({ mediaId, target, dataUrl }),
     });
@@ -1572,7 +1601,7 @@ export const desktopApi = {
 
   async refreshOfficialArtwork(mediaId: string, target: OfficialArtworkRefreshTarget = 'all'): Promise<OfficialArtworkResult> {
     if (window.desktopApi?.refreshOfficialArtwork) return window.desktopApi.refreshOfficialArtwork(mediaId, target);
-    return fetchJson<OfficialArtworkResult>('/api/artwork/refresh-official', {
+    return fetchJson('/api/artwork/refresh-official', officialArtworkResultSchema, {
       method: 'POST',
       body: JSON.stringify({ mediaId, target }),
     });
@@ -1580,7 +1609,7 @@ export const desktopApi = {
 
   async getStreamingProviders(mediaId: string): Promise<StreamingProvider[]> {
     if (window.desktopApi?.getStreamingProviders) return window.desktopApi.getStreamingProviders(mediaId);
-    return fetchJson<StreamingProvider[]>('/api/metadata/streaming-providers', {
+    return fetchJson('/api/metadata/streaming-providers', z.array(lanStreamingProviderSchema), {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -1588,7 +1617,7 @@ export const desktopApi = {
 
   async refreshIncompleteMetadata(mediaId: string): Promise<boolean> {
     if (window.desktopApi?.refreshIncompleteMetadata) return window.desktopApi.refreshIncompleteMetadata(mediaId);
-    return fetchJson<boolean>('/api/metadata/refresh-incomplete', {
+    return fetchJson('/api/metadata/refresh-incomplete', z.boolean(), {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -1596,7 +1625,7 @@ export const desktopApi = {
 
   async getPlaybackLogo(mediaId: string): Promise<PlaybackLogoResult> {
     if (window.desktopApi?.getPlaybackLogo) return window.desktopApi.getPlaybackLogo(mediaId);
-    return fetchJson<PlaybackLogoResult>('/api/artwork/playback-logo', {
+    return fetchJson('/api/artwork/playback-logo', playbackLogoResultSchema, {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -1604,7 +1633,7 @@ export const desktopApi = {
 
   async getOfficialMetadataCandidates(mediaId: string): Promise<OfficialMetadataCandidate[]> {
     if (window.desktopApi?.getOfficialMetadataCandidates) return window.desktopApi.getOfficialMetadataCandidates(mediaId);
-    return fetchJson<OfficialMetadataCandidate[]>('/api/artwork/official-candidates', {
+    return fetchJson('/api/artwork/official-candidates', z.array(officialMetadataCandidateSchema), {
       method: 'POST',
       body: JSON.stringify({ mediaId }),
     });
@@ -1612,7 +1641,7 @@ export const desktopApi = {
 
   async applyOfficialMetadata(mediaId: string, candidate: OfficialMetadataCandidate, target: OfficialMetadataApplyTarget = 'all'): Promise<OfficialArtworkResult> {
     if (window.desktopApi?.applyOfficialMetadata) return window.desktopApi.applyOfficialMetadata(mediaId, candidate, target);
-    return fetchJson<OfficialArtworkResult>('/api/artwork/apply-official', {
+    return fetchJson('/api/artwork/apply-official', officialArtworkResultSchema, {
       method: 'POST',
       body: JSON.stringify({ mediaId, candidate, target }),
     });
@@ -1620,7 +1649,7 @@ export const desktopApi = {
 
   async importCustomArtwork(entries: Record<string, Record<string, string>>): Promise<boolean> {
     if (window.desktopApi?.importCustomArtwork) return window.desktopApi.importCustomArtwork(entries);
-    const response = await fetchJson<{ ok: boolean }>('/api/artwork/import', {
+    const response = await fetchJson('/api/artwork/import', okResultSchema, {
       method: 'POST',
       body: JSON.stringify({ entries }),
     });
@@ -1629,12 +1658,12 @@ export const desktopApi = {
 
   async backupDatabase(): Promise<{ ok: boolean; path?: string; error?: string }> {
     if (window.desktopApi?.backupDatabase) return window.desktopApi.backupDatabase();
-    return fetchJson<{ ok: boolean; path?: string; error?: string }>('/api/database/backup', { method: 'POST' });
+    return fetchJson('/api/database/backup', backupResultSchema, { method: 'POST' });
   },
 
   async clearAppData(): Promise<LibraryIndexPayload> {
     if (window.desktopApi?.clearAppData) return window.desktopApi.clearAppData();
-    return fetchJson<LibraryIndexPayload>('/api/database/clear', { method: 'POST' });
+    return fetchJson('/api/database/clear', desktopLibraryIndexSchema, { method: 'POST' });
   },
 
   openExternal(url: string): void {
@@ -1670,7 +1699,7 @@ export const desktopApi = {
         headers: { Accept: 'application/vnd.github+json' },
       });
       if (!response.ok) throw new Error(`Update check returned ${response.status}`);
-      const release = await response.json() as { tag_name?: string; html_url?: string };
+      const release = await readJsonResponse(response, githubReleaseSchema, 'GitHub release');
       const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
       return {
         status: 'available',
@@ -1710,7 +1739,7 @@ export const desktopApi = {
 
   async playMedia(filePath: string): Promise<boolean> {
     if (window.desktopApi) return window.desktopApi.playMedia(filePath);
-    const response = await fetchJson<{ ok: boolean }>('/api/play-media', {
+    const response = await fetchJson('/api/play-media', okResultSchema, {
       method: 'POST',
       body: JSON.stringify({ filePath }),
     });
@@ -1829,7 +1858,7 @@ export const desktopApi = {
         return { ok: false, error: 'Media probing is handled by the paired host.' };
       }
       if (window.desktopApi?.media) return window.desktopApi.media.probe(filePath);
-      return fetchJson<ApiResult<unknown>>('/api/renderer/media/probe', {
+      return fetchJson('/api/renderer/media/probe', unknownApiResultSchema, {
         method: 'POST',
         body: JSON.stringify({ filePath }),
       });
@@ -1849,7 +1878,7 @@ export const desktopApi = {
     async startTranscode(filePath: string, options?: TranscodeOptions): Promise<ApiResult<TranscodeSession>> {
       if (isRemoteDesktopMode()) {
         await refreshRemoteActiveProfileState();
-        const result = await remoteJson<ApiResult<TranscodeSession>>('/api/v2/start-hls', {
+        const result = await remoteJson('/api/v2/start-hls', apiResultSchema(transcodeSessionSchema), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1864,7 +1893,7 @@ export const desktopApi = {
         return result;
       }
       if (window.desktopApi?.media) return window.desktopApi.media.startTranscode(filePath, options);
-      return fetchJson<ApiResult<TranscodeSession>>('/api/renderer/media/start-transcode', {
+      return fetchJson('/api/renderer/media/start-transcode', apiResultSchema(transcodeSessionSchema), {
         method: 'POST',
         body: JSON.stringify({ filePath, options }),
       });
@@ -1873,7 +1902,7 @@ export const desktopApi = {
     async stopTranscode(sessionId: string): Promise<ApiResult<boolean>> {
       if (isRemoteDesktopMode()) return { ok: true, data: true };
       if (window.desktopApi?.media) return window.desktopApi.media.stopTranscode(sessionId);
-      return fetchJson<ApiResult<boolean>>('/api/renderer/media/stop-transcode', {
+      return fetchJson('/api/renderer/media/stop-transcode', apiResultSchema(z.boolean()), {
         method: 'POST',
         body: JSON.stringify({ sessionId }),
       });

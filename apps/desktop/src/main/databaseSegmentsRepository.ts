@@ -1,4 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
+import { z } from 'zod';
+import { parseStoredJson } from './runtimeValidation.ts';
 import { resolveCandidates } from './skipSegments/normalize.ts';
 import type {
   MediaSegment,
@@ -28,16 +30,51 @@ export type SegmentAnalysisInventory = {
   analyzedAt: number;
 };
 
+const finiteNumber = z.number().finite();
+const segmentTypeSchema = z.enum(['intro', 'recap', 'outro', 'credits', 'preview']);
+const segmentSourceSchema = z.enum(['manual', 'chapter', 'theintrodb', 'aniskip', 'chromaprint']);
+const segmentAnalysisMetadataSchema = z.object({
+  detector: z.enum(['chromaprint', 'blackframe', 'chapter']).optional(),
+  peerSupport: finiteNumber.optional(),
+  originalStartMs: finiteNumber.optional(),
+  originalEndMs: finiteNumber.nullable().optional(),
+  startSnap: z.enum(['chapter', 'silence', 'keyframe', 'media-edge', 'original']).optional(),
+  endSnap: z.enum(['chapter', 'silence', 'keyframe', 'media-edge', 'original']).optional(),
+  confidenceComponents: z.record(z.string(), finiteNumber).optional(),
+  userDecision: z.object({
+    status: z.enum(['active', 'rejected']).optional(),
+    type: segmentTypeSchema.optional(),
+  }).optional(),
+});
+const normalizedSegmentInputSchema = z.object({
+  type: segmentTypeSchema,
+  startMs: finiteNumber,
+  endMs: finiteNumber.nullable(),
+  source: segmentSourceSchema,
+  confidence: finiteNumber,
+});
+const segmentCandidateSchema = z.object({
+  id: z.string(),
+  type: segmentTypeSchema,
+  startMs: finiteNumber,
+  endMs: finiteNumber.nullable(),
+  confidence: finiteNumber,
+  source: segmentSourceSchema,
+  mediaDurationMs: finiteNumber,
+  updatedAt: z.string(),
+  analysisMetadata: segmentAnalysisMetadataSchema.optional(),
+  mediaId: z.string(),
+  season: finiteNumber,
+  episode: finiteNumber,
+  filePath: z.string(),
+  fileRevision: z.string(),
+  releaseKey: z.string().optional(),
+  status: z.enum(['active', 'review', 'rejected']),
+  expiresAt: finiteNumber.optional(),
+});
+
 export function createDatabaseSegmentsRepository(database: BetterSqlite3.Database) {
   const getDb = (): BetterSqlite3.Database => database;
-  const jsonParse = <T>(value: string | null | undefined, fallback: T): T => {
-    if (!value) return fallback;
-    try {
-      return JSON.parse(value) as T;
-    } catch {
-      return fallback;
-    }
-  };
   const jsonString = (value: unknown): string => JSON.stringify(value ?? null);
 
   type SegmentCandidateRow = {
@@ -78,7 +115,7 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
       mediaDurationMs: row.media_duration_ms,
       updatedAt: new Date(row.updated_at).toISOString(),
       expiresAt: row.expires_at || undefined,
-      analysisMetadata: jsonParse(row.analysis_metadata_json, undefined),
+      analysisMetadata: parseStoredJson(row.analysis_metadata_json, segmentAnalysisMetadataSchema.optional(), undefined),
     };
   }
 
@@ -135,7 +172,7 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
       lookupKey: row.lookup_key,
       durationBucket: row.duration_bucket,
       status: row.status,
-      segments: jsonParse(row.segments_json, []),
+      segments: parseStoredJson(row.segments_json, z.array(normalizedSegmentInputSchema), []),
       fetchedAt: row.fetched_at,
       expiresAt: row.expires_at,
       staleUntil: row.stale_until,
@@ -343,7 +380,7 @@ export function createDatabaseSegmentsRepository(database: BetterSqlite3.Databas
       `).all() as Array<{ history_id: number; snapshot_json: string }>;
       const match = history.map((row) => ({
         row,
-        candidate: jsonParse<MediaSegmentCandidate | null>(row.snapshot_json, null),
+        candidate: parseStoredJson(row.snapshot_json, segmentCandidateSchema.nullable(), null),
       })).find(({ candidate }) => candidate?.fileRevision === fileRevision && candidate.type === type
         && candidate.source === 'manual' && (!candidateId || candidate.id === candidateId));
       if (!match?.candidate) return getResolvedMediaSegments(fileRevision);

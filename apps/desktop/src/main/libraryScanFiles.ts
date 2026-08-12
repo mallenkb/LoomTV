@@ -25,6 +25,8 @@ const SKIPPED_EPISODE_DIRECTORIES = new Set([
   'behind the scenes', 'featurettes', 'interviews', 'scenes', 'shorts',
   'trailers', 'featurette', 'sample', 'samples', 'subs', 'subtitles',
 ]);
+const SPECIALS_DIRECTORY_PATTERN = /^specials?(?=$|[\s.:()[\]{}–—])/i;
+const SEASON_DIRECTORY_PATTERN = /^(?:season|series|s)[\s.:]*0*(\d{1,2})(?=$|[\s.:()[\]{}–—])/i;
 
 /**
  * Jellyfin treats Season 00 as the Specials season. It also accepts the
@@ -33,9 +35,14 @@ const SKIPPED_EPISODE_DIRECTORIES = new Set([
  */
 export function seasonNumberFromDirectoryName(name: string): number | null {
   const normalized = name.trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
-  if (/^specials?$/i.test(normalized)) return 0;
+  if (SPECIALS_DIRECTORY_PATTERN.test(normalized)) return 0;
 
-  const match = normalized.match(/^(?:season|series|s)\s*0*(\d{1,2})$/i);
+  // Downloaded libraries commonly append an arc or subtitle to the season
+  // number, for example "Season 02 - Entertainment District Arc". The
+  // leading season marker remains authoritative as long as the number ends at
+  // a separator, which avoids treating episode-like names such as S01E02 as a
+  // season directory.
+  const match = normalized.match(SEASON_DIRECTORY_PATTERN);
   return match ? parseInt(match[1], 10) : null;
 }
 

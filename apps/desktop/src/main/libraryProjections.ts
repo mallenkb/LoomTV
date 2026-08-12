@@ -106,6 +106,12 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
     const logoCandidates = artworkDeliveryUrls(item.logoCandidates);
     const poster = artworkDeliveryUrl(item.poster) || posterCandidates[0] || '';
     const backdrop = artworkDeliveryUrl(item.backdrop) || backdropCandidates[0] || poster;
+    const cast = item.cast.map((credit) => ({
+      ...credit,
+      image: artworkDeliveryUrl(credit.image),
+      characterImage: artworkDeliveryUrl(credit.characterImage),
+      voiceActorImage: artworkDeliveryUrl(credit.voiceActorImage),
+    }));
 
     return {
       ...item,
@@ -115,6 +121,7 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       posterCandidates,
       backdropCandidates,
       logoCandidates,
+      cast,
       subtitles: subtitleRecordsForRenderer(item.subtitles),
       episodes: item.episodes?.map((episode) => ({
         ...episode,
@@ -122,6 +129,8 @@ export function createLibraryDeliveryProjections(deps: LibraryProjectionDependen
       })),
       episodeFiles: item.episodeFiles?.map((episodeFile) => ({
         ...episodeFile,
+        ...(episodeFile.still ? { still: artworkDeliveryUrl(episodeFile.still) } : {}),
+        ...(episodeFile.thumbnail ? { thumbnail: artworkDeliveryUrl(episodeFile.thumbnail) } : {}),
         subtitles: subtitleRecordsForRenderer(episodeFile.subtitles),
       })),
     };

@@ -12,6 +12,28 @@ import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNaviga
 import type { StreamingProvider } from '@/shared/desktopProtocol';
 import { preferredProviderLogoUrl } from '@/shared/providerLogos';
 import { normalizeAnimeCast } from '@/shared/animeCast';
+import {
+  aniListDiscoverResponseSchema,
+  aniListGenreResponseSchema,
+  type AniListMediaResult,
+} from '@/lib/anilistSchemas';
+import { parseStoredValue, readJsonResponse, stremioCatalogItemSchema } from '@/lib/desktopDecoders';
+import {
+  tmdbContentRatingsResponseSchema,
+  tmdbDetailResponseSchema,
+  tmdbGenreResponseSchema,
+  tmdbListResponseSchema,
+  tmdbProviderListResponseSchema,
+  tmdbReleaseDatesResponseSchema,
+  tmdbWatchProviderDetailSchema,
+  type TmdbCreditsPerson,
+  type TmdbCreditsResponse,
+  type TmdbDetailResponse,
+  type TmdbListResult,
+  type TmdbProvider,
+  type TmdbVideo,
+} from '@/lib/tmdbSchemas';
+import { z } from 'zod';
 
 const PROVIDER_SEARCH_DEBOUNCE_MS = 450;
 const DISCOVER_RESULT_LIMIT = 30;
@@ -53,163 +75,17 @@ interface DiscoverCacheState {
   entries: Record<string, CachedDiscoverItem>;
 }
 
-interface TmdbListResult {
-  id: number;
-  title?: string;
-  name?: string;
-  overview?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  genre_ids?: number[];
-  release_date?: string;
-  first_air_date?: string;
-  vote_average?: number;
-  runtime?: number;
-  number_of_seasons?: number;
-  number_of_episodes?: number;
-}
-
-interface TmdbCreditsPerson {
-  name?: string;
-  character?: string;
-  profile_path?: string | null;
-}
-
-interface TmdbCreditsResponse {
-  cast?: TmdbCreditsPerson[];
-}
-
-interface TmdbListResponse {
-  results?: TmdbListResult[];
-}
-
-interface TmdbProvider {
-  provider_id: number;
-  provider_name: string;
-  logo_path?: string | null;
-  display_priority?: number;
-}
-
-interface TmdbProviderListResponse {
-  results?: TmdbProvider[];
-}
-
-interface TmdbWatchProviderRegion {
-  flatrate?: TmdbProvider[];
-  ads?: TmdbProvider[];
-  free?: TmdbProvider[];
-}
-
-interface TmdbWatchProviderDetailResponse {
-  results?: Record<string, TmdbWatchProviderRegion>;
-}
-
-interface TmdbGenre {
-  id: number;
-  name: string;
-}
-
-interface TmdbGenreResponse {
-  genres?: TmdbGenre[];
-}
-
-interface TmdbDetailResponse extends TmdbListResult {
-  credits?: TmdbCreditsResponse;
-  genres?: TmdbGenre[];
-  release_dates?: {
-    results?: Array<{ iso_3166_1?: string; release_dates?: Array<{ certification?: string }> }>;
-  };
-  content_ratings?: {
-    results?: Array<{ iso_3166_1?: string; rating?: string }>;
-  };
-  videos?: {
-    results?: TmdbVideo[];
-  };
-  'watch/providers'?: TmdbWatchProviderDetailResponse;
-}
-
-interface TmdbReleaseDatesResponse {
-  results?: Array<{
-    iso_3166_1?: string;
-    release_dates?: Array<{ certification?: string }>;
-  }>;
-}
-
-interface TmdbContentRatingsResponse {
-  results?: Array<{ iso_3166_1?: string; rating?: string }>;
-}
-
-interface TmdbVideo {
-  key?: string;
-  site?: string;
-  type?: string;
-  official?: boolean;
-}
-
-interface AniListDate {
-  year?: number | null;
-  month?: number | null;
-  day?: number | null;
-}
-
-interface AniListMediaTitle {
-  userPreferred?: string;
-  english?: string;
-  native?: string;
-}
-
-interface AniListPersonName {
-  full?: string;
-}
-
-interface AniListPersonImage {
-  medium?: string | null;
-  large?: string | null;
-}
-
-interface AniListCharacter {
-  name?: AniListPersonName | null;
-  image?: AniListPersonImage | null;
-}
-
-interface AniListVoiceActor {
-  name?: AniListPersonName | null;
-  image?: AniListPersonImage | null;
-  languageV2?: string | null;
-}
-
-interface AniListCharacterEdge {
-  node?: AniListCharacter | null;
-  role?: string | null;
-  voiceActors?: AniListVoiceActor[] | null;
-}
-
-interface AniListCoverImage {
-  extraLarge?: string | null;
-  large?: string | null;
-  medium?: string | null;
-}
-
-interface AniListMediaResult {
-  id: number;
-  title?: AniListMediaTitle;
-  description?: string | null;
-  genres?: string[];
-  averageScore?: number | null;
-  format?: string | null;
-  duration?: number | null;
-  startDate?: AniListDate | null;
-  coverImage?: AniListCoverImage | null;
-  bannerImage?: string | null;
-  episodes?: number | null;
-  characters?: {
-    edges?: AniListCharacterEdge[];
-  };
-  trailer?: {
-    id?: string | null;
-    site?: string | null;
-  } | null;
-}
+const discoverCacheStateSchema = z.object({
+  date: z.string(),
+  entries: z.record(z.string(), z.object({
+    expiresAt: z.number().finite().nonnegative(),
+    items: z.array(stremioCatalogItemSchema),
+  })),
+});
+const discoverViewStateSchema = z.object({
+  search: z.string().optional(),
+  scrollTop: z.number().finite().nonnegative().optional(),
+});
 
 type ParsedDiscoverFilterState = {
   contentType: DiscoverType;
@@ -262,22 +138,6 @@ function buildDiscoverSearch(state: ParsedDiscoverFilterState): string {
   const query = state.query.trim();
   if (query) params.set('q', query);
   return params.toString();
-}
-
-interface AniListResponse {
-  data?: {
-    Page?: {
-      media?: AniListMediaResult[];
-    };
-  };
-  errors?: { message?: string }[];
-}
-
-interface AniListGenreCollectionResponse {
-  data?: {
-    GenreCollection?: string[];
-  };
-  errors?: { message?: string }[];
 }
 
 const DISCOVER_SECTIONS: Record<DiscoverType, readonly DiscoverSection[]> = {
@@ -788,7 +648,8 @@ function loadDiscoverCacheFromStorage(): DiscoverCacheState {
   try {
     const raw = localStorage.getItem(DISCOVER_CACHE_STORAGE_KEY);
     if (!raw) return empty;
-    const parsed = JSON.parse(raw) as DiscoverCacheState;
+    const parsed = parseStoredValue(raw, discoverCacheStateSchema.nullable(), null);
+    if (!parsed) return empty;
     if (!parsed || typeof parsed.date !== 'string' || parsed.date !== toLocalDateKey()) return empty;
     if (!parsed.entries || typeof parsed.entries !== 'object') return empty;
     return {
@@ -805,7 +666,12 @@ function loadDiscoverCacheFromStorage(): DiscoverCacheState {
   }
 }
 
-async function requestTmdbJson<T>(path: string, credential: string, query: Record<string, string | number | boolean> = {}): Promise<T> {
+async function requestTmdbJson<TSchema extends z.ZodType>(
+  path: string,
+  credential: string,
+  schema: TSchema,
+  query: Record<string, string | number | boolean> = {},
+): Promise<z.output<TSchema>> {
   const normalized = normalizeTmdbCredential(credential);
   if (!normalized) {
     throw new Error('TMDB API key is missing. Add it in Settings → Metadata API keys.');
@@ -826,11 +692,11 @@ async function requestTmdbJson<T>(path: string, credential: string, query: Recor
     throw new Error(`TMDB request failed: ${response.status} ${response.statusText}`);
   }
 
-  return response.json() as Promise<T>;
+  return readJsonResponse(response, schema, `TMDB ${path}`);
 }
 
 async function discoverTmdbGenres(type: GenreSourceType, credential: string): Promise<GenreOption[]> {
-  const response = await requestTmdbJson<TmdbGenreResponse>(`genre/${type}/list`, credential);
+  const response = await requestTmdbJson(`genre/${type}/list`, credential, tmdbGenreResponseSchema);
   return (response.genres || [])
     .map((genre): GenreOption => ({ label: genre.name, value: String(genre.id) }))
     .sort((left, right) => left.label.localeCompare(right.label));
@@ -842,9 +708,10 @@ async function discoverTmdbProviders(
   credential: string,
 ): Promise<ProviderOption[]> {
   const regions = region === ALL_AVAILABILITY_REGION ? AVAILABILITY_REGIONS : [region];
-  const responses = await Promise.all(regions.map((watchRegion) => requestTmdbJson<TmdbProviderListResponse>(
+  const responses = await Promise.all(regions.map((watchRegion) => requestTmdbJson(
     `watch/providers/${type}`,
     credential,
+    tmdbProviderListResponseSchema,
     { watch_region: watchRegion },
   )));
   const groupedProviders = new Map<string, ProviderOption>();
@@ -894,7 +761,7 @@ async function discoverAniListGenres(): Promise<GenreOption[]> {
     throw new Error(`AniList request failed: ${response.status} ${response.statusText}`);
   }
 
-  const payload = await response.json() as AniListGenreCollectionResponse;
+  const payload = await readJsonResponse(response, aniListGenreResponseSchema, 'AniList genres');
   if (payload.errors?.length) {
     throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
   }
@@ -934,7 +801,11 @@ async function hasTmdbFlatrateProvider(
   credential: string,
 ): Promise<boolean> {
   try {
-    const response = await requestTmdbJson<TmdbWatchProviderDetailResponse>(`${type}/${itemId}/watch/providers`, credential);
+    const response = await requestTmdbJson(
+      `${type}/${itemId}/watch/providers`,
+      credential,
+      tmdbWatchProviderDetailSchema,
+    );
     const requestedProviderIds = providerIds.split(',').map((id) => id.trim()).filter(Boolean);
     const regionResults = region === ALL_AVAILABILITY_REGION
       ? Object.values(response.results || {})
@@ -988,7 +859,7 @@ async function discoverMoviesOrTv(
   const discoveryRegions = useDiscoveryEndpoint && filters.provider && filters.region === ALL_AVAILABILITY_REGION
     ? AVAILABILITY_REGIONS
     : [filters.region];
-  const responses = await Promise.all(discoveryRegions.map((discoveryRegion) => requestTmdbJson<TmdbListResponse>(path, credential, {
+  const responses = await Promise.all(discoveryRegions.map((discoveryRegion) => requestTmdbJson(path, credential, tmdbListResponseSchema, {
     ...(isSearch ? { query: normalizedQuery, include_adult: false } : {}),
     ...discoveryQuery,
     ...(useDiscoveryEndpoint && filters.provider ? { watch_region: discoveryRegion } : {}),
@@ -1031,10 +902,18 @@ async function tmdbCatalogContentRating(
 ): Promise<StremioPluginCatalogItem> {
   const contentRating = type === 'movie'
     ? tmdbContentRating({
-        release_dates: await requestTmdbJson<TmdbReleaseDatesResponse>(`${type}/${item.id}/release_dates`, credential),
+        release_dates: await requestTmdbJson(
+          `${type}/${item.id}/release_dates`,
+          credential,
+          tmdbReleaseDatesResponseSchema,
+        ),
       }, type)
     : tmdbContentRating({
-        content_ratings: await requestTmdbJson<TmdbContentRatingsResponse>(`${type}/${item.id}/content_ratings`, credential),
+        content_ratings: await requestTmdbJson(
+          `${type}/${item.id}/content_ratings`,
+          credential,
+          tmdbContentRatingsResponseSchema,
+        ),
       }, type);
 
   return contentRating ? { ...item, contentRating } : item;
@@ -1071,7 +950,7 @@ async function enrichCatalogItemWithTmdbCredits(
   type: 'movie' | 'tv',
   credential: string,
 ): Promise<StremioPluginCatalogItem> {
-  const response = await requestTmdbJson<TmdbDetailResponse>(`${type}/${item.id}`, credential, {
+  const response = await requestTmdbJson(`${type}/${item.id}`, credential, tmdbDetailResponseSchema, {
     append_to_response: 'credits,videos,release_dates,content_ratings,watch/providers',
   });
   return mapTmdbCredits(response.credits, {
@@ -1102,7 +981,7 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
 ): Promise<StremioPluginCatalogItem> {
   const isMovie = Boolean(item.runtime && !/\beps?\b/i.test(item.runtime));
   const tmdbType = isMovie ? 'movie' : 'tv';
-  const search = await requestTmdbJson<TmdbListResponse>(`search/${tmdbType}`, credential, {
+  const search = await requestTmdbJson(`search/${tmdbType}`, credential, tmdbListResponseSchema, {
     query: item.title,
     include_adult: false,
     page: 1,
@@ -1120,7 +999,7 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
     || results[0];
   if (!match?.id) return { ...item, streamingProviders: item.streamingProviders || [] };
 
-  const details = await requestTmdbJson<TmdbDetailResponse>(`${tmdbType}/${match.id}`, credential, {
+  const details = await requestTmdbJson(`${tmdbType}/${match.id}`, credential, tmdbDetailResponseSchema, {
     append_to_response: 'watch/providers,release_dates,content_ratings',
   });
   const streamingProviders = tmdbStreamingProviders(details);
@@ -1198,7 +1077,7 @@ async function discoverAnime(
       throw new Error(`AniList request failed: ${response.status} ${response.statusText}`);
     }
 
-    const payload = await response.json() as AniListResponse;
+    const payload = await readJsonResponse(response, aniListDiscoverResponseSchema, 'AniList discovery');
     if (payload.errors?.length) {
       throw new Error(payload.errors[0]?.message || 'AniList request returned an error.');
     }
@@ -1616,7 +1495,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     try {
       const raw = sessionStorage.getItem(viewStateStorageKey);
       if (!raw) return;
-      const saved = JSON.parse(raw) as { search?: string; scrollTop?: number };
+      const saved = parseStoredValue(raw, discoverViewStateSchema, {});
       if (saved.search !== location.search || typeof saved.scrollTop !== 'number' || !Number.isFinite(saved.scrollTop) || saved.scrollTop <= 0) {
         return;
       }

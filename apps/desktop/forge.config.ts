@@ -12,6 +12,22 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import type { MakerSquirrelConfig } from '@electron-forge/maker-squirrel';
+import { z } from 'zod';
+
+const runtimeManifestSchema = z.object({
+  manifestVersion: z.number().optional(),
+  application: z.object({ license: z.string().optional() }).optional(),
+  pathsAreRelativeTo: z.string().optional(),
+  distributionPolicy: z.object({
+    mpvBundled: z.boolean().optional(),
+    mpvDownloadedByLoomTV: z.boolean().optional(),
+    mpvLinkedByLoomTV: z.boolean().optional(),
+  }).optional(),
+  components: z.array(z.unknown()).optional(),
+});
+const runtimePackageSchema = z.object({
+  dependencies: z.record(z.string(), z.string()).optional(),
+});
 
 function hasBinary(binary: string): boolean {
   try {
@@ -282,19 +298,10 @@ function requireRuntimeManifest(outputPath: string, platform: string): void {
     throw new Error(`Missing FFmpeg runtime provenance manifest: ${manifestPath}`);
   }
 
-  let manifest: {
-    manifestVersion?: number;
-    application?: { license?: string };
-    pathsAreRelativeTo?: string;
-    distributionPolicy?: {
-      mpvBundled?: boolean;
-      mpvDownloadedByLoomTV?: boolean;
-      mpvLinkedByLoomTV?: boolean;
-    };
-    components?: unknown[];
-  };
+  let manifest: z.output<typeof runtimeManifestSchema>;
   try {
-    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as typeof manifest;
+    const payload: unknown = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest = runtimeManifestSchema.parse(payload);
   } catch (error) {
     throw new Error(`Invalid FFmpeg runtime provenance manifest ${manifestPath}: ${String(error)}`, { cause: error });
   }
@@ -322,9 +329,8 @@ function copyRuntimeModule(moduleName: string, targetNodeModules: string, copied
   }
 
   const packageJsonPath = path.join(sourcePath, 'package.json');
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as {
-    dependencies?: Record<string, string>;
-  };
+  const packagePayload: unknown = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+  const packageJson = runtimePackageSchema.parse(packagePayload);
 
   const targetPath = path.join(targetNodeModules, moduleName);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });

@@ -1,5 +1,6 @@
 import type { MediaItem } from '@/contexts/LibraryContext';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
+import { parseStoredValue, stremioCatalogItemSchema } from '@/lib/desktopDecoders';
 
 const WATCHED_DISCOVER_CACHE_PREFIX = 'loomtv:watched-discover-item-v1:';
 
@@ -72,7 +73,7 @@ export function getCachedWatchedDiscoverItem(key: string): StremioPluginCatalogI
   try {
     const raw = window.localStorage.getItem(`${WATCHED_DISCOVER_CACHE_PREFIX}${key}`);
     if (!raw) return null;
-    const item = JSON.parse(raw) as StremioPluginCatalogItem;
+    const item = parseStoredValue(raw, stremioCatalogItemSchema.nullable(), null);
     const parsed = parseDiscoverWatchedKey(key);
     return item && parsed && item.id === parsed.id && item.type === parsed.type ? item : null;
   } catch {

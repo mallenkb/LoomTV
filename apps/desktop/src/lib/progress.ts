@@ -1,6 +1,8 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { desktopApi, type StoredProgress } from '@/lib/desktopApi';
 import { createProgressRefreshSubscription } from '@/lib/progressSubscription';
+import { parseStoredValue } from '@/lib/desktopDecoders';
+import { z } from 'zod';
 
 const PROGRESS_KEY = 'videoProgress';
 const PROGRESS_MIGRATION_KEY = 'loomtvProgressMigrationVersion';
@@ -9,6 +11,15 @@ const WATCHED_THRESHOLD = 0.9;
 const REPLAY_FROM_START_REMAINING_SECONDS = 8;
 
 type LegacyProgress = number | { position?: number; duration?: number; updatedAt?: number; watched?: boolean };
+const legacyProgressSchema = z.record(z.string(), z.union([
+  z.number().finite(),
+  z.object({
+    position: z.number().finite().optional(),
+    duration: z.number().finite().optional(),
+    updatedAt: z.number().finite().optional(),
+    watched: z.boolean().optional(),
+  }),
+]));
 
 let progressCache: Record<string, StoredProgress> = readLocalProgress();
 let hydrated = false;
@@ -34,14 +45,10 @@ function normalizeProgress(value: LegacyProgress | StoredProgress | null | undef
 }
 
 function readLocalProgress(): Record<string, StoredProgress> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}') as Record<string, LegacyProgress>;
-    return Object.fromEntries(Object.entries(raw)
-      .map(([filePath, value]) => [filePath, normalizeProgress(value)] as const)
-      .filter((entry): entry is readonly [string, StoredProgress] => Boolean(entry[1])));
-  } catch {
-    return {};
-  }
+  const raw = parseStoredValue(localStorage.getItem(PROGRESS_KEY), legacyProgressSchema, {});
+  return Object.fromEntries(Object.entries(raw)
+    .map(([filePath, value]) => [filePath, normalizeProgress(value)] as const)
+    .filter((entry): entry is readonly [string, StoredProgress] => Boolean(entry[1])));
 }
 
 function writeLocalProgress(): void {

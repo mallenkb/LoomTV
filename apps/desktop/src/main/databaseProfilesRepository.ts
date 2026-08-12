@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { normalizeProfileType } from '@loom-media-server/media-core';
+import { lanProfilePreferencesSchema } from '@loom-media-server/lan-protocol';
 import type BetterSqlite3 from 'better-sqlite3';
 import type {
   LanProfileListEntry,
@@ -9,6 +10,7 @@ import type {
   LanProfileRestrictions,
   LanProfileType,
 } from '@loom-media-server/lan-protocol';
+import { parseStoredJson } from './runtimeValidation.ts';
 
 export type ProfileType = LanProfileType;
 export type ProfilePreferences = LanProfilePreferences;
@@ -84,15 +86,6 @@ function rowToRecord(row: ProfileRow): ProfileRecord {
     ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}),
     sortOrder: row.sort_order,
   };
-}
-
-function jsonParse<T>(value: string | null | undefined, fallback: T): T {
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
 }
 
 function safeProfileName(name: unknown): string {
@@ -384,7 +377,7 @@ export function getProfilePreferences(database: BetterSqlite3.Database, profileI
   const row = database.prepare('SELECT preferences_json FROM profile_preferences WHERE profile_id = ?').get(profileId) as {
     preferences_json: string;
   } | undefined;
-  return normalizePreferences(jsonParse(row?.preferences_json, {}));
+  return normalizePreferences(parseStoredJson(row?.preferences_json, lanProfilePreferencesSchema, {}));
 }
 
 export function saveProfilePreferences(

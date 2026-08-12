@@ -2,6 +2,7 @@ import { yearFromDateString } from './helpers';
 import type { EpisodeMeta, OriginPlatform, TVMetadata } from './types';
 import { safeFetch } from '../safeFetch';
 import { preferredProviderLogoUrl } from '../../shared/providerLogos';
+import { z } from 'zod';
 
 interface TVMazeImage {
   medium?: string;
@@ -59,17 +60,67 @@ interface TVMazeSearchEntry {
   show?: TVMazeShow;
 }
 
+const tvMazeImageSchema: z.ZodType<TVMazeImage> = z.object({
+  medium: z.string().optional(),
+  original: z.string().optional(),
+});
+const nullableString = z.string().nullable().optional().transform((value) => value ?? undefined);
+const nullableNumber = z.number().finite().nullable().optional().transform((value) => value ?? undefined);
+const tvMazeEpisodeSchema: z.ZodType<TVMazeEpisode> = z.object({
+  season: z.number().finite().optional(),
+  number: z.number().finite().optional(),
+  name: z.string().optional(),
+  summary: nullableString,
+  image: tvMazeImageSchema.nullable().optional().transform((value) => value ?? undefined),
+  rating: z.object({ average: nullableNumber }).optional(),
+  airdate: z.string().optional(),
+});
+const tvMazePlatformSchema: z.ZodType<TVMazePlatform> = z.object({
+  id: z.number().finite().optional(),
+  name: z.string().optional(),
+  officialSite: z.string().nullable().optional(),
+  country: z.object({
+    code: z.string().optional(),
+    name: z.string().optional(),
+  }).nullable().optional(),
+});
+const tvMazeShowSchema: z.ZodType<TVMazeShow> = z.object({
+  id: z.number().finite().optional(),
+  name: z.string().optional(),
+  image: tvMazeImageSchema.nullable().optional().transform((value) => value ?? undefined),
+  summary: nullableString,
+  rating: z.object({ average: nullableNumber }).optional(),
+  genres: z.array(z.string()).optional(),
+  premiered: nullableString,
+  language: nullableString,
+  type: z.string().optional(),
+  externals: z.object({
+    imdb: nullableString,
+    thetvdb: z.union([z.string(), z.number().finite()]).nullable().optional().transform((value) => value ?? undefined),
+  }).optional(),
+  network: tvMazePlatformSchema.nullable().optional(),
+  webChannel: tvMazePlatformSchema.nullable().optional(),
+  _embedded: z.object({
+    seasons: z.array(z.object({ number: z.number().finite().optional(), name: z.string().optional(), episodeOrder: nullableNumber })).optional(),
+    cast: z.array(z.object({
+      person: z.object({ name: z.string().optional(), image: tvMazeImageSchema.nullable().optional().transform((value) => value ?? undefined) }).optional(),
+      character: z.object({ name: z.string().optional() }).optional(),
+    })).optional(),
+  }).optional(),
+});
+const tvMazeSearchSchema: z.ZodType<TVMazeSearchEntry[]> = z.array(z.object({ show: tvMazeShowSchema.optional() }));
+
 function originPlatformFromShow(show: TVMazeShow): OriginPlatform | undefined {
   const platform = show.webChannel || show.network;
   const name = platform?.name?.trim();
-  if (!name) return undefined;
+  if (!platform || !name) return undefined;
   return {
-    id: platform?.id,
+    id: platform.id,
     name,
     kind: show.webChannel ? 'web-channel' : 'network',
-    countryCode: platform?.country?.code || undefined,
-    countryName: platform?.country?.name || undefined,
-    officialSite: platform?.officialSite || undefined,
+    countryCode: platform.country?.code || undefined,
+    countryName: platform.country?.name || undefined,
+    officialSite: platform.officialSite || undefined,
     logoUrl: preferredProviderLogoUrl({ name }),
     source: 'tvmaze',
   };
@@ -93,8 +144,7 @@ async function fetchTVEpisodesById(showId: number): Promise<EpisodeMeta[]> {
     retries: 2,
   });
   if (!episodesRes.ok) return [];
-  const episodes = (await episodesRes.json()) as TVMazeEpisode[];
-  if (!Array.isArray(episodes)) return [];
+  const episodes = z.array(tvMazeEpisodeSchema).parse(await episodesRes.json());
   return episodes.map(tvmazeEpisodeToMeta).filter((episode) => episode.season > 0 && episode.number > 0);
 }
 
@@ -106,7 +156,7 @@ async function fetchTVMetadataById(showId: number, fallbackTitle: string, localY
   );
   if (!detailRes.ok) return null;
   const [details, episodes] = await Promise.all([
-    detailRes.json() as Promise<TVMazeShow>,
+    detailRes.json().then((value) => tvMazeShowSchema.parse(value)),
     fetchTVEpisodesById(showId),
   ]);
 
@@ -159,7 +209,7 @@ export async function fetchTVMetadata(title: string, localYear?: number): Promis
       {},
       { allowedHosts: ['api.tvmaze.com'], retries: 2 },
     );
-    const searchData = (await searchRes.json()) as TVMazeSearchEntry[];
+    const searchData = tvMazeSearchSchema.parse(await searchRes.json());
     if (!searchData || searchData.length === 0) return null;
 
     let show = searchData[0]?.show;
@@ -185,8 +235,8 @@ export async function fetchTVMetadataCandidates(title: string, localYear?: numbe
       allowedHosts: ['api.tvmaze.com'],
       retries: 2,
     });
-    const searchData = (await searchRes.json()) as TVMazeSearchEntry[];
-    if (!Array.isArray(searchData) || searchData.length === 0) return [];
+    const searchData = tvMazeSearchSchema.parse(await searchRes.json());
+    if (searchData.length === 0) return [];
 
     return await Promise.all(searchData.slice(0, 6).map(async (result) => {
       const show: TVMazeShow = result.show ?? {};

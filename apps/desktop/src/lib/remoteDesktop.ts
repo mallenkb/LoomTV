@@ -1,4 +1,5 @@
 import type { RemoteLibraryConnection } from '../shared/desktopProtocol';
+import { parseStoredValue, remoteDesktopSessionSchema } from './desktopDecoders';
 
 export type DesktopLibraryMode = 'host' | 'remote';
 
@@ -43,13 +44,11 @@ export function clearDesktopLibraryMode(): void {
 
 export function getRemoteDesktopSession(): RemoteDesktopSession | null {
   if (!canUseStorage()) return null;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(REMOTE_SESSION_KEY) || 'null') as RemoteDesktopSession | null;
-    if (!parsed?.baseUrl || !parsed.deviceId) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+  return parseStoredValue(
+    window.localStorage.getItem(REMOTE_SESSION_KEY),
+    remoteDesktopSessionSchema.nullable(),
+    null,
+  );
 }
 
 export function saveRemoteDesktopSession(session: RemoteDesktopSession): void {

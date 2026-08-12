@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3';
+import { parseRequiredJson, unknownRecordSchema } from './runtimeValidation.ts';
 
 // Ledger-versioned migrations begin with the profiles rebuild. The
 // introspection-style migrations below predate the ledger and stay outside it.
@@ -270,6 +271,13 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS thumbnail_cache (
+      cache_key TEXT PRIMARY KEY,
+      mime_type TEXT NOT NULL,
+      image_bytes BLOB NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS plugin_artwork_objects (
       content_hash TEXT PRIMARY KEY CHECK (length(content_hash) = 64),
       cache_path TEXT NOT NULL UNIQUE,
@@ -530,13 +538,9 @@ function migrateOutroSegments(database: BetterSqlite3.Database): void {
     const settingsRow = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
     if (settingsRow) {
       try {
-        const settings = JSON.parse(settingsRow.data_json) as Record<string, unknown>;
-        const skipAnalysis = settings.skipAnalysis && typeof settings.skipAnalysis === 'object'
-          ? settings.skipAnalysis as Record<string, unknown>
-          : {};
-        const promptTypes = skipAnalysis.promptTypes && typeof skipAnalysis.promptTypes === 'object'
-          ? skipAnalysis.promptTypes as Record<string, unknown>
-          : {};
+        const settings = parseRequiredJson(settingsRow.data_json, unknownRecordSchema, 'Legacy settings');
+        const skipAnalysis = unknownRecordSchema.safeParse(settings.skipAnalysis).data ?? {};
+        const promptTypes = unknownRecordSchema.safeParse(skipAnalysis.promptTypes).data ?? {};
         settings.skipAnalysis = { ...skipAnalysis, promptTypes: { ...promptTypes, preview: true } };
         database.prepare('UPDATE app_settings SET data_json = ?, updated_at = ? WHERE id = 1')
           .run(JSON.stringify(settings), Date.now());
@@ -640,10 +644,12 @@ function migrateProfileSelectionLedger(database: BetterSqlite3.Database): void {
     const owner = database.prepare("SELECT id FROM profiles WHERE profile_type = 'owner'").get() as { id: string } | undefined;
     if (settingsRow && owner) {
       try {
-        const settings = JSON.parse(settingsRow.data_json) as Record<string, unknown>;
+        const settings = parseRequiredJson(settingsRow.data_json, unknownRecordSchema, 'Legacy settings');
         const keys = ['appThemeMode', 'appThemeColor', 'appDarkTheme', 'appLoaderStyle', 'sidebarNavOrder', 'playbackSkipBackSeconds', 'playbackSkipForwardSeconds'] as const;
         const row = database.prepare('SELECT preferences_json FROM profile_preferences WHERE profile_id = ?').get(owner.id) as { preferences_json: string } | undefined;
-        const existing = row ? JSON.parse(row.preferences_json) as Record<string, unknown> : {};
+        const existing = row
+          ? parseRequiredJson(row.preferences_json, unknownRecordSchema, 'Legacy profile preferences')
+          : {};
         const legacy = Object.fromEntries(keys.flatMap((key) => settings[key] === undefined ? [] : [[key, settings[key]]]));
         database.prepare(`
           INSERT INTO profile_preferences (profile_id, preferences_json, revision, updated_at)
@@ -830,7 +836,7 @@ function migrateProfileFeatures(database: BetterSqlite3.Database): void {
       const settingsRow = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
       if (owner && settingsRow) {
         try {
-          const settings = JSON.parse(settingsRow.data_json) as Record<string, unknown>;
+          const settings = parseRequiredJson(settingsRow.data_json, unknownRecordSchema, 'Legacy settings');
           const keys = [
             'appThemeMode',
             'appThemeColor',

@@ -14,6 +14,9 @@ import type {
   RemoteLibraryResponse,
   RemoteLibrarySessionState,
 } from '../shared/desktopProtocol.ts';
+import { lanLibraryPayloadSchema, lanMediaItemSchema } from '@loom-media-server/lan-protocol';
+import { z } from 'zod';
+import { parseRequiredJson } from './runtimeValidation.ts';
 
 const SESSION_VERSION = 2;
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -36,18 +39,46 @@ type RemoteSecretSession = {
   clientDeviceName: string;
 };
 
-type RemotePairPayload = {
-  deviceId: string;
-  certFingerprint: string;
-  accessToken: string;
-  accessTokenExpiresAt: number;
-  refreshToken: string;
-  refreshTokenExpiresAt: number;
-  hostDeviceId?: string;
-  hostDeviceName?: string;
-  library?: LibraryPayload;
-  libraryEtag?: string;
-};
+const nonNegativeNumber = z.number().finite().nonnegative();
+const remoteLibraryPayloadSchema = lanLibraryPayloadSchema(lanMediaItemSchema).transform((library) => ({
+  movies: library.movies ?? [],
+  tvShows: library.tvShows ?? [],
+  animeShows: library.animeShows,
+  others: library.others,
+  libraryFolders: [],
+}));
+const remoteSecretSessionSchema = z.object({
+  baseUrl: z.string().url(),
+  certFingerprint: z.string().min(1),
+  certificatePem: z.string().min(1),
+  deviceId: z.string().min(1),
+  accessToken: z.string().min(1),
+  accessTokenExpiresAt: nonNegativeNumber,
+  refreshToken: z.string().min(1),
+  refreshTokenExpiresAt: nonNegativeNumber,
+  hostDeviceId: z.string().optional(),
+  hostDeviceName: z.string().optional(),
+  clientDeviceName: z.string(),
+});
+const sessionEnvelopeSchema = z.object({
+  version: z.number().int(),
+  encrypted: z.string().min(1),
+});
+const remoteRefreshPayloadSchema = z.object({
+  accessToken: z.string().min(1),
+  accessTokenExpiresAt: nonNegativeNumber,
+  refreshToken: z.string().min(1),
+  refreshTokenExpiresAt: nonNegativeNumber,
+});
+const remotePairPayloadSchema = remoteRefreshPayloadSchema.extend({
+  deviceId: z.string().min(1),
+  certFingerprint: z.string().min(1),
+  hostDeviceId: z.string().optional(),
+  hostDeviceName: z.string().optional(),
+  library: remoteLibraryPayloadSchema.optional(),
+  libraryEtag: z.string().optional(),
+});
+const remoteErrorSchema = z.object({ error: z.string().optional() });
 
 const REMOTE_ROUTE_POLICY = new Map<string, ReadonlySet<string>>([
   ['/api/v2/library', new Set(['GET'])],
@@ -328,7 +359,7 @@ async function readResponseText(response: Response, maxBytes: number): Promise<s
 
 function errorMessage(payload: string, fallback: string): string {
   try {
-    const parsed = JSON.parse(payload) as { error?: string };
+    const parsed = parseRequiredJson(payload, remoteErrorSchema, 'Remote error');
     return parsed.error || fallback;
   } catch {
     return payload.trim() || fallback;
@@ -351,24 +382,13 @@ export function createRemoteLibraryClient() {
       return session;
     }
     try {
-      const envelope = JSON.parse(fs.readFileSync(target, 'utf8')) as { version?: number; encrypted?: string };
+      const envelope = parseRequiredJson(fs.readFileSync(target, 'utf8'), sessionEnvelopeSchema, 'Saved pairing');
       if (envelope.version !== SESSION_VERSION || !envelope.encrypted) {
         sessionLoadFailure = 'The saved pairing uses an unsupported security format. Pair this laptop again.';
         return session;
       }
       const decrypted = safeStorage.decryptString(Buffer.from(envelope.encrypted, 'base64'));
-      const parsed = JSON.parse(decrypted) as RemoteSecretSession;
-      if (
-        !parsed.baseUrl
-        || !parsed.certFingerprint
-        || !parsed.certificatePem
-        || !parsed.deviceId
-        || !parsed.accessToken
-        || !parsed.refreshToken
-      ) {
-        sessionLoadFailure = 'The saved pairing is incomplete. Pair this laptop again.';
-        return session;
-      }
+      const parsed = parseRequiredJson(decrypted, remoteSecretSessionSchema, 'Saved pairing');
       session = parsed;
     } catch {
       session = null;
@@ -433,8 +453,7 @@ export function createRemoteLibraryClient() {
         if (response.status === 401 || response.status === 403) clearSession();
         throw new Error(errorMessage(text, 'The secure pairing session could not be refreshed.'));
       }
-      const payload = JSON.parse(text) as Pick<RemotePairPayload,
-        'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>;
+      const payload = parseRequiredJson(text, remoteRefreshPayloadSchema, 'Credential refresh');
       const updated = {
         ...current,
         accessToken: payload.accessToken,
@@ -508,7 +527,7 @@ export function createRemoteLibraryClient() {
         if (response.status === 429) throw new Error('Too many failed pairing attempts. Try again in a few minutes.');
         throw new Error(errorMessage(text, `The host returned ${response.status}.`));
       }
-      const payload = JSON.parse(text) as RemotePairPayload;
+      const payload = parseRequiredJson(text, remotePairPayloadSchema, 'Pairing');
       if (normalizedFingerprint(payload.certFingerprint) !== observedCertificate.certFingerprint) {
         throw new Error('The LoomTV host TLS identity changed during pairing. Refresh discovery and try again.');
       }

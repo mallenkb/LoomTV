@@ -22,6 +22,7 @@ resolution-mode: highest
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@0.2.3
   vite-plus: 0.2.3
+  zod: 4.4.3
 overrides:
   vite: 'catalog:'
   builder-util-runtime: 9.7.0

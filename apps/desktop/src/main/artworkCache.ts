@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 
 const MAX_CACHED_CANDIDATES_PER_KIND = 2;
-const MAX_CACHED_EPISODE_STILLS_PER_ITEM = 6;
 const CUSTOM_ARTWORK_PROTOCOL = 'loomtv-custom-artwork:';
 
 type ArtworkCacheItem = {
@@ -11,7 +10,9 @@ type ArtworkCacheItem = {
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logoCandidates?: string[];
+  cast?: Array<{ image?: string; characterImage?: string; voiceActorImage?: string }>;
   episodes?: Array<{ still?: string }>;
+  episodeFiles?: Array<{ still?: string; thumbnail?: string }>;
 };
 
 type ArtworkCacheLibrary = {
@@ -76,7 +77,16 @@ export function collectArtworkSourcesForCache(data: ArtworkCacheLibrary): string
     addCandidates(item.posterCandidates);
     addCandidates(item.backdropCandidates);
     addCandidates(item.logoCandidates);
-    (item.episodes || []).slice(0, MAX_CACHED_EPISODE_STILLS_PER_ITEM).forEach((episode) => add(episode.still));
+    for (const credit of item.cast || []) {
+      add(credit.image);
+      add(credit.characterImage);
+      add(credit.voiceActorImage);
+    }
+    for (const episode of item.episodes || []) add(episode.still);
+    for (const episodeFile of item.episodeFiles || []) {
+      add(episodeFile.still);
+      add(episodeFile.thumbnail);
+    }
   }
 
   return Array.from(sources);

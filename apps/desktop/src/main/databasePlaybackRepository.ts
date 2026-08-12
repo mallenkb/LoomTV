@@ -1,4 +1,6 @@
 import type BetterSqlite3 from 'better-sqlite3';
+import { z } from 'zod';
+import { parseStoredJson, unknownRecordSchema } from './runtimeValidation.ts';
 
 export type SettingsData = Record<string, unknown>;
 
@@ -37,22 +39,27 @@ type PlaybackTrackPreferenceRow = {
   updated_at: number;
 };
 
-function jsonParse<T>(value: string | null | undefined, fallback: T): T {
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
+const trackPreferenceInputSchema = z.object({
+  enabled: z.boolean().optional(),
+  index: z.number().finite().optional(),
+  language: z.string().optional(),
+  title: z.string().optional(),
+  codec: z.string().optional(),
+  forced: z.boolean().optional(),
+});
+const trackPreferencesInputSchema = z.object({
+  audio: z.unknown().optional(),
+  subtitle: z.unknown().optional(),
+});
 
 function jsonString(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
 function normalizeTrackPreference(value: unknown): TrackPreference | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const preference = value as TrackPreference;
+  const result = trackPreferenceInputSchema.safeParse(value);
+  if (!result.success) return undefined;
+  const preference = result.data;
   return {
     enabled: Boolean(preference.enabled),
     ...(typeof preference.index === 'number' && Number.isFinite(preference.index) ? { index: preference.index } : {}),
@@ -64,7 +71,8 @@ function normalizeTrackPreference(value: unknown): TrackPreference | undefined {
 }
 
 function normalizeTrackPreferences(value: unknown): PlaybackTrackPreferences {
-  const preferences = value && typeof value === 'object' ? value as PlaybackTrackPreferences : {};
+  const result = trackPreferencesInputSchema.safeParse(value);
+  const preferences = result.success ? result.data : {};
   return {
     ...(preferences.audio ? { audio: normalizeTrackPreference(preferences.audio) } : {}),
     ...(preferences.subtitle ? { subtitle: normalizeTrackPreference(preferences.subtitle) } : {}),
@@ -73,7 +81,7 @@ function normalizeTrackPreferences(value: unknown): PlaybackTrackPreferences {
 
 export function loadSettings(database: BetterSqlite3.Database): SettingsData | null {
   const row = database.prepare('SELECT data_json FROM app_settings WHERE id = 1').get() as { data_json: string } | undefined;
-  return row ? jsonParse(row.data_json, {}) : null;
+  return row ? parseStoredJson(row.data_json, unknownRecordSchema, {}) : null;
 }
 
 export function saveSettings(database: BetterSqlite3.Database, settings: SettingsData): void {
@@ -100,11 +108,14 @@ export function getPlaybackTrackPreferences(
 ): PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> {
   if (scope) {
     const row = database.prepare('SELECT preferences_json FROM playback_track_preferences WHERE profile_id = ? AND scope = ?').get(profileId, scope) as Pick<PlaybackTrackPreferenceRow, 'preferences_json'> | undefined;
-    return row ? normalizeTrackPreferences(jsonParse(row.preferences_json, {})) : {};
+    return row ? normalizeTrackPreferences(parseStoredJson(row.preferences_json, unknownRecordSchema, {})) : {};
   }
 
   return Object.fromEntries((database.prepare('SELECT * FROM playback_track_preferences WHERE profile_id = ?').all(profileId) as PlaybackTrackPreferenceRow[])
-    .map((row): [string, PlaybackTrackPreferences] => [row.scope, normalizeTrackPreferences(jsonParse(row.preferences_json, {}))]));
+    .map((row): [string, PlaybackTrackPreferences] => [
+      row.scope,
+      normalizeTrackPreferences(parseStoredJson(row.preferences_json, unknownRecordSchema, {})),
+    ]));
 }
 
 export function savePlaybackTrackPreferences(

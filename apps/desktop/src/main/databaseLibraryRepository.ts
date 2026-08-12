@@ -1,7 +1,17 @@
 import type BetterSqlite3 from 'better-sqlite3';
-import type { LibraryData, LibraryFolderGroups, ScanCacheEntry, ScanCacheFolderKind } from './appContracts.ts';
+import type { LibraryData, LibraryFolderGroups, ScanCacheEntry } from './appContracts.ts';
 import { customArtworkReference } from './artworkCache.ts';
-import type { EpisodeFile, EpisodeMeta, MediaItem, StreamingProvider } from './metadata/types.ts';
+import type { EpisodeFile, EpisodeMeta, MediaItem } from './metadata/types.ts';
+import {
+  lanCastMemberSchema,
+  lanContentRatingSchema,
+  lanLocalMediaDetailsSchema,
+  lanOriginPlatformSchema,
+  lanStreamingProviderSchema,
+  lanSubtitleRecordSchema,
+} from '@loom-media-server/lan-protocol';
+import { z } from 'zod';
+import { parseStoredJson } from './runtimeValidation.ts';
 
 type SeasonEntry = { number: number; title: string; episodeCount: number };
 
@@ -65,14 +75,18 @@ type ScanCacheRow = {
   ratings_refreshed_at: number;
 };
 
-function jsonParse<T>(value: string | null | undefined, fallback: T): T {
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
+const stringArraySchema = z.array(z.string());
+const providerIdsSchema = z.object({
+  tmdbId: z.string().optional(),
+  imdbId: z.string().optional(),
+  tvdbId: z.string().optional(),
+  tvmazeId: z.string().optional(),
+  malId: z.string().optional(),
+  malIdBySeason: z.record(z.string(), z.string()).optional(),
+});
+const contentRatingsSchema = z.record(z.string(), lanContentRatingSchema);
+const mediaTypeSchema = z.enum(['movie', 'tv', 'anime']);
+const scanCacheFolderKindSchema = z.enum(['movies', 'tv', 'anime', 'auto']);
 
 function jsonString(value: unknown): string {
   return JSON.stringify(value ?? null);
@@ -186,7 +200,7 @@ export function loadLibrary(
       still: row.still,
       rating: row.rating,
       airDate: row.air_date,
-      localMetadata: jsonParse(row.local_metadata_json, undefined),
+      localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
     });
   }
 
@@ -197,8 +211,8 @@ export function loadLibrary(
       episode: row.episode,
       filePath: row.file_path,
       title: row.title || undefined,
-      subtitles: jsonParse(row.subtitles_json, []),
-      localMetadata: jsonParse(row.local_metadata_json, undefined),
+      subtitles: parseStoredJson(row.subtitles_json, z.array(lanSubtitleRecordSchema), []),
+      localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
     });
   }
 
@@ -206,7 +220,7 @@ export function loadLibrary(
     row.folder_path,
     {
       version: row.version,
-      folderKind: row.folder_kind as ScanCacheFolderKind,
+      folderKind: scanCacheFolderKindSchema.parse(row.folder_kind),
       signature: row.signature,
       subtitleProfile: row.subtitle_profile || '',
       fileCount: row.file_count,
@@ -228,28 +242,28 @@ export function loadLibrary(
   for (const row of rows) {
     const item = applyDurableState({
       id: row.id,
-      type: row.type as MediaItem['type'],
+      type: mediaTypeSchema.parse(row.type),
       format: row.format || undefined,
       title: row.title,
       year: row.year,
       poster: row.poster,
       backdrop: row.backdrop,
       logo: row.logo,
-      posterCandidates: jsonParse(row.poster_candidates_json, []),
-      backdropCandidates: jsonParse(row.backdrop_candidates_json, []),
-      logoCandidates: jsonParse(row.logo_candidates_json, []),
+      posterCandidates: parseStoredJson(row.poster_candidates_json, stringArraySchema, []),
+      backdropCandidates: parseStoredJson(row.backdrop_candidates_json, stringArraySchema, []),
+      logoCandidates: parseStoredJson(row.logo_candidates_json, stringArraySchema, []),
       summary: row.summary,
       rating: row.rating,
-      contentRatings: jsonParse(row.content_ratings_json, {}),
-      streamingProviders: jsonParse<StreamingProvider[] | undefined>(row.streaming_providers_json, undefined),
-      originPlatform: jsonParse<MediaItem['originPlatform']>(row.origin_platform_json, undefined),
-      genres: jsonParse(row.genres_json, []),
-      cast: jsonParse(row.cast_json, []),
+      contentRatings: parseStoredJson(row.content_ratings_json, contentRatingsSchema, {}),
+      streamingProviders: parseStoredJson(row.streaming_providers_json, z.array(lanStreamingProviderSchema).optional(), undefined),
+      originPlatform: parseStoredJson(row.origin_platform_json, lanOriginPlatformSchema.optional(), undefined),
+      genres: parseStoredJson(row.genres_json, stringArraySchema, []),
+      cast: parseStoredJson(row.cast_json, z.array(lanCastMemberSchema), []),
       filePath: row.file_path,
       fileSize: row.file_size || undefined,
-      subtitles: jsonParse(row.subtitles_json, []),
-      localMetadata: jsonParse(row.local_metadata_json, undefined),
-      providerIds: jsonParse(row.provider_ids_json, undefined),
+      subtitles: parseStoredJson(row.subtitles_json, z.array(lanSubtitleRecordSchema), []),
+      localMetadata: parseStoredJson(row.local_metadata_json, lanLocalMediaDetailsSchema.optional(), undefined),
+      providerIds: parseStoredJson(row.provider_ids_json, providerIdsSchema.optional(), undefined),
       seasons: seasonsByMedia.get(row.id) || undefined,
       episodes: episodesByMedia.get(row.id) || undefined,
       episodeFiles: episodeFilesByMedia.get(row.id) || undefined,

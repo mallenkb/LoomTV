@@ -5,10 +5,16 @@ import path from 'node:path';
 import test from 'node:test';
 
 import {
+  extractSeasons,
   getLibraryFolderSignature,
   scanEpisodeFiles,
+  seasonNumberFromDirectoryName,
 } from '../src/main/libraryScanFiles.ts';
-import { parseEpisodeFileName } from '../src/main/scanClassification.ts';
+import {
+  mergeLocalSeasonsWithMetadata,
+  mergeOfficialSeasonMetadata,
+  parseEpisodeFileName,
+} from '../src/main/scanClassification.ts';
 
 test('episode filename parsing covers TV, anime, and numbered-title conventions', () => {
   assert.deepEqual(parseEpisodeFileName('Show.S02E03.mkv', 1), { season: 2, episode: 3 });
@@ -16,6 +22,77 @@ test('episode filename parsing covers TV, anime, and numbered-title conventions'
   assert.deepEqual(parseEpisodeFileName('[Group] Show - 07.mkv', 1), { season: 1, episode: 7 });
   assert.deepEqual(parseEpisodeFileName('03 - A Beginning.mkv', 5), { season: 5, episode: 3 });
   assert.equal(parseEpisodeFileName('Show 2026.mkv', 1), null);
+});
+
+test('decorated season folder names retain their leading season number', () => {
+  assert.equal(seasonNumberFromDirectoryName('Season 01 - Unwavering Resolve Arc'), 1);
+  assert.equal(seasonNumberFromDirectoryName('Season 2. Entertainment District Arc'), 2);
+  assert.equal(seasonNumberFromDirectoryName('S03_Swordsmith Village Arc'), 3);
+  assert.equal(seasonNumberFromDirectoryName('Series 04: Hashira Training Arc'), 4);
+  assert.equal(seasonNumberFromDirectoryName('Specials - OVAs'), 0);
+  assert.equal(seasonNumberFromDirectoryName('S01E02'), null);
+  assert.equal(seasonNumberFromDirectoryName('Season 2024'), null);
+});
+
+test('decorated season folders group numbered anime files under the parent series', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'loomtv-decorated-seasons-'));
+  try {
+    const seasonOne = path.join(root, 'Season 01 - Unwavering Resolve Arc');
+    const seasonTwo = path.join(root, 'Season 02. Entertainment District Arc');
+    mkdirSync(seasonOne);
+    mkdirSync(seasonTwo);
+    writeFileSync(path.join(seasonOne, '[Group] Show - 01.mkv'), 'video');
+    writeFileSync(path.join(seasonTwo, '[Group] Show - 01.mkv'), 'video');
+
+    const probe = () => ({ localMetadata: { videoCodec: 'h264' } });
+    const episodes = scanEpisodeFiles(root, probe);
+    const seasons = extractSeasons(root, path.basename(root), probe);
+
+    assert.deepEqual(episodes.map(({ season, episode }) => ({ season, episode })), [
+      { season: 1, episode: 1 },
+      { season: 2, episode: 1 },
+    ]);
+    assert.deepEqual(seasons, [
+      { number: 1, title: 'Season 01 - Unwavering Resolve Arc', episodeCount: 1 },
+      { number: 2, title: 'Season 02. Entertainment District Arc', episodeCount: 1 },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('official season names replace local folder subtitles by season number', () => {
+  const localSeasons = [
+    { number: 1, title: 'Season 01', episodeCount: 26 },
+    { number: 2, title: 'Season 02 - Entertainment Resort', episodeCount: 11 },
+    { number: 3, title: 'Season 03 - Swordsmith Village Arc', episodeCount: 11 },
+  ];
+
+  assert.deepEqual(mergeLocalSeasonsWithMetadata(localSeasons, [
+    { number: 1, title: 'Unwavering Resolve Arc', episodeCount: 26 },
+    { number: 2, title: 'Season 2 - Entertainment District Arc', episodeCount: 11 },
+    { number: 3, title: 'Season 3', episodeCount: 11 },
+  ]), [
+    { number: 1, title: 'Season 1: Unwavering Resolve Arc', episodeCount: 26 },
+    { number: 2, title: 'Season 2: Entertainment District Arc', episodeCount: 11 },
+    { number: 3, title: 'Season 3', episodeCount: 11 },
+  ]);
+});
+
+test('meaningful season names from a fallback provider replace generic API names', () => {
+  assert.deepEqual(mergeOfficialSeasonMetadata(
+    [
+      { number: 1, title: 'Season 1', episodeCount: 26 },
+      { number: 2, title: 'Season 2', episodeCount: 0 },
+    ],
+    [
+      { number: 1, title: 'Season 1', episodeCount: 26 },
+      { number: 2, title: 'Entertainment District Arc', episodeCount: 11 },
+    ],
+  ), [
+    { number: 1, title: 'Season 1', episodeCount: 26 },
+    { number: 2, title: 'Entertainment District Arc', episodeCount: 11 },
+  ]);
 });
 
 test('episode scanning follows season folders, pairs subtitles, and skips extras', () => {

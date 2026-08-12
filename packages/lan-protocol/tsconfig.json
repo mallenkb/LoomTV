@@ -5,6 +5,9 @@
     "moduleResolution": "bundler",
     "lib": ["ESNext"],
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "isolatedModules": true,
     "skipLibCheck": true,
     // Pure type contracts with no runtime dependencies. Without this, the

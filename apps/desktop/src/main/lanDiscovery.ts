@@ -39,11 +39,19 @@ type MdnsEmitter = {
   on: (event: 'error' | 'warning', listener: (error: NodeJS.ErrnoException) => void) => void;
 };
 
-type BonjourInternals = {
-  server?: {
-    mdns?: MdnsEmitter;
+function mdnsEmitterFrom(instance: Bonjour): MdnsEmitter | null {
+  const server = Reflect.get(instance, 'server');
+  if (!server || typeof server !== 'object') return null;
+  const mdns = Reflect.get(server, 'mdns');
+  if (!mdns || typeof mdns !== 'object') return null;
+  const on = Reflect.get(mdns, 'on');
+  if (typeof on !== 'function') return null;
+  return {
+    on: (event, listener) => {
+      Reflect.apply(on, mdns, [event, listener]);
+    },
   };
-};
+}
 
 function handleMdnsError(error: unknown): void {
   const now = Date.now();
@@ -67,7 +75,7 @@ function ensureBonjour(): Bonjour {
     // is an optional convenience layer, so an unavailable multicast route must
     // never take down the HTTP media server or interrupt direct-IP clients.
     bonjour = new Bonjour({}, handleMdnsError);
-    const mdns = (bonjour as unknown as BonjourInternals).server?.mdns;
+    const mdns = mdnsEmitterFrom(bonjour);
     mdns?.on('error', handleMdnsError);
     mdns?.on('warning', handleMdnsError);
   }

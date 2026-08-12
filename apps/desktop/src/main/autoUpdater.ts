@@ -11,10 +11,20 @@ import { stopAllTranscodes } from './transcodeManager';
 import { destroyLanDiscovery } from './lanDiscovery';
 import { createUpdateAdapter } from './updateAdapter';
 import { safeFetch } from './safeFetch';
+import { parseRequiredJson } from './runtimeValidation.ts';
+import { z } from 'zod';
 
 const UPDATE_OWNER = 'mallenkb';
 const UPDATE_REPO = 'LoomTV';
 const execFileAsync = promisify(execFile);
+const githubReleaseSchema = z.object({
+  tag_name: z.string().optional(),
+  html_url: z.string().optional(),
+});
+const pendingUpdateInfoSchema = z.object({
+  sha512: z.string().optional(),
+  fileName: z.string().optional(),
+});
 type UpdateStatus =
   | 'idle'
   | 'disabled'
@@ -181,7 +191,8 @@ async function checkLatestGitHubRelease(): Promise<UpdateState> {
       throw new Error(`Update check returned ${response.status}`);
     }
 
-    const release = await response.json() as { tag_name?: string; html_url?: string };
+    const releasePayload: unknown = await response.json();
+    const release = githubReleaseSchema.parse(releasePayload);
     const latestVersion = normalizeReleaseVersion(release.tag_name);
     const currentVersion = app.getVersion();
     const hasUpdate = compareReleaseVersions(latestVersion, currentVersion) > 0;
@@ -285,7 +296,7 @@ async function sha512Base64(filePath: string): Promise<string> {
 async function verifyMacUpdateZip(updateFilePath: string): Promise<void> {
   const infoPath = getMacUpdaterPendingInfoPath(updateFilePath);
   const rawInfo = await fs.promises.readFile(infoPath, 'utf8');
-  const info = JSON.parse(rawInfo) as { sha512?: string; fileName?: string };
+  const info = parseRequiredJson(rawInfo, pendingUpdateInfoSchema, 'Pending update metadata');
   if (!info.sha512) throw new Error('Downloaded update metadata is missing a sha512 checksum.');
 
   const actualSha512 = await sha512Base64(updateFilePath);

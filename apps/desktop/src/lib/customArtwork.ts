@@ -1,17 +1,15 @@
 import { desktopApi } from '@/lib/desktopApi';
+import { parseStoredValue } from '@/lib/desktopDecoders';
+import { z } from 'zod';
 
 const MOVIE_ARTWORK_KEY = 'loomtvCustomMovieArtwork';
 const SHOW_ARTWORK_KEY = 'loomtvCustomShowArtwork';
 
 type ArtworkById = Record<string, Record<string, string>>;
+const artworkByIdSchema = z.record(z.string(), z.record(z.string(), z.string()));
 
 function readLegacy(key: string): ArtworkById {
-  try {
-    const value = JSON.parse(localStorage.getItem(key) || '{}') as ArtworkById;
-    return value && typeof value === 'object' ? value : {};
-  } catch {
-    return {};
-  }
+  return parseStoredValue(localStorage.getItem(key), artworkByIdSchema, {});
 }
 
 export async function migrateLegacyArtwork(): Promise<void> {

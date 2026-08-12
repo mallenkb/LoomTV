@@ -97,11 +97,11 @@ export async function readJsonBody(
         return;
       }
       try {
-        const parsed = JSON.parse(body) as unknown;
+        const parsed: unknown = JSON.parse(body);
         if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
           throw new HttpBodyError('JSON body must be an object.', 400);
         }
-        finish(() => resolve(parsed as Record<string, unknown>));
+        finish(() => resolve(Object.fromEntries(Object.entries(parsed))));
       } catch (error) {
         finish(() => reject(error instanceof HttpBodyError
           ? error

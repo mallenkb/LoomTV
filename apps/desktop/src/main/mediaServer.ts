@@ -38,15 +38,18 @@ import {
   createProfile,
   getAllProgress,
   getCachedArtwork,
+  getCachedThumbnail,
   getCachedPluginArtwork,
   getCustomArtworkData,
   getPlaybackTrackPreferences,
   getProfileLists,
   getProfilePreferences,
   savePlaybackTrackPreferences,
+  saveCachedThumbnail,
   saveProfilePreferences,
   saveProgress,
   setProfileListEntry,
+  thumbnailCacheKey,
 } from './database';
 import type { TranscodeOptions } from './mediaTypes';
 import type {
@@ -170,6 +173,7 @@ const mediaServerSockets = new Set<NodeSocket>();
 const lanMediaServerSockets = new Set<NodeSocket>();
 const LAN_IMAGE_CACHE_QUERY_PARAM = 'loomtvImageCache';
 const LAN_IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+const LOCAL_IMAGE_CACHE_CONTROL = 'private, max-age=3600';
 const THUMBNAIL_SCALE_FILTER = "scale='min(640,iw)':-2";
 const ALL_LOCAL_RESOURCE_KINDS = new Set(['media', 'subtitle', 'image'] as const);
 const MEDIA_RESOURCE_KIND = new Set(['media'] as const);
@@ -1016,8 +1020,9 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
       const isStreamRoute = routeAccess.kind === 'stream';
       const isArtworkRoute = routeAccess.kind === 'artwork';
       const hasValidSignature = isLanSharingEnabled() && isSignedLanRequestValid(reqUrl);
-      const isCacheableLanImageRequest = hasValidSignature && reqUrl.searchParams.get(LAN_IMAGE_CACHE_QUERY_PARAM) === '1';
       const hasLocalAccess = authorizeLocalRequest(reqUrl, req);
+      const isCacheableImageRequest = hasLocalAccess
+        || (hasValidSignature && reqUrl.searchParams.get(LAN_IMAGE_CACHE_QUERY_PARAM) === '1');
       if (
         isArtworkRoute
         && !loopbackRequest
@@ -1604,7 +1609,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             res.writeHead(200, cachedArtworkResponseHeaders(
               cachedArtwork.mimeType,
               cachedArtwork.byteLength,
-              isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
+              isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
             ));
             const stream = fs.createReadStream(cachedArtwork.cachePath);
             pipeResponse(stream, res);
@@ -1621,7 +1626,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           res.writeHead(200, cachedArtworkResponseHeaders(
             cachedArtwork.mimeType || decoded.mimeType,
             decoded.buffer.byteLength,
-            isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
+            isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : undefined,
           ));
           res.end(decoded.buffer);
         };
@@ -1678,7 +1683,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
         res.writeHead(200, {
           ...cachedArtworkResponseHeaders(decoded.mimeType, decoded.buffer.byteLength),
-          'Cache-Control': isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : 'no-store',
+          'Cache-Control': isCacheableImageRequest ? LAN_IMAGE_CACHE_CONTROL : 'no-store',
           ETag: `"${createHash('sha1').update(artwork.dataUrl).digest('hex')}"`,
         });
         res.end(decoded.buffer);
@@ -1694,7 +1699,7 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
 
         res.writeHead(200, {
           'Content-Type': getImageMimeType(filePath),
-          'Cache-Control': isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : 'public, max-age=3600',
+          'Cache-Control': isCacheableImageRequest ? LOCAL_IMAGE_CACHE_CONTROL : 'public, max-age=3600',
         });
         const stream = fs.createReadStream(filePath);
         pipeResponse(stream, res);
@@ -1709,17 +1714,27 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
         }
         const embedded = reqUrl.searchParams.get('embedded') === '1';
         const streamIndex = parseIntegerTag(reqUrl.searchParams.get('stream') || undefined);
-        const ffmpegPath = findFFmpeg();
-        if (!ffmpegPath || !filePath) {
+        if (!filePath) {
           res.writeHead(404);
           res.end();
           return;
         }
         if (!requireProfileMediaAccess(filePath)) return;
+        const cacheKey = thumbnailCacheKey(filePath, time, embedded, streamIndex);
+        const cachedThumbnail = cacheKey ? getCachedThumbnail(cacheKey) : null;
         res.writeHead(200, {
-          'Content-Type': 'image/jpeg',
-          'Cache-Control': isCacheableLanImageRequest ? LAN_IMAGE_CACHE_CONTROL : 'private, max-age=3600',
+          'Content-Type': cachedThumbnail?.mimeType || 'image/jpeg',
+          'Cache-Control': isCacheableImageRequest ? LOCAL_IMAGE_CACHE_CONTROL : 'private, max-age=3600',
         });
+        if (cachedThumbnail) {
+          res.end(cachedThumbnail.bytes);
+          return;
+        }
+        const ffmpegPath = findFFmpeg();
+        if (!ffmpegPath) {
+          safeEndResponse(res);
+          return;
+        }
         const args = embedded
           ? [
               '-i', filePath,
@@ -1743,7 +1758,19 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
             try {
               const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
               proc.once('exit', release);
-              if (proc.stdout) pipeResponse(proc.stdout, res);
+              const chunks: Buffer[] = [];
+              let outputBytes = 0;
+              proc.stdout?.on('data', (chunk: Buffer) => {
+                outputBytes += chunk.byteLength;
+                if (cacheKey && outputBytes <= 2 * 1024 * 1024) chunks.push(Buffer.from(chunk));
+                if (!res.destroyed && !res.writableEnded) res.write(chunk);
+              });
+              proc.stdout?.once('end', () => {
+                if (cacheKey && outputBytes > 0 && outputBytes <= 2 * 1024 * 1024) {
+                  saveCachedThumbnail(cacheKey, Buffer.concat(chunks), 'image/jpeg');
+                }
+                safeEndResponse(res);
+              });
               proc.once('error', (error) => {
                 console.error('thumbnail FFmpeg spawn error:', error);
                 release();

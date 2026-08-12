@@ -18,6 +18,7 @@ import {
   type CachedArtwork,
   type FetchedArtworkBytes,
 } from './databaseArtworkRepository.ts';
+import { createDatabaseThumbnailRepository, type CachedThumbnail } from './databaseThumbnailRepository.ts';
 import {
   loadLibrary as loadLibraryRecord,
   saveLibrary as saveLibraryRecord,
@@ -125,6 +126,7 @@ export type {
 
 let db: BetterSqlite3.Database | null = null;
 let artworkRepository: ReturnType<typeof createDatabaseArtworkRepository> | null = null;
+let thumbnailRepository: ReturnType<typeof createDatabaseThumbnailRepository> | null = null;
 let segmentRepository: ReturnType<typeof createDatabaseSegmentsRepository> | null = null;
 let pluginSecretStore: PluginSecretStore | null = null;
 
@@ -322,6 +324,40 @@ function getArtworkRepository(): ReturnType<typeof createDatabaseArtworkReposito
     fetchArtworkBytes,
   });
   return artworkRepository;
+}
+
+function getThumbnailRepository(): ReturnType<typeof createDatabaseThumbnailRepository> {
+  thumbnailRepository ||= createDatabaseThumbnailRepository(getDb());
+  return thumbnailRepository;
+}
+
+export function thumbnailCacheKey(
+  filePath: string,
+  time: string,
+  embedded: boolean,
+  streamIndex?: number,
+): string | null {
+  try {
+    const stat = fs.statSync(filePath);
+    return createHash('sha256').update(JSON.stringify({
+      filePath: path.resolve(filePath),
+      fileSize: stat.size,
+      modifiedAtMs: stat.mtimeMs,
+      time,
+      embedded,
+      streamIndex: streamIndex ?? null,
+    })).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+export function getCachedThumbnail(cacheKey: string): CachedThumbnail | null {
+  return getThumbnailRepository().getCachedThumbnail(cacheKey);
+}
+
+export function saveCachedThumbnail(cacheKey: string, bytes: Buffer, mimeType = 'image/jpeg'): void {
+  getThumbnailRepository().saveCachedThumbnail(cacheKey, bytes, mimeType);
 }
 
 

@@ -291,8 +291,7 @@ export default function PlayerEpisodePanel({
     if (!viewport || !target) return;
     viewport.scrollTop = Math.max(0, target.offsetTop - viewport.clientHeight / 2 + target.clientHeight / 2);
     handleScroll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleScroll]);
 
   return (
     <aside

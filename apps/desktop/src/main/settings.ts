@@ -7,6 +7,7 @@ import { loadSettingsFromDatabase, saveSettingsToDatabase } from './database';
 import { normalizeProviderId } from './metadataKeys';
 import type { AppSettings, LanPairedDevice } from './appContracts.ts';
 import type { SkipAnalysisSettings } from '../shared/desktopProtocol.ts';
+import { z } from 'zod';
 
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 
@@ -14,6 +15,47 @@ const METADATA_KEY_ALIASES: Record<string, keyof Pick<AppSettings, 'omdbApiKey' 
   omdb: 'omdbApiKey',
   tmdb: 'tmdbApiKey',
 };
+
+const skipAnalysisInputSchema = z.object({
+  enabled: z.unknown().optional(),
+  analyzeNewMedia: z.unknown().optional(),
+  enabledTypes: z.record(z.string(), z.unknown()).optional(),
+  promptTypes: z.record(z.string(), z.unknown()).optional(),
+  durationLimits: z.record(z.string(), z.unknown()).optional(),
+  suppressFirstEpisodeIntro: z.unknown().optional(),
+  analyzeSpecials: z.unknown().optional(),
+  exclusions: z.record(z.string(), z.unknown()).optional(),
+  seasonOverrides: z.record(z.string(), z.unknown()).optional(),
+});
+
+const settingsInputSchema = z.looseObject({
+  appLoaderStyle: z.unknown().optional(),
+  appThemeColor: z.unknown().optional(),
+  appThemeMode: z.unknown().optional(),
+  autoSyncIntervalHours: z.unknown().optional(),
+  localNetworkDeviceId: z.unknown().optional(),
+  localNetworkDeviceName: z.unknown().optional(),
+  localNetworkHmacSecret: z.unknown().optional(),
+  localNetworkPairedDevices: z.unknown().optional(),
+  localNetworkShareToken: z.unknown().optional(),
+  localNetworkSharingEnabled: z.unknown().optional(),
+  localSkipAnalysisEnabled: z.unknown().optional(),
+  metadataApiKeys: z.unknown().optional(),
+  mpvExecutablePath: z.unknown().optional(),
+  omdbApiKey: z.unknown().optional(),
+  openSubtitlesAutoDownload: z.unknown().optional(),
+  openSubtitlesLanguages: z.unknown().optional(),
+  openSubtitlesPassword: z.unknown().optional(),
+  openSubtitlesUsername: z.unknown().optional(),
+  playbackDisplaySleepTimeoutMinutes: z.unknown().optional(),
+  playbackSkipBackSeconds: z.unknown().optional(),
+  playbackSkipForwardSeconds: z.unknown().optional(),
+  sidebarNavOrder: z.unknown().optional(),
+  skipAnalysis: skipAnalysisInputSchema.optional(),
+  tmdbApiKey: z.unknown().optional(),
+});
+
+type SettingsInput = z.output<typeof settingsInputSchema>;
 
 export function createLanShareCode(): string {
   return String(randomInt(100000, 1000000));
@@ -69,7 +111,7 @@ function stringList(value: unknown, max = 500): string[] {
   return [...new Set(value.flatMap((entry) => typeof entry === 'string' && entry.trim() ? [entry.trim().slice(0, 1024)] : []))].slice(0, max);
 }
 
-function normalizeSkipAnalysis(raw: AppSettings): SkipAnalysisSettings {
+function normalizeSkipAnalysis(raw: SettingsInput): SkipAnalysisSettings {
   const value = raw.skipAnalysis && typeof raw.skipAnalysis === 'object' ? raw.skipAnalysis : undefined;
   const bool = (entry: unknown, fallback: boolean) => typeof entry === 'boolean' ? entry : fallback;
   const limit = (entry: unknown, fallbackMin: number, fallbackMax: number) => {
@@ -128,9 +170,13 @@ function normalizeSkipAnalysis(raw: AppSettings): SkipAnalysisSettings {
   };
 }
 
-function normalizeSettings(raw: AppSettings): AppSettings {
+function normalizeSettings(input: unknown): AppSettings {
+  const result = settingsInputSchema.safeParse(input);
+  const raw: SettingsInput = result.success ? result.data : {};
   const metadataApiKeys: Record<string, string> = {};
-  const rawKeys = raw.metadataApiKeys || {};
+  const rawKeys = raw.metadataApiKeys && typeof raw.metadataApiKeys === 'object' && !Array.isArray(raw.metadataApiKeys)
+    ? raw.metadataApiKeys
+    : {};
   const autoSyncIntervalHours = Number(raw.autoSyncIntervalHours);
   const defaultSidebarNavOrder = ['anime', 'tv', 'movies', 'others'];
   const rawSidebarNavOrder = Array.isArray(raw.sidebarNavOrder) ? raw.sidebarNavOrder : [];
@@ -145,8 +191,8 @@ function normalizeSettings(raw: AppSettings): AppSettings {
     if (providerId && apiKey) metadataApiKeys[providerId] = apiKey;
   }
 
-  if (raw.omdbApiKey?.trim()) metadataApiKeys.omdb = raw.omdbApiKey.trim();
-  if (raw.tmdbApiKey?.trim()) metadataApiKeys.tmdb = raw.tmdbApiKey.trim();
+  if (typeof raw.omdbApiKey === 'string' && raw.omdbApiKey.trim()) metadataApiKeys.omdb = raw.omdbApiKey.trim();
+  if (typeof raw.tmdbApiKey === 'string' && raw.tmdbApiKey.trim()) metadataApiKeys.tmdb = raw.tmdbApiKey.trim();
 
   const skipAnalysis = normalizeSkipAnalysis(raw);
   const mpvExecutablePath = typeof raw.mpvExecutablePath === 'string' && raw.mpvExecutablePath.trim()
@@ -192,7 +238,7 @@ function normalizeSettings(raw: AppSettings): AppSettings {
       ? raw.appLoaderStyle
       : 'play-mark',
     localNetworkSharingEnabled: Boolean(raw.localNetworkSharingEnabled),
-    localNetworkShareToken: raw.localNetworkShareToken && /^\d{6}$/.test(raw.localNetworkShareToken)
+    localNetworkShareToken: typeof raw.localNetworkShareToken === 'string' && /^\d{6}$/.test(raw.localNetworkShareToken)
       ? raw.localNetworkShareToken
       : createLanShareCode(),
     localNetworkDeviceId: typeof raw.localNetworkDeviceId === 'string' && raw.localNetworkDeviceId.length >= 8
@@ -222,17 +268,17 @@ export function getMetadataApiKey(settings: AppSettings, providerId: string): st
 export function loadSettings(): AppSettings {
   const databaseSettings = loadSettingsFromDatabase();
   if (databaseSettings) {
-    const normalized = normalizeSettings(databaseSettings as AppSettings);
-    if (Number((databaseSettings as AppSettings).localNetworkSecurityEpoch) !== 2) {
-      saveSettingsToDatabase(normalized as unknown as Record<string, unknown>);
+    const normalized = normalizeSettings(databaseSettings);
+    if (Number(databaseSettings.localNetworkSecurityEpoch) !== 2) {
+      saveSettingsToDatabase({ ...normalized });
     }
     return normalized;
   }
 
   try {
     if (fs.existsSync(SETTINGS_FILE)) {
-      const settings = normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')) as AppSettings);
-      saveSettingsToDatabase(settings as unknown as Record<string, unknown>);
+      const settings = normalizeSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')));
+      saveSettingsToDatabase({ ...settings });
       try {
         fs.rmSync(SETTINGS_FILE);
       } catch (error) {
@@ -244,10 +290,10 @@ export function loadSettings(): AppSettings {
     console.error('[settings] Failed to migrate legacy settings:', error);
   }
   const initialSettings = normalizeSettings({});
-  saveSettingsToDatabase(initialSettings as unknown as Record<string, unknown>);
+  saveSettingsToDatabase({ ...initialSettings });
   return initialSettings;
 }
 
 export function saveSettings(settings: AppSettings): void {
-  saveSettingsToDatabase(normalizeSettings(settings) as unknown as Record<string, unknown>);
+  saveSettingsToDatabase({ ...normalizeSettings(settings) });
 }

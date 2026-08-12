@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef, ReactNode, useCallback } from 'react';
 import { desktopApi, type LibraryIndexPayload } from '@/lib/desktopApi';
+import { isRemoteDesktopMode } from '@/lib/remoteDesktop';
 import { migrateLegacyArtwork } from '@/lib/customArtwork';
 import { hydrateProgressFromDatabase } from '@/lib/progress';
 import {
@@ -8,112 +9,23 @@ import {
   type LibraryMutationToken,
 } from './libraryMutationCoordinator';
 import { useProfiles } from './ProfileContext';
+import type {
+  WireEpisodeFile,
+  WireEpisodeMeta,
+  WireLocalMediaDetails,
+  WireMediaItem,
+} from '../shared/desktopProtocol';
 
-export interface MediaItem {
-  id: string;
-  type: 'movie' | 'tv' | 'anime';
-  format?: string;
-  title: string;
-  year: number;
-  poster: string;
-  backdrop: string;
-  logo?: string;
-  posterCandidates?: string[];
-  backdropCandidates?: string[];
-  logoCandidates?: string[];
-  summary: string;
-  rating: number;
+export interface MediaItem extends WireMediaItem {
   contentRating?: string;
   trailerUrl?: string;
-  contentRatings?: Record<string, { code: string; minimumAge: number; source: string }>;
-  streamingProviders?: Array<{
-    id: number;
-    name: string;
-    logoUrl: string;
-    regions?: string[];
-    offerTypes?: Array<'subscription' | 'ads' | 'free' | 'rent' | 'buy'>;
-    availability?: 'preferred-region' | 'other-region';
-    source?: 'tmdb';
-  }>;
-  originPlatform?: {
-    id?: number;
-    name: string;
-    kind: 'network' | 'web-channel';
-    countryCode?: string;
-    countryName?: string;
-    officialSite?: string;
-    logoUrl?: string;
-    source: 'tvmaze';
-  };
-  runtime?: string;
-  seasonCount?: number;
-  episodeCount?: number;
-  genres: string[];
-  cast: {
-    name: string;
-    character: string;
-    image: string;
-    characterName?: string;
-    characterRole?: string;
-    characterImage?: string;
-    voiceActorName?: string;
-    voiceActorImage?: string;
-    voiceActorLanguage?: string;
-  }[];
-  filePath: string;
-  fileSize?: number;
-  lastPlayed?: number;
-  seasons?: { number: number; title: string; episodeCount: number }[];
-  episodes?: EpisodeMeta[];
-  episodeFiles?: EpisodeFile[];
-  subtitles?: { lang: string; label: string; url: string }[];
-  localMetadata?: LocalMediaDetails;
-  providerIds?: {
-    tmdbId?: string;
-    imdbId?: string;
-    tvdbId?: string;
-    tvmazeId?: string;
-    malId?: string;
-    malIdBySeason?: Record<string, string>;
-  };
   /** Present only on lightweight catalog cards. Full details are fetched on demand. */
   catalogRevision?: number;
 }
 
-export interface EpisodeMeta {
-  season: number;
-  number: number;
-  title: string;
-  summary: string;
-  still: string;
-  rating: number;
-  airDate: string;
-  localMetadata?: LocalMediaDetails;
-}
-
-export interface EpisodeFile {
-  season: number;
-  episode: number;
-  filePath: string;
-  title?: string;
-  subtitles?: { lang: string; label: string; url: string }[];
-  localMetadata?: LocalMediaDetails;
-}
-
-export interface LocalMediaDetails {
-  fileSize?: number;
-  modifiedAtMs?: number;
-  durationSeconds?: number;
-  width?: number;
-  height?: number;
-  videoCodec?: string;
-  audioCodec?: string;
-  audioTracks?: number;
-  subtitleTracks?: number;
-  bitrateKbps?: number;
-  container?: string;
-  chapters?: { startMs: number; endMs: number; title: string }[];
-}
+export type EpisodeMeta = WireEpisodeMeta;
+export type EpisodeFile = WireEpisodeFile;
+export type LocalMediaDetails = WireLocalMediaDetails;
 
 export interface TVShow extends MediaItem {
   seasons: { number: number; title: string; episodeCount: number }[];
@@ -597,6 +509,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
 
   const loadPrimaryCatalog = useCallback(async (mutationToken?: LibraryMutationToken) => {
     const requestProfileId = activeProfileId;
+    if (!isRemoteDesktopMode()) {
+      const library = await desktopApi.getLibrary();
+      if (activeProfileIdRef.current !== requestProfileId) return null;
+      if (!isCurrentLibraryMutation(mutationToken)) return null;
+      const localLibrary = { ...library, catalogRevision: null, catalogTransport: 'legacy' as const };
+      return applyLibraryData(localLibrary, mutationToken) ? localLibrary : null;
+    }
+
     const index = await desktopApi.getLibraryIndex();
     if (activeProfileIdRef.current !== requestProfileId) return null;
     if (!isCurrentLibraryMutation(mutationToken)) return null;
@@ -612,6 +532,14 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     const fallback = { ...legacy, catalogRevision: null, catalogTransport: 'legacy' as const };
     return applyLibraryData(fallback, mutationToken) ? fallback : null;
   }, [activeProfileId, applyCompactIndex, applyLibraryData, isCurrentLibraryMutation]);
+
+  const applyScanCatalog = useCallback(async (index: LibraryIndexPayload, mutationToken: LibraryMutationToken) => {
+    if (isRemoteDesktopMode()) {
+      applyCompactIndex(index, mutationToken);
+      return;
+    }
+    await loadPrimaryCatalog(mutationToken);
+  }, [applyCompactIndex, loadPrimaryCatalog]);
 
   const applyScanProgress = useCallback((progress?: { isComplete: boolean; scannedFolders: number; totalFolders: number }) => {
     if (!progress) return;
@@ -700,7 +628,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
       const index = await desktopApi.scanLibrary(mode);
-      if (index?.catalogVersion === 1) applyCompactIndex(index, mutationToken);
+      if (index?.catalogVersion === 1) await applyScanCatalog(index, mutationToken);
       else await loadPrimaryCatalog(mutationToken);
     } catch (error) {
       console.error('Failed to scan library:', error);
@@ -721,7 +649,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     const mutationToken = beginLibraryMutation('catalog');
     try {
       const index = await desktopApi.addLibraryFolder(kind);
-      if (index?.catalogVersion === 1) applyCompactIndex(index, mutationToken);
+      if (index?.catalogVersion === 1) await applyScanCatalog(index, mutationToken);
     } catch (error) {
       console.error('Failed to add library folder:', error);
       throw toLibraryMutationError('add-folder', error);
@@ -734,7 +662,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     const mutationToken = beginLibraryMutation('catalog');
     try {
       const index = await desktopApi.removeLibraryFolder(folder);
-      applyCompactIndex(index, mutationToken);
+      await applyScanCatalog(index, mutationToken);
     } catch (error) {
       console.error('Failed to remove library folder:', error);
       throw toLibraryMutationError('remove-folder', error);
@@ -749,7 +677,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
     try {
       const index = await desktopApi.clearAppData();
-      applyCompactIndex(index, catalogMutation);
+      await applyScanCatalog(index, catalogMutation);
       if (isCurrentLibraryMutation(settingsMutation)) {
         dispatch({ type: 'SET_AUTO_SYNC_INTERVAL_HOURS', payload: initialState.autoSyncIntervalHours });
         autoSyncHoursRef.current = initialState.autoSyncIntervalHours;
@@ -807,9 +735,8 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
       }
 
-      // The cached library is the small startup slice. It is sufficient to
-      // render Home and its priority hero; profile progress, settings, artwork
-      // migration, and scanning can hydrate the rest without holding the gate.
+      // Local host mode already loaded the persisted rich snapshot. Remote mode
+      // intentionally keeps the compact index and hydrates opened titles only.
       if (!cancelled) {
         dispatch({ type: 'SET_LOADING', payload: false });
         dispatch({ type: 'SET_STARTUP_PREPARED', payload: true });
@@ -843,7 +770,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           const mutationToken = beginLibraryMutation('catalog');
           try {
             const index = await desktopApi.scanLibrary('quick');
-            if (!cancelled && index?.catalogVersion === 1) applyCompactIndex(index, mutationToken);
+            if (!cancelled && index?.catalogVersion === 1) await applyScanCatalog(index, mutationToken);
           } catch (error) {
             const mutationError = toLibraryMutationError('scan', error);
             console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
@@ -869,7 +796,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
       }
     };
-  }, [activeProfile?.id, activeProfile?.type, applyCompactIndex, beginLibraryMutation, loadPrimaryCatalog]);
+  }, [activeProfile?.id, activeProfile?.type, applyScanCatalog, beginLibraryMutation, loadPrimaryCatalog]);
 
   useEffect(() => {
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
@@ -883,7 +810,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         const mutationToken = beginLibraryMutation('catalog');
         try {
           const index = await desktopApi.scanLibrary('quick');
-          if (index?.catalogVersion === 1) applyCompactIndex(index, mutationToken);
+          if (index?.catalogVersion === 1) await applyScanCatalog(index, mutationToken);
         } catch (error) {
           const mutationError = toLibraryMutationError('scan', error);
           console.error(mutationError.code, mutationError.sanitizedMessage, mutationError.cause);
@@ -896,7 +823,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }, intervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [activeProfile?.type, applyCompactIndex, beginLibraryMutation, state.autoSyncIntervalHours]);
+  }, [activeProfile?.type, applyScanCatalog, beginLibraryMutation, state.autoSyncIntervalHours]);
 
   useEffect(() => {
     if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;

@@ -4,6 +4,7 @@ import { safeFetch } from '../safeFetch.ts';
 import { jikanContentRating } from './contentRatings.ts';
 import { fetchAniListAnimeCast } from './anilist.ts';
 import { normalizeAnimeCast } from '../../shared/animeCast.ts';
+import { z } from 'zod';
 
 export interface JikanAnimeResult extends Partial<MediaItem> {
   episodes?: EpisodeMeta[];
@@ -12,53 +13,63 @@ export interface JikanAnimeResult extends Partial<MediaItem> {
   format?: string;
 }
 
-interface JikanImageSet {
-  jpg?: { image_url?: string; large_image_url?: string };
-}
+const jikanImageSetSchema = z.object({
+  jpg: z.object({
+    image_url: z.string().optional(),
+    large_image_url: z.string().optional(),
+  }).optional(),
+});
 
-interface JikanPersonEntry {
-  name?: string;
-  images?: JikanImageSet;
-}
+const jikanPersonEntrySchema = z.object({
+  name: z.string().optional(),
+  images: jikanImageSetSchema.optional(),
+});
 
-interface JikanEpisodeEntry {
-  mal_id?: number;
-  title?: string;
-  title_romanji?: string;
-  title_japanese?: string;
-  score?: number;
-  aired?: string;
-}
+const jikanEpisodeEntrySchema = z.object({
+  mal_id: z.number().finite().optional(),
+  title: z.string().optional(),
+  title_romanji: z.string().optional(),
+  title_japanese: z.string().optional(),
+  score: z.number().finite().nullable().optional(),
+  aired: z.string().nullable().optional(),
+});
 
-interface JikanCharacterEntry {
-  role?: string;
-  character?: { name?: string; images?: JikanImageSet };
-  voice_actors?: { person?: JikanPersonEntry; language?: string }[];
-}
+const jikanCharacterEntrySchema = z.object({
+  role: z.string().optional(),
+  character: z.object({
+    name: z.string().optional(),
+    images: jikanImageSetSchema.optional(),
+  }).optional(),
+  voice_actors: z.array(z.object({
+    person: jikanPersonEntrySchema.optional(),
+    language: z.string().optional(),
+  })).optional(),
+});
 
-interface JikanGenre {
-  name?: string;
-}
+const jikanAnimeHitSchema = z.object({
+  mal_id: z.number().finite().optional(),
+  type: z.string().optional(),
+  title: z.string().optional(),
+  title_english: z.string().nullable().optional(),
+  title_japanese: z.string().nullable().optional(),
+  title_synonyms: z.array(z.string()).optional(),
+  images: jikanImageSetSchema.optional(),
+  synopsis: z.string().nullable().optional(),
+  score: z.number().finite().nullable().optional(),
+  genres: z.array(z.object({ name: z.string().optional() })).optional(),
+  year: z.number().finite().nullable().optional(),
+  aired: z.object({ from: z.string().nullable().optional() }).optional(),
+  rating: z.string().nullable().optional(),
+});
 
-interface JikanAnimeHit {
-  mal_id?: number;
-  type?: string;
-  title?: string;
-  title_english?: string;
-  title_japanese?: string;
-  title_synonyms?: string[];
-  images?: JikanImageSet;
-  synopsis?: string;
-  score?: number;
-  genres?: JikanGenre[];
-  year?: number;
-  aired?: { from?: string };
-  rating?: string;
-}
+type JikanEpisodeEntry = z.infer<typeof jikanEpisodeEntrySchema>;
+type JikanAnimeHit = z.infer<typeof jikanAnimeHitSchema>;
 
-interface JikanListResponse<T> {
-  data?: T[];
-  pagination?: { has_next_page?: boolean };
+function jikanListResponseSchema<TSchema extends z.ZodType>(itemSchema: TSchema) {
+  return z.object({
+    data: z.array(itemSchema).optional(),
+    pagination: z.object({ has_next_page: z.boolean().optional() }).optional(),
+  });
 }
 
 /** Respect Jikan's public rate limit (3 req/sec). */
@@ -70,11 +81,11 @@ async function jikanDelay(): Promise<void> {
   _jikan.lastCallAt = Date.now();
 }
 
-async function jikanFetch<T>(path: string): Promise<T> {
+async function jikanFetch<TSchema extends z.ZodType>(path: string, schema: TSchema): Promise<z.output<TSchema>> {
   await jikanDelay();
   const res = await safeFetch(`https://api.jikan.moe/v4${path}`, {}, { allowedHosts: ['api.jikan.moe'], retries: 2 });
   if (!res.ok) throw new Error(`Jikan ${path} → ${res.status}`);
-  return (await res.json()) as T;
+  return schema.parse(await res.json());
 }
 
 function isGenericEpisodeTitle(value: unknown, episodeNumber: number): boolean {
@@ -103,16 +114,19 @@ async function fetchJikanEpisodes(malId: number, maxPages = 3): Promise<EpisodeM
   let page = 1;
   let hasNextPage = true;
   while (hasNextPage && page <= maxPages) {
-    const epData = await jikanFetch<JikanListResponse<JikanEpisodeEntry>>(`/anime/${malId}/episodes?page=${page}`);
+    const epData = await jikanFetch(
+      `/anime/${malId}/episodes?page=${page}`,
+      jikanListResponseSchema(jikanEpisodeEntrySchema),
+    );
     const epList = epData.data ?? [];
     episodes.push(
       ...epList.map((e) => ({
         season: 1,
-        number: e.mal_id as number,
+        number: e.mal_id ?? 0,
         title: resolveJikanEpisodeTitle(e),
         summary: '',
         still: '',
-        rating: (e.score as number) || 0,
+        rating: e.score || 0,
         airDate: e.aired ? String(e.aired).split('T')[0] : '',
       })),
     );
@@ -143,7 +157,10 @@ function jikanVoiceActorLanguagePriority(language?: string): number {
 async function fetchJikanCharacterCast(malId: number): Promise<MediaItem['cast']> {
   if (!malId) return [];
   try {
-    const charData = await jikanFetch<JikanListResponse<JikanCharacterEntry>>(`/anime/${malId}/characters`);
+    const charData = await jikanFetch(
+      `/anime/${malId}/characters`,
+      jikanListResponseSchema(jikanCharacterEntrySchema),
+    );
     return normalizeAnimeCast(
       (charData.data ?? [])
         .filter((entry) => entry.role === 'Main' || entry.role === 'Supporting')
@@ -244,8 +261,9 @@ async function fetchAnimeCast(malId: number, title: string): Promise<MediaItem['
 
 export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResult | null> {
   try {
-    const searchData = await jikanFetch<JikanListResponse<JikanAnimeHit>>(
+    const searchData = await jikanFetch(
       `/anime?q=${encodeURIComponent(title)}&limit=5&sfw`,
+      jikanListResponseSchema(jikanAnimeHitSchema),
     );
     const hit = searchData.data?.[0];
     if (!hit) return null;
@@ -264,7 +282,7 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
     return {
       malId,
       format: hit.type,
-      title: (hit.title_english as string) || (hit.title as string) || title,
+      title: hit.title_english || hit.title || title,
       aliases: [
         hit.title,
         hit.title_english,
@@ -273,11 +291,11 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
       ].filter((alias): alias is string => Boolean(alias)),
       poster,
       backdrop: '',
-      summary: (hit.synopsis as string) || '',
-      rating: (hit.score as number) ?? 0,
+      summary: hit.synopsis || '',
+      rating: hit.score ?? 0,
       contentRatings: jikanContentRating(hit.rating),
-      genres: (hit.genres ?? []).map((g) => g.name as string),
-      year: (hit.year as number) ?? (hit.aired?.from ? new Date(hit.aired.from).getFullYear() : 0),
+      genres: (hit.genres ?? []).flatMap((genre) => genre.name ? [genre.name] : []),
+      year: hit.year ?? (hit.aired?.from ? new Date(hit.aired.from).getFullYear() : 0),
       cast,
       episodes,
     };
@@ -289,13 +307,16 @@ export async function fetchJikanMetadata(title: string): Promise<JikanAnimeResul
 
 export async function fetchJikanMetadataCandidates(title: string, localTitles: string[] = []): Promise<JikanAnimeResult[]> {
   try {
-    const searchData = await jikanFetch<JikanListResponse<JikanAnimeHit>>(`/anime?q=${encodeURIComponent(title)}&limit=8&sfw`);
+    const searchData = await jikanFetch(
+      `/anime?q=${encodeURIComponent(title)}&limit=8&sfw`,
+      jikanListResponseSchema(jikanAnimeHitSchema),
+    );
     const hits = Array.isArray(searchData.data)
       ? searchData.data.filter((hit) => jikanHitMatchesLocal(hit, localTitles))
       : [];
     const results: JikanAnimeResult[] = [];
     for (const hit of hits) {
-      const malId = hit.mal_id as number;
+      const malId = hit.mal_id ?? 0;
       let episodes: EpisodeMeta[] = [];
       try {
         episodes = await fetchJikanEpisodes(malId, 1);
@@ -303,7 +324,7 @@ export async function fetchJikanMetadataCandidates(title: string, localTitles: s
       results.push({
         malId,
         format: hit.type,
-        title: (hit.title_english as string) || (hit.title as string) || title,
+        title: hit.title_english || hit.title || title,
         aliases: [
           hit.title,
           hit.title_english,
@@ -312,11 +333,11 @@ export async function fetchJikanMetadataCandidates(title: string, localTitles: s
         ].filter((alias): alias is string => Boolean(alias)),
         poster: hit.images?.jpg?.large_image_url || hit.images?.jpg?.image_url || '',
         backdrop: '',
-        summary: (hit.synopsis as string) || '',
-        rating: (hit.score as number) ?? 0,
+        summary: hit.synopsis || '',
+        rating: hit.score ?? 0,
         contentRatings: jikanContentRating(hit.rating),
-        genres: (hit.genres ?? []).map((genre) => genre.name as string),
-        year: (hit.year as number) ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
+        genres: (hit.genres ?? []).flatMap((genre) => genre.name ? [genre.name] : []),
+        year: hit.year ?? (hit.aired?.from ? yearFromDateString(hit.aired.from) : 0),
         cast: [],
         episodes,
       });

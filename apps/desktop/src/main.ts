@@ -41,6 +41,7 @@ import {
 } from './main/transcodeManager';
 import { probeMediaFile, probeMediaFileAsync } from './main/mediaProbeFile';
 import { decodeDataUrl, readJsonBody, safeEndResponse, writeJson } from './main/httpResponses';
+import { parseRequiredJson, profileExportSchema } from './main/runtimeValidation.ts';
 import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDecision';
 import { createLanSecurity, type LanPairingApprovalPrompt } from './main/lanSecurity';
 import { isIpcOnlyHttpRoute } from './main/lanRoutePolicy';
@@ -235,6 +236,7 @@ import {
   fetchJikanMetadata,
   fetchJikanMetadataCandidates,
 } from './main/metadata/jikan';
+import { fetchAniListAnimeMetadata } from './main/metadata/anilist';
 import { fetchFanartMovieLogos, fetchFanartTVLogos } from './main/metadata/fanart';
 import { createSkipSegmentService } from './main/skipSegments/service';
 import { createLocalSegmentAnalysis } from './main/skipSegments/localAnalysis';
@@ -353,7 +355,7 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 9;
+const SCAN_CACHE_VERSION = 10;
 let libraryMutationVersion = 0;
 
 function advanceLibraryMutationVersion(): void {
@@ -537,6 +539,7 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   extractSeasons,
   fetchFanartMovieLogos,
   fetchFanartTVLogos,
+  fetchAniListAnimeMetadata,
   fetchJikanEpisodesForLocalAnimeSeasons,
   fetchJikanMetadata,
   fetchOMDbMetadata,
@@ -1175,6 +1178,7 @@ const {
   artworkDeliveryUrl,
   artworkDeliveryUrls,
   cacheArtworkNow,
+  fetchAniListAnimeMetadata,
   fetchFanartMovieLogos,
   fetchFanartTVLogos,
   fetchJikanMetadata,
@@ -1198,15 +1202,6 @@ const {
   probeMediaFile,
   saveLibrary: saveLibraryMutation,
 });
-
-async function libraryItemForRendererWithMetadataRefresh(mediaId: string) {
-  const profileId = getDesktopActiveProfileId();
-  if (!profileId) return null;
-  const scopedLibrary = filterLibraryForProfile(loadLibrary(), profileId);
-  if (!findLibraryItem(scopedLibrary, mediaId)) return null;
-  await refreshIncompleteMetadata(mediaId);
-  return compactLibraryItemForRenderer(mediaId);
-}
 
 function isPathInsideFolder(folderPath: string, candidatePath?: string): boolean {
   if (!candidatePath) return false;
@@ -1390,7 +1385,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
   loadLibrary,
   libraryForRenderer,
   libraryIndexForRenderer: compactLibraryIndexForRenderer,
-  libraryItemForRenderer: libraryItemForRendererWithMetadataRefresh,
+  // Detail reads must return the persisted library snapshot. Provider refreshes
+  // belong to explicit metadata-refresh actions, not opening a local title.
+  libraryItemForRenderer: compactLibraryItemForRenderer,
   scanLibrary,
   saveLibraryFromScan,
   saveLibraryScanCheckpoint,
@@ -1540,7 +1537,11 @@ registerIpcHandlers<LibraryData, AppSettings>({
       const filePath = result.filePaths[0];
       if (result.canceled || !filePath) return { ok: false };
       if ((await fs.promises.stat(filePath)).size > 25 * 1024 * 1024) throw new Error('The profile file is larger than 25 MB.');
-      const bundle = JSON.parse(await fs.promises.readFile(filePath, 'utf8')) as import('./shared/desktopProtocol.ts').ProfileExportV1;
+      const bundle = parseRequiredJson(
+        await fs.promises.readFile(filePath, 'utf8'),
+        profileExportSchema,
+        'Profile import',
+      );
       const imported = importProfileData(bundle);
       broadcastProfilesChanged();
       return {
@@ -1883,7 +1884,12 @@ async function startBackgroundServices(): Promise<void> {
   analysisCoordinator.start();
   // loadLibrary() reads and sanitises the whole library synchronously, so it is
   // called here rather than being evaluated as an argument on the launch path.
-  skipSegmentService.warmLibrary(loadLibrary());
+  const persistedLibrary = loadLibrary();
+  skipSegmentService.warmLibrary(persistedLibrary);
+  // Warm artwork from the persisted database after the window is available.
+  // Detail pages never need to fetch provider artwork as part of opening a
+  // local title, including after an app restart.
+  await cacheArtworkNow(persistedLibrary);
   await cleanupOldTranscodes();
 }
 

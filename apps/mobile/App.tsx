@@ -145,11 +145,9 @@ import {
   streamPathFor,
 } from './mobileLibrary';
 import type {
-  ApiResult,
   Connection,
   DiscoveredHost,
   EpisodeFile,
-  HlsSession,
   LibraryKind,
   LibraryPayload,
   LocalMediaTrack,
@@ -158,14 +156,9 @@ import type {
   MobileActiveProfile,
   MobileProfile,
   MobileProfileListEntry,
-  MobileProfilePreferences,
   MobileLibraryFilter,
-  MobileLibraryIndexPayload,
-  MobileLibraryItemDetailsPayload,
   MobileSearchScope,
-  OfficialArtworkResponse,
   OfficialMetadataCandidate,
-  PairResponse,
   PlaybackTrackPreferences,
   PlayTarget,
   PosterCandidateSheetState,
@@ -177,6 +170,29 @@ import type {
   TrackPreference,
 } from './mobileDomain';
 import { activeKnownMediaSegmentAt, mobileMediaSegmentLabel } from './mobileDomain';
+import {
+  hlsSessionResultSchema,
+  mediaSegmentsPayloadSchema,
+  mobileActiveProfileSchema,
+  mobileLibraryIndexSchema,
+  mobileLibraryItemDetailsSchema,
+  mobileLibrarySchema,
+  mobilePairApprovalRequestSchema,
+  mobilePairResponseSchema,
+  mobileProfileListSchema,
+  mobileProfilePreferencesSchema,
+  mobileProfilesPayloadSchema,
+  mobileProfileSelectionSchema,
+  mobileProgressMapSchema,
+  mobileStoredProgressSchema,
+  officialArtworkResponseSchema,
+  officialMetadataCandidatesSchema,
+  playbackTrackPreferencesSchema,
+  readErrorResponse,
+  readJsonResponse,
+  refreshedCredentialsSchema,
+  savedConnectionSchema,
+} from './mobileDecoders';
 
 type PlayerVerticalGesture = 'brightness' | 'volume';
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
@@ -740,21 +756,6 @@ function mergeCandidateArtwork(item: MediaItem, candidate: OfficialMetadataCandi
       ...(item.backdropCandidates || []),
     ]),
   };
-}
-
-async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
-  const text = await response.text();
-  if (!text.trim()) {
-    if (response.ok) return {} as T;
-    throw new Error(fallbackMessage);
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    const plainText = text.trim().replace(/\s+/g, ' ').slice(0, 120);
-    throw new Error(response.ok ? fallbackMessage : `${fallbackMessage}${plainText ? ` ${plainText}` : ''}`);
-  }
 }
 
 function wait(ms: number): Promise<void> {
@@ -1458,6 +1459,12 @@ function AppRoot() {
   const credentialRefreshPromiseRef = useRef<{ key: string; promise: Promise<SavedConnection> } | null>(null);
   const credentialRefreshKeyRef = useRef('');
   const connectionHealthCheckRef = useRef(false);
+  const reconnectSavedConnectionHandlerRef = useRef(reconnectSavedConnection);
+  const pairWithDesktopHandlerRef = useRef(pairWithDesktop);
+  const checkDesktopConnectionHandlerRef = useRef(checkDesktopConnection);
+  reconnectSavedConnectionHandlerRef.current = reconnectSavedConnection;
+  pairWithDesktopHandlerRef.current = pairWithDesktop;
+  checkDesktopConnectionHandlerRef.current = checkDesktopConnection;
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const themedStyles = useMemo(() => createStyles(mobileTheme), [mobileTheme]);
@@ -1590,15 +1597,9 @@ function AppRoot() {
     void SecureStore.getItemAsync(SAVED_CONNECTION_KEY)
       .then((stored) => {
         if (cancelled || !stored) return;
-        const saved = JSON.parse(stored) as SavedConnection;
-        if (
-          !saved.baseUrl
-          || !saved.deviceId
-          || !saved.deviceToken
-          || !saved.refreshToken
-          || !Number.isFinite(saved.accessTokenExpiresAt)
-          || !Number.isFinite(saved.refreshTokenExpiresAt)
-        ) return;
+        const parsed = savedConnectionSchema.safeParse(JSON.parse(stored));
+        if (!parsed.success) return;
+        const saved = parsed.data;
         const certFingerprint = normalizeCertFingerprint(saved.certFingerprint);
         if (!certFingerprint || !saved.hostDeviceId) {
           invalidateCredentialRefresh();
@@ -1612,7 +1613,7 @@ function AppRoot() {
         const normalizedSaved = { ...saved, certFingerprint };
         setSavedConnection(normalizedSaved);
         setBaseUrl(normalizedSaved.baseUrl);
-        void reconnectSavedConnection(normalizedSaved);
+        void reconnectSavedConnectionHandlerRef.current(normalizedSaved);
       })
       .catch(() => {})
       .finally(() => {
@@ -1621,7 +1622,6 @@ function AppRoot() {
     return () => { cancelled = true; };
     // This runs once to restore the saved session; the callback only uses refs,
     // setters, and the saved value, so it is intentionally not reactive.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1729,7 +1729,7 @@ function AppRoot() {
         // that mismatch into a fresh, approval-gated pairing request.
         if (requestedHostRepairRef.current === savedConnection.hostDeviceId) {
           requestedHostRepairRef.current = null;
-          void pairWithDesktop(discoveredSavedHost);
+          void pairWithDesktopHandlerRef.current(discoveredSavedHost);
         }
         return;
       }
@@ -1739,10 +1739,9 @@ function AppRoot() {
       setSavedConnection(updated);
       setBaseUrl(updated.baseUrl);
       void SecureStore.setItemAsync(SAVED_CONNECTION_KEY, JSON.stringify(updated));
-      void reconnectSavedConnection(updated);
+      void reconnectSavedConnectionHandlerRef.current(updated);
     }
     // Keep the reconnect cadence tied to saved-session state, not callback identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, discoveredHosts, isServerOffline, savedConnection]);
 
   useEffect(() => {
@@ -1760,7 +1759,7 @@ function AppRoot() {
     };
     const tryReconnect = async () => {
       if (cancelled || appStateRef.current !== 'active') return;
-      const connected = await reconnectSavedConnection(savedConnection);
+      const connected = await reconnectSavedConnectionHandlerRef.current(savedConnection);
       if (cancelled || connected || appStateRef.current !== 'active') return;
       schedule(mobileReconnectDelayMs(failedAttempts));
       failedAttempts += 1;
@@ -1772,16 +1771,13 @@ function AppRoot() {
       if (retry) clearTimeout(retry);
     };
     // Keep the retry loop stable while the saved session remains unchanged.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState, connection, isPairing, isServerOffline, savedConnection]);
 
   useEffect(() => {
     if (!connection || appState !== 'active') return;
-    const healthCheck = setInterval(() => void checkDesktopConnection(), 10000);
+    const healthCheck = setInterval(() => void checkDesktopConnectionHandlerRef.current(), 10000);
     return () => clearInterval(healthCheck);
-    // These connection fields intentionally own the health-check lifecycle.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appState, connection?.baseUrl, connection?.deviceToken, connection?.libraryEtag, isServerOffline]);
+  }, [appState, connection]);
 
   useEffect(() => {
     if (!savedConnection || !connection) return undefined;
@@ -1909,7 +1905,7 @@ function AppRoot() {
         item.id,
       );
       if (response.ok) {
-        const payload = await response.json() as MobileLibraryItemDetailsPayload;
+        const payload = await readJsonResponse(response, mobileLibraryItemDetailsSchema, 'Library item details');
         if (payload.catalogVersion === 1 && payload.revision === connection.catalogRevision) {
           if (activeCatalogIdentityRef.current !== requestIdentity) return item;
           rememberMobileDetailItem(detailItemCacheRef.current, payload.item, key);
@@ -1925,7 +1921,7 @@ function AppRoot() {
       console.warn(`[catalog] Item details unavailable; using legacy library payload (fallback ${legacyCatalogFallbackCountRef.current}).`);
       const legacyResponse = await mobileLanClient.getLibrary(connection.baseUrl, connection.deviceToken);
       if (!legacyResponse.ok) return item;
-      const legacyLibrary = await legacyResponse.json() as LibraryPayload;
+      const legacyLibrary = await readJsonResponse(legacyResponse, mobileLibrarySchema, 'Legacy library');
       const detail = allItems(legacyLibrary).find((candidate) => candidate.id === item.id) || item;
       if (activeCatalogIdentityRef.current !== requestIdentity) return item;
       rememberMobileDetailItem(detailItemCacheRef.current, detail, key);
@@ -2004,7 +2000,7 @@ function AppRoot() {
       connection.selectionRevision,
     );
     if (!response.ok) throw new Error('The profile list could not be updated.');
-    let nextLists = await response.json() as MobileProfileListEntry[];
+    let nextLists = await readJsonResponse(response, mobileProfileListSchema, 'Profile list update');
     if (kind === 'watchlist' && !present) {
       response = await mobileLanClient.setProfileList(
         connection.baseUrl,
@@ -2015,7 +2011,7 @@ function AppRoot() {
         connection.selectionRevision,
       );
       if (!response.ok) throw new Error('The profile list could not be updated.');
-      nextLists = await response.json() as MobileProfileListEntry[];
+      nextLists = await readJsonResponse(response, mobileProfileListSchema, 'Profile list update');
     }
     setProfileLists(nextLists);
   }, [connection, isServerOffline]);
@@ -2038,8 +2034,6 @@ function AppRoot() {
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
   }, [isServerOffline, progress, resolveMobileDetailItem]);
 
-  const streamOptionsKey = useMemo(() => JSON.stringify(streamOptions), [streamOptions]);
-
   const player = useVideoPlayer(null, (nextPlayer) => {
     nextPlayer.loop = false;
     nextPlayer.timeUpdateEventInterval = 0.5;
@@ -2056,6 +2050,44 @@ function AppRoot() {
     });
   };
 
+  const connectionBaseUrl = connection?.baseUrl;
+  const connectionDeviceToken = connection?.deviceToken;
+  const connectionSelectionRevision = connection?.selectionRevision;
+  const syncPlaybackProgress = useCallback(async (target = playTarget) => {
+    if (!connectionBaseUrl || !connectionDeviceToken || !target) return;
+    let position: number;
+    let duration: number;
+    try {
+      position = Number(player.currentTime || 0);
+      duration = Number(player.duration || 0);
+    } catch {
+      return;
+    }
+    if (!Number.isFinite(position) || position <= 0) return;
+
+    try {
+      const response = await mobileLanClient.saveProgress(connectionBaseUrl, connectionDeviceToken, {
+        mediaId: filePathFromUrl(target.streamPath),
+        position,
+        duration: Number.isFinite(duration) ? duration : 0,
+        selectionRevision: connectionSelectionRevision,
+      });
+      if (!response.ok) return;
+
+      const stored = await readJsonResponse(response, mobileStoredProgressSchema, 'Playback progress');
+      const playedAt = Date.now();
+      setProgress((current) => ({
+        ...current,
+        [filePathFromUrl(target.streamPath)]: stored,
+      }));
+      setConnection((current) => current
+        ? { ...current, library: libraryWithPlayedItem(current.library, target.streamPath, playedAt) }
+        : current);
+    } catch {
+      // Progress sync should never interrupt playback.
+    }
+  }, [connectionBaseUrl, connectionDeviceToken, connectionSelectionRevision, playTarget, player]);
+
   useEffect(() => {
     if (playbackUrl) {
       shouldAutoplayRef.current = true;
@@ -2065,8 +2097,7 @@ function AppRoot() {
       shouldAutoplayRef.current = false;
       pendingSeekRef.current = 0;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playbackUrl]);
+  }, [playbackUrl, playTarget?.startPosition, streamOptions.startSeconds]);
 
   useEffect(() => {
     const currentFilePath = playTarget ? filePathFromUrl(playTarget.streamPath) : null;
@@ -2208,10 +2239,7 @@ function AppRoot() {
       sourceChangeSubscription?.remove?.();
       endSubscription?.remove?.();
     };
-    // The listener intentionally captures the current progress callback for this
-    // player session instead of re-registering on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection?.library, playbackUrl, playTarget, player, progress, streamOptions.forceTranscode]);
+  }, [connection?.library, playbackUrl, playTarget, player, progress, streamOptions.forceTranscode, syncPlaybackProgress]);
 
   useEffect(() => {
     if (!playbackUrl) return;
@@ -2258,7 +2286,7 @@ function AppRoot() {
           options,
           connection.selectionRevision,
         );
-        const result = (await response.json()) as ApiResult<HlsSession>;
+        const result = await readJsonResponse(response, hlsSessionResultSchema, 'HLS session');
         if (!response.ok || !result.ok || !result.data?.playlistUrl) {
           if (!cancelled) {
             setPlaybackUrl(null);
@@ -2281,50 +2309,13 @@ function AppRoot() {
     return () => {
       cancelled = true;
     };
-    // streamOptionsKey is the stable serialized dependency for this preparation flow.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, streamOptionsKey, streamRetryNonce]);
+  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, streamOptions, streamRetryNonce]);
 
   const retryPlayback = useCallback(() => {
     setPlaybackFailure(null);
     setPlaybackUrl(null);
     setStreamRetryNonce((current) => current + 1);
   }, []);
-
-  async function syncPlaybackProgress(target = playTarget) {
-    if (!connection || !target) return;
-    let position: number;
-    let duration: number;
-    try {
-      position = Number(player.currentTime || 0);
-      duration = Number(player.duration || 0);
-    } catch {
-      return; // player already torn down — nothing to report
-    }
-    if (!Number.isFinite(position) || position <= 0) return;
-
-    try {
-      const response = await mobileLanClient.saveProgress(connection.baseUrl, connection.deviceToken, {
-          mediaId: filePathFromUrl(target.streamPath),
-          position,
-          duration: Number.isFinite(duration) ? duration : 0,
-          selectionRevision: connection.selectionRevision,
-      });
-      if (response.ok) {
-        const stored = (await response.json()) as StoredProgress;
-        const playedAt = Date.now();
-        setProgress((current) => ({
-          ...current,
-          [filePathFromUrl(target.streamPath)]: stored,
-        }));
-        setConnection((current) => current
-          ? { ...current, library: libraryWithPlayedItem(current.library, target.streamPath, playedAt) }
-          : current);
-      }
-    } catch {
-      // Progress sync should never interrupt playback.
-    }
-  }
 
   const closePlayer = useCallback(async () => {
     if (closingPlayerRef.current) return;
@@ -2387,9 +2378,7 @@ function AppRoot() {
     } finally {
       closingPlayerRef.current = false;
     }
-    // closePlayer intentionally keeps its current player-session callback stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKind, catalogCacheKeyFor, detailItem?.id, itemsById, playTarget, playbackFailure, player]);
+  }, [activeKind, catalogCacheKeyFor, detailItem?.id, itemsById, playTarget, playbackFailure, player, syncPlaybackProgress]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -2422,9 +2411,7 @@ function AppRoot() {
       void syncPlaybackProgress(playTarget);
     }, 15000);
     return () => clearInterval(interval);
-    // The interval is keyed to the active player session, not callback identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playTarget, playbackUrl, connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, player]);
+  }, [playTarget, playbackUrl, syncPlaybackProgress]);
 
   function invalidateCredentialRefresh(): void {
     credentialRefreshKeyRef.current = '';
@@ -2436,7 +2423,7 @@ function AppRoot() {
     try {
       const response = await mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken);
       if (!response.ok) return;
-      setProgress((await response.json()) as Record<string, StoredProgress>);
+      setProgress(await readJsonResponse(response, mobileProgressMapSchema, 'Playback progress'));
     } catch {
       // Progress is additive UI state; pairing and browsing should still work without it.
     }
@@ -2453,8 +2440,7 @@ function AppRoot() {
       const currentDeviceName = mobileDeviceName();
       const response = await mobileLanClient.refreshCredentials(saved.baseUrl, saved.refreshToken, currentDeviceName);
       if (!response.ok) throw new MobileCredentialRefreshError(response.status);
-      const payload = (await response.json()) as Pick<PairResponse,
-        'accessToken' | 'accessTokenExpiresAt' | 'refreshToken' | 'refreshTokenExpiresAt'>;
+      const payload = await readJsonResponse(response, refreshedCredentialsSchema, 'Credential refresh');
       const updated: SavedConnection = {
         ...saved,
         deviceToken: payload.accessToken,
@@ -2505,13 +2491,13 @@ function AppRoot() {
       if (response.status === 304) return { status: 'not-modified' };
       if (response.status === 401) return { status: 'unauthorized' };
       if (response.status === 409) {
-        const payload = await response.clone().json().catch(() => null) as { error?: string; status?: string } | null;
+        const payload = await readErrorResponse(response.clone(), 'Legacy library');
         if (payload?.error === 'profile_required' || payload?.status === 'profile_required') return { status: 'profile-required' };
       }
       if (!response.ok) throw new Error(`Desktop sharing is unavailable (${response.status}).`);
       return {
         status: 'ok',
-        library: await response.json() as LibraryPayload,
+        library: await readJsonResponse(response, mobileLibrarySchema, 'Legacy library'),
         etag: response.headers.get('ETag') || '',
         transport: 'legacy',
       };
@@ -2527,12 +2513,12 @@ function AppRoot() {
     if (response.status === 304) return { status: 'not-modified' };
     if (response.status === 401) return { status: 'unauthorized' };
     if (response.status === 409) {
-      const payload = await response.clone().json().catch(() => null) as { error?: string; status?: string } | null;
+      const payload = await readErrorResponse(response.clone(), 'Library index');
       if (payload?.error === 'profile_required' || payload?.status === 'profile_required') return { status: 'profile-required' };
     }
     let unsupportedCompactPayload = false;
     if (response.ok) {
-      const index = await response.json() as MobileLibraryIndexPayload;
+      const index = await readJsonResponse(response, mobileLibraryIndexSchema, 'Library index');
       if (index.catalogVersion === 1 && Number.isSafeInteger(index.revision)) {
         return {
           status: 'ok',
@@ -2566,9 +2552,15 @@ function AppRoot() {
       mobileLanClient.getProfilePreferences(nextConnection.baseUrl, nextConnection.deviceToken),
       mobileLanClient.getProfileLists(nextConnection.baseUrl, nextConnection.deviceToken),
     ]);
-    const nextProgress = progressResponse.ok ? await progressResponse.json() as Record<string, StoredProgress> : {};
-    const nextPreferences = preferencesResponse.ok ? await preferencesResponse.json() as MobileProfilePreferences : null;
-    const nextLists = listsResponse.ok ? await listsResponse.json() as MobileProfileListEntry[] : [];
+    const nextProgress = progressResponse.ok
+      ? await readJsonResponse(progressResponse, mobileProgressMapSchema, 'Playback progress')
+      : {};
+    const nextPreferences = preferencesResponse.ok
+      ? await readJsonResponse(preferencesResponse, mobileProfilePreferencesSchema, 'Profile preferences')
+      : null;
+    const nextLists = listsResponse.ok
+      ? await readJsonResponse(listsResponse, mobileProfileListSchema, 'Profile lists')
+      : [];
     if (generation !== profileHydrationGenerationRef.current) return false;
     if (catalog.status !== 'ok') {
       if (catalog.status === 'profile-required') {
@@ -2618,14 +2610,14 @@ function AppRoot() {
       ...(pin ? { pin } : {}),
     });
     if (!response.ok) {
-      const payload = await response.json().catch(() => ({})) as { error?: string; retryAfterMs?: number };
+      const payload = await readErrorResponse(response, 'Profile selection');
       if (payload.error === 'profile_locked') {
         const wait = payload.retryAfterMs ? ` Try again in ${Math.ceil(payload.retryAfterMs / 1000)} seconds.` : '';
         throw new Error(`That PIN could not be accepted.${wait}`);
       }
       throw new Error('That profile could not be selected.');
     }
-    const payload = await response.json() as { profile: MobileProfile; active: MobileActiveProfile };
+    const payload = await readJsonResponse(response, mobileProfileSelectionSchema, 'Profile selection');
     if (selectionGeneration !== profileHydrationGenerationRef.current) return;
     await hydrateSelectedProfile(nextConnection, payload.profile, payload.active, selectionGeneration);
   }
@@ -2635,10 +2627,12 @@ function AppRoot() {
     if (!configResponse.ok) return false;
     const profilesResponse = await mobileLanClient.getProfiles(nextConnection.baseUrl, nextConnection.deviceToken);
     if (!profilesResponse.ok) return false;
-    const payload = await profilesResponse.json() as { profiles: MobileProfile[] };
+    const payload = await readJsonResponse(profilesResponse, mobileProfilesPayloadSchema, 'Profiles');
     setProfiles(payload.profiles);
     const activeResponse = await mobileLanClient.getActiveProfile(nextConnection.baseUrl, nextConnection.deviceToken);
-    const activeState = activeResponse.ok ? await activeResponse.json() as MobileActiveProfile : null;
+    const activeState = activeResponse.ok
+      ? await readJsonResponse(activeResponse, mobileActiveProfileSchema, 'Active profile')
+      : null;
     const selected = payload.profiles.find((profile) => profile.id === activeState?.profileId);
     if (selected && activeState?.automaticSignIn) {
       await hydrateSelectedProfile(nextConnection, selected, activeState || undefined);
@@ -2652,7 +2646,7 @@ function AppRoot() {
     try {
       const response = await mobileLanClient.getProfiles(nextConnection.baseUrl, nextConnection.deviceToken);
       if (!response.ok) return;
-      const payload = await response.json() as { profiles: MobileProfile[] };
+      const payload = await readJsonResponse(response, mobileProfilesPayloadSchema, 'Profiles');
       setProfiles(payload.profiles);
       setActiveProfile((current) => current
         ? payload.profiles.find((profile) => profile.id === current.id) || current
@@ -2700,7 +2694,7 @@ function AppRoot() {
     if (appStateRef.current !== 'active' || reconnectingSavedConnectionRef.current) return false;
     reconnectingSavedConnectionRef.current = true;
     try {
-      const certFingerprint = String((saved as SavedConnection & { certFingerprint?: string }).certFingerprint || '');
+      const certFingerprint = saved.certFingerprint;
       await configureSecureLanTransport(saved.baseUrl, certFingerprint);
       let activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
         || saved.clientDeviceName !== mobileDeviceName()
@@ -2811,17 +2805,15 @@ function AppRoot() {
       });
       if (host && response.status === 202) {
         setShareCode('');
-        const approval = await readJsonResponse<LanPairApprovalRequest>(
+        const approval = await readJsonResponse(
           response,
-          'The desktop did not return a valid approval request.',
+          mobilePairApprovalRequestSchema,
+          'Pairing approval',
         );
         response = await waitForPairingApproval(nextBaseUrl, approval);
       }
       if (!response.ok) {
-        const failure = await readJsonResponse<{ error?: string; message?: string; status?: string }>(
-          response,
-          `Could not pair with the desktop app (${response.status}).`,
-        );
+        const failure = await readErrorResponse(response, 'Pairing');
         const failureMessage = failure.message || failure.error;
         if (response.status === 403 && failure.status === 'denied') {
           throw new Error('The desktop denied this connection. Tap Connect to request access again.');
@@ -2840,7 +2832,7 @@ function AppRoot() {
         throw new Error(failureMessage || `Could not pair with the desktop app (${response.status}).`);
       }
 
-      const payload = (await response.json()) as PairResponse;
+      const payload = await readJsonResponse(response, mobilePairResponseSchema, 'Pairing');
       const discoveredPairHost = host || discoveredHosts.find((candidate) => candidate.baseUrl === nextBaseUrl);
       const certFingerprint = normalizeCertFingerprint(payload.certFingerprint);
       const discoveredFingerprint = normalizeCertFingerprint(discoveredPairHost?.certFingerprint);
@@ -3232,7 +3224,7 @@ function AppRoot() {
     if (refreshedItem && catalog.transport === 'compact' && catalog.revision !== undefined) {
       const detailResponse = await mobileLanClient.getLibraryItem(connection.baseUrl, connection.deviceToken, itemId);
       if (detailResponse.ok) {
-        const payload = await detailResponse.json() as MobileLibraryItemDetailsPayload;
+        const payload = await readJsonResponse(detailResponse, mobileLibraryItemDetailsSchema, 'Library item details');
         if (activeCatalogIdentityRef.current !== requestIdentity) return;
         if (payload.catalogVersion === 1 && payload.revision === catalog.revision) refreshedItem = payload.item;
       }
@@ -3260,14 +3252,11 @@ function AppRoot() {
         item.id,
         connection.selectionRevision,
       );
-      const result = await readJsonResponse<OfficialMetadataCandidate[] | { error?: string }>(
-        response,
-        `Could not load poster choices (${response.status}).`,
-      );
-      if (!response.ok || !Array.isArray(result)) {
-        const message = Array.isArray(result) ? '' : result.error;
-        throw new Error(message || `Could not load poster choices (${response.status}).`);
+      if (!response.ok) {
+        const failure = await readErrorResponse(response, 'Poster choices');
+        throw new Error(failure.error || failure.message || `Could not load poster choices (${response.status}).`);
       }
+      const result = await readJsonResponse(response, officialMetadataCandidatesSchema, 'Poster choices');
       setPosterCandidateSheet({ item, candidates: result });
     } catch (nextError) {
       setArtworkRefreshError(nextError instanceof Error ? nextError.message : 'Poster refresh failed.');
@@ -3293,10 +3282,7 @@ function AppRoot() {
         candidate,
         connection.selectionRevision,
       );
-      const result = await readJsonResponse<OfficialArtworkResponse>(
-        response,
-        `Could not apply poster (${response.status}).`,
-      );
+      const result = await readJsonResponse(response, officialArtworkResponseSchema, 'Apply poster');
       if (!response.ok || result.error) {
         throw new Error(result.error || `Could not apply poster (${response.status}).`);
       }
@@ -3452,7 +3438,7 @@ function AppRoot() {
                     }
                     void mobileLanClient.setAutomaticSignIn(connection.baseUrl, connection.deviceToken, enabled).then(async (response) => {
                       if (!response.ok) throw new Error('Automatic sign-in update failed.');
-                      const state = await response.json() as MobileActiveProfile;
+                      const state = await readJsonResponse(response, mobileActiveProfileSchema, 'Automatic sign-in');
                       setAutomaticProfileSignIn(state.automaticSignIn);
                       if (!state.automaticSignIn) void clearMobileOfflineSnapshot(connection.hostDeviceId);
                     }).catch(() => {
@@ -5464,7 +5450,9 @@ function PlayerContent({
     if (!baseUrl || !deviceToken || !preferenceScope) return () => { cancelled = true; };
 
     mobileLanClient.getTrackPreferences(baseUrl, deviceToken, preferenceScope)
-      .then((response) => (response.ok ? response.json() as Promise<PlaybackTrackPreferences> : {}))
+      .then((response) => (response.ok
+        ? readJsonResponse(response, playbackTrackPreferencesSchema, 'Playback track preferences')
+        : {}))
       .then((preferences) => {
         if (!cancelled) setTrackPreferences(preferences || {});
       })
@@ -5498,7 +5486,7 @@ function PlayerContent({
           controller.signal,
         );
         if (!response.ok) throw new Error(`Skip marker lookup failed (${response.status}).`);
-        const payload = await response.json() as { segments?: MediaSegment[] };
+        const payload = await readJsonResponse(response, mediaSegmentsPayloadSchema, 'Skip markers');
         if (cancelled) return;
         const segments = Array.isArray(payload.segments) ? payload.segments : [];
         setMediaSegments(segments);
@@ -5636,13 +5624,13 @@ function PlayerContent({
     seekToSeconds(Math.min(duration, Math.max(0, fraction * duration)));
   };
 
-  const showGestureLevel = (kind: PlayerVerticalGesture, value: number) => {
+  const showGestureLevel = useCallback((kind: PlayerVerticalGesture, value: number) => {
     setGestureLevel({ kind, value });
     if (gestureHintTimerRef.current) clearTimeout(gestureHintTimerRef.current);
     gestureHintTimerRef.current = setTimeout(() => setGestureLevel(null), 700);
-  };
+  }, []);
 
-  const setPlayerVolume = (value: number) => {
+  const setPlayerVolume = useCallback((value: number) => {
     const nextValue = clamp01(value);
     volumeRef.current = nextValue;
     try {
@@ -5652,14 +5640,14 @@ function PlayerContent({
       // Volume changes can be rejected while the native player is loading.
     }
     showGestureLevel('volume', nextValue);
-  };
+  }, [player, showGestureLevel]);
 
-  const setPlayerBrightness = (value: number) => {
+  const setPlayerBrightness = useCallback((value: number) => {
     const nextValue = clamp01(value);
     brightnessRef.current = nextValue;
     void Brightness.setBrightnessAsync(nextValue).catch(() => {});
     showGestureLevel('brightness', nextValue);
-  };
+  }, [showGestureLevel]);
 
   const playerPanResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_, gesture) => (
@@ -5690,9 +5678,7 @@ function PlayerContent({
     onPanResponderTerminate: () => {
       gestureStateRef.current = { kind: null, startValue: 0, started: false };
     },
-    // Gesture handlers intentionally use the current render's player controls.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [playerWidth, player]);
+  }), [playerWidth, setPlayerBrightness, setPlayerVolume]);
 
   const toggleMenu = (nextMenu: 'video' | 'speed' | 'audio' | 'subtitles') => {
     bumpControls();
@@ -5709,7 +5695,11 @@ function PlayerContent({
     setPlaybackRate(rate);
   };
 
-  const streamOptionsForSelection = (audioKey: string, subtitleKey: string, startSeconds: number): StreamOptions | null => {
+  const streamOptionsForSelection = useCallback((
+    audioKey: string,
+    subtitleKey: string,
+    startSeconds: number,
+  ): StreamOptions | null => {
     const audioOption = audioOptions.find((option) => option.key === audioKey);
     const subtitleOption = subtitleOptions.find((option) => option.key === subtitleKey);
     const options: StreamOptions = {};
@@ -5739,7 +5729,7 @@ function PlayerContent({
       forceTranscode: true,
       ...(startSeconds > 2 ? { startSeconds } : {}),
     };
-  };
+  }, [audioOptions, subtitleFontSize, subtitleOptions, target.transcode]);
 
   const requestSelectionStream = (audioKey: string, subtitleKey: string) => {
     const startSeconds = Number(player.currentTime || position || 0);
@@ -5763,7 +5753,7 @@ function PlayerContent({
     onStreamOptionsChange(nextOptions || {});
   };
 
-  const applyNativeTrackSelection = (audioKey: string, subtitleKey: string) => {
+  const applyNativeTrackSelection = useCallback((audioKey: string, subtitleKey: string) => {
     const audioOption = audioOptions.find((option) => option.key === audioKey);
     const subtitleOption = subtitleOptions.find((option) => option.key === subtitleKey);
     const hasServerSubtitle = Boolean(subtitleOption?.localTrack || subtitleOption?.sidecar);
@@ -5789,7 +5779,7 @@ function PlayerContent({
         // Track selection can be rejected while the stream is loading.
       }
     }
-  };
+  }, [audioOptions, localAudioTracks.length, localSubtitleTracks.length, player, subtitleOptions, target.subtitles?.length]);
 
   useEffect(() => {
     if (!trackPreferences.audio && !trackPreferences.subtitle) return;
@@ -5822,10 +5812,10 @@ function PlayerContent({
     applyNativeTrackSelection(nextAudioKey, nextSubtitleKey);
     // Track application intentionally runs once per resolved option set; the
     // helper functions are local to that player render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeAudioKey,
     activeSubtitleKey,
+    applyNativeTrackSelection,
     audioOptions,
     localAudioTracks.length,
     localSubtitleTracks.length,

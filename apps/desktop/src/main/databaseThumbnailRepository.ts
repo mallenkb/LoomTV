@@ -1,0 +1,58 @@
+import type BetterSqlite3 from 'better-sqlite3';
+
+export type CachedThumbnail = {
+  bytes: Buffer;
+  mimeType: string;
+};
+
+const MAX_THUMBNAIL_CACHE_ENTRIES = 8_192;
+const MAX_THUMBNAIL_CACHE_BYTES = 256 * 1024 * 1024;
+
+export function createDatabaseThumbnailRepository(database: BetterSqlite3.Database) {
+  function getCachedThumbnail(cacheKey: string): CachedThumbnail | null {
+    const row = database.prepare(
+      'SELECT mime_type, image_bytes FROM thumbnail_cache WHERE cache_key = ?',
+    ).get(cacheKey) as { mime_type: string; image_bytes: Buffer } | undefined;
+    if (!row?.image_bytes?.byteLength) return null;
+    database.prepare('UPDATE thumbnail_cache SET updated_at = ? WHERE cache_key = ?').run(Date.now(), cacheKey);
+    return { bytes: Buffer.from(row.image_bytes), mimeType: row.mime_type };
+  }
+
+  function trimForIncoming(cacheKey: string, incomingBytes: number): void {
+    if (incomingBytes > MAX_THUMBNAIL_CACHE_BYTES) return;
+    const current = database.prepare(
+      'SELECT COUNT(*) AS count, COALESCE(SUM(length(image_bytes)), 0) AS bytes FROM thumbnail_cache WHERE cache_key <> ?',
+    ).get(cacheKey) as { count: number; bytes: number };
+    if (
+      current.count + 1 <= MAX_THUMBNAIL_CACHE_ENTRIES
+      && current.bytes + incomingBytes <= MAX_THUMBNAIL_CACHE_BYTES
+    ) return;
+
+    const rows = database.prepare(
+      'SELECT cache_key, length(image_bytes) AS bytes FROM thumbnail_cache WHERE cache_key <> ? ORDER BY updated_at ASC',
+    ).all(cacheKey) as Array<{ cache_key: string; bytes: number }>;
+    let count = current.count;
+    let bytes = current.bytes;
+    const remove = database.prepare('DELETE FROM thumbnail_cache WHERE cache_key = ?');
+    for (const row of rows) {
+      if (
+        count + 1 <= MAX_THUMBNAIL_CACHE_ENTRIES
+        && bytes + incomingBytes <= MAX_THUMBNAIL_CACHE_BYTES
+      ) break;
+      remove.run(row.cache_key);
+      count -= 1;
+      bytes -= row.bytes;
+    }
+  }
+
+  function saveCachedThumbnail(cacheKey: string, bytes: Buffer, mimeType = 'image/jpeg'): void {
+    if (!cacheKey || bytes.byteLength === 0 || bytes.byteLength > MAX_THUMBNAIL_CACHE_BYTES) return;
+    trimForIncoming(cacheKey, bytes.byteLength);
+    database.prepare(`
+      INSERT OR REPLACE INTO thumbnail_cache (cache_key, mime_type, image_bytes, updated_at)
+      VALUES (?, ?, ?, ?)
+    `).run(cacheKey, mimeType, bytes, Date.now());
+  }
+
+  return { getCachedThumbnail, saveCachedThumbnail };
+}

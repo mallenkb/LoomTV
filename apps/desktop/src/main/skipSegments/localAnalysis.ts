@@ -4,6 +4,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { inflateSync, deflateSync } from 'node:zlib';
+import { z } from 'zod';
+import { parseRequiredJson } from '../runtimeValidation.ts';
 import {
   getAuxiliaryFingerprint,
   getMediaFingerprint,
@@ -120,14 +122,22 @@ function encodeFingerprint(value: FingerprintWindow): string {
   return deflateSync(Buffer.from(JSON.stringify(value))).toString('base64');
 }
 
+const fingerprintWindowSchema = z.object({
+  frames: z.array(z.number().finite()).min(1).max(500_000),
+  durationMs: z.number().finite(),
+  windowStartMs: z.number().finite(),
+});
+const fpcalcOutputSchema = z.object({
+  fingerprint: z.array(z.number().finite()).optional(),
+  duration: z.number().finite().optional(),
+});
+
 function decodeFingerprint(value: string): FingerprintWindow {
-  const parsed = JSON.parse(inflateSync(Buffer.from(value, 'base64'), { maxOutputLength: MAX_OUTPUT_BYTES }).toString('utf8')) as Partial<FingerprintWindow>;
-  if (!Array.isArray(parsed.frames) || !parsed.frames.length || parsed.frames.length > 500_000
-    || parsed.frames.some((frame) => !Number.isFinite(frame))
-    || !Number.isFinite(parsed.durationMs) || !Number.isFinite(parsed.windowStartMs)) {
-    throw new Error('Cached fingerprint data is invalid.');
-  }
-  return parsed as FingerprintWindow;
+  return parseRequiredJson(
+    inflateSync(Buffer.from(value, 'base64'), { maxOutputLength: MAX_OUTPUT_BYTES }).toString('utf8'),
+    fingerprintWindowSchema,
+    'Cached fingerprint data',
+  );
 }
 
 type FingerprintType = 'intro' | 'credits' | 'recap' | 'preview';
@@ -183,7 +193,7 @@ async function generateFingerprint(
   ffmpeg.stdout.pipe(fpcalc.stdin);
   ffmpeg.stderr?.resume();
   const output = await collectOutput(fpcalc, MAX_OUTPUT_BYTES, 'Fingerprint helper');
-  const parsed = JSON.parse(output.toString('utf8')) as { fingerprint?: number[]; duration?: number };
+  const parsed = parseRequiredJson(output.toString('utf8'), fpcalcOutputSchema, 'fpcalc output');
   if (!Array.isArray(parsed.fingerprint) || parsed.fingerprint.length === 0) throw new Error('fpcalc returned no raw fingerprint frames.');
   const value: FingerprintWindow = {
     frames: parsed.fingerprint.map((frame) => Number(frame) >>> 0),

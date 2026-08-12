@@ -10,6 +10,7 @@ import {
 } from './sharedProbeCache';
 import type { MetadataProviderIds } from './mediaTags';
 import type { LocalMediaDetails, LocalMediaTrack } from './metadata/types';
+import { parseFfprobeOutput } from './ffprobeValidation.ts';
 
 export interface ProbeMediaFileResult {
   localMetadata?: LocalMediaDetails;
@@ -113,29 +114,7 @@ function probeMediaFileFromOutput(
       ffprobeOptions,
     );
 
-    const parsed = JSON.parse(raw) as {
-      format?: { duration?: string; bit_rate?: string; format_name?: string; tags?: Record<string, string> };
-      streams?: Array<{
-        index?: number;
-        codec_type?: string;
-        codec_name?: string;
-        profile?: string;
-        pix_fmt?: string;
-        color_transfer?: string;
-        color_primaries?: string;
-        color_space?: string;
-        width?: number;
-        height?: number;
-        channels?: number;
-        disposition?: Record<string, number>;
-        tags?: Record<string, string>;
-      }>;
-      chapters?: Array<{
-        start_time?: string;
-        end_time?: string;
-        tags?: Record<string, string>;
-      }>;
-    };
+    const parsed = parseFfprobeOutput(raw);
 
     const embeddedThumbnailStream = parsed.streams?.find((stream) =>
       stream.index !== undefined

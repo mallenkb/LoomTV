@@ -6,6 +6,8 @@ export type LanLibraryPayload<TMediaItem> = {
   others?: TMediaItem[];
 };
 
+export * from './schemas';
+
 export type LanCatalogVersion = 1;
 
 export type LanLibraryPlaybackReference = {

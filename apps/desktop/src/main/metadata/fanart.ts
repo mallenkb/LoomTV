@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 const FANART_BASE = 'https://webservice.fanart.tv/v3';
 
 type FanartImage = {
@@ -17,6 +19,18 @@ interface FanartResponse {
   clearlogo?: FanartImage[];
 }
 
+const fanartImageSchema: z.ZodType<FanartImage> = z.object({
+  url: z.string().optional(),
+  lang: z.string().optional(),
+  likes: z.union([z.string(), z.number().finite()]).optional(),
+});
+const fanartResponseSchema: z.ZodType<FanartResponse> = z.object({
+  hdmovielogo: z.array(fanartImageSchema).optional(),
+  movielogo: z.array(fanartImageSchema).optional(),
+  hdtvlogo: z.array(fanartImageSchema).optional(),
+  clearlogo: z.array(fanartImageSchema).optional(),
+});
+
 async function fetchFanartJson(path: string, apiKey?: string): Promise<FanartResponse | null> {
   const key = normalizeFanartKey(apiKey);
   if (!key) return null;
@@ -27,12 +41,11 @@ async function fetchFanartJson(path: string, apiKey?: string): Promise<FanartRes
   const response = await safeFetch(url, {}, { allowedHosts: ['webservice.fanart.tv'], retries: 2 });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Fanart.tv request failed with ${response.status}`);
-  return (await response.json()) as FanartResponse;
+  return fanartResponseSchema.parse(await response.json());
 }
 
-function imageUrls(images: unknown): string[] {
-  const entries = Array.isArray(images) ? images as FanartImage[] : [];
-  const sorted = entries
+function imageUrls(images: FanartImage[]): string[] {
+  const sorted = images
     .filter((image) => image?.url)
     .sort((a, b) => (Number(b.likes) || 0) - (Number(a.likes) || 0))
     .sort((a, b) => {

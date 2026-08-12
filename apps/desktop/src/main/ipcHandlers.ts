@@ -27,7 +27,7 @@ import type {
 } from '../shared/desktopProtocol.ts';
 import type { TranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
 import { buildNetworkStatus, ffmpegAvailability } from './ipcHandlerPolicy.ts';
-import { sanitizeRendererSettingsPatch } from './rendererSettings.ts';
+import { rendererSettingsPatchSchema, sanitizeRendererSettingsPatch } from './rendererSettings.ts';
 import { serializeStremioPluginError } from './stremioPluginWire.ts';
 import {
   commandMpvPlayback,
@@ -47,8 +47,198 @@ import {
   setLibVlcPlaybackViewport,
   syncLibVlcPlaybackSurface,
 } from './libvlcPlayback.ts';
-import type { LibVlcCommand, LibVlcStartOptions } from './libvlcPlayback.ts';
+import type { LibVlcStartOptions } from './libvlcPlayback.ts';
 import type { PlaybackViewport } from '../shared/playbackProtocol.ts';
+import { z } from 'zod';
+
+const finiteNumber = z.number().finite();
+const nonEmptyString = z.string().trim().min(1);
+const subtitleStyleSchema = z.object({
+  fontSize: finiteNumber,
+  color: z.string(),
+  borderColor: z.string(),
+  borderWidth: finiteNumber,
+  backgroundColor: z.string(),
+  position: finiteNumber,
+});
+const playbackStartOptionsSchema = z.object({
+  startSeconds: finiteNumber.nonnegative().optional(),
+  volume: finiteNumber.optional(),
+  muted: z.boolean().optional(),
+  speed: finiteNumber.positive().optional(),
+  audioDelay: finiteNumber.optional(),
+  subtitleDelay: finiteNumber.optional(),
+  subtitleStyle: subtitleStyleSchema.optional(),
+  subtitleFiles: z.array(z.object({
+    path: nonEmptyString,
+    source: z.enum(['sidecar', 'opensubtitles']),
+  })).optional(),
+  nativeSubtitles: z.boolean().optional(),
+});
+const playbackCommandSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('set-paused'), paused: z.boolean() }),
+  z.object({ type: z.literal('seek'), position: finiteNumber.nonnegative() }),
+  z.object({ type: z.literal('set-volume'), volume: finiteNumber }),
+  z.object({ type: z.literal('set-muted'), muted: z.boolean() }),
+  z.object({ type: z.literal('set-speed'), speed: finiteNumber.positive() }),
+  z.object({ type: z.literal('set-video-track'), trackId: finiteNumber.nullable() }),
+  z.object({ type: z.literal('set-audio-track'), trackId: finiteNumber.nullable() }),
+  z.object({ type: z.literal('set-subtitle-track'), trackId: finiteNumber.nullable() }),
+  z.object({ type: z.literal('set-secondary-subtitle-track'), trackId: finiteNumber.nullable() }),
+  z.object({ type: z.literal('set-subtitle-delay'), seconds: finiteNumber }),
+  z.object({ type: z.literal('set-audio-delay'), seconds: finiteNumber }),
+  z.object({ type: z.literal('set-subtitle-style'), ...subtitleStyleSchema.shape }),
+  z.object({ type: z.literal('set-video-aspect'), aspect: z.string().nullable() }),
+  z.object({ type: z.literal('set-video-crop'), crop: z.string().nullable() }),
+  z.object({ type: z.literal('set-video-rotation'), degrees: finiteNumber }),
+]);
+const playbackViewportSchema = z.object({
+  x: finiteNumber,
+  y: finiteNumber,
+  width: finiteNumber.positive().max(100_000),
+  height: finiteNumber.positive().max(100_000),
+});
+const mpvStartOptionsSchema = playbackStartOptionsSchema.omit({ nativeSubtitles: true });
+const libraryScanOptionsSchema = z.object({
+  force: z.boolean().optional(),
+  mode: z.enum(['quick', 'metadata', 'full']).optional(),
+});
+const libraryFolderKindSchema = z.enum(['movies', 'tvShows', 'anime', 'others']);
+const metadataKeysSchema = z.record(z.string(), z.string());
+const remoteLibraryRequestSchema = z.object({
+  method: z.enum(['GET', 'POST', 'PATCH', 'PUT', 'DELETE']).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  body: z.string().optional(),
+});
+const profileCreateSchema = z.object({
+  name: z.string(),
+  avatarKey: z.string().optional(),
+  colorKey: z.string().optional(),
+  type: z.enum(['standard', 'kid']).optional(),
+});
+const profileUpdateSchema = profileCreateSchema.partial();
+const profilePreferencesSchema = z.object({
+  appThemeMode: z.enum(['dark', 'light']).optional(),
+  appThemeColor: z.enum(['orange', 'yellow', 'red', 'blue', 'twitch']).optional(),
+  appDarkTheme: z.literal('black').optional(),
+  appLoaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
+  appHomeStyle: z.enum(['default', 'modern']).optional(),
+  appModernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
+  sidebarNavOrder: z.array(z.string()).optional(),
+  autoplayNextEnabled: z.boolean().optional(),
+  playbackSkipBackSeconds: finiteNumber.optional(),
+  playbackSkipForwardSeconds: finiteNumber.optional(),
+});
+const profileRestrictionsInputSchema = z.object({
+  country: z.enum(['US', 'GB', 'CA', 'AU']),
+  maximumAge: finiteNumber.nullable(),
+  allowUnrated: z.boolean(),
+  allowedFolders: z.array(z.string()),
+});
+const profileListKindSchema = z.enum(['watchlist', 'favorite', 'watched']);
+const progressImportValueSchema = z.union([
+  finiteNumber,
+  z.object({
+    position: finiteNumber.optional(),
+    duration: finiteNumber.optional(),
+    updatedAt: finiteNumber.optional(),
+  }),
+]);
+const trackPreferenceSchema = z.object({
+  enabled: z.boolean(),
+  index: finiteNumber.optional(),
+  language: z.string().optional(),
+  title: z.string().optional(),
+  codec: z.string().optional(),
+  forced: z.boolean().optional(),
+});
+const playbackTrackPreferencesSchema = z.object({
+  audio: trackPreferenceSchema.optional(),
+  subtitle: trackPreferenceSchema.optional(),
+});
+const mediaSegmentTypeSchema = z.enum(['intro', 'recap', 'outro', 'credits', 'preview']);
+const mediaSegmentRequestSchema = z.object({
+  mediaId: nonEmptyString.max(240),
+  season: finiteNumber.nonnegative().optional(),
+  episode: finiteNumber.nonnegative().optional(),
+});
+const manualMediaSegmentSchema = mediaSegmentRequestSchema.extend({
+  candidateId: z.string().max(240).optional(),
+  type: mediaSegmentTypeSchema,
+  startMs: finiteNumber.nonnegative(),
+  endMs: finiteNumber.nonnegative().nullable(),
+});
+const artworkCandidateSchema = z.object({
+  id: nonEmptyString,
+  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'Jikan', 'AniList']),
+  title: z.string(),
+  year: finiteNumber.optional(),
+  genres: z.array(z.string()).optional(),
+  episodeCount: finiteNumber.nonnegative().optional(),
+  episodePreview: z.array(z.string()).optional(),
+  format: z.string().optional(),
+  thumbnail: z.string().optional(),
+  cover: z.string().optional(),
+  summary: z.string().optional(),
+  rating: finiteNumber.optional(),
+  posterCandidates: z.array(z.string()).optional(),
+  backdropCandidates: z.array(z.string()).optional(),
+  logoCandidates: z.array(z.string()).optional(),
+  logo: z.string().optional(),
+}).passthrough();
+const transcodeOptionsSchema = z.object({
+  preset: z.enum(['auto', 'software', 'videotoolbox', 'nvenc', 'qsv', 'vaapi', 'amf', 'rkmpp']).optional(),
+  targetVideoCodec: z.enum(['h264', 'hevc', 'av1']).optional(),
+  softwareVideoEncoder: z.enum(['libx264', 'libx265', 'libsvtav1', 'libaom-av1']).optional(),
+  maxWidth: finiteNumber.positive().optional(),
+  maxHeight: finiteNumber.positive().optional(),
+  videoBitrateKbps: finiteNumber.positive().optional(),
+  audioBitrateKbps: finiteNumber.positive().optional(),
+  toneMap: z.boolean().optional(),
+  startSeconds: finiteNumber.nonnegative().optional(),
+  videoTrackIndex: finiteNumber.nonnegative().optional(),
+  audioTrackIndex: finiteNumber.nonnegative().optional(),
+  subtitleTrackIndex: finiteNumber.nonnegative().optional(),
+  subtitleStreamOrdinal: finiteNumber.nonnegative().optional(),
+  subtitleCodec: z.string().optional(),
+  subtitleFilePath: z.string().optional(),
+  secondarySubtitleTrackIndex: finiteNumber.nonnegative().optional(),
+  secondarySubtitleStreamOrdinal: finiteNumber.nonnegative().optional(),
+  secondarySubtitleCodec: z.string().optional(),
+  secondarySubtitleFilePath: z.string().optional(),
+  subtitleStyle: z.object({
+    delaySeconds: finiteNumber.optional(),
+    position: finiteNumber.optional(),
+    scale: finiteNumber.optional(),
+    fontSize: finiteNumber.optional(),
+    fontColor: z.string().optional(),
+    borderColor: z.string().optional(),
+    borderWidth: finiteNumber.optional(),
+    borderEnabled: z.boolean().optional(),
+    backgroundColor: z.string().optional(),
+    backgroundEnabled: z.boolean().optional(),
+  }).optional(),
+  forceTranscode: z.boolean().optional(),
+});
+const stremioExtraSchema = z.record(
+  z.string(),
+  z.union([z.string(), finiteNumber, z.boolean()]),
+);
+const stremioCatalogRequestSchema = z.object({
+  type: nonEmptyString,
+  catalogId: nonEmptyString,
+  filters: z.object({
+    query: z.string().optional(),
+    genre: z.string().optional(),
+    year: z.string().optional(),
+  }).optional(),
+  extra: stremioExtraSchema.optional(),
+});
+const stremioMetaRequestSchema = z.object({
+  type: nonEmptyString,
+  id: nonEmptyString,
+  extra: stremioExtraSchema.optional(),
+});
 
 type IpcLibraryFolderKind = 'movies' | 'tvShows' | 'anime' | 'others';
 type IpcLibraryScanMode = 'quick' | 'metadata' | 'full';
@@ -299,20 +489,39 @@ export function registerIpcHandlers<
       event: IpcMainInvokeEvent,
       ...args: IpcContract[C]['args']
     ) => IpcContract[C]['result'] | Promise<IpcContract[C]['result']>,
+    argsSchema: z.ZodType<IpcContract[C]['args']>,
   ) => {
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
-      return listener(event, ...(args as IpcContract[C]['args']));
+      const validatedArgs = argsSchema.parse(args);
+      return listener(event, ...validatedArgs);
+    });
+  };
+
+  type NoArgChannel = {
+    [C in IpcInvokeChannel]: IpcContract[C]['args'] extends [] ? C : never;
+  }[IpcInvokeChannel];
+  const handleNoArgs = <C extends NoArgChannel>(
+    channel: C,
+    listener: (
+      event: IpcMainInvokeEvent,
+    ) => IpcContract[C]['result'] | Promise<IpcContract[C]['result']>,
+  ) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
+      z.tuple([]).parse(args);
+      return listener(event);
     });
   };
 
   const handleExperimental = (
     channel: string,
     listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown | Promise<unknown>,
+    argsSchema: z.ZodType<unknown[]>,
   ) => {
     ipcMain.handle(channel, (event, ...args) => {
       if (!deps.isTrustedSender(event)) throw new Error('Untrusted IPC sender.');
-      return listener(event, ...args);
+      return listener(event, ...argsSchema.parse(args));
     });
   };
 
@@ -324,6 +533,7 @@ export function registerIpcHandlers<
       event: IpcMainInvokeEvent,
       ...args: IpcContract[C]['args']
     ) => StremioPluginData<C> | Promise<StremioPluginData<C>>,
+    argsSchema: z.ZodType<IpcContract[C]['args']>,
   ) => {
     ipcMain.handle(channel, async (event, ...args) => {
       if (!deps.isTrustedSender(event)) {
@@ -336,8 +546,9 @@ export function registerIpcHandlers<
         } satisfies IpcContract[C]['result'];
       }
       try {
-        const data = await listener(event, ...(args as IpcContract[C]['args']));
-        return { ok: true, data } as IpcContract[C]['result'];
+        const validatedArgs = argsSchema.parse(args);
+        const data = await listener(event, ...validatedArgs);
+        return { ok: true, data };
       } catch (error) {
         return { ok: false, error: serializeStremioPluginError(error) } satisfies IpcContract[C]['result'];
       }
@@ -351,9 +562,9 @@ export function registerIpcHandlers<
     return queued;
   };
 
-  handle('library:get', () => deps.libraryForRenderer());
-  handle('library:get-index', () => deps.libraryIndexForRenderer());
-  handle('library:get-item', (_event, mediaId) => deps.libraryItemForRenderer(String(mediaId || '')));
+  handleNoArgs('library:get', () => deps.libraryForRenderer());
+  handleNoArgs('library:get-index', () => deps.libraryIndexForRenderer());
+  handle('library:get-item', (_event, mediaId) => deps.libraryItemForRenderer(mediaId), z.tuple([nonEmptyString]));
 
   handle('library:scan', async (event, options?: { force?: boolean; mode?: IpcLibraryScanMode }) => {
     deps.authorizeSettingsWrite();
@@ -387,7 +598,7 @@ export function registerIpcHandlers<
         progressPublisher.cancel();
       }
     });
-  });
+  }, z.tuple([libraryScanOptionsSchema.optional()]));
 
   handle('library:add-folder', async (_event, kind: string = 'movies') => {
     deps.authorizeSettingsWrite();
@@ -430,7 +641,7 @@ export function registerIpcHandlers<
       });
     }
     return null;
-  });
+  }, z.tuple([libraryFolderKindSchema.optional()]));
 
   handle('library:remove-folder', (_event, folderPath: string) => {
     deps.authorizeSettingsWrite();
@@ -438,7 +649,7 @@ export function registerIpcHandlers<
     const updated = deps.removeFolderFromLibrary(data, folderPath);
     deps.saveLibraryMutation(updated);
     return deps.libraryIndexForRenderer();
-  });
+  }, z.tuple([nonEmptyString]));
 
   handle('media:play', async (_event, filePath: string) => {
     try {
@@ -448,15 +659,15 @@ export function registerIpcHandlers<
     } catch {
       return false;
     }
-  });
+  }, z.tuple([nonEmptyString]));
 
-  handle('media:get-server-port', () => deps.getMediaServerPort());
+  handleNoArgs('media:get-server-port', () => deps.getMediaServerPort());
 
   // The renderer's loopback credential. It is delivered here, behind the same
   // sender and frame validation as every other channel, because an HTTP route
   // could only authenticate the caller by a header the caller writes — and any
   // local process can write it (audit A.2).
-  handle('renderer:session', () => ({
+  handleNoArgs('renderer:session', () => ({
     port: deps.getMediaServerPort(),
     localAccessToken: deps.localAccessToken,
   }));
@@ -485,7 +696,7 @@ export function registerIpcHandlers<
       playbackMode: playbackPlan.mode,
       decisionReason: playbackPlan.reason,
     };
-  });
+  }, z.tuple([nonEmptyString, transcodeOptionsSchema.optional()]));
 
   handle('media:get-subtitle-url', (_event, filePath: string, streamOrdinal?: number) => {
     deps.authorizeMediaPath(filePath);
@@ -493,14 +704,14 @@ export function registerIpcHandlers<
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (typeof streamOrdinal === 'number' && streamOrdinal >= 0) params.set('streamOrdinal', String(Math.floor(streamOrdinal)));
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/subtitle?${params.toString()}` };
-  });
+  }, z.tuple([nonEmptyString, finiteNumber.int().nonnegative().optional()]));
 
   handle('media:get-thumbnail', (_event, filePath: string, time?: string) => {
     deps.authorizeMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
     if (time) params.set('t', time);
     return { url: `http://127.0.0.1:${deps.getMediaServerPort()}/api/thumbnail?${params.toString()}` };
-  });
+  }, z.tuple([nonEmptyString, z.string().optional()]));
 
   handle('media:get-file-info', (_event, filePath: string) => {
     try {
@@ -512,57 +723,57 @@ export function registerIpcHandlers<
     } catch {
       return { size: 0, path: filePath, exists: false };
     }
-  });
+  }, z.tuple([nonEmptyString]));
 
-  handle('settings:get', () => deps.settingsForRenderer());
+  handleNoArgs('settings:get', () => deps.settingsForRenderer());
 
-  handleStremio('plugins:stremio:list', () => deps.listStremioPlugins());
-  handleStremio('plugins:stremio:available', () => deps.listAvailableStremioPlugins());
-  handleStremio('plugins:stremio:official', () => deps.listOfficialStremioAddons());
-  handleStremio('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId));
-  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')));
-  handleStremio('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')));
-  handleStremio('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')));
-  handleStremio('plugins:stremio:remove', (_event, addonId) => deps.removeStremioAddon(String(addonId || '')));
-  handleStremio('plugins:stremio:profile-access', (_event, profileId) => deps.listStremioProfileAccess(String(profileId || '')));
+  handleStremio('plugins:stremio:list', () => deps.listStremioPlugins(), z.tuple([]));
+  handleStremio('plugins:stremio:available', () => deps.listAvailableStremioPlugins(), z.tuple([]));
+  handleStremio('plugins:stremio:official', () => deps.listOfficialStremioAddons(), z.tuple([]));
+  handleStremio('plugins:stremio:review-official', (_event, officialId) => deps.reviewOfficialStremioAddon(officialId), z.tuple([z.enum(['cinemeta', 'opensubtitles-v3'])]));
+  handleStremio('plugins:stremio:review-url', (_event, manifestUrl) => deps.reviewStremioManifestUrl(String(manifestUrl || '')), z.tuple([z.string().url()]));
+  handleStremio('plugins:stremio:approve', (_event, addonId, reviewToken) => deps.approveStremioAddon(String(addonId || ''), String(reviewToken || '')), z.tuple([nonEmptyString, nonEmptyString]));
+  handleStremio('plugins:stremio:disable', (_event, addonId) => deps.disableStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
+  handleStremio('plugins:stremio:remove', (_event, addonId) => deps.removeStremioAddon(String(addonId || '')), z.tuple([nonEmptyString]));
+  handleStremio('plugins:stremio:profile-access', (_event, profileId) => deps.listStremioProfileAccess(String(profileId || '')), z.tuple([nonEmptyString]));
   handleStremio('plugins:stremio:set-profile-access', (_event, profileId, addonId, enabled) => deps.setStremioProfileAccess(
     String(profileId || ''),
     String(addonId || ''),
     enabled === true,
-  ));
-  handleStremio('plugins:stremio:catalog', (_event, addonId, request) => deps.fetchStremioCatalog(String(addonId || ''), request));
-  handleStremio('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request));
-  handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request));
-  handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')));
-  handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values));
-  handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit));
+  ), z.tuple([nonEmptyString, nonEmptyString, z.boolean()]));
+  handleStremio('plugins:stremio:catalog', (_event, addonId, request) => deps.fetchStremioCatalog(String(addonId || ''), request), z.tuple([nonEmptyString, stremioCatalogRequestSchema]));
+  handleStremio('plugins:stremio:meta', (_event, addonId, request) => deps.fetchStremioMeta(String(addonId || ''), request), z.tuple([nonEmptyString, stremioMetaRequestSchema]));
+  handleStremio('plugins:stremio:meta-item', (_event, request) => deps.fetchStremioMetaByItem(request), z.tuple([stremioMetaRequestSchema]));
+  handleStremio('plugins:stremio:configuration', (_event, addonId) => deps.getStremioAddonConfiguration(String(addonId || '')), z.tuple([nonEmptyString]));
+  handleStremio('plugins:stremio:save-configuration', (_event, addonId, values) => deps.saveStremioAddonConfiguration(String(addonId || ''), values), z.tuple([nonEmptyString, z.record(z.string(), z.unknown())]));
+  handleStremio('plugins:stremio:audit', (_event, addonId, limit) => deps.listStremioPluginAudit(String(addonId || ''), limit), z.tuple([nonEmptyString, finiteNumber.int().positive().max(1_000).optional()]));
 
   handle('settings:save', (_event, settings) => {
     deps.authorizeSettingsWrite();
     deps.saveSettings({
       ...deps.loadSettings(),
-      ...sanitizeRendererSettingsPatch(settings as Record<string, unknown>),
+      ...sanitizeRendererSettingsPatch(settings),
     });
     deps.onSettingsSaved?.();
     deps.syncLanAdvertisement();
     return true;
-  });
+  }, z.tuple([rendererSettingsPatchSchema]));
 
   handle('metadata:test-keys', (_event, keys: Record<string, string>) => {
     deps.authorizeSettingsWrite();
     return deps.testMetadataKeys(keys || {});
-  });
+  }, z.tuple([metadataKeysSchema]));
   handle('metadata:refresh-incomplete', (_event, mediaId: string) => {
     deps.authorizeSettingsWrite();
     return deps.refreshIncompleteMetadata(String(mediaId || ''));
-  });
-  handle('metadata:streaming-providers', (_event, mediaId: string) => deps.getStreamingProviders(String(mediaId || '')));
+  }, z.tuple([nonEmptyString]));
+  handle('metadata:streaming-providers', (_event, mediaId: string) => deps.getStreamingProviders(mediaId), z.tuple([nonEmptyString]));
 
-  handle('mpv:availability', () => mpvAvailability());
+  handleNoArgs('mpv:availability', () => mpvAvailability());
 
-  handle('mpv:refresh-availability', () => refreshMpvAvailability());
+  handleNoArgs('mpv:refresh-availability', () => refreshMpvAvailability());
 
-  handle('mpv:choose-executable', async () => {
+  handleNoArgs('mpv:choose-executable', async () => {
     deps.authorizeSettingsWrite();
     const result = await deps.showOpenFolderDialog({
       title: 'Choose mpv executable',
@@ -579,11 +790,10 @@ export function registerIpcHandlers<
     return refreshMpvAvailability();
   });
 
-  handle('mpv:reset-executable', () => {
+  handleNoArgs('mpv:reset-executable', () => {
     deps.authorizeSettingsWrite();
     const settings = deps.loadSettings();
-    const { mpvExecutablePath: _mpvExecutablePath, ...rest } = settings;
-    deps.saveSettings(rest as TSettings);
+    deps.saveSettings({ ...settings, mpvExecutablePath: undefined });
     deps.onSettingsSaved?.();
     return refreshMpvAvailability();
   });
@@ -596,21 +806,25 @@ export function registerIpcHandlers<
       deps.assertLocalMediaPath(subtitleFile.path);
     }
     return startMpvPlayback(event.sender, filePath, options);
-  });
+  }, z.tuple([nonEmptyString, mpvStartOptionsSchema.optional()]));
 
-  handle('mpv:command', (_event, sessionId, command) => commandMpvPlayback(sessionId, command));
+  handle(
+    'mpv:command',
+    (_event, sessionId, command) => commandMpvPlayback(sessionId, command),
+    z.tuple([nonEmptyString, playbackCommandSchema]),
+  );
 
-  handle('mpv:stop', (_event, sessionId) => stopMpvPlayback(sessionId));
+  handle('mpv:stop', (_event, sessionId) => stopMpvPlayback(sessionId), z.tuple([nonEmptyString]));
 
-  handleExperimental('libvlc:availability', () => libVlcAvailability());
+  handleExperimental('libvlc:availability', () => libVlcAvailability(), z.tuple([]));
 
-  handleExperimental('libvlc:refresh-availability', () => refreshLibVlcAvailability());
+  handleExperimental('libvlc:refresh-availability', () => refreshLibVlcAvailability(), z.tuple([]));
 
   handleExperimental('libvlc:start', (event, filePath, rawOptions) => {
     const mediaPath = String(filePath || '');
     deps.authorizeMediaPath(mediaPath);
     deps.assertLocalMediaPath(mediaPath);
-    const options = (rawOptions && typeof rawOptions === 'object' ? rawOptions : {}) as LibVlcStartOptions;
+    const options: LibVlcStartOptions = playbackStartOptionsSchema.parse(rawOptions ?? {});
     for (const subtitleFile of options.subtitleFiles || []) {
       const subtitlePath = String(subtitleFile?.path || '');
       deps.authorizeMediaPath(subtitlePath);
@@ -618,35 +832,30 @@ export function registerIpcHandlers<
       deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitlePath);
     }
     return startLibVlcPlayback(event.sender, mediaPath, options);
-  });
+  }, z.tuple([nonEmptyString, playbackStartOptionsSchema.optional()]));
 
   handleExperimental('libvlc:command', (_event, sessionId, command) =>
-    commandLibVlcPlayback(String(sessionId || ''), command as LibVlcCommand));
+    commandLibVlcPlayback(String(sessionId || ''), playbackCommandSchema.parse(command)),
+  z.tuple([nonEmptyString, playbackCommandSchema]));
 
   handleExperimental('libvlc:stop', (_event, sessionId) =>
-    stopLibVlcPlayback(sessionId ? String(sessionId) : undefined));
+    stopLibVlcPlayback(sessionId ? String(sessionId) : undefined), z.tuple([z.string().optional()]));
 
-  handleExperimental('libvlc:sync-surface', (event) => syncLibVlcPlaybackSurface(event.sender));
+  handleExperimental('libvlc:sync-surface', (event) => syncLibVlcPlaybackSurface(event.sender), z.tuple([]));
 
   handleExperimental('libvlc:set-fullscreen-transition', (event, transitioning, waitForFinalViewport) =>
     setLibVlcPlaybackFullscreenTransition(
       event.sender,
       Boolean(transitioning),
       waitForFinalViewport === undefined ? true : Boolean(waitForFinalViewport),
-    ));
+    ), z.tuple([z.boolean(), z.boolean().optional()]));
 
   handleExperimental('libvlc:set-viewport', (event, rawViewport) => {
-    const raw = rawViewport && typeof rawViewport === 'object' ? rawViewport as Partial<PlaybackViewport> : {};
-    const viewport = {
-      x: Number(raw.x),
-      y: Number(raw.y),
-      width: Number(raw.width),
-      height: Number(raw.height),
-    } satisfies PlaybackViewport;
-    if (![viewport.x, viewport.y, viewport.width, viewport.height].every(Number.isFinite)) return false;
-    if (viewport.x < -10_000 || viewport.y < -10_000 || viewport.width <= 0 || viewport.height <= 0 || viewport.width > 100_000 || viewport.height > 100_000) return false;
+    const result = playbackViewportSchema.safeParse(rawViewport);
+    if (!result.success || result.data.x < -10_000 || result.data.y < -10_000) return false;
+    const viewport: PlaybackViewport = result.data;
     return setLibVlcPlaybackViewport(event.sender, viewport);
-  });
+  }, z.tuple([playbackViewportSchema]));
 
   // The window uses titleBarStyle 'hiddenInset', so the macOS traffic lights
   // float over whatever is beneath them — in the player that is the video.
@@ -658,7 +867,7 @@ export function registerIpcHandlers<
     if (process.platform !== 'darwin') return false;
     ownerWindow.setWindowButtonVisibility(Boolean(visible));
     return true;
-  });
+  }, z.tuple([z.boolean()]));
 
   handleExperimental('window:set-fullscreen', async (event, enabled) => {
     const ownerWindow = BrowserWindow.fromWebContents(event.sender);
@@ -740,9 +949,9 @@ export function registerIpcHandlers<
         finish(false);
       }
     });
-  });
+  }, z.tuple([z.boolean()]));
 
-  handle('network:status', () => {
+  handleNoArgs('network:status', () => {
     const status = buildNetworkStatus(deps);
     return { ...status, deviceName: status.deviceName || os.hostname() };
   });
@@ -755,22 +964,23 @@ export function registerIpcHandlers<
       console.warn('[mdns] discover failed:', error);
       return [];
     }
-  });
+  }, z.tuple([finiteNumber.positive().max(30_000).optional()]));
 
   handle('network:remote-connect', (_event, baseUrl, code, certFingerprint) => {
     const settings = deps.loadSettings();
     return deps.connectRemoteLibrary(String(baseUrl || ''), String(code || ''), {
       name: settings.localNetworkDeviceName || os.hostname(),
     }, String(certFingerprint || ''));
-  });
+  }, z.tuple([nonEmptyString, z.string(), z.string().optional()]));
 
   handle('network:remote-request', (_event, pathname, request) =>
-    deps.requestRemoteLibrary(String(pathname || ''), request));
+    deps.requestRemoteLibrary(String(pathname || ''), request),
+  z.tuple([nonEmptyString, remoteLibraryRequestSchema.optional()]));
 
-  handle('network:remote-session', () => deps.getRemoteLibrarySession());
+  handleNoArgs('network:remote-session', () => deps.getRemoteLibrarySession());
 
   handle('network:remote-disconnect', (_event, revoke) =>
-    deps.disconnectRemoteLibrary(Boolean(revoke)));
+    deps.disconnectRemoteLibrary(Boolean(revoke)), z.tuple([z.boolean().optional()]));
 
   handle('network:revoke-paired-device', (_event, deviceId: string) => {
     deps.authorizeSettingsWrite();
@@ -782,7 +992,7 @@ export function registerIpcHandlers<
     deps.revokeDeviceProfileAccess(revoked.id);
     deps.saveSettings({ ...settings, localNetworkPairedDevices: remaining });
     return remaining;
-  });
+  }, z.tuple([nonEmptyString]));
 
   handle('network:set-device-name', (_event, name: string) => {
     deps.authorizeSettingsWrite();
@@ -791,53 +1001,58 @@ export function registerIpcHandlers<
     deps.saveSettings({ ...settings, localNetworkDeviceName: nextName });
     deps.syncLanAdvertisement();
     return nextName;
-  });
+  }, z.tuple([nonEmptyString.max(80)]));
 
-  handle('profiles:list', () => deps.listProfiles());
-  handle('profiles:choose-avatar', () => deps.chooseProfileAvatar());
-  handle('profiles:get-active', () => deps.getActiveProfileState());
-  handle('profiles:lock', () => deps.lockProfile());
-  handle('profiles:create', (_event, input) => deps.createProfile(input || { name: '' }));
-  handle('profiles:update', (_event, profileId: string, patch) => deps.updateProfile(String(profileId || ''), patch || {}));
-  handle('profiles:delete', (_event, profileId: string) => deps.deleteProfile(String(profileId || '')));
-  handle('profiles:export', (_event, profileId: string) => deps.exportProfile(String(profileId || '')));
-  handle('profiles:import', () => deps.importProfile());
-  handle('profiles:select', (_event, profileId: string, pin?: string) => deps.selectProfile(String(profileId || ''), pin));
-  handle('profiles:select-guest', () => deps.selectGuestProfile());
-  handle('profiles:reorder', (_event, profileIds) => deps.reorderProfiles(Array.isArray(profileIds) ? profileIds.map(String) : []));
-  handle('profiles:pin', (_event, profileId, pin) => deps.changeProfilePin(String(profileId || ''), pin === null ? null : String(pin || '')));
-  handle('profiles:reset-owner', (_event, confirmation) => deps.resetOwnerProfile(String(confirmation || '')));
-  handle('profiles:set-auto-sign-in', (_event, enabled) => deps.setAutomaticSignIn(Boolean(enabled)));
-  handle('profile-preferences:get', () => deps.getProfilePreferences());
-  handle('profile-preferences:save', (_event, patch, expectedProfileId) => deps.saveProfilePreferences(patch || {}, expectedProfileId));
-  handle('profile-restrictions:get', (_event, profileId) => deps.getProfileRestrictions(String(profileId || '')));
-  handle('profile-restrictions:save', (_event, profileId, input) => deps.saveProfileRestrictions(String(profileId || ''), input));
-  handle('profile-lists:get', (_event, kind) => deps.getProfileLists(kind));
-  handle('profile-lists:set', (_event, mediaId, kind, present, expectedProfileId) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present), expectedProfileId));
-  handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress());
+  handleNoArgs('profiles:list', () => deps.listProfiles());
+  handleNoArgs('profiles:choose-avatar', () => deps.chooseProfileAvatar());
+  handleNoArgs('profiles:get-active', () => deps.getActiveProfileState());
+  handleNoArgs('profiles:lock', () => deps.lockProfile());
+  handle('profiles:create', (_event, input) => deps.createProfile(input || { name: '' }), z.tuple([profileCreateSchema]));
+  handle('profiles:update', (_event, profileId: string, patch) => deps.updateProfile(String(profileId || ''), patch || {}), z.tuple([nonEmptyString, profileUpdateSchema]));
+  handle('profiles:delete', (_event, profileId: string) => deps.deleteProfile(profileId), z.tuple([nonEmptyString]));
+  handle('profiles:export', (_event, profileId: string) => deps.exportProfile(profileId), z.tuple([nonEmptyString]));
+  handleNoArgs('profiles:import', () => deps.importProfile());
+  handle('profiles:select', (_event, profileId: string, pin?: string) => deps.selectProfile(profileId, pin), z.tuple([nonEmptyString, z.string().optional()]));
+  handleNoArgs('profiles:select-guest', () => deps.selectGuestProfile());
+  handle('profiles:reorder', (_event, profileIds) => deps.reorderProfiles(profileIds), z.tuple([z.array(nonEmptyString)]));
+  handle('profiles:pin', (_event, profileId, pin) => deps.changeProfilePin(profileId, pin), z.tuple([nonEmptyString, z.string().nullable()]));
+  handle('profiles:reset-owner', (_event, confirmation) => deps.resetOwnerProfile(confirmation), z.tuple([z.string()]));
+  handle('profiles:set-auto-sign-in', (_event, enabled) => deps.setAutomaticSignIn(enabled), z.tuple([z.boolean()]));
+  handleNoArgs('profile-preferences:get', () => deps.getProfilePreferences());
+  handle('profile-preferences:save', (_event, patch, expectedProfileId) => deps.saveProfilePreferences(patch || {}, expectedProfileId), z.tuple([profilePreferencesSchema, z.string().optional()]));
+  handle('profile-restrictions:get', (_event, profileId) => deps.getProfileRestrictions(String(profileId || '')), z.tuple([nonEmptyString]));
+  handle('profile-restrictions:save', (_event, profileId, input) => deps.saveProfileRestrictions(String(profileId || ''), input), z.tuple([nonEmptyString, profileRestrictionsInputSchema]));
+  handle('profile-lists:get', (_event, kind) => deps.getProfileLists(kind), z.tuple([profileListKindSchema.optional()]));
+  handle('profile-lists:set', (_event, mediaId, kind, present, expectedProfileId) => deps.setProfileListEntry(String(mediaId || ''), kind, Boolean(present), expectedProfileId), z.tuple([nonEmptyString, profileListKindSchema, z.boolean(), z.string().optional()]));
+  handle('progress:get', (_event, filePath?: string) => filePath ? deps.getProgress(filePath) : deps.getAllProgress(), z.tuple([z.string().optional()]));
   handle('progress:save', (_event, filePath: string, position: number, duration: number, expectedProfileId?: string) =>
-    deps.saveProgress(filePath, Number(position) || 0, Number(duration) || 0, expectedProfileId));
+    deps.saveProgress(filePath, position, duration, expectedProfileId), z.tuple([
+    nonEmptyString,
+    finiteNumber.nonnegative(),
+    finiteNumber.nonnegative(),
+    z.string().optional(),
+  ]));
   handle('progress:import', (_event, progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string) => {
     deps.importProgress(progress || {}, expectedProfileId);
     return true;
-  });
-  handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope));
+  }, z.tuple([z.record(z.string(), progressImportValueSchema), z.string().optional()]));
+  handle('playback-track-preferences:get', (_event, scope?: string) => deps.getPlaybackTrackPreferences(scope), z.tuple([z.string().optional()]));
   handle('playback-track-preferences:save', (_event, scope: string, preferences, expectedProfileId) =>
-    deps.savePlaybackTrackPreferences(scope, preferences || {}, expectedProfileId));
+    deps.savePlaybackTrackPreferences(scope, preferences || {}, expectedProfileId), z.tuple([nonEmptyString, playbackTrackPreferencesSchema, z.string().optional()]));
   handle('playback:segments:get', (_event, request: MediaSegmentRequest) =>
-    deps.getMediaSegments(request || { mediaId: '' }));
+    deps.getMediaSegments(request || { mediaId: '' }), z.tuple([mediaSegmentRequestSchema]));
   handle('playback:segments:save-manual', (_event, input: ManualMediaSegmentInput) => {
     deps.authorizeSettingsWrite();
     return deps.saveManualMediaSegment(input);
-  });
+  }, z.tuple([manualMediaSegmentSchema]));
   handle('playback:segments:delete-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => {
     deps.authorizeSettingsWrite();
     return deps.deleteManualMediaSegment(input);
-  });
+  }, z.tuple([mediaSegmentRequestSchema.extend({ candidateId: z.string().optional(), type: mediaSegmentTypeSchema })]));
   handle('playback:segments:undo-manual', (_event, input: MediaSegmentRequest & { candidateId?: string; type: ManualMediaSegmentInput['type'] }) => {
     deps.authorizeSettingsWrite();
     return deps.undoManualMediaSegment(input);
-  });
+  }, z.tuple([mediaSegmentRequestSchema.extend({ candidateId: z.string().optional(), type: mediaSegmentTypeSchema })]));
   handle('playback:segments:manage-list', (_event, request) => {
     deps.authorizeSettingsWrite();
     return deps.getManagedMediaSegments(request ? {
@@ -845,13 +1060,16 @@ export function registerIpcHandlers<
       season: request.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
       episode: request.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
     } : undefined);
-  });
+  }, z.tuple([mediaSegmentRequestSchema.partial().optional()]));
   handle('playback:segments:manage-update', (_event, candidateId, patch) => {
     deps.authorizeSettingsWrite();
     const status = patch?.status === 'active' || patch?.status === 'review' || patch?.status === 'rejected' ? patch.status : undefined;
     const type = patch?.type === 'intro' || patch?.type === 'recap' || patch?.type === 'outro' || patch?.type === 'credits' || patch?.type === 'preview' ? patch.type : undefined;
     return deps.updateManagedMediaSegment(String(candidateId || '').slice(0, 240), { status, type });
-  });
+  }, z.tuple([nonEmptyString.max(240), z.object({
+    status: z.enum(['active', 'review', 'rejected']).optional(),
+    type: mediaSegmentTypeSchema.optional(),
+  })]));
   handle('playback:segments:manage-erase', (_event, request) => {
     deps.authorizeSettingsWrite();
     return deps.eraseManagedMediaSegments({
@@ -859,12 +1077,12 @@ export function registerIpcHandlers<
       season: request?.season === undefined ? undefined : Math.max(0, Math.floor(Number(request.season) || 0)),
       episode: request?.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
     });
-  });
+  }, z.tuple([mediaSegmentRequestSchema]));
   handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
     deps.setPlaybackActivityLease(key, Boolean(active), label);
     return true;
-  });
-  handle('playback:analysis:status', () => {
+  }, z.tuple([nonEmptyString, z.boolean(), z.string().optional()]));
+  handleNoArgs('playback:analysis:status', () => {
     deps.authorizeSettingsWrite();
     return deps.getLocalSegmentAnalysisStatus();
   });
@@ -874,7 +1092,7 @@ export function registerIpcHandlers<
       String(mediaId || '').slice(0, 240),
       Number.isFinite(Number(season)) ? Math.max(0, Math.floor(Number(season))) : 1,
     );
-  });
+  }, z.tuple([nonEmptyString.max(240), finiteNumber.nonnegative()]));
   handle('playback:analysis:run', (_event, scope) => {
     deps.authorizeSettingsWrite();
     return deps.runLocalSegmentAnalysis(scope ? {
@@ -883,56 +1101,64 @@ export function registerIpcHandlers<
       episode: scope.episode === undefined || !Number.isFinite(Number(scope.episode)) ? undefined : Math.max(0, Math.floor(Number(scope.episode))),
       mode: scope.mode === 'quick' ? 'quick' : scope.mode === 'full' ? 'full' : undefined,
     } : undefined);
-  });
+  }, z.tuple([z.object({
+    mediaId: z.string().max(240).optional(),
+    season: finiteNumber.nonnegative().optional(),
+    episode: finiteNumber.nonnegative().optional(),
+    mode: z.enum(['quick', 'full']).optional(),
+  }).optional()]));
   handle('playback:analysis:cancel', (_event, request) => {
     deps.authorizeSettingsWrite();
     return deps.cancelLocalSegmentAnalysis(request ? {
       jobKey: request.jobKey ? String(request.jobKey).slice(0, 128) : undefined,
       kind: request.kind === 'manual' ? 'manual' : undefined,
     } : undefined);
-  });
-  handle('playback:analysis:pause', () => {
+  }, z.tuple([z.object({
+    jobKey: z.string().max(128).optional(),
+    kind: z.literal('manual').optional(),
+  }).optional()]));
+  handleNoArgs('playback:analysis:pause', () => {
     deps.authorizeSettingsWrite();
     return deps.pauseLocalSegmentAnalysis();
   });
-  handle('playback:analysis:resume', () => {
+  handleNoArgs('playback:analysis:resume', () => {
     deps.authorizeSettingsWrite();
     return deps.resumeLocalSegmentAnalysis();
   });
-  handle('playback:analysis:cleanup', () => {
+  handleNoArgs('playback:analysis:cleanup', () => {
     deps.authorizeSettingsWrite();
     return deps.cleanupLocalSegmentAnalysis();
   });
-  handle('playback:analysis:rebuild', () => {
+  handleNoArgs('playback:analysis:rebuild', () => {
     deps.authorizeSettingsWrite();
     return deps.rebuildLocalSegmentAnalysis();
   });
-  handle('artwork:get', (_event, mediaId: string) => deps.customArtworkForRenderer(mediaId));
+  handle('artwork:get', (_event, mediaId: string) => deps.customArtworkForRenderer(mediaId), z.tuple([nonEmptyString]));
   handle('artwork:save', (_event, mediaId: string, target: string, dataUrl: string) => {
     deps.authorizeSettingsWrite();
     deps.saveCustomArtwork(mediaId, target, dataUrl);
     return deps.customArtworkForRenderer(mediaId);
-  });
+  }, z.tuple([nonEmptyString, nonEmptyString, z.string().max(25 * 1024 * 1024)]));
   handle('artwork:official-candidates', (_event, mediaId: string) => {
     deps.authorizeSettingsWrite();
     return deps.getOfficialMetadataCandidates(mediaId);
-  });
+  }, z.tuple([nonEmptyString]));
   handle('artwork:apply-official', (_event, mediaId: string, candidate: OfficialMetadataCandidate, target?: OfficialMetadataApplyTarget) => {
     deps.authorizeSettingsWrite();
     return deps.applyOfficialMetadataCandidate(mediaId, candidate, target);
-  });
+  }, z.tuple([nonEmptyString, artworkCandidateSchema, z.enum(['all', 'poster', 'cover', 'episodes']).optional()]));
   handle('artwork:refresh-official', (_event, mediaId: string, target?: OfficialArtworkRefreshTarget) => {
     deps.authorizeSettingsWrite();
     return deps.refreshOfficialArtwork(mediaId, target);
-  });
-  handle('artwork:playback-logo', (_event, mediaId: string) => deps.getPlaybackLogo(mediaId));
+  }, z.tuple([nonEmptyString, z.enum(['all', 'poster', 'cover']).optional()]));
+  handle('artwork:playback-logo', (_event, mediaId: string) => deps.getPlaybackLogo(mediaId), z.tuple([nonEmptyString]));
   handle('artwork:import', (_event, entries: Record<string, Record<string, string>>) => {
     deps.authorizeSettingsWrite();
     deps.importCustomArtwork(entries || {});
     return true;
-  });
-  handle('database:backup', () => { deps.authorizeSettingsWrite(); return deps.backupDatabase(); });
-  handle('database:clear', () => {
+  }, z.tuple([z.record(z.string(), z.record(z.string(), z.string()))]));
+  handleNoArgs('database:backup', () => { deps.authorizeSettingsWrite(); return deps.backupDatabase(); });
+  handleNoArgs('database:clear', () => {
     deps.authorizeSettingsWrite();
     deps.clearAppData();
     return deps.libraryIndexForRenderer();
@@ -943,7 +1169,7 @@ export function registerIpcHandlers<
       throw new Error('Only http and https links can be opened externally.');
     }
     return shell.openExternal(parsed.toString());
-  });
+  }, z.tuple([nonEmptyString]));
   const openFolderPath = async (filePath: string) => {
     const target = String(filePath || '').trim();
     if (!target) throw new Error('A local path is required.');
@@ -967,22 +1193,22 @@ export function registerIpcHandlers<
     }
     return true;
   };
-  handle('shell:open-folder-path', (_event, filePath: string) => openFolderPath(filePath));
-  handle('shell:show-item', (_event, filePath: string) => openFolderPath(filePath));
-  handle('updates:get-state', () => deps.getUpdateState());
-  handle('updates:check', () => deps.checkForUpdates());
-  handle('updates:install', () => {
+  handle('shell:open-folder-path', (_event, filePath: string) => openFolderPath(filePath), z.tuple([nonEmptyString]));
+  handle('shell:show-item', (_event, filePath: string) => openFolderPath(filePath), z.tuple([nonEmptyString]));
+  handleNoArgs('updates:get-state', () => deps.getUpdateState());
+  handleNoArgs('updates:check', () => deps.checkForUpdates());
+  handleNoArgs('updates:install', () => {
     const updateState = deps.getUpdateState();
     if (updateState.status !== 'downloaded') return updateState;
     return deps.installDownloadedUpdate();
   });
 
-  handle('media:ffmpeg-available', () => ffmpegAvailability(deps.findFFmpeg, deps.getTranscodeCapabilities));
+  handleNoArgs('media:ffmpeg-available', () => ffmpegAvailability(deps.findFFmpeg, deps.getTranscodeCapabilities));
 
   handle('media:probe', (_event, filePath: string) => deps.safeResult(() => {
     deps.authorizeMediaPath(filePath);
     return deps.probeMedia(filePath);
-  }));
+  }), z.tuple([nonEmptyString]));
 
   handle('media:can-direct-play', (_event, filePath: string, backend: 'html5' | 'hls' = 'html5') =>
     deps.safeResult(async () => {
@@ -990,14 +1216,14 @@ export function registerIpcHandlers<
       if (backend === 'html5') return deps.browserPlaybackPlan(filePath).mode === 'direct';
       const result = await deps.probeMedia(filePath);
       return deps.canDirectPlay(filePath, result, backend);
-    }),
+    }), z.tuple([nonEmptyString, z.enum(['html5', 'hls']).optional()]),
   );
 
   handle('media:start-transcode', (_event, filePath: string, options?: TranscodeOptions) =>
     deps.safeResult(async () => {
       deps.authorizeMediaPath(filePath);
       return deps.startTranscode(filePath, options || {}, `http://127.0.0.1:${deps.getMediaServerPort()}`);
-    }),
+    }), z.tuple([nonEmptyString, transcodeOptionsSchema.optional()]),
   );
-  handle('media:stop-transcode', (_event, sessionId: string) => deps.safeResult(() => deps.stopTranscode(sessionId)));
+  handle('media:stop-transcode', (_event, sessionId: string) => deps.safeResult(() => deps.stopTranscode(sessionId)), z.tuple([nonEmptyString]));
 }

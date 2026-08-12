@@ -25,6 +25,14 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
 };
 
 export const THEME_CACHE_KEY = 'loomtv:theme-settings';
+const cachedThemeSchema = z.object({
+  mode: z.enum(['dark', 'light']).optional(),
+  color: z.enum(['red', 'blue', 'orange', 'yellow', 'twitch']).optional(),
+  darkTheme: z.literal('black').optional(),
+  loaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
+  homeStyle: z.enum(['default', 'modern']).optional(),
+  modernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
+});
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
   yellow: { label: 'Sunbeam', hex: '#FC9C03', hover: '#FCB303', foreground: '#0a0a0a', foregroundMuted: '#404040' },
@@ -130,8 +138,12 @@ export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {})
 export function readCachedTheme(): AppThemeSettings | null {
   if (typeof window === 'undefined') return null;
   try {
-    const cachedTheme = window.localStorage.getItem(THEME_CACHE_KEY);
-    return cachedTheme ? normalizeThemeSettings(JSON.parse(cachedTheme) as Partial<AppThemeSettings>) : null;
+    const cachedTheme = parseStoredValue(
+      window.localStorage.getItem(THEME_CACHE_KEY),
+      cachedThemeSchema.nullable(),
+      null,
+    );
+    return cachedTheme ? normalizeThemeSettings(cachedTheme) : null;
   } catch {
     return null;
   }
@@ -238,3 +250,5 @@ export function applyTheme(settings: Partial<AppThemeSettings> = {}) {
   root.style.setProperty('--color-input', themePalette.surface2);
   root.style.setProperty('color-scheme', mode);
 }
+import { parseStoredValue } from '@/lib/desktopDecoders';
+import { z } from 'zod';
