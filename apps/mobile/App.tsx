@@ -996,7 +996,7 @@ function MobileProfilePicker({
   activeProfile: MobileProfile | null;
   error: string;
   mode: MobileProfilePickerMode;
-  onSelect: (profile: MobileProfile, pin?: string) => void;
+  onSelect: (profile: MobileProfile, pin?: string) => void | Promise<void>;
   onClose?: () => void;
   pin: string;
   pinTarget: MobileProfile | null;
@@ -1007,6 +1007,19 @@ function MobileProfilePicker({
   const { colors } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const isDismissible = mode === 'voluntary';
+  const [pendingProfileId, setPendingProfileId] = useState<string | null>(null);
+  const chooseProfile = (profile: MobileProfile, selectedPin?: string) => {
+    if (pendingProfileId) return;
+    if (profile.hasPin && selectedPin === undefined) {
+      setPinTarget(profile);
+      setPin('');
+      return;
+    }
+    setPendingProfileId(profile.id);
+    void Promise.resolve()
+      .then(() => onSelect(profile, selectedPin))
+      .finally(() => setPendingProfileId(null));
+  };
   useMobileModalLayer({
     priority: 70,
     onBack: () => {
@@ -1022,7 +1035,7 @@ function MobileProfilePicker({
     const append = (digit: string) => {
       const next = `${pin}${digit}`.slice(0, 4);
       setPin(next);
-      if (next.length === 4) onSelect(pinTarget, next);
+      if (next.length === 4) chooseProfile(pinTarget, next);
     };
     return (
       <View
@@ -1045,14 +1058,15 @@ function MobileProfilePicker({
         </View>
         <View style={mobileProfileStyles.pinGrid}>
           {'123456789'.split('').map((digit) => (
-            <Pressable key={digit} onPress={() => append(digit)} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}>
+            <Pressable disabled={Boolean(pendingProfileId)} key={digit} onPress={() => append(digit)} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}>
               <Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>{digit}</Text>
             </Pressable>
           ))}
           <View style={mobileProfileStyles.pinKey} />
-          <Pressable onPress={() => append('0')} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}><Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>0</Text></Pressable>
-          <Pressable onPress={() => setPin(pin.slice(0, -1))} style={mobileProfileStyles.pinKey}><Text style={{ color: colors.muted }}>Delete</Text></Pressable>
+          <Pressable disabled={Boolean(pendingProfileId)} onPress={() => append('0')} style={[mobileProfileStyles.pinKey, { backgroundColor: colors.panel }]}><Text style={[mobileProfileStyles.pinText, { color: colors.text }]}>0</Text></Pressable>
+          <Pressable disabled={Boolean(pendingProfileId)} onPress={() => setPin(pin.slice(0, -1))} style={mobileProfileStyles.pinKey}><Text style={{ color: colors.muted }}>Delete</Text></Pressable>
         </View>
+        {pendingProfileId ? <ActivityIndicator color={colors.accent} size="small" /> : null}
         {error ? <Text style={mobileProfileStyles.error}>{error}</Text> : null}
       </View>
     );
@@ -1071,15 +1085,22 @@ function MobileProfilePicker({
           Choose a profile to continue.
         </Text>
       )}
+      {pendingProfileId ? <Text accessibilityRole="text" style={{ color: colors.muted, textAlign: 'center' }}>Opening profile…</Text> : null}
       <View style={mobileProfileStyles.grid}>
         {profiles.map((profile) => (
           <Pressable
+            disabled={Boolean(pendingProfileId)}
+            hitSlop={14}
             key={profile.id}
             accessibilityRole="button"
             accessibilityLabel={`${profile.name}${profile.hasPin ? ', PIN protected' : ''}`}
-            accessibilityState={{ selected: profile.id === activeProfile?.id }}
-            onPress={() => profile.hasPin ? setPinTarget(profile) : onSelect(profile)}
-            style={mobileProfileStyles.card}
+            accessibilityState={{
+              busy: pendingProfileId === profile.id,
+              disabled: Boolean(pendingProfileId),
+              selected: profile.id === activeProfile?.id,
+            }}
+            onPress={() => chooseProfile(profile)}
+            style={({ pressed }) => [mobileProfileStyles.card, pressed && mobileProfileStyles.cardPressed]}
           >
             <View style={[
               mobileProfileStyles.avatar,
@@ -1088,7 +1109,7 @@ function MobileProfilePicker({
               <ExpoImage source={{ uri: mobileProfileAvatarUri(profile) }} style={mobileProfileStyles.avatarImage} contentFit="cover" />
             </View>
             <Text numberOfLines={1} style={[mobileProfileStyles.name, { color: colors.text }]}>{profile.name}</Text>
-            {profile.id === activeProfile?.id ? (
+            {pendingProfileId === profile.id ? <ActivityIndicator color={colors.accent} size="small" /> : profile.id === activeProfile?.id ? (
               <Text style={[mobileProfileStyles.activeProfileLabel, { color: colors.accent }]}>Active</Text>
             ) : null}
             {profile.hasPin ? <Text style={{ color: colors.muted, fontSize: 11 }}>PIN protected</Text> : null}
@@ -1105,6 +1126,7 @@ const mobileProfileStyles = StyleSheet.create({
   title: { fontSize: 30, fontWeight: '800', marginTop: 24 },
   grid: { width: '100%', maxWidth: 560, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 22, marginTop: 28 },
   card: { width: 116, alignItems: 'center', gap: 8 },
+  cardPressed: { opacity: 0.72, transform: [{ scale: 0.96 }] },
   avatar: { width: 104, height: 104, borderRadius: 52, borderWidth: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   avatarImage: { width: '100%', height: '100%', borderRadius: 52 },
   avatarText: { fontSize: 42, fontWeight: '800' },
@@ -3183,11 +3205,13 @@ function AppRoot() {
           profiles={profiles}
           setPin={setProfilePin}
           setPinTarget={(profile) => { setProfilePinTarget(profile); setProfilePin(''); setProfileError(''); }}
-          onSelect={(profile, pin) => {
-            void selectMobileProfile(connection, profile, pin).catch((nextError) => {
+          onSelect={async (profile, pin) => {
+            try {
+              await selectMobileProfile(connection, profile, pin);
+            } catch (nextError) {
               setProfilePin('');
               setProfileError(nextError instanceof Error ? nextError.message : 'That profile could not be selected.');
-            });
+            }
           }}
         />
       ) : (
