@@ -93,7 +93,6 @@ import {
   desktopProfileSelectionSchema,
   desktopProfilesPayloadSchema,
   desktopProgressMapSchema,
-  desktopProgressResultSchema,
   desktopStoredProgressSchema,
   ffmpegStatusSchema,
   githubReleaseSchema,

@@ -1477,6 +1477,7 @@ function AppRoot() {
     return () => { cancelled = true; };
     // This runs once to restore the saved session; the callback only uses refs,
     // setters, and the saved value, so it is intentionally not reactive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1498,6 +1499,7 @@ function AppRoot() {
       void reconnectSavedConnectionHandlerRef.current(updated);
     }
     // Keep the reconnect cadence tied to saved-session state, not callback identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, discoveredHosts, isServerOffline, savedConnection]);
 
   useEffect(() => {
@@ -1515,7 +1517,7 @@ function AppRoot() {
       void pairWithDesktopHandlerRef.current(host);
     }, delay);
     return () => clearTimeout(timer);
-  }, [appState, connection, discoveredHosts, isPairing, isRestoringConnection, isServerOffline, savedConnection]);
+  }, [appState, automaticHostAttemptRef, connection, discoveredHosts, isPairing, isRestoringConnection, isServerOffline, pairWithDesktopHandlerRef, savedConnection, setBaseUrl, setError]);
 
   useEffect(() => {
     // Keep retrying a saved credential while the onboarding screen is visible.
@@ -1544,13 +1546,13 @@ function AppRoot() {
       if (retry) clearTimeout(retry);
     };
     // Keep the retry loop stable while the saved session remains unchanged.
-  }, [appState, connectionLifecycleAction, savedConnection]);
+  }, [appState, appStateRef, connectionLifecycleAction, reconnectSavedConnectionHandlerRef, savedConnection]);
 
   useEffect(() => {
     if (!connection || connectionLifecycleAction !== 'health-check') return;
     const healthCheck = setInterval(() => void checkDesktopConnectionHandlerRef.current(), 5_000);
     return () => clearInterval(healthCheck);
-  }, [connection, connectionLifecycleAction]);
+  }, [checkDesktopConnectionHandlerRef, connection, connectionLifecycleAction]);
 
   useEffect(() => {
     if (!savedConnection || !connection) return undefined;
@@ -1574,6 +1576,8 @@ function AppRoot() {
       });
     }, delay);
     return () => clearTimeout(timer);
+    // The refresh timer is keyed to connection state; refresh helpers are intentionally non-reactive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connection, savedConnection]);
 
   useEffect(() => {
@@ -1719,7 +1723,7 @@ function AppRoot() {
       if (cached || currentItem) currentDetails.set(kind, cached || currentItem as MediaItem);
     }
     lastDetailByKindRef.current = currentDetails;
-  }, [activeProfile?.id, catalogCacheKeyFor, connection?.catalogRevision, itemsById]);
+  }, [activeProfile?.id, catalogCacheKeyFor, connection?.catalogRevision, itemsById, lastDetailByKindRef]);
 
   const openDetailItem = useCallback((item: MediaItem) => {
     const key = catalogCacheKeyFor(item.id);
@@ -1737,7 +1741,7 @@ function AppRoot() {
         })
         .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not load media details.'));
     }
-  }, [activeKind, catalogCacheKeyFor, resolveMobileDetailItem]);
+  }, [activeKind, catalogCacheKeyFor, lastDetailByKindRef, resolveMobileDetailItem, setDetailItem, setError, setFilterOpen]);
 
   useEffect(() => {
     if (!detailItem || detailItem.catalogRevision === undefined) return;
@@ -1753,12 +1757,12 @@ function AppRoot() {
         if (!cancelled) setError(nextError instanceof Error ? nextError.message : 'Could not load media details.');
       });
     return () => { cancelled = true; };
-  }, [activeKind, detailItem, resolveMobileDetailItem]);
+  }, [activeKind, detailItem, lastDetailByKindRef, resolveMobileDetailItem, setDetailItem, setError]);
 
   const closeDetail = useCallback(() => {
     lastDetailByKindRef.current.delete(activeKind);
     setDetailItem(null);
-  }, [activeKind]);
+  }, [activeKind, lastDetailByKindRef, setDetailItem]);
 
   const setMobileProfileListEntry = useCallback(async (
     mediaId: string,
@@ -1790,7 +1794,7 @@ function AppRoot() {
       nextLists = await readJsonResponse(response, mobileProfileListSchema, 'Profile list update');
     }
     setProfileLists(nextLists);
-  }, [connection, isServerOffline]);
+  }, [connection, isServerOffline, setProfileLists]);
 
   const playHomeItem = useCallback((item: MediaItem) => {
     if (isServerOffline) {
@@ -1808,7 +1812,7 @@ function AppRoot() {
         setPlayTarget(playTargetForItem(details, progress));
       })
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
-  }, [isServerOffline, progress, resolveMobileDetailItem]);
+  }, [isServerOffline, playerReturnItemRef, progress, resolveMobileDetailItem, setDetailItem, setError, setMiniPlayerTarget, setPlayTarget, setStreamOptions]);
 
   const connectionBaseUrl = connection?.baseUrl;
   const connectionDeviceToken = connection?.deviceToken;
@@ -1847,7 +1851,7 @@ function AppRoot() {
       // Progress sync should never interrupt playback.
       reportNonFatal('progress.local-sync', error);
     }
-  }, [connectionBaseUrl, connectionDeviceToken, connectionSelectionRevision, playTarget, player]);
+  }, [connectionBaseUrl, connectionDeviceToken, connectionSelectionRevision, playTarget, player, setConnection, setProgress]);
 
   useEffect(() => {
     if (playbackUrl) {
@@ -1858,14 +1862,14 @@ function AppRoot() {
       shouldAutoplayRef.current = false;
       pendingSeekRef.current = 0;
     }
-  }, [playbackUrl, playTarget?.startPosition, streamOptions.startSeconds]);
+  }, [pendingSeekRef, playbackUrl, playTarget?.startPosition, shouldAutoplayRef, streamOptions.startSeconds, userPausedRef]);
 
   useEffect(() => {
     const currentFilePath = playTarget ? filePathFromUrl(playTarget.streamPath) : null;
     if (autoAdvancedEpisodeRef.current !== currentFilePath) {
       autoAdvancedEpisodeRef.current = null;
     }
-  }, [playTarget]);
+  }, [autoAdvancedEpisodeRef, playTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1886,7 +1890,7 @@ function AppRoot() {
     return () => {
       cancelled = true;
     };
-  }, [connection?.deviceToken, playbackUrl, playTarget, player]);
+  }, [connection?.deviceToken, playbackUrl, playTarget, player, setPlaybackFailure]);
 
   useEffect(() => {
     if (!playbackUrl) return;
@@ -1998,7 +2002,7 @@ function AppRoot() {
       sourceChangeSubscription?.remove?.();
       endSubscription?.remove?.();
     };
-  }, [connection?.library, playbackUrl, playTarget, player, progress, streamOptions.forceTranscode, syncPlaybackProgress]);
+  }, [autoAdvancedEpisodeRef, connection?.library, pendingSeekRef, playbackUrl, playerReturnItemRef, playTarget, player, progress, setPlayTarget, setPlaybackFailure, setPlaybackUrl, setStreamOptions, shouldAutoplayRef, streamOptions.forceTranscode, syncPlaybackProgress, userPausedRef]);
 
   useEffect(() => {
     if (!playbackUrl) return;
@@ -2011,7 +2015,7 @@ function AppRoot() {
         reportNonFatal('player.retry-play', error);
       }
     }
-  }, [playbackUrl, player]);
+  }, [playbackUrl, player, shouldAutoplayRef, userPausedRef]);
 
   // Only prepare/transcode a stream when the user actually opens the player —
   // browsing the library no longer kicks off a transcode for every tap.
@@ -2072,13 +2076,13 @@ function AppRoot() {
       cancelled = true;
       requestController.abort();
     };
-  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, streamOptions, streamRetryNonce]);
+  }, [connection?.baseUrl, connection?.deviceToken, connection?.selectionRevision, playTarget, setIsPreparingStream, setPlaybackFailure, setPlaybackUrl, streamOptions, streamRetryNonce]);
 
   const retryPlayback = useCallback(() => {
     setPlaybackFailure(null);
     setPlaybackUrl(null);
     setStreamRetryNonce((current) => current + 1);
-  }, []);
+  }, [setPlaybackFailure, setPlaybackUrl, setStreamRetryNonce]);
 
   const closePlayer = useCallback(async () => {
     if (closingPlayerRef.current) return;
@@ -2142,7 +2146,7 @@ function AppRoot() {
     } finally {
       closingPlayerRef.current = false;
     }
-  }, [activeKind, catalogCacheKeyFor, detailItem?.id, itemsById, playTarget, playbackFailure, player, syncPlaybackProgress]);
+  }, [activeKind, appliedOrientationLockRef, catalogCacheKeyFor, closingPlayerRef, desiredOrientationLockRef, detailItem?.id, itemsById, lastDetailByKindRef, orientationLockQueueRef, playerReturnItemRef, playTarget, playbackFailure, player, setDetailItem, setMiniPlayerTarget, setPlayTarget, setPlaybackFailure, setPlaybackUrl, setStreamOptions, syncPlaybackProgress, windowSizeRef]);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -2167,7 +2171,7 @@ function AppRoot() {
     });
 
     return () => subscription.remove();
-  }, [activeKind, closeDetail, closePlayer, detailItem, playTarget]);
+  }, [activeKind, closeDetail, closePlayer, detailItem, playTarget, setActiveKind]);
 
   useEffect(() => {
     if (!playTarget || !playbackUrl) return undefined;
