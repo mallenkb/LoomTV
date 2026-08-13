@@ -12,6 +12,24 @@ This checklist is the release gate for the same-LAN iOS and Android companion. A
 
 The first EAS build will ask the project owner to connect the Expo project and provision Apple/Google signing credentials. Those account-owned values must stay in EAS or the store portals, never in this repository.
 
+## Automated preflight snapshot
+
+This snapshot is useful source evidence, but it is not a substitute for the signed-artifact and physical-device matrix below.
+
+| Date | Check | Result |
+| --- | --- | --- |
+| 2026-08-13 | Mobile source suite | 60 of 60 passed |
+| 2026-08-13 | TypeScript `tsc --noEmit` | Passed |
+| 2026-08-13 | iOS and Android release configuration verifier | Passed |
+| 2026-08-13 | Android fail-closed configuration verifier | Passed |
+| 2026-08-13 | Clean Expo native prebuild and CocoaPods install | Passed |
+| 2026-08-13 | Unsigned Android Release APK compile | Passed |
+| 2026-08-13 | Unsigned arm64 iOS Simulator Release compile | Passed |
+
+Detailed commands, environment, implementation coverage, and remaining limitations are recorded in `release-evidence/2026-08-13/README.md`.
+
+Re-run and replace this snapshot against the exact committed revision used to build production artifacts.
+
 ## Required device matrix
 
 Record the device, OS version, build URL, tester, date, and result for each row.
@@ -38,3 +56,5 @@ Record the device, OS version, build URL, tester, date, and result for each row.
 ## Scope boundary
 
 The mobile release is a paired same-LAN companion. Internet remote streaming, offline media downloads, casting, TV clients, and multiple saved servers are separate feature tracks and are not release blockers for this client.
+
+The current product decisions for background playback, lock-screen controls, picture-in-picture, localization, and deep links are recorded in `MOBILE_PRODUCT_SCOPE.md`.

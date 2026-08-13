@@ -30,7 +30,10 @@ function assetExists(relativePath, label) {
 }
 
 expect(appConfig.version === mobilePackage.version, 'app.json and mobile package versions must match');
-expect(Boolean(appConfig.scheme), 'A stable mobile URL scheme is required for the development client');
+expect(
+  !appConfig.scheme,
+  'A custom mobile URL scheme must remain disabled until LoomTV has an allowlisted inbound-link product surface',
+);
 expect(Boolean(appConfig.ios?.bundleIdentifier), 'iOS bundleIdentifier is required');
 expect(appConfig.ios?.supportsTablet === true, 'iOS tablet support must stay enabled');
 expect(appConfig.ios?.config?.usesNonExemptEncryption === false, 'iOS export-compliance declaration must be explicit');

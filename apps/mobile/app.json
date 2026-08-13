@@ -2,7 +2,6 @@
   "expo": {
     "name": "LoomTV Mobile",
     "slug": "loomtv-mobile",
-    "scheme": "loomtv",
     "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/icon.png",
@@ -51,6 +50,9 @@
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.VIBRATE",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.WRITE_SETTINGS"

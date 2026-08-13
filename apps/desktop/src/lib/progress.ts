@@ -135,6 +135,26 @@ export async function hydrateProgressFromDatabase(): Promise<void> {
   }
 }
 
+export async function refreshProgressFromDatabase(): Promise<void> {
+  if (!activeProfileId) return;
+  if (!hydrated) {
+    await hydrateProgressFromDatabase();
+    return;
+  }
+  const generation = profileGeneration;
+  try {
+    const remote = await desktopApi.getProgress();
+    if (generation !== profileGeneration) return;
+    const databaseProgress = remote && !('position' in remote)
+      ? remote as Record<string, StoredProgress>
+      : {};
+    progressCache = mergeProgress(databaseProgress, progressCache);
+    writeLocalProgress();
+  } catch {
+    // Keep the last responsive snapshot while the host is temporarily busy.
+  }
+}
+
 export async function setProgressProfile(profileId: string | null): Promise<void> {
   if (activeProfileId === profileId && hydrated) return;
   activeProfileId = profileId;

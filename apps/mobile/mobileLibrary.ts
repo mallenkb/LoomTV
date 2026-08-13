@@ -28,16 +28,7 @@ export function filePathFromUrl(value: string): string {
 
 export function streamPathFor(item: MediaItem): string {
   if (item.type === 'movie' || !item.episodeFiles?.length) return item.filePath;
-
-  let earliestEpisode = item.episodeFiles[0];
-  for (let index = 1; index < item.episodeFiles.length; index += 1) {
-    const episode = item.episodeFiles[index];
-    if (episode.season < earliestEpisode.season
-      || (episode.season === earliestEpisode.season && episode.episode < earliestEpisode.episode)) {
-      earliestEpisode = episode;
-    }
-  }
-  return earliestEpisode.filePath;
+  return sortedEpisodes(item)[0]?.filePath || item.filePath;
 }
 
 export function needsTranscode(streamPath: string, meta?: LocalMediaDetails): boolean {
@@ -56,8 +47,51 @@ export function episodeCode(season: number, episode: number): string {
   return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
 }
 
+function episodeAirDateTimestamp(value?: string): number | null {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const date = new Date(timestamp);
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day
+    ? timestamp
+    : null;
+}
+
+function firstSeasonAirDate(item: MediaItem, season: number): number | null {
+  const dates = (item.episodes || [])
+    .filter((episode) => episode.season === season)
+    .map((episode) => episodeAirDateTimestamp(episode.airDate))
+    .filter((value): value is number => value !== null);
+  return dates.length > 0 ? Math.min(...dates) : null;
+}
+
+export function orderedSeasonNumbers(item: MediaItem): number[] {
+  const available = Array.from(new Set((item.episodeFiles || []).map((episode) => episode.season)));
+  const regular = available.filter((season) => season > 0).sort((a, b) => a - b);
+  if (!available.includes(0)) return regular;
+
+  const specialDate = firstSeasonAirDate(item, 0);
+  if (specialDate === null) return [...regular, 0];
+  const insertBefore = regular.findIndex((season) => {
+    const seasonDate = firstSeasonAirDate(item, season);
+    return seasonDate !== null && seasonDate > specialDate;
+  });
+  if (insertBefore < 0) return [...regular, 0];
+  return [...regular.slice(0, insertBefore), 0, ...regular.slice(insertBefore)];
+}
+
 export function sortedEpisodes(item: MediaItem): EpisodeFile[] {
-  return (item.episodeFiles || []).slice().sort((a, b) => a.season - b.season || a.episode - b.episode);
+  const seasonOrder = new Map(orderedSeasonNumbers(item).map((season, index) => [season, index]));
+  return (item.episodeFiles || []).slice().sort((a, b) => (
+    (seasonOrder.get(a.season) ?? Number.MAX_SAFE_INTEGER)
+    - (seasonOrder.get(b.season) ?? Number.MAX_SAFE_INTEGER)
+    || a.episode - b.episode
+  ));
 }
 
 export function progressStateFor(progress: Record<string, StoredProgress>, streamPath: string, durationHint = 0) {
@@ -158,6 +192,13 @@ export function collections(library: LibraryPayload) {
   };
 }
 
+/** Core product surfaces must use this selector. It intentionally excludes Others. */
+export function coreItems(library: LibraryPayload): MediaItem[] {
+  const grouped = collections(library);
+  return [...grouped.anime, ...grouped.tv, ...grouped.movies];
+}
+
+/** ID lookup and persistence helper only. This includes Others by design. */
 export function allItems(library: LibraryPayload): MediaItem[] {
   const grouped = collections(library);
   const items = [...grouped.anime, ...grouped.tv, ...grouped.movies, ...grouped.others];

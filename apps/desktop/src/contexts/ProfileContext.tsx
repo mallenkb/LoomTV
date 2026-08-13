@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   desktopApi,
+  isBrowserLocalApp,
   type ActiveProfileState,
   type ProfileCreateInput,
   type ProfileListEntry,
@@ -13,7 +14,7 @@ import {
 } from '@/lib/desktopApi';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { hasActivePlayback, shutdownActivePlayback } from '@/lib/playbackLifecycle';
-import { flushProgressWrites, setProgressProfile } from '@/lib/progress';
+import { flushProgressWrites, refreshProgressFromDatabase, setProgressProfile } from '@/lib/progress';
 
 /**
  * Optional destination when opening the gate: jump straight into edit mode,
@@ -83,6 +84,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const [ownerSessionAuthorized, setOwnerSessionAuthorized] = useState(false);
   const [generation, setGeneration] = useState(0);
   const generationRef = useRef(0);
+  const activeStateRef = useRef<ActiveProfileState>(EMPTY_ACTIVE_STATE);
   const watchedMutationRef = useRef(new Map<string, number>());
   const mountedRef = useRef(true);
 
@@ -106,6 +108,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     setPreferences(nextPreferences);
     setLists(nextLists);
   }, []);
+
+  useEffect(() => {
+    activeStateRef.current = activeState;
+  }, [activeState]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -144,6 +150,47 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     // applied avoids both a redundant re-render and re-serializing the current
     // list every tick.
     let lastRemoteProfilesSignature = '';
+    const refreshBrowserHostState = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const [nextProfiles, nextActiveState] = await Promise.all([
+          desktopApi.listProfiles(),
+          desktopApi.getActiveProfileState(),
+        ]);
+        if (!mountedRef.current) return;
+        const previousProfileId = activeStateRef.current.profileId;
+        activeStateRef.current = nextActiveState;
+        setProfiles(nextProfiles);
+        setActiveState(nextActiveState);
+        if (nextActiveState.profileId !== previousProfileId) {
+          const active = nextProfiles.find((profile) => profile.id === nextActiveState.profileId);
+          setSelectedThisSession(Boolean(active));
+          setOwnerSessionAuthorized(active?.type === 'owner');
+          await hydratePersonalState(nextActiveState.profileId);
+          return;
+        }
+        if (!nextActiveState.profileId) return;
+        const hydrationGeneration = generationRef.current;
+        const [nextPreferences, nextLists] = await Promise.all([
+          desktopApi.getProfilePreferences(),
+          desktopApi.getProfileLists(),
+          refreshProgressFromDatabase(),
+        ]);
+        if (!mountedRef.current || hydrationGeneration !== generationRef.current) return;
+        setPreferences(nextPreferences);
+        setLists(nextLists);
+      } catch {
+        // Preserve the last host snapshot until the next visible refresh.
+      }
+    };
+    const browserLocal = isBrowserLocalApp();
+    const handleBrowserFocus = () => {
+      if (browserLocal) void refreshBrowserHostState();
+    };
+    if (browserLocal) {
+      window.addEventListener('focus', handleBrowserFocus);
+      document.addEventListener('visibilitychange', handleBrowserFocus);
+    }
     const remoteProfileRefresh = desktopApi.isRemoteLibraryMode()
       ? window.setInterval(() => {
           if (document.visibilityState !== 'visible') return;
@@ -155,11 +202,17 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
             setProfiles(nextProfiles);
           }).catch(() => undefined);
         }, 5_000)
-      : null;
+      : browserLocal
+        ? window.setInterval(() => void refreshBrowserHostState(), 5_000)
+        : null;
     return () => {
       mountedRef.current = false;
       unsubscribeProfiles();
       unsubscribeActive();
+      if (browserLocal) {
+        window.removeEventListener('focus', handleBrowserFocus);
+        document.removeEventListener('visibilitychange', handleBrowserFocus);
+      }
       if (remoteProfileRefresh !== null) window.clearInterval(remoteProfileRefresh);
     };
   }, [hydratePersonalState]);

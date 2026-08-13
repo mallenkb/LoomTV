@@ -1,0 +1,513 @@
+<!doctype html>
+<!--
+  CANONICAL WORK REPORT AUDIT TEMPLATE (html-artifacts skill)
+  How to use: copy this file mechanically, then replace only content.
+  1. Replace the placeholder <img> src with the prepared base64 screenshot (measure real pixel size first).
+  2. Replace all example copy (a Grab delivery-tracking audit) with the current audit's content.
+  3. Keep every class name, section order, and CSS rule. Do not restyle.
+  4. capture-tall (default, portrait screenshots) vs capture-wide (landscape/desktop): set on the .report div.
+  5. Pins are <a> links to #observation-{n} with aria-labels; status classes: status-high / status-medium / status-verify / status-working. Observation-number badges are group-colored: Issues red, Verify blue, Working green.
+  6. Ledger: score only categories with visible evidence; mark the rest N/O; tfoot shows the applicable-category mean.
+  7. Home link: point to the library page when the report lives in the library's reports/ folder; otherwise remove the link.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A post-plan source and release-evidence audit of the LoomTV mobile app, covering recovery, diagnostics, LAN deadlines, persistence, native builds, architecture, and remaining device gates.">
+  <meta name="keywords" content="LoomTV, mobile audit, release evidence, React Native, Expo, LAN media">
+  <meta name="generator" content="Work Report">
+  <title>LoomTV Mobile App, Post-Plan Audit</title>
+  <style>
+    :root{
+      --canvas:rgb(251,250,247);
+      --ivory:rgb(251,250,247);
+      --sand:#e8e6dc;
+      --ring:#cfccbf;
+      --ink:#141413;
+      --charcoal:#3d3d3a;
+      --olive:#504e49;
+      --stone:#6b6a64;
+      --brand:#1b365d;
+      --brand-light:#2d5a8a;
+      --brand-tint:#e4ecf5;
+      --deep:#141413;
+      --deep-surface:#30302e;
+      --content:1180px;
+      --geist:Geist,"Geist Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html{background:var(--canvas);scroll-behavior:smooth}
+    body{
+      margin:0;
+      min-width:0;
+      color:var(--ink);
+      background:var(--canvas);
+      font-family:var(--geist);
+      font-size:16px;
+      line-height:1.55;
+    }
+    a{color:var(--brand);text-underline-offset:3px}
+    :focus-visible{outline:3px solid rgba(27,54,93,.28);outline-offset:3px}
+    .sans,.kicker,.folio,.label,.tag,.legend,.note,.stamp-small,.footer-meta{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    }
+    .sheet{width:min(calc(100% - 40px),var(--content));margin-inline:auto}
+    .folio-bar{position:fixed;inset:0 0 auto;z-index:50;border-bottom:1px solid rgba(80,78,73,.2);background:rgb(251,250,247);backdrop-filter:blur(12px)}
+    .report{padding-top:52px}
+    .folio-inner{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+    .folio{color:var(--stone);font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+    .folio b{margin-right:10px;color:var(--ink);font-family:Georgia,"Times New Roman",serif;font-size:17px;font-weight:500;letter-spacing:0;text-transform:none}
+    .folio .home-link{color:var(--ink);text-decoration:none}
+    .folio-links{display:flex;gap:18px}
+    .folio-links a{min-height:42px;display:inline-flex;align-items:center;color:var(--olive);font-size:11px;text-decoration:none}
+
+    .cover{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:70px;padding:76px 0 58px;border-bottom:1px solid rgba(80,78,73,.2)}
+    .kicker{margin:0 0 14px;color:var(--brand);font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+    h1,h2,h3,p{margin-top:0}
+    h1{max-width:820px;margin-bottom:22px;font-size:clamp(45px,7vw,78px);font-weight:500;letter-spacing:-.045em;line-height:.98}
+    .deck{max-width:720px;margin-bottom:0;color:var(--charcoal);font-size:19px;line-height:1.55}
+    .stamp{align-self:start;padding:24px;border:1px solid var(--brand);border-radius:16px;background:var(--ivory);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+    .stamp-small{color:var(--stone);font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase}
+    .stamp-score{margin-top:12px;color:var(--brand);font-size:62px;font-variant-numeric:tabular-nums;line-height:.9}
+    .stamp-score span{font-size:19px;color:var(--stone)}
+    .stamp p{margin:0;color:var(--olive);font-size:13px}
+    .cover-meta{display:flex;flex-wrap:wrap;gap:7px 24px;margin-top:32px;color:var(--stone);font:11px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.04em;text-transform:uppercase}
+    .cover-meta span::before{content:"—";margin-right:7px;color:var(--brand)}
+
+    .memo{display:grid;grid-template-columns:repeat(4,1fr);gap:28px;border-bottom:0}
+    .memo-block{padding:28px 0 30px;border-right:0}
+    .memo-block:first-child{padding-left:0}
+    .memo-block:last-child{padding-right:0;border-right:0}
+    .label{margin-bottom:8px;color:var(--brand);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+    .memo-block h2{margin-bottom:7px;font-size:19px;font-weight:500;line-height:1.25}
+    .memo-block p{margin:0;color:var(--stone);font-size:13px;line-height:1.5}
+
+    .overview{padding:30px 0;border-bottom:1px solid var(--border)}
+    .overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .overview-card{display:flex;flex-direction:column;min-height:134px;padding:20px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .overview-score{display:flex;align-items:baseline;gap:7px;font-family:var(--serif);font-size:30px;font-weight:750;line-height:1}
+    .overview-score span{color:var(--stone);font:650 13px/1 var(--geist)}
+    .overview-label{margin-top:10px;color:var(--stone);font-size:13px;font-weight:400;line-height:1.35}
+    .overview-bar{position:relative;height:6px;margin-top:auto;border-radius:99px;background:var(--sand)}
+    .overview-bar i{display:block;height:100%;border-radius:inherit}
+    .overview-card.state-critical .overview-score{color:#9b352f}
+    .overview-card.state-critical .overview-bar i{background:#c94b43}
+    .overview-card.state-warning .overview-score{color:#8a5709}
+    .overview-card.state-warning .overview-bar i{background:#c47f12}
+    .overview-card.state-good .overview-score{color:#17644f}
+    .overview-card.state-good .overview-bar i{background:#0a8f7a}
+    .overview-bar .tick{position:absolute;top:-3px;width:2px;height:11px;border-radius:2px;background:var(--ink);opacity:.4;transform:translateX(-1px)}
+
+    .chapter{padding:62px 0;border-bottom:0}
+    .chapter-head{display:grid;grid-template-columns:150px minmax(0,1fr);gap:34px;margin-bottom:30px}
+    .chapter-head h2{max-width:760px;margin:0;font-size:clamp(29px,4vw,44px);font-weight:500;letter-spacing:-.03em;line-height:1.08}
+    .chapter-head .lead{max-width:700px;margin:11px 0 0;color:var(--stone)}
+
+    .ledger{width:100%;table-layout:fixed;border-collapse:collapse;border-top:2px solid var(--brand)}
+    .ledger th,.ledger td{padding:14px 7px;border-bottom:1px solid rgba(80,78,73,.18);vertical-align:middle;text-align:left}
+    .ledger-no{width:48px;color:var(--brand);font-size:12px;font-variant-numeric:tabular-nums}
+    .ledger-title{font-size:16px;font-weight:500;line-height:1.25}
+    .ledger-score{width:76px;text-align:right;color:var(--brand);font-size:18px;font-variant-numeric:tabular-nums}
+    .ledger-score.na{color:var(--stone);font:700 10px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em}
+    .ledger-copy{color:var(--stone);font-size:13px;line-height:1.4}
+
+    .evidence-layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:56px;align-items:start}
+    .capture-col{position:sticky;top:68px}
+    .capture{border:1px solid var(--ring);border-radius:24px;background:var(--ivory);box-shadow:0 4px 24px rgba(0,0,0,.05)}
+    .capture-inner{border-radius:inherit}
+    .capture img{border-radius:inherit}
+    .capture-inner{position:relative;line-height:0}
+    .capture img{display:block;width:100%;height:auto}
+    .pin{position:absolute;width:27px;height:27px;display:grid;place-items:center;border:2px solid var(--ivory);border-radius:50%;transform:translate(-50%,-50%);color:#fff;background:var(--brand);font:700 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.14)}
+    .pin.secondary{background:var(--olive)}
+    .legend{display:flex;gap:16px;margin-top:14px;color:var(--stone);font-size:11px}
+    .legend span{display:flex;align-items:center;gap:6px}
+    .legend i{width:9px;height:9px;border-radius:50%;background:var(--brand)}
+    .legend i.secondary{background:var(--olive)}
+    .capture-note{margin:13px 0 0;color:var(--stone);font-size:11px;line-height:1.5}
+
+    .observations{min-width:0}
+    .observation{display:grid;grid-template-columns:31px minmax(0,1fr);gap:16px;margin:0 0 12px;padding:18px;border:0;border-radius:20px;background:#fff;box-shadow:0 1px 0 rgba(20,20,19,.03)}
+    .obs-no{width:31px;height:31px;display:grid;place-items:center;border:1px solid var(--brand);border-radius:50%;color:var(--brand);font:700 12px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .observation h3{margin:2px 0 8px;font-size:21px;font-weight:500;letter-spacing:-.015em;line-height:1.2}
+    .observation p{margin:0;color:var(--olive);font-size:14px}
+    .observation p+p{margin-top:10px}
+    .observation .tag+p{margin-top:12px}
+    .observation b{color:var(--ink);font-weight:500}
+    .tag{display:inline-block;margin-top:12px;padding:4px 8px;border-radius:99px;color:var(--brand);background:var(--brand-tint);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+    .preserve .obs-no{color:var(--ivory);background:var(--brand)}
+
+    .decision{padding:68px 0;color:var(--canvas);background:var(--deep)}
+    .decision .kicker{color:#9cb6d1}
+    .decision h2{max-width:800px;margin-bottom:16px;font-size:clamp(34px,5vw,52px);font-weight:500;letter-spacing:-.035em;line-height:1.04}
+    .decision-intro{max-width:730px;margin-bottom:0;color:#c8c6bd;font-size:17px}
+    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:34px}
+    .action{padding:19px;border:1px solid #454540;border-radius:12px;background:var(--deep-surface)}
+    .action-no{display:inline-flex;padding:3px 8px;border-radius:99px;color:var(--deep);background:var(--canvas);font:700 9px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase}
+    .action h3{margin:14px 0 6px;font-size:18px;font-weight:500}
+    .action p{margin:0;color:#c8c6bd;font-size:13px}
+    .score-lifts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:34px}
+    .score-lift{padding:20px;border:1px solid var(--border);border-radius:14px;background:#fff}
+    .score-lift-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px}
+    .score-lift-name{font-size:17px;font-weight:600}
+    .score-lift-jump{color:var(--olive);font-size:15px;font-weight:650;white-space:nowrap}
+    .score-lift-jump em{color:#087c6c;font-style:normal}
+    .score-lift-bar{position:relative;height:6px;margin:14px 0 4px;border-radius:99px;background:var(--sand)}
+    .score-lift-bar i{display:block;height:100%;border-radius:99px;background:#b67818}
+    .score-lift.weak .score-lift-bar i{background:#c64b42}
+    .score-lift-bar .tick{position:absolute;top:-3px;width:2px;height:12px;transform:translateX(-1px);border-radius:2px;background:var(--ink);opacity:.42}
+    .score-lift ul{margin:14px 0 0;padding:0;list-style:none}
+    .score-lift li{position:relative;padding:9px 0 9px 18px;border-top:1px solid var(--border-soft);color:var(--olive);font-size:14px}
+    .score-lift li:first-child{border-top:0}
+    .score-lift li::before{content:"›";position:absolute;left:2px;color:#087c6c;font-weight:800}
+    .score-ref{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:99px;color:#087c6c;background:#e3f2ef;font-size:10px;font-weight:650;white-space:nowrap}
+    .score-ceiling{margin-top:12px;padding:9px 11px;border:1px dashed var(--border);border-radius:9px;color:var(--stone);background:#f7f6f1;font-size:12px;line-height:1.45}
+    .path{width:100%;margin-top:38px;table-layout:fixed;border-collapse:collapse;border-top:1px solid #454540}
+    .path-row td{padding:18px 0;border-bottom:1px solid #333330;vertical-align:middle;text-align:left}
+    .path-step{width:70px;color:#9cb6d1;font:700 10px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+    .path-title{width:190px;font-size:16px;font-weight:500}
+    .path-copy{color:#aaa8a0;font-size:13px}
+    .validation{margin-top:24px;padding:15px 17px;border:1px dashed #55554f;border-radius:9px;color:#aaa8a0;font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    .validation b{color:var(--canvas)}
+
+    footer{padding:28px 0 38px;border-top:0}
+    .footer-inner{display:flex;justify-content:space-between;gap:20px;color:var(--stone)}
+    .footer-inner p{margin:0}
+    .footer-meta{font-size:11px}
+
+    /* Capture layout modes:
+       Tall/mobile: class="report capture-tall"
+       Desktop/web: class="report capture-wide" */
+    .report.capture-wide .evidence-layout{display:block}
+    .report.capture-wide .capture-col{position:static;margin-bottom:44px}
+    .report.capture-wide .capture{width:100%;border-radius:12px}
+    .report.capture-wide .observations{display:block}
+    .report.capture-wide .observations-head{grid-column:1/-1}
+
+    @media(max-width:900px){
+      .cover{grid-template-columns:1fr;gap:34px}
+      .stamp{width:min(100%,280px)}
+      .memo{grid-template-columns:1fr}
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:24px 0;border-right:0;border-bottom:0}
+      .chapter-head{grid-template-columns:1fr;gap:8px}
+      .ledger th,.ledger td{padding:13px 5px}
+      .ledger-no{width:38px}
+      .ledger-score{width:84px}
+      .evidence-layout{grid-template-columns:1fr;gap:36px}
+      .capture-col{position:static}
+      .capture{width:min(100%,392px);margin-inline:auto}
+      .actions{grid-template-columns:1fr}
+      .score-lifts{grid-template-columns:1fr}
+      .report.capture-wide .observations{grid-template-columns:1fr}
+    }
+    @media(max-width:620px){
+      .sheet{width:min(calc(100% - 24px),var(--content))}
+      .folio-links{display:none}
+      .cover{padding-top:50px}
+      .ledger th,.ledger td{padding:13px 3px}
+      .ledger-no{width:34px}
+      .ledger-score{width:84px}
+      .path-step{width:45px}
+      .path-title{width:120px}
+      .footer-inner{flex-direction:column}
+    }
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+    /* Report alignment: long-document rhythm, warm solid rules,
+       restrained radii, and one continuous paper surface. */
+    :root{
+      --serif:var(--geist);
+      --border:#e8e6dc;
+      --border-soft:#e5e3d8;
+    }
+    body{font-family:var(--geist);font-weight:400;line-height:1.55}
+    .report>main{display:flex;flex-direction:column}
+    .report>main>.cover{order:1}
+    .report>main>.overview{order:2}
+    .report>main>#evidence{order:3}
+    .report>main>#decision{order:4}
+    .report>main>.memo{order:5}
+    .report>main>#score{order:6}
+    h1,h2,h3,.folio b,.stamp-score,.ledger-title,.ledger-score,.path-title{font-family:var(--serif)}
+    .sans,.kicker,.folio,.label,.tag,.legend,.note,.stamp-small,.footer-meta,
+    .ledger-score.na,.observations-head span,.pin,.obs-no,.action-no,.path-step,
+    .validation{font-family:var(--geist)}
+    :focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+    .folio-bar,.cover,.memo,.chapter,footer{border-color:var(--border)}
+    .cover,.overview{border-bottom:0}
+    .folio-inner{min-height:52px}
+    .folio{font-size:10px;letter-spacing:.08em}
+    .folio-links{gap:22px}
+    .folio-links a{font-size:12px}
+    .cover{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:44px;padding:64px 0 48px}
+    .cover h1,.cover .deck{max-width:none}
+    h1{max-width:760px;font-size:clamp(42px,6vw,64px);font-weight:500;letter-spacing:-.025em;line-height:1.08}
+    .deck{max-width:690px;font-size:18px}
+    .kicker,.label,.stamp-small{font-weight:500}
+    .stamp{padding:20px;border:0;border-radius:14px;background:#f8ecd5;box-shadow:none}
+    .stamp-small{color:#8a5709}
+    .stamp-score{color:#8a5709;font-size:52px}
+    .stamp-score span{color:#8a5709}
+    .cover-meta{font-family:var(--serif);letter-spacing:.03em;text-transform:none}
+    .memo-block{padding:24px 22px 26px;border-color:var(--border)}
+    .chapter{padding:54px 0}
+    .chapter-head{display:block;max-width:760px;margin-bottom:28px}
+    .chapter-head h2{font-size:clamp(28px,3.5vw,38px);letter-spacing:-.015em;line-height:1.18}
+    .chapter-head>.kicker{margin-bottom:10px;white-space:nowrap}
+    #score .chapter-head,#score .chapter-head>div,#score .chapter-head h2,#score .chapter-head .lead{width:100%;max-width:none}
+    .ledger{border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#fff;border-collapse:separate;border-spacing:0}
+    .ledger th,.ledger td{padding:13px 10px;border-color:var(--border-soft)}
+    .ledger-no{width:42px}
+    .ledger-score{width:92px;white-space:nowrap}
+    .ledger-score{font-size:17px;font-weight:700}
+    .ledger-score.band-high{color:#9b352f}
+    .ledger-score.band-med{color:#8a5709}
+    .ledger-score.band-good{color:#17644f}
+    .ledger-total th,.ledger-total td{padding-top:16px;padding-bottom:16px;border-bottom:0;background:#f7f6f1}
+    .ledger-total th{font-weight:650}
+    .ledger-total .ledger-score{font-weight:750}
+    .ledger-head th{color:var(--stone);font:650 10px/1.3 var(--geist);letter-spacing:.1em;text-transform:uppercase}
+    .capture{border:.5px solid var(--border);border-radius:30px;box-shadow:0 24px 60px rgba(20,20,19,.14)}
+    .pin{color:#fff;text-decoration:none;cursor:pointer}
+    .pin:hover{transform:translate(-50%,-50%) scale(1.08)}
+    .pin:focus-visible{outline:3px solid var(--brand);outline-offset:3px}
+    .pin.status-working{background:#0a8f7a}
+    .pin.status-medium{background:#c47f12}
+    .pin.status-verify{background:#2d5a8a}
+    .pin.status-high{background:#c94b43}
+    .observation{scroll-margin-top:68px;border:1px solid var(--border)}
+    section[id]{scroll-margin-top:68px}
+    .observation:target{box-shadow:0 0 0 2px var(--brand)}
+    .observation{padding:14px 12px;border:1px solid var(--border);box-shadow:none}
+    .observation:target{background:#fff;outline:0;box-shadow:0 0 0 1px #6b7280}
+    .observation>div{min-width:0}
+    .observation h3{font-size:19px;letter-spacing:0}
+    .obs-no{border-radius:50%;font-weight:750}
+    .tag{border-radius:3px;font-weight:500}
+    .tag+.tag{margin-left:6px}
+    .tag.category{color:var(--brand);background:var(--brand-tint)}
+    .tag.status-working{color:#17644f;background:#e4f1eb}
+    .tag.status-improve{color:#8a5709;background:#f8ecd5}
+    .tag.status-verify{color:#2d5680;background:#e4ecf5}
+    .tag.status-high{color:#9b352f;background:#f6e3e1}
+    .quick-win{display:block;width:fit-content;max-width:100%;margin-top:12px;padding:8px 11px;border-radius:10px;color:#0a4f44;background:#e6f4f1;font-size:13px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;word-break:normal}
+    .quick-win b{color:#073a32;font-weight:650}
+    .finding-group{margin:30px 0 12px;padding:0;border:0;font-size:18px;font-weight:650;letter-spacing:-.01em;line-height:1.25;text-transform:none}
+    .finding-group.issues{color:#9b352f}
+    .finding-group.verify{color:#2d5680}
+    .finding-group.working{color:#17644f}
+    #evidence .observations{padding-block:0}
+    #evidence .finding-group{margin-top:0}
+    #evidence .observation:last-of-type{margin-bottom:0}
+    /* Observation-number badges are determined by their finding group, never
+       by the individual issue priority or hard-coded observation number. */
+    .finding-group.issues~.observation .obs-no{color:#fff;border:0;background:#9b352f;box-shadow:none}
+    .finding-group.verify~.observation .obs-no{color:#fff;border:0;background:#2d5680;box-shadow:none}
+    .finding-group.working~.observation .obs-no{color:#fff;border:0;background:#17644f;box-shadow:none}
+    .legend i.status-high{background:#c94b43}
+    .legend i.status-medium{background:#c47f12}
+    .legend i.status-verify{background:#2d5a8a}
+    .legend i.status-working{background:#0a8f7a}
+    .decision{padding:58px 0;color:var(--ink);background:var(--canvas);border-top:0}
+    .decision .kicker{color:var(--brand)}
+    .decision h2{font-size:clamp(30px,4vw,44px);letter-spacing:-.02em;line-height:1.12}
+    .decision h2,.decision-intro{width:100%;max-width:none}
+    .decision-intro,.action p,.path-copy{color:var(--olive)}
+    .actions{gap:12px;margin-top:30px}
+    .action{padding:18px;border:.5px solid var(--border);border-radius:14px;background:var(--ivory)}
+    .action-no{color:var(--brand);background:var(--brand-tint);border-radius:3px;font-weight:500}
+    .path{border-color:var(--border)}
+    .path-row td{padding:16px 0;border-color:var(--border-soft)}
+    .path-step{color:var(--brand);font-weight:500}
+    .validation{border:0;border-radius:14px;color:var(--olive);background:#efefec}
+    .cover,.overview{border-bottom:0}
+    .validation b{color:var(--ink)}
+    @media(max-width:900px){.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:620px){.overview-grid{grid-template-columns:1fr}}
+
+    /* Re-assert stacked-memo padding: the alignment layer above re-adds
+       side padding after the 900px breakpoint has already removed it. */
+    @media(max-width:900px){
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:24px 0}
+    }
+
+    @media print{
+      .memo-block,.memo-block:first-child,.memo-block:last-child{padding:20px 0}
+      @page{margin:14mm}
+      html,body{background:#fff}
+      .folio-bar{position:static;background:none;backdrop-filter:none;border-bottom:1px solid #ddd}
+      .report{padding-top:0}
+      .folio-links{display:none}
+      .capture-col{position:static}
+      .evidence-layout{display:block}
+      .capture{width:min(100%,340px);margin:0 auto 24px;box-shadow:none}
+      .observation{border:1px solid #e5e3d8;box-shadow:none}
+      .observation,.overview-card,.memo-block,.score-lift,.path-row,.validation,.quick-win,.ledger-row{break-inside:avoid}
+      h1,h2,h3,.finding-group,.chapter-head{break-after:avoid}
+      .chapter,.decision{border-top:0}
+      a{color:inherit;text-decoration:none}
+      .pin{box-shadow:none}
+    }
+      .observations{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:16px}
+    .path th,.path td{text-align:center!important;vertical-align:middle!important}
+  </style>
+</head>
+<body>
+  <div class="report capture-wide">
+    <header class="folio-bar">
+      <div class="sheet folio-inner">
+        <div class="folio"><b>Work Report</b> Mobile implementation follow-up &middot; 2026.08.13</div>
+        <nav class="folio-links sans" aria-label="Report navigation"><a href="#evidence">Evidence</a><a href="#score">Score</a><a href="#decision">Decision</a></nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="sheet cover">
+        <div>
+          <p class="kicker">LoomTV mobile app &middot; Post-plan source audit</p>
+          <h1>The ownership boundaries hold.<br>The proof stops at the device.</h1>
+          <p class="deck">The connection path is now designed to disappear into the product: continuous Bonjour discovery, automatic selection of the single obvious desktop, identity-based reconnect after address changes, a certificate-pinned loopback transport, quiet bounded retries, and desktop advertiser self-recovery are implemented. A clean iPhone Simulator install found the running Mac and connected automatically without a tap, desktop prompt, PIN, or mobile error. Physical office Wi-Fi, accessibility, render isolation, and measured long-session behavior remain open; production signing is explicitly deferred to the owner.</p>
+        </div>
+        <aside class="stamp" aria-label="Overall score">
+          <div class="stamp-small">Overall score</div>
+          <div class="stamp-score">9.0<span> / 10</span></div>
+        </aside>
+      </section>
+
+      <section class="overview">
+        <div class="sheet">
+          <div class="overview-grid">
+            <article class="overview-card state-good"><div class="overview-score">9.0 <span>&rarr; 9.5</span></div><div class="overview-label">Overall &middot; directional mean of 10 scored categories</div><div class="overview-bar"><i style="width:90%"></i><span class="tick" style="left:95%"></span></div></article>
+            <article class="overview-card state-warning"><div class="overview-score">8.2 <span>&rarr; 9.5</span></div><div class="overview-label">Ledger 06 &middot; Recognition rather than recall</div><div class="overview-bar"><i style="width:82%"></i><span class="tick" style="left:95%"></span></div></article>
+            <article class="overview-card state-good"><div class="overview-score">8.7 <span>&rarr; 9.5</span></div><div class="overview-label">Ledger 07 &middot; Flexibility and efficiency</div><div class="overview-bar"><i style="width:87%"></i><span class="tick" style="left:95%"></span></div></article>
+            <article class="overview-card state-good"><div class="overview-score">8.8 <span>&rarr; 9.5</span></div><div class="overview-label">Ledger 08 &middot; Simplicity and information architecture</div><div class="overview-bar"><i style="width:88%"></i><span class="tick" style="left:95%"></span></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="chapter" id="evidence">
+        <div class="sheet">
+          <div class="chapter-head"><p class="kicker">01 &middot; Evidence</p><div><h2>Eleven observations, separated by what source can and cannot prove.</h2><p class="lead">This follow-up inspected and exercised the current working tree after the LAN pass. All 68 mobile source-contract tests, the mobile TypeScript check, two desktop LAN contracts, the desktop main-process TypeScript check, and an unsigned iOS Simulator Release build passed on 2026-08-13. A clean iPhone Simulator install discovered the active Mac, created the certificate-pinned loopback session, submitted pairing automatically, received secure credentials without a desktop prompt, and reached profile selection. Physical office-network and full device journeys remain under Needs verification; production signing is owner-deferred.</p><p class="lead"><b>Scoring note.</b> The ledger is a coarse prioritization aid, not a measurement. Automated evidence can close source findings and improve confidence. Only production artifacts and device evidence can close the remaining release gates.</p></div></div>
+          <div class="evidence-layout">
+            <div class="observations">
+              <div class="finding-group verify">Needs verification</div>
+
+              <article class="observation" id="observation-1"><span class="obs-no">1</span><div><h3>Controller isolation needs runtime measurement.</h3><span class="tag category">Information architecture</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> <code>AppRoot</code> composes <code>useMobileConnectionSessionController</code>, <code>useMobileNavigationController</code>, and <code>useMobilePlaybackController</code>; the native video player is no longer owned by the root. <code>tests/mobileArchitecture.test.mjs</code> enforces all three controllers and a 55-hook ceiling, and the complete 68-test suite passes.</p><p><b>Risk.</b> Source ownership is explicit, but static structure cannot prove that playback ticks avoid catalog rerenders or that connection changes leave the player untouched.</p><p><b>Why verify.</b> The architecture finding is implemented; only its runtime performance claim remains open.</p><div class="quick-win"><b>Recommendation.</b> Record render counts for one playback minute and a connection transition on a physical-device build. Keep the controller contract test as the regression boundary.</div></div></article>
+
+              <article class="observation" id="observation-2"><span class="obs-no">2</span><div><h3>Production signing is owner-deferred.</h3><span class="tag category">Trust</span><span class="tag status-verify">Owner deferred</span><p><b>Evidence.</b> <code>plugins/withMobileReleaseHardening.js</code> removes debug release signing, strips forbidden merged Android permissions, disables backup, and hardens clean iOS generation. Local unsigned Android and iOS Simulator Release targets compile. The owner explicitly deferred EAS credentials, signer inspection, provisioning, and store-artifact verification from this pass.</p><p><b>Risk.</b> An unsigned compile cannot prove the signer, entitlements, provisioning, or distributed artifact.</p><p><b>Why verify later.</b> This is still a release boundary, but it is not a LAN-experience blocker and was intentionally left for the owner.</p><div class="quick-win"><b>Owner action.</b> Before distribution, produce EAS preview builds, inspect signer and entitlements, run the preview matrix, and preserve reviewed build IDs.</div></div></article>
+
+              <article class="observation" id="observation-3"><span class="obs-no">3</span><div><h3>Only the physical office-network matrix remains open.</h3><span class="tag category">System status</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> A clean iPhone Simulator install discovered the running Mac, automatically selected the single valid desktop, opened the certificate-pinned native loopback transport, preserved its session-secret path, submitted pairing automatically, received secure credentials without a desktop prompt, and reached profile selection. The live screenshot and raw logs are retained in <code>apps/mobile/release-evidence/2026-08-13/verification</code>. Contracts also prove DHCP address reconciliation by stable host identity, 0.75-to-10-second reconnect backoff, 15-second automatic retry throttling, cancellation, and physical-interface preference over VPN adapters.</p><p><b>Risk.</b> Simulator and source evidence cannot reproduce office access-point client isolation, captive portals, multicast suppression, Local Network permission history, desktop sleep, or actual Wi-Fi loss.</p><p><b>Why verify.</b> The original failure occurred on office Wi-Fi. The implementation is now self-healing, but the network policy itself must be exercised in that environment.</p><div class="quick-win"><b>Recommendation.</b> On one physical phone at the office, launch with the desktop already running, confirm automatic recovery after Wi-Fi off/on and desktop sleep, then repeat once with multicast blocked to verify the compact address-and-PIN fallback.</div></div></article>
+
+              <article class="observation" id="observation-4"><span class="obs-no">4</span><div><h3>Accessibility remains a device claim.</h3><span class="tag category">Accessibility</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> The source retains labels, roles, state props, text scaling, and player focus containment, while <code>RELEASE_CHECKLIST.md</code> explicitly requires screen readers, font scaling, reduced motion, contrast, keyboard avoidance, and target sizing.</p><p><b>Risk.</b> Static props do not establish focus order, announcements, composite grouping, layout at maximum text size, or operability with VoiceOver and TalkBack.</p><p><b>Why verify.</b> Pairing is the only entry into the product. An inaccessible pairing or recovery screen blocks the whole app.</p><div class="quick-win"><b>Recommendation.</b> Record pairing, library, detail, diagnostics, recovery, and playback journeys with VoiceOver and TalkBack at maximum text size in both orientations.</div></div></article>
+
+              <article class="observation" id="observation-5"><span class="obs-no">5</span><div><h3>Runtime recovery and performance need measurements.</h3><span class="tag category">Efficiency</span><span class="tag status-verify">Needs verification</span><p><b>Evidence.</b> Root and player boundaries, diagnostic persistence, bounded progress writes, cached artwork, and lifecycle cancellation exist in source. <code>MOBILE_9_5_RELEASE_GATE.md</code> still asks for deliberate runtime throws, offline startup timings, cached-artwork completion, one-hour persistence traces, reconnect timings, and render counts.</p><p><b>Risk.</b> A compiled fallback may still be unreachable, a cache may still miss perceived-speed targets, and bounded writes do not prove smooth playback over an hour.</p><p><b>Why verify.</b> These are the observations that separate a robust implementation from a responsive product.</p><div class="quick-win"><b>Recommendation.</b> Run the gate against the signed preview build and retain raw timing, write-count, memory, and recovery artifacts. Re-score only after the thresholds pass.</div></div></article>
+
+              <div class="finding-group working">Working well to preserve</div>
+
+              <article class="observation preserve" id="observation-6"><span class="obs-no">6</span><div><h3>Render failures now have scoped recovery.</h3><span class="tag category">Error recovery</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>App.tsx</code> wraps the root and player in separate <code>MobileErrorBoundary</code> scopes. <code>components/MobileErrorBoundary.tsx</code> renders a labelled retry fallback and records the failure without clearing persisted profiles, catalog, progress, credentials, or connection data.</p><p><b>Why it works.</b> A player render failure can return to detail without taking the library down, while a root failure offers controlled retry instead of a blank app.</p><p><b>What to preserve.</b> Keep recovery scopes narrow and never turn a generic retry into broad data deletion.</p></div></article>
+
+              <article class="observation preserve" id="observation-7"><span class="obs-no">7</span><div><h3>Diagnostics are bounded and sanitized.</h3><span class="tag category">Trust</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>mobileDiagnostics.ts</code> provides the shared non-fatal path; Settings can list, export, and clear events. <code>mobileDiagnosticPolicy.ts</code> caps storage at 100 events, seven days, and 256 KB, while tests prove credential, secret-query, and local-path redaction.</p><p><b>Why it works.</b> Operational failures now leave a useful local record without turning diagnostics into a second secret store.</p><p><b>What to preserve.</b> Keep expected parser fallbacks out of the diagnostic stream and maintain the byte cap as event context grows.</p></div></article>
+
+              <article class="observation preserve" id="observation-8"><span class="obs-no">8</span><div><h3>LAN connection is automatic, bounded, and identity-safe.</h3><span class="tag category">User control</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>mobileLanClient.ts</code> defines 4-second health/config, 12-second standard, 20-second library, and 45-second stream-preparation budgets. <code>useMobileBonjourDiscovery.ts</code> continuously rescans without clearing stable results and tolerates brief mDNS removals. <code>mobileDiscoveryExperience.ts</code> selects the single obvious desktop or the saved host identity automatically. <code>mobileSecureTransportUrl.ts</code> preserves the native loopback session secret. The desktop advertiser restarts with bounded backoff, and <code>networkInfo.ts</code> prefers physical private interfaces over VPN and virtual adapters.</p><p><b>Why it works.</b> A first run connects without a mobile tap or desktop prompt. Owners can optionally require approval for new devices in Network settings. Later runs follow the saved desktop across DHCP changes, hide transient network failures behind quiet reconnecting state, and keep certificate changes approval-gated.</p><p><b>What to preserve.</b> Keep automatic selection limited to one unambiguous host, keep approval optional and off by default, preserve certificate pinning, and keep manual address/PIN entry as a compact fallback rather than the primary journey.</p></div></article>
+
+              <article class="observation preserve" id="observation-9"><span class="obs-no">9</span><div><h3>Decode and persistence boundaries have contracts.</h3><span class="tag category">Error prevention</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> Dedicated tests now cover valid, malformed, wrong-typed, truncated, and oversized payloads. <code>mobileOfflineCache.ts</code> persists catalog revisions separately from progress, updates <code>last_seen_at</code> for active paths, and expires only orphaned progress. The final mobile source suite passes 68 of 68 tests.</p><p><b>Why it works.</b> Unchanged catalogs avoid full rewrites, active titles retain resume positions, malformed desktop data cannot silently enter state, and stale progress has explicit semantics.</p><p><b>What to preserve.</b> Keep catalog revision ownership immutable and add fixtures whenever the desktop payload schema changes.</p></div></article>
+
+              <article class="observation preserve" id="observation-10"><span class="obs-no">10</span><div><h3>Others is excluded at the core selector.</h3><span class="tag category">Consistency</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> <code>mobileLibrary.ts</code> exposes <code>coreItems</code>, which returns anime, TV, and movies only. <code>App.tsx</code> uses that selector for the core collection, while Others keeps its own direct-play route and remains available for thumbnail caching and ID ownership where needed.</p><p><b>Why it works.</b> Home, hero, anime, TV, movies, search, My List, and continue-watching no longer each need to remember a local filter.</p><p><b>What to preserve.</b> Keep <code>coreItems</code> as the only core-surface source and make any collection that includes Others explicit in its name and purpose.</p></div></article>
+
+              <article class="observation preserve" id="observation-11"><span class="obs-no">11</span><div><h3>Release generation and product scope are explicit.</h3><span class="tag category">Help and documentation</span><span class="tag status-working">Working well</span><p><b>Evidence.</b> Clean prebuild, CocoaPods integration, unsigned Android Release, and unsigned arm64 iOS Simulator Release all pass. The CI workflow now installs pods and targets <code>LoomTVMobile.xcworkspace</code>/<code>LoomTVMobile</code>. <code>MOBILE_PRODUCT_SCOPE.md</code> records background playback, lock-screen controls, picture-in-picture, English-only copy, and deep links as unsupported for this release; <code>app.json</code> declares no custom scheme.</p><p><b>Why it works.</b> Generated native projects remain reproducible, path-space build defects are fixed in the config plugin, and absent product capabilities are decisions rather than accidental claims.</p><p><b>What to preserve.</b> Revisit a scope row only with implementation, user-facing behavior, automated contracts, and device evidence.</p></div></article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="decision" id="decision">
+        <div class="sheet">
+          <p class="kicker">03 &middot; Decision memo</p>
+          <h2>The source split is done.<br>Finish the evidence.</h2>
+          <p class="decision-intro">The LAN path now behaves like a local product instead of a setup workflow: discovery stays warm, one obvious desktop connects automatically, saved identity survives address changes, requests time out and cancel by operation, and transient failures retry quietly. The shortest credible route to 9.5 is physical office-network, accessibility, and runtime performance evidence; signing remains an explicit owner follow-up.</p>
+          <div class="score-lifts" aria-label="Path to 9.5 by score category">
+            <article class="score-lift">
+              <div class="score-lift-top"><span class="score-lift-name">Overall</span><span class="score-lift-jump">9.0 &rarr; <em>9.5</em></span></div>
+              <div class="score-lift-bar"><i style="width:90%"></i><span class="tick" style="left:95%"></span></div>
+              <ul>
+                <li>Prove the implemented controller seams isolate renders. <span class="score-ref">Verify 1</span></li>
+                <li>Pass physical office-network, accessibility, and timing gates; complete owner-deferred signing before distribution. <span class="score-ref">Verify 2-5</span></li>
+                <li>Protect the recovered boundaries and contracts. <span class="score-ref">Keep 6-11</span></li>
+              </ul>
+              <div class="score-ceiling">The score remains below 9.5 until physical office-network, accessibility, and measured runtime evidence exist. Production signing is owner-deferred and remains mandatory before distribution.</div>
+            </article>
+            <article class="score-lift weak">
+              <div class="score-lift-top"><span class="score-lift-name">Flow &amp; IA</span><span class="score-lift-jump">9.0 &rarr; <em>9.5</em></span></div>
+              <div class="score-lift-bar"><i style="width:90%"></i><span class="tick" style="left:95%"></span></div>
+              <ul>
+                <li>Keep connection/session, player, and navigation/modal ownership in their controllers. <span class="score-ref">Keep 1</span></li>
+                <li>Prove playback ticks and connection changes do not cross-rerender domains. <span class="score-ref">Verify 1</span></li>
+                <li>Keep the single core-media selector contract. <span class="score-ref">Keep 10</span></li>
+              </ul>
+            </article>
+            <article class="score-lift">
+              <div class="score-lift-top"><span class="score-lift-name">Clarity &amp; Copy</span><span class="score-lift-jump">8.4 &rarr; <em>9.5</em></span></div>
+              <div class="score-lift-bar"><i style="width:84%"></i><span class="tick" style="left:95%"></span></div>
+              <ul>
+                <li>Validate timeout, recovery, diagnostics, and unsupported-scope messages on device. <span class="score-ref">Verify 3-5</span></li>
+                <li>Confirm maximum text size does not obscure the required recovery action. <span class="score-ref">Verify 4</span></li>
+                <li>Keep technical detail behind Diagnostics rather than primary error copy. <span class="score-ref">Keep 7</span></li>
+              </ul>
+            </article>
+            <article class="score-lift weak">
+              <div class="score-lift-top"><span class="score-lift-name">Accessibility</span><span class="score-lift-jump">8.2 &rarr; <em>9.5</em></span></div>
+              <div class="score-lift-bar"><i style="width:82%"></i><span class="tick" style="left:95%"></span></div>
+              <ul>
+                <li>Complete VoiceOver and TalkBack journeys through every critical state. <span class="score-ref">Verify 4</span></li>
+                <li>Record focus order, announcements, target sizes, text scale, and orientation. <span class="score-ref">Verify 4</span></li>
+                <li>Exercise the root and player recovery screens with screen readers. <span class="score-ref">Verify 5</span></li>
+              </ul>
+            </article>
+          </div>
+          <table class="path" aria-label="Path to 9.5">
+            <tbody>
+              <tr class="path-row"><td class="path-step">Step 01</td><td class="path-title">Run office LAN</td><td class="path-copy">Verify automatic discovery, Wi-Fi off/on, desktop sleep, client isolation, and compact manual fallback on one physical phone. Addresses 3.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 02</td><td class="path-title">Prove access and recovery</td><td class="path-copy">Exercise pairing, browsing, playback, diagnostics, and deliberate failures with VoiceOver and TalkBack. Addresses 4 and 5.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 03</td><td class="path-title">Measure the hour</td><td class="path-copy">Capture startup, artwork, persistence, reconnect, memory, and controller render-count evidence. Addresses 1 and 5.</td></tr>
+              <tr class="path-row"><td class="path-step">Step 04</td><td class="path-title">Complete signing</td><td class="path-copy">Owner-deferred: inspect production signer, entitlements, provisioning, and immutable build IDs before distribution. Addresses 2.</td></tr>
+            </tbody>
+          </table>
+          <div class="validation"><b>9.5 gate.</b> A physical phone passes office discovery, Wi-Fi off/on, desktop sleep, client-isolation fallback, and reconnect; VoiceOver and TalkBack complete pairing, recovery, and playback; offline startup, cached artwork, one-hour writes, reconnect, and controller render counts meet the numeric gate; all 68 mobile contracts remain green; and owner-deferred signing is completed before distribution.</div>
+        </div>
+      </section>
+
+      <section class="sheet memo">
+        <div class="memo-block"><p class="label">What works well</p><h2>Failure is now bounded, visible, and recorded.</h2><p>Error boundaries, diagnostics, deadlines, cancellation, cache semantics, and decoder contracts are implemented and automated.</p></div>
+        <div class="memo-block"><p class="label">Primary issue</p><h2>The office network is the remaining LAN unknown.</h2><p>Simulator discovery and automatic secure pairing pass, but access-point isolation, captive portals, physical Wi-Fi loss, and desktop sleep require the real environment.</p></div>
+        <div class="memo-block"><p class="label">Recommended action</p><h2>Run one focused office journey.</h2><p>Use a physical phone to prove automatic discovery and reconnect first, then force multicast failure and confirm the compact address-and-PIN fallback.</p></div>
+        <div class="memo-block"><p class="label">Expected outcome</p><h2>A release claim backed by artifacts.</h2><p>The team can distinguish implemented behavior, automated proof, device proof, and production release proof without relying on a score.</p></div>
+      </section>
+
+      <section class="chapter" id="score">
+        <div class="sheet">
+          <div class="chapter-head"><p class="kicker">02 &middot; Score ledger</p><div><h2>Ten categories, rated directionally from verified evidence.</h2><p class="lead">The ratings rank remaining risk. They use one decimal place and are secondary to the observations. Source and unsigned native evidence closed the former high-priority findings. Physical office-network, accessibility, timing, and owner-deferred signing gaps keep the applicable categories below 9.5.</p></div></div>
+          <table class="ledger" aria-label="Heuristic category scores">
+            <thead><tr class="ledger-head"><th class="ledger-no" scope="col">No.</th><th class="ledger-title" scope="col">Category</th><th class="ledger-score" scope="col">Score</th><th class="ledger-copy" scope="col">Evidence</th></tr></thead>
+            <tbody>
+              <tr class="ledger-row"><td class="ledger-no">01</td><td class="ledger-title">System status feedback</td><td class="ledger-score band-good">9.3 / 10</td><td class="ledger-copy">Discovery, approval, timeout, offline, recovery, and diagnostics states are concise; office bad-network behavior remains unmeasured (3, 5, 7, 8).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">02</td><td class="ledger-title">Real world / mental model</td><td class="ledger-score band-good">9.2 / 10</td><td class="ledger-copy">The app finds one obvious local desktop automatically and keeps address/PIN entry as fallback; office network policy still needs physical confirmation (3, 8, 11).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">03</td><td class="ledger-title">User control and reversibility</td><td class="ledger-score band-good">9.3 / 10</td><td class="ledger-copy">Requests cancel on caller and lifecycle changes, automatic retries are bounded, certificate changes remain identity-gated, optional approval is available, and manual fallback remains available (3, 5, 6, 8).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">04</td><td class="ledger-title">Consistency and navigation</td><td class="ledger-score band-good">9.2 / 10</td><td class="ledger-copy">Core media uses one selector and Others retains direct play; device navigation regression is still part of the matrix (3, 10).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">05</td><td class="ledger-title">Error prevention</td><td class="ledger-score band-good">9.1 / 10</td><td class="ledger-copy">Release hardening, decoder contracts, explicit revisions, and bounded diagnostics are automated; signed artifacts remain uninspected (2, 7, 9, 11).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">06</td><td class="ledger-title">Recognition rather than recall</td><td class="ledger-score band-med">8.2 / 10</td><td class="ledger-copy">Labels and state semantics remain in source, but screen-reader order, announcements, grouping, and maximum text size need devices (4).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">07</td><td class="ledger-title">Flexibility and efficiency</td><td class="ledger-score band-good">8.7 / 10</td><td class="ledger-copy">Writes, deadlines, retention, and all three root-domain controllers are bounded; render and one-hour playback measurements are missing (1, 5, 8, 9).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">08</td><td class="ledger-title">Simplicity and information architecture</td><td class="ledger-score band-good">8.9 / 10</td><td class="ledger-copy">Connection/session, navigation/modal, and playback ownership now sit behind explicit controllers with a tested 55-hook root ceiling; runtime isolation remains to prove (1).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">09</td><td class="ledger-title">Error diagnosis and recovery</td><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Root/player boundaries and persisted redacted diagnostics close the blank-screen and no-trace defects; deliberate device throws remain unrecorded (5-7).</td></tr>
+              <tr class="ledger-row"><td class="ledger-no">10</td><td class="ledger-title">Help and documentation</td><td class="ledger-score band-good">8.8 / 10</td><td class="ledger-copy">Scope, release gate, checklist, CI, and automated evidence are explicit; production build IDs and device rows are still pending (2-5, 11).</td></tr>
+            </tbody>
+            <tfoot><tr class="ledger-total"><th colspan="2" scope="row">Average score</th><td class="ledger-score band-good">9.0 / 10</td><td class="ledger-copy">Directional mean of all ten scored categories. Findings and release-gate artifacts outrank the decimal.</td></tr></tfoot>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <footer><div class="sheet footer-inner"><p>Work Report &middot; Evidence-led mobile implementation follow-up &middot; working tree 2026-08-13</p><p class="footer-meta">LAN implementation and simulator evidence &middot; 9.0 / 10 &middot; 68 mobile tests, 2 desktop LAN tests, and focused typechecks passed &middot; Office physical-device evidence open &middot; Signing owner-deferred</p></div></footer>
+  </div>
+</body>
+</html>

@@ -17,6 +17,8 @@ type NetworkSettingsSectionProps = {
   localNetworkStatus: LocalNetworkStatus | null;
   isNetworkSharingOn: boolean;
   isTogglingNetworkSharing: boolean;
+  requireApproval: boolean;
+  setRequireApproval: (enabled: boolean) => void;
   currentNetworkName: string;
   networkStatusMessage: string;
   setLocalNetworkSharing: (enabled: boolean) => void;
@@ -44,6 +46,8 @@ export default function NetworkSettingsSection({
   localNetworkStatus,
   isNetworkSharingOn,
   isTogglingNetworkSharing,
+  requireApproval,
+  setRequireApproval,
   currentNetworkName,
   networkStatusMessage,
   setLocalNetworkSharing,
@@ -77,7 +81,7 @@ export default function NetworkSettingsSection({
             Local Network Sharing
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Watch this library on LoomTV mobile over your home network. Private by default — only explicitly paired devices can connect.
+            Watch this library on LoomTV mobile over your home network. Nearby LoomTV devices connect automatically by default.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -88,10 +92,10 @@ export default function NetworkSettingsSection({
               </p>
               <p className="text-xs text-[var(--loom-muted)]">
                 {isTogglingNetworkSharing
-                  ? 'Preparing one-tap approval and PIN fallback.'
+                  ? 'Preparing automatic local connection.'
                   : isNetworkSharingOn
-                  ? 'Tap Connect in LoomTV mobile, then approve the device here.'
-                  : 'Turn on to approve nearby devices or use a pairing PIN.'}
+                  ? requireApproval ? 'New devices wait for your approval.' : 'Nearby LoomTV devices connect automatically.'
+                  : 'Turn on to connect nearby LoomTV devices.'}
               </p>
             </div>
             <Button
@@ -119,6 +123,23 @@ export default function NetworkSettingsSection({
                 exit={{ height: 0, opacity: 0 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
               >
+                <div className="settings-network-card flex items-center justify-between gap-4 rounded-lg bg-[var(--loom-surface-2)] p-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white">Require approval for new devices</p>
+                    <p className="text-xs text-[var(--loom-muted)]">Optional. Off keeps local connection automatic.</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={requireApproval}
+                    onClick={() => setRequireApproval(!requireApproval)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${requireApproval ? 'bg-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)]'}`}
+                  >
+                    <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${requireApproval ? 'translate-x-6' : 'translate-x-1'}`} />
+                    <span className="sr-only">Require approval for new devices</span>
+                  </button>
+                </div>
+
                 <div className="settings-network-card rounded-xl bg-[var(--loom-accent)]/10 p-4">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-white">
                     <CheckCircle2 className="h-4 w-4 text-[var(--loom-accent)]" />
@@ -161,7 +182,9 @@ export default function NetworkSettingsSection({
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-[var(--loom-muted)]">
-                    A discovered device can request one-tap approval. Once approved, it stays paired until you revoke it. The PIN is a manual fallback; it expires after five minutes and rotates immediately after successful pairing.
+                    {requireApproval
+                      ? 'New devices ask for approval. The PIN remains available as a manual fallback.'
+                      : 'Discovered LoomTV devices connect automatically. The PIN remains available as a manual fallback.'}
                   </p>
                 </div>
 

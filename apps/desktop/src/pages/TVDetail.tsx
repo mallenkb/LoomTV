@@ -60,9 +60,9 @@ const episodeAirDateFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric',
 });
 
-function formatEpisodeAirDate(value?: string): string {
+function episodeAirDateTimestamp(value?: string): number | null {
   const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!match) return '';
+  if (!match) return null;
 
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -73,9 +73,37 @@ function formatEpisodeAirDate(value?: string): string {
     || date.getUTCFullYear() !== year
     || date.getUTCMonth() !== month - 1
     || date.getUTCDate() !== day
-  ) return '';
+  ) return null;
 
-  return episodeAirDateFormatter.format(date);
+  return date.getTime();
+}
+
+function formatEpisodeAirDate(value?: string): string {
+  const timestamp = episodeAirDateTimestamp(value);
+  if (timestamp === null) return '';
+  return episodeAirDateFormatter.format(new Date(timestamp));
+}
+
+function chronologicalSeasonNumbers(seasonNumbers: number[], episodes: EpisodeMeta[] = []): number[] {
+  const available = Array.from(new Set(seasonNumbers));
+  const regular = available.filter((season) => season > 0).sort((a, b) => a - b);
+  if (!available.includes(0)) return regular;
+
+  const firstAirDate = (season: number): number | null => {
+    const dates = episodes
+      .filter((episode) => episode.season === season)
+      .map((episode) => episodeAirDateTimestamp(episode.airDate))
+      .filter((value): value is number => value !== null);
+    return dates.length > 0 ? Math.min(...dates) : null;
+  };
+  const specialDate = firstAirDate(0);
+  if (specialDate === null) return [...regular, 0];
+  const insertBefore = regular.findIndex((season) => {
+    const seasonDate = firstAirDate(season);
+    return seasonDate !== null && seasonDate > specialDate;
+  });
+  if (insertBefore < 0) return [...regular, 0];
+  return [...regular.slice(0, insertBefore), 0, ...regular.slice(insertBefore)];
 }
 
 function formatThumbnailTime(seconds: number, duration = 0): string {
@@ -264,11 +292,11 @@ async function fetchAniListCastById(mediaId: string): Promise<TVShow['cast']> {
   return mapAniListCast(payload.data?.Media?.characters?.edges || []);
 }
 
-function AnimeCreditRows({ credits }: { credits: TVShow['cast'] }) {
+function AnimeCreditRows({ credits, style }: { credits: TVShow['cast']; style: 'standard' | 'compact' }) {
   const normalizedCredits = normalizeAnimeCast(credits);
 
   return (
-    <div role="list" aria-label="Anime character and voice actor credits" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div role="list" aria-label="Anime character and voice actor credits" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
       {normalizedCredits.map((credit, index) => {
         const characterName = credit.characterName || credit.name || 'Unknown character';
         const characterRole = formatCreditRole(credit.characterRole || credit.character || 'Character');
@@ -279,7 +307,7 @@ function AnimeCreditRows({ credits }: { credits: TVShow['cast'] }) {
           ? `${characterName} — voiced by ${actorName}`
           : `${characterName} — no voice actor listed`;
 
-        return (
+        if (style === 'standard') return (
           <div
             key={`${characterName}:${actorName}:${index}`}
             role="listitem"
@@ -296,12 +324,11 @@ function AnimeCreditRows({ credits }: { credits: TVShow['cast'] }) {
                   )}
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="line-clamp-2 text-[16px] font-semibold leading-5 text-[var(--loom-text)]">{characterName}</p>
-                  <p className="truncate text-xs tracking-wide text-[var(--loom-muted)]">{characterRole}</p>
+                  <p className="break-words text-[16px] font-semibold leading-5 text-[var(--loom-text)]">{characterName}</p>
+                  <p className="text-xs tracking-wide text-[var(--loom-muted)]">{characterRole}</p>
                 </div>
               </div>
             </div>
-
             <div className="flex min-w-0 items-center gap-3 bg-[var(--loom-season-episodes-veil)] px-[16px] py-[12px]">
               <Avatar className="h-14 w-14 shrink-0 rounded-full">
                 {actorImage ? (
@@ -313,9 +340,44 @@ function AnimeCreditRows({ credits }: { credits: TVShow['cast'] }) {
                 )}
               </Avatar>
               <div className="min-w-0">
-                <p className="truncate text-[16px] font-medium leading-5 text-[var(--loom-text)]">{actorName || 'Voice actor not listed'}</p>
+                <p className="break-words text-[16px] font-medium leading-5 text-[var(--loom-text)]">{actorName || 'Voice actor not listed'}</p>
                 <p className="text-xs font-semibold text-[var(--loom-muted)]">Voice actor</p>
               </div>
+            </div>
+          </div>
+        );
+
+        return (
+          <div
+            key={`${characterName}:${actorName}:${index}`}
+            role="listitem"
+            aria-label={accessibleLabel}
+            className="overflow-hidden rounded-[12px] border border-white/5 bg-[var(--loom-season-accordion-bg)] p-3 sm:p-4"
+          >
+            <div className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)_3rem] items-center gap-2 sm:grid-cols-[3.5rem_minmax(0,1fr)_3.5rem] sm:gap-3">
+              <Avatar className="h-12 w-12 shrink-0 rounded-full sm:h-14 sm:w-14">
+                {characterImage ? (
+                  <AvatarImage src={characterImage} alt={`${characterName} character portrait`} className="object-cover" />
+                ) : (
+                  <AvatarFallback className="rounded-full bg-[var(--loom-season-episodes-veil)] text-sm text-[var(--loom-text)]">{creditInitials(characterName)}</AvatarFallback>
+                )}
+              </Avatar>
+              <div className="min-w-0">
+                <p className="break-words text-[16px] font-semibold leading-5 text-[var(--loom-text)]">{characterName}</p>
+                <p className="text-xs leading-5 tracking-wide text-[var(--loom-muted)]">{characterRole}</p>
+                {actorName ? (
+                  <p className="break-words text-xs leading-5 tracking-wide text-[var(--loom-muted)]">({actorName})</p>
+                ) : null}
+              </div>
+              <Avatar className="h-12 w-12 shrink-0 rounded-full sm:h-14 sm:w-14">
+                {actorImage ? (
+                  <AvatarImage src={actorImage} alt={`${actorName || 'Voice actor'} portrait`} className="object-cover" />
+                ) : (
+                  <AvatarFallback className="rounded-full bg-[var(--loom-season-episodes-veil)] text-[var(--loom-muted)]">
+                    <UserRound aria-hidden="true" className="h-6 w-6" />
+                  </AvatarFallback>
+                )}
+              </Avatar>
             </div>
           </div>
         );
@@ -425,17 +487,28 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
         .catch((error) => console.warn('Could not hydrate series details:', error));
     }
     if (nextShow && !accordionWasToggledRef.current) {
-      const firstVisibleSeason = (nextShow.seasons || []).find((season) =>
-        (nextShow.episodeFiles?.some((ef) => ef.season === season.number) || false)
-        || (nextShow.episodes?.some((ep) => ep.season === season.number) || false),
+      const seasonNumbers = chronologicalSeasonNumbers([
+        ...(nextShow.seasons || []).map((season) => season.number),
+        ...(nextShow.episodes || []).map((episode) => episode.season),
+        ...(nextShow.episodeFiles || []).map((file) => file.season),
+      ], nextShow.episodes);
+      const seasonOrder = new Map(seasonNumbers.map((season, index) => [season, index]));
+      const orderedFiles = (nextShow.episodeFiles || []).slice().sort((left, right) => (
+        (seasonOrder.get(left.season) ?? Number.MAX_SAFE_INTEGER)
+        - (seasonOrder.get(right.season) ?? Number.MAX_SAFE_INTEGER)
+        || left.episode - right.episode
+      ));
+      const firstVisibleSeason = seasonNumbers.find((season) =>
+        orderedFiles.some((file) => file.season === season)
+        || nextShow.episodes?.some((episode) => episode.season === season),
       );
-      const resumeEpisode = nextShow.episodeFiles?.find((file) =>
+      const resumeEpisode = orderedFiles.find((file) =>
         getProgressState(file.filePath, file.localMetadata?.durationSeconds).inProgress,
       );
-      const nextEpisode = nextShow.episodeFiles?.find((file) =>
+      const nextEpisode = orderedFiles.find((file) =>
         !getProgressState(file.filePath, file.localMetadata?.durationSeconds).watched,
       );
-      setExpandedSeason(resumeEpisode?.season ?? nextEpisode?.season ?? firstVisibleSeason?.number ?? null);
+      setExpandedSeason(resumeEpisode?.season ?? nextEpisode?.season ?? firstVisibleSeason ?? null);
     }
     return () => { cancelled = true; };
   }, [hydrateLibraryItem, kind, mediaId, progressTick, routeAddonId, routeAddonType, routeFallbackShow, shouldOpenDetailsFirst, state.animeShows, state.catalogRevision, state.tvShows]);
@@ -634,23 +707,33 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     return Array.from(byNumber.values()).sort((a, b) => a.number - b.number);
   };
 
-  const visibleSeasons = (show.seasons || []).filter((season) => {
-    const localFileCount = show.episodeFiles?.filter((ef) => ef.season === season.number).length || 0;
-    const mergedEpisodeCount = episodesWithFilesForSeason(season.number).length;
-    return localFileCount > 0 || mergedEpisodeCount > 0;
-  });
+  const seasonByNumber = new Map((show.seasons || []).map((season) => [season.number, season]));
+  const availableSeasonNumbers = chronologicalSeasonNumbers([
+    ...(show.seasons || []).map((season) => season.number),
+    ...(show.episodes || []).map((episode) => episode.season),
+    ...(show.episodeFiles || []).map((file) => file.season),
+  ], show.episodes);
+  const visibleSeasons = availableSeasonNumbers
+    .filter((seasonNumber) => episodesWithFilesForSeason(seasonNumber).length > 0)
+    .map((seasonNumber) => seasonByNumber.get(seasonNumber) || ({
+      number: seasonNumber,
+      title: seasonNumber === 0 ? 'Specials' : `Season ${seasonNumber}`,
+      episodeCount: episodesWithFilesForSeason(seasonNumber).length,
+    }));
 
   const playerEpisodes = visibleSeasons.flatMap((season) => episodesWithFilesForSeason(season.number));
 
   // Specials are displayed separately, but should not become the default
   // Play/Resume target for the main series. They remain available when the
   // Specials season is opened or when playback is explicitly started there.
+  const visibleSeasonOrder = new Map(visibleSeasons.map((season, index) => [season.number, index]));
   const orderedEpisodeFilesForPlayback = show.episodeFiles
     ?.slice()
-    .sort((a, b) => {
-      const specialOrder = Number(a.season === 0) - Number(b.season === 0);
-      return specialOrder || a.season - b.season || a.episode - b.episode;
-    });
+    .sort((a, b) => (
+      (visibleSeasonOrder.get(a.season) ?? Number.MAX_SAFE_INTEGER)
+      - (visibleSeasonOrder.get(b.season) ?? Number.MAX_SAFE_INTEGER)
+      || a.episode - b.episode
+    ));
 
   const firstPlayableEpisode = orderedEpisodeFilesForPlayback
     ?.find((file) => file.season > 0 && Boolean(file.filePath))
@@ -975,7 +1058,10 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                         </span>
                         <span className="font-medium text-[var(--loom-text)]">{seasonTitle}</span>
                         <span className="text-sm text-[var(--loom-muted)]">
-                          {seasonEps.length > 0 ? `${seasonEps.length} episodes` : `${season.episodeCount || fileCount} episodes`}
+                          {(() => {
+                            const count = seasonEps.length > 0 ? seasonEps.length : season.episodeCount || fileCount;
+                            return `${count} ${count === 1 ? 'episode' : 'episodes'}`;
+                          })()}
                         </span>
                       </span>
                     </button>
@@ -1060,7 +1146,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
               <section>
                 <h3 className="mb-3 text-lg font-semibold text-[var(--loom-text)]">Cast</h3>
                 {kind === 'anime' ? (
-                  <AnimeCreditRows credits={show.cast.slice(0, 20)} />
+                  <AnimeCreditRows credits={show.cast.slice(0, 20)} style={theme.castCardStyle} />
                 ) : (
                   <div className="flex gap-4 overflow-x-auto pb-2">
                     {show.cast.slice(0, 12).map((actor) => (

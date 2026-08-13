@@ -306,6 +306,7 @@ export interface SettingsPayload {
   appDarkTheme?: 'black';
   appLoaderStyle?: 'play-mark' | 'logo-mark' | 'horizontal-logo';
   localNetworkSharingEnabled?: boolean;
+  localNetworkRequireApproval?: boolean;
   localNetworkShareToken?: string;
 }
 

@@ -26,7 +26,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyTheme(initialTheme);
     return initialTheme;
   });
-  const [showProviderRatingBadges, setShowProviderRatingBadgesState] = useState(true);
+  const [showProviderRatingBadges, setShowProviderRatingBadgesState] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -51,10 +51,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
               loaderStyle: profileTheme.appLoaderStyle ?? settings.appLoaderStyle,
               homeStyle: profileTheme.appHomeStyle ?? cachedTheme?.homeStyle,
               modernHeroMode: profileTheme.appModernHeroMode ?? cachedTheme?.modernHeroMode,
+              castCardStyle: cachedTheme?.castCardStyle,
             })
           : cachedTheme || DEFAULT_THEME_SETTINGS;
         setThemeState(loadedTheme);
-        setShowProviderRatingBadgesState(preferences.showProviderRatingBadges ?? true);
+        setShowProviderRatingBadgesState(preferences.showProviderRatingBadges ?? false);
         applyTheme(loadedTheme);
         writeCachedTheme(loadedTheme);
         if (!hasSavedTheme && cachedTheme) {
@@ -123,7 +124,7 @@ export function useTheme() {
     return {
       theme: DEFAULT_THEME_SETTINGS,
       setTheme: async () => undefined,
-      showProviderRatingBadges: true,
+      showProviderRatingBadges: false,
       setShowProviderRatingBadges: async () => undefined,
     };
   }

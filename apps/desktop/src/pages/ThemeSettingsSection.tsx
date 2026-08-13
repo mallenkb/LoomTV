@@ -141,6 +141,37 @@ export default function ThemeSettingsSection({
             </button>
           </div>
 
+          <div>
+            <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Anime cast cards</p>
+            <div
+              className="grid w-full grid-cols-2 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-bg)] p-1 sm:w-fit sm:min-w-80"
+              role="group"
+              aria-label="Anime cast card style"
+            >
+              {([
+                { id: 'standard', label: 'Standard' },
+                { id: 'compact', label: 'Compact' },
+              ] as const).map((option) => {
+                const isSelected = theme.castCardStyle === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => void setTheme({ castCardStyle: option.id })}
+                    aria-pressed={isSelected}
+                    className={`min-h-10 rounded-lg px-4 py-2 text-center text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
+                      isSelected
+                        ? 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)] shadow-sm'
+                        : 'text-[var(--loom-muted)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)]'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {canChooseAppearance && (
             <div>
               <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Appearance</p>

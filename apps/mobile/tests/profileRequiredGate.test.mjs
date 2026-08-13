@@ -6,7 +6,7 @@ const appSource = fs.readFileSync(new URL('../App.tsx', import.meta.url), 'utf8'
 
 test('mandatory profile transitions tear down every media surface and native playback', () => {
   const start = appSource.indexOf('const enterProfilePicker');
-  const end = appSource.indexOf('const [savedConnection', start);
+  const end = appSource.indexOf('const detailItemCacheRef', start);
   const transition = appSource.slice(start, end);
 
   assert.match(transition, /mandatoryPlayerTeardownRef\.current\(\)/);

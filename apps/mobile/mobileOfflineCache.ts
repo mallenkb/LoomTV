@@ -6,6 +6,8 @@ import type {
   MobileProfileListEntry,
   StoredProgress,
 } from './mobileDomain';
+import { activeMobileProgressPaths, sameMobileCatalogIdentity } from './mobileOfflineCachePolicy';
+import { reportNonFatal } from './mobileDiagnostics';
 
 const MOBILE_OFFLINE_DATABASE_NAME = 'loomtv-mobile-cache.db';
 const MOBILE_OFFLINE_CACHE_VERSION = 1;
@@ -29,7 +31,7 @@ export type MobileOfflineSnapshot = {
 };
 
 type MobileOfflineSnapshotRow = { payload: string; saved_at: number };
-type MobileOfflineProgressRow = { media_path: string; payload: string };
+type MobileOfflineProgressRow = { media_path: string; payload: string; last_seen_at: number };
 type PersistedSnapshotInput = Omit<MobileOfflineSnapshot, 'version' | 'savedAt'>;
 type SnapshotIdentity = {
   activeProfile: MobileProfile | null;
@@ -123,11 +125,17 @@ async function openMobileOfflineDatabase(): Promise<SQLite.SQLiteDatabase> {
           media_path TEXT NOT NULL,
           payload TEXT NOT NULL,
           saved_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL,
           PRIMARY KEY (host_device_id, media_path)
         );
         CREATE INDEX IF NOT EXISTS mobile_offline_progress_saved_at
           ON mobile_offline_progress(saved_at);
       `);
+      const progressColumns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(mobile_offline_progress)');
+      if (!progressColumns.some((column) => column.name === 'last_seen_at')) {
+        await database.execAsync('ALTER TABLE mobile_offline_progress ADD COLUMN last_seen_at INTEGER NOT NULL DEFAULT 0;');
+        await database.execAsync('UPDATE mobile_offline_progress SET last_seen_at = saved_at WHERE last_seen_at = 0;');
+      }
       return database;
     }).catch((error) => {
       databasePromise = null;
@@ -156,10 +164,7 @@ function sameSnapshotIdentity(left: SnapshotIdentity | undefined, right: Snapsho
     && left?.activeProfile === right.activeProfile
     && left?.automaticProfileSignIn === right.automaticProfileSignIn
     && left?.profiles === right.profiles
-    && left?.library === right.library
-    && left?.libraryEtag === right.libraryEtag
-    && left?.catalogRevision === right.catalogRevision
-    && left?.catalogTransport === right.catalogTransport
+    && sameMobileCatalogIdentity(left, right)
     && left?.selectionRevision === right.selectionRevision
     && left?.profileLists === right.profileLists;
 }
@@ -170,6 +175,7 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
   const nextIdentity = snapshotIdentity(snapshot);
   const metadataChanged = !sameSnapshotIdentity(snapshotIdentityByHost.get(snapshot.hostDeviceId), nextIdentity);
   const nextProgress = new Map(Object.entries(snapshot.progress).map(([mediaPath, value]) => [mediaPath, JSON.stringify(value)]));
+  const activeProgressPaths = activeMobileProgressPaths(snapshot.library);
   const previousProgress = encodedProgressByHost.get(snapshot.hostDeviceId) || new Map<string, string>();
 
   await database.withTransactionAsync(async () => {
@@ -194,13 +200,17 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
     for (const [mediaPath, encoded] of nextProgress) {
       if (previousProgress.get(mediaPath) === encoded) continue;
       await database.runAsync(
-        `INSERT INTO mobile_offline_progress (host_device_id, media_path, payload, saved_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(host_device_id, media_path) DO UPDATE SET payload = excluded.payload, saved_at = excluded.saved_at`,
+        `INSERT INTO mobile_offline_progress (host_device_id, media_path, payload, saved_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(host_device_id, media_path) DO UPDATE SET
+           payload = excluded.payload,
+           saved_at = excluded.saved_at,
+           last_seen_at = CASE WHEN excluded.last_seen_at > 0 THEN excluded.last_seen_at ELSE mobile_offline_progress.last_seen_at END`,
         snapshot.hostDeviceId,
         mediaPath,
         encoded,
         savedAt,
+        activeProgressPaths.has(mediaPath) ? savedAt : 0,
       );
     }
     for (const mediaPath of previousProgress.keys()) {
@@ -208,8 +218,16 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
         await database.runAsync('DELETE FROM mobile_offline_progress WHERE host_device_id = ? AND media_path = ?', snapshot.hostDeviceId, mediaPath);
       }
     }
+    for (const mediaPath of activeProgressPaths) {
+      await database.runAsync(
+        'UPDATE mobile_offline_progress SET last_seen_at = ? WHERE host_device_id = ? AND media_path = ?',
+        savedAt,
+        snapshot.hostDeviceId,
+        mediaPath,
+      );
+    }
     await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE saved_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
-    await database.runAsync('DELETE FROM mobile_offline_progress WHERE saved_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
+    await database.runAsync('DELETE FROM mobile_offline_progress WHERE last_seen_at < ?', savedAt - MOBILE_OFFLINE_CACHE_MAX_AGE_MS);
   });
 
   snapshotIdentityByHost.set(snapshot.hostDeviceId, nextIdentity);
@@ -217,7 +235,9 @@ async function saveSnapshotNow(snapshot: PersistedSnapshotInput): Promise<void> 
 }
 
 export function saveMobileOfflineSnapshot(snapshot: PersistedSnapshotInput): Promise<void> {
-  saveQueue = saveQueue.catch(() => {}).then(() => saveSnapshotNow(snapshot));
+  saveQueue = saveQueue
+    .catch((error) => reportNonFatal('offline-cache.previous-save', error))
+    .then(() => saveSnapshotNow(snapshot));
   return saveQueue;
 }
 
@@ -237,8 +257,9 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
       return null;
     }
     const rows = await database.getAllAsync<MobileOfflineProgressRow>(
-      'SELECT media_path, payload FROM mobile_offline_progress WHERE host_device_id = ?',
+      'SELECT media_path, payload, last_seen_at FROM mobile_offline_progress WHERE host_device_id = ? AND last_seen_at >= ?',
       hostDeviceId,
+      Date.now() - MOBILE_OFFLINE_CACHE_MAX_AGE_MS,
     );
     const progress = { ...snapshot.progress };
     const encodedProgress = new Map<string, string>();
@@ -250,11 +271,13 @@ export async function loadMobileOfflineSnapshot(hostDeviceId: string): Promise<M
         encodedProgress.set(row.media_path, row.payload);
       } catch {
         // Ignore one corrupt progress row instead of discarding the catalog.
+        reportNonFatal('offline-cache.corrupt-progress-row', new Error('A cached progress row could not be decoded.'));
       }
     }
     encodedProgressByHost.set(hostDeviceId, encodedProgress);
     return { ...snapshot, progress };
-  } catch {
+  } catch (error) {
+    reportNonFatal('offline-cache.load', error);
     return null;
   }
 }
@@ -269,7 +292,8 @@ export async function clearMobileOfflineSnapshot(hostDeviceId: string): Promise<
       await database.runAsync('DELETE FROM mobile_offline_snapshots WHERE host_device_id = ?', hostDeviceId);
       await database.runAsync('DELETE FROM mobile_offline_progress WHERE host_device_id = ?', hostDeviceId);
     });
-  } catch {
+  } catch (error) {
     // Cache cleanup must never block sign-out or a revoked-session response.
+    reportNonFatal('offline-cache.clear', error);
   }
 }

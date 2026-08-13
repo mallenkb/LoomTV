@@ -26,6 +26,7 @@ const RENDERER_SETTINGS_WRITE_KEYS: ReadonlySet<string> = new Set([
   'appDarkTheme',
   'appLoaderStyle',
   'localNetworkSharingEnabled',
+  'localNetworkRequireApproval',
 ]);
 
 const segmentTypes = ['intro', 'recap', 'outro', 'credits', 'preview'] as const;
@@ -89,6 +90,7 @@ export const rendererSettingsPatchSchema: z.ZodType<SettingsPayload> = z.object(
   appDarkTheme: z.literal('black').optional(),
   appLoaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
   localNetworkSharingEnabled: z.boolean().optional(),
+  localNetworkRequireApproval: z.boolean().optional(),
   localNetworkShareToken: z.string().optional(),
 });
 
@@ -122,6 +124,7 @@ export function settingsForRenderer(settings: AppSettings): SettingsPayload {
     appDarkTheme: settings.appDarkTheme,
     appLoaderStyle: settings.appLoaderStyle,
     localNetworkSharingEnabled: settings.localNetworkSharingEnabled,
+    localNetworkRequireApproval: settings.localNetworkRequireApproval,
   };
 }
 

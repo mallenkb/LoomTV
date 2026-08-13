@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createMobileLanClient } from '../mobileLanClient.ts';
+import { MOBILE_LAN_TIMEOUT_MS, createMobileLanClient, mobileLanTimeoutFor } from '../mobileLanClient.ts';
+
+test('operation classes receive distinct deadline budgets', () => {
+  assert.equal(mobileLanTimeoutFor('https://desktop/api/v2/client-config'), MOBILE_LAN_TIMEOUT_MS.probe);
+  assert.equal(mobileLanTimeoutFor('https://desktop/api/v2/library'), MOBILE_LAN_TIMEOUT_MS.library);
+  assert.equal(mobileLanTimeoutFor('https://desktop/api/v2/start-hls'), MOBILE_LAN_TIMEOUT_MS.streamPreparation);
+  assert.equal(mobileLanTimeoutFor('https://desktop/api/v2/progress'), MOBILE_LAN_TIMEOUT_MS.standard);
+});
 
 function recordingClient() {
   const requests = [];
@@ -96,5 +103,43 @@ test('segment lookup forwards cancellation and encodes query parameters', async 
     requests[0].input,
     'http://desktop.local:3847/api/v2/playback/segments?mediaId=resource+id&season=1&episode=2',
   );
-  assert.equal(requests[0].init.signal, controller.signal);
+  assert.ok(requests[0].init.signal instanceof AbortSignal);
+});
+
+test('caller cancellation aborts the wrapped request signal', async () => {
+  let wrappedSignal;
+  const client = createMobileLanClient((_input, init = {}) => new Promise((_resolve, reject) => {
+    wrappedSignal = init.signal;
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+  }));
+  const controller = new AbortController();
+  const pending = client.getPlaybackSegments('https://desktop', 'token', new URLSearchParams(), controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(wrappedSignal.aborted, true);
+});
+
+test('operation deadline aborts a hanging request with a typed timeout', async () => {
+  const client = createMobileLanClient((_input, init = {}) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+  }), () => 10);
+  await assert.rejects(
+    client.getProgress('https://desktop', 'token'),
+    (error) => error?.name === 'MobileLanTimeoutError' && error.timeoutMs === 10,
+  );
+});
+
+test('client lifecycle cancellation aborts every active operation', async () => {
+  const signals = [];
+  const client = createMobileLanClient((_input, init = {}) => new Promise((_resolve, reject) => {
+    signals.push(init.signal);
+    init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+  }));
+  const pending = [
+    client.getLibrary('https://desktop', 'token'),
+    client.getProgress('https://desktop', 'token'),
+  ];
+  client.cancelActiveRequests();
+  await Promise.all(pending.map((request) => assert.rejects(request, { name: 'AbortError' })));
+  assert.equal(signals.every((signal) => signal.aborted), true);
 });

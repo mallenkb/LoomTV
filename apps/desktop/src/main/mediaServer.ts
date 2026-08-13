@@ -105,6 +105,7 @@ import {
   applyCorsHeaders,
   listenWithPortRetries,
   proxyWebRendererAsset,
+  proxyWebRendererUpgrade,
   readBoundedUtf8Subtitle,
   serveWebRendererAsset,
   writeLanLandingPage,
@@ -2024,6 +2025,14 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
     };
 
   const localServer = http.createServer(createRequestHandler('loopback'));
+  localServer.on('upgrade', (req, socket, head) => {
+    const webDevServerUrl = getWebRendererDevServerUrl();
+    if (!webDevServerUrl) {
+      socket.destroy();
+      return;
+    }
+    proxyWebRendererUpgrade(req, socket, head, webDevServerUrl);
+  });
   mediaServer = localServer;
   trackServerConnections(localServer, mediaServerSockets);
   try {

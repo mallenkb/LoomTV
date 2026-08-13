@@ -216,6 +216,7 @@ export default function Settings() {
   const [localNetworkStatus, setLocalNetworkStatus] = useState<LocalNetworkStatus | null>(null);
   const [networkStatusMessage, setNetworkStatusMessage] = useState('');
   const [isTogglingNetworkSharing, setIsTogglingNetworkSharing] = useState(false);
+  const [requireNetworkApproval, setRequireNetworkApproval] = useState(false);
   const [remoteLibraryAddress, setRemoteLibraryAddress] = useState('');
   const [remoteLibraryFingerprint, setRemoteLibraryFingerprint] = useState('');
   const [remoteShareCode, setRemoteShareCode] = useState('');
@@ -394,6 +395,7 @@ export default function Settings() {
         displaySleepTimeoutMinutes: loadedDisplaySleepTimeout,
       });
       setSkipAnalysis(s.skipAnalysis || { ...DEFAULT_SKIP_ANALYSIS, enabled: s.localSkipAnalysisEnabled !== false });
+      setRequireNetworkApproval(Boolean(s.localNetworkRequireApproval));
     });
     if (activeProfile?.type === 'owner' && !desktopApi.isRemoteLibraryMode()) {
       void desktopApi.getLocalSegmentAnalysisStatus().then(setLocalAnalysisStatus);
@@ -771,6 +773,19 @@ export default function Settings() {
       setNetworkStatusMessage('Could not update local network sharing.');
     } finally {
       setIsTogglingNetworkSharing(false);
+    }
+  };
+
+  const setLocalNetworkApproval = async (enabled: boolean) => {
+    const previous = requireNetworkApproval;
+    setRequireNetworkApproval(enabled);
+    setNetworkStatusMessage('');
+    try {
+      await desktopApi.saveSettings({ localNetworkRequireApproval: enabled });
+    } catch (error) {
+      setRequireNetworkApproval(previous);
+      console.error('Failed to update local network approval:', error);
+      setNetworkStatusMessage('Could not update approval preference.');
     }
   };
 
@@ -1161,6 +1176,8 @@ export default function Settings() {
             localNetworkStatus={localNetworkStatus}
             isNetworkSharingOn={isNetworkSharingOn}
             isTogglingNetworkSharing={isTogglingNetworkSharing}
+            requireApproval={requireNetworkApproval}
+            setRequireApproval={(enabled) => void setLocalNetworkApproval(enabled)}
             currentNetworkName={currentNetworkName}
             networkStatusMessage={networkStatusMessage}
             setLocalNetworkSharing={(enabled) => void setLocalNetworkSharing(enabled)}

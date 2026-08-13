@@ -30,6 +30,9 @@ export type LanPeer = {
 let bonjour: Bonjour | null = null;
 let publishedService: Service | null = null;
 let nativeMacAdvertiser: ChildProcess | null = null;
+let advertisedOptions: LanAdvertiseOptions | null = null;
+let nativeRestartTimer: ReturnType<typeof setTimeout> | null = null;
+let nativeRestartAttempts = 0;
 let lastMdnsWarningAt = 0;
 let suppressedMdnsWarnings = 0;
 
@@ -90,6 +93,19 @@ function instanceNameFor(deviceName: string): string {
   return deviceName.replace(/\.local\.?$/i, '').replace(/\./g, '-').trim() || 'LoomTV';
 }
 
+function scheduleNativeMacRestart(child: ChildProcess, error?: unknown): void {
+  if (nativeMacAdvertiser !== child || !advertisedOptions || nativeRestartTimer) return;
+  nativeMacAdvertiser = null;
+  if (error) handleMdnsError(error);
+  const delay = Math.min(30_000, 1_000 * (2 ** Math.min(5, nativeRestartAttempts)));
+  nativeRestartAttempts += 1;
+  nativeRestartTimer = setTimeout(() => {
+    nativeRestartTimer = null;
+    const current = advertisedOptions;
+    if (current && !advertiseWithMacDnsSd(current)) advertiseWithBonjour(current);
+  }, delay);
+}
+
 function advertiseWithMacDnsSd(opts: LanAdvertiseOptions): boolean {
   if (process.platform !== 'darwin') return false;
 
@@ -110,15 +126,15 @@ function advertiseWithMacDnsSd(opts: LanAdvertiseOptions): boolean {
 
     nativeMacAdvertiser = child;
     child.once('error', (error) => {
-      if (nativeMacAdvertiser === child) nativeMacAdvertiser = null;
-      handleMdnsError(error);
+      scheduleNativeMacRestart(child, error);
     });
     child.once('exit', (code, signal) => {
-      if (nativeMacAdvertiser !== child) return;
-      nativeMacAdvertiser = null;
-      if (code && code !== 0 && signal !== 'SIGTERM') {
-        handleMdnsError(new Error(`macOS DNS-SD advertiser exited with code ${code}`));
-      }
+      scheduleNativeMacRestart(
+        child,
+        code && code !== 0 && signal !== 'SIGTERM'
+          ? new Error(`macOS DNS-SD advertiser exited with code ${code}`)
+          : undefined,
+      );
     });
     return true;
   } catch (error) {
@@ -127,10 +143,7 @@ function advertiseWithMacDnsSd(opts: LanAdvertiseOptions): boolean {
   }
 }
 
-export function advertiseLanService(opts: LanAdvertiseOptions): void {
-  unadvertiseLanService();
-  if (advertiseWithMacDnsSd(opts)) return;
-
+function advertiseWithBonjour(opts: LanAdvertiseOptions): void {
   try {
     const instance = ensureBonjour();
     publishedService = instance.publish({
@@ -150,7 +163,21 @@ export function advertiseLanService(opts: LanAdvertiseOptions): void {
   }
 }
 
+export function advertiseLanService(opts: LanAdvertiseOptions): void {
+  unadvertiseLanService();
+  advertisedOptions = opts;
+  nativeRestartAttempts = 0;
+  if (advertiseWithMacDnsSd(opts)) return;
+  advertiseWithBonjour(opts);
+}
+
 export function unadvertiseLanService(): void {
+  advertisedOptions = null;
+  nativeRestartAttempts = 0;
+  if (nativeRestartTimer) {
+    clearTimeout(nativeRestartTimer);
+    nativeRestartTimer = null;
+  }
   if (nativeMacAdvertiser) {
     const child = nativeMacAdvertiser;
     nativeMacAdvertiser = null;
@@ -161,13 +188,14 @@ export function unadvertiseLanService(): void {
     }
   }
 
-  if (!publishedService) return;
-  try {
-    publishedService.stop?.(() => undefined);
-  } catch (error) {
-    console.warn('[mdns] stop failed:', error);
+  if (publishedService) {
+    try {
+      publishedService.stop?.(() => undefined);
+    } catch (error) {
+      console.warn('[mdns] stop failed:', error);
+    }
+    publishedService = null;
   }
-  publishedService = null;
 }
 
 export function discoverLanPeers(timeoutMs: number, excludeDeviceId?: string): Promise<LanPeer[]> {

@@ -339,6 +339,10 @@ function showOpenFolderDialog(options: OpenDialogOptions) {
 }
 
 async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Promise<boolean> {
+  // Immediate connection is the default once local-network sharing is enabled.
+  // Owners can opt into a confirmation prompt for each new device in Settings.
+  if (!loadSettings().localNetworkRequireApproval) return true;
+
   let win = getMainWindow();
   if (!win || win.isDestroyed()) {
     createWindow();
@@ -350,7 +354,10 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
   win.show();
   win.focus();
   const secondsRemaining = Math.max(1, Math.ceil((request.expiresAt - Date.now()) / 1000));
-  const result = await dialog.showMessageBox(win, {
+  // Keep the opt-in prompt independent of the transparent video window. A
+  // parented macOS sheet can sit above the native player while its buttons are
+  // intercepted by the video surface beneath it.
+  const result = await dialog.showMessageBox({
     type: 'question',
     title: 'LoomTV device request',
     message: `${request.deviceName} wants to connect`,
@@ -366,6 +373,7 @@ const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
 const SCAN_CACHE_VERSION = 11;
 let libraryMutationVersion = 0;
+let cachedLibrary: LibraryData | null = null;
 
 function advanceLibraryMutationVersion(): void {
   libraryMutationVersion++;
@@ -951,7 +959,7 @@ function persistSeasonFolderRepair(data: LibraryData, forcePersist = false): Lib
   return loadLibraryFromDatabase() || repaired.data;
 }
 
-function loadLibrary(): LibraryData {
+function loadLibraryUncached(): LibraryData {
   const databaseLibrary = loadLibraryFromDatabase();
   if (databaseLibrary) return persistSeasonFolderRepair(databaseLibrary);
 
@@ -1016,6 +1024,11 @@ function loadLibrary(): LibraryData {
   }
   const libraryFolderGroups = defaultLibraryFolderGroups();
   return { movies: [], tvShows: [], animeShows: [], libraryFolders: [], libraryFolderGroups, libraryFolderStatuses: [], scanCache: {} };
+}
+
+function loadLibrary(): LibraryData {
+  if (!cachedLibrary) cachedLibrary = loadLibraryUncached();
+  return cachedLibrary;
 }
 
 function libraryForRenderer(data: LibraryData = loadLibrary()): LibraryData {
@@ -1166,12 +1179,14 @@ function saveLibrary(data: LibraryData): boolean {
     const scanCache = Object.fromEntries(
       Object.entries(durableData.scanCache || {}).filter(([folder]) => activeFolders.has(folder)),
     );
-    saveLibraryToDatabase({
+    const nextLibrary = {
       ...durableData,
       libraryFolderGroups,
       libraryFolders: flattenLibraryFolders(libraryFolderGroups),
       scanCache,
-    });
+    };
+    saveLibraryToDatabase(nextLibrary);
+    cachedLibrary = nextLibrary;
     return true;
   } catch (e) {
     console.error('saveLibrary error:', e);
@@ -1188,6 +1203,21 @@ function saveLibraryMutation(data: LibraryData): void {
 function saveLibraryItemMutation(item: MediaItem): void {
   advanceLibraryMutationVersion();
   saveLibraryItemToDatabase(item);
+  if (cachedLibrary) {
+    let replaced = false;
+    const replaceItem = (candidate: MediaItem): MediaItem => {
+      if (candidate.id !== item.id) return candidate;
+      replaced = true;
+      return item;
+    };
+    cachedLibrary = {
+      ...cachedLibrary,
+      movies: (cachedLibrary.movies || []).map(replaceItem),
+      tvShows: (cachedLibrary.tvShows || []).map(replaceItem),
+      animeShows: (cachedLibrary.animeShows || []).map(replaceItem),
+    };
+    if (!replaced) cachedLibrary = null;
+  }
 }
 
 function preserveLockedMetadata(previous: LibraryData, next: LibraryData): void {
@@ -2004,19 +2034,9 @@ async function startBackgroundServices(): Promise<void> {
   startUpdateAdapter();
   syncLanAdvertisement();
   analysisCoordinator.start();
-  // loadLibrary() reads and sanitises the whole library synchronously, so it is
-  // called here rather than being evaluated as an argument on the launch path.
-  const persistedLibrary = loadLibrary();
-  skipSegmentService.warmLibrary(persistedLibrary);
-  // Warm artwork from the persisted database after the window is available.
-  // Detail pages never need to fetch provider artwork as part of opening a
-  // local title, including after an app restart.
-  await cacheArtworkNow(persistedLibrary);
-  void refreshIncompleteMetadataQueue(persistedLibrary).then(() => (
-    refreshDisplayMetadataQueue(persistedLibrary)
-  )).catch((error) => {
-    console.warn('[metadata] Background refresh at startup failed:', error);
-  });
+  // Artwork is already persisted as it is discovered. Rewalking the complete
+  // library here competes with the first renderer interaction and a mobile
+  // reconnect, so startup leaves uncached artwork to the normal on-demand path.
   await cleanupOldTranscodes();
 }
 

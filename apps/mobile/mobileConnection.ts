@@ -1,8 +1,8 @@
 import type { ZeroconfService } from 'react-native-zeroconf';
-import { normalizeCertFingerprint } from './mobileDomain';
-import type { DiscoveredHost } from './mobileDomain';
+import { normalizeCertFingerprint } from './mobileDomain.ts';
+import type { DiscoveredHost } from './mobileDomain.ts';
 
-export const serverOfflineHint = 'The desktop app or Local Network Sharing may be off. LoomTV will reconnect automatically when it becomes available.';
+export const serverOfflineHint = 'Reconnecting automatically.';
 
 export function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
@@ -55,6 +55,7 @@ function isLikelyServerOfflineError(error: string): boolean {
     || normalized.includes('ehostunreach')
     || normalized.includes('enetunreach')
     || normalized.includes('timed out')
+    || normalized.includes('did not respond within')
     || status === 502
     || status === 503
     || status === 504
@@ -63,11 +64,12 @@ function isLikelyServerOfflineError(error: string): boolean {
 
 export function connectionErrorFor(error: unknown, fallback: string): { message: string; isOffline: boolean } {
   if (error instanceof Error) {
+    if (error.name === 'AbortError') return { isOffline: true, message: '' };
     const isOffline = isLikelyServerOfflineError(error.message);
     return {
       isOffline,
       message: isOffline
-        ? `Could not reach the desktop server. ${serverOfflineHint}`
+        ? `Desktop unavailable. ${serverOfflineHint}`
         : error.message || fallback,
     };
   }
@@ -76,7 +78,7 @@ export function connectionErrorFor(error: unknown, fallback: string): { message:
   return {
     isOffline,
     message: isOffline
-      ? `Could not reach the desktop server. ${serverOfflineHint}`
+      ? `Desktop unavailable. ${serverOfflineHint}`
       : message,
   };
 }

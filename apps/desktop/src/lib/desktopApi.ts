@@ -1473,8 +1473,8 @@ export const desktopApi = {
       return filePath ? all[remoteResourceId(filePath)] || null : remoteProgressByStreamUrl(all);
     }
     if (window.desktopApi?.getProgress) return window.desktopApi.getProgress(filePath);
-    const query = filePath ? `?filePath=${encodeURIComponent(filePath)}` : '';
-    return fetchJson(`/api/progress${query}`, desktopProgressResultSchema);
+    const all = await fetchJson('/api/v2/progress', desktopProgressMapSchema);
+    return filePath ? all[remoteResourceId(filePath)] || null : all;
   },
 
   async saveProgress(filePath: string, position: number, duration: number, expectedProfileId?: string): Promise<StoredProgress> {
@@ -1489,15 +1489,18 @@ export const desktopApi = {
       }),
     });
     if (window.desktopApi?.saveProgress) return window.desktopApi.saveProgress(filePath, position, duration, expectedProfileId);
-    return fetchJson('/api/progress', desktopStoredProgressSchema, {
+    return fetchJson('/api/v2/progress', desktopStoredProgressSchema, {
       method: 'POST',
-      body: JSON.stringify({ filePath, position, duration }),
+      body: JSON.stringify({ mediaId: remoteResourceId(filePath), position, duration }),
     });
   },
 
   async importProgress(progress: Record<string, number | { position?: number; duration?: number; updatedAt?: number }>, expectedProfileId?: string): Promise<boolean> {
     if (isRemoteDesktopMode()) return true;
     if (window.desktopApi?.importProgress) return window.desktopApi.importProgress(progress, expectedProfileId);
+    // Browser /app/ sessions already read the host database directly. The
+    // legacy import route is intentionally Electron IPC-only.
+    if (isBrowserLocalApp()) return true;
     const response = await fetchJson('/api/progress/import', okResultSchema, {
       method: 'POST',
       body: JSON.stringify({ progress }),
@@ -1512,7 +1515,7 @@ export const desktopApi = {
     }
     if (window.desktopApi?.getPlaybackTrackPreferences) return window.desktopApi.getPlaybackTrackPreferences(scope);
     const query = scope ? `?scope=${encodeURIComponent(scope)}` : '';
-    return fetchJson(`/api/playback-track-preferences${query}`, playbackTrackPreferencesResultSchema);
+    return fetchJson(`/api/v2/playback-track-preferences${query}`, playbackTrackPreferencesResultSchema);
   },
 
   async savePlaybackTrackPreferences(scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string): Promise<PlaybackTrackPreferences> {
@@ -1522,7 +1525,7 @@ export const desktopApi = {
       body: JSON.stringify({ scope, preferences, selectionRevision: getRemoteDesktopSession()?.selectionRevision }),
     });
     if (window.desktopApi?.savePlaybackTrackPreferences) return window.desktopApi.savePlaybackTrackPreferences(scope, preferences, expectedProfileId);
-    return fetchJson('/api/playback-track-preferences', playbackTrackPreferencesSchema, {
+    return fetchJson('/api/v2/playback-track-preferences', playbackTrackPreferencesSchema, {
       method: 'POST',
       body: JSON.stringify({ scope, preferences }),
     });

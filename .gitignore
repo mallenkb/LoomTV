@@ -97,3 +97,7 @@ apps/desktop/resources/fpcalc/win/fpcalc.exe
 # Apple distribution artifacts
 *.mobileprovision
 *.provisionprofile
+
+# Locally generated mobile release binaries. Keep the verification record and
+# screenshots in git, but publish installable artifacts through release storage.
+apps/mobile/release-evidence/**/verification/artifacts/

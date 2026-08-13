@@ -38,6 +38,7 @@ const settingsInputSchema = z.looseObject({
   localNetworkDeviceName: z.unknown().optional(),
   localNetworkHmacSecret: z.unknown().optional(),
   localNetworkPairedDevices: z.unknown().optional(),
+  localNetworkRequireApproval: z.unknown().optional(),
   localNetworkShareToken: z.unknown().optional(),
   localNetworkSharingEnabled: z.unknown().optional(),
   localSkipAnalysisEnabled: z.unknown().optional(),
@@ -242,6 +243,7 @@ function normalizeSettings(input: unknown): AppSettings {
       ? raw.appLoaderStyle
       : 'play-mark',
     localNetworkSharingEnabled: Boolean(raw.localNetworkSharingEnabled),
+    localNetworkRequireApproval: Boolean(raw.localNetworkRequireApproval),
     localNetworkShareToken: typeof raw.localNetworkShareToken === 'string' && /^\d{6}$/.test(raw.localNetworkShareToken)
       ? raw.localNetworkShareToken
       : createLanShareCode(),

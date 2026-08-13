@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
+import type { Duplex } from 'node:stream';
 import { readBoundedUtf8File } from './boundedTextFile.ts';
 
 const MAX_SIDECAR_SUBTITLE_BYTES = 8 * 1024 * 1024;
@@ -150,6 +151,64 @@ export function proxyWebRendererAsset(
     if (!res.headersSent) res.writeHead(502);
     res.end('The LoomTV web development server is unavailable.');
   });
+  proxyRequest.end();
+}
+
+export function proxyWebRendererUpgrade(
+  req: http.IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  devServerUrl: string,
+): void {
+  let requestUrl: URL;
+  try {
+    requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  const target = new URL(devServerUrl);
+  target.pathname = requestUrl.pathname.startsWith('/app/')
+    ? `/${requestUrl.pathname.slice('/app/'.length)}`
+    : requestUrl.pathname;
+  target.search = requestUrl.search;
+
+  const proxyRequest = http.request(target, {
+    method: req.method,
+    headers: { ...req.headers, host: target.host },
+  });
+
+  proxyRequest.on('upgrade', (proxyResponse, proxySocket, proxyHead) => {
+    const statusCode = proxyResponse.statusCode || 101;
+    const statusMessage = proxyResponse.statusMessage || 'Switching Protocols';
+    const headerLines: string[] = [];
+    for (let index = 0; index < proxyResponse.rawHeaders.length; index += 2) {
+      headerLines.push(`${proxyResponse.rawHeaders[index]}: ${proxyResponse.rawHeaders[index + 1]}`);
+    }
+    socket.write(`HTTP/1.1 ${statusCode} ${statusMessage}\r\n${headerLines.join('\r\n')}\r\n\r\n`);
+    if (proxyHead.length > 0) socket.write(proxyHead);
+    if (head.length > 0) proxySocket.write(head);
+
+    socket.on('error', () => proxySocket.destroy());
+    proxySocket.on('error', () => socket.destroy());
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+  });
+
+  proxyRequest.on('response', (proxyResponse) => {
+    const statusCode = proxyResponse.statusCode || 502;
+    const statusMessage = proxyResponse.statusMessage || 'Bad Gateway';
+    const headerLines: string[] = [];
+    for (let index = 0; index < proxyResponse.rawHeaders.length; index += 2) {
+      headerLines.push(`${proxyResponse.rawHeaders[index]}: ${proxyResponse.rawHeaders[index + 1]}`);
+    }
+    socket.write(`HTTP/1.1 ${statusCode} ${statusMessage}\r\n${headerLines.join('\r\n')}\r\n\r\n`);
+    proxyResponse.pipe(socket);
+  });
+
+  proxyRequest.on('error', () => socket.destroy());
+  socket.on('error', () => proxyRequest.destroy());
   proxyRequest.end();
 }
 

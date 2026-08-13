@@ -24,7 +24,10 @@ export const mobileLibraryIndexSchema = lanLibraryIndexSchema(lanLibraryCardSche
 export const mobileLibraryItemDetailsSchema = lanLibraryItemDetailsSchema(lanMediaItemSchema);
 export const mobilePairResponseSchema = lanPairResponseSchema(mobileLibrarySchema);
 export const mobilePairApprovalRequestSchema = lanPairApprovalRequestSchema;
-export const mobileErrorPayloadSchema = lanErrorPayloadSchema;
+export const mobileErrorPayloadSchema = lanErrorPayloadSchema.refine(
+  (value) => JSON.stringify(value).length <= 20_000,
+  'Error payload exceeds the mobile safety limit.',
+);
 export const mobileStoredProgressSchema = lanStoredProgressSchema;
 export const mobileProgressMapSchema = z.record(z.string(), lanStoredProgressSchema);
 export const mobileProfileSchema = lanProfileSummarySchema;

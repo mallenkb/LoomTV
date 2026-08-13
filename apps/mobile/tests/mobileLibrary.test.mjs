@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   allItems,
+  coreItems,
   filePathFromUrl,
   matchesMobileLibraryFilter,
   matchesQuery,
@@ -68,6 +69,10 @@ test('library selectors preserve collection order and text matching behavior', (
   assert.deepEqual(
     allItems({ animeShows: [anime], tvShows: [tv], movies: [movie], others: [movie, other] }),
     [anime, tv, movie, other],
+  );
+  assert.deepEqual(
+    coreItems({ animeShows: [anime], tvShows: [tv], movies: [movie], others: [other] }),
+    [anime, tv, movie],
   );
   assert.equal(matchesQuery(anime, 'action'), true);
   assert.equal(matchesQuery(anime, 'missing'), false);

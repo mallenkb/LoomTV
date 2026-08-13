@@ -5,8 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
-  AppState,
-  type AppStateStatus,
   BackHandler,
   Easing,
   FlatList,
@@ -21,6 +19,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   ScrollView,
+  Share,
   StyleSheet,
   type StyleProp,
   Switch,
@@ -46,7 +45,6 @@ import {
   type VideoPlayerStatus,
   type VideoSource,
 } from 'expo-video';
-import Zeroconf from 'react-native-zeroconf';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect as SvgRect, Stop } from 'react-native-svg';
 import type { LanPairApprovalRequest } from '@loom-media-server/lan-protocol';
 import {
@@ -76,6 +74,14 @@ import {
   navIcons,
   type IconProps,
 } from './components/LoomIcons';
+import { MobileErrorBoundary } from './components/MobileErrorBoundary';
+import {
+  clearMobileDiagnostics,
+  exportMobileDiagnostics,
+  listMobileDiagnostics,
+  reportNonFatal,
+  type MobileDiagnosticEvent,
+} from './mobileDiagnostics';
 import {
   playbackFailureFromResponse,
   playbackFailureFromUnknown,
@@ -86,6 +92,9 @@ import {
 } from './playbackRecovery';
 import { useMobilePlayerGestures } from './useMobilePlayerGestures';
 import { useMobilePlayerSession } from './useMobilePlayerSession';
+import { useMobileConnectionSessionController, type MobileProfilePickerMode } from './useMobileConnectionSessionController';
+import { useMobileNavigationController } from './useMobileNavigationController';
+import { useMobilePlaybackController } from './useMobilePlaybackController';
 import {
   createStyles,
   settingsContentMaxWidth,
@@ -94,11 +103,10 @@ import {
 import { createMobileLanClient } from './mobileLanClient';
 import { fetchMobileCatalog, synchronizeMobileCatalog } from './mobileCatalog';
 import { captureMobileFocus, clearCapturedMobileFocus, topMobileModalLayer, useMobileModalLayer } from './mobileModalStack';
-import { mobileConnectionLifecycleAction, replaceMobilePlayerSource } from './mobileLifecycle';
+import { replaceMobilePlayerSource } from './mobileLifecycle';
 import { validatePairIdentity } from './mobileHostIdentity';
 import {
   connectionErrorFor,
-  discoveredHostFromService,
   normalizeBaseUrl,
 } from './mobileConnection';
 import {
@@ -114,13 +122,17 @@ import {
   normalizeCertFingerprint,
   rememberMobileDetailItem,
 } from './mobileDomain';
+import {
+  automaticDiscoveredHost,
+  automaticHostAttemptDelay,
+  automaticHostAttemptKey,
+} from './mobileDiscoveryExperience';
 import { MobileThemeProvider, useMobileTheme } from './mobileThemeContext';
 import { reconcileSavedHost } from './mobileHostIdentity';
 import {
   canRestoreMobileOfflineSnapshot,
   clearMobileOfflineSnapshot,
   loadMobileOfflineSnapshot,
-  saveMobileOfflineSnapshot,
 } from './mobileOfflineCache';
 import { MobileReducedMotionProvider, useMobileReducedMotion } from './mobileReducedMotion';
 import {
@@ -132,6 +144,7 @@ import {
 } from './mobileTheme';
 import {
   allItems,
+  coreItems,
   collections,
   episodeCode,
   episodePlayTarget,
@@ -140,6 +153,7 @@ import {
   matchesMobileLibraryFilter,
   matchesMobileSearchScope,
   matchesQuery,
+  orderedSeasonNumbers,
   playTargetForItem,
   progressStateFor,
   shouldTranscode,
@@ -157,7 +171,6 @@ import type {
   MediaSegment,
   MobileActiveProfile,
   MobileProfile,
-  MobileProfileListEntry,
   MobileLibraryFilter,
   MobileSearchScope,
   OfficialMetadataCandidate,
@@ -198,8 +211,6 @@ import {
 type PlayerAspectRatio = 'default' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4';
 type PlayerCropMode = 'none' | '4 / 3' | '16 / 9' | '16 / 10' | '21 / 9' | '5 / 4' | 'custom';
 type PlayerRotation = 0 | 90 | 180 | 270;
-type MobileProfilePickerMode = 'startup' | 'lock' | 'profile-required' | 'voluntary';
-
 const PLAYER_ASPECT_OPTIONS: { value: PlayerAspectRatio; label: string }[] = [
   { value: 'default', label: 'Default' },
   { value: '4 / 3', label: '4:3' },
@@ -261,6 +272,28 @@ function formatOfflineSnapshotTime(savedAt: number): string {
   }
 }
 
+const mobileEpisodeAirDateFormatter = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  month: 'short',
+  timeZone: 'UTC',
+  year: 'numeric',
+});
+
+function formatMobileEpisodeAirDate(value?: string): string {
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+  return mobileEpisodeAirDateFormatter.format(date);
+}
+
+function mobileSeasonLabel(season: number): string {
+  return season === 0 ? 'Specials' : `Season ${season}`;
+}
+
 const PROFILE_COLOR_HEX: Record<string, string> = {
   ember: 'f97316',
   gold: 'f59e0b',
@@ -273,10 +306,13 @@ const PROFILE_COLOR_HEX: Record<string, string> = {
 };
 
 function mobileProfileAvatarUri(profile: Pick<MobileProfile, 'avatarKey' | 'colorKey'>): string {
-  const accent = `#${PROFILE_COLOR_HEX[profile.colorKey] || PROFILE_COLOR_HEX.ocean}`;
-  const initial = (profile.avatarKey || 'L').trim().charAt(0).toUpperCase().replace(/[^A-Z0-9]/g, 'L');
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="48" fill="' + accent + '"/><text x="48" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="40" font-weight="700" fill="white">' + initial + '</text></svg>';
-  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  if (profile.avatarKey.startsWith('data:image/')) return profile.avatarKey;
+  const match = /(?:glyph|weave)-(\d+)$/.exec(profile.avatarKey);
+  const parsed = match ? Number.parseInt(match[1], 10) : 1;
+  const glyph = Number.isFinite(parsed) && parsed > 0 ? ((parsed - 1) % 12) + 1 : 1;
+  const variant = String(glyph).padStart(2, '0');
+  const color = PROFILE_COLOR_HEX[profile.colorKey] || PROFILE_COLOR_HEX.ember;
+  return `https://api.dicebear.com/10.x/glyphs/svg?seed=loomtv-glyph-${variant}&shapeVariant=variant${variant}&backgroundColor=${color}&backgroundColorFill=solid&glyphColor=${color}&glyphColorFill=solid`;
 }
 
 function mobileDeviceName(): string {
@@ -1154,7 +1190,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <MobileReducedMotionProvider>
-        <AppRoot />
+        <MobileErrorBoundary
+          scope="app-root.render"
+          title="LoomTV needs to recover"
+          message="Your saved library and progress are safe. Retry to reopen the app."
+        >
+          <AppRoot />
+        </MobileErrorBoundary>
       </MobileReducedMotionProvider>
     </SafeAreaProvider>
   );
@@ -1196,21 +1238,137 @@ function AppRoot() {
     };
   }, [splashOpacity, splashScale]);
 
-  const [baseUrl, setBaseUrl] = useState('');
-  const [shareCode, setShareCode] = useState('');
-  const [connection, setConnection] = useState<Connection | null>(null);
-  const [profiles, setProfiles] = useState<MobileProfile[]>([]);
-  const [activeProfile, setActiveProfile] = useState<MobileProfile | null>(null);
-  const [automaticProfileSignIn, setAutomaticProfileSignIn] = useState(false);
-  const [profilePickerMode, setProfilePickerMode] = useState<MobileProfilePickerMode | null>(null);
-  const showProfilePicker = profilePickerMode !== null;
-  const [profilePinTarget, setProfilePinTarget] = useState<MobileProfile | null>(null);
-  const [profilePin, setProfilePin] = useState('');
-  const [profileError, setProfileError] = useState('');
-  const [profileLists, setProfileLists] = useState<MobileProfileListEntry[]>([]);
-  const profileHydrationGenerationRef = useRef(0);
-  const mandatoryPlayerTeardownRef = useRef<() => void>(() => undefined);
-  const enterProfilePicker = (mode: MobileProfilePickerMode, nextConnection?: Connection, selectionRevision?: number) => {
+  const {
+    activeProfile,
+    appState,
+    appStateRef,
+    automaticProfileSignIn,
+    automaticHostAttemptRef,
+    baseUrl,
+    checkDesktopConnectionHandlerRef,
+    connection,
+    connectionHealthCheckRef,
+    connectionLifecycleAction,
+    credentialRefreshKeyRef,
+    credentialRefreshPromiseRef,
+    discoveredHosts,
+    discoveryError,
+    error,
+    isCheckingConnection,
+    isDiscoveringHosts,
+    isOnboarding,
+    isPairing,
+    isRestoringConnection,
+    isServerOffline,
+    offlineSnapshotSavedAt,
+    pairWithDesktopHandlerRef,
+    profileError,
+    profileHydrationGenerationRef,
+    profileLists,
+    profilePickerMode,
+    profilePin,
+    profilePinTarget,
+    profiles,
+    progress,
+    reconnectingSavedConnectionRef,
+    reconnectSavedConnectionHandlerRef,
+    refreshDiscovery,
+    requestedHostRepairRef,
+    savedReconnectCompletionRef,
+    savedConnection,
+    setActiveProfile,
+    setAutomaticProfileSignIn,
+    setBaseUrl,
+    setConnection,
+    setError,
+    setIsCheckingConnection,
+    setIsOnboarding,
+    setIsPairing,
+    setIsRestoringConnection,
+    setIsServerOffline,
+    setOfflineSnapshotSavedAt,
+    setProfileError,
+    setProfileLists,
+    setProfilePickerMode,
+    setProfilePin,
+    setProfilePinTarget,
+    setProfiles,
+    setProgress,
+    setSavedConnection,
+    setShareCode,
+    shareCode,
+    showProfilePicker,
+  } = useMobileConnectionSessionController({
+    cancelActiveRequests: mobileLanClient.cancelActiveRequests,
+    stopSecureTransport: stopSecureLanTransport,
+  });
+  const {
+    activeKind,
+    detailItem,
+    filterOpen,
+    homeHeaderPinned,
+    homeHeaderOpacity,
+    homeHeaderScale,
+    homeHeaderTranslateY,
+    lastDetailByKindRef,
+    libraryFilter,
+    libraryListRef,
+    navigateToKind,
+    query,
+    rememberMainScroll,
+    searchOpen,
+    searchScope,
+    settingsScrollRef,
+    settingsSection,
+    setActiveKind,
+    setDetailItem,
+    setFilterOpen,
+    setLibraryFilter,
+    setQuery,
+    setSearchOpen,
+    setSearchScope,
+    setSettingsSection,
+  } = useMobileNavigationController({ cancelActiveRequests: mobileLanClient.cancelActiveRequests });
+  const {
+    appliedOrientationLockRef,
+    autoAdvancedEpisodeRef,
+    closingPlayerRef,
+    desiredOrientationLockRef,
+    isPreparingStream,
+    mandatoryPlayerTeardownRef,
+    miniPlayerTarget,
+    orientationLockQueueRef,
+    pendingSeekRef,
+    playbackFailure,
+    playbackUrl,
+    player,
+    playerReturnItemRef,
+    playTarget,
+    setIsPreparingStream,
+    setMiniPlayerTarget,
+    setPlaybackFailure,
+    setPlaybackUrl,
+    setPlayTarget,
+    setStreamOptions,
+    setStreamRetryNonce,
+    shouldAutoplayRef,
+    streamOptions,
+    streamRetryNonce,
+    userPausedRef,
+    windowSizeRef,
+  } = useMobilePlaybackController({ appState, height, width });
+  const detailItemCacheRef = useRef(new Map<string, MediaItem>());
+  const detailItemRequestsRef = useRef(new Map<string, Promise<MediaItem>>());
+  const activeCatalogIdentityRef = useRef('profile:none:-1');
+  const legacyCatalogFallbackCountRef = useRef(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshingArtworkId, setRefreshingArtworkId] = useState('');
+  const [artworkRefreshError, setArtworkRefreshError] = useState('');
+  const [artworkCacheBusters, setArtworkCacheBusters] = useState<Record<string, string>>({});
+  const [posterCandidateSheet, setPosterCandidateSheet] = useState<PosterCandidateSheetState | null>(null);
+  const [applyingPosterCandidateId, setApplyingPosterCandidateId] = useState('');
+
+  const enterProfilePicker = (mode: MobileProfilePickerMode, nextConnection?: Connection, selectionRevision?: number): void => {
     profileHydrationGenerationRef.current += 1;
     setProfilePinTarget(null);
     setProfilePin('');
@@ -1250,162 +1408,22 @@ function AppRoot() {
     }
     setProfilePickerMode(mode);
   };
-  const [savedConnection, setSavedConnection] = useState<SavedConnection | null>(null);
-  const [discoveredHosts, setDiscoveredHosts] = useState<DiscoveredHost[]>([]);
-  const [isDiscoveringHosts, setIsDiscoveringHosts] = useState(true);
-  const [discoveryError, setDiscoveryError] = useState('');
-  const [discoveryScanNonce, setDiscoveryScanNonce] = useState(0);
-  const [isRestoringConnection, setIsRestoringConnection] = useState(true);
-  const [activeKind, setActiveKind] = useState<LibraryKind>('home');
-  const [query, setQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchScope, setSearchScope] = useState<MobileSearchScope>('all');
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [libraryFilter, setLibraryFilter] = useState<MobileLibraryFilter>('all');
-  const [detailItem, setDetailItem] = useState<MediaItem | null>(null);
-  const [playTarget, setPlayTarget] = useState<PlayTarget | null>(null);
-  const [miniPlayerTarget, setMiniPlayerTarget] = useState<PlayTarget | null>(null);
-  const orientationLockQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const desiredOrientationLockRef = useRef<ScreenOrientation.OrientationLock | null>(null);
-  const appliedOrientationLockRef = useRef<ScreenOrientation.OrientationLock | null>(null);
-  const playerReturnItemRef = useRef<MediaItem | null>(null);
-  const closingPlayerRef = useRef(false);
-  const windowSizeRef = useRef({ height, width });
-  windowSizeRef.current = { height, width };
-  const detailItemCacheRef = useRef(new Map<string, MediaItem>());
-  const detailItemRequestsRef = useRef(new Map<string, Promise<MediaItem>>());
-  const activeCatalogIdentityRef = useRef('profile:none:-1');
-  const legacyCatalogFallbackCountRef = useRef(0);
-  const lastDetailByKindRef = useRef(new Map<LibraryKind, MediaItem>());
-  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
-  const [streamOptions, setStreamOptions] = useState<StreamOptions>({});
-  const shouldAutoplayRef = useRef(false);
-  const userPausedRef = useRef(false);
-  const pendingSeekRef = useRef(0);
-  const autoAdvancedEpisodeRef = useRef<string | null>(null);
-  const [isPairing, setIsPairing] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [refreshingArtworkId, setRefreshingArtworkId] = useState('');
-  const [artworkRefreshError, setArtworkRefreshError] = useState('');
-  const [artworkCacheBusters, setArtworkCacheBusters] = useState<Record<string, string>>({});
-  const [posterCandidateSheet, setPosterCandidateSheet] = useState<PosterCandidateSheetState | null>(null);
-  const [applyingPosterCandidateId, setApplyingPosterCandidateId] = useState('');
-  const [isPreparingStream, setIsPreparingStream] = useState(false);
-  const [error, setError] = useState('');
-  const [isServerOffline, setIsServerOffline] = useState(false);
-  const [isOnboarding, setIsOnboarding] = useState(false);
-  const [isCheckingConnection, setIsCheckingConnection] = useState(false);
-  const [offlineSnapshotSavedAt, setOfflineSnapshotSavedAt] = useState<number | null>(null);
-  const [playbackFailure, setPlaybackFailure] = useState<PlaybackFailure | null>(null);
-  const [streamRetryNonce, setStreamRetryNonce] = useState(0);
-  const [progress, setProgress] = useState<Record<string, StoredProgress>>({});
-  const [homeHeaderPinned, setHomeHeaderPinned] = useState(false);
-  const homeHeaderPinnedRef = useRef(false);
-  const updateHomeHeaderPinned = useCallback((pinned: boolean) => {
-    if (homeHeaderPinnedRef.current === pinned) return;
-    homeHeaderPinnedRef.current = pinned;
-    setHomeHeaderPinned(pinned);
-  }, []);
-  const homeHeaderAnimation = useRef(new Animated.Value(0)).current;
-  const homeHeaderOpacity = homeHeaderAnimation.interpolate({
-    inputRange: [0, 0.35, 1],
-    outputRange: [0, 0.45, 1],
-    extrapolate: 'clamp',
-  });
-  const homeHeaderTranslateY = homeHeaderAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-14, 0],
-    extrapolate: 'clamp',
-  });
-  const homeHeaderScale = homeHeaderAnimation.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.985, 1],
-    extrapolate: 'clamp',
-  });
   const initialResolvedThemeMode: ResolvedMobileThemeMode = 'dark';
   const [mobileTheme, setMobileTheme] = useState<MobileThemeColors>(() => (
     mobileThemeFromSettings(undefined, initialResolvedThemeMode)
   ));
   const [mobileThemeMode, setMobileThemeMode] = useState<MobileThemeMode>('dark');
   const [mobileThemeColor, setMobileThemeColor] = useState<MobileThemeColor>('yellow');
-  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
-  useMobileModalLayer({
-    open: filterOpen,
-    priority: 10,
-    onBack: () => setFilterOpen(false),
-  });
-  useMobileModalLayer({
-    open: activeKind === 'settings' && settingsSection !== null,
-    priority: 12,
-    onBack: () => setSettingsSection(null),
-  });
   const resolvedMobileThemeMode: ResolvedMobileThemeMode = mobileThemeMode === 'auto'
     ? (systemColorScheme === 'light' ? 'light' : 'dark')
     : mobileThemeMode;
-  const libraryListRef = useRef<FlatList<MediaItem> | null>(null);
-  const settingsScrollRef = useRef<ScrollView | null>(null);
-  const scrollOffsetsRef = useRef<Record<LibraryKind, number>>({
-    home: 0,
-    anime: 0,
-    tv: 0,
-    movies: 0,
-    others: 0,
-    settings: 0,
-  });
-  const reconnectingSavedConnectionRef = useRef(false);
-  const requestedHostRepairRef = useRef<string | null>(null);
-  const credentialRefreshPromiseRef = useRef<{ key: string; promise: Promise<SavedConnection> } | null>(null);
-  const credentialRefreshKeyRef = useRef('');
-  const connectionHealthCheckRef = useRef(false);
-  const reconnectSavedConnectionHandlerRef = useRef(reconnectSavedConnection);
-  const pairWithDesktopHandlerRef = useRef(pairWithDesktop);
-  const checkDesktopConnectionHandlerRef = useRef(checkDesktopConnection);
   reconnectSavedConnectionHandlerRef.current = reconnectSavedConnection;
   pairWithDesktopHandlerRef.current = pairWithDesktop;
   checkDesktopConnectionHandlerRef.current = checkDesktopConnection;
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-  const connectionLifecycleAction = mobileConnectionLifecycleAction({
-    appState,
-    hasConnection: Boolean(connection),
-    hasSavedConnection: Boolean(savedConnection),
-    isPairing,
-    isServerOffline,
-  });
   const themedStyles = useMemo(() => createStyles(mobileTheme), [mobileTheme]);
   const themeContextValue = useMemo(() => ({ colors: mobileTheme, styles: themedStyles }), [mobileTheme, themedStyles]);
   const styles = themedStyles;
   const { accent, panel, text, muted } = mobileTheme;
-
-  const navigateToKind = useCallback((kind: LibraryKind) => {
-    if (kind === activeKind) {
-      lastDetailByKindRef.current.delete(kind);
-      setDetailItem(null);
-      setSearchOpen(false);
-      setQuery('');
-      setSearchScope('all');
-      setFilterOpen(false);
-      setLibraryFilter('all');
-      if (kind === 'settings') setSettingsSection(null);
-      scrollOffsetsRef.current[kind] = 0;
-      if (kind === 'settings') {
-        settingsScrollRef.current?.scrollTo({ y: 0, animated: true });
-      } else {
-        libraryListRef.current?.scrollToOffset({ offset: 0, animated: true });
-      }
-      updateHomeHeaderPinned(false);
-      return;
-    }
-    if (detailItem) lastDetailByKindRef.current.set(activeKind, detailItem);
-    setDetailItem(kind === 'settings' ? null : lastDetailByKindRef.current.get(kind) || null);
-    setSearchOpen(false);
-    setQuery('');
-    setSearchScope('all');
-    setFilterOpen(false);
-    setLibraryFilter('all');
-    setActiveKind(kind);
-    updateHomeHeaderPinned(false);
-  }, [activeKind, detailItem, updateHomeHeaderPinned]);
 
   const selectMobileTheme = useCallback((next: MobileThemeMode) => {
     setMobileThemeMode(next);
@@ -1415,78 +1433,6 @@ function AppRoot() {
   const selectMobileThemeColor = useCallback((next: MobileThemeColor) => {
     setMobileThemeColor(next);
     void SecureStore.setItemAsync(MOBILE_THEME_COLOR_KEY, next).catch(() => {});
-  }, []);
-
-  const rememberMainScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const offset = event.nativeEvent.contentOffset.y;
-    if (query) return;
-    scrollOffsetsRef.current[activeKind] = offset;
-    if (activeKind === 'settings') {
-      updateHomeHeaderPinned(false);
-      return;
-    }
-    const shouldPin = offset > (homeHeaderPinnedRef.current ? 84 : 112);
-    updateHomeHeaderPinned(shouldPin);
-  }, [activeKind, query, updateHomeHeaderPinned]);
-
-  useEffect(() => {
-    const animation = homeHeaderPinned
-      ? Animated.spring(homeHeaderAnimation, {
-          damping: 22,
-          isInteraction: false,
-          mass: 0.72,
-          stiffness: 250,
-          toValue: 1,
-          useNativeDriver: true,
-        })
-      : Animated.timing(homeHeaderAnimation, {
-          duration: 150,
-          easing: Easing.out(Easing.cubic),
-          isInteraction: false,
-          toValue: 0,
-          useNativeDriver: true,
-        });
-    animation.start();
-    return () => animation.stop();
-  }, [homeHeaderAnimation, homeHeaderPinned]);
-
-  useEffect(() => {
-    if (activeKind !== 'settings' && !query) return;
-    updateHomeHeaderPinned(false);
-  }, [activeKind, query, updateHomeHeaderPinned]);
-
-  useEffect(() => {
-    if (!searchOpen) return;
-    updateHomeHeaderPinned(false);
-    const frame = requestAnimationFrame(() => {
-      libraryListRef.current?.scrollToOffset({ offset: 0, animated: false });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [searchOpen, updateHomeHeaderPinned]);
-
-  useEffect(() => {
-    if (query) return;
-    const offset = scrollOffsetsRef.current[activeKind] || 0;
-    const frame = requestAnimationFrame(() => {
-      if (activeKind === 'settings') {
-        settingsScrollRef.current?.scrollTo({ y: offset, animated: false });
-      } else {
-        libraryListRef.current?.scrollToOffset({ offset, animated: false });
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [activeKind, query]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      appStateRef.current = nextState;
-      setAppState(nextState);
-    });
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => () => {
-    void stopSecureLanTransport();
   }, []);
 
   useEffect(() => {
@@ -1534,112 +1480,13 @@ function AppRoot() {
   }, []);
 
   useEffect(() => {
-    if (!connection?.hostDeviceId) return undefined;
-    const usesProfiles = profiles.length > 0 || activeProfile !== null;
-    const profileCanPersist = !usesProfiles || Boolean(
-      activeProfile
-      && automaticProfileSignIn
-      && !activeProfile.hasPin
-      && !activeProfile.isGuest,
-    );
-    if (showProfilePicker || !profileCanPersist) {
-      void clearMobileOfflineSnapshot(connection.hostDeviceId);
-      return undefined;
-    }
-    if (isServerOffline) return undefined;
-
-    const timer = setTimeout(() => {
-      void saveMobileOfflineSnapshot({
-        hostDeviceId: connection.hostDeviceId,
-        activeProfile,
-        automaticProfileSignIn,
-        profiles,
-        library: connection.library,
-        libraryEtag: connection.libraryEtag,
-        catalogRevision: connection.catalogRevision,
-        catalogTransport: connection.catalogTransport,
-        selectionRevision: connection.selectionRevision,
-        progress,
-        profileLists,
-      }).catch(() => {
-        // The online experience remains usable when the optional metadata cache fails.
-      });
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [
-    activeProfile,
-    automaticProfileSignIn,
-    connection,
-    isServerOffline,
-    profileLists,
-    profiles,
-    progress,
-    showProfilePicker,
-  ]);
-
-  useEffect(() => {
-    // Keep Bonjour running while an offline snapshot is being shown. The saved
-    // connection remains in state for offline browsing, so `connection !== null`
-    // alone must not disable rediscovery of a host whose address changed.
-    if (connection && !isServerOffline) {
-      setIsDiscoveringHosts(false);
-      return;
-    }
-
-    const zeroconf = new Zeroconf();
-    setIsDiscoveringHosts(true);
-    setDiscoveryError('');
-
-    zeroconf.on('resolved', (service) => {
-      const host = discoveredHostFromService(service);
-      if (!host) return;
-      setDiscoveredHosts((current) => [
-        ...current.filter((candidate) => candidate.deviceId !== host.deviceId),
-        host,
-      ].sort((a, b) => a.deviceName.localeCompare(b.deviceName)));
-    });
-    zeroconf.on('remove', (name) => {
-      setDiscoveredHosts((current) => current.filter((host) => host.serviceName !== name));
-    });
-    zeroconf.on('error', () => {
-      setDiscoveryError(
-        'Automatic discovery is unavailable. Check Local Network permission and desktop Settings → Network, then tap Refresh. You can still connect manually.',
-      );
-      setIsDiscoveringHosts(false);
-    });
-    zeroconf.on('start', () => setIsDiscoveringHosts(true));
-    try {
-      zeroconf.scan('loomtv', 'tcp', 'local.');
-    } catch {
-      setDiscoveryError('Automatic discovery requires a LoomTV development or store build. You can still connect manually.');
-      setIsDiscoveringHosts(false);
-    }
-
-    const scanWindow = setTimeout(() => setIsDiscoveringHosts(false), 5000);
-    return () => {
-      clearTimeout(scanWindow);
-      try { zeroconf.stop(); } catch { /* Zeroconf may already be stopped. */ }
-      zeroconf.removeAllListeners();
-      zeroconf.removeDeviceListeners();
-    };
-  }, [connection, discoveryScanNonce, isServerOffline]);
-
-  useEffect(() => {
     if (!savedConnection || (connection && !isServerOffline)) return;
     const discoveredSavedHost = discoveredHosts.find((host) => host.deviceId === savedConnection.hostDeviceId);
     if (discoveredSavedHost) {
       const reconciliation = reconcileSavedHost(savedConnection, discoveredSavedHost);
       if (reconciliation.kind === 'identity-mismatch') {
         setIsServerOffline(true);
-        setError('A desktop claiming this saved identity was discovered, but its security fingerprint does not match. Re-pair with the current 6-digit PIN before connecting.');
-        // A certificate rotation is expected after the desktop repairs an
-        // expired LAN identity. Only an explicit Reconnect request may turn
-        // that mismatch into a fresh, approval-gated pairing request.
-        if (requestedHostRepairRef.current === savedConnection.hostDeviceId) {
-          requestedHostRepairRef.current = null;
-          void pairWithDesktopHandlerRef.current(discoveredSavedHost);
-        }
+        setError('Approve the refreshed connection on your desktop.');
         return;
       }
       if (reconciliation.kind === 'unchanged') return;
@@ -1652,6 +1499,23 @@ function AppRoot() {
     }
     // Keep the reconnect cadence tied to saved-session state, not callback identity.
   }, [connection, discoveredHosts, isServerOffline, savedConnection]);
+
+  useEffect(() => {
+    if (appState !== 'active' || isPairing || isRestoringConnection || (connection && !isServerOffline)) return;
+    const host = automaticDiscoveredHost(discoveredHosts, savedConnection);
+    if (!host) return;
+    if (savedConnection && reconcileSavedHost(savedConnection, host).kind !== 'identity-mismatch') return;
+
+    const attemptKey = automaticHostAttemptKey(host);
+    const delay = automaticHostAttemptDelay(automaticHostAttemptRef.current.get(attemptKey));
+    const timer = setTimeout(() => {
+      automaticHostAttemptRef.current.set(attemptKey, Date.now());
+      setBaseUrl(host.baseUrl);
+      setError('');
+      void pairWithDesktopHandlerRef.current(host);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [appState, connection, discoveredHosts, isPairing, isRestoringConnection, isServerOffline, savedConnection]);
 
   useEffect(() => {
     // Keep retrying a saved credential while the onboarding screen is visible.
@@ -1684,7 +1548,7 @@ function AppRoot() {
 
   useEffect(() => {
     if (!connection || connectionLifecycleAction !== 'health-check') return;
-    const healthCheck = setInterval(() => void checkDesktopConnectionHandlerRef.current(), 10000);
+    const healthCheck = setInterval(() => void checkDesktopConnectionHandlerRef.current(), 5_000);
     return () => clearInterval(healthCheck);
   }, [connection, connectionLifecycleAction]);
 
@@ -1712,31 +1576,13 @@ function AppRoot() {
     return () => clearTimeout(timer);
   }, [connection, savedConnection]);
 
-  // Browsing is portrait; video playback is locked to either landscape direction.
-  // Serialize and deduplicate native lock requests: overlapping lockAsync calls can
-  // deadlock Expo's iOS orientation registry while it dispatches an orientation event.
-  useEffect(() => {
-    const lock = playTarget ? ScreenOrientation.OrientationLock.LANDSCAPE : ScreenOrientation.OrientationLock.PORTRAIT_UP;
-    if (desiredOrientationLockRef.current === lock && appliedOrientationLockRef.current === lock) return;
-
-    desiredOrientationLockRef.current = lock;
-    orientationLockQueueRef.current = orientationLockQueueRef.current
-      .catch(() => {})
-      .then(async () => {
-        if (desiredOrientationLockRef.current !== lock || appliedOrientationLockRef.current === lock) return;
-        await ScreenOrientation.lockAsync(lock);
-        appliedOrientationLockRef.current = lock;
-      })
-      .catch(() => {});
-  }, [playTarget]);
-
   useEffect(() => {
     setMobileTheme(mobileThemeFromSettings({ appThemeColor: mobileThemeColor }, resolvedMobileThemeMode));
   }, [mobileThemeColor, resolvedMobileThemeMode]);
 
   const library = useMemo(() => connection?.library || {}, [connection?.library]);
   const grouped = useMemo(() => collections(library), [library]);
-  const everything = useMemo(() => [...grouped.anime, ...grouped.tv, ...grouped.movies], [grouped]);
+  const everything = useMemo(() => coreItems(library), [library]);
 
   useEffect(() => {
     if (!connection?.baseUrl || isServerOffline) return;
@@ -1964,22 +1810,6 @@ function AppRoot() {
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
   }, [isServerOffline, progress, resolveMobileDetailItem]);
 
-  const player = useVideoPlayer(null, (nextPlayer) => {
-    nextPlayer.loop = false;
-    nextPlayer.timeUpdateEventInterval = 0.5;
-  });
-  mandatoryPlayerTeardownRef.current = () => {
-    try {
-      player.pause();
-    } catch {
-      // The native player may already be tearing down.
-    }
-    void player.replaceAsync(null).catch(() => {
-      // Clearing the React playback state remains authoritative if native
-      // teardown races a profile-required response.
-    });
-  };
-
   const connectionBaseUrl = connection?.baseUrl;
   const connectionDeviceToken = connection?.deviceToken;
   const connectionSelectionRevision = connection?.selectionRevision;
@@ -2013,8 +1843,9 @@ function AppRoot() {
       setConnection((current) => current
         ? { ...current, library: libraryWithPlayedItem(current.library, target.streamPath, playedAt) }
         : current);
-    } catch {
+    } catch (error) {
       // Progress sync should never interrupt playback.
+      reportNonFatal('progress.local-sync', error);
     }
   }, [connectionBaseUrl, connectionDeviceToken, connectionSelectionRevision, playTarget, player]);
 
@@ -2111,8 +1942,9 @@ function AppRoot() {
           pendingSeekRef.current = 0;
           player.play();
           shouldAutoplayRef.current = false;
-        } catch {
+        } catch (error) {
           // Native player readiness can lag behind this callback on some devices.
+          reportNonFatal('player.autoplay', error);
         }
       }
     });
@@ -2174,8 +2006,9 @@ function AppRoot() {
     if (shouldAutoplayRef.current && !userPausedRef.current) {
       try {
         player.play();
-      } catch {
+      } catch (error) {
         // player may not be ready yet; the status listener will retry when ready.
+        reportNonFatal('player.retry-play', error);
       }
     }
   }, [playbackUrl, player]);
@@ -2257,8 +2090,9 @@ function AppRoot() {
     try {
       resumePosition = Number(player.currentTime || 0);
       player.pause();
-    } catch {
+    } catch (error) {
       // ignore — player may already be torn down
+      reportNonFatal('player.close-pause', error);
     }
     const target = playTarget;
     const returnItem = playerReturnItemRef.current;
@@ -2354,8 +2188,9 @@ function AppRoot() {
       const response = await mobileLanClient.getProgress(nextConnection.baseUrl, nextConnection.deviceToken);
       if (!response.ok) return;
       setProgress(await readJsonResponse(response, mobileProgressMapSchema, 'Playback progress'));
-    } catch {
+    } catch (error) {
       // Progress is additive UI state; pairing and browsing should still work without it.
+      reportNonFatal('progress.remote-load', error);
     }
   }
 
@@ -2520,8 +2355,9 @@ function AppRoot() {
       setActiveProfile((current) => current
         ? payload.profiles.find((profile) => profile.id === current.id) || current
         : current);
-    } catch {
+    } catch (error) {
       // Profile updates are opportunistic; the existing connection check reports real outages.
+      reportNonFatal('profile.opportunistic-update', error);
     }
   }
 
@@ -2555,15 +2391,23 @@ function AppRoot() {
     setBaseUrl(saved.baseUrl);
     setOfflineSnapshotSavedAt(snapshot.savedAt);
     setIsServerOffline(true);
-    setError(`Desktop is offline. Showing the library saved ${formatOfflineSnapshotTime(snapshot.savedAt)}; playback and changes will work again after reconnecting.`);
+    setError(`Offline library from ${formatOfflineSnapshotTime(snapshot.savedAt)}. Reconnecting.`);
     return true;
   }
 
   async function reconnectSavedConnection(saved: SavedConnection): Promise<boolean> {
     if (appStateRef.current !== 'active' || reconnectingSavedConnectionRef.current) return false;
     reconnectingSavedConnectionRef.current = true;
+    setIsRestoringConnection(true);
+    let finishReconnect: (() => void) | undefined;
+    const reconnectCompletion = new Promise<void>((resolve) => { finishReconnect = resolve; });
+    savedReconnectCompletionRef.current = reconnectCompletion;
     try {
       const certFingerprint = saved.certFingerprint;
+      // The native loopback proxy can be reclaimed while iOS backgrounds the
+      // app even though its old URL remains cached in JavaScript. Rebuild it
+      // for every offline recovery so retries never stay pinned to a dead port.
+      await stopSecureLanTransport();
       await configureSecureLanTransport(saved.baseUrl, certFingerprint);
       let activeSaved = saved.accessTokenExpiresAt <= Date.now() + 60_000
         || saved.clientDeviceName !== mobileDeviceName()
@@ -2641,12 +2485,15 @@ function AppRoot() {
         return true;
       }
       const connectionError = connectionErrorFor(nextError, 'The paired desktop is unavailable.');
-      if (connectionError.isOffline && await restoreOfflineConnection(saved)) return true;
+      if (connectionError.isOffline && await restoreOfflineConnection(saved)) return false;
       returnToOnboarding();
-      setError(connectionError.message);
+      setIsServerOffline(connectionError.isOffline);
+      setError(connectionError.isOffline ? '' : connectionError.message);
       return false;
     } finally {
       reconnectingSavedConnectionRef.current = false;
+      finishReconnect?.();
+      if (savedReconnectCompletionRef.current === reconnectCompletion) savedReconnectCompletionRef.current = null;
       setIsRestoringConnection(false);
     }
   }
@@ -2686,11 +2533,11 @@ function AppRoot() {
         const failure = await readErrorResponse(response, 'Pairing');
         const failureMessage = failure.message || failure.error;
         if (response.status === 403 && failure.status === 'denied') {
-          throw new Error('The desktop denied this connection. Tap Connect to request access again.');
+          throw new Error('Connection was not approved.');
         }
         if (response.status === 401) {
           throw new Error(host
-            ? 'This desktop does not support one-tap approval yet. Update LoomTV or use Connect manually with its current PIN.'
+            ? 'Update LoomTV on the desktop, or connect manually.'
             : 'The sharing code was not accepted.');
         }
         if (response.status === 429) {
@@ -2745,7 +2592,7 @@ function AppRoot() {
       }
     } catch (nextError) {
       const connectionError = connectionErrorFor(nextError, 'Pairing failed.');
-      setError(connectionError.message);
+      setError(connectionError.isOffline ? '' : connectionError.message);
       setIsServerOffline(preserveOfflineSnapshot || connectionError.isOffline);
     } finally {
       setIsPairing(false);
@@ -2955,6 +2802,8 @@ function AppRoot() {
   function requestServerReconnect() {
     // A retry should also restart Bonjour. This covers NAS/desktop hosts whose
     // DHCP address changed while the mobile app was showing its cached library.
+    const interruptedReconnect = savedReconnectCompletionRef.current;
+    mobileLanClient.cancelActiveRequests();
     if (savedConnection) {
       const discoveredSavedHost = discoveredHosts.find((host) => host.deviceId === savedConnection.hostDeviceId);
       if (discoveredSavedHost && reconcileSavedHost(savedConnection, discoveredSavedHost).kind === 'identity-mismatch') {
@@ -2967,11 +2816,13 @@ function AppRoot() {
       }
       requestedHostRepairRef.current = savedConnection.hostDeviceId;
     }
-    setDiscoveredHosts([]);
-    setDiscoveryScanNonce((current) => current + 1);
+    refreshDiscovery();
     if (savedConnection) {
       setIsRestoringConnection(true);
-      void reconnectSavedConnection(savedConnection);
+      void (async () => {
+        if (interruptedReconnect) await interruptedReconnect;
+        await reconnectSavedConnection(savedConnection);
+      })();
       return;
     }
     void checkDesktopConnection();
@@ -3186,10 +3037,8 @@ function AppRoot() {
           isDiscoveringHosts={isDiscoveringHosts}
           isPairing={isPairing}
           isRestoringConnection={isRestoringConnection}
-          onRefreshDiscovery={() => {
-            setDiscoveredHosts([]);
-            setDiscoveryScanNonce((current) => current + 1);
-          }}
+          isServerOffline={isServerOffline}
+          onRefreshDiscovery={refreshDiscovery}
           // Returning to onboarding keeps the saved credential in SecureStore,
           // but lets Bonjour present the current host instead of exposing a
           // stale address or a manual-IP form first.
@@ -3346,7 +3195,7 @@ function AppRoot() {
                         onChange={setLibraryFilter}
                       />
                     ) : null}
-                    {isServerOffline ? (
+                    {isServerOffline && !offlineSnapshotSavedAt ? (
                       <OfflineNotice
                         message={error}
                         onRetry={requestServerReconnect}
@@ -3534,6 +3383,13 @@ function AppRoot() {
           }}
         />
       ) : null}
+      <MobileErrorBoundary
+        scope="player.render"
+        title="Playback stopped"
+        message="The player could not continue. Close it and retry from the title page."
+        resetKey={playTarget?.streamPath || ''}
+        onReset={() => { void closePlayer(); }}
+      >
       <PlayerModal
         baseUrl={connection?.baseUrl || ''}
         deviceToken={connection?.deviceToken || ''}
@@ -3547,6 +3403,7 @@ function AppRoot() {
         onRetry={retryPlayback}
         onStreamOptionsChange={setStreamOptions}
       />
+      </MobileErrorBoundary>
       </Fragment>
       ) : null}
       {showStartupSplash && !showProfilePicker ? (
@@ -3575,6 +3432,7 @@ function PairingScreen({
   isDiscoveringHosts,
   isPairing,
   isRestoringConnection,
+  isServerOffline,
   onRefreshDiscovery,
   savedConnection,
   setBaseUrl,
@@ -3589,6 +3447,7 @@ function PairingScreen({
   isDiscoveringHosts: boolean;
   isPairing: boolean;
   isRestoringConnection: boolean;
+  isServerOffline: boolean;
   onRefreshDiscovery: () => void;
   savedConnection: SavedConnection | null;
   setBaseUrl: (value: string) => void;
@@ -3601,6 +3460,10 @@ function PairingScreen({
   const [showManual, setShowManual] = useState(false);
   const [connectingHostDeviceId, setConnectingHostDeviceId] = useState<string | null>(null);
   const isConnecting = isPairing || isRestoringConnection;
+  const automaticallyConnectingHost = isConnecting
+    ? automaticDiscoveredHost(discoveredHosts, savedConnection)
+    : null;
+  const activeConnectingHostDeviceId = connectingHostDeviceId || automaticallyConnectingHost?.deviceId || null;
   const manualVisible = showManual;
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
@@ -3631,7 +3494,7 @@ function PairingScreen({
         <View style={styles.pairingHero}>
           <LoomLogo width={118} height={33} accent={accent} wordColor={text} />
           <Text selectable style={styles.pairingSubtitle}>
-            {savedConnection ? savedConnection.hostDeviceName : 'Pick your desktop to start watching.'}
+            {savedConnection ? savedConnection.hostDeviceName : 'Finding your desktop…'}
           </Text>
         </View>
         <View style={styles.formBlock}>
@@ -3663,7 +3526,7 @@ function PairingScreen({
                     }}
                     style={({ pressed }) => [
                       styles.hostCard,
-                      connectingHostDeviceId === host.deviceId && isConnecting && styles.hostCardSelected,
+                      activeConnectingHostDeviceId === host.deviceId && isConnecting && styles.hostCardSelected,
                       pressed && styles.pressed,
                     ]}
                     accessibilityRole="button"
@@ -3673,11 +3536,10 @@ function PairingScreen({
                   >
                     <View style={styles.hostCardCopy}>
                       <Text selectable numberOfLines={1} style={styles.hostName}>{host.deviceName}</Text>
-                      <Text selectable numberOfLines={1} style={styles.hostAddress}>{host.baseUrl}</Text>
                     </View>
-                    {connectingHostDeviceId === host.deviceId && isConnecting
+                    {activeConnectingHostDeviceId === host.deviceId && isConnecting
                       ? <ActivityIndicator size="small" color={accent} />
-                      : <Text style={styles.hostConnectLabel}>Connect</Text>}
+                      : <Text style={styles.hostConnectLabel}>Ready</Text>}
                 </Pressable>
             ))}
             {!discoveredHosts.length ? (
@@ -3686,11 +3548,11 @@ function PairingScreen({
                   <ActivityIndicator size="small" color={accent} />
                 ) : (
                   <>
-                    <Text style={styles.emptyDiscoveryTitle}>No desktops found</Text>
+                    <Text style={styles.emptyDiscoveryTitle}>Still looking…</Text>
                     <Text style={styles.emptyDiscoveryCopy}>
                       {discoveryError
                         ? discoveryError
-                        : 'Turn on Local Network Sharing in the desktop app.'}
+                        : 'Open LoomTV on your desktop.'}
                     </Text>
                   </>
                 )}
@@ -3732,7 +3594,7 @@ function PairingScreen({
               />
             </View>
           ) : null}
-          {error ? (
+          {error && !isServerOffline ? (
             <View style={styles.errorCard}>
               <Text
                 accessibilityLiveRegion="assertive"
@@ -3758,11 +3620,13 @@ function PairingScreen({
           ) : null}
           {isConnecting && !manualVisible ? (
             <Text selectable style={styles.manualHint}>
-              {isPairing ? 'Approve this device in LoomTV on your desktop.' : 'Connecting to your saved desktop…'}
+              Connecting…
             </Text>
+          ) : isServerOffline && !manualVisible ? (
+            <Text selectable style={styles.manualHint}>Reconnecting…</Text>
           ) : manualVisible ? (
             <Text selectable style={styles.manualHint}>
-              {'On your desktop, open Settings > Network. Enter the HTTPS address and 6-digit PIN shown there. Do not use the address beginning with 127.0.0.1.'}
+              {'Enter the address and PIN from desktop Settings > Network.'}
             </Text>
           ) : null}
           <Pressable
@@ -3780,7 +3644,7 @@ function PairingScreen({
             }}
             style={[styles.helpToggle, isConnecting && styles.disabledButton]}
           >
-            <Text style={styles.helpToggleText}>{showManual ? 'Cancel' : 'Connect manually'}</Text>
+            <Text style={styles.helpToggleText}>{showManual ? 'Cancel' : 'Use address and PIN'}</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -4414,7 +4278,7 @@ function DetailContent({
   }, [baseUrl, cacheBust, episodes, item.backdrop, item.backdropCandidates, item.poster, item.posterCandidates]);
   const isSeries = item.type !== 'movie' && episodes.length > 0;
   const hasEpisodeTab = item.type !== 'movie';
-  const seasonNumbers = Array.from(new Set(episodes.map((ep) => ep.season))).sort((a, b) => a - b);
+  const seasonNumbers = useMemo(() => orderedSeasonNumbers(item), [item]);
   const [selectedSeason, setSelectedSeason] = useState(seasonNumbers[0] ?? 1);
   const [seasonPickerOpen, setSeasonPickerOpen] = useState(false);
   const [detailTab, setDetailTab] = useState<'episodes' | 'details'>(hasEpisodeTab ? 'episodes' : 'details');
@@ -4597,7 +4461,7 @@ function DetailContent({
                   onPress={() => setSeasonPickerOpen((current) => !current)}
                   style={({ pressed }) => [styles.seasonPicker, pressed && styles.pressed]}
                 >
-                  <Text style={styles.seasonPickerText}>Season {selectedSeason}</Text>
+                  <Text style={styles.seasonPickerText}>{mobileSeasonLabel(selectedSeason)}</Text>
                   <View style={[styles.seasonPickerChevron, seasonPickerOpen && styles.seasonPickerChevronOpen]}>
                     <ChevronRightIcon size={20} color={text} />
                   </View>
@@ -4615,9 +4479,9 @@ function DetailContent({
                         }}
                         style={({ pressed }) => [styles.seasonPickerOption, season === selectedSeason && styles.seasonPickerOptionActive, pressed && styles.pressed]}
                       >
-                        <Text style={[styles.seasonPickerOptionText, season === selectedSeason && styles.seasonPickerOptionTextActive]}>Season {season}</Text>
+                        <Text style={[styles.seasonPickerOptionText, season === selectedSeason && styles.seasonPickerOptionTextActive]}>{mobileSeasonLabel(season)}</Text>
                         <Text style={styles.seasonPickerOptionMeta}>
-                          {episodes.filter((ep) => ep.season === season).length} episodes
+                          {episodes.filter((ep) => ep.season === season).length} {episodes.filter((ep) => ep.season === season).length === 1 ? 'episode' : 'episodes'}
                         </Text>
                       </Pressable>
                     ))}
@@ -4642,6 +4506,7 @@ function DetailContent({
                         ...(item.posterCandidates || []),
                       ]}
                       progress={progressStateFor(progress, ep.filePath, ep.localMetadata?.durationSeconds)}
+                      airDate={episodeDetails?.airDate}
                       summary={episodeDetails?.summary}
                       onPress={() => onPlay(episodePlayTarget(item, ep, progress))}
                     />
@@ -4949,6 +4814,7 @@ function EpisodeRow({
   episode,
   fallbackSources,
   progress,
+  airDate,
   summary,
   onPress,
 }: {
@@ -4957,6 +4823,7 @@ function EpisodeRow({
   episode: EpisodeFile;
   fallbackSources: Array<string | undefined>;
   progress: ReturnType<typeof progressStateFor>;
+  airDate?: string;
   summary?: string;
   onPress: () => void;
 }) {
@@ -4970,13 +4837,14 @@ function EpisodeRow({
     [baseUrl, cacheBust, episode.still, episode.thumbnail, fallbackSources],
   );
   const progressWidth = `${Math.max(6, Math.round(progress.fraction * 100))}%` as `${number}%`;
+  const episodeAirDate = formatMobileEpisodeAirDate(airDate);
   return (
     <PressableScale
       onPress={onPress}
       scaleTo={0.98}
       style={[styles.episodeRow, progress.watched && styles.episodeRowWatched]}
       accessibilityRole="button"
-      accessibilityLabel={`Play ${episodeCode(episode.season, episode.episode)} ${episode.title || ''}`}
+      accessibilityLabel={`Play ${episodeCode(episode.season, episode.episode)} ${episode.title || ''}${episodeAirDate ? `, released ${episodeAirDate}` : ''}`}
     >
       <View style={styles.episodeThumb}>
         <FallbackImage
@@ -5008,7 +4876,7 @@ function EpisodeRow({
         </Text>
         <View style={styles.episodeMetaRow}>
           <Text style={styles.episodeMeta}>
-            {episode.localMetadata?.durationSeconds ? formatDuration(episode.localMetadata.durationSeconds) : 'Runtime unknown'}
+            {[episodeAirDate, episode.localMetadata?.durationSeconds ? formatDuration(episode.localMetadata.durationSeconds) : 'Runtime unknown'].filter(Boolean).join('  •  ')}
           </Text>
           {progress.inProgress ? <Text style={styles.resumePill}>Resume</Text> : null}
         </View>
@@ -5177,6 +5045,7 @@ function PlayerContent({
   const { colors: { accent }, styles } = useMobileTheme();
   const insets = useSafeAreaInsets();
   const { width: playerWidth } = useWindowDimensions();
+  const [showLongPreparation, setShowLongPreparation] = useState(false);
   const [aspectRatio, setAspectRatio] = useState<PlayerAspectRatio>('default');
   const [cropMode, setCropMode] = useState<PlayerCropMode>('none');
   const [rotation, setRotation] = useState<PlayerRotation>(0);
@@ -5212,6 +5081,14 @@ function PlayerContent({
     accessibilityElementsHidden: playerMenuOpen,
     importantForAccessibility: playerMenuOpen ? 'no-hide-descendants' as const : 'auto' as const,
   };
+  useEffect(() => {
+    if (!isPreparing) {
+      setShowLongPreparation(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setShowLongPreparation(true), 2_000);
+    return () => clearTimeout(timer);
+  }, [isPreparing, target.streamPath]);
   useMobileModalLayer({
     priority: 50,
     onBack: () => {
@@ -5379,8 +5256,9 @@ function PlayerContent({
     showControls();
     try {
       player.playbackRate = rate;
-    } catch {
+    } catch (error) {
       // Rate changes can be rejected while the stream is loading.
+      reportNonFatal('player.playback-rate', error);
     }
     setPlaybackRate(rate);
   };
@@ -5429,7 +5307,8 @@ function PlayerContent({
   const selectSubtitleFontSize = (fontSize: number) => {
     showControls();
     setSubtitleFontSize(fontSize);
-    void SecureStore.setItemAsync(MOBILE_SUBTITLE_FONT_SIZE_KEY, String(fontSize)).catch(() => {});
+    void SecureStore.setItemAsync(MOBILE_SUBTITLE_FONT_SIZE_KEY, String(fontSize))
+      .catch((error) => reportNonFatal('secure-store.subtitle-font-size', error));
 
     const subtitleOption = subtitleOptions.find((option) => option.key === activeSubtitleKey);
     if (!subtitleOption?.localTrack && !subtitleOption?.sidecar) return;
@@ -5451,22 +5330,25 @@ function PlayerContent({
     if (audioOption?.nativeTrack && localAudioTracks.length === 0 && !hasServerSubtitle) {
       try {
         player.audioTrack = audioOption.nativeTrack;
-      } catch {
+      } catch (error) {
         // Track selection can be rejected while the stream is loading.
+        reportNonFatal('player.audio-track-apply', error);
       }
     }
 
     if (subtitleOption?.nativeTrack && localSubtitleTracks.length === 0 && !target.subtitles?.length) {
       try {
         player.subtitleTrack = subtitleOption.nativeTrack;
-      } catch {
+      } catch (error) {
         // Track selection can be rejected while the stream is loading.
+        reportNonFatal('player.subtitle-track-apply', error);
       }
     } else if (subtitleKey === 'off') {
       try {
         player.subtitleTrack = null;
-      } catch {
+      } catch (error) {
         // Track selection can be rejected while the stream is loading.
+        reportNonFatal('player.subtitle-track-clear', error);
       }
     }
   }, [audioOptions, localAudioTracks.length, localSubtitleTracks.length, player, subtitleOptions, target.subtitles?.length]);
@@ -5524,7 +5406,8 @@ function PlayerContent({
     const nextPreferences = { ...trackPreferences, ...nextPreference };
     setTrackPreferences(nextPreferences);
     if (!baseUrl || !deviceToken || !preferenceScope) return;
-    mobileLanClient.saveTrackPreferences(baseUrl, deviceToken, preferenceScope, nextPreferences, selectionRevision).catch(() => {});
+    mobileLanClient.saveTrackPreferences(baseUrl, deviceToken, preferenceScope, nextPreferences, selectionRevision)
+      .catch((error) => reportNonFatal('player.track-preferences-save', error));
   };
 
   const selectAudioOption = (option: PlayerAudioOption) => {
@@ -5536,8 +5419,9 @@ function PlayerContent({
     if (option.nativeTrack && localAudioTracks.length === 0 && !hasServerSubtitle) {
       try {
         player.audioTrack = option.nativeTrack;
-      } catch {
+      } catch (error) {
         // Track selection can be rejected while the stream is loading.
+        reportNonFatal('player.audio-track-select', error);
       }
       return;
     }
@@ -5553,8 +5437,9 @@ function PlayerContent({
     if (option?.nativeTrack && localSubtitleTracks.length === 0 && !target.subtitles?.length) {
       try {
         player.subtitleTrack = option.nativeTrack;
-      } catch {
+      } catch (error) {
         // Track selection can be rejected while the stream is loading.
+        reportNonFatal('player.subtitle-track-select', error);
       }
       return;
     }
@@ -5562,8 +5447,9 @@ function PlayerContent({
     if (!option) {
       try {
         player.subtitleTrack = null;
-      } catch {
+      } catch (error) {
         // Track selection can be rejected while the stream is loading.
+        reportNonFatal('player.subtitle-track-disable', error);
       }
     }
     requestSelectionStream(activeAudioKey || audioOptions[0]?.key || '', nextSubtitleKey);
@@ -5910,7 +5796,9 @@ function PlayerContent({
           <View style={styles.playerStatus}>
             {isPreparing ? <ActivityIndicator color={accent} size="large" /> : null}
             <Text selectable style={styles.playerStatusText}>
-              {failure?.message || (isPreparing ? 'Preparing stream…' : 'Starting playback…')}
+              {failure?.message || (isPreparing
+                ? (showLongPreparation ? 'Preparing stream…' : 'Connecting to desktop…')
+                : 'Starting playback…')}
             </Text>
             <Text selectable numberOfLines={2} style={styles.playerStatusTitle}>{target.title}</Text>
             {failure ? (
@@ -6254,6 +6142,17 @@ function SettingsDetail({
 }) {
   const { styles } = useMobileTheme();
   const { width, fontScale } = useWindowDimensions();
+  const [diagnostics, setDiagnostics] = useState<MobileDiagnosticEvent[]>([]);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const refreshDiagnostics = useCallback(() => {
+    void listMobileDiagnostics()
+      .then(setDiagnostics)
+      .catch((error) => reportNonFatal('diagnostics.list', error));
+  }, []);
+
+  useEffect(() => {
+    if (section.id === 'about') refreshDiagnostics();
+  }, [refreshDiagnostics, section.id]);
   const availableSettingsWidth = Math.min(
     settingsContentMaxWidth,
     Math.max(0, width - (isTablet ? 220 : 0) - settingsPageHorizontalPadding),
@@ -6332,6 +6231,52 @@ function SettingsDetail({
             DiceBear Glyphs remixes “Abstract Avatars for All Creative Profile Use” by Matt Houser, licensed under CC BY 4.0.
           </Text>
           <Text selectable style={styles.settingsValue}>dicebear.com/styles/glyphs</Text>
+        </View>
+        <View style={styles.settingsCard}>
+          <Text selectable style={styles.settingsCardTitle}>Diagnostics</Text>
+          <Text selectable style={styles.settingsCardCopy}>
+            LoomTV keeps up to 100 sanitized diagnostic events for seven days. Credentials and private paths are removed.
+          </Text>
+          <Text selectable style={styles.settingsValue}>
+            {diagnostics.length === 1 ? '1 recent event' : `${diagnostics.length} recent events`}
+          </Text>
+          {diagnostics.slice(0, 5).map((event) => (
+            <Text key={event.id} selectable numberOfLines={2} style={styles.settingsValue}>
+              {event.scope} · {event.name}: {event.message}
+            </Text>
+          ))}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Export diagnostics"
+              disabled={diagnosticsBusy || diagnostics.length === 0}
+              style={[{ minHeight: 44, minWidth: 96, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 16 }, { borderColor: 'rgba(255,255,255,0.2)' }, (diagnosticsBusy || diagnostics.length === 0) && styles.disabledButton]}
+              onPress={() => {
+                setDiagnosticsBusy(true);
+                void exportMobileDiagnostics()
+                  .then((message) => Share.share({ title: 'LoomTV diagnostics', message }))
+                  .catch((error) => reportNonFatal('diagnostics.export', error))
+                  .finally(() => setDiagnosticsBusy(false));
+              }}
+            >
+              <Text style={styles.settingsValue}>Export</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear diagnostics"
+              disabled={diagnosticsBusy || diagnostics.length === 0}
+              style={[{ minHeight: 44, minWidth: 96, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderRadius: 10, paddingHorizontal: 16 }, { borderColor: 'rgba(255,255,255,0.2)' }, (diagnosticsBusy || diagnostics.length === 0) && styles.disabledButton]}
+              onPress={() => {
+                setDiagnosticsBusy(true);
+                void clearMobileDiagnostics()
+                  .then(() => setDiagnostics([]))
+                  .catch((error) => reportNonFatal('diagnostics.clear', error))
+                  .finally(() => setDiagnosticsBusy(false));
+              }}
+            >
+              <Text style={styles.settingsValue}>Clear</Text>
+            </Pressable>
+          </View>
         </View>
         <View style={styles.settingsCard}>
           <Text selectable style={styles.settingsCardTitle}>Open-source notices</Text>

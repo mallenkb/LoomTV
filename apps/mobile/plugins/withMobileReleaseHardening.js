@@ -1,9 +1,18 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { withAndroidManifest, withAppBuildGradle, withDangerousMod } = require('@expo/config-plugins');
+const {
+  withAndroidManifest,
+  withAppBuildGradle,
+  withDangerousMod,
+  withPodfile,
+  withXcodeProject,
+} = require('@expo/config-plugins');
 
 const FORBIDDEN_PERMISSIONS = new Set([
   'android.permission.READ_EXTERNAL_STORAGE',
+  'android.permission.USE_BIOMETRIC',
+  'android.permission.USE_FINGERPRINT',
+  'android.permission.VIBRATE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
   'android.permission.SYSTEM_ALERT_WINDOW',
   'android.permission.WRITE_SETTINGS',
@@ -42,6 +51,14 @@ function withMobileReleaseHardening(config) {
   config = withAndroidManifest(config, (androidConfig) => {
     const manifest = androidConfig.modResults.manifest;
     manifest['uses-permission'] = (manifest['uses-permission'] || []).filter((entry) => !FORBIDDEN_PERMISSIONS.has(entry?.$?.['android:name']));
+    for (const permission of FORBIDDEN_PERMISSIONS) {
+      manifest['uses-permission'].push({
+        $: {
+          'android:name': permission,
+          'tools:node': 'remove',
+        },
+      });
+    }
     const application = manifest.application?.[0];
     if (!application?.$) throw new Error('Android application manifest entry is missing.');
     application.$['android:allowBackup'] = 'false';
@@ -73,6 +90,60 @@ function withMobileReleaseHardening(config) {
     }
     gradleConfig.modResults.contents = contents.slice(0, releaseStart) + hardenedReleaseBlock + contents.slice(releaseEnd);
     return gradleConfig;
+  });
+
+  config = withPodfile(config, (podfileConfig) => {
+    const marker = '# LoomTV minimum iOS deployment target';
+    if (podfileConfig.modResults.contents.includes(marker)) return podfileConfig;
+    const postInstallPattern = /(post_install do \|installer\|\r?\n)/;
+    if (!postInstallPattern.test(podfileConfig.modResults.contents)) {
+      throw new Error('iOS Podfile post_install hook is missing.');
+    }
+    const deploymentTargetGuard = `${marker}
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |build_config|
+      deployment_target = build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f
+      if deployment_target.positive? && deployment_target < 15.1
+        build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
+      end
+    end
+    target.shell_script_build_phases.each do |phase|
+      next unless phase.name == '[CP-User] Generate app.config for prebuilt Constants.manifest'
+      phase.shell_script = 'bash -l -c "\\"$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh\\""'
+    end
+  end
+`;
+    podfileConfig.modResults.contents = podfileConfig.modResults.contents.replace(
+      postInstallPattern,
+      `$1  ${deploymentTargetGuard}`,
+    );
+    return podfileConfig;
+  });
+
+  config = withXcodeProject(config, (xcodeConfig) => {
+    const phases = xcodeConfig.modResults.hash.project.objects.PBXShellScriptBuildPhase;
+    const nodePrint = '"$NODE_BINARY" --print "require(\'path\').dirname(require.resolve(\'react-native/package.json\')) + \'/scripts/react-native-xcode.sh\'"';
+    const unquotedInvocation = `\`${nodePrint}\``;
+    const quotedInvocation = `"$(${nodePrint})"`;
+
+    Object.values(phases).forEach((phase) => {
+      if (!phase || typeof phase !== 'object') return;
+      const phaseName = String(phase.name || '').replace(/^"|"$/g, '');
+      if (phaseName !== 'Bundle React Native code and images') return;
+
+      const shellScript = String(phase.shellScript || '');
+      const escapedUnquotedInvocation = unquotedInvocation.replaceAll('"', '\\"');
+      const escapedQuotedInvocation = quotedInvocation.replaceAll('"', '\\"');
+      if (shellScript.includes(unquotedInvocation)) {
+        phase.shellScript = shellScript.replace(unquotedInvocation, quotedInvocation);
+      } else if (shellScript.includes(escapedUnquotedInvocation)) {
+        phase.shellScript = shellScript.replace(escapedUnquotedInvocation, escapedQuotedInvocation);
+      } else {
+        throw new Error('React Native bundle phase no longer contains the expected script invocation.');
+      }
+    });
+
+    return xcodeConfig;
   });
 
   config = withDangerousMod(config, ['android', async (dangerousConfig) => {

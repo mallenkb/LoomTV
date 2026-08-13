@@ -8,6 +8,7 @@ export type AppDarkTheme = 'black';
 export type AppLoaderStyle = 'play-mark' | 'logo-mark' | 'horizontal-logo';
 export type AppHomeStyle = 'default' | 'modern';
 export type AppModernHeroMode = 'continue-watching' | 'featured';
+export type AppCastCardStyle = 'standard' | 'compact';
 
 export type AppThemeSettings = {
   mode: AppThemeMode;
@@ -16,6 +17,7 @@ export type AppThemeSettings = {
   loaderStyle: AppLoaderStyle;
   homeStyle: AppHomeStyle;
   modernHeroMode: AppModernHeroMode;
+  castCardStyle: AppCastCardStyle;
 };
 
 export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
@@ -25,6 +27,7 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   loaderStyle: 'play-mark',
   homeStyle: 'default',
   modernHeroMode: 'continue-watching',
+  castCardStyle: 'compact',
 };
 
 export const THEME_CACHE_KEY = 'loomtv:theme-settings';
@@ -35,6 +38,7 @@ const cachedThemeSchema = z.object({
   loaderStyle: z.enum(['play-mark', 'logo-mark', 'horizontal-logo']).optional(),
   homeStyle: z.enum(['default', 'modern']).optional(),
   modernHeroMode: z.enum(['continue-watching', 'featured']).optional(),
+  castCardStyle: z.enum(['standard', 'compact']).optional(),
 });
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
@@ -124,6 +128,10 @@ export function normalizeModernHeroMode(value?: string): AppModernHeroMode {
   return value === 'featured' ? 'featured' : 'continue-watching';
 }
 
+export function normalizeCastCardStyle(value?: string): AppCastCardStyle {
+  return value === 'standard' ? 'standard' : 'compact';
+}
+
 export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {}): AppThemeSettings {
   const homeStyle = normalizeHomeStyle(settings.homeStyle);
   return {
@@ -135,6 +143,7 @@ export function normalizeThemeSettings(settings: Partial<AppThemeSettings> = {})
     loaderStyle: normalizeLoaderStyle(settings.loaderStyle),
     homeStyle,
     modernHeroMode: normalizeModernHeroMode(settings.modernHeroMode),
+    castCardStyle: normalizeCastCardStyle(settings.castCardStyle),
   };
 }
 

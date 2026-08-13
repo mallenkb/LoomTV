@@ -304,7 +304,8 @@ export function createAnalysisCoordinator(deps: {
         primary.season,
         [...new Set(group.map((job) => job.fileRevision))],
         () => analysisEnabled() && !paused && !manualPreemptionRequested
-          && !group.some((job) => cancelledJobs.has(job.jobKey)) && !activity.isActive(),
+          && !group.some((job) => cancelledJobs.has(job.jobKey)) && !activity.isActive()
+          && (primary.kind === 'manual' || runtime.idleSeconds() >= 300),
         (progress) => {
           currentPhaseProgress = progress;
           deps.repository.updateSegmentAnalysisJob(primary.jobKey, 'running', progress.detail);
@@ -316,6 +317,9 @@ export function createAnalysisCoordinator(deps: {
       if (paused) throw new Error('Analysis was paused.');
       if (manualPreemptionRequested) throw new Error('Analysis was interrupted for a manual scan.');
       if (activity.isActive()) throw new Error('Playback became active; analysis was queued again.');
+      if (primary.kind !== 'manual' && runtime.idleSeconds() < 300) {
+        throw new Error('The desktop became active; analysis was queued again.');
+      }
       for (const job of group) {
         if (settledJobKeys.has(job.jobKey)) continue;
         const outcome = outcomes.get(job.fileRevision);
@@ -336,6 +340,7 @@ export function createAnalysisCoordinator(deps: {
       const disabledDuringRun = !analysisEnabled();
       const interrupted = message.toLowerCase().includes('interrupted');
       const pausedForPlayback = activity.isActive() || (interrupted && !preemptedForManual);
+      const pausedForForeground = primary.kind !== 'manual' && runtime.idleSeconds() < 300;
       for (const job of group) {
         if (settledJobKeys.has(job.jobKey)) continue;
         if (cancelledJobs.has(job.jobKey)) deps.repository.updateSegmentAnalysisJob(job.jobKey, 'cancelled', 'Cancelled by user');
@@ -343,12 +348,13 @@ export function createAnalysisCoordinator(deps: {
         else if (disabledDuringRun) deps.repository.updateSegmentAnalysisJob(job.jobKey, 'pending', 'Automatic analysis disabled');
         else if (pausedByUser) deps.repository.updateSegmentAnalysisJob(job.jobKey, 'pending', 'Paused by user');
         else if (pausedForPlayback) deps.repository.updateSegmentAnalysisJob(job.jobKey, 'pending', 'Paused for playback');
+        else if (pausedForForeground) deps.repository.updateSegmentAnalysisJob(job.jobKey, 'pending', 'Paused while LoomTV is in use');
         else deps.repository.updateSegmentAnalysisJob(job.jobKey, 'error', message);
       }
-      if (pausedByUser || pausedForPlayback || preemptedForManual || disabledDuringRun) {
+      if (pausedByUser || pausedForPlayback || pausedForForeground || preemptedForManual || disabledDuringRun) {
         console.info('[skip-segments] job group paused', {
           mediaId: primary.mediaId, season: primary.season, jobs: group.length,
-          reason: preemptedForManual ? 'manual-preemption' : disabledDuringRun ? 'disabled' : pausedByUser ? 'user' : 'playback',
+          reason: preemptedForManual ? 'manual-preemption' : disabledDuringRun ? 'disabled' : pausedByUser ? 'user' : pausedForForeground ? 'foreground' : 'playback',
           durationMs: Date.now() - startedAt,
         });
       } else console.warn(`[skip-segments] ${message}`);
@@ -544,9 +550,6 @@ export function createAnalysisCoordinator(deps: {
     runtime.onBattery(() => { onAcPower = false; });
     timer = setInterval(() => { void tick(); }, 60_000);
     timer.unref?.();
-    // Let Electron create/paint its native window before any eligible recovered
-    // analysis begins synchronous context setup.
-    setImmediate(() => { void drain(); });
   }
 
   return {

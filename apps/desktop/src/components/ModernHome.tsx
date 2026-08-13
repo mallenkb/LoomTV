@@ -367,7 +367,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
   const mediaDetails = heroMediaDetails(item);
   const durationLabel = item.type === 'movie' ? heroDurationLabel(mediaDetails?.durationSeconds) : '';
   const providerRatings = heroProviderRatings(item);
-  const displayedProviderRatings = showProviderRatingBadges ? providerRatings : [];
+  const displayedProviderRatings = showProviderRatingBadges ? providerRatings.slice(0, 1) : [];
   const hasRating = displayedProviderRatings.length > 0 || item.rating > 0;
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';

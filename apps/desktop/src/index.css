@@ -96,6 +96,9 @@
      --loom-frame-gutter   distance from the viewport edge to the content edge,
                            applied symmetrically to keep the canvas centred. */
   --loom-frame-max-width: 90rem;
+  /* Hero artwork may extend 10% beyond each side of the centred content
+     frame. Copy and controls remain on --loom-frame-max-width. */
+  --loom-hero-artwork-max-width: calc(var(--loom-frame-max-width) * 1.2);
   /* Classic keeps its original 1.5rem page padding; only the Modern style opts
      into the wider, viewport-responsive inset below. */
   --loom-frame-inset: 1.5rem;
@@ -1364,6 +1367,9 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-top-controls {
 }
 
 .loom-detail-hero-fade {
+  width: min(100%, var(--loom-hero-artwork-max-width));
+  max-width: var(--loom-hero-artwork-max-width);
+  margin-inline: auto;
   background: linear-gradient(180deg, transparent 0%, transparent 10%, color-mix(in srgb, var(--loom-bg) 24%, transparent) 34%, color-mix(in srgb, var(--loom-bg) 68%, transparent) 72%, var(--loom-bg) 100%);
   background-repeat: no-repeat;
   background-size: 100% 100%;
@@ -1417,6 +1423,9 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-top-controls {
 
 .loom-detail-cover-image {
   position: absolute;
+  width: min(100%, var(--loom-hero-artwork-max-width));
+  max-width: var(--loom-hero-artwork-max-width);
+  margin-inline: auto;
   overflow: hidden;
 }
 
@@ -2183,7 +2192,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   display: none;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 1024px) {
   body {
     overflow: hidden;
   }
@@ -2193,7 +2202,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     min-height: 100vh;
   }
 
-  .loom-app-shell > aside {
+  .loom-app-shell > .loom-app-underlay > aside {
     position: fixed;
     inset-inline: 0;
     bottom: 0;
@@ -2207,11 +2216,11 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     backdrop-filter: blur(18px);
   }
 
-  .loom-app-shell > aside .loom-sidebar-brand {
+  .loom-app-shell > .loom-app-underlay > aside .loom-sidebar-brand {
     display: none;
   }
 
-  .loom-app-shell > aside nav {
+  .loom-app-shell > .loom-app-underlay > aside nav {
     width: 100%;
     padding: 0.45rem 0.5rem calc(0.45rem + env(safe-area-inset-bottom));
     flex-direction: row;
@@ -2219,26 +2228,26 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     gap: 0.25rem;
   }
 
-  .loom-app-shell > aside nav > .relative {
+  .loom-app-shell > .loom-app-underlay > aside nav > .relative {
     display: grid;
     flex: 1;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 0.125rem;
   }
 
-  .loom-app-shell > aside nav > .relative > span {
+  .loom-app-shell > .loom-app-underlay > aside nav > .relative > span {
     display: none;
   }
 
-  .loom-app-shell > aside nav > .relative > a:not(.loom-mobile-nav-link) {
+  .loom-app-shell > .loom-app-underlay > aside nav > .relative > a:not(.loom-mobile-nav-link) {
     display: none;
   }
 
-  .loom-app-shell > aside nav > .relative > a.loom-mobile-nav-link {
+  .loom-app-shell > .loom-app-underlay > aside nav > .relative > a.loom-mobile-nav-link {
     display: flex;
   }
 
-  .loom-app-shell > aside nav a {
+  .loom-app-shell > .loom-app-underlay > aside nav a {
     margin: 0;
     height: 3.35rem;
     min-width: 0;
@@ -2249,17 +2258,17 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     border-radius: 0.8rem;
   }
 
-  .loom-app-shell > aside nav a[aria-current="page"] {
+  .loom-app-shell > .loom-app-underlay > aside nav a[aria-current="page"] {
     background: transparent;
     color: var(--loom-active-text);
   }
 
-  .loom-app-shell > aside nav a svg {
+  .loom-app-shell > .loom-app-underlay > aside nav a svg {
     width: 1.2rem;
     height: 1.2rem;
   }
 
-  .loom-app-shell > aside nav a span {
+  .loom-app-shell > .loom-app-underlay > aside nav a span {
     max-width: 100%;
     font-size: 0.68rem;
     line-height: 1;
@@ -2268,8 +2277,8 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
     white-space: nowrap;
   }
 
-  .loom-app-shell > aside nav > .mt-auto,
-  .loom-app-shell > aside nav > .flex:last-child {
+  .loom-app-shell > .loom-app-underlay > aside nav > .mt-auto,
+  .loom-app-shell > .loom-app-underlay > aside nav > .flex:last-child {
     display: none;
   }
 
@@ -2583,7 +2592,7 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   }
 }
 
-:root[data-theme="light"] .loom-app-shell > aside {
+:root[data-theme="light"] .loom-app-shell > .loom-app-underlay > aside {
   background: var(--loom-bg);
   border-top-color: var(--loom-border);
   box-shadow: none;

@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from 'expo';
+import { normalizeLoopbackProxyBaseUrl, rewriteSecureLanUrl } from './mobileSecureTransportUrl.ts';
 
 type SecureTransportNativeModule = {
   probeCertificate(origin: string): Promise<string>;
@@ -8,7 +9,7 @@ type SecureTransportNativeModule = {
 
 type ActiveTransport = {
   remoteOrigin: string;
-  proxyOrigin: string;
+  proxyBaseUrl: string;
   certFingerprint: string;
 };
 
@@ -61,13 +62,9 @@ export async function configureSecureLanTransport(
 
   const transport = requireTransport();
   pendingConfiguration = transport.start(remoteOrigin, fingerprint).then((proxyBaseUrl) => {
-    const proxy = new URL(proxyBaseUrl);
-    if (proxy.protocol !== 'http:' || (proxy.hostname !== 'localhost' && proxy.hostname !== '127.0.0.1')) {
-      throw new Error('The secure LAN transport returned an invalid loopback endpoint.');
-    }
     activeTransport = {
       remoteOrigin,
-      proxyOrigin: proxy.origin,
+      proxyBaseUrl: normalizeLoopbackProxyBaseUrl(proxyBaseUrl),
       certFingerprint: fingerprint,
     };
     return activeTransport;
@@ -78,14 +75,8 @@ export async function configureSecureLanTransport(
 }
 
 export function secureLanUrl(value: string): string {
-  if (!activeTransport || !/^https?:/i.test(value)) return value;
-  try {
-    const parsed = new URL(value);
-    if (parsed.origin !== activeTransport.remoteOrigin) return value;
-    return `${activeTransport.proxyOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
-  } catch {
-    return value;
-  }
+  if (!activeTransport) return value;
+  return rewriteSecureLanUrl(value, activeTransport.remoteOrigin, activeTransport.proxyBaseUrl);
 }
 
 export async function stopSecureLanTransport(): Promise<void> {

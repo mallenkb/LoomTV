@@ -11,6 +11,7 @@ const connectionSource = fs.readFileSync(new URL('../mobileConnection.ts', impor
 const appConfig = JSON.parse(fs.readFileSync(new URL('../app.json', import.meta.url), 'utf8'));
 const lanClientSource = fs.readFileSync(new URL('../mobileLanClient.ts', import.meta.url), 'utf8');
 const secureTransportSource = fs.readFileSync(new URL('../mobileSecureTransport.ts', import.meta.url), 'utf8');
+const secureTransportUrlSource = fs.readFileSync(new URL('../mobileSecureTransportUrl.ts', import.meta.url), 'utf8');
 
 function sourceSection(source, sourceName, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -47,11 +48,12 @@ test('mobile LAN traffic rejects cleartext and routes through the pinned native 
   assert.match(discovery, /\^\[0-9a-f\]\{64\}\$/i);
   assert.match(discovery, /baseUrl:\s*`https:\/\//);
   assert.match(appSource, /createMobileLanClient\(\(input, init\) => fetch\(secureLanUrl\(input\), init\)\)/);
-  assert.match(lanClientSource, /fetch\(input, \{ \.\.\.init, signal: controller\.signal \}\)/);
+  assert.match(lanClientSource, /fetchImpl\(input as string, \{ \.\.\.init, signal: controller\.signal \}\)/);
   assert.match(secureTransportSource, /parsed\.protocol\s*!==\s*'https:'/);
   assert.match(secureTransportSource, /transport\.start\(remoteOrigin, fingerprint\)/);
-  assert.match(secureTransportSource, /proxy\.protocol\s*!==\s*'http:'/);
-  assert.match(secureTransportSource, /proxy\.hostname\s*!==\s*'localhost'/);
+  assert.match(secureTransportUrlSource, /proxy\.protocol\s*!==\s*'http:'/);
+  assert.match(secureTransportUrlSource, /proxy\.hostname\s*!==\s*'localhost'/);
+  assert.match(secureTransportUrlSource, /proxy\.pathname/);
 });
 
 test('saved sessions require a pinned fingerprint before restore', () => {

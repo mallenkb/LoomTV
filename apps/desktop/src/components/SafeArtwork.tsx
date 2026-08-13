@@ -99,7 +99,7 @@ export default function SafeArtwork({
           src={placeholderSrc}
           alt=""
           aria-hidden="true"
-          loading="eager"
+          loading={priority ? 'eager' : 'lazy'}
           decoding="async"
           className={`${naturalSize ? 'relative h-auto max-h-full w-auto max-w-full' : 'absolute inset-0 h-full w-full'} ${imgClassName}`}
         />
@@ -109,7 +109,7 @@ export default function SafeArtwork({
           ref={imageRef}
           src={currentSource}
           alt={alt}
-          loading={priority ? 'eager' : 'lazy'}
+          loading="eager"
           fetchPriority={priority ? 'high' : 'auto'}
           decoding="async"
           className={`${naturalSize ? 'relative h-auto max-h-full w-auto max-w-full' : 'absolute inset-0 h-full w-full'} transition-opacity duration-150 ${imgClassName} ${sourceLoaded ? 'opacity-100' : 'opacity-0'}`}

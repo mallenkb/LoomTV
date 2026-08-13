@@ -43,8 +43,8 @@ export type MediaItem = MobileMediaIdentity & MobileMediaMetadata & {
   catalogRevision?: number;
 };
 
-const MOBILE_RECONNECT_BASE_DELAY_MS = 1_000;
-const MOBILE_RECONNECT_MAX_DELAY_MS = 30_000;
+const MOBILE_RECONNECT_BASE_DELAY_MS = 750;
+const MOBILE_RECONNECT_MAX_DELAY_MS = 10_000;
 export const MOBILE_DETAIL_ITEM_CACHE_LIMIT = 24;
 
 export type MobileLibraryIndexPayload = LanLibraryIndexPayload<LanLibraryCard>;
