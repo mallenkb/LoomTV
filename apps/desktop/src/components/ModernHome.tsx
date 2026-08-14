@@ -1,15 +1,15 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Play, Search, Star, X } from 'lucide-react';
+import { Bookmark, Clapperboard, CircleHelp, FolderPlus, Search, Star, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { libraryMutationMessage, type MediaItem, useLibrary } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
 import SafeArtwork from '@/components/SafeArtwork';
 import MediaPosterCard from '@/components/MediaPosterCard';
-import RatingBadge from '@/components/RatingBadge';
 import ProviderMark from '@/components/ProviderMark';
 import ProviderRatingLogo from '@/components/ProviderRatingLogo';
 import MediaRail from '@/components/MediaRail';
+import ContinueWatchingCard from '@/components/ContinueWatchingCard';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { backdropSources, logoSources, posterSources, routeArtworkState } from '@/lib/artwork';
@@ -27,6 +27,14 @@ import { mediaFormatLabel } from '@/shared/mediaFormat';
 import WatchedToggle from '@/components/WatchedToggle';
 import MediaTechnicalBadges from '@/components/MediaTechnicalBadges';
 import { isLocalItemWatched, localProgressPathsForItem, localWatchedKeysForItem } from '@/lib/watched';
+import {
+  HERO_ACTION_DIVIDER_CLASS,
+  HERO_ACTION_FIRST_SEGMENT_CLASS,
+  HERO_ACTION_GROUP_CLASS,
+  HERO_ACTION_LAST_SEGMENT_CLASS,
+  HERO_ACTION_MIDDLE_SEGMENT_CLASS,
+  HERO_ACTION_SEGMENT_CLASS,
+} from '@/components/heroActionStyles';
 
 export default function ModernHome() {
   const { state, addLibraryFolder } = useLibrary();
@@ -555,28 +563,28 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
                 <span>Play</span>
               </Link>
 
-              <div className="inline-flex h-14 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
+              <div className={HERO_ACTION_GROUP_CLASS}>
                 <button
                   type="button"
                   onClick={onToggleWatchlist}
                   aria-label={inWatchlist ? `Remove ${item.title} from My List` : `Add ${item.title} to My List`}
-                  className="grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+                  className={`grid h-14 w-14 place-items-center text-white ${HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
                 >
                   <Bookmark className="h-5 w-5" fill={inWatchlist ? 'currentColor' : 'none'} />
                 </button>
-                <span className="my-auto inline-block h-7 w-px bg-white/20" />
+                <span className={HERO_ACTION_DIVIDER_CLASS} />
                 <WatchedToggle
                   watched={watched}
                   onToggle={onToggleWatched}
                   surface="plain"
-                  className="loom-modern-hero-watched-toggle h-14 w-14 rounded-full bg-transparent text-white/80"
+                  className={`loom-modern-hero-watched-toggle h-14 w-14 !rounded-[4px] bg-transparent text-white ${HERO_ACTION_MIDDLE_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
                   label={watched ? 'Mark as unwatched' : 'Mark as watched'}
                 />
-                <span className="my-auto inline-block h-7 w-px bg-white/20" />
+                <span className={HERO_ACTION_DIVIDER_CLASS} />
                 <Link
                   to={mediaLink(item)}
                   state={linkState}
-                  className="grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+                  className={`grid h-14 w-14 place-items-center text-white ${HERO_ACTION_LAST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
                   aria-label={`Open details for ${item.title}`}
                 >
                   <CircleHelp className="h-5 w-5" />
@@ -714,68 +722,6 @@ function ContinueWatchingRail({
       ))}
     </MediaRail>
   );
-}
-
-function ContinueWatchingCard({
-  item,
-  from,
-  progress,
-}: {
-  item: MediaItem;
-  from: string;
-  progress: Record<string, StoredProgress>;
-}) {
-  const progressPercent = latestProgressPercent(item, progress);
-
-  return (
-    <Link
-      to={mediaLink(item)}
-      state={{ from, artwork: routeArtworkState(item, posterSources(item)) }}
-      className="loom-continue-watching-card group block w-[280px] flex-none"
-    >
-      <div className="relative aspect-video overflow-hidden rounded-2xl bg-[var(--loom-media-veil)] shadow-lg">
-        <SafeArtwork
-          src={backdropSources(item)}
-          alt={item.title}
-          className="h-full w-full"
-          imgClassName="object-cover transition-transform duration-500 group-hover:scale-105"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-[var(--loom-media-scrim-strong)] via-transparent to-transparent" />
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl">
-            <Play className="ml-0.5 h-5 w-5 fill-current" />
-          </span>
-        </div>
-        <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
-        <p className="absolute bottom-4 left-3 right-3 truncate text-sm font-semibold text-[var(--loom-on-media)]">{item.title}</p>
-        <div className="absolute inset-x-0 bottom-0 h-1 bg-[var(--loom-media-track)]">
-          <div className="h-full bg-[var(--loom-accent)]" style={{ width: `${progressPercent}%` }} />
-        </div>
-      </div>
-    </Link>
-  );
-}
-
-function latestProgressPercent(item: MediaItem, progress: Record<string, StoredProgress>): number {
-  const candidates = [
-    {
-      filePath: item.filePath,
-      durationHint: item.localMetadata?.durationSeconds || 0,
-    },
-    ...(item.episodeFiles || []).map((episode) => ({
-      filePath: episode.filePath,
-      durationHint: episode.localMetadata?.durationSeconds || 0,
-    })),
-  ].filter((candidate) => Boolean(candidate.filePath));
-  const latest = candidates
-    .map((candidate) => ({ ...candidate, stored: progress[candidate.filePath] }))
-    .filter((candidate): candidate is typeof candidate & { stored: StoredProgress } => Boolean(candidate.stored))
-    .sort((left, right) => (right.stored.updatedAt || 0) - (left.stored.updatedAt || 0))[0];
-
-  if (!latest) return 0;
-  const duration = latest.stored.duration > 0 ? latest.stored.duration : latest.durationHint;
-  if (duration <= 0) return 0;
-  return Math.min(100, Math.max(0, (latest.stored.position / duration) * 100));
 }
 
 /**

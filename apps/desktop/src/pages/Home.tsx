@@ -9,6 +9,7 @@ import LibrarySearch from '@/components/LibrarySearch';
 import { matchesMediaItem, searchQuery } from '@/lib/search';
 import { useProgressSnapshot } from '@/lib/progress';
 import MediaPosterCard from '@/components/MediaPosterCard';
+import ContinueWatchingCard from '@/components/ContinueWatchingCard';
 import { mediaMetaLine } from '@/components/MediaPosterCard.helpers';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { useTheme } from '@/components/ThemeProvider';
@@ -143,7 +144,9 @@ function DefaultHome() {
 
         {!normalizedQuery && visibleContinueWatching.length > 0 && (
           <MediaRail title="Continue Watching" className="mb-8">
-            <PosterCards items={visibleContinueWatching} from={currentRoute} isLoading={isLoading} />
+            {visibleContinueWatching.slice(0, 8).map((item) => (
+              <ContinueWatchingCard key={item.id} item={item} from={currentRoute} progress={progress} />
+            ))}
           </MediaRail>
         )}
 

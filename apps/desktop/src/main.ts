@@ -13,6 +13,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
+
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
+}
 import {
   LOCAL_ACCESS_HEADER,
   LOCAL_ACCESS_QUERY_PARAM,
@@ -21,6 +25,7 @@ import {
   describeErrorForLog,
 } from './main/serverSecurity';
 import { isTrustedIpcSender } from './main/trustedIpcSender.ts';
+import { unregisterSystemMediaKeys } from './main/systemMediaKeys.ts';
 import {
   destroyLanDiscovery,
   discoverLanPeers,
@@ -2110,6 +2115,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  unregisterSystemMediaKeys();
   isAppShuttingDown = true;
   flushPairedDeviceTouches();
   clearAllGuestProfiles();

@@ -3,6 +3,7 @@ import { parseStoredValue, stremioCatalogItemSchema } from '@/lib/desktopDecoder
 import { z } from 'zod';
 
 export const DISCOVER_RETURN_ROUTE_CACHE_KEY = 'loomtv:discover-return-route-v1';
+export const EXPLORE_ITEM_UPDATED_EVENT = 'loomtv:explore-item-updated';
 const EXPLORE_ITEM_CACHE_PREFIX = 'loomtv:explore-item-v2:';
 const DISCOVER_RETURN_ROUTE_TTL_MS = 7_200_000;
 const cachedDiscoverReturnRouteSchema = z.object({
@@ -60,6 +61,7 @@ export function cacheExploreItem(item: StremioPluginCatalogItem): void {
   } catch {
     // Route state remains authoritative when session storage is unavailable.
   }
+  window.dispatchEvent(new CustomEvent<StremioPluginCatalogItem>(EXPLORE_ITEM_UPDATED_EVENT, { detail: item }));
 }
 
 export function getCachedExploreItem(type: string, id?: string): StremioPluginCatalogItem | null {

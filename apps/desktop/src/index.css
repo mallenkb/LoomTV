@@ -165,8 +165,13 @@
   --loom-sidebar-active-bg: rgb(28 25 23 / 0.10) !important;
   --loom-focus-ring: #a8a29e;
   --loom-control-veil: rgb(23 23 23 / 0.07);
-  --loom-season-accordion-bg: rgb(23 23 23 / 0.042);
-  --loom-season-episodes-veil: rgb(0 0 0 / 0.06);
+  /* The header strip carries this tint alone; the expanded episode list stacks
+     the veil below on top of it. A dark veil compounded into a heavy grey slab,
+     so light mode lifts the body instead — the header stays the defined strip
+     and the expanded content reads as the lighter surface under it. The header
+     tint is deeper than the collapsed card needs so that step stays visible. */
+  --loom-season-accordion-bg: rgb(23 23 23 / 0.075);
+  --loom-season-episodes-veil: rgb(255 255 255 / 0.38);
   color-scheme: light;
 }
 
@@ -543,6 +548,14 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
 
 .loom-season-accordion {
   background: var(--loom-season-accordion-bg);
+}
+
+/* The default style standardises on an 8px corner, so the search field and its
+   filter trigger drop the pill they inherit from the markup. Modern keeps the
+   pill — its search furniture floats over artwork and reads as a capsule. */
+:root:not([data-home-style="modern"]) .loom-library-search-control,
+:root:not([data-home-style="modern"]) .loom-library-filter-trigger {
+  border-radius: 0.5rem;
 }
 
 .loom-shared-highlight-episodes {
@@ -926,6 +939,108 @@ img {
   }
 }
 
+/* Keep light-mode transient surfaces readable over bright artwork. */
+:root[data-theme="light"] .loom-provider-tooltip,
+:root[data-theme="light"] .loom-toast-default {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  background: rgba(24, 24, 27, 0.96) !important;
+  color: #ffffff !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28) !important;
+}
+
+:root[data-theme="light"] .loom-toast-description {
+  color: rgba(255, 255, 255, 0.68) !important;
+}
+
+:root[data-theme="light"] .loom-toast-dismiss {
+  color: rgba(255, 255, 255, 0.68) !important;
+}
+
+:root[data-theme="light"] .loom-toast-dismiss:hover {
+  background: rgba(0, 0, 0, 0.4) !important;
+  color: #ffffff !important;
+}
+
+/* Dark mode blends the hero straight into --loom-bg because blending toward
+   near-black doubles as the scrim the white hero copy needs. Light mode cannot
+   do that in one layer — a white veil laid over the artwork erases the copy
+   sitting on it. So the same seamless landing is built from two layers:
+
+   1. The page blend, on top, ramping to a fully opaque --loom-bg at the very
+      last pixel. The previous curve stopped at 72% opacity, so the artwork was
+      still visible where the page colour began and left a hard edge.
+   2. A readability scrim underneath, peaking behind the title block and easing
+      back out as the page blend takes over, so the two never stack into a grey
+      band above the seam. */
+:root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-fade {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      transparent 78%,
+      color-mix(in srgb, var(--loom-bg) 4%, transparent) 84%,
+      color-mix(in srgb, var(--loom-bg) 12%, transparent) 88%,
+      color-mix(in srgb, var(--loom-bg) 28%, transparent) 92%,
+      color-mix(in srgb, var(--loom-bg) 50%, transparent) 94.5%,
+      color-mix(in srgb, var(--loom-bg) 74%, transparent) 97%,
+      color-mix(in srgb, var(--loom-bg) 92%, transparent) 99%,
+      var(--loom-bg) 100%
+    ),
+    radial-gradient(
+      125% 95% at 6% 106%,
+      rgba(0, 0, 0, 0.80) 0%,
+      rgba(0, 0, 0, 0.62) 26%,
+      rgba(0, 0, 0, 0.38) 48%,
+      rgba(0, 0, 0, 0.16) 66%,
+      transparent 80%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      transparent 36%,
+      rgba(0, 0, 0, 0.20) 52%,
+      rgba(0, 0, 0, 0.50) 68%,
+      rgba(0, 0, 0, 0.66) 80%,
+      rgba(0, 0, 0, 0.52) 89%,
+      rgba(0, 0, 0, 0.22) 95%,
+      transparent 100%
+    );
+}
+
+/* The hero copy is forced white because it sits on the artwork scrim. The
+   metadata badges carry their own pill background and their own text colour —
+   HD is black on a white chip, the format badge is accent-on-glass — so
+   sweeping them into the white override left white text on a white pill.
+   Exclude anything marked .loom-badge and let it keep its own colours. */
+:root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info,
+:root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info :where(h1, p, span, svg):not(.loom-badge, .loom-badge *, .loom-rating, .loom-rating *) {
+  color: #ffffff !important;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
+}
+
+/* The group is a pill by default, which read as a mismatched shape sitting
+   next to the rounded-lg play button. Light mode pins it to the button's own
+   radius so the pair reads as one control set. */
+:root[data-theme="light"] .loom-detail-page .loom-detail-hero-actions {
+  position: relative;
+  z-index: 12;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 0.5rem !important;
+  background: rgba(24, 24, 27, 0.84) !important;
+  color: #ffffff !important;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24) !important;
+}
+
+:root[data-theme="light"] .loom-detail-page .loom-detail-hero-actions > button {
+  color: #ffffff !important;
+}
+
+:root[data-theme="light"] .loom-detail-page .loom-detail-hero-actions > button:hover {
+  border-radius: 8px !important;
+  background: rgba(0, 0, 0, 0.4) !important;
+}
+
 @media (max-width: 1180px) {
   .loom-detail-page-modern .loom-artwork-fix-button {
     display: none;
@@ -969,7 +1084,7 @@ img {
 
 .loom-modern-hero-watched-toggle:hover,
 .loom-modern-hero-watched-toggle:active {
-  background-color: var(--loom-active-bg) !important;
+  background-color: rgba(0, 0, 0, 0.40) !important;
 }
 
 .loom-modern-hero-artwork {
@@ -1029,7 +1144,22 @@ img {
 }
 
 :root[data-theme="light"][data-home-style="modern"] .loom-library-search-modern .loom-library-search-control {
-  border-color: var(--loom-control-border) !important;
+  border-color: rgba(23, 23, 23, 0.14) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 10px 30px rgba(23, 23, 23, 0.10);
+}
+
+:root[data-theme="light"][data-home-style="modern"] .loom-library-search-slot .loom-library-filter-trigger {
+  border-color: rgba(23, 23, 23, 0.14) !important;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #292524;
+  box-shadow: 0 10px 30px rgba(23, 23, 23, 0.10);
+}
+
+:root[data-theme="light"][data-home-style="modern"] .loom-library-search-slot .loom-library-filter-trigger:hover {
+  background: #e7e5e4;
+  color: #171717;
 }
 
 :root[data-theme="dark"][data-home-style="modern"] .loom-library-search-slot [role="menu"] {
@@ -1126,20 +1256,31 @@ img {
    the theme's text colours. The Modern detail page already does this; these
    rules bring the default layout in line. */
 :root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info,
-:root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info :where(div, p, span) {
+:root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info :where(div, p, span):not(.loom-badge, .loom-badge *, .loom-rating, .loom-rating *) {
   color: var(--loom-on-media-muted);
 }
 
 :root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info h1 {
   color: var(--loom-on-media);
   /* Backdrops vary; a soft shadow keeps the title legible over a bright frame
-     even before the scrim underneath it does its work. */
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+     even before the scrim underneath it does its work. The tight inner shadow
+     carries the glyph edges on pale artwork, where a wide soft one dissipates
+     before it can separate them from the background. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55), 0 2px 16px rgba(0, 0, 0, 0.55);
 }
 
 /* Star ratings keep their semantic gold rather than washing to white. */
 :root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info .loom-rating {
   color: var(--loom-rating);
+  /* Excluding .loom-rating from the white-copy rule also dropped the shadow
+     that rule carried, leaving gold sitting flat on the artwork. Give it its
+     own separation — text-shadow for the value, drop-shadow for the star,
+     which is an svg and ignores text-shadow. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.78), 0 2px 10px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme="light"] .loom-detail-page:not(.loom-detail-page-modern) .loom-detail-hero-info .loom-rating svg {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
 }
 
 :root[data-theme="light"] .loom-page input,
@@ -1283,6 +1424,16 @@ body.platform-darwin :where(a[href], button, input, select, textarea, label, sum
   -webkit-app-region: no-drag;
 }
 
+/* Discover's search lives inline in its own sticky header, so it has no
+   floating search bar to clear the way the library routes do — their pt-24 was
+   reserving a strip of nothing. This lands the header in the same band as
+   those routes' search bar, which sits at top-4. It can overlap the draggable
+   title strip for the same reason that bar can: the header is z-40 and the
+   strip is z-35, so the header stays on top and stays clickable. */
+.loom-discover-page-frame {
+  padding-top: 2rem;
+}
+
 .loom-main-drag-region {
   display: none;
 }
@@ -1380,6 +1531,19 @@ body.platform-darwin .loom-player-is-fullscreen .loom-player-top-controls {
    scrim. Modern details raise this wrapper further below for their own layers. */
 .loom-detail-hero-content-wrap {
   z-index: 2;
+}
+
+/* Markup order is play button then secondary actions, because the play button
+   is the primary action and should come first for keyboard and screen reader
+   users. Visually the secondary group leads and the play button anchors the
+   row's end, so reorder here rather than in the markup. */
+.loom-detail-hero-controls > .loom-detail-hero-actions,
+.loom-detail-hero-controls > .loom-detail-hero-actions-menu {
+  order: 1;
+}
+
+.loom-detail-hero-controls > .loom-detail-hero-play {
+  order: 2;
 }
 
 /* Light theme cannot reuse the dark fade. There, --loom-bg is near-black, so
@@ -1566,14 +1730,9 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 }
 
 :root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-fade {
-  background: linear-gradient(
-    180deg,
-    transparent 0%,
-    transparent 78%,
-    color-mix(in srgb, var(--loom-bg) 12%, transparent) 84%,
-    color-mix(in srgb, var(--loom-bg) 58%, transparent) 94%,
-    var(--loom-bg) 100%
-  );
+  background:
+    linear-gradient(180deg, transparent 0%, transparent 88%, color-mix(in srgb, var(--loom-bg) 24%, transparent) 93%, var(--loom-bg) 100%),
+    linear-gradient(180deg, transparent 0%, transparent 48%, rgba(0, 0, 0, 0.12) 62%, rgba(0, 0, 0, 0.54) 84%, rgba(0, 0, 0, 0.44) 94%, transparent 100%);
 }
 
 :root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-content {
@@ -1582,6 +1741,34 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 
 :root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-info :where(h1, p, span, svg) {
   color: #ffffff !important;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-info .loom-rating,
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-info .loom-rating svg {
+  color: var(--loom-rating) !important;
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions,
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions-menu > button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(24, 24, 27, 0.82) !important;
+  color: #ffffff !important;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions :where(button, svg),
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions-menu > button :where(svg) {
+  color: #ffffff !important;
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions > span {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions button:hover,
+:root[data-theme="light"] .loom-detail-page-modern .loom-detail-hero-actions-menu > button:hover {
+  background: rgba(0, 0, 0, 0.40) !important;
 }
 
 :root[data-theme="light"] .loom-detail-page-modern .loom-detail-back,
@@ -1725,6 +1912,14 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 
 .loom-detail-page-modern .loom-detail-hero-controls {
   order: 2;
+  position: relative;
+  z-index: 12;
+  isolation: isolate;
+}
+
+.loom-detail-page-modern .loom-detail-hero-controls > .loom-detail-hero-actions,
+.loom-detail-page-modern .loom-detail-hero-controls > .loom-detail-hero-actions-menu {
+  order: 1;
 }
 
 .loom-detail-page-modern .loom-detail-hero-play,
@@ -1736,7 +1931,6 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
 .loom-detail-page-modern .loom-detail-bookmark {
   width: 3.5rem;
   min-width: 3.5rem;
-  border-radius: 9999px;
 }
 
 .loom-detail-page-modern .loom-detail-hero-play {
@@ -1746,6 +1940,31 @@ body:is(.platform-darwin, .platform-win32, .platform-linux) .loom-detail-page-mo
   min-width: 9rem;
   background: var(--loom-accent);
   color: var(--loom-accent-foreground);
+}
+
+:root[data-theme="light"] .loom-season-play-button-complete,
+:root[data-theme="light"] .loom-season-play-button-complete:disabled {
+  border-color: #047857 !important;
+  background: #047857 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+/* The chip is a dark disc on artwork of any brightness, so its glyph is white
+   in both themes. The svg is named explicitly because the icon paints with
+   currentColor and must not pick up a theme text colour from an ancestor. */
+:root[data-theme="light"] .loom-poster-watched-toggle,
+:root[data-theme="light"] .loom-poster-watched-toggle svg {
+  color: #ffffff !important;
+}
+
+:root[data-theme="light"] .loom-poster-watched-toggle {
+  background: rgba(24, 24, 27, 0.82) !important;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme="light"] .loom-poster-watched-toggle:hover {
+  background: rgba(0, 0, 0, 0.92) !important;
 }
 
 .loom-detail-page-modern .loom-detail-hero-play:hover {

@@ -19,7 +19,7 @@ export default function ContentRatingBadge({ rating, className = '' }: { rating?
   const label = rating?.trim();
   if (!label) return null;
   return (
-    <span className={`inline-flex w-fit items-center rounded-md border border-[var(--loom-muted)]/80 bg-[var(--loom-surface-3)] px-1 py-0 text-[11px] font-medium leading-4 text-[var(--loom-text)] backdrop-blur-[12px] ${className}`}>
+    <span className={`loom-badge inline-flex w-fit items-center rounded-md border border-[var(--loom-muted)]/80 bg-[var(--loom-surface-3)] px-1 py-0 text-[11px] font-medium leading-4 text-[var(--loom-text)] backdrop-blur-[12px] ${className}`}>
       {label}
     </span>
   );

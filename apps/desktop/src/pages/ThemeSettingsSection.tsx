@@ -43,8 +43,8 @@ export default function ThemeSettingsSection({
             <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Style</p>
             <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Home layout style">
               {([
-                { id: 'default', label: 'Default', description: 'The familiar LoomTV library layout.' },
                 { id: 'modern', label: 'Modern', description: 'A cinematic hero, category pill, and floating controls.' },
+                { id: 'default', label: 'Classic', description: 'The familiar LoomTV library layout.' },
               ] as const satisfies readonly { id: AppHomeStyle; label: string; description: string }[]).map((option) => {
                 const isSelected = theme.homeStyle === option.id;
                 return (
@@ -66,6 +66,38 @@ export default function ThemeSettingsSection({
               })}
             </div>
           </div>
+
+          {canChooseAppearance && (
+            <div>
+              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Appearance</p>
+              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Appearance mode">
+                {([
+                  { mode: 'dark' as const, label: 'Dark', Icon: Moon },
+                  { mode: 'light' as const, label: 'Light', Icon: Sun },
+                ]).map(({ mode, label, Icon }) => {
+                  const isSelected = theme.mode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => void setTheme({ mode })}
+                      aria-pressed={isSelected}
+                      className={`theme-appearance-option flex h-14 items-center gap-3 rounded-lg border px-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
+                        isSelected
+                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
+                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
+                      }`}
+                    >
+                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${isSelected ? 'bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
+                        <Icon className="h-5 w-5" />
+                      </span>
+                      <span className={`text-sm font-semibold ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-text)]'}`}>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {theme.homeStyle === 'modern' && (
             <div>
@@ -172,37 +204,6 @@ export default function ThemeSettingsSection({
             </div>
           </div>
 
-          {canChooseAppearance && (
-            <div>
-              <p className="mb-3 text-sm font-semibold text-[var(--loom-text)]">Appearance</p>
-              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="Appearance mode">
-                {([
-                  { mode: 'dark' as const, label: 'Dark', Icon: Moon },
-                  { mode: 'light' as const, label: 'Light', Icon: Sun },
-                ]).map(({ mode, label, Icon }) => {
-                  const isSelected = theme.mode === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => void setTheme({ mode })}
-                      aria-pressed={isSelected}
-                      className={`theme-appearance-option flex h-14 items-center gap-3 rounded-lg border px-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-ring)] ${
-                        isSelected
-                          ? 'border-[var(--loom-active-border)] bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'
-                          : 'border-[var(--loom-border)] bg-[var(--loom-bg)] hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)]'
-                      }`}
-                    >
-                      <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${isSelected ? 'bg-[var(--loom-active-bg-strong)] text-[var(--loom-active-text)]' : 'bg-[var(--loom-surface-3)] text-[var(--loom-muted)]'}`}>
-                        <Icon className="h-5 w-5" />
-                      </span>
-                      <span className={`text-sm font-semibold ${isSelected ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-text)]'}`}>{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
 
           <div className="space-y-7">
             <div>

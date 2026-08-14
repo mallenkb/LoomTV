@@ -2,6 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Eye, MoreHorizontal, Play } from 'lucide-react';
 import WatchedToggle from '@/components/WatchedToggle';
 import { useToast } from '@/components/ToastProvider';
+import {
+  HERO_ACTION_DIVIDER_CLASS,
+  HERO_ACTION_FIRST_SEGMENT_CLASS,
+  HERO_ACTION_GROUP_CLASS,
+  HERO_ACTION_MIDDLE_SEGMENT_CLASS,
+  HERO_ACTION_SEGMENT_CLASS,
+} from '@/components/heroActionStyles';
 
 type DetailHeroActionsProps = {
   canBookmark: boolean;
@@ -56,19 +63,19 @@ export default function DetailHeroActions({
 
   return (
     <>
-      <div className="loom-detail-hero-actions inline-flex h-14 shrink-0 overflow-hidden rounded-full bg-white/10 backdrop-blur-[12px]">
+      <div className={`loom-detail-hero-actions ${HERO_ACTION_GROUP_CLASS}`}>
         {onPlayTrailer && (
           <>
             <button
               type="button"
               aria-label="Play trailer"
               onClick={onPlayTrailer}
-              className="flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+              className={`flex h-14 items-center gap-2 px-5 text-sm font-semibold text-white ${HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
             >
               <Play className="h-5 w-5 fill-current" />
               <span>Trailer</span>
             </button>
-            <span className="my-auto inline-block h-7 w-px bg-white/20" />
+            <span className={HERO_ACTION_DIVIDER_CLASS} />
           </>
         )}
         {canBookmark && (
@@ -78,19 +85,19 @@ export default function DetailHeroActions({
               aria-label={inMyList ? 'Remove from My List' : 'Add to My List'}
               aria-pressed={inMyList}
               onClick={onToggleList}
-              className="loom-detail-bookmark grid h-14 w-14 place-items-center rounded-full text-white transition-colors hover:bg-[var(--loom-active-bg)]"
+              className={`loom-detail-bookmark grid h-14 w-14 place-items-center text-white ${onPlayTrailer ? HERO_ACTION_MIDDLE_SEGMENT_CLASS : HERO_ACTION_FIRST_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
               title={inMyList ? 'Remove from My List' : 'Add to My List'}
             >
               <Bookmark className="h-5 w-5" fill={inMyList ? 'currentColor' : 'none'} />
             </button>
-            <span className="my-auto inline-block h-7 w-px bg-white/20" />
+            <span className={HERO_ACTION_DIVIDER_CLASS} />
           </>
         )}
         <WatchedToggle
           watched={watched}
           onToggle={onToggleWatched}
           surface="plain"
-          className="h-14 w-14 rounded-full bg-transparent text-white/80"
+          className={`loom-modern-hero-watched-toggle h-14 w-14 bg-transparent text-white ${HERO_ACTION_MIDDLE_SEGMENT_CLASS} ${HERO_ACTION_SEGMENT_CLASS}`}
           label={watched ? 'Mark as unwatched' : 'Mark as watched'}
         />
       </div>
@@ -102,7 +109,7 @@ export default function DetailHeroActions({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
-          className="grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white shadow-[0_16px_38px_rgba(0,0,0,0.28)] backdrop-blur-[12px] transition-colors hover:bg-[var(--loom-active-bg)]"
+          className="grid h-14 w-14 place-items-center rounded-full bg-white/10 text-white shadow-[0_16px_38px_rgba(0,0,0,0.28)] backdrop-blur-[12px] transition-colors hover:bg-black/40"
         >
           <MoreHorizontal className="h-6 w-6" />
         </button>

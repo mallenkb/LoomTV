@@ -60,6 +60,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
+- [LoomTV 1.0.128](docs/releases/v1.0.128.md): improves desktop playback controls, artwork badges, hero actions, plugin discovery, and theme customization.
 - [LoomTV 1.0.127](docs/releases/v1.0.127.md): improves desktop LAN discovery, playback progress, artwork and ratings, theme controls, and companion mobile reliability.
 - [LoomTV 1.0.126](docs/releases/v1.0.126.md): restores trusted CI validation for the mobile release gate and refreshes the verified desktop packages.
 - [LoomTV 1.0.125](docs/releases/v1.0.125.md): fixes browser-host detection and artwork API routing, improves custom-folder navigation state, and refines desktop artwork presentation.

@@ -10,7 +10,7 @@ import { desktopApi, isBrowserLocalApp } from '@/lib/desktopApi';
 import SafeArtwork from '@/components/SafeArtwork';
 import { backdropSources, logoSources, posterSources, RouteArtworkState, uniqueArtworkSources } from '@/lib/artwork';
 import { getProgressState, resetProgress, useProgressRefreshRevision } from '@/lib/progress';
-import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
+import { EXPLORE_ITEM_UPDATED_EVENT, getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import { loadCustomArtwork } from '@/lib/customArtwork';
 import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkEditorControls';
 import { useTheme } from '@/components/ThemeProvider';
@@ -169,7 +169,17 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
     || routeState?.from?.startsWith('/discover'),
   );
   const routeCatalogItem = useMemo(
-    () => routeState?.stremioCatalogItem || (isRemoteDetailRoute ? getCachedExploreItem('movie', mediaId) : null),
+    () => {
+      const routeItem = routeState?.stremioCatalogItem;
+      const cachedItem = isRemoteDetailRoute ? getCachedExploreItem('movie', mediaId) : null;
+      if (!routeItem) return cachedItem;
+      if (!cachedItem) return routeItem;
+      return {
+        ...routeItem,
+        ...cachedItem,
+        artwork: { ...routeItem.artwork, ...cachedItem.artwork },
+      };
+    },
     [isRemoteDetailRoute, mediaId, routeState?.stremioCatalogItem],
   );
   const routeFallbackMovie = useMemo(
@@ -178,6 +188,20 @@ export default function MovieDetail({ onPlay }: MovieDetailProps) {
   );
   const routeAddonId = routeState?.addonId;
   const [isRemoteStremioMovie, setIsRemoteStremioMovie] = useState(Boolean(routeState?.stremioCatalogItem));
+
+  useEffect(() => {
+    if (!isRemoteDetailRoute) return;
+
+    const handleExploreItemUpdated = (event: Event) => {
+      const nextItem = (event as CustomEvent<StremioPluginCatalogItem>).detail;
+      if (!nextItem || nextItem.type !== 'movie' || nextItem.id !== mediaId) return;
+      const nextMovie = mediaFromStremioCatalogItem(nextItem);
+      if (nextMovie) setMovie(nextMovie);
+    };
+
+    window.addEventListener(EXPLORE_ITEM_UPDATED_EVENT, handleExploreItemUpdated);
+    return () => window.removeEventListener(EXPLORE_ITEM_UPDATED_EVENT, handleExploreItemUpdated);
+  }, [isRemoteDetailRoute, mediaId]);
 
   useEffect(() => {
     let cancelled = false;

@@ -155,7 +155,12 @@ const MediaPosterCard = memo(function MediaPosterCard({
           <>
             <div className={BACKDROP_CLASS} />
             <div className={PLAY_OVERLAY_CLASS}>
-              <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+              {/* Matches the Discover card's hover mark. It stays a span rather
+                  than a button because the whole card is already a link, and a
+                  nested button would be invalid inside it. */}
+              <span className="loom-poster-play-action grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl transition-transform duration-200 group-hover:scale-110">
+                <Play className="ml-0.5 h-5 w-5 fill-current" />
+              </span>
             </div>
           </>
         ) : null}
@@ -167,7 +172,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
         {variant !== 'others' && (metaLine || contentRating || item.format) && (
           <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
             {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
-            <ContentRatingBadge rating={formatLabel} className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]" />
+            <ContentRatingBadge rating={formatLabel} className="shrink-0 bg-[var(--loom-surface-3)]" />
             <ContentRatingBadge rating={contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
           </div>
         )}
@@ -190,7 +195,7 @@ const MediaPosterCard = memo(function MediaPosterCard({
         <WatchedToggle
           watched={watched}
           onToggle={toggleWatched}
-          className="absolute left-2 top-2 z-20"
+          className="loom-poster-watched-toggle absolute left-2 top-2 z-20"
           iconClassName="h-4 w-4"
           size="compact"
         />

@@ -36,7 +36,7 @@ export default function MediaTechnicalBadges({ item }: { item: TechnicalMediaIte
   return (
     <>
       {metadata.resolution && (
-        <span className="rounded bg-white/90 px-1.5 py-px text-[0.6875rem] font-bold leading-4 text-black shadow-none [text-shadow:none]">
+        <span className="loom-badge rounded bg-white/90 px-1.5 py-px text-[0.6875rem] font-bold leading-4 text-black shadow-none [text-shadow:none]">
           {metadata.resolution}
         </span>
       )}
@@ -47,7 +47,7 @@ export default function MediaTechnicalBadges({ item }: { item: TechnicalMediaIte
         </span>
       )}
       {metadata.hasSubtitles && (
-        <span className="inline-flex items-center gap-1 rounded-md border border-[var(--loom-muted)]/80 bg-[var(--loom-surface-3)] px-1.5 py-px text-[0.6875rem] font-medium leading-4 text-[var(--loom-text)] shadow-none backdrop-blur-[12px] [text-shadow:none]">
+        <span className="loom-badge inline-flex items-center gap-1 rounded-md border border-[var(--loom-muted)]/80 bg-[var(--loom-surface-3)] px-1.5 py-px text-[0.6875rem] font-medium leading-4 text-[var(--loom-text)] shadow-none backdrop-blur-[12px] [text-shadow:none]">
           <Captions className="h-3 w-3" />
           CC
         </span>

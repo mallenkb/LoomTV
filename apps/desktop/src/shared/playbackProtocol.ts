@@ -63,6 +63,10 @@ export type PlaybackStartOptions = {
   volume?: number;
   muted?: boolean;
   speed?: number;
+  /** Preferred embedded audio track resolved from the saved per-profile preference. */
+  audioTrackId?: number;
+  /** Semantic fallback used when a native engine's runtime IDs differ from probe stream indexes. */
+  audioLanguage?: string;
   audioDelay?: number;
   subtitleDelay?: number;
   subtitleStyle?: {

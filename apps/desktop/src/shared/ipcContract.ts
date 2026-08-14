@@ -185,6 +185,7 @@ export interface IpcContract {
 export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
+  'playback:system-media-key': { args: [action: 'play-pause' | 'previous-track' | 'next-track'] };
   'library:scan-progress': { args: [progress: import('./desktopProtocol.ts').LibraryScanProgress] };
   'profile:active-changed': { args: [state: ActiveProfileState] };
   'profiles:changed': { args: [event: import('./desktopProtocol.ts').ProfilesChangedEvent] };

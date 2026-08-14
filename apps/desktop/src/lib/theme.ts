@@ -25,7 +25,7 @@ export const DEFAULT_THEME_SETTINGS: AppThemeSettings = {
   color: 'yellow',
   darkTheme: 'black',
   loaderStyle: 'play-mark',
-  homeStyle: 'default',
+  homeStyle: 'modern',
   modernHeroMode: 'continue-watching',
   castCardStyle: 'compact',
 };
@@ -42,11 +42,14 @@ const cachedThemeSchema = z.object({
 });
 
 export const THEME_COLORS: Record<AppThemeColor, { label: string; hex: string; hover: string; foreground: string; foregroundMuted: string }> = {
-  yellow: { label: 'Sunbeam', hex: '#FC9C03', hover: '#FCB303', foreground: '#0a0a0a', foregroundMuted: '#404040' },
-  red: { label: 'Ember', hex: '#E20C17', hover: '#F31520', foreground: '#ffffff', foregroundMuted: '#ffffff' },
-  blue: { label: 'Cobalt', hex: '#0367FC', hover: '#1D78FC', foreground: '#ffffff', foregroundMuted: '#ffffff' },
-  orange: { label: 'Tide', hex: '#05D3EB', hover: '#27E0F5', foreground: '#001719', foregroundMuted: '#123C40' },
-  twitch: { label: 'Aurora', hex: '#9449FC', hover: '#AC73FC', foreground: '#ffffff', foregroundMuted: '#ffffff' },
+  // `hover` is a darker shade of `hex` (roughly 14% down each channel), so
+  // accent buttons deepen under the cursor instead of lightening. The paired
+  // `foreground` still clears contrast against the darker shade.
+  yellow: { label: 'Sunbeam', hex: '#FC9C03', hover: '#D98603', foreground: '#0a0a0a', foregroundMuted: '#404040' },
+  red: { label: 'Ember', hex: '#E20C17', hover: '#C20A14', foreground: '#ffffff', foregroundMuted: '#ffffff' },
+  blue: { label: 'Cobalt', hex: '#0367FC', hover: '#0359D9', foreground: '#ffffff', foregroundMuted: '#ffffff' },
+  orange: { label: 'Tide', hex: '#05D3EB', hover: '#04B5CA', foreground: '#001719', foregroundMuted: '#123C40' },
+  twitch: { label: 'Aurora', hex: '#9449FC', hover: '#7F3FD9', foreground: '#ffffff', foregroundMuted: '#ffffff' },
 };
 
 export const DARK_THEMES: Record<AppDarkTheme, {
@@ -120,8 +123,13 @@ export function normalizeLoaderStyle(value?: string): AppLoaderStyle {
     : DEFAULT_THEME_SETTINGS.loaderStyle;
 }
 
+/* Both styles are matched explicitly so an existing Classic choice survives.
+   Folding unknown values straight to 'default' would have pinned every profile
+   that has never set a style to Classic, which is no longer the default. */
 export function normalizeHomeStyle(value?: string): AppHomeStyle {
-  return value === 'modern' ? 'modern' : 'default';
+  if (value === 'modern') return 'modern';
+  if (value === 'default') return 'default';
+  return DEFAULT_THEME_SETTINGS.homeStyle;
 }
 
 export function normalizeModernHeroMode(value?: string): AppModernHeroMode {

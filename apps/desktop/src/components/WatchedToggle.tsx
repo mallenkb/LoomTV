@@ -42,7 +42,7 @@ export default function WatchedToggle({
         });
       }}
       onKeyDown={(event) => event.stopPropagation()}
-      className={`grid ${sizeClassName} shrink-0 place-items-center rounded-full text-white/75 transition-colors ${surfaceClassName} ${defaultHoverClassName} hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${className}`}
+      className={`grid ${sizeClassName} shrink-0 place-items-center rounded-full text-white transition-colors ${surfaceClassName} ${defaultHoverClassName} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${className}`}
     >
       {watched ? (
         <svg aria-hidden="true" className={iconClassName} viewBox="0 0 24 24" fill="currentColor">

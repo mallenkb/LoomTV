@@ -135,7 +135,7 @@ export default function ProviderMark({ mediaId, providers, originPlatform, class
       {tooltipOpen && (
         <span
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--loom-surface-3)] px-2.5 py-1 text-xs font-medium text-[var(--loom-text)] shadow-lg ring-1 ring-white/10"
+          className="loom-provider-tooltip pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md bg-[var(--loom-surface-3)] px-2.5 py-1 text-xs font-medium text-[var(--loom-text)] shadow-lg ring-1 ring-white/10"
         >
           {providerLabel}
         </span>

@@ -7,6 +7,7 @@ import { useProfiles } from '@/contexts/ProfileContext';
 import LibrarySearch from '@/components/LibrarySearch';
 import StremioPosterCard from '@/components/StremioPosterCard';
 import VirtualPosterGrid from '@/components/VirtualPosterGrid';
+import TrailerDialog from '@/components/TrailerDialog';
 import { desktopApi, type StremioPluginCatalogItem } from '@/lib/desktopApi';
 import { cacheDiscoverReturnRoute, cacheExploreItem } from '@/lib/discoverNavigation';
 import type { StreamingProvider } from '@/shared/desktopProtocol';
@@ -25,6 +26,7 @@ import {
   tmdbListResponseSchema,
   tmdbProviderListResponseSchema,
   tmdbReleaseDatesResponseSchema,
+  tmdbVideosResponseSchema,
   tmdbWatchProviderDetailSchema,
   type TmdbCreditsPerson,
   type TmdbCreditsResponse,
@@ -448,8 +450,7 @@ function tmdbStreamingProviders(
     }));
 }
 
-function tmdbTrailerUrl(response: TmdbDetailResponse): string {
-  const videos = response.videos?.results || [];
+function tmdbTrailerUrlFromVideos(videos: readonly TmdbVideo[]): string {
   const trailer = [...videos]
     .filter((video) => video.key && video.site?.toLowerCase() === 'youtube')
     .sort((left, right) => {
@@ -457,6 +458,31 @@ function tmdbTrailerUrl(response: TmdbDetailResponse): string {
       return score(right) - score(left);
     })[0];
   return trailer?.key ? `https://www.youtube.com/watch?v=${encodeURIComponent(trailer.key)}` : '';
+}
+
+function tmdbTrailerUrl(response: TmdbDetailResponse): string {
+  return tmdbTrailerUrlFromVideos(response.videos?.results || []);
+}
+
+async function fetchTmdbTrailerFallback(
+  type: 'movie' | 'tv',
+  id: number,
+  credential: string,
+): Promise<string> {
+  const languages = ['en-US', 'pt-BR', 'es-ES', 'fr-FR', 'ja-JP', 'ko-KR'];
+  const responses = await Promise.allSettled(languages.map((language) => requestTmdbJson(
+    `${type}/${id}/videos`,
+    credential,
+    tmdbVideosResponseSchema,
+    {
+      language,
+      include_video_language: 'en,null,pt,es,fr,ja,ko,zh',
+    },
+  )));
+  const videos = responses.flatMap((response) => (
+    response.status === 'fulfilled' ? response.value.results || [] : []
+  ));
+  return tmdbTrailerUrlFromVideos(videos);
 }
 
 function mapAnilistToCatalog(media: AniListMediaResult): StremioPluginCatalogItem {
@@ -858,6 +884,9 @@ async function enrichCatalogItemWithTmdbCredits(
   const response = await requestTmdbJson(`${type}/${item.id}`, credential, tmdbDetailResponseSchema, {
     append_to_response: 'credits,videos,release_dates,content_ratings,watch/providers,external_ids',
   });
+  const trailerUrl = item.trailerUrl
+    || tmdbTrailerUrl(response)
+    || await fetchTmdbTrailerFallback(type, response.id, credential);
   return mapTmdbCredits(response.credits, {
     ...item,
     imdbId: response.imdb_id || response.external_ids?.imdb_id || item.imdbId,
@@ -872,7 +901,7 @@ async function enrichCatalogItemWithTmdbCredits(
     genres: response.genres?.map((genre) => genre.name).filter(Boolean) || item.genres,
     contentRating: tmdbContentRating(response, type) || item.contentRating,
     streamingProviders: tmdbStreamingProviders(response),
-    trailerUrl: tmdbTrailerUrl(response) || item.trailerUrl,
+    trailerUrl,
     runtime: type === 'movie' && response.runtime && response.runtime > 0
       ? `${response.runtime}m`
       : item.runtime,
@@ -906,14 +935,18 @@ async function enrichAnimeCatalogItemWithTmdbProviders(
   if (!match?.id) return { ...item, streamingProviders: item.streamingProviders || [] };
 
   const details = await requestTmdbJson(`${tmdbType}/${match.id}`, credential, tmdbDetailResponseSchema, {
-    append_to_response: 'watch/providers,release_dates,content_ratings,external_ids',
+    append_to_response: 'videos,watch/providers,release_dates,content_ratings,external_ids',
   });
   const streamingProviders = tmdbStreamingProviders(details);
   const contentRating = tmdbContentRating(details, tmdbType);
+  const trailerUrl = item.trailerUrl
+    || tmdbTrailerUrl(details)
+    || await fetchTmdbTrailerFallback(tmdbType, match.id, credential);
   return {
     ...item,
     imdbId: details.imdb_id || details.external_ids?.imdb_id || item.imdbId,
     streamingProviders,
+    ...(trailerUrl ? { trailerUrl } : {}),
     ...(contentRating ? { contentRating } : {}),
     ...(tmdbType === 'movie' && details.runtime && details.runtime > 0
       ? { runtime: `${details.runtime}m` }
@@ -1308,6 +1341,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     : []);
   const [loading, setLoading] = useState(() => !initialCachedItems);
   const [error, setError] = useState<string | null>(null);
+  const [trailerItem, setTrailerItem] = useState<StremioPluginCatalogItem | null>(null);
   const catalogRequestRevision = useRef(0);
   const searchTimer = useRef<number | null>(null);
   const queryRef = useRef('');
@@ -1337,7 +1371,12 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const yearOptions = useMemo(() => releaseYearOptions(), []);
   const isModern = theme.homeStyle === 'modern';
   const frameClass = isModern ? 'loom-modern-content-frame' : 'loom-frame';
-  const topPaddingClass = isModern ? 'pt-6' : 'pt-24';
+  /* The library routes float a search bar above their frame and use pt-24 to
+     clear it. Discover carries its search inline in a sticky header instead,
+     so it only has to clear the draggable title strip — see
+     .loom-discover-page-frame, which is platform-aware because that strip only
+     exists on macOS. */
+  const topPaddingClass = isModern ? 'pt-6' : 'loom-discover-page-frame';
   const currentSearch = location.search.startsWith('?') ? location.search.slice(1) : location.search;
   const viewStateStorageKey = isHome ? 'loomtv:home-discover-view-state-v1' : DISCOVER_VIEW_STATE_STORAGE_KEY;
 
@@ -1810,7 +1849,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     if (existing) return existing;
 
     let metadataPending = Promise.resolve(item);
-    if (tmdbCredential && item.type === 'anime' && item.streamingProviders === undefined) {
+    if (tmdbCredential && item.type === 'anime' && (item.streamingProviders === undefined || !item.trailerUrl)) {
       metadataPending = enrichAnimeCatalogItemWithTmdbProviders(item, tmdbCredential).catch(() => item);
     } else if (tmdbCredential && (item.type === 'movie' || item.type === 'tv')) {
       metadataPending = enrichCatalogItemWithTmdbCredits(item, item.type, tmdbCredential).catch(() => item);
@@ -1826,27 +1865,43 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     return resolved;
   }, [omdbCredential, tmdbCredential]);
 
+  const openItemTrailer = useCallback(async (item: StremioPluginCatalogItem) => {
+    const enrichedItem = item.trailerUrl ? item : await enrichWithCast(item);
+    cacheExploreItem(enrichedItem);
+    if (enrichedItem.trailerUrl) {
+      setTrailerItem(enrichedItem);
+      return;
+    }
+    const year = parseYearFromItem(enrichedItem);
+    const query = `${enrichedItem.title}${year ? ` ${year}` : ''} official trailer`;
+    await desktopApi.openExternal(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`);
+  }, [enrichWithCast]);
+
   const openItemDetails = useCallback((item: StremioPluginCatalogItem) => {
-    void (async () => {
-      const nextItem = await enrichWithCast(item);
-      const discoverSourceRoute = location.search
-        ? `${routePath}${location.search}`
-        : routePath;
-      cacheDiscoverReturnRoute(discoverSourceRoute);
-      cacheExploreItem(nextItem);
-      const detailPath = nextItem.type === 'movie'
-        ? `/movie/${nextItem.id}`
-        : nextItem.type === 'anime'
-          ? `/anime/${nextItem.id}`
-          : `/tv/${nextItem.id}`;
-      navigate(detailPath, {
-        state: {
-          from: discoverSourceRoute,
-          fromDiscover: true,
-          stremioCatalogItem: nextItem,
-        },
-      });
-    })();
+    const discoverSourceRoute = location.search
+      ? `${routePath}${location.search}`
+      : routePath;
+    cacheDiscoverReturnRoute(discoverSourceRoute);
+    cacheExploreItem(item);
+    const detailPath = item.type === 'movie'
+      ? `/movie/${item.id}`
+      : item.type === 'anime'
+        ? `/anime/${item.id}`
+        : `/tv/${item.id}`;
+
+    // Navigate with the catalog payload immediately. Provider enrichment is
+    // an enhancement and must never block opening the detail screen.
+    navigate(detailPath, {
+      state: {
+        from: discoverSourceRoute,
+        fromDiscover: true,
+        stremioCatalogItem: item,
+      },
+    });
+
+    void enrichWithCast(item)
+      .then((nextItem) => cacheExploreItem(nextItem))
+      .catch(() => undefined);
   }, [enrichWithCast, location.search, navigate, routePath]);
 
   const chipClass = (isActive: boolean) => `h-8 shrink-0 rounded-full px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${
@@ -2015,6 +2070,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
               <StremioPosterCard
                 item={entry.item}
                 metaLine={stremioMetaLine(entry.item)}
+                onPlayTrailer={() => { void openItemTrailer(entry.item); }}
                 onSelect={(selected) => {
                   void openItemDetails(selected);
                 }}
@@ -2023,6 +2079,12 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
           />
         )}
       </div>
+      <TrailerDialog
+        open={Boolean(trailerItem)}
+        title={trailerItem?.title || 'Trailer'}
+        trailerUrl={trailerItem?.trailerUrl}
+        onClose={() => setTrailerItem(null)}
+      />
     </div>
   );
 }

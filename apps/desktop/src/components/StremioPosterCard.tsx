@@ -42,10 +42,12 @@ const StremioPosterCard = memo(function StremioPosterCard({
   item,
   metaLine = '',
   onSelect,
+  onPlayTrailer,
 }: {
   item: StremioPluginCatalogItem;
   metaLine?: string;
   onSelect: (item: StremioPluginCatalogItem) => void;
+  onPlayTrailer?: () => void;
 }) {
   const { watchedKeys, setWatched } = useProfiles();
   const watchedKey = discoverWatchedKey(item);
@@ -75,7 +77,22 @@ const StremioPosterCard = memo(function StremioPosterCard({
         <RatingBadge rating={item.rating} providerRatings={item.providerRatings} />
         <div className={BACKDROP_CLASS} />
         <div className={PLAY_OVERLAY_CLASS}>
-          <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+          {onPlayTrailer ? (
+            <button
+              type="button"
+              aria-label={`Play ${item.title}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect(item);
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="loom-poster-play-action grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl transition-transform duration-200 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+            >
+              <Play className="ml-0.5 h-5 w-5 fill-current" />
+            </button>
+          ) : (
+            <Play className="h-8 w-8 fill-current text-[var(--loom-accent)] drop-shadow-[0_2px_8px_rgba(0,0,0,0.6)] transition-transform duration-200 group-hover:scale-110" />
+          )}
         </div>
       </div>
       <div className="mt-2 shrink-0 overflow-hidden">
@@ -85,7 +102,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
             {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
             <ContentRatingBadge
               rating={mediaFormatLabel(item.format, item.type)}
-              className="shrink-0 border-[var(--loom-accent)]/70 bg-[var(--loom-surface-3)] text-[var(--loom-accent)]"
+              className="shrink-0 bg-[var(--loom-surface-3)]"
             />
             <ContentRatingBadge rating={item.contentRating} className="shrink-0 bg-[var(--loom-surface-3)]" />
           </div>
@@ -97,7 +114,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
           cacheWatchedDiscoverItem(item);
           void setWatched(watchedKey, !watched);
         }}
-        className="absolute left-2 top-2 z-20"
+        className="loom-poster-watched-toggle absolute left-2 top-2 z-20"
         iconClassName="h-4 w-4"
         size="compact"
       />

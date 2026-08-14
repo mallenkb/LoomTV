@@ -16,7 +16,7 @@ import ArtworkEditorControls, { CustomArtworkState } from '@/components/ArtworkE
 import { cleanEpisodeTitleForDisplay, episodeCode } from '@/lib/episodeTitles';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
-import { getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
+import { EXPLORE_ITEM_UPDATED_EVENT, getCachedDiscoverReturnRoute, getCachedExploreItem } from '@/lib/discoverNavigation';
 import type { StremioPluginCatalogItem } from '@/shared/desktopProtocol';
 import TrailerDialog from '@/components/TrailerDialog';
 import HeroMetadata from '@/components/HeroMetadata';
@@ -418,9 +418,19 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
     || routeState?.from?.startsWith('/discover'),
   );
   const routeCatalogItem = useMemo(
-    () => routeState?.stremioCatalogItem || (isRemoteDetailRoute
-      ? getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId)
-      : null),
+    () => {
+      const routeItem = routeState?.stremioCatalogItem;
+      const cachedItem = isRemoteDetailRoute
+        ? getCachedExploreItem(kind === 'anime' ? 'anime' : 'tv', mediaId)
+        : null;
+      if (!routeItem) return cachedItem;
+      if (!cachedItem) return routeItem;
+      return {
+        ...routeItem,
+        ...cachedItem,
+        artwork: { ...routeItem.artwork, ...cachedItem.artwork },
+      };
+    },
     [isRemoteDetailRoute, kind, mediaId, routeState?.stremioCatalogItem],
   );
   const routeFallbackShow = useMemo(
@@ -438,6 +448,21 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const shouldOpenDetailsFirst = Boolean(routeState?.fromDiscover || routeState?.from?.startsWith('/discover') || isRemoteStremioShow);
   const [activeDetailTab, setActiveDetailTab] = useState<DetailTab>(shouldOpenDetailsFirst ? 'details' : 'episodes');
   const metadataFetchKeyRef = useRef('');
+
+  useEffect(() => {
+    if (!isRemoteDetailRoute) return;
+
+    const handleExploreItemUpdated = (event: Event) => {
+      const nextItem = (event as CustomEvent<StremioPluginCatalogItem>).detail;
+      const expectedType = kind === 'anime' ? 'anime' : 'tv';
+      if (!nextItem || nextItem.type !== expectedType || nextItem.id !== mediaId) return;
+      const nextShow = showFromStremioCatalogItem(kind, nextItem);
+      if (nextShow) setShow(nextShow);
+    };
+
+    window.addEventListener(EXPLORE_ITEM_UPDATED_EVENT, handleExploreItemUpdated);
+    return () => window.removeEventListener(EXPLORE_ITEM_UPDATED_EVENT, handleExploreItemUpdated);
+  }, [isRemoteDetailRoute, kind, mediaId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1071,7 +1096,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
                           disabled={seasonIsCompleted}
                           onClick={seasonIsCompleted ? undefined : () => handlePlaySeason(season.number)}
                           aria-label={seasonIsCompleted ? `${seasonTitle} completed` : `${seasonIsResume ? 'Resume' : 'Play'} ${seasonTitle}`}
-                          className={`absolute right-4 top-1/2 z-20 h-7 -translate-y-1/2 overflow-hidden rounded-lg px-3 text-xs gap-1 whitespace-nowrap ${seasonIsCompleted
+                          className={`loom-season-play-button ${seasonIsCompleted ? 'loom-season-play-button-complete' : ''} absolute right-4 top-1/2 z-20 h-7 -translate-y-1/2 overflow-hidden rounded-full px-3 text-xs gap-1 whitespace-nowrap ${seasonIsCompleted
                             ? 'border border-emerald-400/45 bg-emerald-700 text-white shadow-[0_0_12px_rgba(16,185,129,0.16)] disabled:cursor-default disabled:opacity-100'
                             : 'bg-[var(--loom-accent)] text-[var(--loom-accent-foreground)] hover:bg-[var(--loom-accent-hover)]'
                           }`}

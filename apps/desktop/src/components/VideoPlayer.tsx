@@ -33,6 +33,7 @@ import {
   END_COMPLETION_TOLERANCE_SECONDS,
   HLS_RECOVERY_ATTEMPTS,
   HLS_TRANSCODE_RESTART_ATTEMPTS,
+  MAX_AUDIO_REAPPLY_ATTEMPTS,
   NEXT_EPISODE_PROMPT_REMAINING_SECONDS,
   REPLAY_FROM_START_REMAINING_SECONDS,
   SUBTITLE_DELAY_FINE_STEP_SECONDS,
@@ -196,6 +197,7 @@ export default function VideoPlayer({
 }: VideoPlayerProps) {
   const { activeProfile } = useProfiles();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const systemMediaAudioRef = useRef<HTMLAudioElement>(null);
   const { state: libraryState } = useLibrary();
   const playbackActivityKeyRef = useRef(`desktop-player:${crypto.randomUUID()}`);
   const { theme } = useTheme();
@@ -248,6 +250,14 @@ export default function VideoPlayer({
   const probeTracksRef = useRef<MediaTrack[]>([]);
   const selectedVideoTrackIndexRef = useRef<number | undefined>(undefined);
   const selectedAudioTrackIndexRef = useRef<number | undefined>(undefined);
+  /* selectedAudioTrackIndexRef records what we *asked* for, and the engine's
+     track-list snapshots overwrite it with whatever is actually playing. These
+     two keep the request itself, so a snapshot that disagrees can be corrected
+     instead of silently accepted. Attempts are bounded: if the engine will not
+     honour the request, the UI adopts the truth rather than showing a track
+     that is not playing. */
+  const desiredAudioTrackIndexRef = useRef<number | undefined>(undefined);
+  const audioReapplyAttemptsRef = useRef(0);
   const selectedSubtitleTrackIndexRef = useRef<number>(-1);
   const subtitleSelectionExplicitRef = useRef(false);
   const subtitlesDefaultEnabledRef = useRef(loadSubtitlesDefaultEnabled());
@@ -876,6 +886,11 @@ export default function VideoPlayer({
     probeTracksRef.current = nextTracks;
     selectedVideoTrackIndexRef.current = firstVideo >= 0 ? firstVideo : undefined;
     selectedAudioTrackIndexRef.current = firstAudio >= 0 ? firstAudio : undefined;
+    // The probe resolves the saved language preference before playback starts.
+    // Record it as the request so a native engine that opens on a different
+    // track gets corrected rather than accepted.
+    desiredAudioTrackIndexRef.current = firstAudio;
+    audioReapplyAttemptsRef.current = 0;
     selectedSubtitleTrackIndexRef.current = firstSubtitle;
     subtitlesDefaultEnabledRef.current = subtitlesEnabled;
 
@@ -1227,9 +1242,10 @@ export default function VideoPlayer({
         const preferences = sharedTrackPreferencesRef.current;
         const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id
           ?? firstTrackIndex(nextTracks, 'video');
-        const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
-        const selectedAudio = preferredAudio ?? state.tracks.find((track) => track.type === 'audio' && track.selected)?.id
+        const engineSelectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id
           ?? firstTrackIndex(nextTracks, 'audio');
+        const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
+        const requestedAudio = preferredAudio ?? engineSelectedAudio;
         const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
         const selectedSubtitle = preferredSubtitle
           ?? (subtitlesDefaultEnabledRef.current
@@ -1238,13 +1254,34 @@ export default function VideoPlayer({
             : -1);
 
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
-        selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
+        // Keep the engine-confirmed selection separate from the saved request.
+        // The first snapshot commonly arrives with the file's default audio
+        // selected, even when a different saved language should be restored.
+        // Showing the request as selected here made the panel say Japanese while
+        // English was still playing and also hid the mismatch from retry logic.
+        selectedAudioTrackIndexRef.current = engineSelectedAudio >= 0 ? engineSelectedAudio : undefined;
+        desiredAudioTrackIndexRef.current = requestedAudio;
+        audioReapplyAttemptsRef.current = requestedAudio !== engineSelectedAudio ? 1 : 0;
         selectedSubtitleTrackIndexRef.current = selectedSubtitle;
         setSelectedVideoTrackIndex(selectedVideo);
-        setSelectedAudioTrackIndex(selectedAudio);
+        setSelectedAudioTrackIndex(engineSelectedAudio);
         setSelectedSubtitleTrackIndex(selectedSubtitle);
         void playbackEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
-        void playbackEngineRef.current?.selectAudio(selectedAudio >= 0 ? selectedAudio : null);
+        const initialAudioEngine = playbackEngineRef.current;
+        void initialAudioEngine?.selectAudio(requestedAudio >= 0 ? requestedAudio : null);
+        if (initialAudioEngine && requestedAudio >= 0 && requestedAudio !== engineSelectedAudio) {
+          window.setTimeout(() => {
+            if (
+              !playerActiveRef.current
+              || playbackEngineRef.current !== initialAudioEngine
+              || desiredAudioTrackIndexRef.current !== requestedAudio
+              || selectedAudioTrackIndexRef.current === requestedAudio
+              || audioReapplyAttemptsRef.current >= MAX_AUDIO_REAPPLY_ATTEMPTS
+            ) return;
+            audioReapplyAttemptsRef.current += 1;
+            void initialAudioEngine.selectAudio(requestedAudio);
+          }, 350);
+        }
         // LibVLC SPU IDs are not the same namespace as Loom's probe IDs. Its
         // native path is therefore allowed to keep only the deterministic
         // bitmap/default track selected at media-open time; parseable text is
@@ -1256,9 +1293,29 @@ export default function VideoPlayer({
         const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id ?? -1;
         const selectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id ?? -1;
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
-        selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
         setSelectedVideoTrackIndex(selectedVideo);
-        setSelectedAudioTrackIndex(selectedAudio);
+
+        /* The engine re-evaluates its own audio track on reload, so a snapshot
+           can report a different track than the one that was asked for. Adopting
+           it blindly is what let the panel and the speakers disagree. Ask again
+           instead, and only accept the engine's answer once it stops changing
+           or the retries run out — an unhonoured request must not leave the
+           panel pointing at a track that is not playing. */
+        const desiredAudio = desiredAudioTrackIndexRef.current;
+        const audioDrifted = typeof desiredAudio === 'number'
+          && desiredAudio >= 0
+          && selectedAudio >= 0
+          && selectedAudio !== desiredAudio
+          && probeTracksRef.current.some((track) => track.type === 'audio' && track.index === desiredAudio);
+
+        if (audioDrifted && audioReapplyAttemptsRef.current < MAX_AUDIO_REAPPLY_ATTEMPTS) {
+          audioReapplyAttemptsRef.current += 1;
+          void playbackEngineRef.current?.selectAudio(desiredAudio);
+        } else {
+          if (audioDrifted) desiredAudioTrackIndexRef.current = selectedAudio;
+          selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
+          setSelectedAudioTrackIndex(selectedAudio);
+        }
         // Loom owns parseable-text subtitle selection while LibVLC's native
         // SPU IDs live in a different namespace. Do not let recurring LibVLC
         // state snapshots overwrite the renderer-overlay selection with the
@@ -1378,6 +1435,7 @@ export default function VideoPlayer({
     document.documentElement.classList.remove('loom-native-active');
     setSelectedSecondarySubtitleTrackIndex(-1);
     nativeInitialTracksAppliedRef.current = false;
+    audioReapplyAttemptsRef.current = 0;
     setPlayerState('loading');
     setStatusMessage('Retrying playback...');
     setErrorMessage(null);
@@ -1439,6 +1497,7 @@ export default function VideoPlayer({
     setNativePlaybackActive(false);
     setNativeEngineKind(null);
     nativeInitialTracksAppliedRef.current = false;
+    audioReapplyAttemptsRef.current = 0;
     document.documentElement.classList.remove('loom-native-active');
     updatePlaybackSnapshot(
       requestedStartPosition,
@@ -1531,6 +1590,9 @@ export default function VideoPlayer({
           selectedSubtitleTrack
           && isBitmapSubtitleCodec(selectedSubtitleTrack.codec),
         );
+        const selectedAudioTrack = probeTracksRef.current.find((track) =>
+          track.type === 'audio' && track.index === selectedAudioTrackIndexRef.current,
+        );
         for (const NativePlaybackEngine of nativeEngineFactories) {
           const engine = new NativePlaybackEngine(handleNativePlaybackState);
           playbackEngineRef.current = engine;
@@ -1542,6 +1604,8 @@ export default function VideoPlayer({
           try {
             loaded = await engine.load(filePath, {
               startSeconds: requestedStartPosition,
+              audioTrackId: selectedAudioTrack?.index,
+              audioLanguage: selectedAudioTrack?.language,
               audioDelay: audioDelayRef.current,
               subtitleDelay: initialSubtitleStyle.delaySeconds,
               subtitleStyle: {
@@ -2657,8 +2721,13 @@ export default function VideoPlayer({
     restartForTrackChange();
   }, [restartForTrackChange]);
 
+  /* No early return when the requested track is already the selected one. That
+     guard compared the request against itself, so once the engine drifted off
+     the requested track there was no way to ask for it again — picking it did
+     nothing, and only selecting a different track and coming back worked. */
   const selectAudioTrack = useCallback((trackIndex: number) => {
-    if (selectedAudioTrackIndexRef.current === trackIndex) return;
+    desiredAudioTrackIndexRef.current = trackIndex;
+    audioReapplyAttemptsRef.current = 0;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'audio');
     const preference = saveTrackPreference(trackPreferenceScopeKey, 'audio', selectedTrack, trackIndex >= 0);
     const nextPreferences = { ...sharedTrackPreferencesRef.current, audio: preference };
@@ -2845,6 +2914,33 @@ export default function VideoPlayer({
 
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
+  const lastSystemMediaActionRef = useRef<{
+    action: 'play-pause' | 'previous-track' | 'next-track';
+    at: number;
+  } | null>(null);
+  const runSystemMediaAction = useCallback((
+    action: 'play-pause' | 'previous-track' | 'next-track',
+  ) => {
+    const now = performance.now();
+    const previous = lastSystemMediaActionRef.current;
+    if (previous?.action === action && now - previous.at < 250) return;
+    lastSystemMediaActionRef.current = { action, at: now };
+
+    if (action === 'play-pause') {
+      void togglePlay();
+    } else if (action === 'previous-track') {
+      handlePrevEpisode();
+    } else {
+      handleNextEpisode();
+    }
+  }, [handleNextEpisode, handlePrevEpisode, togglePlay]);
+
+  useEffect(
+    () =>
+      desktopApi.onSystemMediaKey(runSystemMediaAction),
+    [runSystemMediaAction],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableShortcutTarget(e.target)) return;
@@ -2863,7 +2959,8 @@ export default function VideoPlayer({
       }
       const hasCommandModifier = e.metaKey || e.ctrlKey || e.altKey;
 
-      switch (e.key) {
+      const key = e.code === 'Space' ? ' ' : e.key;
+      switch (key) {
         case 'Escape':
           cancelPendingSurfaceClick();
           e.preventDefault();
@@ -2872,20 +2969,54 @@ export default function VideoPlayer({
           break;
         case ' ':
         case 'Spacebar':
+        case 'k':
+        case 'K':
+        case 'MediaPlayPause':
+        case 'F8':
           if (hasCommandModifier) break;
           cancelPendingSurfaceClick();
           e.preventDefault();
-          togglePlay();
+          runSystemMediaAction('play-pause');
           break;
         case 'ArrowLeft':
+        case 'j':
+        case 'J':
+        case 'MediaRewind':
           cancelPendingSurfaceClick();
           e.preventDefault();
           seekTo(playbackPositionRef.current - (e.shiftKey ? 60 : skipBackSeconds));
           break;
         case 'ArrowRight':
+        case 'l':
+        case 'L':
+        case 'MediaFastForward':
           cancelPendingSurfaceClick();
           e.preventDefault();
           seekTo(playbackPositionRef.current + (e.shiftKey ? 60 : skipForwardSeconds));
+          break;
+        case 'MediaPlay':
+          cancelPendingSurfaceClick();
+          e.preventDefault();
+          if (paused) togglePlay();
+          break;
+        case 'MediaPause':
+          cancelPendingSurfaceClick();
+          e.preventDefault();
+          if (!paused) togglePlay();
+          break;
+        case 'MediaTrackPrevious':
+        case 'MediaPreviousTrack':
+        case 'F7':
+          cancelPendingSurfaceClick();
+          e.preventDefault();
+          runSystemMediaAction('previous-track');
+          break;
+        case 'MediaTrackNext':
+        case 'MediaNextTrack':
+        case 'F9':
+          cancelPendingSurfaceClick();
+          e.preventDefault();
+          runSystemMediaAction('next-track');
           break;
         case 'ArrowUp':
           cancelPendingSurfaceClick();
@@ -2970,8 +3101,10 @@ export default function VideoPlayer({
           break;
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // Capture playback keys before an open panel or focused control consumes
+    // them. Editable fields remain excluded above so typing is unaffected.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [
     cancelPendingSurfaceClick,
     changePlaybackRate,
@@ -2980,9 +3113,13 @@ export default function VideoPlayer({
     fullscreen,
     handleBack,
     handleClose,
+    handleNextEpisode,
+    handlePrevEpisode,
+    paused,
     resetPlaybackRate,
     adjustSubtitleDelay,
     resetSubtitleDelay,
+    runSystemMediaAction,
     skipBackSeconds,
     skipForwardSeconds,
     seekTo,
@@ -2990,6 +3127,126 @@ export default function VideoPlayer({
     toggleFullscreen,
     togglePlay,
   ]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return undefined;
+    const mediaSession = navigator.mediaSession;
+    const register = <TAction extends MediaSessionAction>(
+      action: TAction,
+      handler: MediaSessionActionHandler,
+    ) => {
+      try {
+        mediaSession.setActionHandler(action, handler);
+      } catch {
+        // Older Electron/Chromium builds expose Media Session but not every
+        // action. Keyboard capture above remains the fallback.
+      }
+    };
+
+    try {
+      const artworkSource = artwork?.poster
+        || artwork?.backdrop
+        || artwork?.posterCandidates?.[0]
+        || artwork?.backdropCandidates?.[0];
+      mediaSession.metadata = new MediaMetadata({
+        title: title || 'LoomTV playback',
+        artist: currentSeason > 0 && currentEpisode > 0
+          ? `Season ${currentSeason}, Episode ${currentEpisode}`
+          : 'LoomTV',
+        album: 'LoomTV',
+        ...(artworkSource ? { artwork: [{ src: artworkSource }] } : {}),
+      });
+    } catch {
+      mediaSession.metadata = new MediaMetadata({
+        title: title || 'LoomTV playback',
+        artist: 'LoomTV',
+        album: 'LoomTV',
+      });
+    }
+
+    register('play', () => {
+      if (paused) runSystemMediaAction('play-pause');
+    });
+    register('pause', () => {
+      if (!paused) runSystemMediaAction('play-pause');
+    });
+    register('seekbackward', (details) => {
+      seekTo(playbackPositionRef.current - (details.seekOffset || skipBackSeconds));
+    });
+    register('seekforward', (details) => {
+      seekTo(playbackPositionRef.current + (details.seekOffset || skipForwardSeconds));
+    });
+    register('seekto', (details) => {
+      if (typeof details.seekTime === 'number') seekTo(details.seekTime);
+    });
+    register('previoustrack', () => runSystemMediaAction('previous-track'));
+    register('nexttrack', () => runSystemMediaAction('next-track'));
+    mediaSession.playbackState = paused ? 'paused' : 'playing';
+
+    return () => {
+      (['play', 'pause', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack'] as MediaSessionAction[])
+        .forEach((action) => {
+          try { mediaSession.setActionHandler(action, null); } catch { /* Unsupported action. */ }
+        });
+      mediaSession.playbackState = 'none';
+      mediaSession.metadata = null;
+    };
+  }, [artwork, currentEpisode, currentSeason, paused, runSystemMediaAction, seekTo, skipBackSeconds, skipForwardSeconds, title]);
+
+  useEffect(() => {
+    if (!nativePlaybackActive || !('mediaSession' in navigator)) return undefined;
+    const audio = systemMediaAudioRef.current;
+    if (!audio) return undefined;
+
+    // Native LibVLC/mpv playback bypasses Chromium's media pipeline. Keep an
+    // inaudible PCM stream active beside it so the operating system can route
+    // media controls to LoomTV's Media Session handlers without window focus.
+    const sampleRate = 8_000;
+    const wav = new Uint8Array(44 + sampleRate);
+    const view = new DataView(wav.buffer);
+    const writeAscii = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index += 1) wav[offset + index] = value.charCodeAt(index);
+    };
+    writeAscii(0, 'RIFF');
+    view.setUint32(4, 36 + sampleRate, true);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate, true);
+    view.setUint16(32, 1, true);
+    view.setUint16(34, 8, true);
+    writeAscii(36, 'data');
+    view.setUint32(40, sampleRate, true);
+    wav.fill(128, 44);
+
+    const source = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+    audio.src = source;
+    audio.loop = true;
+    void audio.play().catch(() => undefined);
+
+    return () => {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+      URL.revokeObjectURL(source);
+    };
+  }, [nativePlaybackActive]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate,
+        position: Math.min(duration, Math.max(0, position)),
+      });
+    } catch {
+      // Position state is optional on older Chromium builds.
+    }
+  }, [duration, playbackRate, position]);
 
   // ─── Derived ───────────────────────────────────────────────────────────────
 
@@ -3297,6 +3554,7 @@ export default function VideoPlayer({
       onPointerMove={handlePointerMove}
       ref={containerRef}
       >
+      <audio ref={systemMediaAudioRef} className="hidden" aria-hidden="true" />
       <h1 id="loom-player-title" className="sr-only">Playing {title}</h1>
       <p id="loom-player-description" className="sr-only">Playback controls, episode selection, subtitle settings, and close controls.</p>
       <style>

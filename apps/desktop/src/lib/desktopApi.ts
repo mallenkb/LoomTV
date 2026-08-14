@@ -236,6 +236,9 @@ export type DesktopBridgeApi = {
       setFullscreen?: (enabled: boolean) => Promise<boolean>;
       setWindowChromeVisible?: (visible: boolean) => Promise<boolean>;
       onFullscreenChanged?: (callback: (fullscreen: boolean) => void) => () => void;
+      onSystemMediaKey?: (
+        callback: (action: 'play-pause' | 'previous-track' | 'next-track') => void,
+      ) => () => void;
       checkFFmpeg: () => Promise<FFmpegStatus>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
@@ -949,6 +952,12 @@ export const desktopApi = {
 
   onFullscreenChanged(callback: (fullscreen: boolean) => void): () => void {
     return window.desktopApi?.onFullscreenChanged?.(callback) || (() => undefined);
+  },
+
+  onSystemMediaKey(
+    callback: (action: 'play-pause' | 'previous-track' | 'next-track') => void,
+  ): () => void {
+    return window.desktopApi?.onSystemMediaKey?.(callback) || (() => undefined);
   },
 
   async getLocalNetworkStatus(): Promise<LocalNetworkStatus> {

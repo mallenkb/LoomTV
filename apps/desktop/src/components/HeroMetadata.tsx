@@ -133,7 +133,7 @@ export default function HeroMetadata({ item, isOther = false }: HeroMetadataProp
         </span>
         <ContentRatingBadge
           rating={mediaFormat}
-          className="border-[var(--loom-accent)]/75 bg-white/10 text-[var(--loom-accent)]"
+          className="border-white/75 bg-white/10 text-white"
         />
         {contentRating && <ContentRatingBadge rating={contentRating} className="border-white/75 bg-white/10 text-white" />}
       </div>

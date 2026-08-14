@@ -170,6 +170,8 @@ export type MpvStartOptions = {
   volume?: number;
   muted?: boolean;
   speed?: number;
+  audioTrackId?: number;
+  audioLanguage?: string;
   audioDelay?: number;
   subtitleDelay?: number;
   subtitleStyle?: {

@@ -326,6 +326,9 @@ class MpvPlaybackSession {
       `--volume=${Math.round(Math.max(0, Math.min(1, options.volume ?? 1)) * 100)}`,
       `--mute=${options.muted ? 'yes' : 'no'}`,
       `--speed=${Math.max(0.25, Math.min(3, options.speed ?? 1))}`,
+      ...(options.audioLanguage
+        ? [`--alang=${options.audioLanguage}`]
+        : Number.isFinite(options.audioTrackId) ? [`--aid=${options.audioTrackId}`] : []),
       `--audio-delay=${options.audioDelay || 0}`,
       `--sub-delay=${options.subtitleDelay || 0}`,
       ...(options.subtitleStyle ? [

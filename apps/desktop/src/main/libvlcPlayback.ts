@@ -71,6 +71,7 @@ type LibVlcApi = {
   playerSetTime: DynamicFunction;
   audioSetVolume: DynamicFunction;
   audioSetMute: DynamicFunction;
+  audioGetTrack?: DynamicFunction;
   playerSetRate: DynamicFunction;
   setDrawable: DynamicFunction;
   videoSetMouseInput?: DynamicFunction;
@@ -402,6 +403,7 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         playerSetTime: bind(library, 'libvlc_media_player_set_time', 'void', ['void *', 'int64']),
         audioSetVolume: bind(library, 'libvlc_audio_set_volume', 'int', ['void *', 'int']),
         audioSetMute: bind(library, 'libvlc_audio_set_mute', 'void', ['void *', 'int']),
+        audioGetTrack: optionalBind(library, 'libvlc_audio_get_track', 'int', ['void *']),
         playerSetRate: bind(library, 'libvlc_media_player_set_rate', 'int', ['void *', 'float']),
         setDrawable: bind(library, 'libvlc_media_player_set_nsobject', 'void', ['void *', 'void *']),
         videoSetMouseInput: optionalBind(library, 'libvlc_video_set_mouse_input', 'void', ['void *', 'int']),
@@ -826,6 +828,9 @@ class LibVlcPlaybackSession {
   private startSeconds: number;
   private startApplied = false;
   private requestedPaused = false;
+  private preferredAudioTrackId: number | null;
+  private initialAudioSelectionApplied = false;
+  private initialAudioSelectionAttempts = 0;
   private nativeRearmUntil = 0;
   private state: LibVlcPlaybackState;
   private readonly windowListeners: Array<() => void> = [];
@@ -839,6 +844,9 @@ class LibVlcPlaybackSession {
     private readonly onTerminated: (session: LibVlcPlaybackSession) => void,
   ) {
     this.startSeconds = Math.max(0, finite(options.startSeconds, 0));
+    this.preferredAudioTrackId = Number.isFinite(options.audioTrackId)
+      ? Number(options.audioTrackId)
+      : null;
     this.state = {
       sessionId: this.id,
       status: 'starting',
@@ -864,6 +872,12 @@ class LibVlcPlaybackSession {
     }
     try {
       api.mediaAddOption(media, ':vout=macosx');
+      if (options.audioLanguage && /^[a-z0-9_-]+$/i.test(options.audioLanguage)) {
+        api.mediaAddOption(media, `:audio-language=${options.audioLanguage}`);
+      }
+      if (this.preferredAudioTrackId !== null) {
+        api.mediaAddOption(media, `:audio-track=${this.preferredAudioTrackId}`);
+      }
       for (const subtitle of options.subtitleFiles || []) api.mediaAddOption(media, `:sub-file=${subtitle.path}`);
       if (options.nativeSubtitles === false) api.mediaAddOption(media, ':no-spu');
       if (finite(options.subtitleDelay, 0) !== 0) api.mediaAddOption(media, `:sub-delay=${Math.round(finite(options.subtitleDelay, 0) * 1_000_000)}`);
@@ -1090,6 +1104,8 @@ class LibVlcPlaybackSession {
     if (!nextPlayer) throw new Error('LibVLC could not recreate the native video output.');
     this.player = nextPlayer;
     this.configureNativePlayer(nextPlayer);
+    this.initialAudioSelectionApplied = this.preferredAudioTrackId === null;
+    this.initialAudioSelectionAttempts = 0;
     if (Number(api.playerPlay(nextPlayer)) < 0) throw new Error('LibVLC could not re-arm the native video output.');
     const restorePosition = () => {
       if (this.stopped || this.player !== nextPlayer || positionMs < 0) return;
@@ -1286,6 +1302,30 @@ class LibVlcPlaybackSession {
     if (!this.owner.isDestroyed()) this.owner.send('libvlc:state', this.state);
   }
 
+  private applyInitialAudioSelection(): void {
+    if (this.initialAudioSelectionApplied || this.preferredAudioTrackId === null || !this.player) return;
+    const api = this.runtime.api;
+    if (api.audioGetTrack) {
+      try {
+        if (Number(api.audioGetTrack(this.player)) === this.preferredAudioTrackId) {
+          this.initialAudioSelectionApplied = true;
+          return;
+        }
+      } catch {
+        // Retry through the setter while the decoder is becoming ready.
+      }
+    }
+    if (!api.audioSetTrack || this.initialAudioSelectionAttempts >= 8) return;
+    this.initialAudioSelectionAttempts += 1;
+    try {
+      const accepted = Number(api.audioSetTrack(this.player, this.preferredAudioTrackId)) >= 0;
+      if (accepted && !api.audioGetTrack) this.initialAudioSelectionApplied = true;
+    } catch {
+      // LibVLC can reject track changes during its opening state. The 250 ms
+      // poll retries after the decoder exposes its elementary streams.
+    }
+  }
+
   private poll(): void {
     if (this.stopped) return;
     try {
@@ -1295,6 +1335,7 @@ class LibVlcPlaybackSession {
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
       const durationMs = Number(api.playerGetLength(this.player));
       const positionMs = Number(api.playerGetTime(this.player));
+      if (status === 'ready') this.applyInitialAudioSelection();
       if (status === 'ready' && this.startSeconds > 0 && !this.startApplied) {
         api.playerSetTime(this.player, Math.round(this.startSeconds * 1_000));
         this.startApplied = true;
@@ -1341,7 +1382,17 @@ class LibVlcPlaybackSession {
           return true;
         case 'set-speed': return Number(api.playerSetRate(this.player, clamp(finite(command.speed, 1), 0.25, 3))) >= 0;
         case 'set-video-track': return api.videoSetTrack ? Number(api.videoSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
-        case 'set-audio-track': return api.audioSetTrack ? Number(api.audioSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
+        case 'set-audio-track': {
+          this.preferredAudioTrackId = command.trackId;
+          this.initialAudioSelectionAttempts = 0;
+          if (!api.audioSetTrack) {
+            this.initialAudioSelectionApplied = command.trackId === null;
+            return false;
+          }
+          const applied = Number(api.audioSetTrack(this.player, command.trackId ?? -1)) >= 0;
+          this.initialAudioSelectionApplied = applied;
+          return applied;
+        }
         case 'set-subtitle-track': return api.subtitleSetTrack ? Number(api.subtitleSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
         case 'set-subtitle-delay': return api.subtitleSetDelay ? Number(api.subtitleSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0 : false;
         case 'set-audio-delay': return api.audioSetDelay ? Number(api.audioSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0 : false;

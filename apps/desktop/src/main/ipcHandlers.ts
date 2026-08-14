@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { addLocalAccessToken } from './serverSecurity';
+import { setSystemMediaKeyActivity } from './systemMediaKeys.ts';
 import { appendStreamOptionParams } from './transcodeFilters.ts';
 import { getMimeType } from './mimeTypes';
 import type { ApiResult, ProbeResult, TranscodeOptions, TranscodeSession } from './mediaTypes';
@@ -70,6 +71,8 @@ const playbackStartOptionsSchema = z.object({
   volume: finiteNumber.optional(),
   muted: z.boolean().optional(),
   speed: finiteNumber.positive().optional(),
+  audioTrackId: finiteNumber.optional(),
+  audioLanguage: z.string().trim().min(1).max(32).optional(),
   audioDelay: finiteNumber.optional(),
   subtitleDelay: finiteNumber.optional(),
   subtitleStyle: subtitleStyleSchema.optional(),
@@ -1175,8 +1178,9 @@ export function registerIpcHandlers<
       episode: request?.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
     });
   }, z.tuple([mediaSegmentRequestSchema]));
-  handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
+  handle('playback:activity', (event, key: string, active: boolean, label?: string) => {
     deps.setPlaybackActivityLease(key, Boolean(active), label);
+    setSystemMediaKeyActivity(event.sender, key, Boolean(active));
     return true;
   }, z.tuple([nonEmptyString, z.boolean(), z.string().optional()]));
   handleNoArgs('playback:analysis:status', () => {

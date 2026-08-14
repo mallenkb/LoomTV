@@ -110,6 +110,16 @@ const desktopApi = {
     electronIpcRenderer.on('window:fullscreen-changed', handler);
     return () => electronIpcRenderer.removeListener('window:fullscreen-changed', handler);
   },
+  onSystemMediaKey: (
+    callback: (action: 'play-pause' | 'previous-track' | 'next-track') => void,
+  ) => {
+    const handler = (
+      _: Electron.IpcRendererEvent,
+      action: 'play-pause' | 'previous-track' | 'next-track',
+    ) => callback(action);
+    electronIpcRenderer.on('playback:system-media-key', handler);
+    return () => electronIpcRenderer.removeListener('playback:system-media-key', handler);
+  },
   checkFFmpeg: () => ipcRenderer.invoke('media:ffmpeg-available'),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   listStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:list'),

@@ -63,8 +63,8 @@ export default function LibraryFilterBar({ activeFilter, onChange }: LibraryFilt
         aria-label={`Filter library, ${activeOption?.label || 'All'}`}
         title={`Filter: ${activeOption?.label || 'All'}`}
         onClick={() => setFilterOpen((open) => !open)}
-        style={{ borderColor: 'var(--loom-control-border)' }}
-        className={`loom-library-filter-trigger loom-no-drag pointer-events-auto relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-lg border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
+        style={{ borderColor: 'var(--loom-panel-border)' }}
+        className={`loom-library-filter-trigger loom-no-drag pointer-events-auto relative z-10 inline-flex h-12 w-12 items-center justify-center rounded-full border p-0 shadow-[0_16px_42px_rgba(0,0,0,0.34)] backdrop-blur-md transition-[border-color,background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]/70 ${
           activeFilter === 'all'
             ? 'bg-[var(--loom-panel)] text-[var(--loom-muted)] hover:bg-[var(--loom-surface-3)] hover:text-[var(--loom-text)]'
             : 'bg-[var(--loom-active-bg)] text-[var(--loom-active-text)]'

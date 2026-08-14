@@ -122,8 +122,8 @@ export default function DesktopOnboarding({
               <h2 className="text-sm font-semibold text-[var(--loom-text)]">Choose your style</h2>
               <div className="mt-3 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="LoomTV style">
                 {([
-                  { id: 'default', label: 'Default', description: 'The familiar LoomTV library layout.', Icon: LayoutGrid },
                   { id: 'modern', label: 'Modern', description: 'A cinematic hero with floating navigation.', Icon: Clapperboard },
+                  { id: 'default', label: 'Classic', description: 'The familiar LoomTV library layout.', Icon: LayoutGrid },
                 ] as const).map(({ id, label, description, Icon }) => {
                   const selected = homeStyle === id;
                   return (
