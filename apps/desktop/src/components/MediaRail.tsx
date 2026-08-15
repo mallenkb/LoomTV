@@ -221,7 +221,7 @@ export default function MediaRail({ title, titleHref, action, variant = 'classic
       <div
         ref={railRef}
         {...railHandlers}
-        className={`flex w-full min-w-0 select-none overflow-x-auto overflow-y-hidden scroll-smooth [scrollbar-gutter:stable] [touch-action:pan-y] ${GAP_CLASS[variant]} ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`loom-media-rail-scroller flex w-full min-w-0 select-none overflow-x-auto overflow-y-hidden scroll-smooth [scrollbar-gutter:stable] [touch-action:pan-y] ${GAP_CLASS[variant]} ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
       >
         {children}
       </div>

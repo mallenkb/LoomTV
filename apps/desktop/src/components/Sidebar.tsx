@@ -97,6 +97,9 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
 
   return (
     <header className="loom-modern-header loom-no-drag fixed inset-x-0 top-6 z-50 flex h-12 items-center justify-center px-5">
+      <Link to="/" className="loom-modern-mobile-brand" aria-label="LoomTV home">
+        <LoomLogo className="h-8 w-auto" />
+      </Link>
       <nav
         className="loom-modern-category-pill loom-no-drag flex h-12 items-center rounded-full border p-1 backdrop-blur-2xl"
         aria-label="Library categories"
@@ -434,6 +437,9 @@ export default function Sidebar() {
   const { libraryFolderGroups } = state;
   const routeState = location.state as { from?: string; fromDiscover?: boolean } | null;
   const sourceRoute = routeState?.from;
+  const isDetailRoute = location.pathname.startsWith('/movie/')
+    || location.pathname.startsWith('/tv/')
+    || location.pathname.startsWith('/anime/');
   const isExploreContext = location.pathname === '/discover'
     || routeState?.fromDiscover === true
     || sourceRoute?.startsWith('/discover') === true;
@@ -606,7 +612,7 @@ export default function Sidebar() {
       <>
         {libraryActionError ? <span role="alert" className="sr-only">{libraryActionError}</span> : null}
         <aside className="loom-modern-sidebar loom-no-drag fixed inset-y-0 left-0 z-50 flex w-20 flex-col items-center py-5">
-          <nav className="mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
+          <nav className="loom-modern-sidebar-desktop-nav mt-6 flex flex-1 flex-col items-center" aria-label="Primary navigation">
             <SharedListHighlight
               activeId={activeNavItemId}
               followPointer={false}
@@ -713,7 +719,54 @@ export default function Sidebar() {
               </span>
             </button>
           )}
-          <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
+          <div className="loom-modern-sidebar-profile">
+            <SidebarProfileSwitcher compact isScanning={state.isScanning} onQuickScan={() => { void handleScanLibrary(); }} />
+          </div>
+          {/* Keep the detail page focused on its media controls. The corner
+              settings/profile entry remains available on home and library
+              surfaces, but is not part of the detail-page shell. */}
+          {!isDetailRoute && (
+            <Link
+              to="/settings"
+              aria-label="Open settings"
+              className="loom-modern-mobile-profile"
+            >
+              <ProfileAvatar
+                name={activeProfile.name}
+                avatarKey={activeProfile.avatarKey}
+                colorKey={activeProfile.colorKey}
+              />
+            </Link>
+          )}
+          <nav className="loom-modern-mobile-nav" aria-label="Mobile navigation">
+            <SharedListHighlight activeId={activeNavItemId} followPointer={false} className="flex items-center">
+              {[homeNavItem, discoverNavItem, myListNavItem].map((item) => {
+                const isActive = activeNavItemId === item.id;
+                const Icon = isActive ? (item.activeIcon || item.icon) : item.icon;
+                return (
+                  <Link
+                    key={`modern-mobile-${item.id}`}
+                    to={item.path}
+                    aria-label={item.label}
+                    aria-current={isActive ? 'page' : undefined}
+                    data-shared-highlight-item
+                    data-shared-highlight-id={item.id}
+                    className="loom-modern-mobile-nav-item"
+                  >
+                    <Icon className="h-6 w-6" />
+                  </Link>
+                );
+              })}
+              <button
+                type="button"
+                aria-label="Search library"
+                onClick={() => navigate('/', { replace: location.pathname === '/', state: { openLibrarySearch: true } })}
+                className="loom-modern-mobile-nav-item"
+              >
+                <Search className="h-6 w-6" />
+              </button>
+            </SharedListHighlight>
+          </nav>
         </aside>
         {!location.pathname.startsWith('/settings') && !isExploreContext && (
           <ModernCategoryPill pathname={location.pathname} />

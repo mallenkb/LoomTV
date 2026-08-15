@@ -634,6 +634,14 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
   backdrop-filter: none;
 }
 
+.loom-mobile-search-landing {
+  display: none;
+}
+
+.loom-modern-hero-poster {
+  display: none;
+}
+
 /* Modal content is always an opaque surface. The dimmed backdrop may still
    show the page behind it, but the dialog itself must never reveal artwork or
    other page content through a translucent panel. */
@@ -852,6 +860,8 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
    1rem offset it always had. */
 .loom-detail-back {
   top: var(--loom-detail-floating-top, 1.5rem);
+  z-index: 80;
+  pointer-events: auto;
   left: calc(
     var(--loom-sidebar-width)
     + max(0px, (100vw - var(--loom-sidebar-width) - var(--loom-frame-max-width)) / 2)
@@ -3070,6 +3080,88 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
   }
 }
 
+/* Tablets keep the full web category control: a floating pill is easier to
+   scan and gives the wider viewport a stable navigation anchor. Phones keep
+   the edge-to-edge tab strip above. */
+@media (min-width: 761px) and (max-width: 1024px) {
+  :root[data-loom-client="browser"] .loom-modern-header {
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.78) 0%,
+      rgba(0, 0, 0, 0.38) 72%,
+      transparent 100%
+    );
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill {
+    width: auto;
+    max-width: calc(100vw - 18rem);
+    height: 3rem;
+    margin: 0 auto;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header .loom-shared-highlight-category {
+    gap: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a {
+    height: 2.5rem;
+    min-height: 0;
+    padding: 0 1rem;
+    border-radius: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 0.9rem;
+    text-shadow: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a.loom-modern-category-active {
+    background: transparent;
+    color: #fff;
+    box-shadow: inset 0 -2px 0 #fff;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a.loom-modern-category-idle {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.92);
+  }
+}
+
+@media (max-width: 760px) {
+  :root[data-loom-client="browser"] .loom-modern-header {
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.78) 0%,
+      rgba(0, 0, 0, 0.34) 72%,
+      transparent 100%
+    );
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill {
+    background: transparent;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a,
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a.loom-modern-category-idle,
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a.loom-modern-category-active {
+    background: transparent;
+    border-radius: 0;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill a.loom-modern-category-active {
+    box-shadow: inset 0 -2px 0 #fff;
+  }
+}
+
 @media (max-width: 760px) {
   .loom-modern-header {
     right: 0;
@@ -3129,5 +3221,840 @@ body.platform-darwin .loom-detail-page-modern .loom-detail-back {
 
   .loom-continue-watching-card {
     width: clamp(14rem, 78vw, 17.5rem);
+  }
+}
+
+/* ===========================================================================
+   Mobile web layout for the browser renderer (/app/).
+
+   Everything that changes layout lives inside a max-width media query, so the
+   desktop window and the Electron shell keep their existing geometry. The
+   target is the familiar phone streaming shell: a brand + category strip
+   floating over a full-bleed hero, and a fixed bottom tab bar.
+   =========================================================================== */
+
+/* The mobile brand mark and tab bar are markup-only above the breakpoint. */
+.loom-modern-mobile-brand,
+.loom-modern-mobile-profile,
+.loom-modern-mobile-nav {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  :root[data-loom-client="browser"][data-home-style="modern"] {
+    /* One gutter for the whole mobile web app: every page edge, the category
+       strip, the hero copy and the rails all start on the same 16px line. */
+    --loom-mobile-gutter: 1rem;
+    --loom-frame-inset: var(--loom-mobile-gutter);
+    /* Brand row + category strip. Pages that scroll under it clear this much. */
+    --loom-mobile-header-height: 7rem;
+    --loom-mobile-header-top: max(0.7rem, env(safe-area-inset-top));
+    --loom-mobile-brand-height: 1.7rem;
+    --loom-mobile-avatar: 2.25rem;
+    --loom-mobile-nav-height: 4.6rem;
+    --loom-mobile-nav-total: calc(var(--loom-mobile-nav-height) + env(safe-area-inset-bottom));
+    /* The hero and rails run edge to edge here, so the desktop frame gutters
+       collapse rather than reserving sidebar space that no longer exists. */
+    --loom-frame-start: 0px;
+    --loom-frame-end: 0px;
+    --loom-frame-content-start: 0px;
+    --loom-frame-content-end: 0px;
+    --loom-frame-content-width: 100%;
+    --loom-detail-frame-start: 0px;
+    --loom-detail-frame-end: 0px;
+    --loom-detail-frame-width: 100%;
+    --loom-hero-artwork-bleed: 0px;
+    --loom-hero-artwork-min-start: 0px;
+  }
+
+  /* ---- Bottom tab bar --------------------------------------------------- */
+
+  /* The shared mobile rule already turns the sidebar into a bottom bar; the
+     modern shell only needs its own surface and the blur moved onto a pseudo
+     element. `backdrop-filter` on the bar itself would make it a containing
+     block for the fixed profile button that has to sit at the top of the
+     screen. */
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar {
+    /* The element carries Tailwind's `inset-y-0`, so `top` has to be released
+       explicitly or the bar pins itself to the top of the screen. */
+    inset: auto 0 0;
+    height: var(--loom-mobile-nav-total);
+    padding: 0;
+    background: transparent;
+    backdrop-filter: none;
+    border-top: 1px solid color-mix(in srgb, var(--loom-border) 70%, transparent);
+    box-shadow: 0 -18px 42px rgba(0, 0, 0, 0.38);
+  }
+
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: color-mix(in srgb, var(--loom-sidebar) 92%, transparent);
+    backdrop-filter: blur(22px);
+  }
+
+  .loom-modern-sidebar-desktop-nav,
+  :root[data-loom-client="browser"] .loom-modern-sidebar .loom-modern-sidebar-action {
+    display: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar .loom-modern-mobile-nav {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0 0.5rem env(safe-area-inset-bottom);
+  }
+
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar .loom-modern-mobile-nav > .loom-shared-highlight-group {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: center;
+  }
+
+  /* The sliding pill reads as a desktop affordance; the tab bar marks the
+     active item with colour alone. */
+  .loom-modern-mobile-nav > .loom-shared-highlight-group::before,
+  :root[data-loom-client="browser"] .loom-modern-mobile-nav > .loom-shared-highlight-group::after {
+    display: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar .loom-modern-mobile-nav-item {
+    position: relative;
+    z-index: 1;
+    display: grid !important;
+    place-items: center;
+    min-width: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: color-mix(in srgb, var(--loom-muted) 90%, transparent);
+    transition: color 160ms ease;
+  }
+
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar .loom-modern-mobile-nav-item[aria-current="page"] {
+    color: var(--loom-text);
+  }
+
+  :root[data-loom-client="browser"] .loom-app-shell > .loom-app-underlay > aside.loom-modern-sidebar .loom-modern-mobile-nav-item:focus-visible {
+    outline: 2px solid var(--loom-accent);
+    outline-offset: -4px;
+  }
+
+  /* ---- Profile button --------------------------------------------------- */
+
+  /* The sidebar's profile menu anchors itself to a sidebar that is off screen
+     here, so the phone shell uses its own corner avatar instead. */
+  :root[data-loom-client="browser"] .loom-modern-sidebar-profile {
+    display: none !important;
+  }
+
+  /* Sits in the opposite corner from the brand and shares its centre line, so
+     the two read as one row. */
+  :root[data-loom-client="browser"] .loom-modern-mobile-profile {
+    position: fixed;
+    top: calc(
+      var(--loom-mobile-header-top)
+      + (var(--loom-mobile-brand-height) - var(--loom-mobile-avatar)) / 2
+    );
+    right: var(--loom-mobile-gutter);
+    z-index: 70;
+    display: block;
+    width: var(--loom-mobile-avatar);
+    height: var(--loom-mobile-avatar);
+    overflow: hidden;
+    border-radius: 9999px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-profile:focus-visible {
+    outline: 2px solid var(--loom-accent);
+    outline-offset: 2px;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-profile > * {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ---- Brand + category strip ------------------------------------------- */
+
+  :root[data-loom-client="browser"][data-home-style="modern"] .loom-modern-header {
+    top: 0;
+    right: 0;
+    left: 0;
+    height: auto;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    /* The reference separates the brand row from the tab strip by ~28px; they
+       read as two rows rather than one stacked block. */
+    gap: 1.5rem;
+    padding: var(--loom-mobile-header-top) 0 0.6rem;
+    /* The strip floats over the artwork, so only the controls take pointer
+       events; the rest of the band stays transparent to the hero beneath. */
+    pointer-events: none;
+    /* Light enough that the artwork still reads behind the strip, as it does
+       on the reference, while the labels keep their contrast. */
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.62) 0%,
+      rgba(0, 0, 0, 0.34) 52%,
+      transparent 100%
+    );
+  }
+
+  .loom-modern-mobile-brand,
+  :root[data-loom-client="browser"] .loom-modern-header nav {
+    pointer-events: auto;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-brand {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    /* Clear of the fixed profile button on the opposite corner. */
+    margin-inline: var(--loom-mobile-gutter) 4rem;
+    color: #fff;
+    filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.6));
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-brand svg {
+    height: var(--loom-mobile-brand-height);
+    width: auto;
+  }
+
+  :root[data-loom-client="browser"][data-home-style="modern"] .loom-modern-header nav.loom-modern-category-pill {
+    width: 100%;
+    max-width: none;
+    height: 2.75rem;
+    margin: 0;
+    padding: 0 var(--loom-mobile-gutter);
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav.loom-modern-category-pill::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Underline the active tab instead of sliding a filled pill behind it. */
+  .loom-modern-header .loom-shared-highlight-category::before,
+  :root[data-loom-client="browser"] .loom-modern-header .loom-shared-highlight-category::after {
+    display: none !important;
+  }
+
+  /* Tabs carry no horizontal padding so the underline hugs the label rather
+     than a box around it. Auto margins centre the strip while it fits and
+     collapse to zero once it overflows, so the first tab stays reachable at
+     the gutter instead of being scrolled off the start edge. */
+  :root[data-loom-client="browser"] .loom-modern-header .loom-shared-highlight-category {
+    gap: var(--loom-mobile-gutter);
+    margin-inline: auto;
+    padding-inline: 0;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav a {
+    flex: 0 0 auto;
+    height: 2.75rem;
+    min-height: 44px;
+    width: auto;
+    padding: 0 4px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    white-space: nowrap;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav a.loom-modern-category-idle {
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(0, 0, 0, 0.42);
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav a.loom-modern-category-active {
+    color: #fff;
+    background: rgba(0, 0, 0, 0.62);
+    box-shadow: inset 0 -2px 0 #fff;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav a:focus-visible {
+    outline: 3px solid #fff;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px rgba(0, 0, 0, 0.72);
+  }
+
+  /* The tab bar already carries My List; the strip drops it to save width. */
+  :root[data-loom-client="browser"] .loom-modern-header nav a[aria-label="My List"] {
+    display: none;
+  }
+
+  /* ---- Page shell ------------------------------------------------------- */
+
+  :root[data-loom-client="browser"] .loom-modern-home > .loom-library-search-slot {
+    display: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-home > main.loom-modern-content-frame {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    /* The hero already fades to the page background, so the first rail only
+       needs its own breathing room. The shell's `main` reserves the tab bar,
+       so the bottom padding here must not reserve it a second time. */
+    padding: 0.5rem var(--loom-mobile-gutter) 2rem;
+    background: var(--loom-bg);
+  }
+
+  /* Library, search and list pages scroll beneath the floating strip, so they
+     start below it rather than tucking their first heading under the tabs. */
+  :root[data-loom-client="browser"] .loom-modern-content-frame.loom-library-page-frame {
+    padding-top: calc(var(--loom-mobile-header-height) + 0.75rem);
+    padding-inline: var(--loom-mobile-gutter);
+  }
+
+  /* Discover and Settings hide the category strip, so they only have to clear
+     the profile button in the corner. */
+  :root[data-loom-client="browser"] body:not(:has(.loom-modern-header)) .loom-modern-content-frame.loom-library-page-frame {
+    padding-top: 3.25rem;
+  }
+
+  /* ---- Hero ------------------------------------------------------------- */
+
+  :root[data-loom-client="browser"] .loom-modern-hero {
+    height: min(64svh, 32rem);
+    min-height: 27rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-artwork {
+    inset: 0;
+    width: 100%;
+  }
+
+  /* Landscape backdrops crop hard into a portrait frame; biasing slightly
+     above centre keeps faces in shot rather than chests. */
+  :root[data-loom-client="browser"] .loom-modern-hero-image {
+    object-position: center 32%;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-vignette {
+    background:
+      /* The header band already darkens the top, so the vignette only has to
+         carry the copy at the bottom and land on the page background. */
+      linear-gradient(
+        180deg,
+        rgba(0, 0, 0, 0.12) 0%,
+        transparent 24%,
+        rgba(0, 0, 0, 0.3) 50%,
+        rgba(0, 0, 0, 0.82) 80%,
+        var(--loom-bg) 100%
+      ),
+      linear-gradient(90deg, rgba(0, 0, 0, 0.22), transparent 40%, rgba(0, 0, 0, 0.22));
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-frame {
+    --loom-hero-actions-bottom: 1.25rem;
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    align-items: flex-end;
+  }
+
+  /* The pager sits in the copy's bottom padding, so that padding has to clear
+     the dots — otherwise they print on top of the Play button. */
+  :root[data-loom-client="browser"] .loom-modern-hero-copy {
+    max-width: 40rem;
+    margin-inline: auto;
+    align-items: center;
+    padding: 6rem var(--loom-mobile-gutter) 4.25rem;
+    text-align: center;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy > img {
+    width: min(22rem, 68vw);
+    max-height: 5.5rem;
+    object-position: center bottom;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero h1 {
+    max-width: 100%;
+    font-size: clamp(2rem, 9vw, 3rem);
+  }
+
+  .loom-modern-hero-meta,
+  .loom-modern-hero-stats,
+  :root[data-loom-client="browser"] .loom-modern-hero-actions {
+    justify-content: center;
+  }
+
+  /* The desktop copy column is capped at 50% of the frame; on a phone that
+     cap is what pushed the summary into a two-word ribbon. */
+  :root[data-loom-client="browser"] .loom-modern-hero-copy > div:has(> .loom-modern-hero-summary) {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-summary {
+    -webkit-line-clamp: 3;
+    text-align: center;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-pager {
+    right: 0;
+    left: 0;
+    justify-content: center;
+  }
+
+  /* ---- Rails ------------------------------------------------------------ */
+
+  /* Rails are swiped here, so the paging arrows are dead weight over content. */
+  :root[data-loom-client="browser"] .loom-modern-home button[aria-label^="Scroll "] {
+    display: none !important;
+  }
+
+  /* The rail opts out of horizontal panning so a mouse drag can own it. With
+     the arrows gone, touch needs the browser's own horizontal scrolling back. */
+  :root[data-loom-client="browser"] .loom-media-rail-scroller {
+    touch-action: pan-x pan-y;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-home .loom-poster-link {
+    width: clamp(10rem, 27vw, 12rem) !important;
+    max-width: clamp(10rem, 27vw, 12rem) !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-home main section > h2 {
+    font-size: 1.3rem;
+  }
+}
+
+@media (max-width: 760px) {
+  :root[data-loom-client="browser"][data-home-style="modern"] {
+    --loom-mobile-brand-height: 2rem;
+    --loom-mobile-avatar: 2rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header nav a {
+    font-size: 1rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero {
+    height: min(74.4svh, 37.2rem);
+    min-height: 31.2rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy {
+    padding: 32px var(--loom-mobile-gutter) 20px;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy > img {
+    max-height: 4.6rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy > img.object-contain.object-left-bottom {
+    width: auto !important;
+    height: 104px !important;
+    max-height: 104px !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-meta {
+    max-width: 100%;
+    font-size: 0.9rem;
+    line-height: 1.25rem;
+    min-width: 0;
+    flex-wrap: nowrap !important;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-summary {
+    min-height: 0;
+    font-size: 0.9rem !important;
+    line-height: 1.3rem !important;
+  }
+
+  /* Codec and rating chips are the first thing to go when width is scarce. */
+  :root[data-loom-client="browser"] .loom-modern-hero-stats {
+    display: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-actions {
+    margin-top: 0.9rem;
+    transform: scale(0.92);
+    transform-origin: center;
+  }
+
+  /* Fixed intrinsic sizing is useful for desktop virtualization, but it
+     leaves a large empty block below narrower mobile cards. Let phone rails
+     use their rendered poster and metadata height instead. */
+  :root[data-loom-client="browser"] .loom-modern-home .loom-poster-link {
+    align-self: flex-start;
+    height: auto !important;
+    content-visibility: visible;
+    contain-intrinsic-size: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-home .loom-poster-link > a,
+  :root[data-loom-client="browser"] .loom-modern-home .loom-poster-link > button {
+    height: auto !important;
+  }
+
+  /* Mobile rails should hand off directly to the next section after the
+     card metadata instead of preserving the desktop section rhythm. */
+  :root[data-loom-client="browser"] .loom-modern-home section.min-w-0.w-full + section.min-w-0.w-full {
+    margin-top: 16px !important;
+  }
+
+  /* Keep hero descriptions readable without allowing them to push the
+     controls and rails below the fold. */
+  :root[data-loom-client="browser"] .loom-modern-hero-summary {
+    display: -webkit-box !important;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy {
+    transform: translateY(32px);
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-copy {
+    padding-inline: 16px !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-actions > div {
+    display: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-actions {
+    transform: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-pager {
+    position: static;
+    width: 100%;
+    height: auto;
+    min-height: 1.5rem;
+    margin-top: 0.75rem;
+    justify-content: center;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-nav-item > svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-header {
+    /* Keep the overlay anchored to the viewport edge. The previous transform
+       moved the gradient down with the controls and left a bright strip above
+       it. Preserve the 12px content offset with padding instead. */
+    transform: none;
+    padding-top: calc(var(--loom-mobile-header-top) + 12px);
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-mobile-profile {
+    transform: translateY(12px);
+  }
+
+  /* Mobile home follows a streaming-app rhythm: brand row, plain category
+     tabs, artwork-led hero, then a two-column poster rail. */
+  :root[data-loom-client="browser"][data-home-style="modern"] .loom-modern-header {
+    gap: 1.25rem;
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.58) 0%,
+      rgba(0, 0, 0, 0.24) 62%,
+      transparent 100%
+    );
+    transition: background 180ms ease, box-shadow 180ms ease, backdrop-filter 180ms ease;
+  }
+
+  :root[data-loom-client="browser"][data-home-style="modern"][data-loom-home-scrolled="true"] .loom-modern-header {
+    background: linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.88) 0%,
+      rgba(0, 0, 0, 0.74) 78%,
+      rgba(0, 0, 0, 0.42) 100%
+    ) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(14px) saturate(120%);
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill {
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill::-webkit-scrollbar {
+    display: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill > .loom-shared-highlight-group {
+    width: max-content;
+    min-width: 100%;
+    justify-content: flex-start;
+    gap: 1.25rem;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill > .loom-shared-highlight-group::before,
+  :root[data-loom-client="browser"] .loom-modern-category-pill > .loom-shared-highlight-group::after {
+    display: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill a {
+    min-width: max-content;
+    min-height: 44px;
+    padding: 0 4px !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-category-pill a[aria-current="page"] {
+    box-shadow: inset 0 -2px 0 currentColor !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero {
+    height: min(73.1svh, 42.5rem);
+    min-height: 30.6rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-meta,
+  :root[data-loom-client="browser"] .loom-modern-hero-actions {
+    justify-content: center;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-summary {
+    text-align: center;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-home .loom-poster-link {
+    width: clamp(8.75rem, 40.5vw, 11.7rem) !important;
+    max-width: clamp(8.75rem, 40.5vw, 11.7rem) !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-search-overlay {
+    padding: 8rem 1rem calc(var(--loom-mobile-nav-total) + 1.5rem);
+    background: var(--loom-bg);
+    backdrop-filter: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-search-overlay > div {
+    max-width: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-search-control {
+    height: 4rem;
+    padding-inline: 1rem;
+    border: 0;
+    border-radius: 0.5rem;
+    background: var(--loom-panel);
+    box-shadow: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-search-control input {
+    height: 4rem;
+    padding-inline: 0.75rem;
+    font-size: 1.25rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-search-control .loom-library-search-slot {
+    display: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-mobile-search-landing {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    margin-top: 2.75rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-mobile-search-landing .loom-media-rail-scroller {
+    gap: 1rem;
+    padding-bottom: 0.25rem;
+  }
+
+  :root[data-loom-client="browser"] .loom-mobile-search-landing .loom-poster-link {
+    width: clamp(8.75rem, 40.5vw, 11.7rem) !important;
+    max-width: clamp(8.75rem, 40.5vw, 11.7rem) !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-backdrop {
+    display: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-poster {
+    display: block;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-hero-logo {
+    display: none;
+  }
+
+  :root[data-loom-client="browser"] .loom-modern-home > main.loom-modern-content-frame {
+    padding-top: 0.25rem;
+  }
+
+  /* Three columns of card leave the meta row too narrow for a year plus two
+     badges, and the year is the part that loses — it truncates to "2..". The
+     badges are the expendable half on a phone. */
+  :root[data-loom-client="browser"] .loom-poster-meta > :not(p) {
+    display: none;
+  }
+
+  /* Discover's cards clip their title to one line, which at this width loses
+     most of it. Two lines matches the library cards beside them. */
+  :root[data-loom-client="browser"] .loom-poster-link h4.truncate {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile web: media detail pages.
+
+   The detail route renders its own back control and title block, so the
+   floating brand + category strip that belongs to the browse shell only
+   collides with it here.
+   --------------------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  :root[data-loom-client="browser"] body:has(.loom-detail-page-modern) .loom-modern-header,
+  :root[data-loom-client="browser"] body:has(.loom-detail-page-modern) .loom-modern-mobile-brand {
+    display: none !important;
+  }
+
+  :root[data-loom-client="browser"] .loom-detail-page-modern .loom-detail-back {
+    top: var(--loom-mobile-header-top);
+    left: var(--loom-mobile-gutter);
+    z-index: 80;
+  }
+
+  /* The controls row is `shrink-0` with a `whitespace-nowrap` play button, so
+     at this width it runs off the right edge. Letting the row and its buttons
+     shrink keeps it on one line — wrapping instead would make the block taller
+     than the fixed-height cover it is pinned inside, and the overflow gets
+     clipped away. The play label truncates rather than growing the hero. */
+  :root[data-loom-client="browser"] .loom-detail-hero-controls {
+    width: 100%;
+    min-width: 0;
+    flex-shrink: 1;
+    flex-wrap: nowrap;
+  }
+
+  :root[data-loom-client="browser"] .loom-detail-hero-controls > *,
+  :root[data-loom-client="browser"] .loom-detail-hero-controls button {
+    min-width: 0;
+    max-width: 100%;
+    flex-shrink: 1;
+    overflow: hidden;
+  }
+
+  :root[data-loom-client="browser"] .loom-detail-hero-content,
+  :root[data-loom-client="browser"] .loom-detail-page-modern .loom-detail-body {
+    padding-inline: var(--loom-mobile-gutter);
+  }
+
+  /* The title block wraps onto more lines at this width, so it reaches lower
+     than the cover it is pinned inside. Give the cover room for it, stop it
+     clipping, and drop the body's negative blend overlap — on desktop that
+     overlap sits above the controls, here it lands right on top of them. */
+  :root[data-loom-client="browser"] .loom-detail-page-modern .loom-detail-cover {
+    min-height: 58vh;
+    overflow: visible;
+  }
+
+  :root[data-loom-client="browser"] .loom-detail-page-modern .loom-detail-body.loom-frame {
+    --loom-detail-blend-overlap: 0px;
+  }
+
+  /* The title block sits under the back control rather than beside it. */
+  :root[data-loom-client="browser"] .loom-detail-page-modern .loom-detail-hero-content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  /* The title block is pinned to the bottom of a fixed-height cover and grows
+     upward. Once the controls wrap onto extra rows it is taller than the
+     cover's 45vh, and the cover's `overflow: hidden` clips the play button
+     away entirely. The backdrop and its fade are both inset-absolute, so
+     nothing here needs the clip. */
+}
+
+/* Keep the detail hero usable in compact desktop and tablet windows. */
+@media (min-width: 641px) and (max-width: 1100px) {
+  .loom-detail-page-modern .loom-detail-cover {
+    min-height: min(70vh, 34rem);
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-content {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 2rem 1.5rem 1.5rem;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-identity,
+  .loom-detail-page-modern .loom-detail-hero-info {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-info h1 {
+    max-width: 100%;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-controls {
+    align-self: stretch;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-controls > .loom-detail-hero-actions,
+  .loom-detail-page-modern .loom-detail-hero-controls > .loom-detail-hero-actions-menu {
+    flex: 0 0 auto;
+  }
+
+  .loom-detail-page-modern .loom-detail-hero-play {
+    flex: 1 1 auto;
+    max-width: none;
+    min-width: 0;
+    width: auto;
   }
 }

@@ -54,6 +54,7 @@ export default function ModernHome() {
   const searchOverlayRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const resultsGridRef = useRef<HTMLDivElement | null>(null);
+  const homeScrollRef = useRef<HTMLDivElement | null>(null);
   const {
     movies: allMovies,
     tvShows: allTVShows,
@@ -197,6 +198,26 @@ export default function ModernHome() {
     };
   }, [searchOpen]);
 
+  useEffect(() => {
+    const scrollElement = homeScrollRef.current;
+    if (!scrollElement) return;
+
+    const syncHeaderState = () => {
+      document.documentElement.toggleAttribute(
+        'data-loom-home-scrolled',
+        scrollElement.scrollTop > 8,
+      );
+    };
+
+    syncHeaderState();
+    scrollElement.addEventListener('scroll', syncHeaderState, { passive: true });
+
+    return () => {
+      scrollElement.removeEventListener('scroll', syncHeaderState);
+      document.documentElement.removeAttribute('data-loom-home-scrolled');
+    };
+  }, []);
+
   useModalLayer({
     open: searchOpen,
     contentRef: searchOverlayRef,
@@ -205,7 +226,7 @@ export default function ModernHome() {
   });
 
   return (
-    <div className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
+    <div ref={homeScrollRef} className="loom-modern-home relative h-full overflow-x-hidden overflow-y-auto bg-[var(--loom-bg)] text-[var(--loom-text)]">
       {!searchOpen && (
         <div className="loom-library-search-slot loom-no-drag pointer-events-auto fixed right-5 top-6 z-[55]">
           <LibraryFilterBar activeFilter={activeFilter} onChange={setActiveFilter} />
@@ -245,10 +266,10 @@ export default function ModernHome() {
                     event.preventDefault();
                     firstResult.focus();
                   }}
-                  placeholder="Search your library"
+                  placeholder="Find movies, shows, and more"
                   autoComplete="off"
                   autoFocus
-                  aria-label="Search your library"
+                  aria-label="Find movies, shows, and more"
                   className="loom-modern-search-input h-16 min-w-0 flex-1 bg-transparent px-4 text-lg text-[var(--loom-text)] outline-none placeholder:text-[var(--loom-faint)]"
                 />
                 <div className="loom-library-search-slot loom-no-drag pointer-events-auto shrink-0">
@@ -261,7 +282,24 @@ export default function ModernHome() {
               {normalizedQuery ? (
                 <SearchResults items={results} query={query} from={currentRoute} isLoading={isLoading} overlay gridRef={resultsGridRef} onExitTop={() => searchInputRef.current?.focus()} />
               ) : (
-                <p className="pt-8 text-center text-sm text-[var(--loom-muted)]">Search anime, TV shows, and movies</p>
+                <>
+                  <div className="loom-mobile-search-landing">
+                    {visibleTVShows.length > 0 && (
+                      <PosterRail title="Popular TV" items={visibleTVShows} from={currentRoute} />
+                    )}
+                    <PosterRail
+                      title="For You"
+                      items={visibleSavedItems.length > 0 ? visibleSavedItems : visibleItems}
+                      from={currentRoute}
+                    />
+                    {visibleMovies.length > 0 && (
+                      <PosterRail title="Drama! Drama! Drama!" items={visibleMovies} from={currentRoute} />
+                    )}
+                  </div>
+                  <p className="loom-modern-search-empty-hint pt-8 text-center text-sm text-[var(--loom-muted)]">
+                    Search anime, TV shows, and movies
+                  </p>
+                </>
               )}
             </div>
           </motion.div>
@@ -380,6 +418,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
   const linkState = { from, artwork: routeArtworkState(item, posterSources(item)) };
   const heroSummary = item.summary || 'Dive in to this title and add it to your library for full details and playback.';
   const heroLogoSources = useMemo(() => logoSources(item), [item]);
+  const heroPosterSources = useMemo(() => posterSources(item), [item]);
   const heroArtworkSources = useMemo(() => backdropSources(item), [item]);
   const heroFilePathCandidate = item.filePath || item.episodeFiles?.find((episode) => Boolean(episode.filePath))?.filePath || '';
   // Compact/paired-library cards can carry opaque or signed playback keys.
@@ -448,14 +487,22 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
             exit={{ opacity: 0 }}
             transition={artworkTransition}
           >
-            <SafeArtwork
-              src={resolvedHeroArtwork}
-              alt=""
-              className="h-full w-full"
-              imgClassName="object-cover object-center"
-              onError={requestHeroThumbnail}
-              priority
-            />
+              <SafeArtwork
+                src={resolvedHeroArtwork}
+                alt=""
+                className="loom-modern-hero-backdrop h-full w-full"
+                imgClassName="loom-modern-hero-image object-cover object-center"
+                onError={requestHeroThumbnail}
+                priority
+              />
+              <SafeArtwork
+                src={heroPosterSources[0] || resolvedHeroArtwork}
+                alt=""
+                className="loom-modern-hero-poster h-full w-full"
+                imgClassName="loom-modern-hero-image object-cover object-center"
+                onError={requestHeroThumbnail}
+                priority
+              />
           </motion.div>
         </AnimatePresence>
         <div className="loom-modern-hero-vignette absolute inset-0" />
@@ -476,7 +523,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
                 alt={item.title}
                 decoding="async"
                 fetchPriority="high"
-                className="max-h-[clamp(4.2rem,12vh,7.7rem)] w-[min(21rem,34vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                className="loom-modern-hero-logo max-h-[clamp(4.2rem,12vh,7.7rem)] w-[min(21rem,34vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
                 onError={() => setLogoFailed(true)}
               />
             ) : (
@@ -501,7 +548,7 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
                 )}
               </>
             )}
-            <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(1rem,1.35vw,1.45rem)] font-semibold text-[var(--loom-on-media)]">
+            <div className="loom-modern-hero-meta loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-[clamp(1rem,1.35vw,1.45rem)] font-semibold text-[var(--loom-on-media)]">
               <span className="inline-flex items-center gap-2">
                 <ProviderMark
                   mediaId={item.id}
@@ -518,12 +565,12 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
             </div>
 
             <div className="mt-3 w-full max-w-[50%]">
-              <p className="loom-modern-hero-text min-h-[2.9em] line-clamp-2 text-[clamp(1rem,1.35vw,1.55rem)] leading-[1.45] text-[var(--loom-on-media)]">
+              <p className="loom-modern-hero-summary loom-modern-hero-text min-h-[2.9em] line-clamp-2 text-[clamp(1rem,1.35vw,1.55rem)] leading-[1.45] text-[var(--loom-on-media)]">
                 {heroSummary}
               </p>
             </div>
 
-            <div className="loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[clamp(0.95rem,1.2vw,1.2rem)] font-semibold text-[var(--loom-on-media-muted)]">
+            <div className="loom-modern-hero-stats loom-modern-hero-text mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[clamp(0.95rem,1.2vw,1.2rem)] font-semibold text-[var(--loom-on-media-muted)]">
               {(hasRating || item.year > 0) && (
                 <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-2">
                   {displayedProviderRatings.map((rating, index) => (
@@ -553,7 +600,22 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
               <MediaTechnicalBadges item={item} />
             </div>
 
-            <div className="mt-5 flex items-center gap-3">
+            {itemCount > 1 && (
+              <div className="loom-modern-hero-pager absolute right-[var(--loom-frame-inset)] z-20 flex h-14 items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.55)]">
+                {Array.from({ length: itemCount }).map((_, index) => (
+                  <button
+                    key={`hero-dot-${index}`}
+                    type="button"
+                    aria-label={`Show featured title ${index + 1} of ${itemCount}`}
+                    aria-current={activeIndex === index ? 'true' : undefined}
+                    onClick={() => onSelect(index)}
+                    className={`h-1.5 rounded-full transition-[width,background-color] duration-300 ${activeIndex === index ? 'w-8 bg-[var(--loom-on-media)]' : 'w-1.5 bg-[var(--loom-media-hairline-strong)] hover:bg-[var(--loom-on-media)]'}`}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="loom-modern-hero-actions mt-5 flex items-center gap-3">
               <Link
                 to={mediaLink(item)}
                 state={linkState}
@@ -593,20 +655,6 @@ function Hero({ item, from, inWatchlist, onToggleWatchlist, watched, onToggleWat
             </div>
           </motion.div>
         </AnimatePresence>
-        {itemCount > 1 && (
-          <div className="loom-modern-hero-pager absolute right-[var(--loom-frame-inset)] z-20 flex h-14 items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.55)]">
-            {Array.from({ length: itemCount }).map((_, index) => (
-              <button
-                key={`hero-dot-${index}`}
-                type="button"
-                aria-label={`Show featured title ${index + 1} of ${itemCount}`}
-                aria-current={activeIndex === index ? 'true' : undefined}
-                onClick={() => onSelect(index)}
-                className={`h-1.5 rounded-full transition-[width,background-color] duration-300 ${activeIndex === index ? 'w-8 bg-[var(--loom-on-media)]' : 'w-1.5 bg-[var(--loom-media-hairline-strong)] hover:bg-[var(--loom-on-media)]'}`}
-              />
-            ))}
-          </div>
-        )}
       </div>
       {/* Announce slide changes without moving focus. */}
       <p className="sr-only" aria-live="polite">

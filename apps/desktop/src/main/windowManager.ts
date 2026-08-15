@@ -96,8 +96,11 @@ export function createWindow(): void {
   const windowOptions: ConstructorParameters<typeof BrowserWindow>[0] = {
     width: 1280,
     height: 800,
-    minWidth: 960,
-    minHeight: 540,
+    // Keep the desktop composition at its smallest supported reference view.
+    // Below this point the hero controls and episode rows no longer have
+    // enough room to remain readable without overlapping.
+    minWidth: 1180,
+    minHeight: 768,
     title: 'LoomTV',
     show: false,
     ...windowChromeOptions(process.platform),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
+import { useAnimate } from 'motion/react';
 import { Check, Play, Star, UserRound, ChevronRight, ChevronDown } from 'lucide-react';
 import { libraryMutationMessage, useLibrary, TVShow, EpisodeMeta, EpisodeFile } from '@/contexts/LibraryContext';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -406,6 +407,21 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const [customArtwork, setCustomArtwork] = useState<CustomArtworkState>({});
   const [libraryActionError, setLibraryActionError] = useState('');
   const [detailsReady, setDetailsReady] = useState(false);
+  const [detailScope, animateDetail] = useAnimate();
+
+  useEffect(() => {
+    if (!detailsReady || !detailScope.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
+    const controls = animateDetail(
+      detailScope.current,
+      { opacity: [0, 1] },
+      { duration: 0.22, ease: 'easeOut' },
+    );
+
+    return () => controls.stop();
+  }, [animateDetail, detailScope, detailsReady]);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [metadataRefreshState, setMetadataRefreshState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const routeState = (location.state as TVDetailRouteState | null) || null;
@@ -889,11 +905,26 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
   const backTarget = sourceRoute && !sourceRoute.startsWith('/anime/') && !sourceRoute.startsWith('/tv/')
     ? sourceRoute
     : fallbackRoute;
-  const handleBack = () => navigate(backTarget);
+  const handleBack = () => {
+    const historyIndex = window.history.state?.idx;
+    if (typeof historyIndex === 'number' && historyIndex > 0) {
+      navigate(-1);
+      return;
+    }
+
+    const isSameRoute = backTarget === location.pathname
+      || backTarget === `${location.pathname}${location.search}`;
+    if (!isSameRoute) {
+      navigate(backTarget);
+      return;
+    }
+
+    navigate(fallbackRoute);
+  };
 
 
   return (
-    <div className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
+    <div ref={detailScope} className={`loom-page loom-detail-page h-full overflow-y-auto ${theme.homeStyle === 'modern' ? 'loom-detail-page-modern' : ''}`}>
       {/* Hero backdrop */}
       <div className="loom-detail-cover relative h-[45vh] w-full overflow-hidden">
         <div className="loom-detail-cover-image absolute inset-y-0 left-0 right-0 mx-auto w-full max-w-[var(--loom-frame-max-width)]">
@@ -928,7 +959,7 @@ export default function TVDetail({ kind = 'series', onPlay }: TVDetailProps) {
           type="button"
           onClick={handleBack}
           aria-label="Back"
-          className="loom-detail-back loom-no-drag fixed top-6 z-50 flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
+          className="loom-detail-back loom-no-drag pointer-events-auto fixed top-6 z-[80] flex h-10 items-center gap-2 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-panel)] px-3 text-sm text-[var(--loom-text)] shadow-lg backdrop-blur-md transition-colors hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-active-text)]"
         >
           <ChevronRight className="w-5 h-5 rotate-180" />
           <span className="loom-detail-back-label">Back</span>

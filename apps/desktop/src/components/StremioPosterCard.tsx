@@ -98,7 +98,7 @@ const StremioPosterCard = memo(function StremioPosterCard({
       <div className="mt-2 shrink-0 overflow-hidden">
         <h4 className="truncate text-sm font-semibold text-[var(--loom-text)]">{item.title}</h4>
         {(metaLine || item.contentRating || item.format) && (
-          <div className="mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
+          <div className="loom-poster-meta mt-1.5 flex min-w-0 items-center gap-x-1.5 gap-y-1">
             {metaLine && <p className="min-w-0 truncate text-xs text-[var(--loom-muted)]">{metaLine}</p>}
             <ContentRatingBadge
               rating={mediaFormatLabel(item.format, item.type)}
