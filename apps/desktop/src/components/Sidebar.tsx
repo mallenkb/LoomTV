@@ -725,7 +725,7 @@ export default function Sidebar() {
           {/* Keep the detail page focused on its media controls. The corner
               settings/profile entry remains available on home and library
               surfaces, but is not part of the detail-page shell. */}
-          {!isDetailRoute && (
+          {!isDetailRoute && activeProfile && (
             <Link
               to="/settings"
               aria-label="Open settings"
