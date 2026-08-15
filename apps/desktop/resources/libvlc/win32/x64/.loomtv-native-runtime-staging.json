@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "engine": "libvlc",
+  "target": "win32-x64",
+  "layout": "resources/libvlc/win32/x64",
+  "sourceMode": "per-engine"
+}

@@ -257,9 +257,8 @@ body,
 /* The established MPV fallback renders in its own borderless window behind
    Electron. During native playback, LoomTV becomes the transparent
    control/overlay layer while the library screen underneath the player is
-   hidden. The experimental LibVLC child surface is additionally gated in the
-   main process because window-manager ordering is not true renderer
-   compositing. */
+   hidden. The LibVLC child surface is additionally gated in the main process
+   because window-manager ordering is not true renderer compositing. */
 html.loom-native-active,
 html.loom-native-active body,
 html.loom-native-active #root,

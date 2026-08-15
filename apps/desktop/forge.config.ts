@@ -127,9 +127,11 @@ function nativeRuntimeFileName(engine: 'libvlc' | 'mpv', platform: string): stri
 }
 
 function nativeEnginesForPlatform(platform: string): Array<'libvlc' | 'mpv'> {
-  // The LibVLC surface is currently wired only for macOS. MPV remains the
-  // cross-platform native fallback wherever its payload is supplied.
-  return platform === 'darwin' ? ['libvlc', 'mpv'] : ['mpv'];
+  // LibVLC is the primary local engine on macOS and Windows. MPV remains the
+  // macOS fallback; Linux keeps its existing browser/native-system fallback.
+  if (platform === 'darwin') return ['libvlc', 'mpv'];
+  if (platform === 'win32') return ['libvlc'];
+  return [];
 }
 
 function containsFile(root: string, expectedName: string): boolean {

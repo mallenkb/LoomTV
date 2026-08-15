@@ -8,6 +8,7 @@ import {
   releaseNativePlaybackDisplaySleep,
   syncNativePlaybackDisplaySleep,
 } from './nativePlaybackPower';
+import { libVlcPlatformBinding, libVlcPlatformVariants } from './libvlcPlatform.ts';
 
 /**
  * A koffi type descriptor. `koffi.struct(...)` returns one of these opaque
@@ -144,18 +145,12 @@ function libVlcKillSwitchEnabled(): boolean {
 }
 
 // A raw BrowserWindow native drawable is not composited with WebContents, so
-// the gate below used to hold the surface back unconditionally. The in-window
-// host now exists: createMacOsNativeViewHost inserts a real AppKit child
-// NSView at the bottom of Electron's content view, leaving the renderer as the
-// interactive layer above it and creating no second OS-visible window.
-//
-// The host is implemented for macOS only. Other platforms keep the MPV then
-// Chromium/HLS fallback order until their surface is wired.
-// LOOMTV_LIBVLC_COMPOSITED_SURFACE=0 still forces the old behavior.
+// the gate below is only open on platforms with a real child-surface host.
+// LOOMTV_LIBVLC_COMPOSITED_SURFACE=0 still forces the fallback-only behavior.
 function libVlcCompositionGateEnabled(): boolean {
   const configured = explicitBoolean(process.env.LOOMTV_LIBVLC_COMPOSITED_SURFACE);
   if (configured !== undefined) return configured;
-  return process.platform === 'darwin';
+  return libVlcPlatformBinding(process.platform) !== null;
 }
 
 function disabledReason(): string {
@@ -166,9 +161,7 @@ function disabledReason(): string {
     return 'Native LibVLC playback was disabled by configuration. LoomTV is using MPV or Chromium/HLS fallback playback.';
   }
   if (!libVlcCompositionGateEnabled()) {
-    return process.platform === 'darwin'
-      ? 'Native LibVLC playback was turned off for this launch. LoomTV is using MPV or Chromium/HLS fallback playback.'
-      : 'Native LibVLC playback has no in-window composition host on this platform yet. LoomTV is using MPV or Chromium/HLS fallback playback.';
+    return 'Native LibVLC playback has no in-window composition host on this platform. LoomTV is using MPV or Chromium/HLS fallback playback.';
   }
   return 'Native LibVLC playback is unavailable. LoomTV is using MPV or Chromium/HLS fallback playback.';
 }
@@ -189,12 +182,6 @@ function runtimeCacheKey(): string {
 
 function libraryFileName(): string {
   return process.platform === 'win32' ? 'libvlc.dll' : process.platform === 'darwin' ? 'libvlc.dylib' : 'libvlc.so';
-}
-
-function platformVariants(): string[] {
-  if (process.platform === 'darwin') return ['mac', 'macos', 'darwin'];
-  if (process.platform === 'win32') return ['win', 'windows'];
-  return ['linux'];
 }
 
 function architectureVariants(): string[] {
@@ -222,7 +209,7 @@ function bundledLibraryPaths(): string[] {
   const name = libraryFileName();
   const layoutRoots: string[] = [];
   for (const root of bundledResourceRoots()) {
-    for (const platform of platformVariants()) {
+    for (const platform of libVlcPlatformVariants(process.platform)) {
       for (const architecture of architectureVariants()) {
         layoutRoots.push(path.join(root, platform, architecture));
       }
@@ -270,6 +257,16 @@ function candidateLibraryPaths(): Array<{ path: string; source: 'environment' | 
       { path: '/opt/homebrew/lib/libvlc.dylib', source: 'system' },
       { path: '/usr/local/lib/libvlc.dylib', source: 'system' },
       { path: 'libvlc.dylib', source: 'system' },
+    );
+  } else if (process.platform === 'win32') {
+    const programFiles = process.env.ProgramW6432 || process.env.ProgramFiles || 'C:\\Program Files';
+    const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const localAppData = process.env.LOCALAPPDATA || '';
+    candidates.push(
+      { path: path.join(programFiles, 'VideoLAN', 'VLC', 'libvlc.dll'), source: 'system' },
+      { path: path.join(programFilesX86, 'VideoLAN', 'VLC', 'libvlc.dll'), source: 'system' },
+      ...(localAppData ? [{ path: path.join(localAppData, 'Programs', 'VideoLAN', 'VLC', 'libvlc.dll'), source: 'system' as const }] : []),
+      { path: 'libvlc.dll', source: 'system' },
     );
   }
   return [...new Map(candidates.map((candidate) => [candidate.path, candidate])).values()];
@@ -354,9 +351,8 @@ function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
 
 function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
   if (!libVlcConfiguredEnabled() || libVlcKillSwitchEnabled() || !libVlcCompositionGateEnabled()) return { runtime: null };
-  if (process.platform !== 'darwin') {
-    return { runtime: null, warning: 'The experimental LibVLC surface currently wires only the macOS native surface.' };
-  }
+  const platformBinding = libVlcPlatformBinding(process.platform);
+  if (!platformBinding) return { runtime: null, warning: 'No LibVLC child-surface host is implemented for this platform.' };
 
   let koffi: KoffiRuntime;
   try {
@@ -369,12 +365,15 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
   for (const candidate of candidateLibraryPaths()) {
     try {
       const loadedLibraries: KoffiLibrary[] = [];
-      // VLC's macOS dylibs use @rpath/libvlccore.dylib. The standalone VLC
-      // executable supplies that rpath, but Electron/Koffi does not inherit
-      // it when loading libvlc directly. Load the sibling core library first
-      // so dyld can satisfy libvlc's dependency from the same payload.
-      if (process.platform === 'darwin') {
-        const corePath = path.join(path.dirname(candidate.path), 'libvlccore.dylib');
+      // VLC's bundled libraries are normally loaded by the VLC executable,
+      // which supplies the sibling core library and plugin path. Electron/
+      // Koffi does not inherit that executable loader setup, so load the
+      // sibling core first on both supported native platforms.
+      if (process.platform === 'darwin' || process.platform === 'win32') {
+        const corePath = path.join(
+          path.dirname(candidate.path),
+          process.platform === 'win32' ? 'libvlccore.dll' : 'libvlccore.dylib',
+        );
         try {
           if (fs.statSync(corePath).isFile()) loadedLibraries.push(koffi.load(corePath));
         } catch {
@@ -405,7 +404,7 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         audioSetMute: bind(library, 'libvlc_audio_set_mute', 'void', ['void *', 'int']),
         audioGetTrack: optionalBind(library, 'libvlc_audio_get_track', 'int', ['void *']),
         playerSetRate: bind(library, 'libvlc_media_player_set_rate', 'int', ['void *', 'float']),
-        setDrawable: bind(library, 'libvlc_media_player_set_nsobject', 'void', ['void *', 'void *']),
+        setDrawable: bind(library, platformBinding.drawableSymbol, 'void', ['void *', 'void *']),
         videoSetMouseInput: optionalBind(library, 'libvlc_video_set_mouse_input', 'void', ['void *', 'int']),
         videoSetKeyInput: optionalBind(library, 'libvlc_video_set_key_input', 'void', ['void *', 'int']),
         videoSetTrack: optionalBind(library, 'libvlc_video_set_track', 'int', ['void *', 'int']),
@@ -481,7 +480,7 @@ function nativeHandleForWindow(window: BrowserWindow): NativeDrawable {
   return pointer;
 }
 
-type MacOsNativeViewHost = {
+type NativeViewHost = {
   drawable: NativeDrawable;
   setVisible: (visible: boolean) => void;
   /**
@@ -498,16 +497,16 @@ type MacOsNativeViewHost = {
 };
 
 /**
- * Attach a LibVLC NSView to Electron's existing content view hierarchy.
+ * Attach a LibVLC child surface to Electron's existing content view hierarchy.
  *
  * BrowserWindow/native-window drawables are not composited with WebContents:
  * LibVLC takes over that view and hides the renderer. The only supported
- * single-window route here is a real AppKit child NSView, inserted at the
+ * single-window route here is a real platform child surface, inserted at the
  * bottom of Electron's native view so the renderer remains the interactive
- * layer above it. Koffi is used only for the narrow Objective-C/AppKit calls;
- * no second BrowserWindow or owned window is created.
+ * layer above it. Koffi is used only for the narrow platform calls; no second
+ * BrowserWindow or owned window is created.
  */
-function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): MacOsNativeViewHost {
+function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
   if (process.platform !== 'darwin') throw new Error('The LibVLC NSView host is only available on macOS.');
   const ownerView = nativeHandleForWindow(ownerWindow);
   const objc = koffi.load('/usr/lib/libobjc.A.dylib');
@@ -795,6 +794,175 @@ function createMacOsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWind
   }
 }
 
+/**
+ * Attach a LibVLC HWND below Chromium on Windows.
+ *
+ * `libvlc_media_player_set_hwnd` renders into a child HWND, not into a
+ * BrowserWindow's compositor surface. Creating two ordinary child controls
+ * keeps the black backdrop below the video and keeps both below Electron's
+ * Chromium child window, so Loom's controls remain clickable and visible.
+ */
+function createWindowsNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
+  if (process.platform !== 'win32') throw new Error('The LibVLC HWND host is only available on Windows.');
+  const ownerHandle = nativeHandleForWindow(ownerWindow);
+  const user32 = koffi.load('user32.dll');
+  const createWindowEx = user32.func('CreateWindowExA', 'void *', [
+    'uint32', 'str', 'str', 'uint32', 'int', 'int', 'int', 'int',
+    'void *', 'void *', 'void *', 'void *',
+  ]);
+  const destroyWindow = user32.func('DestroyWindow', 'bool', ['void *']);
+  const showWindow = user32.func('ShowWindow', 'bool', ['void *', 'int']);
+  const setWindowPos = user32.func('SetWindowPos', 'bool', [
+    'void *', 'void *', 'int', 'int', 'int', 'int', 'uint32',
+  ]);
+
+  const WS_CHILD = 0x40000000;
+  const WS_VISIBLE = 0x10000000;
+  const WS_CLIPSIBLINGS = 0x04000000;
+  const WS_CLIPCHILDREN = 0x02000000;
+  const WS_EX_NOACTIVATE = 0x08000000;
+  const SS_BLACKRECT = 0x00000004;
+  const SW_HIDE = 0;
+  const SW_SHOW = 5;
+  const SWP_NOSIZE = 0x0001;
+  const SWP_NOMOVE = 0x0002;
+  const SWP_NOACTIVATE = 0x0010;
+  const SWP_SHOWWINDOW = 0x0040;
+  const SWP_NOOWNERZORDER = 0x0200;
+  const HWND_BOTTOM = 1n;
+
+  const positionFlags = SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW;
+  const orderBelowRenderer = (windowHandle: NativeDrawable, insertAfter: NativeDrawable | null): void => {
+    setWindowPos(windowHandle, insertAfter, 0, 0, 0, 0, positionFlags | SWP_NOSIZE | SWP_NOMOVE);
+  };
+
+  let backdrop: NativeDrawable | null = null;
+  let nativeView: NativeDrawable | null = null;
+  let destroyed = false;
+  let attached = false;
+
+  const destroy = (): void => {
+    if (destroyed) return;
+    destroyed = true;
+    if (nativeView) {
+      try { showWindow(nativeView, SW_HIDE); } catch { /* best effort */ }
+      try { destroyWindow(nativeView); } catch { /* best effort */ }
+    }
+    if (backdrop) {
+      try { showWindow(backdrop, SW_HIDE); } catch { /* best effort */ }
+      try { destroyWindow(backdrop); } catch { /* best effort */ }
+    }
+    nativeView = null;
+    backdrop = null;
+  };
+
+  try {
+    const childStyle = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+    backdrop = nativeHandle(createWindowEx(
+      WS_EX_NOACTIVATE,
+      'STATIC',
+      '',
+      childStyle | SS_BLACKRECT,
+      0,
+      0,
+      1,
+      1,
+      ownerHandle,
+      null,
+      null,
+      null,
+    ));
+    if (!backdrop) throw new Error('The Windows LibVLC backdrop child could not be created.');
+
+    nativeView = nativeHandle(createWindowEx(
+      WS_EX_NOACTIVATE,
+      'STATIC',
+      '',
+      childStyle | SS_BLACKRECT,
+      0,
+      0,
+      1,
+      1,
+      ownerHandle,
+      null,
+      null,
+      null,
+    ));
+    if (!nativeView) throw new Error('The Windows LibVLC video child could not be created.');
+
+    const setFrame = (windowHandle: NativeDrawable, x: number, y: number, width: number, height: number): void => {
+      setWindowPos(
+        windowHandle,
+        null,
+        Math.round(x),
+        Math.round(y),
+        Math.max(1, Math.round(width)),
+        Math.max(1, Math.round(height)),
+        positionFlags,
+      );
+    };
+
+    let viewport: PlaybackViewport | null = null;
+    const syncBounds = (nextViewport?: PlaybackViewport | null): void => {
+      if (destroyed || !nativeView || !backdrop || ownerWindow.isDestroyed()) return;
+      if (nextViewport !== undefined) viewport = nextViewport;
+      const [contentWidth, contentHeight] = ownerWindow.getContentSize();
+      const width = Math.max(1, contentWidth);
+      const height = Math.max(1, contentHeight);
+      setFrame(backdrop, 0, 0, width, height);
+      if (!viewport) {
+        setFrame(nativeView, 0, 0, width, height);
+        return;
+      }
+      const left = clamp(viewport.x, 0, Math.max(0, width - 1));
+      const top = clamp(viewport.y, 0, Math.max(0, height - 1));
+      const frameWidth = clamp(viewport.width, 1, width - left);
+      const frameHeight = clamp(viewport.height, 1, height - top);
+      setFrame(nativeView, left, top, frameWidth, frameHeight);
+    };
+
+    const syncHierarchy = (_forceRebind = false): boolean => {
+      if (destroyed || !nativeView || !backdrop) return false;
+      // Child z-order is relative to the top-level Electron client area.
+      // Keep the black backdrop at the bottom and the LibVLC child directly
+      // above it; Chromium's existing child window remains above both.
+      orderBelowRenderer(backdrop, HWND_BOTTOM);
+      orderBelowRenderer(nativeView, backdrop);
+      const changed = !attached;
+      attached = true;
+      return changed;
+    };
+
+    syncBounds();
+    syncHierarchy(true);
+    showWindow(backdrop, SW_SHOW);
+    showWindow(nativeView, SW_SHOW);
+
+    return {
+      drawable: nativeView,
+      setVisible: (visible) => {
+        if (destroyed || !nativeView || !backdrop) return;
+        showWindow(backdrop, visible ? SW_SHOW : SW_HIDE);
+        showWindow(nativeView, visible ? SW_SHOW : SW_HIDE);
+      },
+      syncBounds,
+      setAutoresize: () => { /* Windows child bounds are synchronized explicitly. */ },
+      syncHierarchy,
+      destroy,
+    };
+  } catch (error) {
+    destroy();
+    throw error;
+  }
+}
+
+function createNativeViewHost(koffi: KoffiRuntime, ownerWindow: BrowserWindow): NativeViewHost {
+  const platformBinding = libVlcPlatformBinding(process.platform);
+  if (platformBinding?.host === 'macos-child') return createMacOsNativeViewHost(koffi, ownerWindow);
+  if (platformBinding?.host === 'windows-child') return createWindowsNativeViewHost(koffi, ownerWindow);
+  throw new Error('No LibVLC native child-surface host is available for this platform.');
+}
+
 function nativeStateStatus(state: number): LibVlcPlaybackState['status'] {
   if (state === 3 || state === 4) return 'ready';
   if (state === 6) return 'ended';
@@ -812,7 +980,7 @@ class LibVlcPlaybackSession {
   private nativeSyncTimer: NodeJS.Timeout | null = null;
   private nativeSyncRetryCount = 0;
   private nativeSyncForceRebind = false;
-  private nativeViewHost: MacOsNativeViewHost | null = null;
+  private nativeViewHost: NativeViewHost | null = null;
   private viewport: PlaybackViewport | null = null;
   private viewportRevision = 0;
   private finalViewportSyncTimer: NodeJS.Timeout | null = null;
@@ -871,7 +1039,9 @@ class LibVlcPlaybackSession {
       throw new Error('LibVLC could not open the authorized local media path.');
     }
     try {
-      api.mediaAddOption(media, ':vout=macosx');
+      const platformBinding = libVlcPlatformBinding(process.platform);
+      if (!platformBinding) throw new Error('LibVLC playback is not supported on this platform.');
+      api.mediaAddOption(media, platformBinding.mediaVoutOption);
       if (options.audioLanguage && /^[a-z0-9_-]+$/i.test(options.audioLanguage)) {
         api.mediaAddOption(media, `:audio-language=${options.audioLanguage}`);
       }
@@ -895,11 +1065,12 @@ class LibVlcPlaybackSession {
     }
 
     try {
-      // Attach LibVLC to a real AppKit child view inside the existing Electron
-      // window. Directly attaching to the owner WebContents view replaces the
-      // renderer layer, while a sibling NSView ordered below it preserves all
-      // Loom controls, subtitles, and panels in the same OS window.
-      this.nativeViewHost = createMacOsNativeViewHost(loadKoffi(), ownerWindow);
+      // Attach LibVLC to a real platform child view inside the existing
+      // Electron window. Directly attaching to the owner WebContents view
+      // replaces the renderer layer, while a sibling child ordered below it
+      // preserves all Loom controls, subtitles, and panels in the same OS
+      // window.
+      this.nativeViewHost = createNativeViewHost(loadKoffi(), ownerWindow);
       this.configureNativePlayer(this.player);
       if (this.startSeconds === 0 && nativeInt(api.playerPlay(this.player)) < 0) throw new Error('LibVLC rejected the authorized local media source.');
       if (this.startSeconds > 0 && nativeInt(api.playerPlay(this.player)) < 0) throw new Error('LibVLC rejected the authorized local media source.');

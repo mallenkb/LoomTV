@@ -262,6 +262,19 @@
       "icon": "resources/icon.ico",
       "extraResources": [
         {
+          "from": "resources/libvlc/win32/x64",
+          "to": "libvlc/win32/x64",
+          "filter": [
+            "**/*",
+            "!runtime-manifest.json",
+            "!.loomtv-native-runtime-staging.json"
+          ]
+        },
+        {
+          "from": "resources/libvlc/win32/x64/runtime-manifest.json",
+          "to": "libvlc/win32/x64/runtime-manifest.json"
+        },
+        {
           "from": "resources/ffmpeg/win",
           "to": "ffmpeg/win"
         },

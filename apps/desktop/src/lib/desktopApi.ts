@@ -74,7 +74,10 @@ import {
   clearRemoteDesktopSession,
   getRemoteDesktopSession,
   isRemoteDesktopMode,
+  isRemoteMediaSource,
   remoteProfileSessionPatch,
+  remoteMediaRoutePath,
+  remoteMediaProtocolUrl,
   remoteResourceId,
   saveRemoteDesktopSession,
   setDesktopLibraryMode,
@@ -635,7 +638,7 @@ async function remotePlaybackPlan(
   filePath: string,
   capabilities: PlaybackCapabilities = DEFAULT_REMOTE_PLAYBACK_CAPABILITIES,
 ): Promise<PlaybackPlanResponse | null> {
-  if (!isRemoteDesktopMode() || !/^https?:\/\//i.test(filePath)) return null;
+  if (!isRemoteDesktopMode() || !filePath.trim()) return null;
   const result = await remoteJson('/api/v2/playback-plan', playbackPlanResultSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -697,10 +700,24 @@ function remoteMediaSource(url: string, remoteBaseUrl?: string): string {
     const parsed = new URL(url);
     const baseUrl = remoteBaseUrl || getRemoteDesktopSession()?.baseUrl;
     if (!baseUrl || parsed.origin !== new URL(baseUrl).origin) return url;
-    return `plexserver://remote${parsed.pathname}${parsed.search}`;
+    return remoteMediaProtocolUrl(`${parsed.pathname}${parsed.search}`);
   } catch {
     return url;
   }
+}
+
+function remoteMediaRoute(
+  pathname: string,
+  filePath: string,
+  extraParams?: Record<string, string | number | undefined>,
+): string {
+  const route = remoteMediaRoutePath(pathname, filePath, extraParams);
+  if (window.desktopApi?.remoteLibraryRequest) {
+    return remoteMediaProtocolUrl(route);
+  }
+  const baseUrl = getRemoteDesktopSession()?.baseUrl;
+  if (!baseUrl) return filePath;
+  return new URL(route, `${baseUrl}/`).toString();
 }
 
 function remoteLibrarySources(library: LibraryPayload, remoteBaseUrl?: string): LibraryPayload {
@@ -846,13 +863,13 @@ export const desktopApi = {
   },
 
   async getStreamUrl(filePath: string, options: StreamUrlOptions = {}): Promise<StreamUrlResult> {
-    if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
+    if (isRemoteDesktopMode()) {
       let fileName = 'Remote stream';
       try { fileName = new URL(filePath).pathname.split('/').pop() || fileName; } catch { /* Keep fallback. */ }
       const playbackPlan = await remotePlaybackPlan(filePath).catch(() => null);
       const plan = playbackPlan?.plan;
       return {
-        url: remoteMediaSource(filePath),
+        url: remoteMediaRoute('/stream', filePath),
         contentType: 'video/mp4',
         fileName,
         isTranscoded: plan?.sourceAction === 'transcode',
@@ -926,9 +943,15 @@ export const desktopApi = {
   },
 
   async getSubtitleUrl(filePath: string, streamOrdinal?: number): Promise<{ url: string }> {
-    if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
-      const parsed = new URL(filePath);
-      if (parsed.pathname === '/subtitle') return { url: remoteMediaSource(filePath) };
+    if (isRemoteDesktopMode()) {
+      const parsed = isRemoteMediaSource(filePath) ? new URL(filePath) : null;
+      if (!parsed || parsed.pathname === '/stream' || parsed.pathname === '/subtitle') {
+        return {
+          url: remoteMediaRoute('/subtitle', filePath, typeof streamOrdinal === 'number'
+            ? { streamOrdinal: Math.floor(streamOrdinal) }
+            : undefined),
+        };
+      }
       throw new Error('Embedded remote subtitles require a host-provided subtitle URL.');
     }
     if (window.desktopApi?.getSubtitleUrl) return window.desktopApi.getSubtitleUrl(filePath, streamOrdinal);
@@ -1135,6 +1158,9 @@ export const desktopApi = {
   },
 
   async getThumbnail(filePath: string, time?: string): Promise<{ url: string }> {
+    if (isRemoteDesktopMode()) {
+      return { url: remoteMediaRoute('/api/thumbnail', filePath, time ? { t: time } : undefined) };
+    }
     if (window.desktopApi?.getThumbnail) return window.desktopApi.getThumbnail(filePath, time);
     const params = new URLSearchParams({ path: filePath });
     if (time) params.set('t', time);
@@ -1902,7 +1928,7 @@ export const desktopApi = {
 
   media: {
     async probe(filePath: string): Promise<ApiResult<unknown>> {
-      if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) {
+      if (isRemoteDesktopMode()) {
         return { ok: false, error: 'Media probing is handled by the paired host.' };
       }
       if (window.desktopApi?.media) return window.desktopApi.media.probe(filePath);
@@ -1913,7 +1939,7 @@ export const desktopApi = {
     },
 
     async canDirectPlay(filePath: string, backend: 'html5' | 'hls' = 'html5'): Promise<ApiResult<boolean>> {
-      if (isRemoteDesktopMode() && /^https?:\/\//i.test(filePath)) return { ok: true, data: backend === 'html5' };
+      if (isRemoteDesktopMode()) return { ok: true, data: backend === 'html5' };
       if (window.desktopApi?.media) return window.desktopApi.media.canDirectPlay(filePath, backend);
       const probeResult = await this.probe(filePath);
       return probeResult.ok ? { ok: true, data: backend === 'html5' } : { ok: false, error: probeResult.error };

@@ -198,7 +198,7 @@ export default function PlaybackSettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Native playback fallback (mpv)</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            LibVLC plays local files through an in-window native surface on macOS. Configure an external mpv installation here as the fallback for the classic integrated player experience; packaged releases may also include a verified mpv payload.
+            LibVLC plays local files through an in-window native surface on macOS and Windows. Configure an external mpv installation here as the fallback for the classic integrated player experience; packaged releases may also include a verified mpv payload.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -437,7 +437,7 @@ export default function PlaybackSettingsSection({
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
               <dt className="text-xs font-semibold text-white/60">Local files</dt>
-              <dd className="mt-1 text-white/85">Classic Loom player UI → LibVLC native surface (macOS) → mpv fallback → Chromium/HLS</dd>
+              <dd className="mt-1 text-white/85">Classic Loom player UI → LibVLC native surface (macOS/Windows) → mpv fallback → Chromium/HLS</dd>
             </div>
             <div className="rounded-lg bg-[var(--loom-surface-2)] p-3">
               <dt className="text-xs font-semibold text-white/60">Network &amp; remote media</dt>
@@ -456,7 +456,7 @@ export default function PlaybackSettingsSection({
           <div className="overflow-hidden rounded-lg border border-[var(--loom-panel-border)] bg-[var(--loom-surface-2)] divide-y divide-[var(--loom-panel-border)]">
             <div className="grid gap-2 px-4 py-3 text-sm sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
               <span className="font-medium text-white">LibVLC</span>
-              <span className="text-xs text-[var(--loom-faint)]">Primary local playback on macOS</span>
+              <span className="text-xs text-[var(--loom-faint)]">Primary local playback on macOS and Windows</span>
               <span className={libvlcAvailability?.available ? 'settings-status-available text-xs' : 'text-xs text-[var(--loom-muted)]'} title={libvlcAvailability?.libraryPath || libvlcAvailability?.warning || libvlcAvailability?.reason}>
                 {libvlcAvailability === null
                   ? 'Checking…'

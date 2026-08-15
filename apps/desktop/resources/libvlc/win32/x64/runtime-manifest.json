@@ -1,0 +1,1872 @@
+{
+  "manifestVersion": 1,
+  "engine": "libvlc",
+  "platform": "win32",
+  "architecture": "x64",
+  "files": [
+    {
+      "path": "hrtfs/dodeca_and_7channel_3DSL_HRTF.sofa",
+      "sha256": "05ca927052cf83663b29546b06998b03ea7fbcd288f7c99e7af8b215ac77ec4e"
+    },
+    {
+      "path": "libvlc.dll",
+      "sha256": "095d164633af53ac015dcd76540e8523744f57d506db111f19b3fdd9d6180833"
+    },
+    {
+      "path": "libvlccore.dll",
+      "sha256": "2ddb85b36650f85b5a09724c5b17428b1b1b76bd3e3dd85b643933659d5e333d"
+    },
+    {
+      "path": "lua/extensions/VLSub.luac",
+      "sha256": "661ba9e5287efc4b066b6e4c0b23fcc2726471cf6ca67d53e6da0ac4b879cfaa"
+    },
+    {
+      "path": "lua/http/css/main.css",
+      "sha256": "f9a95d835f65815715e8366b16e6a780d635307bb5dc67ac54ebd74732e49363"
+    },
+    {
+      "path": "lua/http/css/mobile.css",
+      "sha256": "10709dbffc67c6be84c5a041b936ce03e4c774912e4aad2ee170a9a14c546012"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_diagonals-thick_18_b81900_40x40.png",
+      "sha256": "adb182bf32d80030963bfae7079295b8c35085a85cf5a0fe28046db1b4836e7f"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_diagonals-thick_20_666666_40x40.png",
+      "sha256": "c6133633c005b1c344f4ae682811157a366af0f9f637ee4fb65e896ffbf0d71e"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_flat_10_000000_40x100.png",
+      "sha256": "61b9e46d291ed3d7800cbc899b7edcb95327d16cd61085bb515381af32bc1469"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_glass_100_f6f6f6_1x400.png",
+      "sha256": "49d57607054d07581044a39025ea0ff623185d5e8117b7325084db098795298d"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_glass_100_fdf5ce_1x400.png",
+      "sha256": "1a9cb0100308c590bd17ace4d3541dab56cd982af721d0b2ea67f5d746dcab5f"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_glass_65_ffffff_1x400.png",
+      "sha256": "29043ec911594970261ab6c5e03de903c1161ed13a25a377449c9c3b22134c28"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_gloss-wave_35_f6a828_500x100.png",
+      "sha256": "0307f13b51f07c8d10ede9b29c8f43cb02024fcd2d69f04a26600a4244846ac0"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_highlight-soft_100_eeeeee_1x100.png",
+      "sha256": "983c3de6adc1d836b26e97bcb87cb29fb5b31b2fc87ae78563bd6e328907667b"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-bg_highlight-soft_75_ffe45c_1x100.png",
+      "sha256": "46f39d964785147c69c5ef4495977c1285984a1d99aa087d650036ec6bce8234"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-icons_222222_256x240.png",
+      "sha256": "7ad54e50835a67efbb2e9694e73d24a5dd9545df297afb1569992e0247acc32c"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-icons_228ef1_256x240.png",
+      "sha256": "3d9ef9c36b2407d3766fd183927e2778a1e4abaaf2233910453bafaf76e1f3db"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-icons_ef8c08_256x240.png",
+      "sha256": "40a22c997402ddb59e9e344c2d0a8c4cafe64cf4b103584208863eec05dfa897"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-icons_ffd27a_256x240.png",
+      "sha256": "1bd643299f5a35060c7057dc76b4a2138cf3723a2ed5f98a25f9c9a954eaced6"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/images/ui-icons_ffffff_256x240.png",
+      "sha256": "fdcb90174d3b2f5cb8b7a4205e60119419c728c1c76e5a2573aaa8058b6dd3a1"
+    },
+    {
+      "path": "lua/http/css/ui-lightness/jquery-ui-1.8.13.custom.css",
+      "sha256": "272013c17922c5142893beb0655d6fe411c4f77b2a8140b4c35a4db49ac0a8b5"
+    },
+    {
+      "path": "lua/http/custom.lua",
+      "sha256": "a6623694797e67dc0f22e4f64570825e489d2730676e02db9d6911a04d2cb1ca"
+    },
+    {
+      "path": "lua/http/dialogs/batch_window.html",
+      "sha256": "5189cdb57f5b2e8c3add7e6c4487f5cf8a018508c612f35c8e1305512f2176e8"
+    },
+    {
+      "path": "lua/http/dialogs/browse_window.html",
+      "sha256": "d93c774a7aeb4594f56b37e81838ba03b6855c2bbd91eb8cb803dbd413c5e571"
+    },
+    {
+      "path": "lua/http/dialogs/create_stream.html",
+      "sha256": "fdfc3417223b88d2e8f0421ced4711760ab11a3c18a50dc05b805a0f4f1a5134"
+    },
+    {
+      "path": "lua/http/dialogs/equalizer_window.html",
+      "sha256": "62cac570011b9b07e0f421612571a1ce663e49dd3b90a16cf31d8855f1adddac"
+    },
+    {
+      "path": "lua/http/dialogs/error_window.html",
+      "sha256": "75d1a1ab807cd97801bc37ed547b26c7b357497e82d01221ac064497c9480304"
+    },
+    {
+      "path": "lua/http/dialogs/mosaic_window.html",
+      "sha256": "e474ca66e17ecad86fdecd0ff4db1eff7eee70083c2cb30498f81bce71d03e18"
+    },
+    {
+      "path": "lua/http/dialogs/offset_window.html",
+      "sha256": "f0c8450d88f4a64396304652811c3b9d215b9cceb24c36a0753042e68a688ab5"
+    },
+    {
+      "path": "lua/http/dialogs/stream_config_window.html",
+      "sha256": "1ef2a9fc7005712cd18effe0c6d644f6e1badce728c4bbbcdd675cd67d4fb9f7"
+    },
+    {
+      "path": "lua/http/dialogs/stream_window.html",
+      "sha256": "b103c0d7778d1694fdcab3aa28de6ee80aa9a10288355d2f47ee9ecf8a2462e6"
+    },
+    {
+      "path": "lua/http/favicon.ico",
+      "sha256": "fd9b5998b98ee0ba86ed7687f215a1cdde90c00b0b1cd11dc83e3614389cb6ad"
+    },
+    {
+      "path": "lua/http/images/Audio-48.png",
+      "sha256": "372b03407e4c070aaf05d9bcf70bc048a2560593b7d3e4c919eda602c1cb5d0b"
+    },
+    {
+      "path": "lua/http/images/Back-48.png",
+      "sha256": "e92c787df1d4c93ea84bfce7cf61448dca2879c4c2b9a9d8ad1e8c80f4001ac8"
+    },
+    {
+      "path": "lua/http/images/Folder-48.png",
+      "sha256": "a5a4ed70d20cefe54e541e15bc007a6d36339fb6b8428806f7b48f846e8b9160"
+    },
+    {
+      "path": "lua/http/images/Other-48.png",
+      "sha256": "48878e2d1d5dcbd686358a180379d61f82aaf862fa2c4030933c1ad4e7299a20"
+    },
+    {
+      "path": "lua/http/images/Video-48.png",
+      "sha256": "aa6039a0466683c195e0d2c4b4bf8602bd2173e955bc8dd39ca793d207985a3a"
+    },
+    {
+      "path": "lua/http/images/buttons.png",
+      "sha256": "c3904f63906db4346d2e0529285397c0ced3dbd5132dba250c3fcb28ed6a96df"
+    },
+    {
+      "path": "lua/http/images/speaker-32.png",
+      "sha256": "3c6cf8b87ad6453bf0d0629893cbe4d0196a3b28e9036b7cc6f19c0168325137"
+    },
+    {
+      "path": "lua/http/images/vlc-48.png",
+      "sha256": "731d5a34a98fee76f9e1aacaa524b3e0ed0cf0ecac3e2f9e2703b38c4a4bc518"
+    },
+    {
+      "path": "lua/http/images/vlc16x16.png",
+      "sha256": "32030a3d8e8fa75bd89ead94c429f2c3418944d9aa3d1029294b4af99264f5c5"
+    },
+    {
+      "path": "lua/http/index.html",
+      "sha256": "3ba76bc7289762cfb5aa4dc88d31ad37742740dfb31ea7efbb80fe4e7f870498"
+    },
+    {
+      "path": "lua/http/js/common.js",
+      "sha256": "47cad1dbde4ad4d5eee0a7306c7e20df3f2a080a986cac5693c50b8ff1434b27"
+    },
+    {
+      "path": "lua/http/js/controllers.js",
+      "sha256": "696f9e83ec6105a036fe2e0f2c25084a4730ed5673d9d8220ee9ffb74779c609"
+    },
+    {
+      "path": "lua/http/js/jquery.jstree.js",
+      "sha256": "5169fb1e68e1e30f244452d6ca8587fc195c280966d52d1cef46630f53e9f2d2"
+    },
+    {
+      "path": "lua/http/js/ui.js",
+      "sha256": "b1a990a068123eb73baf4e7fd5f959dd96fc8fd2093f564da456745ea534f46c"
+    },
+    {
+      "path": "lua/http/mobile.html",
+      "sha256": "0a51d360b893589899e37689c40f08a7d3132555f29942962a3096ef02f40589"
+    },
+    {
+      "path": "lua/http/mobile_browse.html",
+      "sha256": "400ab7330b6a36fec3ed1254d10b7297f003141e8b33f3d0140802b8cc729771"
+    },
+    {
+      "path": "lua/http/mobile_equalizer.html",
+      "sha256": "adb1eafa9ab357b5a4f930f4ad8dd65e67140eb2e12240dbcf7c7695b02c7f50"
+    },
+    {
+      "path": "lua/http/mobile_view.html",
+      "sha256": "062037d130761ad2cb4c8859f4adff50eabbba71d6702676157d694a5fcb0961"
+    },
+    {
+      "path": "lua/http/requests/README.txt",
+      "sha256": "2ad28742d23d327c4fdf121214b4b3be3ac5dd18c395522f909575e29a2c914f"
+    },
+    {
+      "path": "lua/http/requests/browse.json",
+      "sha256": "82756e7538c248852219b2cd6e5bfd9967847afc0c8d89c663b2198a58cbe725"
+    },
+    {
+      "path": "lua/http/requests/browse.xml",
+      "sha256": "a531cfcb9bab3f642c9183c2a1942c1e3ca8d8f7af15e025de29d5c4984103d9"
+    },
+    {
+      "path": "lua/http/requests/playlist.json",
+      "sha256": "ddbb968705ad5c287cf192bbacc102ea7e243ccd77f0116e5ff331837a3af2b6"
+    },
+    {
+      "path": "lua/http/requests/playlist.xml",
+      "sha256": "194884ced0d0a0e8dade7a0d7cc3e1415c52733246f6664a6d7095f343a6e0a1"
+    },
+    {
+      "path": "lua/http/requests/playlist_jstree.xml",
+      "sha256": "999dfa91636c29896c4dd759d6d3d1ed022bbecfbba98d6ee825b685b8211132"
+    },
+    {
+      "path": "lua/http/requests/status.json",
+      "sha256": "a0742096ca150198577f26ace46ba6297b8fb8083da5188cff3a40c427bcca6d"
+    },
+    {
+      "path": "lua/http/requests/status.xml",
+      "sha256": "23271ab8ef267a88bf8f5ca539dd00e31d59bd0de31c1e38656d874143974042"
+    },
+    {
+      "path": "lua/http/requests/vlm.xml",
+      "sha256": "d8f7f26d06fa9f26687501a09db4b2bb5deb92a3dc7c70f82e3b2c8ee31d17bf"
+    },
+    {
+      "path": "lua/http/requests/vlm_cmd.xml",
+      "sha256": "5ed84ea7c22002f3df32895b0bc133953d44a229749dd8dd1f06691885a96ba2"
+    },
+    {
+      "path": "lua/http/view.html",
+      "sha256": "ea2910aa8e3359ceaa47afef1a267c0cd629ff30feca9113d4c7ca827d708e52"
+    },
+    {
+      "path": "lua/http/vlm.html",
+      "sha256": "4800ddaa370be2bc8660b8559c10d8650034d65e70adcf89dad4779aa4aad93f"
+    },
+    {
+      "path": "lua/http/vlm_export.html",
+      "sha256": "09bd722b8c4cd442d56c7c730c2a363cf9bdfcb6a8971f00be002c90c40215b9"
+    },
+    {
+      "path": "lua/intf/cli.luac",
+      "sha256": "eb30cebb44e86194bbe9255eecfd0b6f4ed46081139f3e2e59825ad7120cce1c"
+    },
+    {
+      "path": "lua/intf/dummy.luac",
+      "sha256": "0e34a875ef2db1a23a25a8692af9b253c81fbaf547b1bed2c80f2302b8b75ec0"
+    },
+    {
+      "path": "lua/intf/dumpmeta.luac",
+      "sha256": "807bdbdfcfb7a994062b3c1d451979d113f5db4e07d0e9a6540f580bee2a3de0"
+    },
+    {
+      "path": "lua/intf/http.luac",
+      "sha256": "8cd42d7ab0446a3220b5657d3a9d776741a1c9d12242f4f3e1842bfc8f401c56"
+    },
+    {
+      "path": "lua/intf/luac.luac",
+      "sha256": "38225f3117716d74467f51c0d0d46160405eeacfeac3ea1faf84258b4c652e1e"
+    },
+    {
+      "path": "lua/intf/modules/host.luac",
+      "sha256": "ba2177f3d4ce020b79157331abb89916f208e61a67ca7e05ac88c661aee931cd"
+    },
+    {
+      "path": "lua/intf/modules/httprequests.luac",
+      "sha256": "d45dd555f80ab98b3346744c97b36491a6fdbf78a27f249dd1ebfb6f8b82d63f"
+    },
+    {
+      "path": "lua/intf/telnet.luac",
+      "sha256": "a98bbf2485fe7be01260b83fc6a52ef3e6a13100d8e76a65da8660da38da7c65"
+    },
+    {
+      "path": "lua/meta/art/00_musicbrainz.luac",
+      "sha256": "db6e28fef939caa4a9c6a1079bf92311ae841ed679ce5a71a02af42e99421ca9"
+    },
+    {
+      "path": "lua/meta/art/01_googleimage.luac",
+      "sha256": "b9c34e8389d48a3e30a138db94066363ee10a13f48df1cfe2d24656a49f709c5"
+    },
+    {
+      "path": "lua/meta/art/02_frenchtv.luac",
+      "sha256": "71ccb383c7bfcd252cdfdf5fc2dfbf74532e53dc37addea4a627e24f4856c766"
+    },
+    {
+      "path": "lua/meta/art/03_lastfm.luac",
+      "sha256": "5fbac2268d01bb39b9ef81231367ec1ea17f40f478d74ba6d2077f04352df3b8"
+    },
+    {
+      "path": "lua/meta/reader/filename.luac",
+      "sha256": "08caa9e8f09c95b671ad79d567b01104bdd974f039cd11fabe9edf473b7d4e66"
+    },
+    {
+      "path": "lua/modules/common.luac",
+      "sha256": "a611e22bd551d427b620e6dcd95f4c340c4467cf95b611d490f05bb08144efc4"
+    },
+    {
+      "path": "lua/modules/dkjson.luac",
+      "sha256": "e6eb1f8510f039d3bcf22ba6c743509f15594d5c9dff203a73952f6cb84f632e"
+    },
+    {
+      "path": "lua/modules/sandbox.luac",
+      "sha256": "32ada78341de379137779f3e181411eee42c6e567cd043e26437e66fb5ebad90"
+    },
+    {
+      "path": "lua/modules/simplexml.luac",
+      "sha256": "c8e995a289b4cd6def8bf76ed053f8633d08a9939eb23ba3faf076b3f8178034"
+    },
+    {
+      "path": "lua/playlist/anevia_streams.luac",
+      "sha256": "e9b87c65bd3515a6cac3652dacb2a8fa41101b09f8048996a6cca8acb160d7b3"
+    },
+    {
+      "path": "lua/playlist/anevia_xml.luac",
+      "sha256": "168b0ef8279b88240effc50ff8493e75687ed32b2c1446d24350e977d60d4b28"
+    },
+    {
+      "path": "lua/playlist/appletrailers.luac",
+      "sha256": "6d7515051c388c09a81816bc72894141b7527d2892b5a617ff8c802c87b9b3e1"
+    },
+    {
+      "path": "lua/playlist/bbc_co_uk.luac",
+      "sha256": "5bb45b82b723a7a15ad163915494f201c2ec9968f3b9e9395e0961a1e9e5ace3"
+    },
+    {
+      "path": "lua/playlist/cue.luac",
+      "sha256": "de76b50183e68442d7a869bdc9c412d54e38eb5a73f13620f5a0cd9f2fa10643"
+    },
+    {
+      "path": "lua/playlist/dailymotion.luac",
+      "sha256": "b94d06125457858a60c296993c6e23286bc1b1f7856553474da8afb4334e939c"
+    },
+    {
+      "path": "lua/playlist/jamendo.luac",
+      "sha256": "f1c0e7021abe8abc0a0c7beba8c87f40af0d7c474a45ed751be145931b0c37a3"
+    },
+    {
+      "path": "lua/playlist/koreus.luac",
+      "sha256": "d93acf4f35e97f83a145f2ba0ae278e403dedf38d8516a51e966e3d56af2d3f0"
+    },
+    {
+      "path": "lua/playlist/liveleak.luac",
+      "sha256": "e847ad9bf8c7e14a9094e9d5a3163726d96fc748bb7c424a78b0ee1aef3c1d82"
+    },
+    {
+      "path": "lua/playlist/newgrounds.luac",
+      "sha256": "5c076730de1d6492d9ed588a144ca70fab8ad1670f7059b95ee2284d1df75191"
+    },
+    {
+      "path": "lua/playlist/rockbox_fm_presets.luac",
+      "sha256": "98a8a54ae42703ad776ef8d8acf11f0fa9185cd8192482a758e64e65167c6142"
+    },
+    {
+      "path": "lua/playlist/soundcloud.luac",
+      "sha256": "d9f0812c71f9f0d326509afc1688d1590f404f4f06fc906aea87e87a888e41a0"
+    },
+    {
+      "path": "lua/playlist/twitch.luac",
+      "sha256": "e5f28c94b735da1b63f327b70841ee45ce3aed01ad655cc58bb485dd0a7487aa"
+    },
+    {
+      "path": "lua/playlist/vimeo.luac",
+      "sha256": "53d1830bab611db506407bbebbb4069a9fa20fa003d1c64fb4c3c1a681068f18"
+    },
+    {
+      "path": "lua/playlist/vocaroo.luac",
+      "sha256": "60010b77fda61b1f6c37ecab5294a9b3d4cad15f072eee907989e9bfb58d37d2"
+    },
+    {
+      "path": "lua/playlist/youtube.luac",
+      "sha256": "b3b55554894b0367d9d1e6ac1dd1a0b18e1b043810dae0c0fd79518dec8b9587"
+    },
+    {
+      "path": "lua/sd/icecast.luac",
+      "sha256": "a091f67dbbf12675b35fbd3cfe65ec7f294d143e430b6a48cc5275bbf9452277"
+    },
+    {
+      "path": "lua/sd/jamendo.luac",
+      "sha256": "7e6fddd9c43fab843fd437f3e3dec61e58d520ff1d242afdb1f7dd1c360d3aa7"
+    },
+    {
+      "path": "plugins/access/libaccess_concat_plugin.dll",
+      "sha256": "6f6f559ef8d2159307d0ae995994240137cc3ce57c0f92eae2e523aa59e552d3"
+    },
+    {
+      "path": "plugins/access/libaccess_imem_plugin.dll",
+      "sha256": "40c878a8e7afd4dc18aa185ae713f112c256f1d5ca82b6742d723faeab9f5632"
+    },
+    {
+      "path": "plugins/access/libaccess_mms_plugin.dll",
+      "sha256": "7444230b516a10d1de8b8ccf1a0a987738c866a738056d85322d4427b9f86b30"
+    },
+    {
+      "path": "plugins/access/libaccess_realrtsp_plugin.dll",
+      "sha256": "3c150257a94f533e55b6d3383a7d14d4f5b6d67cbd9d921a5ea95ce313438aeb"
+    },
+    {
+      "path": "plugins/access/libaccess_srt_plugin.dll",
+      "sha256": "09c279c2ed8128112145135775846874c080a3a6439005096c10039306f09ae7"
+    },
+    {
+      "path": "plugins/access/libaccess_wasapi_plugin.dll",
+      "sha256": "84ef5300e9182954f06aba4d48777b06bfda4a8da0836fddb078c2ffc4b90252"
+    },
+    {
+      "path": "plugins/access/libattachment_plugin.dll",
+      "sha256": "40fff66b8aaab8e26cc073a0601c4464fa54e73bc06d14fc11aeebc78180d237"
+    },
+    {
+      "path": "plugins/access/libbluray-awt-j2se-1.3.2.jar",
+      "sha256": "dfc56ae74409c8e0b98ddd5f97da731ef04faf4fc46ae406a04e7f2eef80fdc7"
+    },
+    {
+      "path": "plugins/access/libbluray-j2se-1.3.2.jar",
+      "sha256": "adc1d1416988b3a525fdc0b90a99edd339f89b7ace641f76831ac9eb868b00c7"
+    },
+    {
+      "path": "plugins/access/libcdda_plugin.dll",
+      "sha256": "3051a415800d40de3a51145d712bd7f6aa11587791279dc65d5b92e29e0a7703"
+    },
+    {
+      "path": "plugins/access/libdcp_plugin.dll",
+      "sha256": "ac58a5dbe85ebc907e2f94cab7c0adac52838308b5befa235ef26c8d439e5aee"
+    },
+    {
+      "path": "plugins/access/libdshow_plugin.dll",
+      "sha256": "c9068e5fc75748358c7b3be10f186c0f1f1eec527debc36d657a712ec99806a2"
+    },
+    {
+      "path": "plugins/access/libdtv_plugin.dll",
+      "sha256": "d2950117eb44891ccc1eec486e89d4ca2836028c8970b4693d5951c161c32612"
+    },
+    {
+      "path": "plugins/access/libdvdnav_plugin.dll",
+      "sha256": "08f1e9f310dad3fb7e45f356a245d0ac6f3a5fb527b6c832ee1ab862a91f10ad"
+    },
+    {
+      "path": "plugins/access/libdvdread_plugin.dll",
+      "sha256": "274f82f8701f2cb4408aa33e50273e35a16985bbccbd69e78e3e6d2b15d6bd9f"
+    },
+    {
+      "path": "plugins/access/libfilesystem_plugin.dll",
+      "sha256": "42fdf97c099f84f704f3028257ce183d67ca9dc3307f6f053d0ea9f37eac0487"
+    },
+    {
+      "path": "plugins/access/libftp_plugin.dll",
+      "sha256": "c62802f791733086e7c0db2d14c94bd61ad34bb31291cbeeaede63c659f7d6f8"
+    },
+    {
+      "path": "plugins/access/libhttp_plugin.dll",
+      "sha256": "99b049d9329cdccdfa1b36d9dd737557bf83cb0ffdacd6c797322aaff14a676d"
+    },
+    {
+      "path": "plugins/access/libhttps_plugin.dll",
+      "sha256": "ca65993a13fd9f9ca5f97c782541d3358af6a295862ddd6ea1374dbbe3c9b47d"
+    },
+    {
+      "path": "plugins/access/libidummy_plugin.dll",
+      "sha256": "c9cd73f95d9608a14096cba96fb57f8a3690b1e61173634c98b3aacf5ec798eb"
+    },
+    {
+      "path": "plugins/access/libimem_plugin.dll",
+      "sha256": "5a3128a3bf086c61596a94a5efacea8247e9c4273f8ea410ede070384033b92e"
+    },
+    {
+      "path": "plugins/access/liblibbluray_plugin.dll",
+      "sha256": "3bf74c67d780cd44c0575aca57c99051dcd24f608c209141ea99c39ea1dae02a"
+    },
+    {
+      "path": "plugins/access/liblive555_plugin.dll",
+      "sha256": "534dadbce175696fda1fa7f97eae8d0bb60bf50c49d6d5a8fcfbf59ae453a2cf"
+    },
+    {
+      "path": "plugins/access/libnfs_plugin.dll",
+      "sha256": "3658d90abdb256882211b0a3d7425d2f449dbc2c88397393c98dca68131fed1d"
+    },
+    {
+      "path": "plugins/access/librist_plugin.dll",
+      "sha256": "ac74f2b4474fd04bbaf659d0cb279679f5a95bc9a3b950d962ffe39ec7fbef5f"
+    },
+    {
+      "path": "plugins/access/librtp_plugin.dll",
+      "sha256": "88f79fd42e5a422458b55ae70e0e694101d01cd572d9703555ce5db5c5bd3031"
+    },
+    {
+      "path": "plugins/access/libsatip_plugin.dll",
+      "sha256": "86defa1c00e30345808d1f725af1e1a7807394977ff36665665027b3c844e4e2"
+    },
+    {
+      "path": "plugins/access/libscreen_plugin.dll",
+      "sha256": "e2ccd647810e4375ee3f701faed38b372895897decbe868c14a9e14f69dea3bb"
+    },
+    {
+      "path": "plugins/access/libsdp_plugin.dll",
+      "sha256": "7a97fcb964e62b391c8838021aea18ebfbd12e5d9b814454332cc46f51e63efb"
+    },
+    {
+      "path": "plugins/access/libsftp_plugin.dll",
+      "sha256": "4463c22d1a922cfd6ca9b9b05253877f510b35cfc85a4d2faee7c19e193af149"
+    },
+    {
+      "path": "plugins/access/libshm_plugin.dll",
+      "sha256": "5cb61406f84a9e52f0c0ce7dd043bf321ea0d828b4d67ee6429c8b148eb49961"
+    },
+    {
+      "path": "plugins/access/libsmb_plugin.dll",
+      "sha256": "26b236f8a6311fcf530de9999438dcbf4c51f3c9cb6947a8b797093ccda43cdf"
+    },
+    {
+      "path": "plugins/access/libtcp_plugin.dll",
+      "sha256": "b242903875986338b3b317c89fad8776d1355f9e92cef470626ef4fd42842a83"
+    },
+    {
+      "path": "plugins/access/libtimecode_plugin.dll",
+      "sha256": "4817cac5fe61f48cbc4e85011e82ec65a368c4c33183174bdc233cad0f02fbdb"
+    },
+    {
+      "path": "plugins/access/libudp_plugin.dll",
+      "sha256": "5b16687a251773daa0661c109bbd640efaace50f01f3aefacdfef8ce5ad540c0"
+    },
+    {
+      "path": "plugins/access/libvcd_plugin.dll",
+      "sha256": "14d7493e9454e2a6b8bbbf1b0cb58985c8017c3044415ebc60b875f9741f2603"
+    },
+    {
+      "path": "plugins/access/libvdr_plugin.dll",
+      "sha256": "a60db6596198bba46bfc25d69e4b0eccd017bc9d713031a396d0c8deebdda286"
+    },
+    {
+      "path": "plugins/access/libvnc_plugin.dll",
+      "sha256": "0df2b69b357729c571529a9f5695696aae0c979b01fa3aba3316fb07a9fd1506"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_dummy_plugin.dll",
+      "sha256": "0a675a9165dea73b2712fadf3aa608b50a5f6d8e127394d602d63054b26355ac"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_file_plugin.dll",
+      "sha256": "36a92e3fe259cb11bf1ee5b74344ac1598b322be5b60a3839a4522e23677894d"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_http_plugin.dll",
+      "sha256": "d156345bb7e68f0c12bfdd060e2543c749c7c29a77204710be5b402b3fa13926"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_livehttp_plugin.dll",
+      "sha256": "398588b6b11c5bb007f54e5e8ff4beb443cf3dd301374a40ed4fc10d2b4b6949"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_rist_plugin.dll",
+      "sha256": "a9ae32d01d9c40db142410676d233bf711e4ccb882386bc509f7392c50cee4be"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_shout_plugin.dll",
+      "sha256": "beb870bd8cbcb4a03a0e7524912d9c2b8ad909dea1312cfdfd3066a5445bb44c"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_srt_plugin.dll",
+      "sha256": "f216a30317c4418b4701b27ca81856e5b372166afff2a77de139e7c64da05735"
+    },
+    {
+      "path": "plugins/access_output/libaccess_output_udp_plugin.dll",
+      "sha256": "ca0a4fa6a35f13f75cd5eb57e1b8bd4adfba11aa3dd180a8906136848d47c32a"
+    },
+    {
+      "path": "plugins/audio_filter/libaudio_format_plugin.dll",
+      "sha256": "055c76dd0cb6ad4350a8b4a56250964db487062be893519438b24de40310cae0"
+    },
+    {
+      "path": "plugins/audio_filter/libaudiobargraph_a_plugin.dll",
+      "sha256": "1f146353d736af8cd74d25f3f5f5780c7475329a4f41d07be321fd884c8fef78"
+    },
+    {
+      "path": "plugins/audio_filter/libchorus_flanger_plugin.dll",
+      "sha256": "7e12ef7e683dc1f0feb7444dbefaca1ac967763c9b126587402c97865730526a"
+    },
+    {
+      "path": "plugins/audio_filter/libcompressor_plugin.dll",
+      "sha256": "aabbe90904f39fa60c5019bf963f4cb7be68b2dfc012fb0ec36a3e5898c7e664"
+    },
+    {
+      "path": "plugins/audio_filter/libdolby_surround_decoder_plugin.dll",
+      "sha256": "fe204ecc320880c695e49a0ec492e78a664ca681701c773e004bb6a1c5b58486"
+    },
+    {
+      "path": "plugins/audio_filter/libequalizer_plugin.dll",
+      "sha256": "eea0f77f6c2cc9ceddbeb542d20dd9a4499530d29a513ee755f63b9f2ce8225f"
+    },
+    {
+      "path": "plugins/audio_filter/libgain_plugin.dll",
+      "sha256": "40733e77cce38dde911ca7dd5a0af78f6bc5097334b3ac49ebc29d8e69872c57"
+    },
+    {
+      "path": "plugins/audio_filter/libheadphone_channel_mixer_plugin.dll",
+      "sha256": "8459a1e097f3c1547bf3d794f020b80f98efc0dc12619411c2ae55fa6d7dd8e5"
+    },
+    {
+      "path": "plugins/audio_filter/libkaraoke_plugin.dll",
+      "sha256": "cd638a38f41a91306b48a9e22668020e8576537811c014246c2d1736afe9aea0"
+    },
+    {
+      "path": "plugins/audio_filter/libmad_plugin.dll",
+      "sha256": "0fa9d48d922e34daf767728fb0117ffb32d0d54df74806c031ca9b9d7775e025"
+    },
+    {
+      "path": "plugins/audio_filter/libmono_plugin.dll",
+      "sha256": "297b1ba63dd3e0d6c8f2966c81bec748f91da9596192d2e5f0e78c56d917d493"
+    },
+    {
+      "path": "plugins/audio_filter/libnormvol_plugin.dll",
+      "sha256": "f5fe81012cd08f14681af5ca3bb838159653bf4af84e22c39401afee130d2583"
+    },
+    {
+      "path": "plugins/audio_filter/libparam_eq_plugin.dll",
+      "sha256": "5d7a3895e28e1ca335361f866c9b703c978af233f73a1f50d43d069c12b445ac"
+    },
+    {
+      "path": "plugins/audio_filter/libremap_plugin.dll",
+      "sha256": "91fb1c351affee727b0fab3aa7511c3c7053b06fa1a3044641570154dfca17a1"
+    },
+    {
+      "path": "plugins/audio_filter/libsamplerate_plugin.dll",
+      "sha256": "739b3ccc8d7e537eddb8c556eaba65b23a1868a1bc7b9c65e294e8203cadc5b9"
+    },
+    {
+      "path": "plugins/audio_filter/libscaletempo_pitch_plugin.dll",
+      "sha256": "31f6266733a15b971361baa9f567f4695c866318cd78856d920b4f5e03e6d98b"
+    },
+    {
+      "path": "plugins/audio_filter/libscaletempo_plugin.dll",
+      "sha256": "adc6ddce58e2e0935cbbcdab42dd33c0dcb12160b81ed85247a311d04418711c"
+    },
+    {
+      "path": "plugins/audio_filter/libsimple_channel_mixer_plugin.dll",
+      "sha256": "463053bcbc18a0e842cc0c4e62ac4a9917d06e82a616cfd110b07d16a2f587c9"
+    },
+    {
+      "path": "plugins/audio_filter/libspatialaudio_plugin.dll",
+      "sha256": "38ca59e94eecc26ba1bed2ee40cb632912fd9550b8a2ecb719acc3ca9655a16e"
+    },
+    {
+      "path": "plugins/audio_filter/libspatializer_plugin.dll",
+      "sha256": "bb2980cf0f088b6846704b6fb25a53437da91d8950912db703e282ff3c28d643"
+    },
+    {
+      "path": "plugins/audio_filter/libspeex_resampler_plugin.dll",
+      "sha256": "b10802d8576c90223f348bfb6a1f9e59c706f3304a57524cade0ea5da6097db2"
+    },
+    {
+      "path": "plugins/audio_filter/libstereo_widen_plugin.dll",
+      "sha256": "055149ca23abbd913fcb1856449f0df075a40f1918d478d1ed7e1b3b87e0c8a4"
+    },
+    {
+      "path": "plugins/audio_filter/libtospdif_plugin.dll",
+      "sha256": "369b09b3546b582e7327cb0200d550a0bb6626ac3d4120b15abb1d08d8dc546f"
+    },
+    {
+      "path": "plugins/audio_filter/libtrivial_channel_mixer_plugin.dll",
+      "sha256": "f02553ed6fe1456d01a748464bcb150bf9cabac30c8d2d02d4db5057989da419"
+    },
+    {
+      "path": "plugins/audio_filter/libugly_resampler_plugin.dll",
+      "sha256": "163061b58944fd73e3fa9f0414015010b8fbe32261548237c2856ee6e74a8169"
+    },
+    {
+      "path": "plugins/audio_mixer/libfloat_mixer_plugin.dll",
+      "sha256": "7fd5c2893aed7fdf175155dab4045d32fc9cd0eff6b86e3fe341ec25407019fe"
+    },
+    {
+      "path": "plugins/audio_mixer/libinteger_mixer_plugin.dll",
+      "sha256": "6fa6e514c0696803ce4348caea9ecd8d61aa685f22d2a79487432a87a86c1e04"
+    },
+    {
+      "path": "plugins/audio_output/libadummy_plugin.dll",
+      "sha256": "2a567f1e45878809f261025fcd7d7b6f5eca22114a0b8b1ca680e477a33136ec"
+    },
+    {
+      "path": "plugins/audio_output/libafile_plugin.dll",
+      "sha256": "595c596f0d1bc55a14541c9faa8ad7595aa5b75f986286a426d8304bbeb3eb7b"
+    },
+    {
+      "path": "plugins/audio_output/libamem_plugin.dll",
+      "sha256": "7d3d1703ce53e091c7de54ceaecd2229c5d7344aee2b9f0730981e066857964f"
+    },
+    {
+      "path": "plugins/audio_output/libdirectsound_plugin.dll",
+      "sha256": "8c6e313a0ba5c96ef40d7e76a7bd8e538664f01d80519a828a913d3288f7c981"
+    },
+    {
+      "path": "plugins/audio_output/libmmdevice_plugin.dll",
+      "sha256": "8b675888d218f8e25c6766704a02c121c7156528a03d70568484b597960fe610"
+    },
+    {
+      "path": "plugins/audio_output/libwasapi_plugin.dll",
+      "sha256": "28fc5f3b189ef50b10df423c666cf5112b89e77d77e8247656966b7a8d338566"
+    },
+    {
+      "path": "plugins/audio_output/libwaveout_plugin.dll",
+      "sha256": "31933854ce4f35414e99a26d9d00c9f8df7de312b1ca928212a445a1bad5630d"
+    },
+    {
+      "path": "plugins/codec/liba52_plugin.dll",
+      "sha256": "c445468770cc6a2586fe0238904e636c9b650e9d74cf6b45cb4b5a1f99806085"
+    },
+    {
+      "path": "plugins/codec/libadpcm_plugin.dll",
+      "sha256": "229cfe7620dfc6efaab46abeae3bf8b3a03af60380c6b553b58476305005ed45"
+    },
+    {
+      "path": "plugins/codec/libaes3_plugin.dll",
+      "sha256": "cbe341ee243592fbbbb123c4e5f2c771bd5d3a9c2dbf24bb594aa6a06cc77ea6"
+    },
+    {
+      "path": "plugins/codec/libaom_plugin.dll",
+      "sha256": "68e178ba995e1e3600ea55f1f09c05c70f8b0caae775acf5d6ac023f2d33c0e0"
+    },
+    {
+      "path": "plugins/codec/libaraw_plugin.dll",
+      "sha256": "18598481c4d439ec8fbafa3c5b27576562c2665b411263e82594cac276e0c35d"
+    },
+    {
+      "path": "plugins/codec/libaribsub_plugin.dll",
+      "sha256": "a02ecbeb07983aefc1d03bb5bbe2bee0158a69004ca1b7dfb3e9057b86b13d59"
+    },
+    {
+      "path": "plugins/codec/libavcodec_plugin.dll",
+      "sha256": "d887921dafde05442b3ba1e5c3ab3483233550e539730d9c24a3dc529c5e10c8"
+    },
+    {
+      "path": "plugins/codec/libcc_plugin.dll",
+      "sha256": "38226c4953a44dbdcd7df01dae67e863238a8ac37a201bb7ec6658231ec2dca8"
+    },
+    {
+      "path": "plugins/codec/libcdg_plugin.dll",
+      "sha256": "da138b6e7169527fb4c795ce85194b19995b677baa66adb18dbed820c0ec23ba"
+    },
+    {
+      "path": "plugins/codec/libcrystalhd_plugin.dll",
+      "sha256": "faaebcbc81bb28c434b9378db27cc9b9b328cc547004cf59b9ddf245b4be7769"
+    },
+    {
+      "path": "plugins/codec/libcvdsub_plugin.dll",
+      "sha256": "76531abfc5399024487637c4abbf0684ab09ea01726dfb19b7a9b753a14d6eb0"
+    },
+    {
+      "path": "plugins/codec/libd3d11va_plugin.dll",
+      "sha256": "283031faf1431f00bf2f41d09ceb6c5663611d3124f9d6e34f6afe5226dc7237"
+    },
+    {
+      "path": "plugins/codec/libdav1d_plugin.dll",
+      "sha256": "dfae81351c91935c8cb1cef2b90b3d64290aee5736e6d021d4150c28b1c65b34"
+    },
+    {
+      "path": "plugins/codec/libdca_plugin.dll",
+      "sha256": "bbfef63caef5c52fa51a0596f9a1224cb4a350d8f62e4de3d2e0f0af9a38c9b4"
+    },
+    {
+      "path": "plugins/codec/libddummy_plugin.dll",
+      "sha256": "f1eda769a586ff8dd7bba4dd5765ee54ca6618d1debf4c927319fefa5c12136f"
+    },
+    {
+      "path": "plugins/codec/libdmo_plugin.dll",
+      "sha256": "c58c5b834a9da79a583a57bfdb62dd67488ef8f59c942d3498f891b04b421dcb"
+    },
+    {
+      "path": "plugins/codec/libdvbsub_plugin.dll",
+      "sha256": "e31a62598a6b418ed95c2db91168c7d67a38e51fb17d3c0d8699aa548ff3d0b5"
+    },
+    {
+      "path": "plugins/codec/libdxva2_plugin.dll",
+      "sha256": "4644ce54ef6bdc7c247d84b89d3cbed9f1fc516c46af8dc9f6f36a712d7cc542"
+    },
+    {
+      "path": "plugins/codec/libedummy_plugin.dll",
+      "sha256": "1025ff05fdc0505d19b80a014d3a56656bde5b656aa4386320e395878c18accf"
+    },
+    {
+      "path": "plugins/codec/libfaad_plugin.dll",
+      "sha256": "30f312ed9c33c2d644abc1c8f473578ebd98c9221519a89eb5a891f0684c7c49"
+    },
+    {
+      "path": "plugins/codec/libflac_plugin.dll",
+      "sha256": "ecabde6bc0470fe6e4b6de816f0b2aaf48a051390a3ff4bee883730b7bbb2a9b"
+    },
+    {
+      "path": "plugins/codec/libfluidsynth_plugin.dll",
+      "sha256": "fc28ea25fda87815508e8ea08022a4671798680f62c0e8e62be0080c6abe1e43"
+    },
+    {
+      "path": "plugins/codec/libg711_plugin.dll",
+      "sha256": "b93010301b00c9b85ca921e8f7ec130ec53509b436bebafd570e2b9afce5f89d"
+    },
+    {
+      "path": "plugins/codec/libjpeg_plugin.dll",
+      "sha256": "8fd6df1639e34280f5043c4d3e4a98a30695bf0fd0da6e4bd516d453c66443e7"
+    },
+    {
+      "path": "plugins/codec/libkate_plugin.dll",
+      "sha256": "2645f7a30053b8ead89c003e3ffd1d1b133c2f5795315a45623aa1e7a50e205c"
+    },
+    {
+      "path": "plugins/codec/liblibass_plugin.dll",
+      "sha256": "06bc595b8e2bbe864441d038630054fc5d304aff295c50ae58a7b6883ef97225"
+    },
+    {
+      "path": "plugins/codec/liblibmpeg2_plugin.dll",
+      "sha256": "e9570d70f64f954a7df0b80d99116142d512f0e2ff7f799021fd8001a8b14c91"
+    },
+    {
+      "path": "plugins/codec/liblpcm_plugin.dll",
+      "sha256": "e9004e16f190c26f8d66acd60629f68e8a800d98717baaa0b312fa0327a55c62"
+    },
+    {
+      "path": "plugins/codec/libmft_plugin.dll",
+      "sha256": "f7e82b47a59fd691bd7a5afc96ef2eb5401b4cc9b897ba256040d276f37a4047"
+    },
+    {
+      "path": "plugins/codec/libmpg123_plugin.dll",
+      "sha256": "fce103b3793dc9d773749c2dc49ea8b904f0309c19f6e63b19f30b1b48ec91fb"
+    },
+    {
+      "path": "plugins/codec/liboggspots_plugin.dll",
+      "sha256": "3dcaa5054332dbed86c13bcd61d05bb6fc5073b63a1be730dd8028e2ec496841"
+    },
+    {
+      "path": "plugins/codec/libopus_plugin.dll",
+      "sha256": "d62ada40147bf8c3b957ee0cf8a26bf251a31114a53ab51ff71625872b0f0516"
+    },
+    {
+      "path": "plugins/codec/libpng_plugin.dll",
+      "sha256": "44fd528f8d4507cd2ea59a30f0bd1dfe30088c5959788a627cea98db3b9eede4"
+    },
+    {
+      "path": "plugins/codec/libqsv_plugin.dll",
+      "sha256": "1d99aea7b326f4e47adb663fa2be28b0175b0a5eda1b0185e5dceea8d43d8d4f"
+    },
+    {
+      "path": "plugins/codec/librawvideo_plugin.dll",
+      "sha256": "80f10ac344bc1767e8efc03e28902cc0e16fd8bcf4fd3fc0a46bfcf5853d1361"
+    },
+    {
+      "path": "plugins/codec/librtpvideo_plugin.dll",
+      "sha256": "460be99b94f3fd418983b52c1a573a406b97f66ed1af83530c16d413bed8cac8"
+    },
+    {
+      "path": "plugins/codec/libschroedinger_plugin.dll",
+      "sha256": "0fce888a77ce9cedb8afe0a52a60cf95f88035294529e77ed19e9b3aa11f68e2"
+    },
+    {
+      "path": "plugins/codec/libscte18_plugin.dll",
+      "sha256": "6f8d0150a07750195ddc3b500ef6d25429a60a6117f38589af9f0c973dd78929"
+    },
+    {
+      "path": "plugins/codec/libscte27_plugin.dll",
+      "sha256": "a64e831352fce6cc17353177477af256c66f1aea4426d9f150c8387712777602"
+    },
+    {
+      "path": "plugins/codec/libsdl_image_plugin.dll",
+      "sha256": "a9df5e738a8866bfeb73edab4413cb1f05ac789f59693602d184bd7a167a61d6"
+    },
+    {
+      "path": "plugins/codec/libspdif_plugin.dll",
+      "sha256": "14dea4e4e3302458f0ddc29da643cdbaa647d7d170e7adbfbc5f5f2b2a6c02e0"
+    },
+    {
+      "path": "plugins/codec/libspeex_plugin.dll",
+      "sha256": "421efdffd97efb289ae4e953f4d6e4b6cd0a919ece855be0793ddb5974f902ab"
+    },
+    {
+      "path": "plugins/codec/libspudec_plugin.dll",
+      "sha256": "cb3cb7a0908b279b2ec8e9e2dd64befb7c5ccfe012721fe9424afbb0ac727d36"
+    },
+    {
+      "path": "plugins/codec/libstl_plugin.dll",
+      "sha256": "8a589dd2daf82dff3f56a4b9540991d45344676add6bbaa9b2e309d5e33f042a"
+    },
+    {
+      "path": "plugins/codec/libsubsdec_plugin.dll",
+      "sha256": "00525e689757035dcff87d610ac1e520675d0c7a68da6c3f305ba3d86e8b06af"
+    },
+    {
+      "path": "plugins/codec/libsubstx3g_plugin.dll",
+      "sha256": "27fb55b2d12c7e59fc80c10f5206436f4eb7b665040d19a021156002b59298b8"
+    },
+    {
+      "path": "plugins/codec/libsubsusf_plugin.dll",
+      "sha256": "4a4294103bc93419bab0e64849d550ce97e0693b5806ac99da163d1299e080cc"
+    },
+    {
+      "path": "plugins/codec/libsvcdsub_plugin.dll",
+      "sha256": "52e1b431af213cf1a7f8cda11d9c0d049b7af98888f9d2a4c88cc5fb32c9837f"
+    },
+    {
+      "path": "plugins/codec/libt140_plugin.dll",
+      "sha256": "f6d5002c05be35ae4505cde69d693953f039ade0f0942b4141bfde76bc9ffbc7"
+    },
+    {
+      "path": "plugins/codec/libtextst_plugin.dll",
+      "sha256": "c77a7a849a54a510e1af48ad31e85ab2d43bd6de1788d7ad86ff4f7aeeb01371"
+    },
+    {
+      "path": "plugins/codec/libtheora_plugin.dll",
+      "sha256": "147d21a5d8915a46b3521987c5d59a0b2233f071683b9151367a05615f9a8dd5"
+    },
+    {
+      "path": "plugins/codec/libttml_plugin.dll",
+      "sha256": "f9e90ac018772020e599f516036d1589f96129ce530210806e0f20047017ad30"
+    },
+    {
+      "path": "plugins/codec/libtwolame_plugin.dll",
+      "sha256": "8115a103a3295fdd34a73dc89f8b2a6c862a848fe142cf1b574dfacceb88bf93"
+    },
+    {
+      "path": "plugins/codec/libuleaddvaudio_plugin.dll",
+      "sha256": "4e60723a5cf3306712bcb5c665ed98c2545094ddaae580b5141757141878f6d9"
+    },
+    {
+      "path": "plugins/codec/libvorbis_plugin.dll",
+      "sha256": "942a4ae7a3c4cef2e3e6d9529a568e4b887b3a3ecbcc0423ae671f4b11bfac00"
+    },
+    {
+      "path": "plugins/codec/libvpx_plugin.dll",
+      "sha256": "0e380d1dc68af5c91316db56526ffc0b4e397fe58e642e0c994f432ae884bec0"
+    },
+    {
+      "path": "plugins/codec/libwebvtt_plugin.dll",
+      "sha256": "9d23a8bdbbfc3b2b078f835bbe302aa9eca3fce4ac0a9b226333a08655c1b5c0"
+    },
+    {
+      "path": "plugins/codec/libx26410b_plugin.dll",
+      "sha256": "023d9904b323e25ea5837b741f4f6d5c34f147bf1710ea6c050692323e57c6f7"
+    },
+    {
+      "path": "plugins/codec/libx264_plugin.dll",
+      "sha256": "c366aa45fb2bd890dd0146cf49d11a6a36d08967da0a91f56a9ee2cc78e34874"
+    },
+    {
+      "path": "plugins/codec/libx265_plugin.dll",
+      "sha256": "752190cdf87ba4be39eebdfd6598010f386373bd858d5f3df43d19e458bd6f52"
+    },
+    {
+      "path": "plugins/codec/libzvbi_plugin.dll",
+      "sha256": "1ec83a0eb917a3ed61fb0a77577752829b077c4d11171146e9a551f933294934"
+    },
+    {
+      "path": "plugins/control/libdummy_plugin.dll",
+      "sha256": "d484d81f33302561c5c9e348a9c15401a661ebba9a509b1d3c263806cc5dbc37"
+    },
+    {
+      "path": "plugins/control/libgestures_plugin.dll",
+      "sha256": "7f5a41f8a6a84e17404d479e25bfd4626028f92b9ff4db91b4a06a76e18c91bc"
+    },
+    {
+      "path": "plugins/control/libhotkeys_plugin.dll",
+      "sha256": "aeae5d3931fa6488b80e73d82ff404ce09b2d506224798f209062a7740318aee"
+    },
+    {
+      "path": "plugins/control/libnetsync_plugin.dll",
+      "sha256": "3e7169a2f653237a80576209a43df562a65c01937f924ad552620ea3b744cd96"
+    },
+    {
+      "path": "plugins/control/libntservice_plugin.dll",
+      "sha256": "8d5b29d5b3f4c2946a45775d160683c54dd77c2c4973baf9a9317e9f2d18aeb2"
+    },
+    {
+      "path": "plugins/control/liboldrc_plugin.dll",
+      "sha256": "0f0f79d7ff874753281d9513252c7ab632254d1f0dd7fcb8d52ea0db3388746a"
+    },
+    {
+      "path": "plugins/control/libwin_hotkeys_plugin.dll",
+      "sha256": "77b7271bd7276bbea3d8d5bc34a041a3e40dd3a10eb7e666002e21cd0206d55d"
+    },
+    {
+      "path": "plugins/control/libwin_msg_plugin.dll",
+      "sha256": "bae03326a4f19ea42879524fc0e7db2faf93a1b00c519c1c3f8ef1daed777582"
+    },
+    {
+      "path": "plugins/d3d11/libdirect3d11_filters_plugin.dll",
+      "sha256": "c3dd280cc487399038dddb1625ebb3a2565c567f6d84cbd53367740a698ee6a9"
+    },
+    {
+      "path": "plugins/d3d9/libdirect3d9_filters_plugin.dll",
+      "sha256": "ccb8186137811c55d387a2e74e29aa56a3c49f7033066e6ed71c77ff0989563c"
+    },
+    {
+      "path": "plugins/demux/libadaptive_plugin.dll",
+      "sha256": "1b6ef05d2591f5486225de21d81ed1b974e508b9c1ded3c6bba1f937d8db225c"
+    },
+    {
+      "path": "plugins/demux/libaiff_plugin.dll",
+      "sha256": "ea01bb09ae9d789b203f44d3fac890fd98fb0d3afed13059599a5e76d60e0512"
+    },
+    {
+      "path": "plugins/demux/libasf_plugin.dll",
+      "sha256": "f216565b9669f518660f3ed3b3b51193bf8d0815ceb7a7b226aa7df558eb2088"
+    },
+    {
+      "path": "plugins/demux/libau_plugin.dll",
+      "sha256": "22646f14ebfa7cd2822773f93774c7f933daad0acd701c6c86ecd6104439aacc"
+    },
+    {
+      "path": "plugins/demux/libavi_plugin.dll",
+      "sha256": "f88d324e3835f07af7f9ff14d750fdf9f3545464b8984443566a900bc82164af"
+    },
+    {
+      "path": "plugins/demux/libcaf_plugin.dll",
+      "sha256": "66cf35da14b084a80c04d277109f905c7aa303af47c51d6f82bb8a96f748a7cb"
+    },
+    {
+      "path": "plugins/demux/libdemux_cdg_plugin.dll",
+      "sha256": "b4b547f2764f5350ec80751b25b3a5cb9d68d0450a2732c5a5ba8799ed5569c6"
+    },
+    {
+      "path": "plugins/demux/libdemux_chromecast_plugin.dll",
+      "sha256": "4cac7cc260b1290927d5af640cd17ae4effc53061425362909dd17a550b20be6"
+    },
+    {
+      "path": "plugins/demux/libdemux_stl_plugin.dll",
+      "sha256": "74ed30b4af1b67fa3d465bca4370d3860ff1c156477502d97b702ee7f8a45ade"
+    },
+    {
+      "path": "plugins/demux/libdemuxdump_plugin.dll",
+      "sha256": "5187be2bf08ea6ff217526ac90ca09cb564a71f4eecfbfce492acc92e2a7c5ea"
+    },
+    {
+      "path": "plugins/demux/libdiracsys_plugin.dll",
+      "sha256": "b4898d6c033069c2da813db41d31824d0925151fa5e29eaa7a45569cbeedf6e3"
+    },
+    {
+      "path": "plugins/demux/libdirectory_demux_plugin.dll",
+      "sha256": "66495ae00010ceaedd98ab692d859fada5121a022c1bf92fc1b7a4e1607593fa"
+    },
+    {
+      "path": "plugins/demux/libes_plugin.dll",
+      "sha256": "cc4a386e17be93c8f258c334164a8ee60aa37809437b416a145e6124f5ed292c"
+    },
+    {
+      "path": "plugins/demux/libflacsys_plugin.dll",
+      "sha256": "03fa144ccd108bd33a1d4168154db7f7b09611351a6a8f34231ad7b6ec07bef8"
+    },
+    {
+      "path": "plugins/demux/libgme_plugin.dll",
+      "sha256": "90b075c8eb76689631217779f8712d73a6ce1b810f4df9bf458fd78f61edae95"
+    },
+    {
+      "path": "plugins/demux/libh26x_plugin.dll",
+      "sha256": "e4c0153ea5c282f77ac0582f29b8d808fbaeef586df91490b428abee3b517a7d"
+    },
+    {
+      "path": "plugins/demux/libimage_plugin.dll",
+      "sha256": "008a802ad1f672e3c5c455ade27a078449d97381e16a4d20141df723e23609bf"
+    },
+    {
+      "path": "plugins/demux/libmjpeg_plugin.dll",
+      "sha256": "43504fa7741aad4f0a75bb22355f848857b82fd5ac46eb0a169f8b5fa2854671"
+    },
+    {
+      "path": "plugins/demux/libmkv_plugin.dll",
+      "sha256": "bf8e32f528a227c47ce5e15a9162a161be0d2444f31ca02ee20b4d7dae0297bd"
+    },
+    {
+      "path": "plugins/demux/libmod_plugin.dll",
+      "sha256": "dae8053110ab01f8b3461585c00917a5e941971e4d84fdda2ad732ac64f7cafa"
+    },
+    {
+      "path": "plugins/demux/libmp4_plugin.dll",
+      "sha256": "9d21198bce1938e290dd4a87157c8014af2ee08f3512bd2ab052e2d70a0cbe2e"
+    },
+    {
+      "path": "plugins/demux/libmpc_plugin.dll",
+      "sha256": "6a760cbe4e2ae41618a539b57df4fa23d272e6d305c10b2f4ffb209fa0288dc7"
+    },
+    {
+      "path": "plugins/demux/libmpgv_plugin.dll",
+      "sha256": "9634163aa641339a2cc05d559aae611a4d4197d2c2e44bd12ab7b372fae11ca6"
+    },
+    {
+      "path": "plugins/demux/libnoseek_plugin.dll",
+      "sha256": "8623777666e30a5f6594e0d19ee692e4ed293596cf8bb00861b3d89f5e67d5ff"
+    },
+    {
+      "path": "plugins/demux/libnsc_plugin.dll",
+      "sha256": "63a8766449b9b4452312179c5d214ded7ba7d9dea646b14ebddc97a781dd81e2"
+    },
+    {
+      "path": "plugins/demux/libnsv_plugin.dll",
+      "sha256": "273ac95d2c4644bce98a38534ae3fb52dd1b73b622ced9b449d52216423ffea3"
+    },
+    {
+      "path": "plugins/demux/libnuv_plugin.dll",
+      "sha256": "5761a8e5ab59d40a5d97ce56866b0d986f7617cc33791861677af4a1e6a3e137"
+    },
+    {
+      "path": "plugins/demux/libogg_plugin.dll",
+      "sha256": "fffbba80708e32ea138e4b210ce22924387d4a285fd1a15d15066f9f869fed55"
+    },
+    {
+      "path": "plugins/demux/libplaylist_plugin.dll",
+      "sha256": "ea80db34adb2519953819e62a121de16193bbf6b02abe59ed39c312f32ad24ed"
+    },
+    {
+      "path": "plugins/demux/libps_plugin.dll",
+      "sha256": "43250227d2cb157cb1a58832496a2480ace3d2c20746b1c99e170da7b0fe000d"
+    },
+    {
+      "path": "plugins/demux/libpva_plugin.dll",
+      "sha256": "ff0ccc0e30ee647a1144806b60784a4355b976e8b96d90aef2b5bc743aada42a"
+    },
+    {
+      "path": "plugins/demux/librawaud_plugin.dll",
+      "sha256": "d8faeef72bdc2114864be5e07f6617dd64ce38e905db10434bd23acba0dcf7ee"
+    },
+    {
+      "path": "plugins/demux/librawdv_plugin.dll",
+      "sha256": "0c86e80e370eb0262912235b00fdcfd3842e37cb535c9be6dc0ff43e018a7443"
+    },
+    {
+      "path": "plugins/demux/librawvid_plugin.dll",
+      "sha256": "23e40f5df0d85053c50b9137fe2bf111e4adef6907b82ffca35ba405488d7c38"
+    },
+    {
+      "path": "plugins/demux/libreal_plugin.dll",
+      "sha256": "0b379775e84cb58591e634046457c6a7330915570bd6873d81609112cc91ce06"
+    },
+    {
+      "path": "plugins/demux/libsid_plugin.dll",
+      "sha256": "5e98a602e4a70bcd87fd24d56795afcce3a0af7b8e9f51a5b2846bfbe730e332"
+    },
+    {
+      "path": "plugins/demux/libsmf_plugin.dll",
+      "sha256": "9fbbdc31190a3b24d6bacb4e00c5a51a4d914f9ada44486df334e68952fdf1cc"
+    },
+    {
+      "path": "plugins/demux/libsubtitle_plugin.dll",
+      "sha256": "5af6559104e28179eb4dfcd1c0b502f835dd02fe66e14d02e06efc5735f270db"
+    },
+    {
+      "path": "plugins/demux/libts_plugin.dll",
+      "sha256": "280126dac3d3d77beb0ed873266d77ed0b38ed58f51045152dad84a6ba742337"
+    },
+    {
+      "path": "plugins/demux/libtta_plugin.dll",
+      "sha256": "43aebe833ece3e841b5ce7ebcc700e1461ea0f4620c4bf73627b1da46bb021b8"
+    },
+    {
+      "path": "plugins/demux/libty_plugin.dll",
+      "sha256": "314f37bb54228412c002eee74ff6c5e06b2d53258fb8362b2faa64a06227adbf"
+    },
+    {
+      "path": "plugins/demux/libvc1_plugin.dll",
+      "sha256": "a32d2355bc3cf230d4a87e4345e35b3288a2189434a6f004a82400a39a37984f"
+    },
+    {
+      "path": "plugins/demux/libvobsub_plugin.dll",
+      "sha256": "a19de214e653efcbeedd6e7d47931cf05ffa9908f6884ffecc04abf40daf785c"
+    },
+    {
+      "path": "plugins/demux/libvoc_plugin.dll",
+      "sha256": "e91242a04f929103def1e6c1c544a7b99d227660adf9732bb8fb0a73b9c4b2ed"
+    },
+    {
+      "path": "plugins/demux/libwav_plugin.dll",
+      "sha256": "c6bc401b31b5dd5b776e70b382f7f013952d6f438ae4b005f7bc1be91fd9293c"
+    },
+    {
+      "path": "plugins/demux/libxa_plugin.dll",
+      "sha256": "d2605db50d702ae7e043272526b3f2e0066b6586073d3e39c2d01027cfcd317a"
+    },
+    {
+      "path": "plugins/gui/libqt_plugin.dll",
+      "sha256": "1ad116d4b769c5e4d32d3f5e3947137bc4fb7b55937459771538b735e29b2057"
+    },
+    {
+      "path": "plugins/gui/libskins2_plugin.dll",
+      "sha256": "75bd3b90762221e59c6b562102b5776d7c125f8992b51eb0dcc8d369e6426f37"
+    },
+    {
+      "path": "plugins/keystore/libfile_keystore_plugin.dll",
+      "sha256": "0cb0134e32afa6f5b67444f9f63fe9144a2d38dbd1dfe5aa653fd9f8da27abbe"
+    },
+    {
+      "path": "plugins/keystore/libmemory_keystore_plugin.dll",
+      "sha256": "d707ff21a73ad0a0bc84dc70e12a4162135eea50ed0e738fd902faeb4778db30"
+    },
+    {
+      "path": "plugins/logger/libconsole_logger_plugin.dll",
+      "sha256": "e31e5d58497fe9c3c07de35a6395cf3c0a5a698a4a8774ca978a23f4aa6ec2bd"
+    },
+    {
+      "path": "plugins/logger/libfile_logger_plugin.dll",
+      "sha256": "5adc85e297c51965138e8b809416f7a4bae780b8291cda5faf26cff4155c8c30"
+    },
+    {
+      "path": "plugins/lua/liblua_plugin.dll",
+      "sha256": "539bd4539f208c00b0f1cb7d6bb219041e1e53297f8f2cd9b562dda7bd8fbf98"
+    },
+    {
+      "path": "plugins/meta_engine/libfolder_plugin.dll",
+      "sha256": "b2e03054aeb294a38098a32f46a36421c1b268ba9aef50751d796d6229f92fe0"
+    },
+    {
+      "path": "plugins/meta_engine/libtaglib_plugin.dll",
+      "sha256": "d5980798545de66eb78faeb359eaaa561469f618db28700465b999c93b1a74c8"
+    },
+    {
+      "path": "plugins/misc/libaddonsfsstorage_plugin.dll",
+      "sha256": "8a00a5f64cdf62010daa44435180ec186f5e591fc888c31e64f07b2cb990da1d"
+    },
+    {
+      "path": "plugins/misc/libaddonsvorepository_plugin.dll",
+      "sha256": "031cadfad654cce1855256001f11730d28842c49414e01711a90997cd77c239c"
+    },
+    {
+      "path": "plugins/misc/libaudioscrobbler_plugin.dll",
+      "sha256": "11c8af09a4547c7f8f50545117634535cf7d03117c7d58b887386b47e3c451a0"
+    },
+    {
+      "path": "plugins/misc/libexport_plugin.dll",
+      "sha256": "6f90e0a70993a9e9abcb6413ef5eacf54021777740eb7ea4c9d1d2615a1074bf"
+    },
+    {
+      "path": "plugins/misc/libfingerprinter_plugin.dll",
+      "sha256": "ff950cd747b1435605ff9646b671560c355e86e860fdd9e2465e399ed73cdacd"
+    },
+    {
+      "path": "plugins/misc/libgnutls_plugin.dll",
+      "sha256": "6cc0ffd83dd8999e087270cfec5c00de9d393b02a71155e8af6c583b1057a319"
+    },
+    {
+      "path": "plugins/misc/liblogger_plugin.dll",
+      "sha256": "d08d7b084e5a2305a47f78ee33189dee6918aa153fe3f86e00a436a80c2e0121"
+    },
+    {
+      "path": "plugins/misc/libstats_plugin.dll",
+      "sha256": "6cd043c2575c0cf85c1aab1199948670374fbc80fb35c45a2679ee20977ed579"
+    },
+    {
+      "path": "plugins/misc/libvod_rtsp_plugin.dll",
+      "sha256": "c2144bb6dd6b78d12a764fc243665e3256c82bb5100733119072d74fef06f553"
+    },
+    {
+      "path": "plugins/misc/libxml_plugin.dll",
+      "sha256": "d219066cd935b0e7fd12c33b9606bde0b5ac93c79aa1c49c31679b0ed44116f2"
+    },
+    {
+      "path": "plugins/mux/libmux_asf_plugin.dll",
+      "sha256": "0a3cc4932e369f3f1c5e44e435a1b0273388577340ce87f70ea630ae25d30df5"
+    },
+    {
+      "path": "plugins/mux/libmux_avi_plugin.dll",
+      "sha256": "d9034355bcd04ff2980cff0b862a4cc6bb4ee7807f96e2838bf7ffff088aae68"
+    },
+    {
+      "path": "plugins/mux/libmux_dummy_plugin.dll",
+      "sha256": "5a5df22f6330e6be437a20f6d54907e5aea7baad976d593eadc1eb1e61c82dd4"
+    },
+    {
+      "path": "plugins/mux/libmux_mp4_plugin.dll",
+      "sha256": "c0104ff304f1e4cbab54d745fa4e9c2e6da1665bd82eeccf6700a1a2b35156ab"
+    },
+    {
+      "path": "plugins/mux/libmux_mpjpeg_plugin.dll",
+      "sha256": "1ebbb56b058cd755563d6762542c521c75717d1c4f590c1cb9b5d35b469e9711"
+    },
+    {
+      "path": "plugins/mux/libmux_ogg_plugin.dll",
+      "sha256": "396275f932f751e5bc69aabdeda923da1057e9749bd51b33210f1d711a825318"
+    },
+    {
+      "path": "plugins/mux/libmux_ps_plugin.dll",
+      "sha256": "6798ad1b2147e33bbb94c82fd600659f6d6bc8beed74e4d26603249677c67dac"
+    },
+    {
+      "path": "plugins/mux/libmux_ts_plugin.dll",
+      "sha256": "46f0fde93f925877a3c1084bbc8c1d09894a0194f20898fe15b0260ea5ede706"
+    },
+    {
+      "path": "plugins/mux/libmux_wav_plugin.dll",
+      "sha256": "e0ee9a4976251d4b3198556fa67e8035a269a38a7fc81dbac462f33abf35782f"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_a52_plugin.dll",
+      "sha256": "45d406753e969b214e7e373aaa9e97375bdac35b74bdbcd7a8f5f8b399bd667d"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_av1_plugin.dll",
+      "sha256": "151099493485051a980ab63ace146a48fa024f6b0d9e3ca50fbb4579287add87"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_copy_plugin.dll",
+      "sha256": "9607fe91126f8bd2982327ead83c954fab238a551acffb98195c74d3602541c1"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_dirac_plugin.dll",
+      "sha256": "5dd77e07754df05a119cede5b3bc61f81ed8f6601dab5a3ffd7dbbeee6299e16"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_dts_plugin.dll",
+      "sha256": "4a35ffaf3c5c13e622d11e75a78bbfe389fa2e9f129b97ca851708667f4002d5"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_flac_plugin.dll",
+      "sha256": "afac90fa45030ac26b9ca38e39553110fc7ef7e8fa4deea4ce947b6fdb7eeebc"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_h264_plugin.dll",
+      "sha256": "2e2da2c2d58faa249fb8fef0c0735d72bc7188eefd7b108450c6bba794b6eeba"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_hevc_plugin.dll",
+      "sha256": "c9ad563e35ac1132178706f437385265766b358e41d0f851a3a1b35fa835329c"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_mlp_plugin.dll",
+      "sha256": "f15270189734814551bbc4cad84bdf6ba8b32bd4e88fe7127d1c0c68e1b2198f"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_mpeg4audio_plugin.dll",
+      "sha256": "7b6ed82895318a5479c79690d94b4493f020246d46147d7b5a3764f55fef7973"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_mpeg4video_plugin.dll",
+      "sha256": "e2044d20f6f5bbf355c9e568126259812faef0a372740a613ccd0e99d489abad"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_mpegaudio_plugin.dll",
+      "sha256": "a919bf96d33768a400335d0a35228c965acc40f8bf41fd1d5fc409cc35c2cf34"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_mpegvideo_plugin.dll",
+      "sha256": "cee0a8147af8b20f7dbf3b748f4f904498a309b19546bbdce881522e0aa1525c"
+    },
+    {
+      "path": "plugins/packetizer/libpacketizer_vc1_plugin.dll",
+      "sha256": "df519308a032c3df0218dc125db5afc5ae620d649877c0663938fd541ff6fbba"
+    },
+    {
+      "path": "plugins/plugins.dat",
+      "sha256": "ab92f9aebd225d52aa4c1d7398eecb12f8692a8be3a8fcbf433fcce1f9db3db9"
+    },
+    {
+      "path": "plugins/services_discovery/libmediadirs_plugin.dll",
+      "sha256": "945dcc97b98175b7a54decaacfc587d3d1349de1d8b8c72cca1ac81991e5fb4d"
+    },
+    {
+      "path": "plugins/services_discovery/libmicrodns_plugin.dll",
+      "sha256": "400590486ddc9c01a21429d01c5578832df627a35adc2b45a69479f2474895d3"
+    },
+    {
+      "path": "plugins/services_discovery/libpodcast_plugin.dll",
+      "sha256": "97fc6bf5709dd2eae456a3be34cc6f17f25b6a1575e60bf700541f28428bffdf"
+    },
+    {
+      "path": "plugins/services_discovery/libsap_plugin.dll",
+      "sha256": "9589412d14fa86ebb49a061cb71552f09484419f4a8a6fd650686c4635c58424"
+    },
+    {
+      "path": "plugins/services_discovery/libupnp_plugin.dll",
+      "sha256": "91bca3c43c79c8b1ec34556c54a5b16a5ffdb435acd9e119e14a2940a61fb9e7"
+    },
+    {
+      "path": "plugins/services_discovery/libwindrive_plugin.dll",
+      "sha256": "92f108b639dee8d8f37d1effa90a3e2f38f70ba38463ccbd82fd81e127facb20"
+    },
+    {
+      "path": "plugins/spu/libaudiobargraph_v_plugin.dll",
+      "sha256": "857b0122c1c4b5537612e7412cb6fe8ae5bc2cbb1c2676af373f52e54aaaac62"
+    },
+    {
+      "path": "plugins/spu/liblogo_plugin.dll",
+      "sha256": "0b454c1a98d5d34c9e2ca2dc17acc0611aac53aff3193157229622fb93be2f1b"
+    },
+    {
+      "path": "plugins/spu/libmarq_plugin.dll",
+      "sha256": "269044ea1fd8528c3ee87b69e8b517b0a47e689715b672faa9bd63390d3f56e6"
+    },
+    {
+      "path": "plugins/spu/libmosaic_plugin.dll",
+      "sha256": "21e6c3e79313f2353504351500a271ee47e1ff97f441a3d80c16cf8b51998897"
+    },
+    {
+      "path": "plugins/spu/libremoteosd_plugin.dll",
+      "sha256": "ed498f83fe06722a8319e10c19fc3732ee10205c70d380775a7e62bd4319a9ae"
+    },
+    {
+      "path": "plugins/spu/librss_plugin.dll",
+      "sha256": "c93bcd6ac48ebf60fe9cc12e36d1d396a14e242baefe160cd97a311b9fdce440"
+    },
+    {
+      "path": "plugins/spu/libsubsdelay_plugin.dll",
+      "sha256": "8145d6d1c1ba2d9f1a0af6212a3ab7f9313e2b6fa127856dbf59746eb41b8145"
+    },
+    {
+      "path": "plugins/stream_extractor/libarchive_plugin.dll",
+      "sha256": "577cac5f32fef9873fa7735ec1ccc9653af14bd5e10c6e7d9b26d192b85d9fc7"
+    },
+    {
+      "path": "plugins/stream_filter/libadf_plugin.dll",
+      "sha256": "0e7fd8e18bdfc7d5847b736b51ef26386e95c59f57a66e11859fce7dea7604c3"
+    },
+    {
+      "path": "plugins/stream_filter/libaribcam_plugin.dll",
+      "sha256": "1e2f115f9e7f7460f6f90a7b1a35b41501a91a1361f5bebfd33784dddd125158"
+    },
+    {
+      "path": "plugins/stream_filter/libcache_block_plugin.dll",
+      "sha256": "bb31041980171f80f1cbc497f677c8d1a0769872df3c330cb779de2ec30aef7b"
+    },
+    {
+      "path": "plugins/stream_filter/libcache_read_plugin.dll",
+      "sha256": "618857e3d800c34eb74b395971cf0420268dafd2e5a1e60447fc58b12f60a268"
+    },
+    {
+      "path": "plugins/stream_filter/libhds_plugin.dll",
+      "sha256": "f2ad5c87f68f3f70809ab7d28676f14b6a29a13a0d7a95107a65c0fc7b83ec42"
+    },
+    {
+      "path": "plugins/stream_filter/libinflate_plugin.dll",
+      "sha256": "1c2f3d0955794fb0e868909c2fc3d742c5bc89ac4b70701c5cc9017c8cbb4873"
+    },
+    {
+      "path": "plugins/stream_filter/libprefetch_plugin.dll",
+      "sha256": "a6d47eaea5a1c432ad799c3a586b63fa2dbcf4674293710d647b6f7fd8beb09c"
+    },
+    {
+      "path": "plugins/stream_filter/librecord_plugin.dll",
+      "sha256": "1171e74f17b6b4c0656a4fa717399cc1d46e7dd9d477023d52023e20b664bc42"
+    },
+    {
+      "path": "plugins/stream_filter/libskiptags_plugin.dll",
+      "sha256": "3e7d3a6246d1e2bbc39619fc74192f046a85d56830d610b9d34b191360fd755a"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_autodel_plugin.dll",
+      "sha256": "d3d6489ccc123f83f291628eb71ebed141d2e544da607e6590b99758f4a895a3"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_bridge_plugin.dll",
+      "sha256": "a7758b7c89c418709096e3b7e14e37c1021439be9621b0adb8fe11f4a4a363dd"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_chromaprint_plugin.dll",
+      "sha256": "c3f6c5ae1b5911af48b3910a191dc2694e6f9544654865f210c46bd26165f6e4"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_chromecast_plugin.dll",
+      "sha256": "34814e639d770ae20e2212d01473edae1f3031245cf56b7bbbb7ee127531f849"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_cycle_plugin.dll",
+      "sha256": "0e07aeda581425158f756de617835b1eb620be300eecd6bc6d7a15463897ac3e"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_delay_plugin.dll",
+      "sha256": "cf4e75f03a3200dc5ddeb54279106f1cfe082cb6496b9db60cd39af963e89e84"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_description_plugin.dll",
+      "sha256": "6ec152960a06bee2284a598c97a774e7dff74e05dcea5311fa4a5128bec2b6c2"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_display_plugin.dll",
+      "sha256": "dd868c15e7c3e241fbc78b3eddfe13704d94f01b7dfd30677fd8aab088156fef"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_dummy_plugin.dll",
+      "sha256": "07a32fc9eff11fbbb3ce9b29725867fabb80f46b55a499d6603b63dadd960713"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_duplicate_plugin.dll",
+      "sha256": "d5f097bf3732baef790324a52276f5e462c1b73bdf70e5c99b29b43f61958ff9"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_es_plugin.dll",
+      "sha256": "ed42067c9e0302f3d78d9215f69a07d1fa8f48c2e2c15531dd051fa193b57acf"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_gather_plugin.dll",
+      "sha256": "58f1693ce203cd787885b35cea5370936d7da6da0fc1dfa06decad3670d9eb1d"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_mosaic_bridge_plugin.dll",
+      "sha256": "ac8907bae617f0c598d81d17186bb903294361a0483573dd347232da8042e8c8"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_record_plugin.dll",
+      "sha256": "cdb3917c5df53585f3468efe03f43349d4beccfc47b1b34620079978a0f5b3d3"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_rtp_plugin.dll",
+      "sha256": "e0c5d8833c76f08a7fae5026463abca211d3d4e0565ded34aa19489dfce6bc67"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_setid_plugin.dll",
+      "sha256": "a8a3d71169150d57d8a3535fa54fca63845ff7540a4fb650a83e4d6604d8b6cd"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_smem_plugin.dll",
+      "sha256": "528da16c766b4a1de1566222056aca96cbae4c5db4a96c2202a9022619faa880"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_standard_plugin.dll",
+      "sha256": "bfa12b435c2f4bd343525369858a95b021fb23de4dd04b5bd23ef21c45e32a61"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_stats_plugin.dll",
+      "sha256": "9f52e11139b8ee8959a173c8a6534c2edae347c7d561b950d20d2e9bbfcefafc"
+    },
+    {
+      "path": "plugins/stream_out/libstream_out_transcode_plugin.dll",
+      "sha256": "d879a807ef8788b3477e6cd3732c7857cbf04cfe60fc0404d1b4eb65446e096b"
+    },
+    {
+      "path": "plugins/text_renderer/libfreetype_plugin.dll",
+      "sha256": "821eea21d12fd1309ec2cf42de1a39738b78acd7c726d2634b2f32894ebeb02f"
+    },
+    {
+      "path": "plugins/text_renderer/libsapi_plugin.dll",
+      "sha256": "6d06002828a42c225a3a0695edbe94b2e17459aefc0e4214b991ad3596bb829b"
+    },
+    {
+      "path": "plugins/text_renderer/libtdummy_plugin.dll",
+      "sha256": "e66f83416a5fed8c767e49cd5953a93685b3dabf98f1e18f2bcd9819d03f6103"
+    },
+    {
+      "path": "plugins/video_chroma/libchain_plugin.dll",
+      "sha256": "6d24100fe72dd10fa341b9c31689272d5b9ec6a0b441c0572a1e428f320d3a70"
+    },
+    {
+      "path": "plugins/video_chroma/libgrey_yuv_plugin.dll",
+      "sha256": "0a46a7822f32ecaffd22a22ad925e16b996d92b506b2fae52b57af76a5580cc1"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_10_p010_plugin.dll",
+      "sha256": "8417cbb0de1c26297086f4ebe6eeadfae6b87077a4e0bbd3cfac176749734602"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_nv12_plugin.dll",
+      "sha256": "1a66f2b80328d21ef08adb6bf05b14cd8a07040905df6c87dd2c09400f05579e"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_rgb_mmx_plugin.dll",
+      "sha256": "85bef3670a919f4ae9cc523b8bca7fedd206de0e9e24c4f42ce09e87c753afcd"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_rgb_plugin.dll",
+      "sha256": "96e24b6a9a2ca1b935c15cdfd9f14a70b48e104afda88a8ae49519266b0907cd"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_rgb_sse2_plugin.dll",
+      "sha256": "071c4ed83376e05656b309b292b5c6be505c1ff8a5256c071b26c1bbf1688b5f"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_yuy2_mmx_plugin.dll",
+      "sha256": "24c497e186afc884f5d3f76cf453bdf39219641a08c8d4e7208d08016b192fbe"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_yuy2_plugin.dll",
+      "sha256": "064ef2749e90003d44b2f7f8698cf08359c2e349caee129ca86d2be30c9ef0a5"
+    },
+    {
+      "path": "plugins/video_chroma/libi420_yuy2_sse2_plugin.dll",
+      "sha256": "eeab0429abea03446193f84dc33ec09ae36f3ef23e7f9eb0d60481add2a9ccb8"
+    },
+    {
+      "path": "plugins/video_chroma/libi422_i420_plugin.dll",
+      "sha256": "07aa289a53e75c60063e5724219593678668e8738557490c56af658f24a40589"
+    },
+    {
+      "path": "plugins/video_chroma/libi422_yuy2_mmx_plugin.dll",
+      "sha256": "57233457e47f3a8e5e9fc0b80e8b2624c4721b603aa25582574e38288680f57a"
+    },
+    {
+      "path": "plugins/video_chroma/libi422_yuy2_plugin.dll",
+      "sha256": "a9a172e46f86d78cd1838229a31e900c87ed8466f9836dd53a0328e25e8bc2ef"
+    },
+    {
+      "path": "plugins/video_chroma/libi422_yuy2_sse2_plugin.dll",
+      "sha256": "25609c49a768a309c6747de11ac0e73a38cde11e876e8cf965fe212d16c06ad2"
+    },
+    {
+      "path": "plugins/video_chroma/librv32_plugin.dll",
+      "sha256": "e2bdf5f65e00d7eddc96ac8c12e9cfcb76fbcc3957b65b8ec9976280456ad736"
+    },
+    {
+      "path": "plugins/video_chroma/libswscale_plugin.dll",
+      "sha256": "167ebdf10029df2fa3bb998798e8275c94ebdca58a0110b79a017c73a5c83904"
+    },
+    {
+      "path": "plugins/video_chroma/libyuvp_plugin.dll",
+      "sha256": "44b7020dafb275424a715ebe08dd16fc8479b5f174ea24736a37bdae7e490026"
+    },
+    {
+      "path": "plugins/video_chroma/libyuy2_i420_plugin.dll",
+      "sha256": "a35e2c2578e0894b9268805f317780b22f5770cf800fed0e838337d01426a20b"
+    },
+    {
+      "path": "plugins/video_chroma/libyuy2_i422_plugin.dll",
+      "sha256": "e5e94e7ebb9b6a599b2ae6e1ef9dbd2d672330a16074e9d84b69f9e4747cd443"
+    },
+    {
+      "path": "plugins/video_filter/libadjust_plugin.dll",
+      "sha256": "3315fb959d9892fc0eff076967a0d57b8ba49fdf1b171068515443aa13d4f57d"
+    },
+    {
+      "path": "plugins/video_filter/libalphamask_plugin.dll",
+      "sha256": "64d2ac35506e170a57f61de3821850e32e0cdafee5cf13beec56ce29cd16de0a"
+    },
+    {
+      "path": "plugins/video_filter/libanaglyph_plugin.dll",
+      "sha256": "5de3ad339ff6f9b261180b87d9373db1e0ed1d32c20af2dfaae7e0b657ade4d1"
+    },
+    {
+      "path": "plugins/video_filter/libantiflicker_plugin.dll",
+      "sha256": "191b6b7ef082c99970f0c76a6a7153101b8dd69b012895889075fa067c3f64cf"
+    },
+    {
+      "path": "plugins/video_filter/libball_plugin.dll",
+      "sha256": "37b85e472d8914f03efa7275abc24d8a49601ee87945128b9e9dd2d93f312b21"
+    },
+    {
+      "path": "plugins/video_filter/libblend_plugin.dll",
+      "sha256": "d34853a1fdf183efd64c3f242097264fab478eeef56e624d53ab1fdfe5b703f8"
+    },
+    {
+      "path": "plugins/video_filter/libblendbench_plugin.dll",
+      "sha256": "5c003c9284dc1489a1376101461494d452892ebeac018e1a7d225f4d46746283"
+    },
+    {
+      "path": "plugins/video_filter/libbluescreen_plugin.dll",
+      "sha256": "5fa830b30f23ab243ddb508a7fc5f514cc12196499d746ca9ddf6d782a2d1743"
+    },
+    {
+      "path": "plugins/video_filter/libcanvas_plugin.dll",
+      "sha256": "8020f8d77f168c7b32b821317f9a9a2cf0084aad55a1ab57c59476d2fd3b5485"
+    },
+    {
+      "path": "plugins/video_filter/libcolorthres_plugin.dll",
+      "sha256": "ad8755340564935d629f7c94e0ede41fb49cfb6fbcc8a61927f9319ad778cc42"
+    },
+    {
+      "path": "plugins/video_filter/libcroppadd_plugin.dll",
+      "sha256": "b208018b6a9200444b4152eb714685576605c7880d9d34ee4a45c48f9bc1951e"
+    },
+    {
+      "path": "plugins/video_filter/libdeinterlace_plugin.dll",
+      "sha256": "38a3fb919210e42919c5b409be7bccafbd7db43061519ee80acd69b8c7df5f35"
+    },
+    {
+      "path": "plugins/video_filter/libedgedetection_plugin.dll",
+      "sha256": "e8e62b14952d394b4c7f99d2595506030696a84e53b8e1de15bc0c5fcdb1e653"
+    },
+    {
+      "path": "plugins/video_filter/liberase_plugin.dll",
+      "sha256": "f5042a20dc91599d2b5d681563fde16687155170a93e213a01978149002e5971"
+    },
+    {
+      "path": "plugins/video_filter/libextract_plugin.dll",
+      "sha256": "491018dca3cf3fccb6c8cb5888202509de1334d208f64e7f6bf166a7e771de27"
+    },
+    {
+      "path": "plugins/video_filter/libfps_plugin.dll",
+      "sha256": "0341c31cf62f981c5ca276b2ba535d3e075c2cd691d0b3cbf5348bcc5365f355"
+    },
+    {
+      "path": "plugins/video_filter/libfreeze_plugin.dll",
+      "sha256": "91dedf8463747b14623755d7d54fc2a03c442d4f258355d61fd3e4e8c1118a3a"
+    },
+    {
+      "path": "plugins/video_filter/libgaussianblur_plugin.dll",
+      "sha256": "23c67d08ec5008325804ab39f2bbffae1eeec449c23bcd6ec35c9510d1479835"
+    },
+    {
+      "path": "plugins/video_filter/libgradfun_plugin.dll",
+      "sha256": "4ec6bcebf4900f3f4f9c195aa299e73573e8c90a30e71534521e76a7bbbf472b"
+    },
+    {
+      "path": "plugins/video_filter/libgradient_plugin.dll",
+      "sha256": "c02923321662dfe869dfafae3cf104d2e2d60bdbe74a5acdb9d7a598f9efb96a"
+    },
+    {
+      "path": "plugins/video_filter/libgrain_plugin.dll",
+      "sha256": "dc37ddfe8e497efac980efaf96668f6d643fc265c8a42d29d24d3ab4d40667ce"
+    },
+    {
+      "path": "plugins/video_filter/libhqdn3d_plugin.dll",
+      "sha256": "6e7fc2457c2573b429af19470ccc21d9416e96044500157836c102b25d025ffd"
+    },
+    {
+      "path": "plugins/video_filter/libinvert_plugin.dll",
+      "sha256": "e5512791ec65127b09fc3e166d66947b397944968e14e9ec7ee7997e7bb11481"
+    },
+    {
+      "path": "plugins/video_filter/libmagnify_plugin.dll",
+      "sha256": "9c93c32d7f46d55b9c1b55ad9a0d52c44ce25a12152e34260a9bc4e253e41fb4"
+    },
+    {
+      "path": "plugins/video_filter/libmirror_plugin.dll",
+      "sha256": "231c8a6d8218bdd688573deda6e0409371f7d6a7b99c18ec2478bf16a3c6d3b8"
+    },
+    {
+      "path": "plugins/video_filter/libmotionblur_plugin.dll",
+      "sha256": "6c19aa4aad7db7b8aa9f9908d3e9f2c91cc2dfaa401383b3859fef1e3bccc157"
+    },
+    {
+      "path": "plugins/video_filter/libmotiondetect_plugin.dll",
+      "sha256": "1f9b22cf01e16cd72722386e3874832597d9ed2c993c12aa99b41aaca711387a"
+    },
+    {
+      "path": "plugins/video_filter/liboldmovie_plugin.dll",
+      "sha256": "4f83ebaceade8bfe2bf6912d84e6a3256e074f4505da2fbce68e4e5c879fbaf2"
+    },
+    {
+      "path": "plugins/video_filter/libposterize_plugin.dll",
+      "sha256": "739d1af07621e72a0bd10b9d52a0b62d0b86909a5f2cad2ca33d3ca0791a10e5"
+    },
+    {
+      "path": "plugins/video_filter/libpostproc_plugin.dll",
+      "sha256": "6460329b0af77d0a5bae0ccc6e7397b7b0923ed81efeeb075901c7a135570dd2"
+    },
+    {
+      "path": "plugins/video_filter/libpsychedelic_plugin.dll",
+      "sha256": "50dc6c658416af65d737882e9b0511c333a7f49262173fc8db584711a43b5326"
+    },
+    {
+      "path": "plugins/video_filter/libpuzzle_plugin.dll",
+      "sha256": "265ad8302a1f5c83e528a9e7ee8fc96f5749a8a67ea3e4264471f7a541f092d3"
+    },
+    {
+      "path": "plugins/video_filter/libripple_plugin.dll",
+      "sha256": "be5b366ff8670baf9c356edebc30ff06d1b7f40624a0b5825c62f4d304e24ebb"
+    },
+    {
+      "path": "plugins/video_filter/librotate_plugin.dll",
+      "sha256": "da1a3638357b55da01d8228ed20acb8cc0671f3b024869ed0b0eee0301fa7463"
+    },
+    {
+      "path": "plugins/video_filter/libscale_plugin.dll",
+      "sha256": "afc3135679ac45d8f8a41a41206194bd83e7dfbf46d68ecebb52ad308b960862"
+    },
+    {
+      "path": "plugins/video_filter/libscene_plugin.dll",
+      "sha256": "c62844cc94cb5801cd52fa1b3f2323b6e7241eb81bb326ffdbbf5b96bb71bc6d"
+    },
+    {
+      "path": "plugins/video_filter/libsepia_plugin.dll",
+      "sha256": "2908347b03e6652b16c8bacb013f1f9c9e002ba6d40460c0459d1116308fa54f"
+    },
+    {
+      "path": "plugins/video_filter/libsharpen_plugin.dll",
+      "sha256": "118971b365dc25c5d074bcc7793048cca00dd2ac5d41ad1ed54374283e3ee92f"
+    },
+    {
+      "path": "plugins/video_filter/libtransform_plugin.dll",
+      "sha256": "338f6019b68a0651b4b2219783fdccf95dd5f406bf03b951c2acf9394f7d0ed9"
+    },
+    {
+      "path": "plugins/video_filter/libvhs_plugin.dll",
+      "sha256": "3791cf6ed7018b10d34ed3e3846dce39432d93dedf9f8e2394da292416faedf3"
+    },
+    {
+      "path": "plugins/video_filter/libwave_plugin.dll",
+      "sha256": "605bf8a272b5366a99f4cb1517cfc1408973e17638f281f93db0af9b980ffc62"
+    },
+    {
+      "path": "plugins/video_output/libcaca_plugin.dll",
+      "sha256": "39958d9bf2e500d83029a1cab3cdcae6a0414d33e021733a53e659e8a9d2fd84"
+    },
+    {
+      "path": "plugins/video_output/libdirect3d11_plugin.dll",
+      "sha256": "c9e97fc9a68544357a63609aa7a42a525d623905563ce3682b4914dc88597f9f"
+    },
+    {
+      "path": "plugins/video_output/libdirect3d9_plugin.dll",
+      "sha256": "97b4dc5b252b434df7c45c7c2761c183cc87a7b1276505eb592fe567aa662482"
+    },
+    {
+      "path": "plugins/video_output/libdirectdraw_plugin.dll",
+      "sha256": "cc39e69f66862adbbe0c042c87ee703236f9303a8878fc5aba19fd8b27931d68"
+    },
+    {
+      "path": "plugins/video_output/libdrawable_plugin.dll",
+      "sha256": "1e177224fa67807620c7679d24c59b2b68e9a6ff1d2184c95422a2e5758a7fd7"
+    },
+    {
+      "path": "plugins/video_output/libflaschen_plugin.dll",
+      "sha256": "0ebed4ebdc1900aea736d4d029c23506fef5f5683fefe68834d9f47c16b3264f"
+    },
+    {
+      "path": "plugins/video_output/libgl_plugin.dll",
+      "sha256": "898e5844957c73ba546025856d1169071fa02a794cff75349a92b0e2bfc354fb"
+    },
+    {
+      "path": "plugins/video_output/libglinterop_dxva2_plugin.dll",
+      "sha256": "251c44c1e91c56f48707a0b1653d081a0cdc15072541a5d823c215d9b59979a4"
+    },
+    {
+      "path": "plugins/video_output/libglwin32_plugin.dll",
+      "sha256": "7ad5608f5c576345c6c48e236a77dd1e20c2eeb9fc572fe09ffefc26dbf675f9"
+    },
+    {
+      "path": "plugins/video_output/libvdummy_plugin.dll",
+      "sha256": "07e555cfd7f12f279eac058079bd2a5b866bee77f705640dd623f6ba2494017a"
+    },
+    {
+      "path": "plugins/video_output/libvmem_plugin.dll",
+      "sha256": "d92204eb71c076dc596523e5a6cab36c2541c10bbc760eebfaef3de60f784c89"
+    },
+    {
+      "path": "plugins/video_output/libwgl_plugin.dll",
+      "sha256": "d7f6d31af120793e6d4fa91c8441f342bc9c84c0e9d45e2e1e96e9f4383fa029"
+    },
+    {
+      "path": "plugins/video_output/libwingdi_plugin.dll",
+      "sha256": "f28cff4ee7574ff82a15b251b2d975a97e6c4a7692eb14478cbfe9fb78d50cb5"
+    },
+    {
+      "path": "plugins/video_output/libwinhibit_plugin.dll",
+      "sha256": "662e30e584d6c646e6210c1016cf2938ef9d0fe611f6a0bf90bac4965aef5e6d"
+    },
+    {
+      "path": "plugins/video_output/libyuv_plugin.dll",
+      "sha256": "b77192dabcb8d32bcf8a93f62bf735cc284b1c5a541f8010234c366366d55d6e"
+    },
+    {
+      "path": "plugins/video_splitter/libclone_plugin.dll",
+      "sha256": "c5600f2ffd922f5d614d4b2463c1d88b60d36b2bb04e67f1b823a0e5b325b47e"
+    },
+    {
+      "path": "plugins/video_splitter/libpanoramix_plugin.dll",
+      "sha256": "680cdc7bb9f457ab30b26df587eaafb397995695a4d0a81257a46f60bbd7cebe"
+    },
+    {
+      "path": "plugins/video_splitter/libwall_plugin.dll",
+      "sha256": "a714fea89113dc0a16945d50bd494acacd7403d1e095730ae47796e6e5493f27"
+    },
+    {
+      "path": "plugins/visualization/libglspectrum_plugin.dll",
+      "sha256": "f0a52034458f432286582c7dc312e451ffee55830a4bd990fb0ec2499a068deb"
+    },
+    {
+      "path": "plugins/visualization/libgoom_plugin.dll",
+      "sha256": "bf971fb2923207440730fb051f60acf302fe9a56767aba359d512c213daebcfa"
+    },
+    {
+      "path": "plugins/visualization/libprojectm_plugin.dll",
+      "sha256": "d7e4617c13633980c2e5a45562cc79c81bee932f88766bfc64b116ddf09450b5"
+    },
+    {
+      "path": "plugins/visualization/libvisual_plugin.dll",
+      "sha256": "be74a063fecbb789ad455fafbc8dab848dc2e3b1602b6183cfcf1e8ebe8aa880"
+    }
+  ]
+}

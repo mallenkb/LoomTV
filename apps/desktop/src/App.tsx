@@ -36,6 +36,7 @@ import {
   purgeRemoteDesktopSecrets,
   type DesktopLibraryMode,
 } from './lib/remoteDesktop';
+import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
 
 interface NowPlaying {
   mediaId?: string;
@@ -64,7 +65,7 @@ type PlaybackCandidate = {
 };
 
 function isRemotePlaybackSource(filePath: string): boolean {
-  return /^(?:https?|plexserver):\/\//i.test(filePath);
+  return /^(?:https?):\/\//i.test(filePath) || isMediaProtocolUrl(filePath);
 }
 
 async function choosePlaybackCandidate(candidates: PlaybackCandidate[]): Promise<PlaybackCandidate | null> {
@@ -76,7 +77,7 @@ async function choosePlaybackCandidate(candidates: PlaybackCandidate[]): Promise
 
   // Remote sources are already opaque playback capabilities. The paired host
   // owns their existence check, so do not send them through the local probe.
-  if (isRemotePlaybackSource(uniqueCandidates[0].filePath) || !window.desktopApi?.getFileInfo) {
+  if (desktopApi.isRemoteLibraryMode() || isRemotePlaybackSource(uniqueCandidates[0].filePath) || !window.desktopApi?.getFileInfo) {
     return uniqueCandidates[0];
   }
 
@@ -423,7 +424,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 
 function AppShell() {
   const { state: libraryState, hydrateLibraryItem } = useLibrary();
-  const { gateOpen } = useProfiles();
+  const { activeProfile, gateOpen, openGate } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
@@ -462,6 +463,15 @@ function AppShell() {
     startPosition?: number,
   ) => {
     const openPlayer = async (details?: MediaItem | null) => {
+      // The profile gate and the media IPC handler read the same persisted
+      // selection, but a profile can be locked or revoked while a catalog
+      // card is still on screen. Recheck at the playback boundary so the
+      // player never opens into a request that the main process must reject.
+      const activeProfileState = await desktopApi.getActiveProfileState();
+      if (!activeProfileState.profileId || !activeProfile) {
+        openGate();
+        return;
+      }
       const resolvedEpisode = details && typeof currentSeason === 'number' && typeof currentEpisode === 'number'
         ? details.episodeFiles?.find((candidate) => (
             candidate.season === currentSeason && candidate.episode === currentEpisode
@@ -510,7 +520,7 @@ function AppShell() {
         console.warn('Could not hydrate playback details:', error);
         void openPlayer();
       });
-  }, [hydrateLibraryItem]);
+  }, [activeProfile, hydrateLibraryItem, openGate]);
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {

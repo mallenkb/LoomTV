@@ -154,11 +154,11 @@ Download the installer or archive for your operating system, then run it like an
 - Tailwind CSS and local UI components for styling.
 - better-sqlite3 for local persistence.
 - FFmpeg, FFprobe, and HLS.js for direct playback checks and HLS/transcode fallback.
-- A bundled LibVLC/Koffi bridge reserved for local desktop playback experiments, with the established mpv and Chromium/HLS fallbacks.
+- A bundled LibVLC/Koffi bridge for local desktop playback, with the established mpv and Chromium/HLS fallbacks.
 
 ## Playback Architecture
 
-- Local desktop files preserve the classic Loom player composition. On macOS they play through the LibVLC in-window native surface, then packaged or user/system-installed mpv, then the browser/HLS path; other platforms start at mpv. Set `LOOMTV_LIBVLC_COMPOSITED_SURFACE=0` to force the mpv/browser fallback for a launch.
+- Local desktop files preserve the classic Loom player composition. On macOS and Windows they play through the LibVLC in-window native surface when a runtime is available, then packaged or user/system-installed mpv, then the browser/HLS path. Set `LOOMTV_LIBVLC_COMPOSITED_SURFACE=0` to force the mpv/browser fallback for a launch.
 - LAN, remote, and mobile playback continue through LoomTV's authenticated direct-play/transcode and browser/HLS paths.
 
 ## Getting Started
@@ -302,11 +302,11 @@ apps/
 
 ## Building and Packaging
 
-The Forge configuration packages the desktop app with ASAR enabled and includes media tooling resources from `apps/desktop/resources/ffmpeg`, plus staged native playback payloads under `apps/desktop/resources/libvlc` and `apps/desktop/resources/mpv` when those target artifacts are supplied. Platform makers are configured for ZIP on macOS, Squirrel on Windows, and DEB/RPM on Linux.
+The Forge configuration packages the desktop app with ASAR enabled and includes media tooling resources from `apps/desktop/resources/ffmpeg`, plus staged native playback payloads under `apps/desktop/resources/libvlc` and `apps/desktop/resources/mpv`. The supported Windows x64 and macOS targets carry their verified LibVLC payloads outside `app.asar`. Platform makers are configured for ZIP on macOS, Squirrel on Windows, and DEB/RPM on Linux.
 
 ## Third-Party Notices
 
-Loom Media Server depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, Lucide React, and Koffi. Release payloads include staged native LibVLC and MPV artifacts for the target platforms that have been explicitly supplied and verified; the LibVLC payload remains gated until its surface can preserve Loom's single-window renderer composition. Unsupported or development targets continue to use compatible system runtimes and browser/HLS fallback where available. LoomTV does not download native runtimes at application runtime.
+Loom Media Server depends on open-source desktop, UI, database, and media libraries. Important runtime dependencies include Electron, Electron Forge, React, React Router, Vite, TypeScript, Tailwind CSS, better-sqlite3, HLS.js, Motion, Lucide React, and Koffi. Release payloads include staged native LibVLC and MPV artifacts for the supported targets; Windows and macOS LibVLC surfaces preserve Loom's single-window renderer composition. Unsupported or development targets continue to use compatible system runtimes and browser/HLS fallback where available. LoomTV does not download native runtimes at application runtime.
 
 The application also includes local UI component patterns inspired by shadcn/ui.
 

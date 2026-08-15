@@ -1,16 +1,27 @@
 # LibVLC runtime notice
 
-This notice covers the staged macOS arm64 payload currently present in this
-checkout. It was repackaged from the official VLC 3.0.23 arm64 macOS
-distribution and is kept outside `app.asar` so the native libraries and plugin
-modules can be loaded by the Electron main process. Other target payloads must
-carry their own release-specific provenance before distribution.
+This notice covers the staged macOS arm64 and Windows x64 payloads in this
+checkout. They are repackaged from the official VLC 3.0.23 arm64 macOS and
+VLC 3.0.21 Windows x64 distributions. The payloads are kept outside `app.asar`
+so the native libraries and plugin modules can be loaded by the Electron main
+process. Windows uses the LibVLC bridge through a child HWND and Direct3D11.
 
 Upstream artifact: `vlc-3.0.23-arm64.dmg`
 
 Source: <https://download.videolan.org/vlc/last/macosx/vlc-3.0.23-arm64.dmg>
 
 Archive SHA-256: `fc6fac08d87f538517d44aca0c5e7a244b67c8c4cb589bf478363a7315fd5e0d`
+
+Windows artifact: `vlc-3.0.21-win64.exe`
+
+Source: <https://download.videolan.org/vlc/3.0.21/win64/vlc-3.0.21-win64.exe>
+
+Archive SHA-256: `9742689a50e96ddc04d80ceff046b28da2beefd617be18166f8c5e715ec60c59`
+
+The Windows payload is a runtime-only repackaging of that distribution: it
+retains `libvlc.dll`, `libvlccore.dll`, the VLC plugin modules and cache, and
+the required `lua`/`hrtfs` support data. The VLC desktop executable,
+uninstaller, skins, and unrelated UI resources are not shipped.
 
 The staging manifest under each target payload records SHA-256 values for the
 reviewed upstream files. Packaged macOS binaries are re-signed as part of the
@@ -49,11 +60,9 @@ license and package metadata remain part of the application dependency
 notices. macOS releases must also sign and notarize the staged dynamic
 libraries and plugin modules consistently with the app.
 
-LibVLC is used for local desktop files only. The current native surface is
-held behind the validation-only `LOOMTV_LIBVLC_COMPOSITED_SURFACE=1` gate until
-LoomTV has a true in-window native view host that preserves its renderer
-controls and keeps exactly one OS-visible player window. Without that gate, or
-if LibVLC is absent, cannot initialize, or is disabled by
+LibVLC is used for local desktop files only. macOS uses an NSView child host and
+Windows uses an HWND child host; both preserve the renderer controls in the
+same OS-visible player window. If LibVLC is absent, cannot initialize, or is disabled by
 `LOOMTV_DISABLE_EXPERIMENTAL_LIBVLC=1` (with the legacy aliases still
 supported), LoomTV keeps the existing fallback order: MPV, then Chromium/HLS.
 Network, LAN, and remote playback continue to use LoomTV's authenticated

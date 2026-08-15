@@ -1,4 +1,8 @@
 import type { RemoteLibraryConnection } from '../shared/desktopProtocol.ts';
+import {
+  isMediaProtocolUrl,
+  remoteMediaProtocolUrl,
+} from '../shared/mediaProtocol.ts';
 import { parseStoredValue, remoteDesktopSessionSchema } from './desktopDecoders.ts';
 
 export type DesktopLibraryMode = 'host' | 'remote';
@@ -90,6 +94,34 @@ export function purgeRemoteDesktopSecrets(): void {
 
 export function isRemoteDesktopMode(): boolean {
   return getDesktopLibraryMode() === 'remote' && Boolean(getRemoteDesktopSession());
+}
+
+export function isRemoteMediaSource(value: string): boolean {
+  if (/^https?:\/\//i.test(value)) return true;
+  if (!isMediaProtocolUrl(value)) return false;
+  try {
+    return new URL(value).hostname.toLowerCase() === 'remote';
+  } catch {
+    return false;
+  }
+}
+
+export { remoteMediaProtocolUrl };
+
+export function remoteMediaRoutePath(
+  pathname: string,
+  filePath: string,
+  extraParams?: Record<string, string | number | undefined>,
+): string {
+  const parsed = isRemoteMediaSource(filePath) ? new URL(filePath) : null;
+  const params = parsed
+    ? new URLSearchParams(parsed.search)
+    : new URLSearchParams({ resourceId: remoteResourceId(filePath) });
+  for (const [key, value] of Object.entries(extraParams || {})) {
+    if (value !== undefined) params.set(key, String(value));
+  }
+  const query = params.toString();
+  return `${pathname}${query ? `?${query}` : ''}`;
 }
 
 export function remoteResourceId(value: string): string {

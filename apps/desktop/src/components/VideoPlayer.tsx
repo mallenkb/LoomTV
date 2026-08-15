@@ -18,6 +18,7 @@ import {
   type MediaSegment,
   type MediaSegmentType,
 } from '@/lib/desktopApi';
+import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
@@ -96,6 +97,7 @@ import TopPlayerControls from './VideoPlayer/TopPlayerControls';
 import { loadSubtitleStyle, saveSubtitleStyle } from './VideoPlayer/subtitleStyleStorage';
 import { absoluteMediaSeconds, playerSecondsForAbsolute } from './VideoPlayer/playbackClock';
 import { activeSkipSegmentAt, shouldShowSkipPrompt, skipPromptLabel } from './VideoPlayer/skipPrompt';
+import { isProfileSelectionRequiredError } from './VideoPlayer/playbackProfileGuard';
 import {
   groupEpisodesBySeason,
   nextPlayableEpisodeFile,
@@ -195,7 +197,7 @@ export default function VideoPlayer({
   onClose,
   onEpisodeChange,
 }: VideoPlayerProps) {
-  const { activeProfile } = useProfiles();
+  const { activeProfile, openGate } = useProfiles();
   const videoRef = useRef<HTMLVideoElement>(null);
   const systemMediaAudioRef = useRef<HTMLAudioElement>(null);
   const { state: libraryState } = useLibrary();
@@ -1161,11 +1163,24 @@ export default function VideoPlayer({
       setStreamUrl(stream.url);
     } catch (error) {
       if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+      if (isProfileSelectionRequiredError(error)) {
+        // Profile state can change between the AppShell preflight and this
+        // stream request. Return to the picker instead of leaving a player
+        // overlay stuck on an IPC error that Retry cannot repair.
+        setStreamUrl('');
+        setStreamIsTranscoded(false);
+        setNativePlaybackActive(false);
+        setNativeEngineKind(null);
+        document.documentElement.classList.remove('loom-native-active');
+        onClose();
+        openGate();
+        return;
+      }
       setPlayerState('error');
       setStatusMessage('Failed to resolve stream');
       setErrorMessage(error instanceof Error ? error.message : 'Failed to resolve stream URL');
     }
-  }, [clearHls, filePath, startTranscodedFallback, stopTranscodeSession]);
+  }, [clearHls, filePath, onClose, openGate, startTranscodedFallback, stopTranscodeSession]);
 
   const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
@@ -1534,7 +1549,7 @@ export default function VideoPlayer({
         if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
         if (probeResult.ok) applyProbeData(probeResult.data, preferences);
 
-        const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath);
+        const isLocalFile = !/^(?:https?):/i.test(filePath) && !isMediaProtocolUrl(filePath);
         // Saved audio/subtitle preferences must not disqualify the native
         // desktop engine. They are applied after LibVLC reports its own track
         // IDs, while semantic matching remains based on the probe data above.
