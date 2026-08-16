@@ -60,7 +60,7 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Release Notes
 
-- [LoomTV 1.0.129](docs/releases/v1.0.129.md): improves responsive browser layouts, mobile navigation, hero artwork and actions, and detail-page transitions across the desktop app.
+- [LoomTV 1.0.129](docs/releases/v1.0.129.md): improves responsive browser layouts and detail-page transitions, and fixes Windows native playback, profile gating, and remote browser fallback behavior.
 - [LoomTV 1.0.128](docs/releases/v1.0.128.md): improves desktop playback controls, artwork badges, hero actions, plugin discovery, and theme customization.
 - [LoomTV 1.0.127](docs/releases/v1.0.127.md): improves desktop LAN discovery, playback progress, artwork and ratings, theme controls, and companion mobile reliability.
 - [LoomTV 1.0.126](docs/releases/v1.0.126.md): restores trusted CI validation for the mobile release gate and refreshes the verified desktop packages.
