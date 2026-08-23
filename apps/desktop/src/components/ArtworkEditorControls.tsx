@@ -382,8 +382,10 @@ export default function ArtworkEditorControls({
         });
       }
       await saveOfficialArtwork(refreshedArtwork, artworkTarget);
-    } catch (error) {
-      setMetadataError(error instanceof Error ? error.message : 'Unable to refresh metadata.');
+    } catch {
+      setMetadataError(
+        'No artwork could be loaded from the connected metadata providers. You can keep the current artwork or upload a poster image instead.',
+      );
       setMetadataDialogOpen(true);
     } finally {
       setIsFetchingArtwork(false);
@@ -431,8 +433,8 @@ export default function ArtworkEditorControls({
         description: `${appliedLabel} from ${candidate.title} on ${candidate.source} was applied.`,
         tone: 'success',
       });
-    } catch (error) {
-      setMetadataError(error instanceof Error ? error.message : 'Unable to apply metadata.');
+    } catch {
+      setMetadataError('That artwork could not be applied. Choose another image or upload a poster image instead.');
     } finally {
       setApplyingCandidateId('');
     }

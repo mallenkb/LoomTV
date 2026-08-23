@@ -662,6 +662,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     return [...library.movies, ...library.tvShows, ...library.animeShows].find((item) => item.id === mediaId) || null;
   }
 
+  async function safeMetadataProvider<T>(request: Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await request;
+    } catch {
+      return fallback;
+    }
+  }
+
   async function fetchOfficialMetadataCandidatesForItem(item: MediaItem): Promise<OfficialMetadataCandidate[]> {
     if (!metadataRequestsAllowed()) return [];
     const settings = loadSettings();
@@ -671,13 +679,13 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     if (item.type === 'movie') {
       const [tmdbById, tmdbBySearch, tmdbCandidates, omdbById, omdbBySearch, tvMeta, tvCandidates] = await Promise.all([
-        providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-        fetchTMDBMovieMetadata(title, year, tmdbApiKey),
-        fetchTMDBMovieMetadataCandidates(title, year, tmdbApiKey),
-        providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-        fetchOMDbMetadata(title, year, omdbApiKey),
-        fetchTVMetadata(title, year),
-        fetchTVMetadataCandidates(title, year),
+        safeMetadataProvider(providerIds.tmdbId ? fetchTMDBMovieMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null), null),
+        safeMetadataProvider(fetchTMDBMovieMetadata(title, year, tmdbApiKey), null),
+        safeMetadataProvider(fetchTMDBMovieMetadataCandidates(title, year, tmdbApiKey), []),
+        safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
+        safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
+        safeMetadataProvider(fetchTVMetadata(title, year), null),
+        safeMetadataProvider(fetchTVMetadataCandidates(title, year), []),
       ]);
       return sortMetadataCandidates(uniqueMetadataCandidates([
         metadataCandidate('TMDB', tmdbById, title),
@@ -692,15 +700,15 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     const likelyAnime = item.type === 'anime';
     const [omdbById, omdbBySearch, anilistMeta, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvMeta, tvCandidates] = await Promise.all([
-      providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-      fetchOMDbMetadata(title, year, omdbApiKey),
-      likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null),
-      likelyAnime ? fetchJikanMetadataCandidates(title, localTitles) : Promise.resolve([]),
-      providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-      fetchTMDBTVMetadata(title, year, tmdbApiKey),
-      fetchTMDBTVMetadataCandidates(title, year, tmdbApiKey),
-      fetchTVMetadata(title, year),
-      fetchTVMetadataCandidates(title, year),
+      safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
+      safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
+      safeMetadataProvider(likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null), null),
+      safeMetadataProvider(likelyAnime ? fetchJikanMetadataCandidates(title, localTitles) : Promise.resolve([]), []),
+      safeMetadataProvider(providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null), null),
+      safeMetadataProvider(fetchTMDBTVMetadata(title, year, tmdbApiKey), null),
+      safeMetadataProvider(fetchTMDBTVMetadataCandidates(title, year, tmdbApiKey), []),
+      safeMetadataProvider(fetchTVMetadata(title, year), null),
+      safeMetadataProvider(fetchTVMetadataCandidates(title, year), []),
     ]);
     const animeCandidates = likelyAnime ? [
       metadataCandidate('AniList', metadataResultMatchesLocalTitle(anilistMeta, localTitles) ? anilistMeta : null, title),
@@ -783,13 +791,13 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
 
     const likelyAnime = item.type === 'anime';
     const [omdbById, omdbBySearch, anilistMeta, jikanMeta, tmdbById, tmdbBySearch, tvMeta] = await Promise.all([
-      providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null),
-      fetchOMDbMetadata(title, year, omdbApiKey),
-      likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null),
-      likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null),
-      providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null),
-      fetchTMDBTVMetadata(title, year, tmdbApiKey),
-      fetchTVMetadata(title, year),
+      safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
+      safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
+      safeMetadataProvider(likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null), null),
+      safeMetadataProvider(likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null), null),
+      safeMetadataProvider(providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null), null),
+      safeMetadataProvider(fetchTMDBTVMetadata(title, year, tmdbApiKey), null),
+      safeMetadataProvider(fetchTVMetadata(title, year), null),
     ]);
     const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
     const matchedAniList = metadataResultMatchesLocalTitle(anilistMeta, localTitles) ? anilistMeta : null;

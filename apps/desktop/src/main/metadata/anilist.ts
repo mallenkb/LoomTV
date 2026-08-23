@@ -113,11 +113,10 @@ async function fetchAniListMedia(variables: { malId?: number; search?: string })
     },
     { allowedHosts: ['graphql.anilist.co'], timeoutMs: 12_000, maxBytes: 1_500_000, retries: 1 },
   );
-  // AniList occasionally returns HTTP 404 for an unavailable lookup instead
-  // of a normal GraphQL response. That means “no AniList match” to the local
-  // metadata pipeline, not a reason to discard TMDB, Jikan, TVmaze, and OMDb
-  // candidates that can still satisfy the request.
-  if (response.status === 404) return null;
+  // AniList can reject or temporarily block public lookups. Treat those
+  // statuses as an unavailable provider so the other metadata sources can
+  // still satisfy the request.
+  if ([401, 403, 404].includes(response.status)) return null;
   if (!response.ok) throw new Error(`AniList request failed: ${response.status}`);
 
   const payload = aniListResponseSchema.parse(await response.json());
