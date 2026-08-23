@@ -186,7 +186,7 @@ export default function LibrarySettingsSection({
                 <Clock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--loom-accent)]" />
                 <div>
                   <p className="text-sm font-semibold text-white">Automatic quick sync</p>
-                  <p className="mt-0.5 text-xs text-[var(--loom-muted)]">Check for new or changed files while LoomTV is open.</p>
+                  <p className="mt-0.5 text-xs text-[var(--loom-muted)]">Check for new or changed files, and refresh cached titles when metadata keys change.</p>
                 </div>
               </div>
               <div

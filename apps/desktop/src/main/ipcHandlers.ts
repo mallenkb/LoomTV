@@ -304,6 +304,8 @@ export interface IpcHandlerDependencies<
   addFolderToLibrary: (library: TLibraryData, folderPath: string, kind: IpcLibraryFolderKind) => TLibraryData;
   removeFolderFromLibrary: (library: TLibraryData, folderPath: string) => TLibraryData;
   saveLibraryMutation: (library: TLibraryData) => void;
+  addUnifiedLibraryRoot: (folderPath: string, kind: IpcLibraryFolderKind) => Promise<boolean>;
+  removeUnifiedLibraryRoot: (folderPath: string) => Promise<boolean>;
   assertLocalMediaPath: (filePath: string) => void;
   authorizeMediaPath: (filePath: string) => void;
   assertSubtitleCanAccessMediaPath?: (mediaFilePath: string, subtitleFilePath: string) => void;
@@ -315,6 +317,9 @@ export interface IpcHandlerDependencies<
   authorizeSettingsWrite: () => void;
   saveSettings: (settings: TSettings) => void;
   onSettingsSaved?: () => void;
+  getUnifiedDesktopServerState: () => IpcResult<'server:unified-state'>;
+  configureUnifiedDesktopOwner: (input: IpcContract['server:configure-owner']['args'][0]) => Promise<IpcResult<'server:configure-owner'>>;
+  openUnifiedDesktopAdmin: () => Promise<IpcResult<'server:open-admin'>>;
   syncLanAdvertisement: () => void;
   testMetadataKeys: (keys: Record<string, string>) => Promise<MetadataKeyTestResult[]>;
   getLanShareToken: () => string;
@@ -622,6 +627,7 @@ export function registerIpcHandlers<
       const newFolder = result.filePaths[0];
       const updated = deps.addFolderToLibrary(data, newFolder, safeLibraryFolderKind(kind));
       deps.saveLibraryMutation(updated);
+      await deps.addUnifiedLibraryRoot(newFolder, safeLibraryFolderKind(kind));
       return enqueueLibraryScan(async () => {
         const scanData = deps.loadLibrary();
         const scanVersion = deps.getLibraryMutationVersion();
@@ -660,6 +666,7 @@ export function registerIpcHandlers<
     const data = deps.loadLibrary();
     const updated = deps.addFolderToLibrary(data, path.resolve(normalizedFolderPath), safeLibraryFolderKind(kind));
     deps.saveLibraryMutation(updated);
+    await deps.addUnifiedLibraryRoot(normalizedFolderPath, safeLibraryFolderKind(kind));
     return enqueueLibraryScan(async () => {
       const scanData = deps.loadLibrary();
       const scanVersion = deps.getLibraryMutationVersion();
@@ -683,11 +690,12 @@ export function registerIpcHandlers<
     });
   }, z.tuple([libraryFolderKindSchema, nonEmptyString]));
 
-  handle('library:remove-folder', (_event, folderPath: string) => {
+  handle('library:remove-folder', async (_event, folderPath: string) => {
     deps.authorizeSettingsWrite();
     const data = deps.loadLibrary();
     const updated = deps.removeFolderFromLibrary(data, folderPath);
     deps.saveLibraryMutation(updated);
+    await deps.removeUnifiedLibraryRoot(folderPath);
     return deps.libraryIndexForRenderer();
   }, z.tuple([nonEmptyString]));
 
@@ -720,6 +728,8 @@ export function registerIpcHandlers<
       safeLibraryFolderKind(kind),
     );
     deps.saveLibraryMutation(updated);
+    await deps.removeUnifiedLibraryRoot(folderPath);
+    await deps.addUnifiedLibraryRoot(normalizedNextFolderPath, safeLibraryFolderKind(kind));
 
     return enqueueLibraryScan(async () => {
       const scanData = deps.loadLibrary();
@@ -857,6 +867,15 @@ export function registerIpcHandlers<
     deps.syncLanAdvertisement();
     return true;
   }, z.tuple([rendererSettingsPatchSchema]));
+
+  handleNoArgs('server:unified-state', () => deps.getUnifiedDesktopServerState());
+  handle('server:configure-owner', (_event, input) => deps.configureUnifiedDesktopOwner(input), z.tuple([
+    z.object({
+      name: z.string().trim().min(1).max(80),
+      password: z.string().min(8).max(256),
+    }),
+  ]));
+  handleNoArgs('server:open-admin', () => deps.openUnifiedDesktopAdmin());
 
   handle('metadata:test-keys', (_event, keys: Record<string, string>) => {
     deps.authorizeSettingsWrite();

@@ -1,5 +1,9 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { hasPermission } from './auth-policy.js';
+import { createDesktopSetupChannel } from './desktop-setup-channel.js';
+import { SETUP_STEPS } from './setup-service.js';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import {
   MEDIA_CORE_CONTRACT_VERSION,
@@ -296,7 +300,7 @@ function discoveryDocument(version, health) {
     serverVersion: version,
     mediaCoreContractVersion: health.mediaCoreContractVersion,
     openapi: '/api/v1/openapi.json',
-    client: { app: '/app/', admin: '/admin/' },
+    client: { app: '/app/', admin: '/admin/', setup: '/setup/' },
     capabilities: {
       authentication: true,
       profiles: true,
@@ -372,6 +376,18 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/auth/owner': { post: { summary: 'Create the first owner account' } },
     '/api/v1/auth/session': { post: { summary: 'Create an authenticated session' }, delete: { summary: 'Revoke the current session' } },
     '/api/v1/auth/me': { get: { summary: 'Return the authenticated account' } },
+    '/api/v1/setup/state': { get: { summary: 'Read first-run setup status shared by /app and /admin' } },
+    '/api/v1/setup/owner': { post: { summary: 'Create the first owner during setup' } },
+    '/api/v1/setup/libraries': { get: { summary: 'List library folders added during setup' }, post: { summary: 'Add a library folder during setup' } },
+    '/api/v1/setup/libraries/{rootId}': { delete: { summary: 'Remove a library folder during setup' } },
+    '/api/v1/setup/libraries/check': { post: { summary: 'Check whether the server can read a folder' } },
+    '/api/v1/setup/libraries/browse': { post: { summary: 'Browse folders visible to the server' } },
+    '/api/v1/setup/libraries/search': { post: { summary: 'Search folders visible to the server' } },
+    '/api/v1/setup/libraries/pick': { post: { summary: 'Open the desktop folder picker' } },
+    '/api/v1/setup/metadata': { get: { summary: 'Read metadata provider settings' }, put: { summary: 'Save or skip metadata provider settings' } },
+    '/api/v1/setup/metadata/test': { post: { summary: 'Test a metadata provider key' } },
+    '/api/v1/setup/step': { post: { summary: 'Record setup progress' } },
+    '/api/v1/setup/complete': { post: { summary: 'Finish setup and start the first scan' } },
     '/api/v1/library': { get: { summary: 'List the authenticated catalog' } },
     '/api/v1/library/series': { get: { summary: 'List episodes grouped into series and seasons' } },
     '/api/v1/library/roots': { get: { summary: 'List the authenticated library roots' }, post: { summary: 'Add a library root' } },
@@ -437,8 +453,23 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
  * Versioned viewer/client API. Existing `/api/admin` and `/api/media` routes
  * remain intact; this handler is a stable adapter around those services.
  */
-export function createPublicApiHandler({ service, clientState, mediaService, pairingService, remotePolicy, getRuntimeHealth, version, requireSecureTransport = false, proxyPolicy = createTrustedProxyPolicy(), castSessions = createCastSessionRegistry() }) {
+export function createPublicApiHandler({ service, clientState, mediaService, pairingService, remotePolicy, setupService, setupHooks = {}, getRuntimeHealth, version, requireSecureTransport = false, requireBootstrapSecret = true, proxyPolicy = createTrustedProxyPolicy(), castSessions = createCastSessionRegistry(), desktopSetupChannel, pickFolder, deploymentMode = 'standalone' }) {
   if (!service || !clientState || !mediaService || !pairingService || !remotePolicy) throw new Error('createPublicApiHandler requires server services.');
+  const desktopChannel = desktopSetupChannel || createDesktopSetupChannel({ clientAddress: (req) => proxyPolicy.clientAddress(req) });
+
+  async function waitForSetupScan(scan, principal) {
+    if (!scan || scan.state !== 'scanning') return scan;
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const current = await service.getScanStatus(principal);
+      if (current?.id !== scan.id || current.state !== 'scanning') {
+        if (current?.state === 'failed' || current?.state === 'interrupted') {
+          throw requestError(500, 'setup_scan_failed', 'The library scan did not finish. Check the saved folders and retry.');
+        }
+        return current;
+      }
+    }
+  }
 
   function isSecureRequest(req) {
     return proxyPolicy.isSecureRequest(req);
@@ -486,6 +517,91 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
 
   function canSeeAllProfiles(principal) {
     return hasPermission(principal, 'users.manage');
+  }
+
+  function requireSetupService() {
+    if (!setupService) throw requestError(501, 'setup_unavailable', 'This server was started without the setup service.');
+    return setupService;
+  }
+
+  /**
+   * Report whether the server can read a folder now. A share that is offline
+   * is still savable — the caller decides — because a NAS that is asleep at
+   * setup time is a normal thing, not a configuration mistake.
+   */
+  async function inspectSetupFolder(target) {
+    try {
+      const stats = await fs.stat(target);
+      if (!stats.isDirectory()) {
+        return { accessible: false, retryable: false, reason: 'not_a_directory', message: 'That path is not a folder.' };
+      }
+      await fs.access(target);
+      return { accessible: true, retryable: false, reason: 'online', message: 'The server can read this folder.' };
+    } catch (error) {
+      if (error?.code === 'EACCES') {
+        return { accessible: false, retryable: true, reason: 'permission_denied', message: 'The server cannot read that folder. Check its permissions, or save it and retry later.' };
+      }
+      return { accessible: false, retryable: true, reason: 'unavailable', message: 'That folder is not reachable right now. Save it and LoomTV will pick it up once the share is back.' };
+    }
+  }
+
+  /** Validate one of the keyed metadata providers without storing its secret. */
+  async function testMetadataProvider(provider, apiKey) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const id = ['tmdb', 'fanart', 'omdb', 'opensubtitles'].includes(provider) ? provider : 'tmdb';
+    const isReadToken = id === 'tmdb' && /^ey[A-Za-z0-9._-]{20,}$/.test(apiKey);
+    const requests = {
+      tmdb: {
+        endpoint: isReadToken
+          ? 'https://api.themoviedb.org/3/configuration'
+          : `https://api.themoviedb.org/3/configuration?api_key=${encodeURIComponent(apiKey)}`,
+        headers: isReadToken ? { Authorization: `Bearer ${apiKey}` } : {},
+      },
+      fanart: { endpoint: `https://webservice.fanart.tv/v3/movies/120?api_key=${encodeURIComponent(apiKey)}`, headers: {} },
+      omdb: { endpoint: `https://www.omdbapi.com/?apikey=${encodeURIComponent(apiKey)}&i=tt0133093`, headers: {} },
+      opensubtitles: {
+        endpoint: 'https://api.opensubtitles.com/api/v1/infos/languages',
+        headers: { 'Api-Key': apiKey, 'User-Agent': 'LoomTV v1' },
+      },
+    };
+    const labels = { tmdb: 'TMDB', fanart: 'Fanart.tv', omdb: 'OMDb', opensubtitles: 'OpenSubtitles' };
+    const request = requests[id];
+    try {
+      const response = await fetch(request.endpoint, {
+        headers: { Accept: 'application/json', ...request.headers },
+        signal: controller.signal,
+      });
+      if (response.status === 401 || response.status === 403) {
+        return { ok: false, code: 'invalid_key', message: `${labels[id]} rejected that key.` };
+      }
+      if (!response.ok) return { ok: false, code: 'provider_error', message: `${labels[id]} replied with status ${response.status}.` };
+      if (id === 'omdb') {
+        const payload = await response.json().catch(() => ({}));
+        if (payload?.Response === 'False') return { ok: false, code: 'invalid_key', message: String(payload.Error || 'OMDb rejected that key.') };
+      }
+      return { ok: true, message: `${labels[id]} accepted the key.` };
+    } catch (error) {
+      return {
+        ok: false,
+        code: error?.name === 'AbortError' ? 'timeout' : 'unreachable',
+        message: error?.name === 'AbortError'
+          ? `${labels[id]} did not answer in time.`
+          : `LoomTV could not reach ${labels[id]}. Check this server's internet access.`,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function testSetupMetadata(provider, apiKey) {
+    if (typeof setupHooks.testMetadata !== 'function') return testMetadataProvider(provider, apiKey);
+    const verdict = await setupHooks.testMetadata({ provider, apiKey });
+    return {
+      ok: verdict?.ok === true,
+      code: verdict?.code || (verdict?.ok === true ? undefined : 'invalid_key'),
+      message: verdict?.message || (verdict?.ok === true ? 'The provider accepted the key.' : 'The provider rejected that key.'),
+    };
   }
 
   async function playbackProfileContext(principal, req, media = undefined) {
@@ -594,6 +710,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
     const publicDiscovery = (resource === 'discovery' && req.method === 'GET')
       || (resource === 'health' && req.method === 'GET')
       || (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET')
+      || (resource === 'setup' && segments[1] === 'state' && req.method === 'GET')
       || (pathname === `${PUBLIC_API_PREFIX}/openapi.json` && (req.method === 'GET' || req.method === 'HEAD'));
     if ((pairingRoute || (requireSecureTransport && !publicDiscovery)) && !isSecureRequest(req)) {
       writeError(res, 426, 'secure_transport_required', 'Use HTTPS for credential, API, and media requests.');
@@ -790,6 +907,245 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         });
         return true;
       }
+      // ── First-run setup ────────────────────────────────────────────────
+      // One flow, one state. `/app` and `/admin` both redirect into `/setup`,
+      // which drives these routes, so the two entry points cannot drift.
+      if (resource === 'setup' && segments[1] === 'state' && segments.length === 2 && req.method === 'GET') {
+        const setup = requireSetupService();
+        const trusted = desktopChannel.isTrustedRequest(req);
+        const runtimeHealth = typeof getRuntimeHealth === 'function'
+          ? await getRuntimeHealth().catch(() => null)
+          : null;
+        const browseRootConfigured = runtimeHealth?.media?.configured !== false;
+        writeData(res, 200, {
+          ...await setup.status(),
+          steps: SETUP_STEPS,
+          deploymentMode,
+          // Both desktop and web setup use the account password. Deployments
+          // that opt into a claim secret expose that requirement explicitly.
+          trustedDesktop: trusted,
+          requiresBootstrapSecret: !trusted && requireBootstrapSecret,
+          nativeFolderPicker: trusted && typeof pickFolder === 'function',
+          folderBrowse: typeof service.listLibraryDirectories === 'function' && browseRootConfigured,
+        });
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'owner' && segments.length === 2 && req.method === 'POST') {
+        const setup = requireSetupService();
+        if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
+        const body = await readJsonBody(req);
+        const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
+        if (!['bearer','cookie'].includes(sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
+        if (sessionMode === 'cookie' && (!isSecureRequest(req) || !sameOriginRequest(req))) {
+          throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require same-origin HTTPS.');
+        }
+        const trusted = desktopChannel.isTrustedRequest(req);
+        const name = requiredString(body.name, 'name', 80);
+        const result = await service.createOwner({
+          name,
+          password: requiredString(body.password, 'password', 256),
+          ...(trusted || !requireBootstrapSecret
+            ? { trustedChannel: true }
+            : { bootstrapSecret: requiredString(body.bootstrapSecret, 'bootstrapSecret', 1_024) }),
+          address: proxyPolicy.clientAddress(req),
+        });
+        if (typeof setupHooks.ownerCreated === 'function') {
+          await setupHooks.ownerCreated({
+            name,
+            adminToken: result.adminToken,
+            expiresAt: result.expiresAt,
+          });
+        }
+        setup.begin({
+          ownerName: name,
+          serverName: optionalString(body.serverName, 'serverName', 80) || `${name}’s LoomTV`,
+        });
+        // The owner should land on a library, not on an empty profile chooser.
+        let defaultProfile = null;
+        try {
+          defaultProfile = await clientState.createProfile({ name }, result.user?.id);
+        } catch (error) {
+          if (error?.code !== 'profile_exists') {
+            await service.appendOperationalLog?.('warn', 'The default owner profile could not be created during setup.');
+          }
+        }
+        remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, result.user || null);
+        const data = {
+          user: result.user,
+          expiresAt: result.expiresAt,
+          sessionMode,
+          setup: await setup.status(),
+          ...(defaultProfile ? { profile: defaultProfile } : {}),
+        };
+        if (sessionMode === 'cookie') {
+          const csrfToken = randomBytes(32).toString('base64url');
+          writeData(res, 201, { ...data, csrfToken }, cookieSessionHeaders(result.adminToken, csrfToken, result.expiresAt));
+        } else writeData(res, 201, { ...data, adminToken: result.adminToken });
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments.length === 2 && req.method === 'GET') {
+        requireSetupService();
+        const principal = await requirePrincipal(req, 'library.read');
+        writeData(res, 200, { roots: await service.listLibraryRoots(principal) });
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments.length === 2 && req.method === 'POST') {
+        requireSetupService();
+        const principal = await requirePrincipal(req, 'library.manage');
+        const body = await readJsonBody(req);
+        const requested = requiredString(body.path, 'path', 4_096);
+        const kind = ['movies', 'tvShows', 'anime', 'others'].includes(body.kind) ? body.kind : 'others';
+        const inspection = await inspectSetupFolder(path.resolve(requested));
+        if (!inspection.accessible && body.allowUnavailable !== true) {
+          writeJson(res, 409, { ok: false, error: { code: 'folder_unavailable', message: inspection.message, ...inspection } });
+          return true;
+        }
+        const root = await service.addLibraryRoot({ path: requested, kind }, principal);
+        writeData(res, 201, { root, inspection });
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments[2] === 'check' && segments.length === 3 && req.method === 'POST') {
+        requireSetupService();
+        await requirePrincipal(req, 'library.manage');
+        const body = await readJsonBody(req);
+        writeData(res, 200, await inspectSetupFolder(path.resolve(requiredString(body.path, 'path', 4_096))));
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments[2] === 'browse' && segments.length === 3 && req.method === 'POST') {
+        requireSetupService();
+        const principal = await requirePrincipal(req, 'library.manage');
+        if (typeof service.listLibraryDirectories !== 'function') {
+          throw requestError(501, 'browse_unavailable', 'This server cannot browse its own folders. Enter the server path instead.');
+        }
+        const body = await readJsonBody(req);
+        const requested = optionalString(body.path, 'path', 4_096);
+        writeData(res, 200, await service.listLibraryDirectories(requested ? { path: requested } : {}, principal));
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments[2] === 'search' && segments.length === 3 && req.method === 'POST') {
+        requireSetupService();
+        const principal = await requirePrincipal(req, 'library.manage');
+        if (typeof service.searchLibraryDirectories !== 'function') {
+          throw requestError(501, 'search_unavailable', 'This server cannot search its folders. Enter the server path instead.');
+        }
+        const body = await readJsonBody(req);
+        const query = requiredString(body.query, 'query', 120);
+        writeData(res, 200, await service.searchLibraryDirectories({ query }, principal));
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments[2] === 'pick' && segments.length === 3 && req.method === 'POST') {
+        requireSetupService();
+        await requirePrincipal(req, 'library.manage');
+        if (!desktopChannel.isTrustedRequest(req) || typeof pickFolder !== 'function') {
+          throw requestError(501, 'picker_unavailable', 'A native folder picker is available only in the LoomTV desktop app.');
+        }
+        const picked = await pickFolder();
+        if (!picked) {
+          writeData(res, 200, { cancelled: true });
+          return true;
+        }
+        writeData(res, 200, { cancelled: false, path: picked, inspection: await inspectSetupFolder(picked) });
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'libraries' && segments.length === 3 && req.method === 'DELETE') {
+        requireSetupService();
+        const principal = await requirePrincipal(req, 'library.manage');
+        await service.removeLibraryRoot(decodeSegment(segments[2], 'rootId'), principal);
+        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+        res.end();
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'metadata' && segments.length === 2 && req.method === 'GET') {
+        const setup = requireSetupService();
+        await requirePrincipal(req, 'library.manage');
+        writeData(res, 200, setup.metadataSettings());
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'metadata' && segments.length === 2 && req.method === 'PUT') {
+        const setup = requireSetupService();
+        await requirePrincipal(req, 'library.manage');
+        const body = await readJsonBody(req);
+        const skipped = body.skip === true;
+        const supportedProviders = ['tmdb', 'fanart', 'omdb', 'opensubtitles'];
+        const suppliedKeys = body.keys && typeof body.keys === 'object' && !Array.isArray(body.keys) ? body.keys : {};
+        const keys = skipped ? {} : Object.fromEntries(supportedProviders.flatMap((provider) => {
+          const value = provider === 'tmdb' && suppliedKeys[provider] === undefined ? body.apiKey : suppliedKeys[provider];
+          const key = optionalString(value, `${provider}ApiKey`, 512);
+          return key ? [[provider, key]] : [];
+        }));
+        if (body.verify !== false) {
+          for (const [provider, apiKey] of Object.entries(keys)) {
+            const verdict = await testSetupMetadata(provider, apiKey);
+            if (!verdict.ok) {
+              const error = requestError(400, verdict.code, verdict.message);
+              error.provider = provider;
+              throw error;
+            }
+          }
+        }
+        if (typeof setupHooks.saveMetadata === 'function') {
+          await setupHooks.saveMetadata({
+            keys,
+            skipped,
+          });
+        }
+        setup.saveMetadata({
+          provider: optionalString(body.provider, 'provider', 32) || 'tmdb',
+          keys,
+          skipped,
+        });
+        writeData(res, 200, { ...setup.metadataSettings(), setup: await setup.status() });
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'metadata' && segments[2] === 'test' && segments.length === 3 && req.method === 'POST') {
+        requireSetupService();
+        await requirePrincipal(req, 'library.manage');
+        const body = await readJsonBody(req);
+        const provider = optionalString(body.provider, 'provider', 32) || 'tmdb';
+        if (!['tmdb', 'fanart', 'omdb', 'opensubtitles'].includes(provider)) throw requestError(400, 'invalid_request', 'Unknown metadata provider.');
+        const verdict = await testSetupMetadata(provider, requiredString(body.apiKey, 'apiKey', 512));
+        if (!verdict.ok) throw requestError(400, verdict.code, verdict.message);
+        writeData(res, 200, verdict);
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'step' && segments.length === 2 && req.method === 'POST') {
+        const setup = requireSetupService();
+        await requirePrincipal(req, 'library.manage');
+        const body = await readJsonBody(req);
+        setup.setStep(requiredString(body.step, 'step', 32));
+        writeData(res, 200, await setup.status());
+        return true;
+      }
+      if (resource === 'setup' && segments[1] === 'complete' && segments.length === 2 && req.method === 'POST') {
+        const setup = requireSetupService();
+        const principal = await requirePrincipal(req, 'library.manage');
+        const body = await readJsonBody(req).catch(() => ({}));
+        const roots = await service.listLibraryRoots(principal);
+        let scan = null;
+        if (roots.some((root) => root.state === 'online')) {
+          scan = await service.startLibraryScan({ mode: 'quick' }, principal).catch(() => null);
+        }
+        const record = setup.read();
+        const desktopCompletion = typeof setupHooks.complete === 'function'
+          ? Promise.resolve(setupHooks.complete({
+            roots,
+            ownerName: record.ownerName,
+            serverName: record.serverName,
+            language: record.language,
+          }))
+          : Promise.resolve();
+        const [completedScan] = await Promise.all([
+          waitForSetupScan(scan, principal),
+          desktopCompletion,
+        ]);
+        setup.complete({ scanStarted: Boolean(scan) });
+        writeData(res, 200, {
+          setup: await setup.status(),
+          scan: completedScan,
+          redirect: body?.returnTo === 'admin' ? '/admin' : '/app/',
+        });
+        return true;
+      }
       if (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET') {
         writeData(res, 200, { ownerConfigured: await service.isOwnerConfigured(), apiVersion: PUBLIC_API_VERSION });
         return true;
@@ -805,7 +1161,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         const result = await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
-          bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
+          ...(requireBootstrapSecret ? { bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024) } : { trustedChannel: true }),
           address: proxyPolicy.clientAddress(req),
         });
         remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, result.user || null);
@@ -1384,6 +1740,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, pai
         message,
         {
           ...(error?.retryable !== undefined ? { retryable: error.retryable === true } : {}),
+          ...(error?.provider ? { provider: error.provider } : {}),
           ...(retryAfterSeconds ? { retryAfterMs: retryAfterSeconds * 1_000 } : {}),
         },
         retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {},

@@ -22,14 +22,14 @@
       --loom-accent: #FC9C03;
       --loom-accent-hover: #ffd43b;
       --loom-accent-foreground: #0a0a0a;
-      --loom-panel: rgba(23, 23, 23, 0.88);
-      --loom-panel-border: rgba(255,255,255,.10);
+      --loom-panel: #171717;
+      --loom-panel-border: rgba(255, 255, 255, .06);
       --loom-sidebar-active-bg: rgb(250 250 249 / .10);
       --loom-active-bg: rgb(68 64 60 / .40);
       --loom-active-bg-strong: #44403c;
       --loom-active-text: #fafaf9;
       --loom-active-border: #44403c;
-      --loom-control-border: rgba(255,255,255,.05);
+      --loom-control-border: rgba(255, 255, 255, .06);
 
       /* Local aliases keep the rest of this standalone document readable. */
       --bg: var(--loom-bg);
@@ -47,183 +47,261 @@
       --positive: #67d391;
       --warning: #f8c15c;
       --negative: #ef7f7f;
-      --radius: 16px;
-      --shadow: 0 18px 50px rgba(0,0,0,.24);
+
+      /* One radius scale, mirroring the desktop's rounded-lg / rounded-md /
+         rounded-sm steps instead of a per-component value. */
+      --radius: 12px;
+      --radius-control: 10px;
+      --radius-inner: 8px;
+      /* The desktop Card shadow: a hairline lift, not a drop shadow. */
+      --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 16px rgba(0,0,0,.06);
+
+      /* Type scale. The desktop renders its chrome at text-sm/font-medium, so
+         the control plane starts at 14px rather than the 16px browser default. */
+      --fs-body: 14px;
+      --fs-small: 13px;
+      --fs-tiny: 12px;
+      --fs-micro: 11px;
+
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       font-synthesis: none;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; }
-    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-size: var(--fs-body); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
     button, input, select { font: inherit; }
     button, a { -webkit-tap-highlight-color: transparent; }
     button { border: 0; }
-    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .shell { display: grid; grid-template-columns: 192px minmax(0, 1fr); height: 100vh; min-height: 0; }
-    .sidebar { display: flex; flex-direction: column; gap: 24px; height: 100vh; min-height: 0; overflow-y: auto; padding: 24px 14px 16px; border-right: 1px solid var(--loom-border); background: var(--loom-sidebar); }
-    .brand { display: flex; align-items: center; padding: 0 10px; }
-    .brand-logo { display: block; width: 115px; height: 32px; }
-    .eyebrow { margin: 0; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-    .side-label { padding: 0 12px; color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-    .nav { display: grid; gap: 4px; }
-    .nav button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 11px; border-radius: 10px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; transition: background .18s ease, color .18s ease; }
+    .sidebar { display: flex; flex-direction: column; gap: 16px; height: 100vh; min-height: 0; overflow-y: auto; padding: 20px 12px 16px; border-right: 1px solid var(--line); background: var(--loom-sidebar); }
+    .brand { display: grid; gap: 6px; padding: 4px 10px 16px; border-bottom: 1px solid var(--line); }
+    .brand-logo { display: block; width: 104px; height: 29px; }
+    .brand-caption { margin: 0; color: var(--faint); font-size: var(--fs-tiny); }
+    .eyebrow { margin: 0; color: var(--faint); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+    .nav { display: grid; gap: 2px; }
+    .nav button { display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; padding: 0 10px; border-radius: var(--radius-control); background: transparent; color: var(--muted); font-size: var(--fs-body); font-weight: 500; text-align: left; cursor: pointer; transition: background .15s ease, color .15s ease; }
     .nav button:hover { background: var(--loom-sidebar-active-bg); color: var(--loom-active-text); }
     .nav button[aria-current="page"] { background: var(--loom-sidebar-active-bg); color: var(--loom-active-text); }
     .nav button[aria-current="page"] .nav-icon { color: var(--accent); }
     .icon { display: block; width: 16px; height: 16px; flex: 0 0 auto; color: currentColor; overflow: visible; }
-    .nav-icon { display: grid; width: 20px; place-items: center; color: currentColor; }
-    .nav-icon .icon { width: 18px; height: 18px; }
-    .side-footer { display: grid; gap: 11px; margin-top: auto; padding: 14px 12px 0; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+    .nav-icon { display: grid; width: 18px; place-items: center; color: currentColor; }
+    .nav-icon .icon { width: 17px; height: 17px; }
+    .side-footer { display: grid; gap: 8px; margin-top: auto; padding: 14px 10px 0; border-top: 1px solid var(--line); color: var(--faint); font-size: var(--fs-tiny); }
     .connection { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-    .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--faint); }
-    .dot.online { background: var(--positive); box-shadow: 0 0 0 4px rgba(103,211,145,.10); }
-    .dot.warn { background: var(--warning); box-shadow: 0 0 0 4px rgba(248,193,92,.10); }
-    .dot.offline { background: var(--negative); box-shadow: 0 0 0 4px rgba(239,127,127,.10); }
-    .main { min-width: 0; min-height: 0; height: 100vh; overflow-x: hidden; overflow-y: auto; padding: 28px clamp(20px, 3vw, 48px) 56px; }
-    .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 18px; max-width: 1280px; margin: 0 auto 22px; }
-    .topbar-actions { display: flex; align-items: center; gap: 10px; }
-    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-raised); color: var(--text); font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
-    .button:hover { border-color: var(--loom-active-border); background: var(--loom-active-bg); transform: translateY(-1px); }
-    .button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
-    .button.primary:hover { border-color: var(--loom-accent-hover); background: var(--loom-accent-hover); color: var(--accent-ink); }
-    .button.subtle { background: transparent; color: var(--muted); }
-    .button.danger { color: var(--negative); }
-    .button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-    .page { display: none; max-width: 1280px; margin: 0 auto; }
+    .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--faint); flex: 0 0 auto; }
+    .dot.online { background: var(--positive); }
+    .dot.warn { background: var(--warning); }
+    .dot.offline { background: var(--negative); }
+    .main { min-width: 0; min-height: 0; height: 100vh; overflow-x: hidden; overflow-y: auto; padding: 20px clamp(20px, 3vw, 40px) 56px; }
+    /* One header per page: the title lives here rather than repeating as a
+       second toolbar inside every section. */
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; max-width: 1180px; margin: 0 auto; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .topbar-heading { min-width: 0; }
+    .topbar-heading h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    .topbar-heading p { max-width: 68ch; margin: 4px 0 0; color: var(--muted); font-size: var(--fs-small); }
+    .topbar-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex: 0 0 auto; padding-top: 2px; }
+    .page-actions { display: none; align-items: center; gap: 8px; }
+    .page-actions.active { display: flex; }
+    .page-actions:empty { display: none; }
+    .topbar-divider { width: 1px; height: 20px; background: var(--line); }
+    .button.icon-only { width: 36px; padding: 0; }
+
+    /* Buttons follow the desktop Button component: 40px tall, rounded-lg,
+       text-sm/medium, colour-only transitions (no hover lift). */
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface-raised); color: var(--text); font-size: var(--fs-body); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+    .button:hover { background: var(--surface-soft); }
+    .button.primary { border-color: transparent; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+    .button.primary:hover { background: var(--loom-accent-hover); color: var(--accent-ink); }
+    .button.subtle { border-color: transparent; background: transparent; color: var(--muted); }
+    .button.subtle:hover { background: var(--surface-soft); color: var(--text); }
+    .button.danger { border-color: transparent; background: rgba(239,127,127,.12); color: var(--negative); }
+    .button.subtle.danger { background: transparent; color: var(--negative); }
+    .button.subtle.danger:hover { background: rgba(239,127,127,.14); color: var(--negative); }
+    .button.danger:hover { background: rgba(239,127,127,.20); color: var(--negative); }
+    .button:disabled { opacity: .45; cursor: not-allowed; }
+    .page { display: none; max-width: 1180px; margin: 0 auto; }
     .page.active { display: block; }
-    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(270px, .6fr); gap: 16px; }
+
+    /* Panels are the desktop Card: flat surface, hairline border, 12px radius. */
     .panel { border: 1px solid var(--loom-panel-border); border-radius: var(--radius); background: var(--loom-panel); box-shadow: var(--shadow); }
-    .panel.pad { padding: 22px; }
-    .health-card { position: relative; overflow: hidden; min-height: 220px; padding: clamp(22px, 3vw, 32px); }
-    .health-card::after { position: absolute; right: -30px; bottom: -74px; width: 260px; height: 260px; border: 1px solid rgba(252,156,3,.11); border-radius: 50%; box-shadow: 0 0 0 30px rgba(252,156,3,.018), 0 0 0 60px rgba(252,156,3,.012); content: ""; }
-    .health-card h2 { position: relative; z-index: 1; max-width: 580px; margin: 15px 0 11px; font-size: clamp(26px, 3.4vw, 38px); line-height: 1.08; letter-spacing: -.045em; }
-    .health-card p { position: relative; z-index: 1; max-width: 560px; margin: 0; color: var(--muted); line-height: 1.55; }
-    .status-badge { display: inline-flex; align-items: center; gap: 9px; position: relative; z-index: 1; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
-    .stat-stack { display: grid; gap: 16px; }
-    .stat { display: flex; flex-direction: column; justify-content: space-between; min-height: 106px; padding: 20px; }
-    .stat-label { color: var(--muted); font-size: 12px; font-weight: 700; }
-    .stat-value { margin-top: 15px; font-size: 28px; font-weight: 800; letter-spacing: -.04em; }
-    .stat-note { margin-top: 3px; color: var(--faint); font-size: 12px; }
-    .section-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 16px; margin-top: 16px; }
-    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 21px 22px 0; }
-    .panel-head h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
-    .panel-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
-    .panel-body { padding: 18px 22px 22px; }
-    .check-list { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
-    .check-list li { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-    .check-list li:last-child { border-bottom: 0; }
-    .check-copy { display: grid; gap: 3px; }
-    .check-copy strong { font-size: 13px; }
-    .check-copy span { color: var(--muted); font-size: 12px; }
-    .pill { display: inline-flex; align-items: center; width: max-content; padding: 4px 8px; border-radius: 99px; background: rgba(255,255,255,.08); color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+    .panel.pad { padding: 20px; }
+    /* Status, capability facts and the headline counts read as one block so
+       the overview opens with an answer instead of a decorative hero. */
+    .status-panel { display: grid; }
+    .status-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding: 22px 22px 20px; }
+    .status-copy { display: grid; gap: 10px; justify-items: start; }
+    .status-copy h2 { max-width: 22ch; margin: 0; font-size: 24px; line-height: 1.15; letter-spacing: -.02em; }
+    .fact-list { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 460px; }
+    .fact { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--surface-raised); font-size: var(--fs-micro); }
+    .fact-label { color: var(--faint); }
+    .fact-value { color: var(--muted); font-weight: 500; }
+    .fact.pass .fact-value { color: var(--positive); }
+    .fact.warn .fact-value { color: var(--warning); }
+    .fact.fail .fact-value { color: var(--negative); }
+    .metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+    .metric { display: grid; gap: 2px; padding: 16px 22px; border-left: 1px solid var(--line); }
+    .metric:first-child { border-left: 0; }
+    .metric-label { color: var(--muted); font-size: var(--fs-tiny); }
+    .metric-value { font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; }
+    .metric-note { color: var(--faint); font-size: var(--fs-tiny); }
+    .status-badge { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 99px; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+    .section-grid { display: grid; align-items: start; grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr); gap: 12px; margin-top: 12px; }
+    .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 20px 0; }
+    .panel-head h2 { margin: 0; font-size: 15px; }
+    .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-small); }
+    .panel-body { padding: 12px 20px 20px; }
+    .check-list { display: grid; margin: 0; padding: 0; list-style: none; }
+    .check-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .check-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+    .check-copy { display: grid; gap: 2px; }
+    .check-copy strong { font-size: var(--fs-small); font-weight: 600; }
+    .check-copy span { color: var(--muted); font-size: var(--fs-tiny); }
+    .pill { display: inline-flex; align-items: center; width: max-content; padding: 3px 8px; border-radius: 99px; background: rgba(255,255,255,.06); color: var(--muted); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
     .pill.online, .pill.pass, .pill.healthy { background: rgba(103,211,145,.12); color: var(--positive); }
     .pill.warn, .pill.degraded, .pill.scanning { background: rgba(248,193,92,.13); color: var(--warning); }
     .pill.offline, .pill.fail, .pill.failed { background: rgba(239,127,127,.13); color: var(--negative); }
-    .callout { display: grid; gap: 13px; padding: 18px; border: 1px solid var(--loom-active-border); border-radius: 13px; background: var(--loom-active-bg); }
+    .callout { display: grid; gap: 10px; margin-top: 10px; }
     .callout h3 { margin: 0; font-size: 15px; }
-    .callout p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-    .page-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 16px; }
-    .page-toolbar h2 { margin: 0; font-size: 23px; letter-spacing: -.04em; }
-    .page-toolbar p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-    .toolbar-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+    .callout p { margin: 0; color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
+    .callout .button { justify-self: start; }
+    .toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .library-folder-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .library-folder-grid > :only-child { grid-column: 1 / -1; }
     .users-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .users-grid > :only-child { grid-column: 1 / -1; }
     .user-card { min-width: 0; padding: 18px; }
     .user-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-    .user-card h3 { margin: 0; font-size: 16px; letter-spacing: -.02em; }
-    .user-card p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
-    .user-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 15px; }
-    .user-card-permissions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; color: var(--faint); font-size: 11px; line-height: 1.4; }
+    .user-card h3 { margin: 0; font-size: 15px; }
+    .user-card p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-tiny); }
+    .user-card-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+    .user-card-permissions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; color: var(--faint); font-size: var(--fs-micro); line-height: 1.45; }
     .permission-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .permission-option { display: flex; align-items: flex-start; gap: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--loom-bg); color: var(--muted); font-size: 11px; line-height: 1.3; }
-    .permission-option input { width: auto; margin-top: 2px; accent-color: var(--accent); }
+    .permission-option { display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-inner); background: var(--surface-raised); color: var(--muted); font-size: var(--fs-tiny); line-height: 1.35; }
+    .permission-option input { margin: 1px 0 0; }
     .user-root-list { display: grid; gap: 7px; max-height: 150px; overflow-y: auto; padding: 2px; }
-    .user-root-option { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 11px; line-height: 1.35; }
-    .user-root-option input { width: auto; margin-top: 2px; accent-color: var(--accent); }
-    .folder-card { min-width: 0; padding: 14px; }
-    .folder-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-    .folder-card-head h3 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
-    .folder-card-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
-    .folder-card-list { display: grid; gap: 1px; }
-    .folder-root-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
-    .folder-root-copy { min-width: 0; display: grid; gap: 4px; }
-    .folder-root-path { overflow: hidden; color: var(--text); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-    .folder-root-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--faint); font-size: 11px; }
+    .user-root-option { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: var(--fs-tiny); line-height: 1.4; }
+    .user-root-option input { margin: 2px 0 0; }
+    .folder-card { min-width: 0; padding: 16px; }
+    .folder-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .folder-card-head h3 { margin: 0; font-size: 15px; }
+    .folder-card-head p { margin: 4px 0 0; color: var(--muted); font-size: var(--fs-tiny); line-height: 1.45; }
+    .folder-card-list { display: grid; }
+    .folder-root-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .folder-root-copy { min-width: 0; display: grid; gap: 3px; }
+    .folder-root-path { overflow: hidden; color: var(--text); font-size: var(--fs-tiny); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .folder-root-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--faint); font-size: var(--fs-micro); }
     .folder-root-meta span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .folder-root-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
-    .folder-root-actions .button { min-height: 32px; padding: 6px 9px; font-size: 11px; }
-    .folder-card-empty { padding: 17px 4px 7px; color: var(--faint); font-size: 12px; }
+    .folder-root-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .folder-root-actions .button { height: 30px; padding: 0 10px; font-size: var(--fs-tiny); }
+    .folder-card-empty { padding: 6px 0; color: var(--faint); font-size: var(--fs-small); }
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 660px; }
-    th, td { padding: 15px 22px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
-    th { color: var(--faint); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-    td { color: var(--muted); font-size: 13px; }
-    td strong { display: block; color: var(--text); font-size: 13px; }
-    td small { display: block; margin-top: 3px; color: var(--faint); font-size: 11px; }
+    .panel.pad > .panel-head + .table-wrap { margin-top: 16px; }
+    table { width: 100%; border-collapse: collapse; min-width: 660px; table-layout: fixed; }
+    td { overflow-wrap: anywhere; }
+    .col-fit { white-space: nowrap; }
+    .logs-table col.c-time { width: 176px; }
+    /* A timestamp broken over two lines makes every row taller for nothing. */
+    .logs-table td:first-child, .backups-table td:first-child { white-space: nowrap; }
+    .logs-table col.c-level { width: 84px; }
+    .logs-table col.c-source { width: 140px; }
+    .sessions-table col.c-client { width: 22%; }
+    .sessions-table col.c-state { width: 120px; }
+    .sessions-table col.c-when { width: 150px; }
+    .sessions-table col.c-rate { width: 110px; }
+    .backups-table col.c-when { width: 170px; }
+    .backups-table col.c-type { width: 110px; }
+    .backups-table col.c-status { width: 120px; }
+    .backups-table col.c-sum { width: 150px; }
+    th, td { padding: 12px 20px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: 0; }
+    th { color: var(--faint); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+    td { color: var(--muted); font-size: var(--fs-small); }
+    td strong { display: block; color: var(--text); font-size: var(--fs-small); font-weight: 500; }
+    td small { display: block; margin-top: 2px; color: var(--faint); font-size: var(--fs-micro); }
     td:last-child, th:last-child { text-align: right; }
-    .empty { padding: 35px 22px; color: var(--muted); text-align: center; }
+    .logs-table th:last-child, .logs-table td:last-child { text-align: left; }
+    .panel.pad th:first-child, .panel.pad td:first-child { padding-left: 0; }
+    .panel.pad th:last-child, .panel.pad td:last-child { padding-right: 0; }
+    td.empty, .empty { padding: 28px 20px; color: var(--faint); text-align: center; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .field { display: grid; gap: 7px; }
+    .log-filters .form-grid { align-items: end; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; }
+    .log-filters .form-actions { grid-column: auto; margin-top: 0; }
+    .field { display: grid; gap: 6px; }
     .field[hidden] { display: none; }
     .field.full { grid-column: 1 / -1; }
-    .field label { color: var(--muted); font-size: 12px; font-weight: 700; }
-    .field input, .field select { width: 100%; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 9px; outline: 0; background: var(--loom-bg); color: var(--text); }
+    .field label { color: var(--muted); font-size: var(--fs-tiny); font-weight: 500; }
+    .field input:not([type="checkbox"]):not([type="radio"]), .field select { width: 100%; height: 38px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); outline: 0; background: var(--surface-raised); color: var(--text); font-size: var(--fs-body); }
+    .field input[type="checkbox"], .field input[type="radio"] { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--accent); }
+    .field input::placeholder { color: var(--faint); }
     .field input:focus, .field select:focus { border-color: var(--accent); }
     .path-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-    .path-control .button { min-width: 104px; }
-    .path-picker { display: grid; gap: 12px; margin-top: 4px; padding: 13px; border: 1px solid var(--loom-panel-border); border-radius: 12px; background: var(--loom-surface-2); }
+    .path-control .button { min-width: 100px; height: 38px; }
+    .path-picker { display: grid; gap: 12px; margin-top: 4px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-raised); }
     .path-picker[hidden] { display: none; }
     .path-picker-head, .path-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    .path-picker-head strong { font-size: 13px; }
-    .path-picker-head p { overflow: hidden; margin: 3px 0 0; color: var(--faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .path-picker-head strong { font-size: var(--fs-small); font-weight: 600; }
+    .path-picker-head p { overflow: hidden; margin: 3px 0 0; color: var(--faint); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
     .path-picker-toolbar { justify-content: flex-start; }
-    .path-picker-list { display: grid; gap: 3px; max-height: 180px; overflow-y: auto; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--loom-bg); }
-    .path-picker-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 10px; border-radius: 7px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+    .path-picker-list { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius-inner); background: var(--loom-bg); }
+    .path-picker-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: 6px; background: transparent; color: var(--text); font-size: var(--fs-small); text-align: left; cursor: pointer; }
     .path-picker-item:hover { background: var(--loom-sidebar-active-bg); }
-    .path-picker-item-icon { color: var(--accent); font-size: 14px; }
-    .path-picker-empty { padding: 16px 10px; color: var(--faint); font-size: 12px; text-align: center; }
+    .path-picker-item-icon { color: var(--accent); font-size: var(--fs-body); }
+    .path-picker-empty { padding: 16px 10px; color: var(--faint); font-size: var(--fs-tiny); text-align: center; }
     .password-control { position: relative; }
-    .password-control input { padding-right: 54px; }
-    .password-toggle { display: grid; position: absolute; top: 50%; right: 5px; width: 40px; height: 40px; place-items: center; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transform: translateY(-50%); }
-    .password-toggle:hover { border-color: var(--line); background: rgba(255,255,255,.07); color: var(--text); }
+    .password-control input { padding-right: 46px; }
+    .password-toggle { display: grid; position: absolute; top: 50%; right: 4px; width: 30px; height: 30px; place-items: center; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transform: translateY(-50%); transition: background .15s ease, color .15s ease; }
+    .password-toggle:hover { background: var(--surface-soft); color: var(--text); }
     .password-toggle:focus-visible { outline-offset: 1px; }
-    .password-icon { grid-area: 1 / 1; width: 19px; height: 19px; pointer-events: none; }
-    .field-hint { margin: 0; color: var(--faint); font-size: 11px; line-height: 1.45; }
-    .auth-error { display: none; grid-column: 1 / -1; margin: 0; padding: 10px 12px; border: 1px solid rgba(239,127,127,.28); border-radius: 9px; background: rgba(239,127,127,.09); color: var(--negative); font-size: 12px; line-height: 1.45; }
+    .password-icon { grid-area: 1 / 1; width: 17px; height: 17px; pointer-events: none; }
+    .field-hint { margin: 0; color: var(--faint); font-size: var(--fs-micro); line-height: 1.5; }
+    .auth-error { display: none; grid-column: 1 / -1; margin: 0; padding: 10px 12px; border: 1px solid rgba(239,127,127,.24); border-radius: var(--radius-inner); background: rgba(239,127,127,.09); color: var(--negative); font-size: var(--fs-tiny); line-height: 1.5; }
     .auth-error.show { display: block; }
-    .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; grid-column: 1 / -1; margin-top: 4px; }
-    .notice { display: none; margin-bottom: 18px; padding: 13px 15px; border: 1px solid rgba(239,127,127,.28); border-radius: 10px; background: rgba(239,127,127,.09); color: var(--negative); font-size: 13px; }
+    .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; grid-column: 1 / -1; margin-top: 4px; }
+    .notice { display: none; margin: 0 auto 16px; max-width: 1180px; padding: 12px 14px; border: 1px solid rgba(239,127,127,.24); border-radius: var(--radius-control); background: rgba(239,127,127,.09); color: var(--negative); font-size: var(--fs-small); }
     .notice.show { display: block; }
-    .modal-backdrop { display: none; position: fixed; z-index: 20; inset: 0; place-items: center; padding: 20px; background: rgba(0,0,0,.75); backdrop-filter: blur(12px); }
+    .modal-backdrop { display: none; position: fixed; z-index: 20; inset: 0; place-items: center; padding: 20px; background: rgba(0,0,0,.70); backdrop-filter: blur(8px); }
     .modal-backdrop.show { display: grid; }
-    .modal { width: min(480px, 100%); padding: 25px; border: 1px solid var(--loom-panel-border); border-radius: 16px; background: var(--loom-panel); box-shadow: 0 30px 80px rgba(0,0,0,.45); }
-    .modal h2 { margin: 0 0 8px; font-size: 23px; letter-spacing: -.04em; }
-    .modal > p { margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .modal { width: min(480px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; padding: 24px; border: 1px solid var(--loom-panel-border); border-radius: var(--radius); background: var(--loom-panel); box-shadow: 0 24px 60px rgba(0,0,0,.45); }
+    .modal h2 { margin: 0 0 6px; font-size: 18px; letter-spacing: -.02em; }
+    .modal > p { margin: 0 0 20px; color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
     .modal .form-grid { grid-template-columns: 1fr; }
     .modal .form-actions { margin-top: 8px; }
-    .toast { position: fixed; z-index: 30; right: 22px; bottom: 22px; max-width: 340px; padding: 13px 15px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-raised); color: var(--text); box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .2s ease; font-size: 13px; }
+    .toast { position: fixed; z-index: 30; right: 20px; bottom: 20px; max-width: 340px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface); color: var(--text); box-shadow: 0 16px 40px rgba(0,0,0,.40); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .2s ease; font-size: var(--fs-small); }
     .toast.show { opacity: 1; transform: translateY(0); }
     .muted { color: var(--muted); }
+    code { border-radius: 4px; background: rgba(255,255,255,.06); padding: 1px 4px; color: var(--accent); font-size: .92em; }
     @media (max-width: 900px) {
       html, body { height: auto; min-height: 100%; overflow: auto; }
       .shell { display: block; height: auto; min-height: 100vh; }
-      .sidebar { position: relative; z-index: 1; inset: auto; width: 100%; height: auto; min-height: 0; overflow: visible; padding: 16px 15px 10px; border-right: 0; border-bottom: 1px solid var(--loom-border); }
+      .sidebar { position: relative; z-index: 1; inset: auto; width: 100%; height: auto; min-height: 0; overflow: visible; gap: 14px; padding: 14px 14px 10px; border-right: 0; border-bottom: 1px solid var(--line); }
       .sidebar.open { transform: none; }
-      .brand { padding: 0 6px; }
-      .side-label, .side-footer { display: none; }
+      .brand { padding: 0 4px; }
+      .side-footer { display: none; }
       .nav { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
-      .nav button { flex-direction: column; justify-content: center; gap: 5px; padding: 8px 4px; text-align: center; font-size: 11px; }
+      .nav button { flex-direction: column; justify-content: center; gap: 5px; height: auto; padding: 8px 4px; text-align: center; font-size: var(--fs-micro); }
       .nav-icon { width: auto; }
-      .hero-grid, .section-grid { grid-template-columns: 1fr; }
+      .section-grid { grid-template-columns: 1fr; }
+      .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+      .topbar-actions { justify-content: flex-start; padding-top: 0; }
+      .status-head { padding: 18px; }
+      .fact-list { justify-content: flex-start; max-width: none; }
+      .metric-row { grid-template-columns: 1fr; }
+      .metric { border-left: 0; border-top: 1px solid var(--line); padding: 14px 18px; }
+      .metric:first-child { border-top: 0; }
       .library-folder-grid { grid-template-columns: 1fr; }
-      .main { height: auto; min-height: calc(100vh - 102px); overflow: visible; padding-top: 22px; }
+      .panel-head { flex-direction: column; align-items: stretch; }
+      .toolbar-actions { justify-content: flex-start; }
+      .log-filters .form-grid { grid-template-columns: 1fr; }
+      .log-filters .form-actions { grid-column: 1 / -1; }
+      .main { height: auto; min-height: calc(100vh - 102px); overflow: visible; padding-top: 18px; }
     }
     @media (max-width: 560px) {
-      .main { padding-inline: 15px; }
-      .topbar { margin-bottom: 18px; }
+      .main { padding-inline: 14px; }
+      .topbar { margin-bottom: 16px; }
       .topbar-actions { width: 100%; justify-content: flex-end; gap: 8px; }
-      .topbar-actions .button { white-space: nowrap; }
-      .health-card { min-height: 250px; }
+      .status-copy h2 { font-size: 21px; }
       .form-grid { grid-template-columns: 1fr; }
       .permission-grid { grid-template-columns: 1fr; }
       .field.full { grid-column: auto; }
@@ -246,18 +324,16 @@
           <path d="M81.845 9.06992L79.0701 16.6339L76.2951 9.12637H71.6514V6.13464H69.6693V9.06992H67.8005V10.8763H69.6127V15.7872C69.6693 17.4242 70.6321 18.8354 72.6708 18.8354H74.5962V16.9726H73.2371C72.4443 16.9726 71.8779 16.6904 71.6514 15.7308V10.8198H75.1059L78.164 18.8354H79.9761L83.5439 9.97309L83.6005 9.83861L83.6571 9.71954L83.7304 9.57795L83.8494 9.34087L84 9.06992H83.7138H81.845Z" fill="var(--loom-logo-word, var(--loom-text))" />
           <path d="M2 4.43171C2 2.52232 4.11644 1.36004 5.74316 2.37604L5.8252 2.4278V15.3712H11.9102L13.9424 16.501L5.74316 21.6231C4.1164 22.6395 2 21.4779 2 19.5684V4.43171ZM17.8574 9.94538C19.3808 10.8972 19.3808 13.103 17.8574 14.0548L16.377 14.9805L12.583 12.8712H8.375V4.02058L17.8574 9.94538Z" fill="var(--loom-accent)" />
         </svg>
+        <p class="brand-caption">Server control</p>
       </div>
-      <div>
-        <p class="side-label">Server control</p>
-        <nav class="nav" aria-label="Admin sections">
+      <nav class="nav" aria-label="Admin sections">
           <button type="button" data-page="overview" aria-current="page"><span class="nav-icon" aria-hidden="true"><svg class="icon"><use href="/admin/lucide-icons.svg#layout-dashboard"></use></svg></span>Overview</button>
           <button type="button" data-page="library"><span class="nav-icon" aria-hidden="true"><svg class="icon"><use href="/admin/lucide-icons.svg#library"></use></svg></span>Library</button>
           <button type="button" data-page="sessions"><span class="nav-icon" aria-hidden="true"><svg class="icon"><use href="/admin/lucide-icons.svg#monitor-play"></use></svg></span>Sessions</button>
           <button type="button" data-page="logs"><span class="nav-icon" aria-hidden="true"><svg class="icon"><use href="/admin/lucide-icons.svg#scroll-text"></use></svg></span>Logs</button>
           <button type="button" data-page="backups"><span class="nav-icon" aria-hidden="true"><svg class="icon"><use href="/admin/lucide-icons.svg#database-backup"></use></svg></span>Backups</button>
           <button type="button" data-page="users"><span class="nav-icon" aria-hidden="true"><svg class="icon"><use href="/admin/lucide-icons.svg#users"></use></svg></span>Users</button>
-        </nav>
-      </div>
+      </nav>
       <div class="side-footer">
         <div class="connection"><span class="dot" id="sideDot"></span><span id="connectionText">Connecting…</span></div>
         <div id="versionText">LoomTV server</div>
@@ -265,61 +341,80 @@
     </aside>
     <main class="main" id="mainContent" data-page="overview">
       <header class="topbar" id="topbar">
+        <div class="topbar-heading">
+          <h1 id="pageTitle">Overview</h1>
+          <p id="pageSubtitle">Server health, library reach, and the next thing worth doing.</p>
+        </div>
         <div class="topbar-actions">
-          <button class="button subtle" id="refreshButton" type="button" title="Refresh data"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg><span>Refresh</span></button>
+          <div class="page-actions active" data-page-actions="overview"></div>
+          <div class="page-actions" data-page-actions="library">
+            <button class="button" id="scanButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#scan-search"></use></svg>Scan library</button>
+          </div>
+          <div class="page-actions" data-page-actions="sessions">
+            <button class="button" data-refresh="sessions" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg>Refresh sessions</button>
+          </div>
+          <div class="page-actions" data-page-actions="logs">
+            <button class="button" data-refresh="logs" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg>Refresh logs</button>
+          </div>
+          <div class="page-actions" data-page-actions="backups">
+            <button class="button primary" id="backupButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#database-backup"></use></svg>Start backup</button>
+          </div>
+          <div class="page-actions" data-page-actions="users">
+            <button class="button primary" id="addUserButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#user-plus"></use></svg>Add user</button>
+          </div>
+          <span class="topbar-divider" aria-hidden="true"></span>
+          <button class="button subtle icon-only" id="refreshButton" type="button" title="Refresh data" aria-label="Refresh data"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg></button>
           <button class="button" id="authButton" type="button">Unlock admin</button>
         </div>
       </header>
       <div class="notice" id="errorNotice" role="alert"></div>
 
       <section class="page active" id="page-overview" data-page-content="overview">
-        <div class="hero-grid">
-          <article class="panel health-card">
-            <div class="status-badge"><span class="dot" id="healthDot"></span><span id="healthBadge">Checking health</span></div>
-            <h2 id="healthHeadline">Your library is waking up.</h2>
-            <p id="healthSummary">The server will report storage, database, and transcoder readiness here.</p>
-          </article>
-          <div class="stat-stack">
-            <article class="panel stat"><div class="stat-label">Library roots</div><div class="stat-value" id="rootCount">—</div><div class="stat-note" id="rootNote">Waiting for server</div></article>
-            <article class="panel stat"><div class="stat-label">Connected clients</div><div class="stat-value" id="sessionCount">—</div><div class="stat-note" id="sessionNote">No active sessions yet</div></article>
+        <article class="panel status-panel">
+          <div class="status-head">
+            <div class="status-copy">
+              <div class="status-badge"><span class="dot" id="healthDot"></span><span id="healthBadge">Checking health</span></div>
+              <h2 id="healthHeadline">Your library is waking up.</h2>
+            </div>
+            <div class="fact-list" id="healthFacts"><span class="fact"><span class="fact-label">Status</span><span class="fact-value">Waiting for the server</span></span></div>
           </div>
-        </div>
+          <div class="metric-row">
+            <div class="metric"><span class="metric-label">Library roots</span><span class="metric-value" id="rootCount">—</span><span class="metric-note" id="rootNote">Waiting for server</span></div>
+            <div class="metric"><span class="metric-label">Connected clients</span><span class="metric-value" id="sessionCount">—</span><span class="metric-note" id="sessionNote">No active sessions yet</span></div>
+            <div class="metric"><span class="metric-label">Uptime</span><span class="metric-value" id="uptimeValue">—</span><span class="metric-note" id="uptimeNote">Since the server started</span></div>
+          </div>
+        </article>
         <div class="section-grid">
           <article class="panel">
-            <div class="panel-head"><div><h2>Readiness checks</h2><p>What keeps this host dependable overnight.</p></div><div class="toolbar-actions"><button type="button" class="button subtle" id="diagnosticsButton">Run diagnostics</button><button type="button" class="button subtle" data-go="library">Manage roots</button></div></div>
+            <div class="panel-head"><div><h2>Readiness checks</h2><p>What keeps this host dependable overnight.</p></div><div class="toolbar-actions"><button type="button" class="button" id="diagnosticsButton">Run diagnostics</button><button type="button" class="button" data-go="library">Manage roots</button></div></div>
             <div class="panel-body"><ul class="check-list" id="checkList"><li><div class="check-copy"><strong>Loading checks</strong><span>Waiting for the server snapshot.</span></div><span class="pill">Pending</span></li></ul></div>
           </article>
           <article class="panel pad">
             <p class="eyebrow">Next useful action</p>
-            <div class="callout" style="margin-top:12px" id="nextAction"><h3>Connect a library root</h3><p>Add the mounted folder where your films, shows, or anime live. Existing records stay safe when a NAS share is unavailable.</p><button type="button" class="button primary" data-go="library">Open library setup</button></div>
+            <div class="callout" id="nextAction"><h3>Connect a library root</h3><p>Add the mounted folder where your films, shows, or anime live. Existing records stay safe when a NAS share is unavailable.</p><button type="button" class="button primary" data-go="library">Open library setup</button></div>
           </article>
         </div>
       </section>
 
       <section class="page" id="page-library" data-page-content="library">
-        <div class="page-toolbar"><div><h2>Library folders</h2><p>Add local folders or OS-mounted NAS shares. Unavailable folders stay saved until you reconnect or remove them.</p></div><div class="toolbar-actions"><button class="button" id="scanButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#scan-search"></use></svg>Scan library</button></div></div>
         <div class="library-folder-grid" id="rootGroups"><article class="panel folder-card"><div class="folder-card-empty">Loading library folders…</div></article></div>
-        <article class="panel pad" style="margin-top:16px"><div class="panel-head" style="padding:0"><div><h2>Scan status</h2><p id="scanSummary">No scan has been requested.</p></div><span class="pill" id="scanPill">Idle</span></div><div style="margin-top:17px"><div style="height:7px;border-radius:99px;background:var(--surface-soft);overflow:hidden"><div id="scanProgress" style="height:100%;width:0;background:var(--accent);transition:width .2s"></div></div></div></article>
+        <article class="panel pad" style="margin-top:12px"><div class="panel-head" style="padding:0"><div><h2>Scan status</h2><p id="scanSummary">No scan has been requested.</p></div><span class="pill" id="scanPill">Idle</span></div><div style="margin-top:12px"><div style="height:6px;border-radius:99px;background:var(--surface-soft);overflow:hidden"><div id="scanProgress" style="height:100%;width:0;background:var(--accent);transition:width .2s"></div></div></div></article>
       </section>
 
       <section class="page" id="page-sessions" data-page-content="sessions">
-        <div class="page-toolbar"><div><h2>Active sessions</h2><p>See who is watching and whether a transcode is in flight.</p></div><button class="button" data-refresh="sessions" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg>Refresh sessions</button></div>
-        <article class="panel"><div class="table-wrap"><table><thead><tr><th>Client</th><th>Now playing</th><th>State</th><th>Connected</th><th>Bitrate</th></tr></thead><tbody id="sessionsTable"><tr><td colspan="5" class="empty">Loading sessions…</td></tr></tbody></table></div></article>
+        <article class="panel"><div class="table-wrap"><table class="sessions-table"><colgroup><col class="c-client"><col><col class="c-state"><col class="c-when"><col class="c-rate"></colgroup><thead><tr><th>Client</th><th>Now playing</th><th>State</th><th>Connected</th><th>Bitrate</th></tr></thead><tbody id="sessionsTable"><tr><td colspan="5" class="empty">Loading sessions…</td></tr></tbody></table></div></article>
       </section>
 
       <section class="page" id="page-logs" data-page-content="logs">
-        <div class="page-toolbar"><div><h2>Server logs</h2><p>Recent operational events, retained for 30 days and filterable by level, source, or text.</p></div><button class="button" data-refresh="logs" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#refresh-cw"></use></svg>Refresh logs</button></div>
-        <article class="panel pad log-filters"><div class="form-grid"><div class="field"><label for="logLevelFilter">Level</label><select id="logLevelFilter"><option value="">All levels</option><option value="error">Error</option><option value="warn">Warning</option><option value="info">Info</option><option value="debug">Debug</option></select></div><div class="field"><label for="logSourceFilter">Source</label><input id="logSourceFilter" type="text" maxlength="128" placeholder="headless-server"></div><div class="field"><label for="logSearchFilter">Search</label><input id="logSearchFilter" type="search" maxlength="200" placeholder="scan, backup, transcoder…"></div><div class="form-actions"><button class="button subtle" id="logFilterButton" type="button">Apply filters</button><button class="button subtle" id="logsNextButton" type="button" disabled>Next page</button></div></div></article>
-        <article class="panel"><div class="table-wrap"><table><thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Message</th></tr></thead><tbody id="logsTable"><tr><td colspan="4" class="empty">Loading logs…</td></tr></tbody></table></div></article>
+        <article class="panel pad log-filters"><div class="form-grid"><div class="field"><label for="logLevelFilter">Level</label><select id="logLevelFilter"><option value="">All levels</option><option value="error">Error</option><option value="warn">Warning</option><option value="info">Info</option><option value="debug">Debug</option></select></div><div class="field"><label for="logSourceFilter">Source</label><input id="logSourceFilter" type="text" maxlength="128" placeholder="headless-server"></div><div class="field"><label for="logSearchFilter">Search</label><input id="logSearchFilter" type="search" maxlength="200" placeholder="scan, backup, transcoder…"></div><div class="form-actions"><button class="button" id="logFilterButton" type="button">Apply filters</button><button class="button subtle" id="logsNextButton" type="button" disabled>Next page</button></div></div></article>
+        <article class="panel"><div class="table-wrap"><table class="logs-table"><colgroup><col class="c-time"><col class="c-level"><col class="c-source"><col></colgroup><thead><tr><th>Time</th><th>Level</th><th>Source</th><th>Message</th></tr></thead><tbody id="logsTable"><tr><td colspan="4" class="empty">Loading logs…</td></tr></tbody></table></div></article>
       </section>
 
       <section class="page" id="page-backups" data-page-content="backups">
-        <div class="page-toolbar"><div><h2>Backups</h2><p>Protect metadata, profiles, watch progress, and scan state.</p></div><button class="button primary" id="backupButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#database-backup"></use></svg>Start backup</button></div>
-        <article class="panel pad"><div class="panel-head" style="padding:0"><div><h2 id="backupState">Checking backup status</h2><p id="backupSummary">The server will report the last successful snapshot.</p></div><span class="pill" id="backupPill">Pending</span></div><div class="form-grid" style="margin-top:22px"><div class="field full"><label for="backupDestination">Destination (optional)</label><input id="backupDestination" type="text" placeholder="/config/backups or an attached volume"></div><div class="field full"><label for="restoreSource">Restore from backup file</label><div class="path-control"><input id="restoreSource" type="text" placeholder="/config/backups/loomtv-backup-….json"><button class="button subtle danger" id="restoreButton" type="button">Validate &amp; restore</button></div><p class="field-hint">Restoring creates an automatic pre-restore snapshot, validates the checksum, replaces server state atomically, and revokes active sessions.</p></div></div></article><article class="panel pad" style="margin-top:16px"><div class="panel-head" style="padding:0"><div><h2>Backup history</h2><p>Verified snapshots and restore points retained in the admin state.</p></div></div><div class="table-wrap"><table><thead><tr><th>When</th><th>Type</th><th>Status</th><th>Location</th><th>Checksum</th></tr></thead><tbody id="backupHistoryTable"><tr><td colspan="5" class="empty">No backup history yet.</td></tr></tbody></table></div></article>
+        <article class="panel pad"><div class="panel-head" style="padding:0"><div><h2 id="backupState">Checking backup status</h2><p id="backupSummary">The server will report the last successful snapshot.</p></div><span class="pill" id="backupPill">Pending</span></div><div class="form-grid" style="margin-top:12px"><div class="field full"><label for="backupDestination">Destination (optional)</label><input id="backupDestination" type="text" placeholder="/config/backups or an attached volume"></div><div class="field full"><label for="restoreSource">Restore from backup file</label><div class="path-control"><input id="restoreSource" type="text" placeholder="/config/backups/loomtv-backup-….json"><button class="button subtle danger" id="restoreButton" type="button">Validate &amp; restore</button></div><p class="field-hint">Restoring creates an automatic pre-restore snapshot, validates the checksum, replaces server state atomically, and revokes active sessions.</p></div></div></article><article class="panel pad" style="margin-top:12px"><div class="panel-head" style="padding:0"><div><h2>Backup history</h2><p>Verified snapshots and restore points retained in the admin state.</p></div></div><div class="table-wrap"><table class="backups-table"><colgroup><col class="c-when"><col class="c-type"><col class="c-status"><col><col class="c-sum"></colgroup><thead><tr><th>When</th><th>Type</th><th>Status</th><th>Location</th><th>Checksum</th></tr></thead><tbody id="backupHistoryTable"><tr><td colspan="5" class="empty">No backup history yet.</td></tr></tbody></table></div></article>
       </section>
 
       <section class="page" id="page-users" data-page-content="users">
-        <div class="page-toolbar"><div><h2>User accounts</h2><p>Control library scope, streaming, transcoding, and server administration.</p></div><button class="button primary" id="addUserButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#user-plus"></use></svg>Add user</button></div>
         <div class="users-grid" id="usersGrid"><article class="panel user-card"><div class="folder-card-empty">Unlock an administrator account to manage users.</div></article></div>
       </section>
     </main>
@@ -328,7 +423,7 @@
   <div class="modal-backdrop" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
     <div class="modal">
       <h2 id="authTitle">Unlock server control</h2>
-      <p id="authCopy">Use the LoomTV owner password to create a short-lived admin session.</p>
+      <p id="authCopy">Use your LoomTV account password to open server control. Sign out when you are done.</p>
       <form id="authForm">
         <div class="form-grid">
           <div class="field" id="ownerNameField">
@@ -344,11 +439,6 @@
               </button>
             </div>
             <p class="field-hint" id="passwordHint">Use at least 8 characters.</p>
-          </div>
-          <div class="field full" id="bootstrapSecretField" hidden>
-            <label for="bootstrapSecret">One-time bootstrap secret</label>
-            <input id="bootstrapSecret" type="password" autocomplete="off" maxlength="1024" spellcheck="false" placeholder="Paste the secret shown when LoomTV started">
-            <p class="field-hint">Required only while creating the first owner account.</p>
           </div>
           <p class="auth-error" id="authError" role="alert" aria-live="polite"></p>
           <div class="form-actions">
@@ -399,22 +489,39 @@
       const error = (message) => { text('errorNotice', message); show('errorNotice', true); };
       const clearError = () => show('errorNotice', false);
       const setToken = (token) => { state.token = token || ''; if (state.token) sessionStorage.setItem('loomtv.adminToken', state.token); else sessionStorage.removeItem('loomtv.adminToken'); updateAuthButton(); applyPermissionUi(state.token ? new Set(state.bootstrap?.user?.permissions || []) : new Set()); };
-      const updateAuthButton = () => { const button = $('authButton'); button.textContent = state.token ? 'Lock admin' : state.bootstrap?.ownerConfigured === false ? 'Set up owner' : 'Unlock admin'; button.classList.toggle('primary', !state.token); };
+      const updateAuthButton = () => { const button = $('authButton'); const authenticated = Boolean(state.token); button.textContent = authenticated ? 'Sign out' : state.bootstrap?.ownerConfigured === false ? 'Set up owner' : 'Unlock admin'; button.title = authenticated ? 'Sign out and revoke this admin session' : ''; button.setAttribute('aria-label', authenticated ? 'Sign out of server control' : button.textContent); button.classList.toggle('primary', !authenticated); };
 
       async function request(path, options = {}) {
+        const { suppressAuthPrompt = false, ...fetchOptions } = options;
         const headers = { Accept: 'application/json', 'X-Loom-Device-Id': state.deviceId, ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(state.token ? { Authorization: `Bearer ${state.token}`, 'X-Loom-Admin-Token': state.token } : {}) };
-        const response = await fetch(`${API}${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
+        const response = await fetch(`${API}${path}`, { ...fetchOptions, headers: { ...headers, ...(options.headers || {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
         let payload = null;
         try { payload = await response.json(); } catch (_) { /* empty response */ }
         if (response.status === 401) {
           const expiredToken = Boolean(state.token);
           setToken('');
           if (path === '/bootstrap' && expiredToken) return request(path, options);
-          openAuth(false);
+          if (!suppressAuthPrompt) openAuth(false);
           throw new Error('Admin authentication is required.');
         }
         if (!response.ok) throw new Error(payload?.message || payload?.error || `Request failed (${response.status}).`);
         return payload;
+      }
+
+      async function signOutAdmin() {
+        if (!state.token) { openAuth(state.bootstrap?.ownerConfigured === false); return; }
+        try {
+          await request('/session', { method: 'DELETE', suppressAuthPrompt: true });
+        } catch (err) {
+          // Local locking still succeeds if the server is unreachable. The
+          // token is removed from this tab and will expire or be rejected on
+          // the server if revocation could not be delivered.
+          if (!/authentication|required|expired/i.test(err.message || '')) error(err.message || 'The admin session could not be revoked on the server.');
+        } finally {
+          setToken('');
+          closeAuth();
+          window.location.reload();
+        }
       }
 
       async function loadBootstrap() {
@@ -437,6 +544,17 @@
           applyPermissionUi(permissions);
         } catch (err) { error(err.message || 'Could not reach the LoomTV server.'); }
       }
+      function formatUptime(seconds) {
+        const total = Math.floor(Number(seconds) || 0);
+        if (!total) return '—';
+        const days = Math.floor(total / 86400);
+        const hours = Math.floor((total % 86400) / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        if (days) return `${days}d ${hours}h`;
+        if (hours) return `${hours}h ${minutes}m`;
+        if (minutes) return `${minutes}m`;
+        return `${total}s`;
+      }
       function renderBootstrap(payload) {
         const health = payload.health || {};
         const status = health.state || 'offline';
@@ -446,7 +564,19 @@
         const codecLabel = (codec) => transcodeDetails.codecs?.[codec] ? 'hardware' : transcodeDetails.softwareCodecs?.[codec] ? 'software' : 'unavailable';
         const codecSummary = transcodeDetails.codecs ? ` · H.264 ${codecLabel('h264')} · HEVC ${codecLabel('hevc')} · AV1 ${codecLabel('av1')}` : '';
         const backendSummary = transcodeDetails.recommendedBackend && transcodeDetails.recommendedBackend !== 'software' ? ` · ${titleCase(transcodeDetails.recommendedBackend)} selected` : '';
-        text('healthSummary', `${health.database === 'healthy' || health.database === 'catalog' ? 'Catalog ready' : 'Catalog needs attention'} · ${health.transcoder === 'available' ? 'Hardware transcoder available' : health.transcoder === 'limited' ? 'Software transcoder available' : 'Transcoder unavailable'}${backendSummary}${codecSummary} · Up ${Math.floor(health.uptimeSeconds || 0)}s`);
+        const catalogReady = health.database === 'healthy' || health.database === 'catalog';
+        const facts = [
+          ['Catalog', catalogReady ? 'Ready' : 'Needs attention', catalogReady ? 'pass' : 'warn'],
+          ['Transcoder', health.transcoder === 'available' ? 'Hardware' : health.transcoder === 'limited' ? 'Software' : 'Unavailable', health.transcoder === 'available' ? 'pass' : health.transcoder === 'limited' ? 'warn' : 'fail'],
+        ];
+        if (backendSummary) facts.push(['Backend', titleCase(transcodeDetails.recommendedBackend), 'pass']);
+        if (codecSummary) ['h264', 'hevc', 'av1'].forEach((codec) => {
+          const label = codecLabel(codec);
+          facts.push([codec === 'h264' ? 'H.264' : codec === 'hevc' ? 'HEVC' : 'AV1', titleCase(label), label === 'hardware' ? 'pass' : label === 'software' ? 'warn' : 'fail']);
+        });
+        $('healthFacts').innerHTML = facts.map(([label, value, tone]) => `<span class="fact ${tone}"><span class="fact-label">${escapeHtml(label)}</span><span class="fact-value">${escapeHtml(value)}</span></span>`).join('');
+        text('uptimeValue', formatUptime(health.uptimeSeconds));
+        text('uptimeNote', health.uptimeSeconds ? 'Since the server started' : 'Not reporting yet');
         $('healthDot').className = `dot ${status === 'healthy' ? 'online' : status === 'degraded' ? 'warn' : 'offline'}`;
         $('sideDot').className = `dot ${status === 'healthy' ? 'online' : status === 'degraded' ? 'warn' : 'offline'}`;
         text('connectionText', status === 'healthy' ? 'Server online' : status === 'degraded' ? 'Server degraded' : 'Server unavailable');
@@ -528,7 +658,7 @@
           const sessions = user.maxSessions ? ` · ${user.maxSessions} session${user.maxSessions === 1 ? '' : 's'} max` : '';
           const userPermissions = state.bootstrap?.user?.permissions || [];
           const canManage = userPermissions.includes('*') || userPermissions.includes('users.manage');
-          return `<article class="panel user-card"><div class="user-card-head"><div><h3>${escapeHtml(user.name)}</h3><p>${escapeHtml(user.role)} · ${escapeHtml(scope)}</p></div><span class="pill ${user.disabled ? 'offline' : 'online'}">${user.disabled ? 'Disabled' : 'Active'}</span></div><div class="user-card-meta"><span class="pill">${escapeHtml(String((user.permissions || []).length))} permissions</span><span class="pill">${escapeHtml(String((user.rootIds === null ? roots.length : user.rootIds?.length || 0)))} roots</span><span class="pill">${escapeHtml(devices)}${escapeHtml(sessions)}</span></div><div class="user-card-permissions">${permissionSummary}${user.permissions?.length > 5 ? ` · +${user.permissions.length - 5} more` : ''}</div>${canManage ? `<div class="folder-root-actions" style="margin-top:16px"><button class="button subtle" type="button" data-edit-user="${escapeHtml(user.id)}">Edit</button><button class="button subtle danger" type="button" data-remove-user="${escapeHtml(user.id)}">Remove</button></div>` : ''}</article>`;
+          return `<article class="panel user-card"><div class="user-card-head"><div><h3>${escapeHtml(user.name)}</h3><p>${escapeHtml(user.role)} · ${escapeHtml(scope)}</p></div><span class="pill ${user.disabled ? 'offline' : 'online'}">${user.disabled ? 'Disabled' : 'Active'}</span></div><div class="user-card-meta"><span class="pill">${escapeHtml(String((user.permissions || []).length))} permissions</span><span class="pill">${escapeHtml(String((user.rootIds === null ? roots.length : user.rootIds?.length || 0)))} roots</span><span class="pill">${escapeHtml(devices)}${escapeHtml(sessions)}</span></div><div class="user-card-permissions">${permissionSummary}${user.permissions?.length > 5 ? ` · +${user.permissions.length - 5} more` : ''}</div>${canManage ? `<div class="folder-root-actions" style="margin-top:12px"><button class="button subtle" type="button" data-edit-user="${escapeHtml(user.id)}">Edit</button><button class="button subtle danger" type="button" data-remove-user="${escapeHtml(user.id)}">Remove</button></div>` : ''}</article>`;
         }).join('') : '<article class="panel user-card"><div class="folder-card-empty">No user accounts are available, or this account cannot manage users.</div></article>';
       }
       function renderUserForm(user) {
@@ -591,22 +721,37 @@
       }
       function closeRootPicker() { $('rootPicker').hidden = true; }
       function setAuthError(message = '') { text('authError', message); show('authError', Boolean(message)); }
-      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || (Boolean($('ownerName').value.trim()) && Boolean($('bootstrapSecret').value.trim()))); $('authSubmit').disabled = !ready; }
+      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || Boolean($('ownerName').value.trim())); $('authSubmit').disabled = !ready; }
       function setPasswordVisibility(visible) { const input = $('ownerPassword'); const toggle = $('toggleOwnerPassword'); input.type = visible ? 'text' : 'password'; toggle.setAttribute('aria-label', visible ? 'Hide password' : 'Show password'); toggle.title = visible ? 'Hide password' : 'Show password'; toggle.setAttribute('aria-pressed', String(visible)); $('passwordIconUse').setAttribute('href', `/admin/lucide-icons.svg#${visible ? 'eye-off' : 'eye'}`); }
-      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); const bootstrapSecret = $('bootstrapSecret'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; $('bootstrapSecretField').hidden = !firstRun; bootstrapSecret.required = firstRun; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Create the owner account used to protect this browser control plane.' : 'Use a LoomTV account password to create a short-lived session.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; bootstrapSecret.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
+      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Create the owner account used to protect this browser control plane.' : 'Use your LoomTV account password to open server control. Sign out when you are done.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
       function closeAuth() { $('authModal').classList.remove('show'); }
       function openRoot(kind) { $('rootModal').classList.add('show'); closeRootPicker(); if (kind) $('rootKind').value = kind; $('rootPath').focus(); }
       function closeRoot() { closeRootPicker(); $('rootModal').classList.remove('show'); }
-      function setPage(page) { state.page = page; $('mainContent').dataset.page = page; document.querySelectorAll('[data-page-content]').forEach((node) => node.classList.toggle('active', node.dataset.pageContent === page)); document.querySelectorAll('.nav button').forEach((node) => node.setAttribute('aria-current', node.dataset.page === page ? 'page' : 'false')); }
+      const PAGES = {
+        overview: ['Overview', 'Server health, library reach, and the next thing worth doing.'],
+        library: ['Library folders', 'Add local folders or OS-mounted NAS shares. Unavailable folders stay saved until you reconnect or remove them.'],
+        sessions: ['Active sessions', 'See who is watching and whether a transcode is in flight.'],
+        logs: ['Server logs', 'Recent operational events, retained for 30 days and filterable by level, source, or text.'],
+        backups: ['Backups', 'Protect metadata, profiles, watch progress, and scan state.'],
+        users: ['User accounts', 'Control library scope, streaming, transcoding, and server administration.'],
+      };
+      function setPage(page) {
+        state.page = page;
+        $('mainContent').dataset.page = page;
+        const [title, subtitle] = PAGES[page] || PAGES.overview;
+        text('pageTitle', title); text('pageSubtitle', subtitle);
+        document.querySelectorAll('[data-page-content]').forEach((node) => node.classList.toggle('active', node.dataset.pageContent === page));
+        document.querySelectorAll('[data-page-actions]').forEach((node) => node.classList.toggle('active', node.dataset.pageActions === page));
+        document.querySelectorAll('.nav button').forEach((node) => node.setAttribute('aria-current', node.dataset.page === page ? 'page' : 'false'));
+      }
 
       document.querySelectorAll('.nav button').forEach((button) => button.addEventListener('click', () => setPage(button.dataset.page)));
       document.querySelectorAll('[data-go]').forEach((button) => button.addEventListener('click', () => setPage(button.dataset.go)));
       $('refreshButton').addEventListener('click', loadBootstrap);
-      $('authButton').addEventListener('click', () => state.token ? setToken('') : openAuth(state.bootstrap?.ownerConfigured === false));
+      $('authButton').addEventListener('click', () => { void signOutAdmin(); });
       $('toggleOwnerPassword').addEventListener('click', () => setPasswordVisibility($('ownerPassword').type === 'password'));
       $('ownerName').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('ownerPassword').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
-      $('bootstrapSecret').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('closeAuthButton').addEventListener('click', closeAuth);
       $('closeRootButton').addEventListener('click', closeRoot);
       $('browseRootButton').addEventListener('click', openRootPicker);
@@ -664,7 +809,7 @@
       $('logFilterButton').addEventListener('click', () => { void loadLogs(true); });
       $('logsNextButton').addEventListener('click', () => { if (state.logPage?.nextOffset !== null) { state.logOffset = state.logPage.nextOffset; void loadLogs(false); } });
       $('rootForm').addEventListener('submit', async (event) => { event.preventDefault(); try { await request('/library/roots', { method: 'POST', body: { path: $('rootPath').value.trim(), kind: $('rootKind').value } }); closeRoot(); $('rootPath').value = ''; toast('Library root added.'); await loadRoots(); await loadBootstrap(); } catch (err) { error(err.message); } });
-      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password, bootstrapSecret: $('bootstrapSecret').value.trim() } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
+      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
       updateAuthButton();
       loadBootstrap();
     })();

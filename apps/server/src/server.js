@@ -12,6 +12,9 @@ import { createHeadlessMediaService } from './media-service.js';
 import { createPublicApiHandler, publicHealthSummary } from './public-api.js';
 import { createLegacyV2CompatibilityHandler } from './legacy-v2-adapter.js';
 import { createBootstrapSecurity } from './secure-bootstrap.js';
+import { createDesktopSetupChannel } from './desktop-setup-channel.js';
+import { createSetupPage } from './setup-page.js';
+import { createSetupService } from './setup-service.js';
 import { createHeadlessTranscoder } from './transcoder.js';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import { assertTransportConfiguration } from './transport-security.js';
@@ -127,6 +130,7 @@ export function createCanonicalVideoServer(options) {
   const directTls = Boolean(directCertificateFingerprint);
   const transport = directTls ? 'https' : 'http';
   const deploymentMode = options.deploymentMode === 'desktop-hosted' ? 'desktop-hosted' : 'standalone';
+  const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   let server;
   let stopPromise;
   let draining = false;
@@ -135,6 +139,7 @@ export function createCanonicalVideoServer(options) {
   let mediaService;
   const bootstrapSecurity = options.bootstrapSecurity || createBootstrapSecurity({
     dataDir: options.paths.dataDir,
+    required: requireBootstrapSecret,
     secret: options.bootstrapSecret,
     secretFile: options.bootstrapSecretFile,
     onGenerated: options.onBootstrapSecretGenerated,
@@ -212,6 +217,7 @@ export function createCanonicalVideoServer(options) {
     proxyPolicy,
     clock: options.clock,
     bootstrapSecurity,
+    requireBootstrapSecret,
   });
   const adminService = persistence.accounts;
   const clientState = persistence.profiles;
@@ -235,25 +241,48 @@ export function createCanonicalVideoServer(options) {
     cacheFileSystem: options.cacheFileSystem,
     spawnProcess: options.spawnProcess,
   });
-  const adminPage = createAdminPage({ htmlPath: options.adminHtmlPath, iconsPath: options.adminIconsPath });
+  const setupService = createSetupService({
+    store: persistence.store,
+    isOwnerConfigured: () => adminService.isOwnerConfigured(),
+  });
+  const desktopSetupChannel = createDesktopSetupChannel({
+    token: options.desktopSetupToken,
+    clientAddress: (req) => proxyPolicy.clientAddress(req),
+  });
+  // Every surface reads the same status, so `/app`, `/admin`, and `/setup`
+  // agree on whether this installation still needs setup.
+  const setupStatus = async () => setupService.status();
+  const setupPage = createSetupPage({ htmlPath: options.setupHtmlPath, getSetupStatus: setupStatus });
+  const adminPage = createAdminPage({
+    htmlPath: options.adminHtmlPath,
+    iconsPath: options.adminIconsPath,
+    getSetupStatus: setupStatus,
+  });
   const adminApi = createAdminApiHandler({
     service: adminService,
     authorize: adminService.authorizeRequest,
     ownerConfigured: adminService.isOwnerConfigured,
     requireSecureTransport: options.requireSecureTransport === true,
+    requireBootstrapSecret,
     proxyPolicy,
   });
-  const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath });
+  const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath, getSetupStatus: setupStatus });
   const publicApi = createPublicApiHandler({
     service: adminService,
     clientState,
     mediaService,
     pairingService,
     remotePolicy,
+    setupService,
+    setupHooks: options.setupHooks,
     getRuntimeHealth: healthPayload,
     version: options.version,
     requireSecureTransport: options.requireSecureTransport === true,
+    requireBootstrapSecret,
     proxyPolicy,
+    desktopSetupChannel,
+    pickFolder: options.pickFolder,
+    deploymentMode,
   });
   const legacyV2 = createLegacyV2CompatibilityHandler({
     authorizeLegacyPairing: options.authorizeLegacyPairing,
@@ -302,7 +331,9 @@ export function createCanonicalVideoServer(options) {
         return;
       }
       const requestUrl = new URL(req.url || '/', `${transport}://${req.headers.host || 'localhost'}`);
-      const routeClass = requestUrl.pathname.startsWith('/api/v1/auth') ? 'credential'
+      // Setup shares the credential class: claiming a server is as sensitive as
+      // signing in to one, and must obey the same remote-access policy.
+      const routeClass = requestUrl.pathname.startsWith('/api/v1/auth') || requestUrl.pathname.startsWith('/api/v1/setup') ? 'credential'
         : requestUrl.pathname.startsWith('/api/v1/pairing') ? 'pairing'
           : requestUrl.pathname.startsWith('/api/v1/downloads') ? 'download'
             : requestUrl.pathname.startsWith('/api/media') || requestUrl.pathname.startsWith('/hls/') || requestUrl.pathname === '/stream' ? 'media'
@@ -329,6 +360,9 @@ export function createCanonicalVideoServer(options) {
         || requestUrl.pathname === '/api/v1/discovery'
         || requestUrl.pathname === '/api/v1/health'
         || requestUrl.pathname === '/api/v1/auth/onboarding'
+        || requestUrl.pathname === '/api/v1/setup/state'
+        || requestUrl.pathname === '/setup'
+        || requestUrl.pathname === '/setup/'
         || requestUrl.pathname === '/api/v1/openapi.json'
         || requestUrl.pathname === '/api/admin/bootstrap'
       );
@@ -340,6 +374,7 @@ export function createCanonicalVideoServer(options) {
         }, req.method);
         return;
       }
+      if (await setupPage(req, res)) return;
       if (await webApp(req, res)) return;
       if (await adminPage(req, res)) return;
       if (await adminApi(req, res)) return;

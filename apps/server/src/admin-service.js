@@ -639,6 +639,7 @@ function normalizeState(raw) {
 
 export function createHeadlessAdminService(options) {
   if (!options.bootstrapSecurity) throw new Error('createHeadlessAdminService requires bootstrapSecurity.');
+  const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   const dataDir = path.resolve(options.dataDir);
   const statePath = path.join(dataDir, STATE_FILENAME);
   const mediaDir = options.mediaDir ? path.resolve(options.mediaDir) : null;
@@ -836,7 +837,6 @@ export function createHeadlessAdminService(options) {
         .catch(async (error) => {
           if (error?.code === 'ENOENT') {
             const state = defaultState();
-            if (mediaDir) state.roots.push({ id: rootIdFor(mediaDir), path: mediaDir, kind: 'others', createdAt: Date.now() });
             await saveState(state);
             return state;
           }
@@ -846,13 +846,7 @@ export function createHeadlessAdminService(options) {
             cause: error,
           });
         })
-        .then(async (state) => {
-          if (mediaDir && state.roots.length === 0) {
-            state.roots.push({ id: rootIdFor(mediaDir), path: mediaDir, kind: 'others', createdAt: Date.now() });
-            await saveState(state);
-          }
-          return state;
-        });
+        .then((state) => state);
     }
     return statePromise;
   }
@@ -1258,7 +1252,12 @@ export function createHeadlessAdminService(options) {
       ownerCreationPromise = (async () => {
         const state = await loadState();
         if (state.owner) throw Object.assign(new Error('The LoomTV owner has already been created.'), { status: 409 });
-        options.bootstrapSecurity.authorize(input.bootstrapSecret, input.address);
+        // Trusted desktop setup and the shared web setup follow the same owner
+        // flow. Deployments that opt into a bootstrap secret still verify it
+        // here, before any account state is written.
+        if (input.trustedChannel !== true && requireBootstrapSecret) {
+          options.bootstrapSecurity.authorize(input.bootstrapSecret, input.address);
+        }
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 80) {
           throw invalidInput('The owner name must be between 1 and 80 characters.');
         }
@@ -1557,6 +1556,82 @@ export function createHeadlessAdminService(options) {
         path: currentPath,
         parentPath: parentPath && isPathWithin(configuredRoot, parentPath) ? parentPath : null,
         directories,
+      };
+    },
+
+    async searchLibraryDirectories(input = {}, principal) {
+      ensurePrincipalPermission(principal, 'library.manage');
+      if (!mediaDir) {
+        throw Object.assign(new Error('No media mount is configured for this server.'), { status: 409 });
+      }
+      const query = typeof input.query === 'string' ? input.query.trim().toLocaleLowerCase() : '';
+      if (!query || query.length > 120) {
+        throw Object.assign(new Error('Enter a folder name to search.'), { status: 400 });
+      }
+
+      const configuredRoot = await fs.realpath(mediaDir).catch((error) => {
+        throw Object.assign(new Error('The configured media mount is not available.'), { status: error?.code === 'EACCES' ? 403 : 409 });
+      });
+      const maxResults = 100;
+      const maxVisited = 5_000;
+      const maxDepth = 12;
+      const unavailableDirectoryErrors = new Set([
+        'EACCES',
+        'EIO',
+        'ELOOP',
+        'ENAMETOOLONG',
+        'ENOENT',
+        'ENOTCONN',
+        'ENOTDIR',
+        'ENXIO',
+        'EPERM',
+        'ESTALE',
+        'ETIMEDOUT',
+      ]);
+      const state = !isOwnerPrincipal(principal) && principal.rootIds !== null ? await loadState() : null;
+      const searchRoots = state
+        ? state.roots
+          .filter((root) => principal.rootIds.includes(root.id))
+          .map((root) => path.resolve(root.path))
+          .filter((root) => isPathWithin(configuredRoot, root))
+        : [configuredRoot];
+      const queue = [];
+      for (const root of searchRoots) {
+        const existing = await fs.realpath(root).catch(() => null);
+        if (existing && isPathWithin(configuredRoot, existing)) queue.push({ path: existing, depth: 0 });
+      }
+
+      const directories = [];
+      let visited = 0;
+      while (queue.length && directories.length < maxResults && visited < maxVisited) {
+        const current = queue.shift();
+        visited += 1;
+        const entries = await fs.readdir(current.path, { withFileTypes: true }).catch((error) => {
+          // External drives, NAS shares, and cloud-storage placeholders can
+          // disappear or time out while the rest of the browse root remains
+          // healthy. Skip only that branch so one unavailable folder cannot
+          // discard matches found elsewhere.
+          if (unavailableDirectoryErrors.has(error?.code)) return [];
+          throw Object.assign(new Error('The server could not search that folder.'), { status: 500 });
+        });
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const childPath = path.join(current.path, entry.name);
+          if (!isPathWithin(configuredRoot, childPath)) continue;
+          if (entry.name.toLocaleLowerCase().includes(query)) {
+            directories.push({ name: entry.name, path: childPath });
+            if (directories.length >= maxResults) break;
+          }
+          if (current.depth < maxDepth) queue.push({ path: childPath, depth: current.depth + 1 });
+        }
+      }
+
+      directories.sort((left, right) => left.path.localeCompare(right.path, undefined, { sensitivity: 'base' }));
+      return {
+        rootPath: configuredRoot,
+        query,
+        directories,
+        truncated: queue.length > 0 || visited >= maxVisited || directories.length >= maxResults,
       };
     },
 

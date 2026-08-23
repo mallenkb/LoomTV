@@ -229,15 +229,27 @@ export function listenWithPortRetries(
   initialPort: number,
   host: string,
   label: string,
+  portIncrement = 1,
 ): Promise<number> {
   const maxAttempts = 20;
   return new Promise((resolve, reject) => {
     let attempts = 0;
     const attempt = (port: number) => {
       attempts += 1;
+      const onListening = () => {
+        server.off('error', onError);
+        server.on('error', (error) => console.error(`[media-server] ${label} error:`, error));
+        resolve(port);
+      };
       const onError = (error: NodeJS.ErrnoException) => {
-        if (error.code === 'EADDRINUSE' && attempts < maxAttempts && port < 65_535) {
-          attempt(port + 1);
+        // `server.listen(..., callback)` registers a listening listener that
+        // survives a failed bind. Retrying the same server would then let the
+        // stale callback resolve the previous port when the next bind succeeds.
+        // Own both listeners here so each failed attempt is fully detached.
+        server.off('listening', onListening);
+        const nextPort = port + portIncrement;
+        if (error.code === 'EADDRINUSE' && attempts < maxAttempts && nextPort <= 65_535) {
+          attempt(nextPort);
           return;
         }
         reject(error.code === 'EADDRINUSE'
@@ -245,14 +257,12 @@ export function listenWithPortRetries(
           : error);
       };
       server.once('error', onError);
+      server.once('listening', onListening);
       try {
-        server.listen(port, host, () => {
-          server.off('error', onError);
-          server.on('error', (error) => console.error(`[media-server] ${label} error:`, error));
-          resolve(port);
-        });
+        server.listen(port, host);
       } catch (error) {
         server.off('error', onError);
+        server.off('listening', onListening);
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     };

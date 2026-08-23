@@ -333,8 +333,8 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     omdbMeta?: OMDbResponse | null,
     tvMeta?: { rating?: number } | null,
   ): number {
-    return numericRating(omdbMeta?.imdbRating)
-      || numericRating(tmdbMeta?.rating)
+    return numericRating(tmdbMeta?.rating)
+      || numericRating(omdbMeta?.imdbRating)
       || numericRating(tvMeta?.rating);
   }
 
@@ -344,11 +344,13 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     tmdbMeta?: Partial<MediaItem> | null,
     tvMeta?: { rating?: number } | null,
     omdbMeta?: OMDbResponse | null,
+    preferOmdbFallback = true,
   ): number {
-    return numericRating(omdbMeta?.imdbRating)
+    return numericRating(tmdbMeta?.rating)
       || (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
-      || numericRating(tmdbMeta?.rating)
-      || numericRating(tvMeta?.rating);
+      || (preferOmdbFallback
+        ? numericRating(omdbMeta?.imdbRating) || numericRating(tvMeta?.rating)
+        : numericRating(tvMeta?.rating) || numericRating(omdbMeta?.imdbRating));
   }
 
   function officialArtworkOnly(urls: Array<string | null | undefined>): string[] {
@@ -529,6 +531,32 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     });
   }
 
+  function uniqueEpisodeMetadata(episodes: EpisodeMeta[]): EpisodeMeta[] {
+    const byKey = new Map<string, EpisodeMeta>();
+    for (const episode of episodes) {
+      const key = `${episode.season}-${episode.number}`;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, episode);
+        continue;
+      }
+      const existingTitleIsPlaceholder = isGenericEpisodeTitle(existing.title, episode.number);
+      const nextTitleIsPlaceholder = isGenericEpisodeTitle(episode.title, episode.number);
+      byKey.set(key, {
+        ...existing,
+        title: existingTitleIsPlaceholder && !nextTitleIsPlaceholder
+          ? episode.title
+          : existing.title || episode.title,
+        summary: existing.summary || episode.summary,
+        still: existing.still || episode.still,
+        rating: existing.rating || episode.rating,
+        airDate: existing.airDate || episode.airDate,
+        localMetadata: existing.localMetadata || episode.localMetadata,
+      });
+    }
+    return [...byKey.values()];
+  }
+
   function mergeEpisodeMetadataForTarget(
     target: MediaItem,
     remoteEpisodes: EpisodeMeta[] | undefined,
@@ -543,11 +571,11 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     );
 
     if (!target.episodeFiles?.length) {
-      target.episodes = remoteEpisodes;
+      target.episodes = uniqueEpisodeMetadata(remoteEpisodes);
       return;
     }
 
-    target.episodes = target.episodeFiles.map((file) => {
+    target.episodes = uniqueEpisodeMetadata(target.episodeFiles.map((file) => {
       const key = `${file.season}-${file.episode}`;
       const localEpisode: EpisodeMeta = {
         season: file.season,
@@ -583,7 +611,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
           : remote?.airDate || existing?.airDate || '',
         localMetadata: file.localMetadata || existing?.localMetadata,
       };
-    });
+    }));
   }
 
   function itemArtworkLookupData(item: MediaItem): {
@@ -674,16 +702,29 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       fetchTVMetadata(title, year),
       fetchTVMetadataCandidates(title, year),
     ]);
-    return sortMetadataCandidates(uniqueMetadataCandidates([
+    const animeCandidates = likelyAnime ? [
       metadataCandidate('AniList', metadataResultMatchesLocalTitle(anilistMeta, localTitles) ? anilistMeta : null, title),
       ...matchingMetadataResults(jikanCandidates, localTitles).map((candidate) => metadataCandidate('Jikan', candidate, title)),
+    ] : [];
+    const tmdbCandidatesInOrder = [
       metadataCandidate('TMDB', tmdbById, title),
       metadataCandidate('TMDB', remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null, title),
       ...matchingMetadataResults(tmdbCandidates, localTitles).map((candidate) => metadataCandidate('TMDB', candidate, title)),
+    ];
+    const omdbCandidates = [
       omdbMetadataCandidate(omdbById, title),
       omdbMetadataCandidate(remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null, title),
+    ];
+    const tvmazeCandidates = [
       metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
       ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
+    ];
+    const providerCandidates = tmdbApiKey?.trim()
+      ? [...tmdbCandidatesInOrder, ...omdbCandidates, ...tvmazeCandidates]
+      : [...tvmazeCandidates, ...omdbCandidates];
+    return sortMetadataCandidates(uniqueMetadataCandidates([
+      ...animeCandidates,
+      ...providerCandidates,
     ]), title, localTitles);
   }
 
@@ -756,11 +797,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
     const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
     const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
+    const preferOmdbFallback = Boolean(tmdbApiKey?.trim());
+    const fallbackPosters = preferOmdbFallback
+      ? [omdbPoster, matchedTV?.poster]
+      : [matchedTV?.poster, omdbPoster];
     const posterCandidates = officialArtworkOnly([
       likelyAnime ? matchedAniList?.poster : '',
       tmdbMeta?.poster,
-      omdbPoster,
-      matchedTV?.poster,
+      ...(likelyAnime ? [omdbPoster, matchedTV?.poster] : fallbackPosters),
       likelyAnime ? matchedJikan?.poster : '',
     ]);
     const backdropCandidates = officialArtworkOnly([
@@ -791,10 +835,22 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         : tmdbMeta?.episodes?.length
           ? 'TMDB'
           : undefined;
+    const fallbackTitle = preferOmdbFallback
+      ? omdbMeta?.Title || matchedTV?.title
+      : matchedTV?.title || omdbMeta?.Title;
+    const fallbackYear = preferOmdbFallback
+      ? Number.parseInt(omdbMeta?.Year || '', 10) || matchedTV?.year
+      : matchedTV?.year || Number.parseInt(omdbMeta?.Year || '', 10);
+    const fallbackSummary = preferOmdbFallback
+      ? omdbMeta?.Plot || matchedTV?.summary
+      : matchedTV?.summary || omdbMeta?.Plot;
+    const fallbackGenres = preferOmdbFallback
+      ? (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : matchedTV?.genres)
+      : (matchedTV?.genres || (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : undefined));
 
     return {
-      title: likelyAnime ? matchedAniList?.title || title : tmdbMeta?.title || matchedTV?.title || title,
-      year: likelyAnime ? matchedAniList?.year || year : tmdbMeta?.year || matchedTV?.year || year,
+      title: likelyAnime ? matchedAniList?.title || title : tmdbMeta?.title || fallbackTitle || title,
+      year: likelyAnime ? matchedAniList?.year || year : tmdbMeta?.year || fallbackYear || year,
       providerIds: mergeProviderIds(
         item.providerIds || {},
         tmdbMeta?.providerIds || {},
@@ -805,16 +861,16 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       format: likelyAnime ? (matchedAniList?.format || matchedJikan?.format || 'TV') : 'TV',
       thumbnail: posterCandidates[0] || '',
       cover: backdropCandidates[0] || posterCandidates[0] || '',
-      summary: (likelyAnime ? matchedAniList?.summary : '') || tmdbMeta?.summary || omdbMeta?.Plot || matchedTV?.summary || matchedJikan?.summary || '',
-      rating: numericRating(omdbMeta?.imdbRating)
+      summary: (likelyAnime ? matchedAniList?.summary : '') || tmdbMeta?.summary || fallbackSummary || matchedJikan?.summary || '',
+      rating: numericRating(tmdbMeta?.rating)
         || (likelyAnime ? numericRating(matchedAniList?.rating) : 0)
-        || showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta),
+        || showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta, preferOmdbFallback),
       trailerUrl: tmdbMeta?.trailerUrl || matchedAniList?.trailerUrl || matchedJikan?.trailerUrl,
       runtime: tmdbMeta?.runtime || matchedAniList?.runtime || matchedJikan?.runtime,
       seasonCount: tmdbMeta?.seasonCount || matchedTV?.seasonCount || matchedJikan?.seasonCount,
       episodeCount: tmdbMeta?.episodeCount || matchedTV?.episodeCount || matchedJikan?.episodeCount,
       providerRatings: omdbProviderRatings(omdbMeta),
-      genres: (likelyAnime ? matchedAniList?.genres || matchedJikan?.genres : undefined) || tmdbMeta?.genres || matchedTV?.genres || [],
+      genres: (likelyAnime ? matchedAniList?.genres || matchedJikan?.genres : undefined) || tmdbMeta?.genres || fallbackGenres || [],
       seasons: mergeOfficialSeasonMetadata(
         tmdbMeta?.tmdbSeasons,
         matchedTV?.seasons,

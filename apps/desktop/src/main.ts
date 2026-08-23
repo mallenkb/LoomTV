@@ -11,7 +11,7 @@ import {
 import type { OpenDialogOptions } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
 
 if (process.platform === 'linux') {
@@ -82,6 +82,18 @@ import {
 import { stopAllMpvPlayback } from './main/mpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
+import {
+  addUnifiedDesktopLibraryRoot,
+  configureUnifiedDesktopOwner,
+  getUnifiedDesktopLanAdvertisement,
+  getUnifiedDesktopServerState,
+  openUnifiedDesktopAdmin,
+  openUnifiedDesktopSetup,
+  removeUnifiedDesktopLibraryRoot,
+  startUnifiedDesktopServer,
+  stopUnifiedDesktopServer,
+  type UnifiedDesktopSetupHooks,
+} from './main/unifiedDesktopServer.ts';
 import { createRemoteLibraryClient } from './main/remoteLibraryClient';
 import {
   settingsForRenderer,
@@ -189,6 +201,7 @@ import {
 import {
   broadcastProfilesChanged,
   broadcastActiveProfileChanged,
+  canConfigureInitialOwnerProfile,
   changeProfilePin,
   createAndSelectGuest,
   DESKTOP_DEVICE_ID,
@@ -320,7 +333,10 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.setName('LoomTV');
-const USER_DATA_DIR = path.join(app.getPath('appData'), 'LoomTV');
+const configuredUserDataDir = String(process.env.LOOMTV_DATA_DIR || '').trim();
+const USER_DATA_DIR = configuredUserDataDir
+  ? path.resolve(configuredUserDataDir)
+  : path.join(app.getPath('appData'), 'LoomTV');
 app.setPath('userData', USER_DATA_DIR);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -376,7 +392,7 @@ async function requestLanPairingApproval(request: LanPairingApprovalPrompt): Pro
 }
 const LIBRARY_FILE = path.join(app.getPath('userData'), 'library.json');
 const SETTINGS_FILE = path.join(app.getPath('userData'), 'settings.json');
-const SCAN_CACHE_VERSION = 11;
+const SCAN_CACHE_VERSION = 14;
 let libraryMutationVersion = 0;
 let cachedLibrary: LibraryData | null = null;
 
@@ -444,6 +460,7 @@ const {
     });
   },
   requestPairingApproval: requestLanPairingApproval,
+  getLanAdvertisementOverride: getUnifiedDesktopLanAdvertisement,
 });
 
 const {
@@ -604,6 +621,7 @@ async function scanLibrary(
   options: {
     force?: boolean;
     mode?: LibraryScanMode;
+    backgroundMetadataRefresh?: boolean;
     onProgress?: (snapshot: LibraryScanProgress) => void | Promise<void>;
     onCheckpoint?: (snapshot: LibraryScanProgress) => void | Promise<void>;
   } = {},
@@ -626,7 +644,17 @@ async function scanLibrary(
       isEnabled: () => Boolean(loadSettings().openSubtitlesAutoDownload),
     },
   };
-  const subtitleProfile = openSubtitlesCacheKey(ctx.openSubtitles);
+  // A quick scan may reuse a folder only while the metadata-provider setup is
+  // unchanged. Store a one-way fingerprint rather than any provider secret.
+  // The existing subtitleProfile field is retained for database compatibility.
+  const metadataProviderProfile = createHash('sha256')
+    .update(JSON.stringify({
+      tmdb: ctx.tmdbApiKey || '',
+      omdb: ctx.omdbApiKey || '',
+      fanart: ctx.fanartApiKey || '',
+      opensubtitles: openSubtitlesCacheKey(ctx.openSubtitles),
+    }))
+    .digest('hex');
   const folderGroups = normalizeLibraryFolderGroups(data);
   const movies: MediaItem[] = [];
   const tvShows: MediaItem[] = [];
@@ -789,7 +817,10 @@ async function scanLibrary(
         // The automatic sync uses quick scans. Once the persisted metadata is
         // a week old, let that normal scan query providers again; the merge
         // below retains every populated/manual value and only refreshes ratings.
-        refreshProviderRatings = !ratingsAreFresh;
+        const providerOrScannerChanged = !cachedEntry
+          || cachedEntry.version !== SCAN_CACHE_VERSION
+          || (cachedEntry.subtitleProfile || '') !== metadataProviderProfile;
+        refreshProviderRatings = !ratingsAreFresh || providerOrScannerChanged;
 
         if (
           mode !== 'full'
@@ -797,7 +828,7 @@ async function scanLibrary(
           && cachedEntry?.version === SCAN_CACHE_VERSION
           && cachedEntry?.folderKind === folderKind
           && cachedEntry.signature === folderSignature.signature
-          && (cachedEntry.subtitleProfile || '') === subtitleProfile
+          && (cachedEntry.subtitleProfile || '') === metadataProviderProfile
         ) {
           const canUseCachedMetadata = ratingsAreFresh
             && mode !== 'metadata'
@@ -828,7 +859,7 @@ async function scanLibrary(
             version: SCAN_CACHE_VERSION,
             folderKind,
             signature: folderSignature.signature,
-            subtitleProfile,
+            subtitleProfile: metadataProviderProfile,
             fileCount: folderSignature.fileCount,
             itemCount: uniqueItems.length,
             scannedAt: Date.now(),
@@ -881,11 +912,13 @@ async function scanLibrary(
     scannedFolders,
     totalFolders,
   });
-  void refreshIncompleteMetadataQueue(repaired.data).then(() => (
-    refreshDisplayMetadataQueue(repaired.data)
-  )).catch((error) => {
-    console.warn('[metadata] Background refresh after scan failed:', error);
-  });
+  if (options.backgroundMetadataRefresh !== false) {
+    void refreshIncompleteMetadataQueue(repaired.data).then(() => (
+      refreshDisplayMetadataQueue(repaired.data)
+    )).catch((error) => {
+      console.warn('[metadata] Background refresh after scan failed:', error);
+    });
+  }
   return repaired.data;
 }
 
@@ -1396,7 +1429,62 @@ function removeFolderFromLibrary(data: LibraryData, folderPath: string): Library
   };
 }
 
+const unifiedDesktopSetupHooks: UnifiedDesktopSetupHooks = {
+  async testMetadata({ provider, apiKey }) {
+    const [result] = await testMetadataKeys({ [provider]: apiKey });
+    return result || { ok: false, code: 'provider_error', message: `${provider} did not return a test result.` };
+  },
+  saveMetadata({ keys, skipped }) {
+    if (skipped) return;
+    const current = loadSettings();
+    const metadataApiKeys = { ...(current.metadataApiKeys || {}), ...keys };
+    saveSettings({
+      ...current,
+      tmdbApiKey: metadataApiKeys.tmdb || current.tmdbApiKey || '',
+      omdbApiKey: metadataApiKeys.omdb || current.omdbApiKey || '',
+      metadataApiKeys,
+      metadataOfflineMode: false,
+    });
+  },
+  async complete({ roots, ownerName }) {
+    const owner = profileSummaries().find((profile) => profile.type === 'owner');
+    if (owner) {
+      if (ownerName && owner.name !== ownerName) updateProfile(owner.id, { name: ownerName });
+      broadcastProfilesChanged();
+      await selectDesktopProfile(owner.id);
+    }
+
+    let nextLibrary = loadLibrary();
+    for (const root of roots) {
+      nextLibrary = addFolderToLibrary(nextLibrary, path.resolve(root.path), root.kind);
+    }
+    if (roots.length) saveLibraryMutation(nextLibrary);
+
+    const scanVersion = libraryMutationVersion;
+    const scanned = await scanLibrary(loadLibrary(), {
+      mode: 'quick',
+      backgroundMetadataRefresh: false,
+    });
+    if (!saveLibraryFromScan(scanned, scanVersion)) {
+      throw new Error('The library changed while setup was scanning. Retry to finish setup with the latest folders.');
+    }
+
+    // Setup must not open Home while the follow-up metadata passes or artwork
+    // cache are still running. These passes fill missing episode titles, choose
+    // the preferred artwork candidates, and make the selected images available
+    // to the existing desktop UI before setup is marked complete.
+    await refreshIncompleteMetadataQueue(loadLibrary());
+    await refreshDisplayMetadataQueue(loadLibrary());
+    await cacheArtworkNow(loadLibrary());
+  },
+};
+
 // ─── Window ───────────────────────────────────────────────────────────────────
+
+function presentPrimaryWindow(): void {
+  if (openUnifiedDesktopSetup(() => createWindow())) return;
+  createWindow();
+}
 
 function applyAppIcon() {
   const iconPath = getWindowIconPath();
@@ -1548,6 +1636,8 @@ registerIpcHandlers<LibraryData, AppSettings>({
   addFolderToLibrary,
   removeFolderFromLibrary,
   saveLibraryMutation,
+  addUnifiedLibraryRoot: addUnifiedDesktopLibraryRoot,
+  removeUnifiedLibraryRoot: removeUnifiedDesktopLibraryRoot,
   assertLocalMediaPath,
   authorizeMediaPath: (filePath) => assertProfileCanAccessPath(loadLibrary(), requireDesktopProfileId(), filePath),
   assertSubtitleCanAccessMediaPath: (mediaFilePath, subtitleFilePath) =>
@@ -1587,6 +1677,9 @@ registerIpcHandlers<LibraryData, AppSettings>({
     refreshNativePlaybackDisplaySleepTimeout();
     if (!loadSettings().localNetworkSharingEnabled) stopTranscodesForScope('lan:');
   },
+  getUnifiedDesktopServerState,
+  configureUnifiedDesktopOwner,
+  openUnifiedDesktopAdmin,
   syncLanAdvertisement,
   testMetadataKeys,
   getLanShareToken,
@@ -1648,7 +1741,7 @@ registerIpcHandlers<LibraryData, AppSettings>({
     return profileSummaries();
   },
   updateProfile: (profileId, patch) => {
-    requireOwner();
+    if (!canConfigureInitialOwnerProfile(profileId)) requireOwner();
     updateProfile(profileId, patch);
     broadcastProfilesChanged();
     return profileSummaries();
@@ -2003,7 +2096,7 @@ async function startBackgroundServices(): Promise<void> {
       iconIsTemplate: Boolean(trayGlyphPath),
       onOpen: () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
-        createWindow();
+        presentPrimaryWindow();
       },
       onOpenWeb: () => {
         if (isUpdateInstalling() || isAppShuttingDown) return;
@@ -2013,6 +2106,9 @@ async function startBackgroundServices(): Promise<void> {
           console.warn('[tray] Could not open LoomTV in the default browser:', error);
         });
       },
+      ...(getUnifiedDesktopServerState().ready ? {
+        onOpenAdmin: () => { void openUnifiedDesktopAdmin(); },
+      } : {}),
       onQuit: () => app.quit(),
       port: getMediaServerPort(),
     });
@@ -2032,6 +2128,7 @@ async function startBackgroundServices(): Promise<void> {
       await Promise.all([
         closeServerForUpdateInstall(localServerToClose, getMediaServerSockets()),
         closeServerForUpdateInstall(lanServerToClose, getLanMediaServerSockets()),
+        stopUnifiedDesktopServer(),
       ]);
     },
   });
@@ -2079,7 +2176,11 @@ app.whenReady().then(async () => {
   // renderer builds its artwork and stream URLs from the bound port. It is just
   // a listen() call, so everything genuinely slow is deferred below instead.
   await startMediaServer(mediaServerDeps);
-  createWindow();
+  const unifiedServerState = await startUnifiedDesktopServer(unifiedDesktopSetupHooks);
+  if (unifiedServerState.enabled && !unifiedServerState.ready) {
+    console.error('[unified desktop] Canonical server startup failed:', unifiedServerState.error);
+  }
+  presentPrimaryWindow();
 
   void startBackgroundServices().catch((error) => {
     console.error('LoomTV background startup failed:', error);
@@ -2096,7 +2197,7 @@ app.on('second-instance', () => {
   if (isUpdateInstalling()) return;
   if (!app.isReady()) return;
   if (isAppShuttingDown) return;
-  createWindow();
+  presentPrimaryWindow();
 });
 
 app.on('window-all-closed', () => {
@@ -2111,7 +2212,7 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (isUpdateInstalling()) return;
   if (isAppShuttingDown) return;
-  createWindow();
+  presentPrimaryWindow();
 });
 
 app.on('before-quit', () => {
@@ -2124,6 +2225,9 @@ app.on('before-quit', () => {
   destroyLanDiscovery();
   stopAllMpvPlayback();
   stopAllLibVlcPlayback();
+  void stopUnifiedDesktopServer().catch((error) => {
+    console.error('[unified desktop] Canonical server shutdown failed:', error);
+  });
   // Skip if quitAndInstall already drained these — re-running close() on a
   // null server can throw and abort the install path.
   if (!isUpdateInstalling()) {

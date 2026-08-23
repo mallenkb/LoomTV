@@ -67,10 +67,12 @@ import type {
   StremioPluginSummary,
   TranscodeOptions,
   TranscodeSession,
+  UnifiedDesktopServerState,
   UpdateState,
 } from '../shared/desktopProtocol.ts';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackState, PlaybackViewport } from '../shared/playbackProtocol';
 import {
+  clearDesktopLibraryMode,
   clearRemoteDesktopSession,
   getRemoteDesktopSession,
   isRemoteDesktopMode,
@@ -267,6 +269,9 @@ export type DesktopBridgeApi = {
       disconnectRemoteLibrary?: (revoke?: boolean) => Promise<boolean>;
       revokePairedDevice?: (deviceId: string) => Promise<LocalNetworkPairedDevice[]>;
       setLocalNetworkDeviceName?: (name: string) => Promise<string>;
+      getUnifiedDesktopServerState?: () => Promise<UnifiedDesktopServerState>;
+      configureUnifiedDesktopOwner?: (input: { name: string; password: string }) => Promise<UnifiedDesktopServerState>;
+      openUnifiedDesktopAdmin?: () => Promise<boolean>;
       listProfiles?: () => Promise<ProfileSummary[]>;
       chooseProfileAvatar?: () => Promise<string | null>;
       getActiveProfileState?: () => Promise<ActiveProfileState>;
@@ -1033,6 +1038,29 @@ export const desktopApi = {
 
   useThisComputerAsHost(): void {
     setDesktopLibraryMode('host');
+  },
+
+  returnToDesktopOnboarding(): void {
+    clearDesktopLibraryMode();
+  },
+
+  async getUnifiedDesktopServerState(): Promise<UnifiedDesktopServerState> {
+    return window.desktopApi?.getUnifiedDesktopServerState?.() || {
+      enabled: false,
+      ready: false,
+      ownerConfigured: false,
+    };
+  },
+
+  async configureUnifiedDesktopOwner(input: { name: string; password: string }): Promise<UnifiedDesktopServerState> {
+    if (!window.desktopApi?.configureUnifiedDesktopOwner) {
+      throw new Error('Unified server setup is unavailable in this desktop session.');
+    }
+    return window.desktopApi.configureUnifiedDesktopOwner(input);
+  },
+
+  async openUnifiedDesktopAdmin(): Promise<boolean> {
+    return window.desktopApi?.openUnifiedDesktopAdmin?.() || false;
   },
 
   isRemoteLibraryMode(): boolean {

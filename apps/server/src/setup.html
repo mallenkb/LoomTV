@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>Set up LoomTV</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      /* The desktop app's dark theme tokens, shared with server control. */
+      --loom-bg: #0a0a0a;
+      --loom-surface: #171717;
+      --loom-surface-2: #0f0f0f;
+      --loom-surface-3: #262626;
+      --loom-text: #fafafa;
+      --loom-muted: #a3a3a3;
+      --loom-faint: #737373;
+      --loom-border: #262626;
+      --loom-logo-word: #fafafa;
+      --loom-accent: #FC9C03;
+      --loom-accent-hover: #ffd43b;
+      --loom-accent-foreground: #0a0a0a;
+      --loom-panel: #171717;
+      --loom-panel-border: rgba(255, 255, 255, .06);
+      --loom-active-bg: rgb(68 64 60 / .40);
+      --loom-active-border: #44403c;
+      --loom-control-border: rgba(255, 255, 255, .06);
+
+      --bg: var(--loom-bg);
+      --surface: var(--loom-surface);
+      --surface-raised: var(--loom-surface-2);
+      --surface-soft: var(--loom-surface-3);
+      --line: var(--loom-panel-border);
+      --line-strong: var(--loom-control-border);
+      --text: var(--loom-text);
+      --muted: var(--loom-muted);
+      --faint: var(--loom-faint);
+      --accent: var(--loom-accent);
+      --accent-ink: var(--loom-accent-foreground);
+      --secondary: var(--loom-surface-3);
+      --secondary-ink: var(--loom-text);
+      --positive: #67d391;
+      --warning: #f8c15c;
+      --negative: #ef7f7f;
+
+      --radius: 12px;
+      --radius-control: 10px;
+      --radius-inner: 8px;
+      --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 16px rgba(0,0,0,.06);
+
+      --fs-body: 14px;
+      --fs-small: 13px;
+      --fs-tiny: 12px;
+      --fs-micro: 11px;
+
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-size: var(--fs-body); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3 { font-weight: 600; letter-spacing: -.01em; }
+    button, input, select { font: inherit; }
+    button { border: 0; }
+    button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .page { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: clamp(20px, 4vw, 56px); width: min(1080px, 100%); height: 100dvh; margin: 0 auto; padding: clamp(24px, 5vh, 64px) clamp(20px, 4vw, 40px); overflow: hidden; }
+    .rail { display: flex; min-height: 0; flex-direction: column; gap: 28px; overflow: hidden; }
+    .brand-logo { display: block; width: 104px; height: 29px; }
+    .brand-caption { margin: 8px 0 0; color: var(--faint); font-size: var(--fs-tiny); }
+    .steps { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+    .steps li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius-control); color: var(--muted); font-size: var(--fs-small); }
+    .steps li[data-state="current"] { background: rgb(250 250 249 / .10); color: var(--text); font-weight: 600; }
+    .steps li[data-state="done"] { color: var(--muted); }
+    .step-marker { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--surface-raised); color: var(--faint); font-size: var(--fs-micro); font-weight: 600; }
+    .steps li[data-state="current"] .step-marker { border-color: transparent; background: var(--accent); color: var(--accent-ink); }
+    .steps li[data-state="done"] .step-marker { border-color: transparent; background: rgba(103,211,145,.16); color: var(--positive); }
+    .step-optional { margin-left: auto; color: var(--faint); font-size: var(--fs-micro); }
+    .rail-note { margin: auto 0 0; color: var(--faint); font-size: var(--fs-tiny); line-height: 1.6; }
+
+    .panel { min-height: 0; border: 1px solid var(--loom-panel-border); border-radius: var(--radius); background: var(--loom-panel); box-shadow: var(--shadow); }
+    .card { padding: clamp(20px, 3vw, 28px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+    .card-head h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .card-head p { max-width: 62ch; margin: 6px 0 0; color: var(--muted); font-size: var(--fs-small); }
+    .card-body { margin-top: 22px; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .account-fields { grid-template-columns: minmax(0, 1fr); }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .full { grid-column: 1 / -1; }
+    .field label { color: var(--muted); font-size: var(--fs-tiny); font-weight: 500; }
+    .field input:not([type="checkbox"]), .field select { width: 100%; height: 38px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); outline: 0; background: var(--surface-raised); color: var(--text); font-size: var(--fs-body); }
+    .field input::placeholder { color: var(--faint); }
+    .field input:focus, .field select:focus { border-color: var(--accent); }
+    .field input[aria-invalid="true"] { border-color: var(--negative); }
+    .field-hint { margin: 0; color: var(--faint); font-size: var(--fs-micro); line-height: 1.5; }
+    .field-error { margin: 0; color: var(--negative); font-size: var(--fs-micro); }
+    .field-error:empty { display: none; }
+    .password-control { position: relative; }
+    .password-control input { padding-right: 46px; }
+    .password-toggle { display: grid; position: absolute; top: 50%; right: 4px; width: 30px; height: 30px; place-items: center; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; transform: translateY(-50%); }
+    .password-toggle:hover { background: var(--surface-soft); color: var(--text); }
+    .select-control { position: relative; }
+    .select-control select { padding-right: 42px; appearance: none; -webkit-appearance: none; }
+    .select-icon { position: absolute; top: 50%; right: 12px; width: 16px; height: 16px; color: var(--muted); pointer-events: none; transform: translateY(-50%); }
+    .path-control { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+    .path-control .button { height: 38px; }
+
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface-raised); color: var(--text); font-size: var(--fs-body); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+    .button:hover { background: var(--surface-soft); }
+    .button.primary { border-color: transparent; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+    .button.primary:hover { background: var(--loom-accent-hover); }
+    .button.subtle { border-color: transparent; background: transparent; color: var(--muted); }
+    .button.subtle:hover { background: var(--surface-soft); color: var(--text); }
+    .button.danger { border-color: transparent; background: transparent; color: var(--negative); }
+    .button.danger:hover { background: rgba(239,127,127,.14); }
+    .button:disabled { opacity: .45; cursor: not-allowed; }
+    .icon { display: block; width: 16px; height: 16px; flex: 0 0 auto; color: currentColor; }
+    .spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.25); border-top-color: currentColor; border-radius: 99px; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+    .actions-end { display: flex; align-items: center; gap: 8px; }
+
+    .notice { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 16px; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--surface-raised); color: var(--muted); font-size: var(--fs-small); line-height: 1.5; }
+    .notice .icon { margin-top: 1px; }
+    .notice.error { border-color: rgba(239,127,127,.24); background: rgba(239,127,127,.09); color: var(--negative); }
+    .notice.good { border-color: rgba(103,211,145,.22); background: rgba(103,211,145,.09); color: var(--positive); }
+    .notice.warn { border-color: rgba(248,193,92,.22); background: rgba(248,193,92,.09); color: var(--warning); }
+    [hidden] { display: none !important; }
+
+    .library-sections { display: grid; gap: 12px; }
+    .library-section { padding: 12px; border-radius: var(--radius-control); background: var(--surface-raised); }
+    .library-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .library-section-title { margin: 0; font-size: var(--fs-body); font-weight: 600; }
+    .library-section-copy { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-tiny); }
+    .folder-rows { display: flex; flex-direction: column; gap: 8px; }
+    .root-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; padding: 8px 10px; border-radius: var(--radius-inner); background: var(--surface-soft); color: var(--text); }
+    .root-row + .root-row { border-radius: var(--radius-inner); }
+    .root-row:hover { background: #303030; }
+    .root-row > .button.danger { width: 36px; flex: 0 0 36px; padding: 0; }
+    .root-copy { min-width: 0; display: grid; gap: 3px; }
+    .root-path { overflow: hidden; font-size: var(--fs-small); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .root-meta { display: flex; align-items: center; gap: 7px; color: var(--faint); font-size: var(--fs-micro); }
+    .pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 99px; background: rgba(255,255,255,.06); color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+    .pill.recommended { background: var(--secondary); color: var(--secondary-ink); }
+    .pill.online { background: rgba(103,211,145,.12); color: var(--positive); }
+    .pill.offline { background: rgba(239,127,127,.13); color: var(--negative); }
+    .pill.degraded { background: rgba(248,193,92,.13); color: var(--warning); }
+    .empty-roots { padding: 8px 0; color: var(--faint); font-size: var(--fs-small); }
+    .folder-dialog-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.72); }
+    .folder-dialog { width: min(520px, 100%); padding: 22px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); box-shadow: 0 24px 80px rgba(0,0,0,.45); }
+    .folder-dialog h2 { margin: 0; font-size: 18px; }
+    .folder-dialog > p { margin: 5px 0 18px; color: var(--muted); font-size: var(--fs-small); }
+    .folder-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .picker { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-inner); background: var(--bg); }
+    .picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .picker-head p { overflow: hidden; margin: 0; color: var(--faint); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+    .picker-search { position: relative; }
+    .picker-search input { width: 100%; height: 34px; padding: 0 10px 0 34px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); outline: 0; background: var(--surface-raised); color: var(--text); font-size: var(--fs-small); }
+    .picker-search input::placeholder { color: var(--faint); }
+    .picker-search input:focus { border-color: var(--accent); }
+    .picker-search > .icon { position: absolute; top: 50%; left: 10px; color: var(--muted); pointer-events: none; transform: translateY(-50%); }
+    .picker-list { display: grid; gap: 2px; max-height: 200px; overflow-y: auto; }
+    .picker-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: 6px; background: transparent; color: var(--text); font-size: var(--fs-small); text-align: left; cursor: pointer; }
+    .picker-item:hover { background: rgb(250 250 249 / .10); }
+    .picker-item .icon { color: var(--accent); }
+    .picker-item-copy { display: grid; min-width: 0; gap: 1px; }
+    .picker-item-copy small { overflow: hidden; color: var(--faint); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+    .picker-empty { padding: 14px 10px; color: var(--faint); font-size: var(--fs-tiny); text-align: center; }
+
+    .provider-list { display: grid; gap: 10px; }
+    .provider-row { display: grid; gap: 10px; padding: 13px; border-radius: var(--radius-control); background: var(--surface-raised); }
+    .provider-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .provider-title { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-small); font-weight: 600; }
+    .provider-copy { margin: 2px 0 0; color: var(--muted); font-size: var(--fs-micro); }
+    .provider-link { color: var(--accent); font-weight: 500; text-decoration: none; white-space: nowrap; }
+    .provider-link:hover { text-decoration: underline; }
+    .provider-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+    .provider-control .password-control input { width: 100%; height: 38px; padding: 0 46px 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); outline: 0; background: var(--surface-raised); color: var(--text); }
+    .provider-control .password-control input:focus { border-color: var(--accent); }
+    .provider-result { margin: 0; color: var(--positive); font-size: var(--fs-micro); }
+    .provider-result.error { color: var(--negative); }
+    .provider-result:empty { display: none; }
+
+    .summary { display: grid; gap: 10px; margin-bottom: 18px; }
+    .summary-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 15px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface-raised); }
+    .summary-label { color: var(--muted); font-size: var(--fs-small); }
+    .summary-value { min-width: 0; overflow: hidden; font-size: var(--fs-small); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .ready-progress { display: grid; gap: 9px; margin-top: 16px; }
+    .ready-progress-track { height: 7px; overflow: hidden; border-radius: 99px; background: var(--surface-raised); }
+    .ready-progress-bar { width: 38%; height: 100%; border-radius: inherit; background: var(--accent); animation: ready-progress 1.2s ease-in-out infinite alternate; }
+    .ready-progress[data-state="complete"] .ready-progress-bar { width: 100%; animation: none; background: var(--positive); }
+    .ready-progress[data-state="error"] .ready-progress-bar { animation-play-state: paused; background: var(--negative); }
+    .ready-progress-copy { margin: 0; color: var(--muted); font-size: var(--fs-small); }
+    @keyframes ready-progress { from { transform: translateX(-15%); } to { transform: translateX(165%); } }
+
+    @media (max-width: 860px) {
+      .page { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 22px; }
+      .rail { gap: 18px; }
+      .steps { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+      .steps li { flex-direction: column; gap: 6px; padding: 10px 6px; text-align: center; font-size: var(--fs-micro); }
+      .step-optional { display: none; }
+      .rail-note { display: none; }
+    }
+    @media (max-width: 560px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .path-control { grid-template-columns: 1fr; }
+      .actions { flex-direction: column-reverse; align-items: stretch; }
+      .actions-end { flex-direction: column-reverse; align-items: stretch; }
+      .actions .button { width: 100%; }
+      .library-section-head { align-items: stretch; flex-direction: column; }
+      .library-section-head .button { width: 100%; }
+      .folder-dialog-actions { flex-direction: column-reverse; }
+      .folder-dialog-actions .button { width: 100%; }
+      .provider-control { grid-template-columns: 1fr; }
+      .provider-control > .button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="rail">
+      <div>
+        <svg class="brand-logo" viewBox="0 0 86 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="LoomTV">
+          <path d="M27.3787 16.1202C27.0955 15.5557 26.9823 15.6686 26.9823 5H25V15.6686C25 17.3056 25.9628 18.8297 27.8884 18.8297H29.4742V16.9669H28.4548C27.8884 16.9669 27.5486 16.6847 27.3787 16.1202Z" fill="var(--loom-logo-word)" />
+          <path d="M35.3639 8.8385C32.5888 8.8385 30.1534 10.9835 30.1534 13.9752C30.1534 16.5154 32.1357 18.9991 35.194 18.9991C38.3656 19.0555 40.2913 16.5718 40.2913 13.9752C40.3479 11.3222 38.1391 8.8385 35.3639 8.8385ZM35.3073 17.1928C33.3817 17.1928 32.0224 15.7816 32.0224 13.9188C32.0224 12.2818 33.3817 10.7577 35.194 10.7577C37.1197 10.7013 38.5355 12.1689 38.5355 13.9752C38.4789 15.6687 37.063 17.1928 35.3073 17.1928Z" fill="var(--loom-logo-word)" />
+          <path d="M46.4636 8.83846C44.1981 8.83846 41.4796 10.6448 41.4796 13.9188C41.4796 16.9105 43.745 18.9426 46.4636 18.9426C49.1821 18.999 51.7873 16.9669 51.7873 13.9752C51.844 10.9835 49.352 8.78202 46.9733 8.83846H46.4636ZM46.5202 17.1927C44.7645 17.1927 43.292 15.838 43.292 13.9188C43.292 12.1689 44.8211 10.7577 46.3503 10.7577H46.5768C48.1626 10.7012 49.9184 11.9995 49.9184 13.9188C49.9184 15.7815 48.4458 17.1927 46.5202 17.1927Z" fill="var(--loom-logo-word)" />
+          <path d="M60.5063 10.1878C61.3505 9.30152 62.1497 8.88639 63.1125 8.83841C65.2645 8.78196 66.9634 10.7576 66.9068 12.9591V18.7732H65.1512V12.9591C65.1512 11.7172 64.2451 10.7012 63.1125 10.7576C61.6401 10.7576 60.8473 11.8866 60.8473 13.0155V18.7732H58.9785V12.8462C58.9785 11.8301 58.129 10.7012 56.9964 10.7576C55.6939 10.7576 54.901 11.8866 54.901 13.0155V18.7732H53.0322V12.8462C53.0322 10.4754 55.1276 8.78196 57.3928 8.83841C58.9889 8.83841 59.8361 9.4782 60.5063 10.1878Z" fill="var(--loom-logo-word)" />
+          <path d="M81.845 9.06992L79.0701 16.6339L76.2951 9.12637H71.6514V6.13464H69.6693V9.06992H67.8005V10.8763H69.6127V15.7872C69.6693 17.4242 70.6321 18.8354 72.6708 18.8354H74.5962V16.9726H73.2371C72.4443 16.9726 71.8779 16.6904 71.6514 15.7308V10.8198H75.1059L78.164 18.8354H79.9761L83.5439 9.97309L83.6005 9.83861L83.6571 9.71954L83.7304 9.57795L83.8494 9.34087L84 9.06992H83.7138H81.845Z" fill="var(--loom-logo-word)" />
+          <path d="M2 4.43171C2 2.52232 4.11644 1.36004 5.74316 2.37604L5.8252 2.4278V15.3712H11.9102L13.9424 16.501L5.74316 21.6231C4.1164 22.6395 2 21.4779 2 19.5684V4.43171ZM17.8574 9.94538C19.3808 10.8972 19.3808 13.103 17.8574 14.0548L16.377 14.9805L12.583 12.8712H8.375V4.02058L17.8574 9.94538Z" fill="var(--loom-accent)" />
+        </svg>
+        <p class="brand-caption" id="railCaption">First-time setup</p>
+      </div>
+      <ol class="steps" id="stepList">
+        <li data-step="account"><span class="step-marker">1</span><span>Account and server</span></li>
+        <li data-step="libraries"><span class="step-marker">2</span><span>Libraries</span></li>
+        <li data-step="metadata"><span class="step-marker">3</span><span>Metadata</span><span class="step-optional">Optional</span></li>
+        <li data-step="ready"><span class="step-marker">4</span><span>Ready</span></li>
+      </ol>
+      <p class="rail-note" id="railNote">You can close setup and resume later.</p>
+    </aside>
+
+    <main class="panel card" id="card" aria-live="polite">
+      <div class="card-head">
+        <h1 id="cardTitle">Starting LoomTV...</h1>
+        <p id="cardCopy">Checking whether this server has been set up.</p>
+      </div>
+      <div class="card-body">
+        <p class="notice error" id="pageError" role="alert" hidden></p>
+
+        <!-- Step 1 · Account and server -->
+        <section id="stepAccount" hidden>
+          <form id="accountForm">
+            <div class="form-grid account-fields">
+              <div class="field">
+                <label for="ownerName">Your name</label>
+                <input id="ownerName" type="text" maxlength="80" autocomplete="username" required placeholder="e.g. Alex">
+              </div>
+              <div class="field">
+                <label for="serverName">Server name</label>
+                <input id="serverName" type="text" maxlength="80" placeholder="e.g. Living room">
+              </div>
+              <div class="field">
+                <label for="ownerPassword">Password</label>
+                <div class="password-control">
+                  <input id="ownerPassword" type="password" minlength="8" maxlength="256" autocomplete="new-password" required placeholder="At least 8 characters">
+                  <button class="password-toggle" id="togglePassword" type="button" aria-label="Show password" aria-pressed="false">
+                    <svg class="icon" aria-hidden="true"><use id="passwordIcon" href="/admin/lucide-icons.svg#eye"></use></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="field">
+                <label for="ownerPasswordConfirm">Confirm password</label>
+                <div class="password-control">
+                  <input id="ownerPasswordConfirm" type="password" minlength="8" maxlength="256" autocomplete="new-password" required placeholder="Repeat the password">
+                  <button class="password-toggle" id="togglePasswordConfirm" type="button" aria-label="Show confirm password" aria-pressed="false">
+                    <svg class="icon" aria-hidden="true"><use id="passwordConfirmIcon" href="/admin/lucide-icons.svg#eye"></use></svg>
+                  </button>
+                </div>
+                <p class="field-error" id="passwordError"></p>
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <!-- Resume sign-in -->
+        <section id="stepResume" hidden>
+          <form id="resumeForm">
+            <div class="form-grid">
+              <div class="field">
+                <label for="resumeName">Account name</label>
+                <input id="resumeName" type="text" maxlength="80" autocomplete="username" placeholder="Owner name">
+              </div>
+              <div class="field">
+                <label for="resumePassword">Password</label>
+                <input id="resumePassword" type="password" maxlength="256" autocomplete="current-password" required placeholder="Your password">
+              </div>
+            </div>
+          </form>
+        </section>
+
+        <!-- Step 2 · Libraries -->
+        <section id="stepLibraries" hidden>
+          <p class="notice"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#hard-drive"></use></svg><span>Add local folders or mounted NAS shares. Unavailable folders stay saved.</span></p>
+          <div class="library-sections" id="librarySections"></div>
+          <p class="field-error" id="rootError"></p>
+        </section>
+
+        <!-- Step 3 · Metadata -->
+        <section id="stepMetadata" hidden>
+          <p class="notice" id="metadataNotice"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#clapperboard"></use></svg><span>Add any keys you use now, or set them up later in Settings.</span></p>
+          <div class="provider-list" id="metadataProviders"></div>
+          <p class="field-error" id="metadataError"></p>
+        </section>
+
+        <!-- Step 4 · Ready -->
+        <section id="stepReady" hidden>
+          <div class="summary" id="readySummary"></div>
+          <p class="notice"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#scan-search"></use></svg><span>LoomTV is matching titles, episode details, posters, and backdrops. Home opens when your library is ready.</span></p>
+          <div class="ready-progress" id="readyProgress" data-state="working" role="status" aria-live="polite">
+            <div class="ready-progress-track" aria-hidden="true"><div class="ready-progress-bar"></div></div>
+            <p class="ready-progress-copy" id="readyProgressCopy">Preparing your library...</p>
+          </div>
+        </section>
+      </div>
+
+      <div class="actions" id="actions" hidden>
+        <button class="button subtle" id="backButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-left"></use></svg>Back</button>
+        <div class="actions-end">
+          <button class="button subtle" id="skipButton" type="button" hidden>Set up later</button>
+          <button class="button primary" id="continueButton" type="button">Continue<svg class="icon" id="continueIcon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-right"></use></svg></button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="folder-dialog-backdrop" id="folderDialogBackdrop" hidden>
+    <div class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderDialogTitle">
+      <h2 id="folderDialogTitle">Add folder</h2>
+      <p id="folderDialogCopy">Choose a folder on this server.</p>
+      <div class="field">
+        <label for="rootPath">Folder path on this server</label>
+        <div class="path-control">
+          <input id="rootPath" type="text" maxlength="4096" spellcheck="false" placeholder="/Volumes/Media/Movies">
+          <button class="button" id="browseButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-open"></use></svg>Browse</button>
+        </div>
+        <p class="field-hint" id="folderBrowseHint">Type the full server path, or use Browse to choose one.</p>
+        <p class="field-hint">Unavailable NAS folders stay saved and retry later.</p>
+        <p class="field-error" id="folderDialogError"></p>
+      </div>
+      <div class="picker" id="picker" hidden>
+        <div class="picker-head">
+          <div><strong style="font-size:var(--fs-small)">Folders on the server</strong><p id="pickerPath">/media</p></div>
+          <div class="actions-end">
+            <button class="button subtle" id="pickerUp" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-up"></use></svg>Up</button>
+            <button class="button" id="pickerUse" type="button">Use this folder</button>
+          </div>
+        </div>
+        <div class="picker-search">
+          <svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#search"></use></svg>
+          <input id="pickerSearch" type="search" maxlength="120" autocomplete="off" placeholder="Search folders on this server" aria-label="Search folders on this server">
+        </div>
+        <div class="picker-list" id="pickerList"></div>
+      </div>
+      <div class="folder-dialog-actions">
+        <button class="button subtle" id="folderDialogCancel" type="button">Cancel</button>
+        <button class="button primary" id="addRootButton" type="button"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-plus"></use></svg>Add folder</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const API = '/api/v1';
+      const $ = (id) => document.getElementById(id);
+      const params = new URLSearchParams(window.location.search);
+      const returnTo = params.get('return') === 'admin' ? 'admin' : 'app';
+      // The key server control already reads, so finishing setup lands there unlocked.
+      const ADMIN_TOKEN_KEY = 'loomtv.adminToken';
+
+      const STEP_COPY = {
+        account: ['Create your account', 'Set the owner account and server name.'],
+        libraries: ['Add your libraries', 'Choose the folders that hold your videos.'],
+        metadata: ['Add API keys', 'Optional. Add any metadata services you use.'],
+        ready: ['Preparing your library', 'Keep LoomTV open while setup finishes your metadata and artwork.'],
+      };
+      const LIBRARY_SECTIONS = [
+        { kind: 'movies', title: 'Movies', description: 'Folders added here always scan into Movies.' },
+        { kind: 'tvShows', title: 'TV Shows', description: 'Folders added here always scan into TV Shows.' },
+        { kind: 'anime', title: 'Anime / Animations', description: 'Folders added here always scan into Anime.' },
+        { kind: 'others', title: 'Others', description: 'Folders added here are scanned with automatic type detection.' },
+      ];
+      const METADATA_PROVIDERS = [
+        { id: 'tmdb', label: 'TMDB', badge: 'Recommended', description: 'Posters, backdrops, cast, and ratings.', placeholder: 'TMDB key or read token', url: 'https://www.themoviedb.org/settings/api' },
+        { id: 'fanart', label: 'Fanart.tv', badge: 'Clearlogos', description: 'Clearlogos shown during playback.', placeholder: 'Fanart.tv API key', url: 'https://fanart.tv/get-an-api-key/#personal' },
+        { id: 'omdb', label: 'OMDb', badge: 'Fallback', description: 'Fallback ratings and movie details.', placeholder: 'OMDb API key', url: 'https://www.omdbapi.com/apikey.aspx' },
+        { id: 'opensubtitles', label: 'OpenSubtitles', badge: 'Subtitles', description: 'Downloads missing subtitles.', placeholder: 'OpenSubtitles API key', url: 'https://www.opensubtitles.com/en/users/consumers' },
+      ];
+
+      // The session token lives in memory (or in an HttpOnly cookie on HTTPS).
+      const state = {
+        status: null, step: 'account', sessionMode: 'cookie', bearer: '', csrf: '',
+        roots: [], busy: false, finishing: false, resuming: false, pendingStep: '', pickerPath: '', pickerParent: null, pickerSearchTimer: null,
+        metadata: null, pendingRootKind: 'movies',
+      };
+
+      const setBusy = (busy, label) => {
+        state.busy = busy;
+        const button = $('continueButton');
+        button.disabled = busy;
+        $('backButton').disabled = busy;
+        $('skipButton').disabled = busy;
+        button.innerHTML = busy
+          ? `<span class="spinner" aria-hidden="true"></span>${escapeHtml(label || 'Working...')}`
+          : `${escapeHtml(button.dataset.label || 'Continue')}<svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#arrow-right"></use></svg>`;
+      };
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+      const showError = (message) => { const node = $('pageError'); node.textContent = message || ''; node.hidden = !message; };
+      const fieldError = (id, message) => { $(id).textContent = message || ''; };
+
+      async function api(path, options = {}) {
+        const headers = { Accept: 'application/json' };
+        if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+        if (state.bearer) headers.Authorization = `Bearer ${state.bearer}`;
+        if (state.csrf) headers['X-Loom-CSRF'] = state.csrf;
+        const response = await fetch(`${API}${path}`, {
+          method: options.method || 'GET',
+          credentials: 'same-origin',
+          headers,
+          ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        });
+        if (response.status === 204) return null;
+        let payload = null;
+        try { payload = await response.json(); } catch { /* empty body */ }
+        if (!response.ok || payload?.ok === false) {
+          const error = payload?.error || {};
+          throw Object.assign(new Error(error.message || `The server rejected that request (${response.status}).`), {
+            status: response.status,
+            code: error.code || 'request_failed',
+            details: error,
+          });
+        }
+        return payload?.data ?? payload;
+      }
+
+      function renderSteps() {
+        const order = ['account', 'libraries', 'metadata', 'ready'];
+        const index = order.indexOf(state.step);
+        for (const node of $('stepList').children) {
+          const position = order.indexOf(node.dataset.step);
+          node.dataset.state = position === index ? 'current' : position < index ? 'done' : 'todo';
+          const marker = node.querySelector('.step-marker');
+          marker.innerHTML = position < index
+            ? '<svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="/admin/lucide-icons.svg#check"></use></svg>'
+            : String(position + 1);
+        }
+      }
+
+      function showStep(step) {
+        state.step = step;
+        showError('');
+        for (const [id, name] of [['stepAccount', 'account'], ['stepLibraries', 'libraries'], ['stepMetadata', 'metadata'], ['stepReady', 'ready']]) {
+          $(id).hidden = state.resuming || name !== step;
+        }
+        $('stepResume').hidden = !state.resuming;
+        $('actions').hidden = false;
+        const [title, copy] = STEP_COPY[step] || STEP_COPY.account;
+        $('cardTitle').textContent = state.resuming ? 'Sign in to continue setup' : title;
+        $('cardCopy').textContent = state.resuming
+          ? 'Setup already created your owner account on this server. Sign in to pick up where you left off.'
+          : copy;
+        // There is no going back past the account: it already exists.
+        $('backButton').hidden = state.resuming || step === 'account' || step === 'libraries';
+        $('skipButton').hidden = state.resuming || step !== 'metadata';
+        const label = state.resuming ? 'Sign in'
+          : step === 'account' ? 'Create account'
+            : step === 'ready' ? 'Retry' : 'Continue';
+        $('continueButton').dataset.label = label;
+        setBusy(false);
+        renderSteps();
+      }
+
+      function renderRoots() {
+        $('librarySections').innerHTML = LIBRARY_SECTIONS.map((section) => {
+          const roots = state.roots.filter((root) => root.kind === section.kind);
+          return `<div class="library-section">
+            <div class="library-section-head">
+              <div><p class="library-section-title">${escapeHtml(section.title)}</p><p class="library-section-copy">${escapeHtml(section.description)}</p></div>
+              <button class="button" type="button" data-add-kind="${section.kind}"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-plus"></use></svg>Add folder</button>
+            </div>
+            <div class="folder-rows">${roots.length ? roots.map((root) => `
+              <div class="root-row">
+                <div class="root-copy">
+                  <span class="root-path" title="${escapeHtml(root.path)}">${escapeHtml(root.path)}</span>
+                  <span class="root-meta"><span class="pill ${escapeHtml(root.state || 'offline')}">${escapeHtml(root.state || 'offline')}</span>${root.message ? `<span>${escapeHtml(root.message)}</span>` : ''}</span>
+                </div>
+                <button class="button danger" type="button" data-remove="${escapeHtml(root.id)}" aria-label="Remove ${escapeHtml(root.path)}" title="Remove folder"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#x"></use></svg></button>
+              </div>`).join('') : `<p class="empty-roots">No ${escapeHtml(section.title.toLowerCase())} folders added</p>`}</div>
+          </div>`;
+        }).join('');
+      }
+
+      function renderReady() {
+        const offline = state.roots.filter((root) => root.state !== 'online').length;
+        const configuredProviders = state.metadata?.configuredProviders || [];
+        const rows = [
+          ['Server', state.status?.serverName || 'LoomTV'],
+          ['Libraries', state.roots.length ? `${state.roots.length} folder${state.roots.length === 1 ? '' : 's'}${offline ? `, ${offline} unavailable` : ''}` : 'None yet'],
+          ['Metadata', configuredProviders.length ? configuredProviders.map((provider) => METADATA_PROVIDERS.find((entry) => entry.id === provider)?.label || provider).join(', ') : 'Set up later'],
+        ];
+        $('readySummary').innerHTML = rows.map(([label, value]) => `
+          <div class="summary-row"><span class="summary-label">${escapeHtml(label)}</span><span class="summary-value" title="${escapeHtml(value)}">${escapeHtml(value)}</span></div>`).join('');
+      }
+
+      async function loadRoots() {
+        const result = await api('/setup/libraries');
+        state.roots = result.roots || [];
+        renderRoots();
+      }
+
+      async function loadMetadata() {
+        state.metadata = await api('/setup/metadata').catch(() => null);
+        renderMetadataProviders();
+      }
+
+      function renderMetadataProviders() {
+        const configured = new Set(state.metadata?.configuredProviders || []);
+        $('metadataProviders').innerHTML = METADATA_PROVIDERS.map((provider) => `
+          <div class="provider-row" data-provider-row="${provider.id}">
+            <div class="provider-head">
+              <div><p class="provider-title">${escapeHtml(provider.label)} <span class="pill${provider.id === 'tmdb' ? ' recommended' : ''}">${escapeHtml(provider.badge)}</span></p><p class="provider-copy">${escapeHtml(provider.description)} <a class="provider-link" href="${escapeHtml(provider.url)}" target="_blank" rel="noreferrer noopener">Get API key &#8599;</a></p></div>
+              ${configured.has(provider.id) ? '<span class="pill online">Saved</span>' : ''}
+            </div>
+            <div class="provider-control">
+              <div class="password-control">
+                <input id="metadataKey-${provider.id}" data-metadata-key="${provider.id}" type="password" maxlength="512" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(provider.placeholder)}">
+                <button class="password-toggle" data-metadata-visibility="${provider.id}" type="button" aria-label="Show ${escapeHtml(provider.label)} key" aria-pressed="false">
+                  <svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#eye"></use></svg>
+                </button>
+              </div>
+              <button class="button" data-metadata-test="${provider.id}" type="button">Test</button>
+            </div>
+            <p class="provider-result" id="metadataResult-${provider.id}" role="status" aria-live="polite"></p>
+          </div>`).join('');
+      }
+
+      function adoptSession(result) {
+        if (state.sessionMode === 'cookie') {
+          state.csrf = result.csrfToken || readCsrfCookie();
+          return;
+        }
+        state.bearer = result.adminToken || '';
+        if (state.bearer) sessionStorage.setItem(ADMIN_TOKEN_KEY, state.bearer);
+      }
+
+      /** Any authenticated step can hit an expired session; ask to sign back in. */
+      function needsSignIn(error) {
+        return error?.status === 401 || error?.code === 'auth_required' || error?.code === 'session_expired';
+      }
+
+      function requireSignIn(nextStep) {
+        if (state.bearer) { state.bearer = ''; sessionStorage.removeItem(ADMIN_TOKEN_KEY); }
+        state.resuming = true;
+        state.pendingStep = nextStep || state.step;
+        showStep(state.pendingStep);
+        window.setTimeout(() => $('resumePassword').focus(), 0);
+      }
+
+      async function enterStep(step) {
+        try {
+          if (step === 'libraries') await loadRoots();
+          if (step === 'metadata') await loadMetadata();
+          if (step === 'ready') { await loadRoots(); await loadMetadata(); renderReady(); }
+        } catch (error) {
+          if (needsSignIn(error)) { requireSignIn(step); return; }
+          showError(error.message);
+        }
+        state.resuming = false;
+        showStep(step);
+        if (step === 'ready' && !state.finishing) {
+          window.setTimeout(() => { void finish(); }, 0);
+        }
+      }
+
+      async function persistStep(step) {
+        await api('/setup/step', { method: 'POST', body: { step } }).catch((error) => {
+          if (needsSignIn(error)) throw error;
+        });
+      }
+
+      async function createOwner() {
+        const name = $('ownerName').value.trim();
+        const password = $('ownerPassword').value;
+        const confirmation = $('ownerPasswordConfirm').value;
+        fieldError('passwordError', '');
+        if (!name) { showError('Enter the name you want to sign in with.'); $('ownerName').focus(); return; }
+        if (password.length < 8) { fieldError('passwordError', 'Use at least 8 characters.'); $('ownerPassword').focus(); return; }
+        if (password !== confirmation) { fieldError('passwordError', 'The two passwords do not match.'); $('ownerPasswordConfirm').focus(); return; }
+        setBusy(true, 'Creating account...');
+        try {
+          const result = await api('/setup/owner', {
+            method: 'POST',
+            body: {
+              name,
+              password,
+              serverName: $('serverName').value.trim() || undefined,
+              sessionMode: state.sessionMode,
+            },
+          });
+          adoptSession(result);
+          state.status = { ...state.status, ...result.setup };
+          $('ownerPassword').value = '';
+          $('ownerPasswordConfirm').value = '';
+          await enterStep('libraries');
+        } catch (error) {
+          showError(error.message);
+          setBusy(false);
+        }
+      }
+
+      async function signInToResume() {
+        const password = $('resumePassword').value;
+        if (!password) { showError('Enter your password.'); return; }
+        setBusy(true, 'Signing in...');
+        try {
+          const result = await api('/auth/session', {
+            method: 'POST',
+            body: {
+              ...(($('resumeName').value.trim()) ? { username: $('resumeName').value.trim() } : {}),
+              password,
+              sessionMode: state.sessionMode,
+            },
+          });
+          adoptSession(result);
+          $('resumePassword').value = '';
+          state.resuming = false;
+          await enterStep(state.pendingStep || 'libraries');
+        } catch (error) {
+          showError(error.message);
+          setBusy(false);
+        }
+      }
+
+      async function addRoot() {
+        const target = $('rootPath').value.trim();
+        fieldError('rootError', '');
+        fieldError('folderDialogError', '');
+        const errorTarget = $('folderDialogBackdrop').hidden ? 'rootError' : 'folderDialogError';
+        if (!target) { fieldError(errorTarget, 'Enter a folder path.'); $('rootPath').focus(); return; }
+        const submit = async (allowUnavailable) => api('/setup/libraries', {
+          method: 'POST',
+          body: { path: target, kind: state.pendingRootKind, ...(allowUnavailable ? { allowUnavailable: true } : {}) },
+        });
+        $('addRootButton').disabled = true;
+        try {
+          await submit(false);
+        } catch (error) {
+          if (error.code === 'folder_unavailable' && error.details?.retryable) {
+            const keep = window.confirm(`${error.message}\n\nSave this folder anyway and retry when the share is back?`);
+            if (!keep) { fieldError(errorTarget, error.message); $('addRootButton').disabled = false; return; }
+            try {
+              await submit(true);
+            } catch (retryError) {
+              fieldError(errorTarget, retryError.message);
+              $('addRootButton').disabled = false;
+              return;
+            }
+          } else if (needsSignIn(error)) {
+            $('addRootButton').disabled = false;
+            requireSignIn('libraries');
+            return;
+          } else {
+            fieldError(errorTarget, error.message);
+            $('addRootButton').disabled = false;
+            return;
+          }
+        }
+        $('rootPath').value = '';
+        fieldError('folderDialogError', '');
+        $('picker').hidden = true;
+        $('folderDialogBackdrop').hidden = true;
+        $('addRootButton').disabled = false;
+        await loadRoots().catch((error) => showError(error.message));
+      }
+
+      function showFolderDialog(kind) {
+        const section = LIBRARY_SECTIONS.find((entry) => entry.kind === kind) || LIBRARY_SECTIONS[0];
+        state.pendingRootKind = section.kind;
+        $('folderDialogTitle').textContent = `Add ${section.title} folder`;
+        $('folderDialogCopy').textContent = section.description;
+        const nativePicker = state.status?.nativeFolderPicker === true;
+        const serverBrowser = state.status?.folderBrowse === true;
+        $('browseButton').hidden = !(nativePicker || serverBrowser);
+        $('browseButton').innerHTML = `<svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-open"></use></svg>${nativePicker ? 'Browse device' : 'Browse server'}`;
+        $('folderBrowseHint').textContent = nativePicker
+          ? 'Type a server path, or Browse device to open Finder or Explorer.'
+          : serverBrowser
+            ? 'Type the full server path, or Browse server to choose a mounted folder.'
+            : 'Type the full path to a folder that the LoomTV server can read.';
+        $('rootPath').value = '';
+        fieldError('folderDialogError', '');
+        $('picker').hidden = true;
+        $('pickerSearch').value = '';
+        $('folderDialogBackdrop').hidden = false;
+        window.setTimeout(() => $('rootPath').focus(), 0);
+      }
+
+      async function chooseFolderForSection(kind) {
+        state.pendingRootKind = kind;
+        fieldError('rootError', '');
+        showFolderDialog(kind);
+      }
+
+      async function removeRoot(rootId) {
+        try {
+          await api(`/setup/libraries/${encodeURIComponent(rootId)}`, { method: 'DELETE' });
+          await loadRoots();
+        } catch (error) {
+          if (needsSignIn(error)) { requireSignIn('libraries'); return; }
+          showError(error.message);
+        }
+      }
+
+      function renderPicker(result, { search = false } = {}) {
+        if (!search) {
+          state.pickerPath = result.path || '';
+          state.pickerParent = result.parentPath || null;
+          $('pickerPath').textContent = result.path || '';
+          $('pickerUp').disabled = !state.pickerParent;
+          $('pickerUse').disabled = !state.pickerPath;
+        }
+        const directories = Array.isArray(result.directories) ? result.directories : [];
+        $('pickerList').innerHTML = directories.length
+          ? directories.map((entry) => `<button class="picker-item" type="button" data-browse="${escapeHtml(entry.path)}"><svg class="icon" aria-hidden="true"><use href="/admin/lucide-icons.svg#folder-open"></use></svg><span class="picker-item-copy"><strong>${escapeHtml(entry.name)}</strong>${search ? `<small>${escapeHtml(entry.path)}</small>` : ''}</span></button>`).join('')
+          : `<div class="picker-empty">${search ? `No folders match “${escapeHtml(result.query || '')}”.` : 'No subfolders here. Use this folder, or type a path above.'}</div>`;
+      }
+
+      async function searchPickerFolders(query) {
+        const value = String(query || '').trim();
+        if (!value) return;
+        $('pickerList').innerHTML = '<div class="picker-empty">Searching folders...</div>';
+        try {
+          renderPicker(await api('/setup/libraries/search', { method: 'POST', body: { query: value } }), { search: true });
+        } catch (error) {
+          if (needsSignIn(error)) { requireSignIn('libraries'); return; }
+          $('pickerList').innerHTML = `<div class="picker-empty">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      async function openPicker(target, { resetSearch = true } = {}) {
+        if (state.status?.nativeFolderPicker) {
+          try {
+            const result = await api('/setup/libraries/pick', { method: 'POST', body: {} });
+            if (!result.cancelled && result.path) $('rootPath').value = result.path;
+            return;
+          } catch (error) {
+            if (needsSignIn(error)) { requireSignIn('libraries'); return; }
+            // Fall through to the server-side browser below.
+          }
+        }
+        if (resetSearch) {
+          window.clearTimeout(state.pickerSearchTimer);
+          state.pickerSearchTimer = null;
+          $('pickerSearch').value = '';
+        }
+        $('picker').hidden = false;
+        try {
+          renderPicker(await api('/setup/libraries/browse', { method: 'POST', body: target ? { path: target } : {} }));
+        } catch (error) {
+          if (needsSignIn(error)) { requireSignIn('libraries'); return; }
+          $('pickerList').innerHTML = `<div class="picker-empty">${escapeHtml(error.message)} Type a path above instead.</div>`;
+          $('pickerUse').disabled = true;
+          $('pickerUp').disabled = true;
+        }
+      }
+
+      async function saveMetadata({ skip }) {
+        const keys = Object.fromEntries(METADATA_PROVIDERS.flatMap((provider) => {
+          const value = $(`metadataKey-${provider.id}`)?.value.trim();
+          return value ? [[provider.id, value]] : [];
+        }));
+        fieldError('metadataError', '');
+        setBusy(true, 'Saving...');
+        try {
+          await api('/setup/metadata', { method: 'PUT', body: skip ? { skip: true } : { keys } });
+          for (const provider of METADATA_PROVIDERS) $(`metadataKey-${provider.id}`).value = '';
+          await enterStep('ready');
+        } catch (error) {
+          if (needsSignIn(error)) { requireSignIn('metadata'); return; }
+          const provider = error.details?.provider;
+          if (provider && $(`metadataResult-${provider}`)) {
+            const result = $(`metadataResult-${provider}`);
+            result.classList.add('error');
+            result.textContent = `Key rejected: ${error.message || 'The provider did not accept this key.'}`;
+          } else {
+            fieldError('metadataError', error.message);
+          }
+          setBusy(false);
+        }
+      }
+
+      async function finish() {
+        if (state.finishing) return;
+        state.finishing = true;
+        $('readyProgress').dataset.state = 'working';
+        $('readyProgressCopy').textContent = 'Matching metadata and downloading artwork. This can take a while.';
+        setBusy(true, 'Preparing library...');
+        try {
+          const result = await api('/setup/complete', { method: 'POST', body: { returnTo } });
+          $('readyProgress').dataset.state = 'complete';
+          $('readyProgressCopy').textContent = 'Library ready. Opening LoomTV...';
+          window.location.replace(result.redirect || (returnTo === 'admin' ? '/admin/' : '/app/'));
+        } catch (error) {
+          state.finishing = false;
+          $('readyProgress').dataset.state = 'error';
+          $('readyProgressCopy').textContent = 'Setup could not finish. Fix the issue below, then retry.';
+          if (needsSignIn(error)) { requireSignIn('ready'); return; }
+          showError(error.message);
+          setBusy(false);
+        }
+      }
+
+      async function onContinue() {
+        if (state.busy) return;
+        if (state.resuming) { await signInToResume(); return; }
+        if (state.step === 'account') { await createOwner(); return; }
+        if (state.step === 'libraries') {
+          if (!state.roots.length && !window.confirm('No libraries added yet. Continue without one and add folders later?')) return;
+          setBusy(true, 'Saving...');
+          try { await persistStep('metadata'); } catch (error) { requireSignIn('metadata'); return; }
+          await enterStep('metadata');
+          return;
+        }
+        if (state.step === 'metadata') { await saveMetadata({ skip: false }); return; }
+        await finish();
+      }
+
+      async function onBack() {
+        if (state.busy) return;
+        const previous = state.step === 'ready' ? 'metadata' : state.step === 'metadata' ? 'libraries' : 'libraries';
+        setBusy(true, 'Going back...');
+        try { await persistStep(previous); } catch { requireSignIn(previous); return; }
+        await enterStep(previous);
+      }
+
+      /** A cookie session survives a refresh; recover its CSRF proof the same way. */
+      function readCsrfCookie() {
+        const entry = document.cookie.split(';').map((part) => part.trim()).find((part) => part.startsWith('__Host-loomtv_csrf='));
+        return entry ? decodeURIComponent(entry.slice('__Host-loomtv_csrf='.length)) : '';
+      }
+
+      async function boot() {
+        // Finishing hands the session to whichever surface the user started
+        // from: server control reads a bearer token, the web app rides the
+        // same-origin cookie. Either way nobody signs in twice.
+        state.sessionMode = returnTo === 'admin' || window.location.protocol !== 'https:' ? 'bearer' : 'cookie';
+        if (state.sessionMode === 'cookie') state.csrf = readCsrfCookie();
+        else state.bearer = sessionStorage.getItem(ADMIN_TOKEN_KEY) || '';
+        try {
+          const status = await api('/setup/state');
+          state.status = status;
+          if (!status.required) { window.location.replace(returnTo === 'admin' ? '/admin/' : '/app/'); return; }
+          $('serverName').value = status.serverName || '';
+          $('browseButton').hidden = !(status.folderBrowse || status.nativeFolderPicker);
+          $('railCaption').textContent = status.ownerConfigured ? 'Resuming setup' : 'First-time setup';
+          if (!status.ownerConfigured) { showStep('account'); window.setTimeout(() => $('ownerName').focus(), 0); return; }
+          await enterStep(status.step === 'account' ? 'libraries' : status.step);
+        } catch (error) {
+          $('cardTitle').textContent = 'LoomTV is not answering';
+          $('cardCopy').textContent = 'Setup could not reach this server. Check that it is running, then reload this page.';
+          showError(error.message);
+          $('actions').hidden = true;
+        }
+      }
+
+      $('continueButton').addEventListener('click', () => { void onContinue(); });
+      $('backButton').addEventListener('click', () => { void onBack(); });
+      $('skipButton').addEventListener('click', () => { void saveMetadata({ skip: true }); });
+      $('addRootButton').addEventListener('click', () => { void addRoot(); });
+      $('folderDialogCancel').addEventListener('click', () => { $('folderDialogBackdrop').hidden = true; $('picker').hidden = true; });
+      $('browseButton').addEventListener('click', () => { void openPicker($('rootPath').value.trim()); });
+      $('pickerUp').addEventListener('click', () => { if (state.pickerParent) void openPicker(state.pickerParent); });
+      $('pickerUse').addEventListener('click', () => { if (state.pickerPath) { $('rootPath').value = state.pickerPath; $('picker').hidden = true; $('rootPath').focus(); } });
+      $('pickerSearch').addEventListener('input', () => {
+        window.clearTimeout(state.pickerSearchTimer);
+        const query = $('pickerSearch').value.trim();
+        if (!query) {
+          void openPicker(state.pickerPath, { resetSearch: false });
+          return;
+        }
+        state.pickerSearchTimer = window.setTimeout(() => { void searchPickerFolders(query); }, 220);
+      });
+      $('metadataProviders').addEventListener('click', async (event) => {
+        const visibility = event.target.closest('[data-metadata-visibility]');
+        if (visibility) {
+          const provider = visibility.dataset.metadataVisibility;
+          const input = $(`metadataKey-${provider}`);
+          const visible = input.type === 'password';
+          input.type = visible ? 'text' : 'password';
+          visibility.setAttribute('aria-pressed', String(visible));
+          visibility.setAttribute('aria-label', `${visible ? 'Hide' : 'Show'} ${METADATA_PROVIDERS.find((entry) => entry.id === provider)?.label || provider} key`);
+          visibility.querySelector('use').setAttribute('href', `/admin/lucide-icons.svg#${visible ? 'eye-off' : 'eye'}`);
+          return;
+        }
+        const testButton = event.target.closest('[data-metadata-test]');
+        if (!testButton) return;
+        const provider = testButton.dataset.metadataTest;
+        const apiKey = $(`metadataKey-${provider}`).value.trim();
+        const result = $(`metadataResult-${provider}`);
+        fieldError('metadataError', '');
+        result.textContent = '';
+        result.classList.remove('error');
+        if (!apiKey) {
+          result.classList.add('error');
+          result.textContent = 'Paste a key to test.';
+          return;
+        }
+        testButton.disabled = true;
+        testButton.textContent = 'Testing...';
+        try {
+          await api('/setup/metadata/test', { method: 'POST', body: { provider, apiKey } });
+          result.textContent = 'Key accepted.';
+        } catch (error) {
+          if (needsSignIn(error)) { requireSignIn('metadata'); return; }
+          result.classList.add('error');
+          result.textContent = `Key rejected: ${error.message || 'The provider did not accept this key.'}`;
+        } finally {
+          testButton.disabled = false;
+          testButton.textContent = 'Test';
+        }
+      });
+      function setAccountPasswordsVisible(visible) {
+        for (const id of ['ownerPassword', 'ownerPasswordConfirm']) $(id).type = visible ? 'text' : 'password';
+        $('togglePassword').setAttribute('aria-pressed', String(visible));
+        $('togglePassword').setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
+        $('togglePasswordConfirm').setAttribute('aria-pressed', String(visible));
+        $('togglePasswordConfirm').setAttribute('aria-label', visible ? 'Hide confirm password' : 'Show confirm password');
+        for (const id of ['passwordIcon', 'passwordConfirmIcon']) {
+          $(id).setAttribute('href', `/admin/lucide-icons.svg#${visible ? 'eye-off' : 'eye'}`);
+        }
+      }
+      $('togglePassword').addEventListener('click', () => {
+        setAccountPasswordsVisible($('ownerPassword').type === 'password');
+      });
+      $('togglePasswordConfirm').addEventListener('click', () => {
+        setAccountPasswordsVisible($('ownerPasswordConfirm').type === 'password');
+      });
+      $('librarySections').addEventListener('click', (event) => {
+        const add = event.target.closest('[data-add-kind]');
+        if (add) { void chooseFolderForSection(add.dataset.addKind); return; }
+        const remove = event.target.closest('[data-remove]');
+        if (remove && window.confirm('Remove this folder from setup?')) void removeRoot(remove.dataset.remove);
+      });
+      $('pickerList').addEventListener('click', (event) => {
+        const entry = event.target.closest('[data-browse]');
+        if (entry) void openPicker(entry.dataset.browse);
+      });
+      for (const form of [$('accountForm'), $('resumeForm')]) {
+        form.addEventListener('submit', (event) => { event.preventDefault(); void onContinue(); });
+      }
+      $('rootPath').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void addRoot(); } });
+
+      void boot();
+    })();
+  </script>
+</body>
+</html>

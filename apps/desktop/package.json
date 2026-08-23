@@ -149,6 +149,10 @@
         "to": "web-app.html"
       },
       {
+        "from": "../server/src/setup.html",
+        "to": "setup.html"
+      },
+      {
         "from": "src/headless/admin.html",
         "to": "admin.html"
       },

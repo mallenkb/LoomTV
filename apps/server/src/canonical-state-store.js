@@ -1484,6 +1484,25 @@ export function createCanonicalStateStore({ dataDir }) {
         .run(json(probe), mediaId, sourceId);
       return result.changes === 1;
     },
+    /**
+     * Small key/value store for runtime records that are not part of the
+     * account, catalog, or profile state machines — setup progress and the
+     * server identity chosen during setup. Reserved keys used by the schema
+     * itself (`schema_version`) are not writable through this door.
+     */
+    readMeta(key) {
+      const row = requireDatabase().prepare('SELECT value FROM meta WHERE key=?').get(String(key));
+      return row ? String(row.value) : null;
+    },
+    writeMeta(key, value) {
+      const name = String(key);
+      if (name === 'schema_version') throw codedError('meta_key_reserved', 'The schema version is managed by the store.');
+      if (value === null || value === undefined) {
+        requireDatabase().prepare('DELETE FROM meta WHERE key=?').run(name);
+        return;
+      }
+      requireDatabase().prepare('INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)').run(name, String(value));
+    },
     replaceAdminState: (state) => inTransaction(requireDatabase(), () => replaceAdminState(requireDatabase(), state)),
     readClientState: () => readClientState(requireDatabase()),
     replaceClientState: (state) => inTransaction(requireDatabase(), () => replaceClientState(requireDatabase(), state)),

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
+import { createSetupRedirectGuard } from './setup-page.js';
 
 /**
  * Server-native admin UI asset loader.
@@ -50,11 +51,14 @@ export async function readAdminIcons(options = {}) {
 export function createAdminPage(options = {}) {
   const htmlProvider = options.getHtml || (() => readAdminPage(options));
   const iconsProvider = options.getIcons || (() => readAdminIcons(options));
+  const setupGuard = createSetupRedirectGuard(options.getSetupStatus, 'admin');
   return async function handleAdminPage(req, res) {
     const pathname = new URL(req.url || '/', 'http://loomtv.local').pathname;
     const isAdminPage = pathname === '/admin' || pathname === HEADLESS_ADMIN_PATH;
     const isIcons = pathname === HEADLESS_ADMIN_ICONS_PATH;
     if (!isAdminPage && !isIcons) return false;
+    // Server control has nothing to control until setup has created an owner.
+    if (isAdminPage && (req.method === 'GET' || req.method === 'HEAD') && await setupGuard(req, res)) return true;
     if (req.method === 'GET' || req.method === 'HEAD') {
       const body = isIcons ? await iconsProvider() : await htmlProvider();
       res.writeHead(200, {
@@ -216,6 +220,7 @@ export function createAdminApiHandler(options = {}) {
   const maxBodyBytes = options.maxBodyBytes || 128 * 1024;
   const log = options.log || ((message, error) => console.error(`[headless-admin] ${message}`, error || ''));
   const requireSecureTransport = options.requireSecureTransport === true;
+  const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   const proxyPolicy = options.proxyPolicy || createTrustedProxyPolicy();
 
   function isSecureRequest(req) {
@@ -295,7 +300,9 @@ export function createAdminApiHandler(options = {}) {
         writeJson(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
-          bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
+          ...(requireBootstrapSecret
+            ? { bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024) }
+            : { trustedChannel: true }),
           address: proxyPolicy.clientAddress(req),
         }));
         return true;

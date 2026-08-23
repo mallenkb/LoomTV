@@ -75,41 +75,12 @@ export default function MetadataSettingsSection({
     <>
       <Card className="settings-panel">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-white">
-            <WifiOff className="h-4 w-4 text-[var(--loom-accent)]" />
-            Local metadata mode
-          </CardTitle>
-          <CardDescription className="text-[var(--loom-muted)]">
-            Use the database and downloaded artwork without contacting metadata providers.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <label className="flex items-start gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
-            <input
-              type="checkbox"
-              checked={metadataOfflineMode}
-              onChange={(event) => setMetadataOfflineMode(event.target.checked)}
-              className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
-            />
-            <span>
-              <span className="block text-sm font-semibold text-white">Stay offline for metadata</span>
-              <span className="mt-1 block text-xs text-[var(--loom-muted)]">
-                Local titles, episode descriptions, cast, ratings, and cached images remain available. Turn this off before searching for new matches or artwork.
-              </span>
-            </span>
-          </label>
-        </CardContent>
-      </Card>
-
-      <Card className="settings-panel">
-        <CardHeader>
           <CardTitle className="text-white flex items-center gap-2">
             <Key className="w-4 h-4 text-[var(--loom-accent)]" />
             Metadata API Keys
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            The app automatically lists every keyed metadata provider it knows about.
-            TVmaze and Jikan do not need keys.
+            Add the services you use. TVmaze and Jikan need no keys.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -165,8 +136,8 @@ export default function MetadataSettingsSection({
                     size="icon"
                     variant="outline"
                     onClick={() => setProviderEditing(provider.id, !isEditing)}
-                    title={isEditing ? `Done editing ${provider.label}` : `Edit ${provider.label}`}
-                    aria-label={isEditing ? `Done editing ${provider.label}` : `Edit ${provider.label}`}
+                    title={isEditing ? `Save ${provider.label}` : `Edit ${provider.label}`}
+                    aria-label={isEditing ? `Save ${provider.label}` : `Edit ${provider.label}`}
                     className="h-10 w-10 shrink-0"
                   >
                     {isEditing ? <Save className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
@@ -228,8 +199,8 @@ export default function MetadataSettingsSection({
                       size="icon"
                       variant="outline"
                       onClick={() => setProviderEditing(providerId, !isEditing)}
-                      title={isEditing ? `Done editing ${providerId}` : `Edit ${providerId}`}
-                      aria-label={isEditing ? `Done editing ${providerId}` : `Edit ${providerId}`}
+                      title={isEditing ? `Save ${providerId}` : `Edit ${providerId}`}
+                      aria-label={isEditing ? `Save ${providerId}` : `Edit ${providerId}`}
                       className="h-10 w-10 shrink-0"
                     >
                       {isEditing ? <Save className="w-4 h-4" /> : <Pencil className="w-4 h-4" />}
@@ -349,6 +320,34 @@ export default function MetadataSettingsSection({
         </CardContent>
       </Card>
 
+      <Card className="settings-panel">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <WifiOff className="h-4 w-4 text-[var(--loom-accent)]" />
+            Local metadata mode
+          </CardTitle>
+          <CardDescription className="text-[var(--loom-muted)]">
+            Use saved metadata and artwork without contacting providers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <label className="flex items-start gap-3 rounded-lg bg-[var(--loom-surface-2)] p-3">
+            <input
+              type="checkbox"
+              checked={metadataOfflineMode}
+              onChange={(event) => setMetadataOfflineMode(event.target.checked)}
+              className="mt-1 h-4 w-4 accent-[var(--loom-accent)]"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-white">Stay offline for metadata</span>
+              <span className="mt-1 block text-xs text-[var(--loom-muted)]">
+                New matches and artwork stay off until you disable this.
+              </span>
+            </span>
+          </label>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col gap-3">
         {metadataKeyTestResults.length > 0 && (
           <div className="rounded-lg bg-[var(--loom-panel)] p-3 text-sm">
@@ -372,7 +371,7 @@ export default function MetadataSettingsSection({
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button onClick={saveApiKeys} className="gap-2 w-full sm:w-auto">
             {savedKey ? <CheckCircle className="w-4 h-4" /> : <Key className="w-4 h-4" />}
-            {savedKey ? 'API keys saved!' : 'Save API Keys'}
+            {savedKey ? 'API keys saved' : 'Save API keys'}
           </Button>
           <Button
             type="button"
@@ -382,7 +381,7 @@ export default function MetadataSettingsSection({
             className="gap-2 w-full sm:w-auto"
           >
             {isTestingKeys ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-            {isTestingKeys ? 'Testing API Keys...' : 'Test API Keys'}
+            {isTestingKeys ? 'Testing API keys...' : 'Test API keys'}
           </Button>
         </div>
       </div>

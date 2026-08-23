@@ -128,7 +128,7 @@ export default function ThemeSettingsSection({
                   }`}
                 >
                   <span
-                    className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                    className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
                       theme.modernHeroMode === 'continue-watching' ? 'translate-x-6' : 'translate-x-1'
                     }`}
                   />
@@ -165,7 +165,7 @@ export default function ThemeSettingsSection({
                 }`}
               >
                 <span
-                  className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                    className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
                     showProviderRatingBadges ? 'translate-x-6' : 'translate-x-1'
                   }`}
                 />

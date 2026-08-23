@@ -22,6 +22,7 @@ Options:
   --ffmpeg-path <path>   FFmpeg executable used for transcoding probes
   --ffprobe-path <path>  FFprobe executable used for media inspection
   --require-secure-transport  Reject admin and credential requests over HTTP
+  --require-bootstrap-secret  Require a generated claim secret for first owner setup
   --trusted-proxies <list>  Comma-separated trusted proxy IPs/CIDRs
   --help                 Show this help
 
@@ -31,6 +32,7 @@ Environment aliases:
   MEDIA_DIR / LOOMTV_MEDIA_DIR, FFMPEG_PATH / LOOMTV_FFMPEG_PATH,
   FFPROBE_PATH / LOOMTV_FFPROBE_PATH,
   REQUIRE_SECURE_TRANSPORT / LOOMTV_REQUIRE_SECURE_TRANSPORT,
+  REQUIRE_BOOTSTRAP_SECRET / LOOMTV_REQUIRE_BOOTSTRAP_SECRET,
   TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES
 `;
 
@@ -71,7 +73,7 @@ function parseBoolean(value, source) {
 
 function parseArgs(args) {
   const values = {};
-  const booleanOptions = new Set(['--require-secure-transport']);
+  const booleanOptions = new Set(['--require-secure-transport', '--require-bootstrap-secret']);
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') return { help: true };
@@ -117,6 +119,9 @@ function buildConfig(cliValues) {
   const requireSecureTransport = cliValues.requiresecuretransport !== undefined
     ? cliValues.requiresecuretransport
     : ['1', 'true', 'yes'].includes((readEnvironmentValue('REQUIRE_SECURE_TRANSPORT', 'LOOMTV_REQUIRE_SECURE_TRANSPORT') || '').toLowerCase());
+  const requireBootstrapSecret = cliValues.requirebootstrapsecret !== undefined
+    ? cliValues.requirebootstrapsecret
+    : ['1', 'true', 'yes'].includes((readEnvironmentValue('REQUIRE_BOOTSTRAP_SECRET', 'LOOMTV_REQUIRE_BOOTSTRAP_SECRET') || '').toLowerCase());
   const legacyTrustProxy = readEnvironmentValue('TRUST_PROXY', 'LOOMTV_TRUST_PROXY');
   if (legacyTrustProxy && parseBoolean(legacyTrustProxy, 'TRUST_PROXY')) {
     throw usageError('TRUST_PROXY=true is no longer supported; configure an explicit TRUSTED_PROXIES allowlist.');
@@ -124,7 +129,7 @@ function buildConfig(cliValues) {
   const trustedProxies = cliValues.trustedproxies
     || readEnvironmentValue('TRUSTED_PROXIES', 'LOOMTV_TRUSTED_PROXIES')
     || '';
-  return { host, port, paths, ffmpegPath, ffprobePath, requireSecureTransport, trustedProxies };
+  return { host, port, paths, ffmpegPath, ffprobePath, requireSecureTransport, requireBootstrapSecret, trustedProxies };
 }
 
 async function run() {
@@ -136,7 +141,12 @@ async function run() {
   const config = buildConfig(cliValues);
   await ensureRuntimeDirectories(config.paths);
   const version = await readServerVersion(PACKAGE_ROOT);
-  const service = createCanonicalVideoServer({ ...config, version, deploymentMode: 'standalone' });
+  const service = createCanonicalVideoServer({
+    ...config,
+    version,
+    deploymentMode: 'standalone',
+    requireBootstrapSecret: config.requireBootstrapSecret,
+  });
   let stopping = false;
 
   const stop = async (signal) => {

@@ -291,6 +291,17 @@ export function requireOwner(deviceId = DESKTOP_DEVICE_ID): ProfileRecord {
   return profile;
 }
 
+export function canConfigureInitialOwnerProfile(profileId: string): boolean {
+  if (getDeviceProfileSelectionState(DESKTOP_DEVICE_ID)) return false;
+  const permanentProfiles = listProfiles().filter((profile) => !profile.isGuest);
+  if (permanentProfiles.length !== 1) return false;
+  const [owner] = permanentProfiles;
+  return owner.id === profileId
+    && owner.type === 'owner'
+    && !owner.hasPin
+    && !owner.lastUsedAt;
+}
+
 export async function changeProfilePin(profileId: string, pin: string | null): Promise<ProfileSummary> {
   const activeProfileId = requireDesktopProfileId();
   const existingProfile = getProfile(profileId);

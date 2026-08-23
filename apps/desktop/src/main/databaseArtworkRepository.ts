@@ -130,8 +130,9 @@ export function createDatabaseArtworkRepository(
       // reads verify the immutable bytes without decoding again on Electron's
       // main thread. Legacy/unverifiable rows fail closed and are refetched.
       const contentHash = createHash('sha256').update(bytes).digest('hex');
+      const normalizedMimeType = row.mime_type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
       if (
-        row.mime_type !== 'image/png'
+        (row.mime_type !== 'image/png' && row.mime_type !== 'image/jpeg')
         || row.byte_length !== bytes.byteLength
         || !/^[a-f0-9]{64}$/.test(row.content_hash || '')
         || row.content_hash !== contentHash
@@ -141,9 +142,9 @@ export function createDatabaseArtworkRepository(
           database.prepare("UPDATE artwork_cache SET data_url = '' WHERE source_url = ?")
             .run(sourceUrl);
         }
-        return { cachePath, mimeType: 'image/png', byteLength: bytes.byteLength, contentHash };
+        return { cachePath, mimeType: normalizedMimeType, byteLength: bytes.byteLength, contentHash };
       }
-      return { dataUrl: row.data_url, mimeType: 'image/png', byteLength: bytes.byteLength, contentHash };
+      return { dataUrl: row.data_url, mimeType: normalizedMimeType, byteLength: bytes.byteLength, contentHash };
     } catch {
       if (cachePath) {
         try { if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath); } catch { /* best effort */ }

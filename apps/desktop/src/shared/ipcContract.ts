@@ -59,6 +59,7 @@ import type {
   StreamUrlResult,
   TranscodeOptions,
   TranscodeSession,
+  UnifiedDesktopServerState,
   UpdateState,
 } from './desktopProtocol.ts';
 
@@ -174,6 +175,9 @@ export interface IpcContract {
   'plugins:stremio:audit': { args: [addonId: string, limit?: number]; result: StremioPluginIpcResult<readonly StremioPluginAuditEntry[]> };
   'settings:get': { args: []; result: SettingsPayload };
   'settings:save': { args: [settings: SettingsPayload]; result: boolean };
+  'server:unified-state': { args: []; result: UnifiedDesktopServerState };
+  'server:configure-owner': { args: [input: { name: string; password: string }]; result: UnifiedDesktopServerState };
+  'server:open-admin': { args: []; result: boolean };
   'shell:open-external': { args: [url: string]; result: void };
   'shell:open-folder-path': { args: [filePath: string]; result: boolean };
   'shell:show-item': { args: [filePath: string]; result: boolean };

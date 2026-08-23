@@ -312,7 +312,7 @@ function mobileProfileAvatarUri(profile: Pick<MobileProfile, 'avatarKey' | 'colo
   const glyph = Number.isFinite(parsed) && parsed > 0 ? ((parsed - 1) % 12) + 1 : 1;
   const variant = String(glyph).padStart(2, '0');
   const color = PROFILE_COLOR_HEX[profile.colorKey] || PROFILE_COLOR_HEX.ember;
-  return `https://api.dicebear.com/10.x/glyphs/svg?seed=loomtv-glyph-${variant}&shapeVariant=variant${variant}&backgroundColor=${color}&backgroundColorFill=solid&glyphColor=${color}&glyphColorFill=solid`;
+  return `https://api.dicebear.com/10.x/glyphs/png?seed=loomtv-glyph-${variant}&shapeVariant=variant${variant}&backgroundColor=${color}&backgroundColorFill=solid&glyphColor=${color}&glyphColorFill=solid&size=256`;
 }
 
 function mobileDeviceName(): string {

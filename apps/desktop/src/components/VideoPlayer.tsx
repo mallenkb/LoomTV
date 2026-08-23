@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
+import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
 import { useModalLayer } from '@/components/ui/dialog';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -125,6 +126,10 @@ import { usePlayerScrubbing } from './VideoPlayer/usePlayerScrubbing';
 import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
 import type { PlaybackEngine, PlaybackEngineKind, PlaybackEngineState } from './VideoPlayer/engines/PlaybackEngine';
+
+// LazyVideoPlayer imports this module while the library screen is idle. Warm
+// the native runtime then, not after the user clicks Play.
+void LibVlcPlaybackEngine.available().catch(() => false);
 
 const EMPTY_EPISODES: EpisodeMeta[] = [];
 const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
@@ -297,6 +302,7 @@ export default function VideoPlayer({
   const pendingCreditsCompletionRef = useRef(false);
   const playbackEngineRef = useRef<PlaybackEngine | null>(null);
   const nativeInitialTracksAppliedRef = useRef(false);
+  const applyResolvedNativePreferencesRef = useRef<(preferences: PlaybackTrackPreferences) => void>(() => undefined);
 
   const cancelPendingSurfaceClick = useCallback((preserveDoubleClickGuard = false) => {
     if (clickTimerRef.current !== null) {
@@ -521,6 +527,7 @@ export default function VideoPlayer({
         // still loading. Keep that newer in-session choice when the request
         // completes instead of overwriting it with the older stored value.
         sharedTrackPreferencesRef.current = mergedPreferences;
+        applyResolvedNativePreferencesRef.current(mergedPreferences);
       }
     });
     return () => {
@@ -900,6 +907,49 @@ export default function VideoPlayer({
     setSelectedSubtitleTrackIndex(firstSubtitle);
     setSubtitlesDefaultEnabled(subtitlesEnabled);
   }, [externalSubtitleTracks, updatePlaybackSnapshot]);
+
+  const applyResolvedNativePreferences = useCallback((preferences: PlaybackTrackPreferences) => {
+    const engine = playbackEngineRef.current;
+    if (!engine || !nativeInitialTracksAppliedRef.current) return;
+
+    const tracks = probeTracksRef.current;
+    const preferredAudio = preferredTrackIndex(tracks, 'audio', preferences.audio);
+    if (preferredAudio !== null) {
+      desiredAudioTrackIndexRef.current = preferredAudio;
+      audioReapplyAttemptsRef.current = 0;
+      void engine.selectAudio(preferredAudio >= 0 ? preferredAudio : null);
+    }
+
+    if (preferences.subtitle === undefined) return;
+    const preferredSubtitle = preferredTrackIndex(tracks, 'subtitle', preferences.subtitle);
+    const selectedSubtitle = preferredSubtitle
+      ?? (preferences.subtitle.enabled ? firstSubtitleTrackIndex(tracks) : -1);
+    const subtitlesEnabled = selectedSubtitle >= 0;
+    selectedSubtitleTrackIndexRef.current = selectedSubtitle;
+    subtitlesDefaultEnabledRef.current = subtitlesEnabled;
+    setSelectedSubtitleTrackIndex(selectedSubtitle);
+    setSubtitlesDefaultEnabled(subtitlesEnabled);
+
+    if (engine.kind === 'libvlc') {
+      // These IDs came from LibVLC's own track event, so they are safe to send
+      // back to LibVLC. Loom renders text subtitles; VLC handles bitmap tracks.
+      const selectedTrack = tracks.find((track) =>
+        track.type === 'subtitle' && track.index === selectedSubtitle,
+      );
+      void engine.selectSubtitle(
+        selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? selectedSubtitle : null,
+      );
+      return;
+    }
+    void engine.selectSubtitle(subtitlesEnabled ? selectedSubtitle : null);
+  }, []);
+
+  useEffect(() => {
+    applyResolvedNativePreferencesRef.current = applyResolvedNativePreferences;
+    return () => {
+      applyResolvedNativePreferencesRef.current = () => undefined;
+    };
+  }, [applyResolvedNativePreferences]);
 
   const {
     clearNextEpisodeCountdown,
@@ -1281,12 +1331,19 @@ export default function VideoPlayer({
             void initialAudioEngine.selectAudio(requestedAudio);
           }, 350);
         }
-        // LibVLC SPU IDs are not the same namespace as Loom's probe IDs. Its
-        // native path is therefore allowed to keep only the deterministic
-        // bitmap/default track selected at media-open time; parseable text is
-        // rendered by Loom's overlay instead of sending an arbitrary ID.
-        if (playbackEngineRef.current?.kind !== 'libvlc') {
-          void playbackEngineRef.current?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
+        const initialSubtitleEngine = playbackEngineRef.current;
+        if (initialSubtitleEngine?.kind === 'libvlc') {
+          // `selectedSubtitle` came from LibVLC's own track event. It is a
+          // native SPU ID, unlike an ffprobe stream index, and is safe to send
+          // back. Keep text in Loom's overlay and use VLC only for bitmaps.
+          const selectedTrack = nextTracks.find((track) =>
+            track.type === 'subtitle' && track.index === selectedSubtitle,
+          );
+          void initialSubtitleEngine.selectSubtitle(
+            selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? selectedSubtitle : null,
+          );
+        } else {
+          void initialSubtitleEngine?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
         }
       } else {
         const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id ?? -1;
@@ -1512,40 +1569,20 @@ export default function VideoPlayer({
 
     (async () => {
       try {
-        // Track selection affects the transcoder command itself. Resolve the
-        // saved preference and this episode's actual stream indexes before
-        // opening the source, otherwise the default audio can begin playing
-        // and subtitles can be mapped against the previous episode.
-        const loadedPreferences = await trackPreferencesLoadRef.current;
-        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-        // The load promise is intentionally scoped to the series, so it can
-        // outlive several episode transitions. Preserve a selection made in
-        // the current player session instead of restoring that promise's
-        // initial snapshot on every new file.
-        const currentPreferences = sharedTrackPreferencesRef.current;
-        const preferences: PlaybackTrackPreferences = {
-          ...loadedPreferences,
-          ...(currentPreferences.audio ? { audio: currentPreferences.audio } : {}),
-          ...(currentPreferences.subtitle ? { subtitle: currentPreferences.subtitle } : {}),
-        };
-        sharedTrackPreferencesRef.current = preferences;
-        const probeResult = await desktopApi.media.probe(filePath);
-        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
-        if (probeResult.ok) applyProbeData(probeResult.data, preferences);
-
         const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath);
-        // Saved audio/subtitle preferences must not disqualify the native
-        // desktop engine. They are applied after LibVLC reports its own track
-        // IDs, while semantic matching remains based on the probe data above.
-        const libVlcAvailable = isLocalFile
-          && await LibVlcPlaybackEngine.available().catch(() => false);
-        // MPV is an optional fallback. Do not execute it just to probe its
-        // version when LibVLC can already handle this file. If LibVLC later
-        // fails, handleNativePlaybackState performs the MPV check on demand.
-        const mpvAvailable = isLocalFile
-          && !libVlcAvailable
-          && await MpvPlaybackEngine.available().catch(() => false);
-        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+        const preferencesPromise = trackPreferencesLoadRef.current.then((loadedPreferences) => {
+          // Preserve a selection made during this player session if the saved
+          // preference request finishes after playback has already started.
+          const currentPreferences = sharedTrackPreferencesRef.current;
+          const preferences: PlaybackTrackPreferences = {
+            ...loadedPreferences,
+            ...(currentPreferences.audio ? { audio: currentPreferences.audio } : {}),
+            ...(currentPreferences.subtitle ? { subtitle: currentPreferences.subtitle } : {}),
+          };
+          sharedTrackPreferencesRef.current = preferences;
+          applyResolvedNativePreferencesRef.current(preferences);
+          return preferences;
+        });
         const allSubtitleFiles = visibleSubtitles.flatMap((subtitle) => {
           try {
             const parsed = new URL(subtitle.url, 'http://127.0.0.1');
@@ -1555,56 +1592,20 @@ export default function VideoPlayer({
             return [];
           }
         });
-        let selectedSubtitleIndex = selectedSubtitleTrackIndexRef.current;
-        let selectedSubtitleTrack = probeTracksRef.current.find((track) =>
-          track.type === 'subtitle' && track.index === selectedSubtitleIndex,
-        );
-        const textAlternative = compatibleTextSubtitleTrack(probeTracksRef.current, selectedSubtitleIndex);
-        const preserveExactSubtitle = subtitleSelectionExplicitRef.current || preferences.subtitle !== undefined;
-        if (libVlcAvailable && textAlternative && !preserveExactSubtitle) {
-          // LibVLC cannot restyle image-based subtitles at runtime. For an
-          // automatic/default selection, keep the same language and subtitle
-          // intent while choosing a parseable text track that Loom can render.
-          selectedSubtitleIndex = textAlternative.index;
-          selectedSubtitleTrack = textAlternative;
-          selectedSubtitleTrackIndexRef.current = textAlternative.index;
-          setSelectedSubtitleTrackIndex(textAlternative.index);
-        }
-        const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = [];
-        if (libVlcAvailable) nativeEngineFactories.push(LibVlcPlaybackEngine);
-        if (mpvAvailable) nativeEngineFactories.push(MpvPlaybackEngine);
-        const selectedExternalSubtitle = (() => {
-          if (selectedSubtitleIndex > -1000) return undefined;
-          const selected = visibleSubtitles[-1000 - selectedSubtitleIndex];
-          if (!selected) return undefined;
-          try {
-            const parsed = new URL(selected.url, 'http://127.0.0.1');
-            const subtitlePath = parsed.searchParams.get('path');
-            return subtitlePath ? { path: subtitlePath, source: selected.source || 'sidecar' as const } : undefined;
-          } catch {
-            return undefined;
-          }
-        })();
-        const libVlcNativeSubtitleFallback = Boolean(
-          selectedSubtitleTrack
-          && isBitmapSubtitleCodec(selectedSubtitleTrack.codec),
-        );
-        const selectedAudioTrack = probeTracksRef.current.find((track) =>
-          track.type === 'audio' && track.index === selectedAudioTrackIndexRef.current,
-        );
+        // Native players already inspect their own duration and tracks. Try
+        // them directly. Availability checks and ffprobe only duplicated work
+        // and delayed the first frame.
+        const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = isLocalFile
+          ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
+          : [];
         for (const NativePlaybackEngine of nativeEngineFactories) {
           const engine = new NativePlaybackEngine(handleNativePlaybackState);
           playbackEngineRef.current = engine;
-          const subtitleFiles = engine.kind === 'libvlc'
-            ? (selectedExternalSubtitle ? [selectedExternalSubtitle] : [])
-            : allSubtitleFiles;
           const initialSubtitleStyle = subtitleStyleRef.current;
           let loaded = false;
           try {
             loaded = await engine.load(filePath, {
               startSeconds: requestedStartPosition,
-              audioTrackId: selectedAudioTrack?.index,
-              audioLanguage: selectedAudioTrack?.language,
               audioDelay: audioDelayRef.current,
               subtitleDelay: initialSubtitleStyle.delaySeconds,
               subtitleStyle: {
@@ -1617,13 +1618,13 @@ export default function VideoPlayer({
                   : '#00000000',
                 position: initialSubtitleStyle.position,
               },
-              subtitleFiles,
-              // Loom's text overlay owns parseable subtitles. LibVLC native
-              // SPU output starts only for bitmap/unsupported tracks, where
-              // the renderer cannot provide equivalent cues or styling.
+              subtitleFiles: allSubtitleFiles,
+              // Start with SPU support available. Once LibVLC reports native
+              // track IDs, Loom disables it for text and keeps it for bitmap
+              // subtitles. This avoids probing the file before playback.
               nativeSubtitles: engine.kind === 'libvlc'
-                ? subtitlesDefaultEnabledRef.current && (libVlcNativeSubtitleFallback || libVlcSubtitleFallbackRef.current)
-                : subtitlesDefaultEnabledRef.current && selectedSubtitleIndex !== -1,
+                ? subtitlesDefaultEnabledRef.current
+                : subtitlesDefaultEnabledRef.current && selectedSubtitleTrackIndexRef.current !== -1,
             });
           } catch (error) {
             console.warn(`[player] Native ${engine.kind} startup failed; trying the next fallback.`, error);
@@ -1644,6 +1645,16 @@ export default function VideoPlayer({
           await engine.destroy();
         }
 
+        // The browser pipeline needs exact codec and stream information for
+        // remux/transcode decisions. Pay that cost only after native playback
+        // is unavailable.
+        const preferences = await preferencesPromise;
+        if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+        if (isLocalFile) {
+          const probeResult = await desktopApi.media.probe(filePath);
+          if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+          if (probeResult.ok) applyProbeData(probeResult.data, preferences);
+        }
         setNativePlaybackActive(false);
         setNativeEngineKind(null);
         document.documentElement.classList.remove('loom-native-active');
@@ -3638,10 +3649,14 @@ export default function VideoPlayer({
             aria-live="polite"
             className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center"
           >
-            <div
-              aria-hidden="true"
-              className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80"
-            />
+            <span aria-hidden="true">
+              <LoomLoader
+                style={theme.loaderStyle}
+                className="text-white/85"
+                markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-6 w-auto' : 'h-10 w-10'}
+                color="currentColor"
+              />
+            </span>
             <p className="text-sm text-white/80">{statusMessage || 'Loading...'}</p>
           </div>
         )}

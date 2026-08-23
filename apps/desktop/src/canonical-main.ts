@@ -33,6 +33,7 @@ import {
 } from './main/autoUpdater';
 import {
   configureCanonicalWindow,
+  configureDesktopSetupChannel,
   getCanonicalWindow,
   openCanonicalWindow,
 } from './main/canonicalWindow';
@@ -41,7 +42,10 @@ if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features'
 if (squirrelStartup) app.quit();
 
 app.setName('LoomTV');
-const USER_DATA_DIR = path.join(app.getPath('appData'), 'LoomTV');
+const configuredUserDataDir = String(process.env.LOOMTV_DATA_DIR || '').trim();
+const USER_DATA_DIR = configuredUserDataDir
+  ? path.resolve(configuredUserDataDir)
+  : path.join(app.getPath('appData'), 'LoomTV');
 app.setPath('userData', USER_DATA_DIR);
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
@@ -260,6 +264,16 @@ function getJson<T>(url: string, identity: LanTlsIdentity): Promise<T> {
   });
 }
 
+/** Native folder chooser for setup, offered only through the trusted desktop channel. */
+async function pickLibraryFolder(): Promise<string | null> {
+  const window = getCanonicalWindow();
+  const result = await (window
+    ? dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'], title: 'Choose a library folder' })
+    : dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'], title: 'Choose a library folder' }));
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+}
+
 async function requestLegacyPairingApproval(request: { deviceName: string; address: string }): Promise<boolean> {
   const result = await dialog.showMessageBox({
     type: 'question',
@@ -287,6 +301,10 @@ async function startCanonicalDesktop(): Promise<void> {
   const packagedAsset = (name: string, developmentPath: string) => (
     app.isPackaged ? path.join(process.resourcesPath, name) : developmentPath
   );
+  // Kept in memory for this run only. It authorizes setup from this app's own
+  // window, so nobody has to copy a secret on the machine that owns the server.
+  const desktopSetupToken = randomBytes(32).toString('base64url');
+  configureDesktopSetupChannel(desktopSetupToken);
 
   canonicalHost = createCanonicalServerHost({
     migrationReady: true,
@@ -301,12 +319,16 @@ async function startCanonicalDesktop(): Promise<void> {
     ffmpegPath: findFFmpeg() || undefined,
     ffprobePath: findFFprobe() || undefined,
     requireSecureTransport: true,
+    requireBootstrapSecret: false,
     tls: { cert: identity.certificatePem, key: identity.privateKeyPem },
     certificateFingerprint: identity.certFingerprint,
     bootstrapSecret: bootstrap || undefined,
     adminHtmlPath: packagedAsset('admin.html', path.join(desktopAssets, 'admin.html')),
     adminIconsPath: packagedAsset('lucide-icons.svg', path.join(desktopAssets, 'lucide-icons.svg')),
     webAppHtmlPath: packagedAsset('web-app.html', path.join(sourceAssets, 'web-app.html')),
+    setupHtmlPath: packagedAsset('setup.html', path.join(sourceAssets, 'setup.html')),
+    desktopSetupToken,
+    pickFolder: pickLibraryFolder,
     compatibilityHandler: async () => false,
     authorizeLegacyPairing: requestLegacyPairingApproval,
   });
@@ -325,19 +347,15 @@ async function startCanonicalDesktop(): Promise<void> {
   });
 
   if (migrationCredential) await showCredential(migrationCredential);
-  const onboarding = await getJson<{ data?: { ownerConfigured?: boolean } }>(
-    `${canonicalOrigin}/api/v1/auth/onboarding`, identity,
+  // Setup itself decides where this launch lands. The desktop window carries
+  // the trusted setup token, so an unclaimed server asks for a name and a
+  // password here — never for the bootstrap secret, which stays on disk for
+  // browser clients and is invalidated the moment an owner exists.
+  const setup = await getJson<{ data?: { required?: boolean; ownerConfigured?: boolean } }>(
+    `${canonicalOrigin}/api/v1/setup/state`, identity,
   );
-  const bootstrapPath = protectedSecretPath('canonical-bootstrap');
-  if (onboarding.data?.ownerConfigured) removeProtectedSecret(bootstrapPath);
-  else if (bootstrap) {
-    await showCredential({
-      label: 'LoomTV owner setup secret',
-      secret: bootstrap,
-      path: bootstrapPath,
-      removeAfterCopy: false,
-    });
-  }
+  if (setup.data?.ownerConfigured) removeProtectedSecret(protectedSecretPath('canonical-bootstrap'));
+  const firstRoute = setup.data?.required ? '/setup/' : '/app/';
 
   const trayGlyph = getTrayIconPath();
   const trayIcon = trayGlyph || getWindowIconPath();
@@ -350,8 +368,8 @@ async function startCanonicalDesktop(): Promise<void> {
     onQuit: () => app.quit(),
     port: address.port,
   });
-  showStartupProgress('Opening your library.');
-  openCanonicalWindow('/app/');
+  showStartupProgress(setup.data?.required ? 'Opening setup.' : 'Opening your library.');
+  openCanonicalWindow(firstRoute);
   closeStartupProgress();
   initAutoUpdater({
     getMainWindow: getCanonicalWindow,

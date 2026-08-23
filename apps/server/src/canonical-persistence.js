@@ -47,6 +47,7 @@ export function createCanonicalPersistence(options) {
     onAuthenticationSessionRevoked: options.onAuthenticationSessionRevoked,
     onAllPlaybackSessionsRevoked: options.onAllPlaybackSessionsRevoked,
     bootstrapSecurity: options.bootstrapSecurity,
+    requireBootstrapSecret: options.requireBootstrapSecret,
   });
   const remote = createRemotePolicyService({
     store,

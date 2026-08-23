@@ -22,6 +22,7 @@ export type CanonicalServerHostOptions = {
   ffmpegPath?: string;
   ffprobePath?: string;
   requireSecureTransport?: boolean;
+  requireBootstrapSecret?: boolean;
   trustedProxies?: string | string[];
   tls?: { cert: string; key: string };
   certificateFingerprint?: string;
@@ -30,6 +31,23 @@ export type CanonicalServerHostOptions = {
   adminHtmlPath?: string;
   adminIconsPath?: string;
   webAppHtmlPath?: string;
+  setupHtmlPath?: string;
+  /** Per-run token that lets this app's own window claim the server without a copied secret. */
+  desktopSetupToken?: string;
+  /** Native folder picker offered to the trusted desktop window during setup. */
+  pickFolder?: () => Promise<string | null>;
+  /** Mirrors setup choices into the existing desktop renderer during the transition. */
+  setupHooks?: {
+    ownerCreated?: (input: { name: string; adminToken: string; expiresAt: number }) => Promise<void> | void;
+    testMetadata?: (input: { provider: string; apiKey: string }) => Promise<{ ok: boolean; code?: string; message?: string }> | { ok: boolean; code?: string; message?: string };
+    saveMetadata?: (input: { keys: Record<string, string>; skipped: boolean }) => Promise<void> | void;
+    complete?: (input: {
+      roots: Array<{ id: string; path: string; kind: 'movies' | 'tvShows' | 'anime' | 'others'; state?: string }>;
+      ownerName: string;
+      serverName: string;
+      language: string;
+    }) => Promise<void> | void;
+  };
   /** Must delegate to the supplied canonical services and must not open desktop persistence. */
   compatibilityHandler: CanonicalCompatibilityHandler;
   /** Validates the compatibility-window PIN only; canonical services issue and persist the credential. */
@@ -69,6 +87,7 @@ export function createCanonicalServerHost(options: CanonicalServerHostOptions) {
           ffmpegPath: options.ffmpegPath,
           ffprobePath: options.ffprobePath,
           requireSecureTransport: options.requireSecureTransport,
+          requireBootstrapSecret: options.requireBootstrapSecret,
           trustedProxies: options.trustedProxies,
           tls: options.tls,
           certificateFingerprint: options.certificateFingerprint,
@@ -77,6 +96,10 @@ export function createCanonicalServerHost(options: CanonicalServerHostOptions) {
           adminHtmlPath: options.adminHtmlPath,
           adminIconsPath: options.adminIconsPath,
           webAppHtmlPath: options.webAppHtmlPath,
+          setupHtmlPath: options.setupHtmlPath,
+          desktopSetupToken: options.desktopSetupToken,
+          pickFolder: options.pickFolder,
+          setupHooks: options.setupHooks,
           deploymentMode: 'desktop-hosted',
           compatibilityHandler: options.compatibilityHandler,
           authorizeLegacyPairing: options.authorizeLegacyPairing,

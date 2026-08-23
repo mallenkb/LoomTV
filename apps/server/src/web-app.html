@@ -97,7 +97,6 @@
     <form id="authForm" class="form">
       <label id="nameField" class="hidden">Owner name<input id="name" autocomplete="name"></label>
       <label id="usernameField">Username<input id="username" autocomplete="username"></label>
-      <label id="bootstrapSecretField" class="hidden">One-time bootstrap secret<input id="bootstrapSecret" type="password" autocomplete="off" spellcheck="false" placeholder="From the LoomTV startup log"></label>
       <label>Password<input id="password" type="password" autocomplete="current-password" required minlength="8"></label>
       <button class="primary" id="authSubmit" type="submit">Sign in</button>
     </form>
@@ -185,6 +184,14 @@
           </form>
 
           <div id="libraryStatus" class="status" data-tone="info"></div>
+
+          <!-- First-run scans keep running after setup hands over; this is how
+               Home says so without blocking anything. -->
+          <section id="scanBanner" class="card hidden" aria-live="polite">
+            <div class="eyebrow">Library scan</div>
+            <div id="scanBannerText" class="muted">Scanning your library…</div>
+            <div class="bar"><span id="scanBannerBar" style="width:0"></span></div>
+          </section>
 
           <section id="player" class="card player hidden" aria-labelledby="nowPlaying">
             <h2 id="nowPlaying"></h2>
@@ -401,11 +408,9 @@
         $('cleartextNotice').classList.toggle('hidden', sessionMode !== 'bearer');
         $('authTitle').textContent = onboarding ? 'Create your LoomTV owner' : 'Sign in';
         $('authCopy').textContent = onboarding
-          ? 'Paste the one-time secret from the server startup log, then choose the first owner password.'
+          ? 'Choose the first owner password to protect this server.'
           : 'Connect to your always-on LoomTV server.';
         $('nameField').classList.toggle('hidden', !onboarding);
-        $('bootstrapSecretField').classList.toggle('hidden', !onboarding);
-        $('bootstrapSecret').required = onboarding;
         $('usernameField').classList.toggle('hidden', onboarding);
         $('authSubmit').textContent = onboarding ? 'Create owner' : 'Sign in';
         $('authForm').dataset.onboarding = onboarding ? '1' : '';
@@ -463,6 +468,7 @@
         if (!selectedProfile) { showProfileChooser(); return; }
         showApp();
         await renderView('home');
+        watchScanProgress();
         if (hasAccountPermission('sharing.manage')) await loadInvitations().catch(() => {});
       }
 
@@ -483,6 +489,42 @@
           invitationSession = account.invitation || { scope: 'shared library' };
           $('invitationDetail').textContent = 'You are viewing a library shared with you. Its owner can revoke this at any time.';
         }
+      }
+
+      // ── Library scan progress ────────────────────────────────────────────
+      // A first-run scan outlives setup, so Home reports it instead of making
+      // anyone wait: the banner appears while a scan runs and refreshes the
+      // library once it finishes.
+      let scanTimer = 0;
+
+      function renderScanProgress(scan) {
+        const banner = $('scanBanner');
+        const running = scan?.state === 'scanning' || scan?.state === 'queued';
+        banner.classList.toggle('hidden', !running);
+        if (!running) return;
+        const total = Number(scan.totalFiles) || 0;
+        const scanned = Number(scan.scannedFiles) || 0;
+        const percent = total ? Math.min(100, Math.round((scanned / total) * 100)) : 0;
+        $('scanBannerBar').style.width = `${percent}%`;
+        $('scanBannerText').textContent = total
+          ? `Scanning your library · ${scanned} of ${total} files (${percent}%). Keep browsing while it finishes.`
+          : 'Scanning your library. Keep browsing while it finishes.';
+      }
+
+      function watchScanProgress() {
+        if (scanTimer) return;
+        const poll = async () => {
+          let scan = null;
+          try { scan = await api('/api/v1/library/scan'); } catch { scan = null; }
+          renderScanProgress(scan);
+          if (scan?.state === 'scanning' || scan?.state === 'queued') {
+            scanTimer = window.setTimeout(poll, 4000);
+            return;
+          }
+          scanTimer = 0;
+          if (scan?.state === 'completed') await renderView(currentView, { force: true }).catch(() => {});
+        };
+        scanTimer = window.setTimeout(poll, 0);
       }
 
       // ── Profiles ─────────────────────────────────────────────────────────
@@ -1305,7 +1347,6 @@
               username: $('username').value,
               password: $('password').value,
               sessionMode,
-              ...(onboarding ? { bootstrapSecret: $('bootstrapSecret').value.trim() } : {}),
             }),
           });
           credentialScheme = 'Bearer';
@@ -1315,7 +1356,6 @@
             throw Object.assign(new Error('The server did not return a session token.'), { code: 'request_failed' });
           }
           $('password').value = '';
-          $('bootstrapSecret').value = '';
           setStatus('authStatus', '');
           await loadAccount();
         } catch (error) {
@@ -1409,7 +1449,7 @@
         try {
           await api('/api/v1/library/scan', { method: 'POST', body: '{}' });
           setStatus('libraryStatus', 'Scan started. Results appear as files are indexed.');
-          window.setTimeout(() => renderView(currentView, { force: true }), 1500);
+          watchScanProgress();
         } catch (error) {
           handleFailure('libraryStatus', error);
         }

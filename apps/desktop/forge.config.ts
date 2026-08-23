@@ -402,6 +402,7 @@ const config: ForgeConfig = {
       'resources/mpv',
       'resources/DICEBEAR_GLYPHS_LICENSE.md',
       '../server/src/web-app.html',
+      '../server/src/setup.html',
       'src/headless/admin.html',
       'src/headless/lucide-icons.svg',
     ],

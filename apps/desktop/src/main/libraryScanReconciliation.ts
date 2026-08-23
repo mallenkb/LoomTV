@@ -113,6 +113,34 @@ function mergeGenericCast(existing: MediaItem['cast'], fresh: MediaItem['cast'])
   return [...existing, ...fresh.filter((credit) => !existingKeys.has(genericCastKey(credit)))];
 }
 
+const TMDB_ARTWORK_RENDITION = /^(https:\/\/image\.tmdb\.org\/t\/p\/)(?:w\d+|original)(\/.*)$/i;
+
+function tmdbArtworkIdentity(value?: string): string {
+  if (!value) return '';
+  let source = value;
+  try {
+    const parsed = new URL(value);
+    source = parsed.pathname === '/api/cached-artwork'
+      ? parsed.searchParams.get('source') || value
+      : value;
+  } catch {
+    return '';
+  }
+  return source.match(TMDB_ARTWORK_RENDITION)?.[2] || '';
+}
+
+function preserveArtworkSelection(existing?: string, fresh?: string): string {
+  if (!existing) return fresh || '';
+  if (!fresh) return existing;
+  const existingTmdb = tmdbArtworkIdentity(existing);
+  const freshTmdb = tmdbArtworkIdentity(fresh);
+  // Upgrade the rendition only when both URLs refer to the exact same TMDB
+  // image. Different paths may represent a user's explicit artwork choice.
+  return existingTmdb && freshTmdb && existingTmdb === freshTmdb
+    ? fresh
+    : existing;
+}
+
 export function preserveExistingItemDuringScan(
   fresh: MediaItem,
   existing?: MediaItem,
@@ -195,9 +223,9 @@ export function preserveExistingItemDuringScan(
     format: existing.format || fresh.format,
     title: existing.title || fresh.title,
     year: existing.year || fresh.year,
-    poster: existing.poster || fresh.poster,
-    backdrop: existing.backdrop || fresh.backdrop,
-    logo: existing.logo || fresh.logo,
+    poster: preserveArtworkSelection(existing.poster, fresh.poster),
+    backdrop: preserveArtworkSelection(existing.backdrop, fresh.backdrop),
+    logo: preserveArtworkSelection(existing.logo, fresh.logo),
     posterCandidates: uniqueValues(existing.posterCandidates, fresh.posterCandidates),
     backdropCandidates: uniqueValues(existing.backdropCandidates, fresh.backdropCandidates),
     logoCandidates: uniqueValues(existing.logoCandidates, fresh.logoCandidates),

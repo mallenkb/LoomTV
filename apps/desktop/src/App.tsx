@@ -315,6 +315,16 @@ function DesktopBootstrap() {
         return;
       }
       try {
+        const unified = await desktopApi.getUnifiedDesktopServerState();
+        if (unified.enabled && unified.ready && unified.ownerConfigured) {
+          desktopApi.useThisComputerAsHost();
+          if (!cancelled) setMode('host');
+          return;
+        }
+      } catch {
+        // The legacy desktop remains usable when the optional unified host is unavailable.
+      }
+      try {
         const index = await desktopApi.getLibraryIndex();
         const library = index || await desktopApi.getLibrary();
         const hasExistingSetup = Boolean(

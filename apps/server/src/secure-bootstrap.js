@@ -45,6 +45,7 @@ function addressKey(address) {
 
 export function createBootstrapSecurity(options) {
   const dataDir = path.resolve(options.dataDir);
+  const required = options.required !== false;
   const configuredFile = options.secretFile ? path.resolve(options.secretFile) : null;
   const defaultFile = path.join(dataDir, DEFAULT_BOOTSTRAP_SECRET_FILENAME);
   const secretFile = configuredFile || defaultFile;
@@ -97,6 +98,11 @@ export function createBootstrapSecurity(options) {
   return {
     async initialize({ ownerConfigured }) {
       if (initialized) return;
+      if (!required) {
+        activeSecret = null;
+        initialized = true;
+        return;
+      }
       if (ownerConfigured) {
         activeSecret = null;
         if (!configuredFile) {
@@ -157,6 +163,7 @@ export function createBootstrapSecurity(options) {
     },
 
     authorize(presentedSecret, address) {
+      if (!required) return;
       if (!initialized || !activeSecret) {
         throw bootstrapError(409, 'bootstrap_unavailable', 'Owner bootstrap is no longer available.');
       }
