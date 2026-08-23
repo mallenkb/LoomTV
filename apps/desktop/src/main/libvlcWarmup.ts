@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Keep one idle LibVLC instance alive for the lifetime of the desktop process.
+ * Keep one LibVLC instance alive for the lifetime of the desktop process.
  *
  * LibVLC discovers and loads its plugin bank inside libvlc_new(). Doing that
  * after the user clicks Play puts module discovery directly on the
- * click-to-first-frame path. The real playback session still owns its media,
- * player, audio tracks and subtitles. This idle instance only pays the runtime
- * and plugin startup cost during LoomTV startup, before playback is requested.
+ * click-to-first-frame path. Playback sessions borrow this process-lifetime
+ * instance, while media descriptors, media players, audio tracks and subtitle
+ * state remain session-owned and are released normally between videos.
  */
 
 type NativeValue = string | number | bigint | boolean | null | undefined | Record<string, unknown>;
@@ -21,10 +21,11 @@ type KoffiLibrary = {
 type KoffiRuntime = {
   load: (libraryPath: string) => KoffiLibrary;
 };
-type NativeHandle = bigint | number | null;
+export type SharedLibVlcInstance = bigint | number;
+type NativeHandle = SharedLibVlcInstance | null;
 
 type WarmRuntime = {
-  instance: Exclude<NativeHandle, null>;
+  instance: SharedLibVlcInstance;
   release: DynamicFunction;
   libraries: KoffiLibrary[];
   libraryPath: string;
@@ -38,11 +39,21 @@ function truthy(value: unknown): boolean {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
 }
 
+function explicitBoolean(value: unknown): boolean | undefined {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
 function enabled(): boolean {
   if (process.platform !== 'darwin' && process.platform !== 'win32') return false;
   if (truthy(process.env.LOOMTV_DISABLE_EXPERIMENTAL_LIBVLC)) return false;
   if (truthy(process.env.LOOMTV_DISABLE_LIBVLC)) return false;
-  return true;
+  const configured = explicitBoolean(process.env.LOOMTV_EXPERIMENTAL_LIBVLC);
+  const legacyConfigured = explicitBoolean(process.env.LOOMTV_ENABLE_LIBVLC);
+  return configured ?? legacyConfigured ?? true;
 }
 
 function nativeHandle(value: NativeValue): NativeHandle {
@@ -96,10 +107,13 @@ function bundledCandidates(): string[] {
     path.join(root, fileName),
     path.join(root, 'lib', fileName),
     path.join(root, 'Frameworks', fileName),
+    path.join(root, 'MacOS', fileName),
     path.join(root, 'MacOS', 'lib', fileName),
     path.join(root, 'Contents', 'Frameworks', fileName),
+    path.join(root, 'Contents', 'MacOS', fileName),
     path.join(root, 'Contents', 'MacOS', 'lib', fileName),
     path.join(root, 'VLC.app', 'Contents', 'Frameworks', fileName),
+    path.join(root, 'VLC.app', 'Contents', 'MacOS', fileName),
     path.join(root, 'VLC.app', 'Contents', 'MacOS', 'lib', fileName),
   ]);
 }
@@ -175,6 +189,18 @@ function pluginPathForLibrary(libraryPath: string): string | undefined {
   });
 }
 
+function normalizedLibraryPath(value: string): string {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function sameLibraryPath(left: string, right: string): boolean {
+  return normalizedLibraryPath(left) === normalizedLibraryPath(right);
+}
+
 function loadCandidate(koffi: KoffiRuntime, libraryPath: string): WarmRuntime | null {
   const libraries: KoffiLibrary[] = [];
   try {
@@ -218,13 +244,24 @@ export function warmLibVlcRuntime(): boolean {
       const loaded = loadCandidate(koffi, candidate);
       if (!loaded) continue;
       warmRuntime = loaded;
-      console.info(`[playback] LibVLC runtime warmed before playback (${candidate})`);
+      console.info(`[playback] LibVLC process instance ready (${candidate})`);
       return true;
     }
   } catch {
     // The normal availability path reports a useful failure if playback is requested.
   }
   return false;
+}
+
+/**
+ * Return the process-lifetime LibVLC instance only when the playback runtime
+ * resolved the same native library. A different configured runtime must never
+ * receive a pointer created by another libvlc image.
+ */
+export function getWarmLibVlcInstance(libraryPath: string): SharedLibVlcInstance | null {
+  if (!warmRuntime && !warmupStarted) warmLibVlcRuntime();
+  if (!warmRuntime || !sameLibraryPath(warmRuntime.libraryPath, libraryPath)) return null;
+  return warmRuntime.instance;
 }
 
 export function releaseWarmLibVlcRuntime(): void {
