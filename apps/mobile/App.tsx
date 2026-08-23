@@ -134,6 +134,7 @@ import {
   clearMobileOfflineSnapshot,
   loadMobileOfflineSnapshot,
 } from './mobileOfflineCache';
+import { mediaIdForPlayTarget, useMobileDownloadsController } from './useMobileDownloadsController';
 import { MobileReducedMotionProvider, useMobileReducedMotion } from './mobileReducedMotion';
 import {
   MOBILE_THEME_COLOR_OPTIONS,
@@ -156,7 +157,6 @@ import {
   orderedSeasonNumbers,
   playTargetForItem,
   progressStateFor,
-  shouldTranscode,
   sortedEpisodes,
   streamPathFor,
 } from './mobileLibrary';
@@ -238,7 +238,7 @@ const PLAYER_ROTATION_OPTIONS: { value: PlayerRotation; label: string }[] = [
 ];
 
 const SAVED_CONNECTION_KEY = 'loomtv.saved-connection.v2';
-const MOBILE_ONBOARDING_OFFLINE_MESSAGE = 'Server unavailable right now. Choose a desktop to reconnect.';
+const MOBILE_ONBOARDING_OFFLINE_MESSAGE = 'Server unavailable right now. Choose a LoomTV server to reconnect.';
 const MOBILE_THEME_MODE_KEY = 'loomtv.mobile-theme-mode.v1';
 const MOBILE_THEME_COLOR_KEY = 'loomtv.mobile-theme-color.v1';
 const MOBILE_SUBTITLE_FONT_SIZE_KEY = 'loomtv.mobile-subtitle-font-size.v1';
@@ -355,8 +355,8 @@ const imageCacheBustQueryParam = 'loomtvImageBust';
 // The bottom nav shrinks to Home / Search / Settings; these tabs carry the
 // library kinds instead.
 const settingsSections: { id: SettingsSection; label: string; description: string }[] = [
-  { id: 'library', label: 'Library', description: 'Refresh and review the paired desktop library.' },
-  { id: 'network', label: 'Network', description: 'Pairing status and desktop connection details.' },
+  { id: 'library', label: 'Library', description: 'Refresh and review the connected server library.' },
+  { id: 'network', label: 'Network', description: 'Pairing status and server connection details.' },
   { id: 'appearance', label: 'Appearance', description: 'Choose a light or dark theme for this device.' },
   { id: 'about', label: 'About', description: 'App information and third-party attribution.' },
 ];
@@ -404,10 +404,11 @@ function isHlsPlaybackUrl(playbackUrl: string): boolean {
 }
 
 function videoSourceFor(playbackUrl: string, target?: PlayTarget | null, deviceToken?: string): VideoSource {
+  const isLocalFile = playbackUrl.startsWith('file:');
   return {
     uri: secureLanUrl(playbackUrl),
     contentType: isHlsPlaybackUrl(playbackUrl) ? 'hls' : 'auto',
-    headers: deviceToken ? { Authorization: `Bearer ${deviceToken}` } : undefined,
+    headers: deviceToken && !isLocalFile ? { Authorization: `LoomDevice ${deviceToken}` } : undefined,
     metadata: target ? {
       title: target.title,
       artist: target.subtitle,
@@ -678,7 +679,7 @@ async function waitForPairingApproval(
     || !Number.isFinite(request.expiresAt)
     || request.expiresAt <= Date.now()
   ) {
-    throw new Error('The desktop returned an invalid approval request. Use the pairing PIN instead.');
+    throw new Error('The server returned an invalid approval request. Start pairing again.');
   }
 
   const deadline = Math.min(request.expiresAt, Date.now() + 65_000);
@@ -690,7 +691,7 @@ async function waitForPairingApproval(
     });
     if (response.status !== 202) return response;
   }
-  throw new Error('The desktop approval request expired. Tap Connect to try again or use the pairing PIN.');
+  throw new Error('The server approval request expired. Tap Connect to try again.');
 }
 
 function FallbackImage({
@@ -1296,7 +1297,6 @@ function AppRoot() {
     setProgress,
     setSavedConnection,
     setShareCode,
-    shareCode,
     showProfilePicker,
   } = useMobileConnectionSessionController({
     cancelActiveRequests: mobileLanClient.cancelActiveRequests,
@@ -1367,6 +1367,18 @@ function AppRoot() {
   const [artworkCacheBusters, setArtworkCacheBusters] = useState<Record<string, string>>({});
   const [posterCandidateSheet, setPosterCandidateSheet] = useState<PosterCandidateSheetState | null>(null);
   const [applyingPosterCandidateId, setApplyingPosterCandidateId] = useState('');
+  const {
+    downloads: mobileDownloads,
+    downloadingMediaId,
+    downloadPlayTarget,
+    removeDownloadedTarget,
+    targetWithOfflineDownload,
+  } = useMobileDownloadsController({
+    activeProfile,
+    client: mobileLanClient,
+    connection,
+    isServerOffline,
+  });
 
   const enterProfilePicker = (mode: MobileProfilePickerMode, nextConnection?: Connection, selectionRevision?: number): void => {
     profileHydrationGenerationRef.current += 1;
@@ -1461,7 +1473,7 @@ function AppRoot() {
           void SecureStore.deleteItemAsync(SAVED_CONNECTION_KEY);
           if (saved.hostDeviceId) void clearMobileOfflineSnapshot(saved.hostDeviceId);
           setBaseUrl(saved.baseUrl);
-          setError('This saved desktop predates secure host identity. Select it and enter the current 6-digit pairing PIN to pair again.');
+          setError('This saved connection predates secure host identity. Select the server and approve pairing again.');
           setIsServerOffline(true);
           return;
         }
@@ -1487,7 +1499,7 @@ function AppRoot() {
       const reconciliation = reconcileSavedHost(savedConnection, discoveredSavedHost);
       if (reconciliation.kind === 'identity-mismatch') {
         setIsServerOffline(true);
-        setError('Approve the refreshed connection on your desktop.');
+        setError('Approve the refreshed connection on your LoomTV server.');
         return;
       }
       if (reconciliation.kind === 'unchanged') return;
@@ -1568,7 +1580,7 @@ function AppRoot() {
           void stopSecureLanTransport();
           setOfflineSnapshotSavedAt(null);
           setIsServerOffline(false);
-          setError('Your secure session expired. Pair with the desktop again.');
+          setError('Your secure session expired. Pair with the LoomTV server again.');
           return;
         }
         setIsServerOffline(true);
@@ -1770,7 +1782,7 @@ function AppRoot() {
     present: boolean,
   ) => {
     if (!connection) return;
-    if (isServerOffline) throw new Error('Reconnect to the desktop before changing My List.');
+    if (isServerOffline) throw new Error('Reconnect to the LoomTV server before changing My List.');
     let response = await mobileLanClient.setProfileList(
       connection.baseUrl,
       connection.deviceToken,
@@ -1798,7 +1810,16 @@ function AppRoot() {
 
   const playHomeItem = useCallback((item: MediaItem) => {
     if (isServerOffline) {
-      setError('Playback needs the paired desktop. Your saved library is still available to browse.');
+      const offlineTarget = targetWithOfflineDownload(playTargetForItem(item, progress));
+      if (!offlineTarget) {
+        setError('This title is not downloaded. Reconnect to the LoomTV server to play it.');
+        return;
+      }
+      playerReturnItemRef.current = item;
+      setDetailItem(null);
+      setMiniPlayerTarget(null);
+      setStreamOptions({});
+      setPlayTarget(offlineTarget);
       return;
     }
     const requestIdentity = activeCatalogIdentityRef.current;
@@ -1812,7 +1833,7 @@ function AppRoot() {
         setPlayTarget(playTargetForItem(details, progress));
       })
       .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
-  }, [isServerOffline, playerReturnItemRef, progress, resolveMobileDetailItem, setDetailItem, setError, setMiniPlayerTarget, setPlayTarget, setStreamOptions]);
+  }, [isServerOffline, playerReturnItemRef, progress, resolveMobileDetailItem, setDetailItem, setError, setMiniPlayerTarget, setPlayTarget, setStreamOptions, targetWithOfflineDownload]);
 
   const connectionBaseUrl = connection?.baseUrl;
   const connectionDeviceToken = connection?.deviceToken;
@@ -1831,7 +1852,7 @@ function AppRoot() {
 
     try {
       const response = await mobileLanClient.saveProgress(connectionBaseUrl, connectionDeviceToken, {
-        mediaId: filePathFromUrl(target.streamPath),
+        mediaId: mediaIdForPlayTarget(target),
         position,
         duration: Number.isFinite(duration) ? duration : 0,
         selectionRevision: connectionSelectionRevision,
@@ -2024,7 +2045,19 @@ function AppRoot() {
     const requestController = new AbortController();
 
     async function prepareStream() {
-      if (!connection?.baseUrl || !connection.deviceToken || !playTarget) {
+      if (!playTarget) {
+        setPlaybackUrl(null);
+        return;
+      }
+
+      if (playTarget.offlineUri) {
+        setPlaybackFailure(null);
+        setIsPreparingStream(false);
+        setPlaybackUrl(playTarget.offlineUri);
+        return;
+      }
+
+      if (!connection?.baseUrl || !connection.deviceToken) {
         setPlaybackUrl(null);
         return;
       }
@@ -2032,22 +2065,16 @@ function AppRoot() {
       setPlaybackFailure(null);
       setIsPreparingStream(true);
       try {
-        const shouldUseHls = playTarget.transcode || hasStreamOptions(streamOptions);
-        if (!shouldUseHls) {
-          if (!cancelled) setPlaybackUrl(playTarget.streamPath);
-          return;
-        }
-
         const startSeconds = streamOptions.startSeconds ?? playTarget.startPosition ?? 0;
         const options: StreamOptions = {
           ...streamOptions,
-          forceTranscode: true,
+          forceTranscode: playTarget.transcode || hasStreamOptions(streamOptions),
           ...(startSeconds > 2 ? { startSeconds } : {}),
         };
         const response = await mobileLanClient.startHls(
           connection.baseUrl,
           connection.deviceToken,
-          filePathFromUrl(playTarget.streamPath),
+          mediaIdForPlayTarget(playTarget),
           options,
           connection.selectionRevision,
           requestController.signal,
@@ -2448,7 +2475,7 @@ function AppRoot() {
         setSavedConnection(null);
         setOfflineSnapshotSavedAt(null);
         setIsServerOffline(false);
-        setError('This device is no longer authorized. Select the desktop and enter its current 6-digit pairing PIN.');
+        setError('This device is no longer authorized. Select the server and approve pairing again.');
         return true;
       }
       if (catalog.status === 'profile-required') {
@@ -2484,11 +2511,11 @@ function AppRoot() {
         setConnection(null);
         void stopSecureLanTransport();
         setOfflineSnapshotSavedAt(null);
-        setError('Your secure session expired. Select the desktop and enter its current 6-digit pairing PIN.');
+        setError('Your secure session expired. Select the server and approve pairing again.');
         setIsServerOffline(false);
         return true;
       }
-      const connectionError = connectionErrorFor(nextError, 'The paired desktop is unavailable.');
+      const connectionError = connectionErrorFor(nextError, 'The paired LoomTV server is unavailable.');
       if (connectionError.isOffline && await restoreOfflineConnection(saved)) return false;
       returnToOnboarding();
       setIsServerOffline(connectionError.isOffline);
@@ -2510,21 +2537,16 @@ function AppRoot() {
     try {
       const host = discoveredHost && typeof discoveredHost.baseUrl === 'string' ? discoveredHost : undefined;
       const nextBaseUrl = normalizeBaseUrl(host?.baseUrl || baseUrl);
-      const code = shareCode.trim();
-      if (!host && !/^\d{6}$/.test(code)) throw new Error('Enter the 6-digit pairing PIN from the desktop app.');
       const observedFingerprint = host?.certFingerprint
         ? host.certFingerprint.replace(/[^0-9a-f]/gi, '').toLowerCase()
         : await probeLanCertificate(nextBaseUrl);
       await configureSecureLanTransport(nextBaseUrl, observedFingerprint);
 
-      let response = await mobileLanClient.pair(nextBaseUrl, host ? {
+      let response = await mobileLanClient.pair(nextBaseUrl, {
         approvalRequested: true,
         deviceName: mobileDeviceName(),
-      } : {
-          code,
-          deviceName: mobileDeviceName(),
       });
-      if (host && response.status === 202) {
+      if (response.status === 202) {
         setShareCode('');
         const approval = await readJsonResponse(
           response,
@@ -2541,16 +2563,16 @@ function AppRoot() {
         }
         if (response.status === 401) {
           throw new Error(host
-            ? 'Update LoomTV on the desktop, or connect manually.'
-            : 'The sharing code was not accepted.');
+            ? 'Update the LoomTV server, or connect manually.'
+            : 'The server did not accept this pairing request.');
         }
         if (response.status === 429) {
           if (failureMessage) throw new Error(failureMessage);
           const retryAfterSeconds = Number.parseInt(response.headers.get('Retry-After') || '', 10);
           const waitMinutes = Number.isFinite(retryAfterSeconds) ? Math.max(1, Math.ceil(retryAfterSeconds / 60)) : 5;
-          throw new Error(`Too many failed attempts. Wait ${waitMinutes} minutes, then use the current PIN from desktop Settings.`);
+          throw new Error(`Too many failed attempts. Wait ${waitMinutes} minutes, then request approval again.`);
         }
-        throw new Error(failureMessage || `Could not pair with the desktop app (${response.status}).`);
+        throw new Error(failureMessage || `Could not pair with the LoomTV server (${response.status}).`);
       }
 
       const payload = await readJsonResponse(response, mobilePairResponseSchema, 'Pairing');
@@ -2565,7 +2587,7 @@ function AppRoot() {
         refreshTokenExpiresAt: payload.refreshTokenExpiresAt,
         certFingerprint,
         hostDeviceId: payload.hostDeviceId || discoveredPairHost?.deviceId || '',
-        hostDeviceName: payload.hostDeviceName || 'LoomTV desktop',
+        hostDeviceName: payload.hostDeviceName || 'LoomTV server',
         clientDeviceName: mobileDeviceName(),
         library: payload.library || {},
         libraryEtag: payload.libraryEtag,
@@ -2906,8 +2928,8 @@ function AppRoot() {
 
   function confirmDisconnectFromDesktop(): void {
     Alert.alert(
-      'Disconnect this desktop?',
-      'You will need to pair again to use this desktop. The saved connection and offline library data will be removed from this device; media files on the desktop will not be deleted.',
+      'Disconnect this server?',
+      'You will need to pair again to use this server. The saved connection and offline library data will be removed from this device; media files on the server will not be deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Disconnect', style: 'destructive', onPress: disconnectFromDesktop },
@@ -2948,7 +2970,7 @@ function AppRoot() {
   async function refreshPosterOnHost(item: MediaItem) {
     if (!connection) return;
     if (isServerOffline) {
-      setArtworkRefreshError('Reconnect to the desktop before changing artwork.');
+      setArtworkRefreshError('Reconnect to the LoomTV server before changing artwork.');
       return;
     }
     setArtworkRefreshError('');
@@ -2976,7 +2998,7 @@ function AppRoot() {
   async function applyPosterCandidate(candidate: OfficialMetadataCandidate, candidateKey: string) {
     if (!connection || !posterCandidateSheet) return;
     if (isServerOffline) {
-      setArtworkRefreshError('Reconnect to the desktop before changing artwork.');
+      setArtworkRefreshError('Reconnect to the LoomTV server before changing artwork.');
       return;
     }
     const itemId = posterCandidateSheet.item.id;
@@ -3055,7 +3077,6 @@ function AppRoot() {
             setShareCode(value);
             if (error) setError('');
           }}
-          shareCode={shareCode}
           onPair={connectToDiscoveredHost}
         />
       ) : showProfilePicker ? (
@@ -3150,7 +3171,7 @@ function AppRoot() {
                       setAutomaticProfileSignIn(state.automaticSignIn);
                       if (!state.automaticSignIn) void clearMobileOfflineSnapshot(connection.hostDeviceId);
                     }).catch(() => {
-                      setError('Automatic sign-in could not be updated while the desktop is offline.');
+                      setError('Automatic sign-in could not be updated while the server is offline.');
                     });
                   }}
                   onSwitchProfile={() => enterProfilePicker('voluntary')}
@@ -3317,6 +3338,8 @@ function AppRoot() {
         progress={progress}
         artworkRefreshError={artworkRefreshError}
         isRefreshingArtwork={Boolean(detailItem && refreshingArtworkId === detailItem.id)}
+        downloadedMediaIds={new Set(Object.keys(mobileDownloads))}
+        downloadingMediaId={downloadingMediaId}
         onClose={closeDetail}
         onOpenKind={navigateToKind}
         onToggleList={async (kind, present) => {
@@ -3331,7 +3354,15 @@ function AppRoot() {
         onPlay={(target) => {
           if (!detailItem) return;
           if (isServerOffline) {
-            setError('Playback needs the paired desktop. Your saved library is still available to browse.');
+            const offlineTarget = targetWithOfflineDownload(target);
+            if (!offlineTarget) {
+              setError('This title is not downloaded. Reconnect to the LoomTV server to play it.');
+              return;
+            }
+            playerReturnItemRef.current = detailItem;
+            setMiniPlayerTarget(null);
+            setStreamOptions({});
+            setPlayTarget(offlineTarget);
             return;
           }
           const requestIdentity = activeCatalogIdentityRef.current;
@@ -3349,6 +3380,22 @@ function AppRoot() {
               setPlayTarget(episode ? episodePlayTarget(details, episode, progress) : playTargetForItem(details, progress));
             })
             .catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not prepare playback.'));
+        }}
+        onDownload={async (target) => {
+          try {
+            await downloadPlayTarget(target);
+            setArtworkRefreshError('Downloaded for offline playback.');
+          } catch (nextError) {
+            setArtworkRefreshError(nextError instanceof Error ? nextError.message : 'The download failed.');
+          }
+        }}
+        onRemoveDownload={async (target) => {
+          try {
+            await removeDownloadedTarget(target);
+            setArtworkRefreshError('Offline copy removed.');
+          } catch (nextError) {
+            setArtworkRefreshError(nextError instanceof Error ? nextError.message : 'The offline copy could not be removed.');
+          }
         }}
         onRefreshArtwork={refreshPosterOnHost}
       />
@@ -3376,7 +3423,7 @@ function AppRoot() {
           onOpen={() => {
             if (!miniPlayerTarget) return;
             if (isServerOffline) {
-              setError('Playback needs the paired desktop. Your saved library is still available to browse.');
+              setError('This title is not downloaded. Reconnect to the LoomTV server to play it.');
               return;
             }
             playerReturnItemRef.current = detailItem;
@@ -3441,7 +3488,6 @@ function PairingScreen({
   savedConnection,
   setBaseUrl,
   setShareCode,
-  shareCode,
   onPair,
 }: {
   baseUrl: string;
@@ -3456,11 +3502,10 @@ function PairingScreen({
   savedConnection: SavedConnection | null;
   setBaseUrl: (value: string) => void;
   setShareCode: (value: string) => void;
-  shareCode: string;
   onPair: (host?: DiscoveredHost) => Promise<void>;
 }) {
   const { colors: { accent, accentForeground, faint, text }, styles } = useMobileTheme();
-  const canPair = Boolean(baseUrl.trim()) && /^\d{6}$/.test(shareCode.trim());
+  const canPair = Boolean(baseUrl.trim());
   const [showManual, setShowManual] = useState(false);
   const [connectingHostDeviceId, setConnectingHostDeviceId] = useState<string | null>(null);
   const isConnecting = isPairing || isRestoringConnection;
@@ -3498,7 +3543,7 @@ function PairingScreen({
         <View style={styles.pairingHero}>
           <LoomLogo width={118} height={33} accent={accent} wordColor={text} />
           <Text selectable style={styles.pairingSubtitle}>
-            {savedConnection ? savedConnection.hostDeviceName : 'Finding your desktop…'}
+            {savedConnection ? savedConnection.hostDeviceName : 'Finding your LoomTV server…'}
           </Text>
         </View>
         <View style={styles.formBlock}>
@@ -3535,7 +3580,7 @@ function PairingScreen({
                     ]}
                     accessibilityRole="button"
                     accessibilityLabel={`Connect to ${host.deviceName}`}
-                    accessibilityHint="Uses the saved secure pairing when available; first-time devices may need desktop approval"
+                    accessibilityHint="Uses the saved secure pairing when available; first-time devices may need administrator approval"
                     accessibilityState={{ busy: isConnecting, disabled: isConnecting }}
                   >
                     <View style={styles.hostCardCopy}>
@@ -3556,7 +3601,7 @@ function PairingScreen({
                     <Text style={styles.emptyDiscoveryCopy}>
                       {discoveryError
                         ? discoveryError
-                        : 'Open LoomTV on your desktop.'}
+                        : 'Start LoomTV on your desktop or NAS.'}
                     </Text>
                   </>
                 )}
@@ -3567,9 +3612,9 @@ function PairingScreen({
           {manualVisible ? (
             <View style={styles.manualForm}>
               <View style={styles.inputField}>
-                <Text nativeID="desktop-address-label" style={styles.inputLabel}>Desktop address</Text>
+                <Text nativeID="desktop-address-label" style={styles.inputLabel}>Server address</Text>
                 <TextInput
-                  accessibilityLabel="Desktop address"
+                  accessibilityLabel="Server address"
                   accessibilityLabelledBy="desktop-address-label"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -3583,19 +3628,6 @@ function PairingScreen({
                   value={baseUrl}
                 />
               </View>
-              <TextInput
-                accessibilityLabel="One-time pairing PIN"
-                autoCapitalize="none"
-                autoCorrect={false}
-                inputMode="numeric"
-                keyboardType="number-pad"
-                maxLength={6}
-                onChangeText={(value) => setShareCode(value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="6-digit pairing PIN"
-                placeholderTextColor={faint}
-                style={[styles.input, styles.codeInput]}
-                value={shareCode}
-              />
             </View>
           ) : null}
           {error && !isServerOffline ? (
@@ -3630,7 +3662,7 @@ function PairingScreen({
             <Text selectable style={styles.manualHint}>Reconnecting…</Text>
           ) : manualVisible ? (
             <Text selectable style={styles.manualHint}>
-              {'Enter the address and PIN from desktop Settings > Network.'}
+              {'Enter the HTTPS address shown by LoomTV, then approve this device on the server.'}
             </Text>
           ) : null}
           <Pressable
@@ -3680,8 +3712,8 @@ function OfflineNotice({
   const body = !isGenericMessage
     ? message
     : savedAt
-      ? `Your saved library is available from ${formatOfflineSnapshotTime(savedAt)}. Playback and changes will resume when the desktop reconnects. LoomTV will keep trying automatically.`
-      : 'The desktop app or Local Network Sharing is unavailable. Check that the desktop is running and both devices are on the same network. LoomTV will keep trying automatically.';
+      ? `Your saved library is available from ${formatOfflineSnapshotTime(savedAt)}. Downloaded titles can play now; other playback and changes resume when the server reconnects. LoomTV will keep trying automatically.`
+      : 'The LoomTV server is unavailable. Check that it is running and reachable from this device. LoomTV will keep trying automatically.';
 
   return (
     <View
@@ -4154,6 +4186,10 @@ function DetailModal({
   onOpenKind,
   onToggleList,
   onPlay,
+  onDownload,
+  onRemoveDownload,
+  downloadedMediaIds,
+  downloadingMediaId,
   onRefreshArtwork,
 }: {
   activeProfile: MobileProfile | null;
@@ -4172,6 +4208,10 @@ function DetailModal({
   onOpenKind: (kind: LibraryKind) => void;
   onToggleList: (kind: 'watchlist' | 'favorite', present: boolean) => Promise<void>;
   onPlay: (target: PlayTarget) => void;
+  onDownload: (target: PlayTarget) => Promise<void>;
+  onRemoveDownload: (target: PlayTarget) => Promise<void>;
+  downloadedMediaIds: ReadonlySet<string>;
+  downloadingMediaId: string;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
   if (!item) return null;
@@ -4195,6 +4235,10 @@ function DetailModal({
       onOpenKind={onOpenKind}
       onToggleList={onToggleList}
       onPlay={onPlay}
+      onDownload={onDownload}
+      onRemoveDownload={onRemoveDownload}
+      downloadedMediaIds={downloadedMediaIds}
+      downloadingMediaId={downloadingMediaId}
       onRefreshArtwork={onRefreshArtwork}
     />
   );
@@ -4233,6 +4277,10 @@ function DetailContent({
   onOpenKind,
   onToggleList,
   onPlay,
+  onDownload,
+  onRemoveDownload,
+  downloadedMediaIds,
+  downloadingMediaId,
   onRefreshArtwork,
 }: {
   activeProfile: MobileProfile | null;
@@ -4251,6 +4299,10 @@ function DetailContent({
   onOpenKind: (kind: LibraryKind) => void;
   onToggleList: (kind: 'watchlist' | 'favorite', present: boolean) => Promise<void>;
   onPlay: (target: PlayTarget) => void;
+  onDownload: (target: PlayTarget) => Promise<void>;
+  onRemoveDownload: (target: PlayTarget) => Promise<void>;
+  downloadedMediaIds: ReadonlySet<string>;
+  downloadingMediaId: string;
   onRefreshArtwork: (item: MediaItem) => void;
 }) {
   const { colors: { accent, accentForeground, text }, styles } = useMobileTheme();
@@ -4308,6 +4360,12 @@ function DetailContent({
       : null;
   }, [episodes, progress]);
   const movieState = progressStateFor(progress, streamPathFor(item), item.localMetadata?.durationSeconds);
+  const primaryPlayTarget = isSeries && nextUp
+    ? episodePlayTarget(item, nextUp.ep, progress)
+    : playTargetForItem(item, progress);
+  const primaryMediaId = mediaIdForPlayTarget(primaryPlayTarget);
+  const isDownloaded = downloadedMediaIds.has(primaryMediaId);
+  const isDownloading = downloadingMediaId === primaryMediaId;
 
   const watchProgress = isSeries && nextUp ? nextUp.state : movieState;
   const watchPrimaryLabel = watchProgress.inProgress ? 'Resume' : isSeries ? 'Watch' : 'Watch Now';
@@ -4318,27 +4376,7 @@ function DetailContent({
   const watchMetaLabel = [watchEpisodeLabel, watchProgressCopy].filter(Boolean).join(' · ');
   const watchProgressWidth = `${Math.round(watchProgress.fraction * 100)}%` as `${number}%`;
   const onPressPlay = () => {
-    if (isSeries && nextUp) {
-      onPlay(episodePlayTarget(item, nextUp.ep, progress));
-    } else {
-      onPlay({
-        title: item.title,
-        subtitle: item.year ? String(item.year) : undefined,
-        streamPath: streamPathFor(item),
-        transcode: shouldTranscode(item),
-        localMetadata: item.localMetadata,
-        subtitles: item.subtitles,
-        startPosition: movieState.inProgress ? movieState.position : 0,
-        mediaId: item.id,
-        thumbnail: item.poster || item.backdrop,
-        thumbnailCandidates: [
-          item.poster,
-          ...(item.posterCandidates || []),
-          item.backdrop,
-          ...(item.backdropCandidates || []),
-        ].filter(Boolean) as string[],
-      });
-    }
+    onPlay(primaryPlayTarget);
   };
 
   const contentRating = item.contentRating
@@ -4425,6 +4463,17 @@ function DetailContent({
               </View>
             </View>
           </PressableScale>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={isDownloaded ? `Remove downloaded ${primaryPlayTarget.title}` : `Download ${primaryPlayTarget.title}`}
+            accessibilityState={{ disabled: isDownloading }}
+            disabled={isDownloading}
+            onPress={() => void (isDownloaded ? onRemoveDownload(primaryPlayTarget) : onDownload(primaryPlayTarget))}
+            style={({ pressed }) => [styles.detailTabButton, isDownloading && styles.disabledButton, pressed && styles.pressed]}
+          >
+            {isDownloading ? <ActivityIndicator color={accent} size="small" /> : <Ionicons name={isDownloaded ? 'checkmark-circle' : 'download-outline'} size={20} color={accent} />}
+            <Text style={styles.detailTabLabel}>{isDownloaded ? 'Remove download' : isDownloading ? 'Downloading…' : 'Download'}</Text>
+          </Pressable>
           {artworkRefreshError ? <Text selectable style={styles.detailErrorText}>{artworkRefreshError}</Text> : null}
 
           {hasEpisodeTab ? (
@@ -4523,7 +4572,7 @@ function DetailContent({
               <Text style={styles.episodesHeading}>Episodes</Text>
               <View style={styles.emptyEpisodesCard}>
                 <Text style={styles.emptyEpisodesTitle}>No episodes found</Text>
-                <Text style={styles.emptyEpisodesCopy}>Refresh the paired desktop library or rescan this show folder.</Text>
+                <Text style={styles.emptyEpisodesCopy}>Refresh the server library or rescan this show folder.</Text>
               </View>
             </View>
           ) : null}
@@ -4737,7 +4786,7 @@ function PosterCandidateSheet({
           {candidates.length === 0 ? (
             <View style={styles.posterCandidateEmpty}>
               <Text style={styles.posterCandidateEmptyTitle}>No matches found</Text>
-              <Text style={styles.posterCandidateEmptyCopy}>The desktop metadata search did not return poster choices for this title.</Text>
+              <Text style={styles.posterCandidateEmptyCopy}>The server metadata search did not return poster choices for this title.</Text>
             </View>
           ) : candidates.map((candidate, index) => {
             const candidateKey = metadataCandidateKey(candidate, index);
@@ -5801,7 +5850,7 @@ function PlayerContent({
             {isPreparing ? <ActivityIndicator color={accent} size="large" /> : null}
             <Text selectable style={styles.playerStatusText}>
               {failure?.message || (isPreparing
-                ? (showLongPreparation ? 'Preparing stream…' : 'Connecting to desktop…')
+                ? (showLongPreparation ? 'Preparing stream…' : 'Connecting to server…')
                 : 'Starting playback…')}
             </Text>
             <Text selectable numberOfLines={2} style={styles.playerStatusTitle}>{target.title}</Text>
@@ -6638,7 +6687,7 @@ function LibraryList({
       ListEmptyComponent={showEmpty ? (
         <View style={styles.emptyInline}>
           <Text selectable style={styles.emptyTitle}>No local matches found</Text>
-          <Text selectable style={styles.emptyCopy}>Try another search or refresh the shared desktop library.</Text>
+          <Text selectable style={styles.emptyCopy}>Try another search or refresh the server library.</Text>
         </View>
       ) : null}
       refreshControl={refreshControl}
@@ -6747,9 +6796,9 @@ function EmptyLibrary({ isTablet }: { isTablet: boolean }) {
       <View style={styles.emptyIcon}>
         <Text style={styles.emptyIconText}>＋</Text>
       </View>
-      <Text selectable style={styles.emptyTitle}>Add your first library folder on desktop</Text>
+      <Text selectable style={styles.emptyTitle}>Add your first library folder on the server</Text>
       <Text selectable style={styles.emptyCopy}>
-        Pairing worked. Add movies, TV shows, or anime folders in LoomTV desktop, then refresh here.
+        Pairing worked. Add video folders on your LoomTV server, then refresh here.
       </Text>
     </View>
   );

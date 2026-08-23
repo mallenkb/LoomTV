@@ -6,12 +6,12 @@ export const serverOfflineHint = 'Reconnecting automatically.';
 
 export function normalizeBaseUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, '');
-  if (!trimmed) throw new Error('Enter the desktop app address.');
+  if (!trimmed) throw new Error('Enter the LoomTV server address.');
   const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
   const parsed = new URL(normalized);
   if (parsed.protocol !== 'https:') {
     throw new Error(
-      'Use the secure HTTPS LAN address from desktop Settings → Network (for example, https://192.168.1.25:3848).',
+      'Use the secure HTTPS address shown by your LoomTV server, for example https://192.168.1.25:3848.',
     );
   }
   return parsed.origin;
@@ -69,7 +69,7 @@ export function connectionErrorFor(error: unknown, fallback: string): { message:
     return {
       isOffline,
       message: isOffline
-        ? `Desktop unavailable. ${serverOfflineHint}`
+        ? `Server unavailable. ${serverOfflineHint}`
         : error.message || fallback,
     };
   }
@@ -78,7 +78,7 @@ export function connectionErrorFor(error: unknown, fallback: string): { message:
   return {
     isOffline,
     message: isOffline
-      ? `Desktop unavailable. ${serverOfflineHint}`
+      ? `Server unavailable. ${serverOfflineHint}`
       : message,
   };
 }

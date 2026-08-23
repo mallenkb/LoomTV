@@ -1,9 +1,43 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { classifyVideoFile, createMediaItemId, isVideoFilePath } from '@loom-media-server/media-core';
 import { isPathWithin } from './media-path-guard.js';
 const CHECKPOINT_EVERY_FILES = 50;
+const SUBTITLE_FORMATS = Object.freeze({ '.srt': 'subrip', '.vtt': 'webvtt', '.ass': 'ass', '.ssa': 'ssa' });
+
+async function subtitleSidecarsFor(entries, videoPath) {
+  const directory = path.dirname(videoPath);
+  const videoBase = path.basename(videoPath, path.extname(videoPath));
+  const candidates = entries.filter((entry) => entry.isFile()).flatMap((entry) => {
+    const extension = path.extname(entry.name).toLowerCase();
+    const codec = SUBTITLE_FORMATS[extension];
+    const stem = path.basename(entry.name, extension);
+    if (!codec || (stem !== videoBase && !stem.startsWith(`${videoBase}.`))) return [];
+    const suffix = stem === videoBase ? [] : stem.slice(videoBase.length + 1).split('.').filter(Boolean);
+    const forced = suffix.some((part) => part.toLowerCase() === 'forced');
+    const defaultTrack = suffix.some((part) => ['default', 'sdh'].includes(part.toLowerCase()));
+    const language = suffix.find((part) => /^[a-z]{2,3}(?:-[A-Za-z]{2})?$/.test(part));
+    const sidecarPath = path.join(directory, entry.name);
+    return [{
+      id: `sidecar:${createHash('sha256').update(sidecarPath).digest('hex').slice(0, 24)}`,
+      path: sidecarPath,
+      relativeName: entry.name.slice(0, 500),
+      format: extension.slice(1), codec,
+      ...(language ? { language: language.toLowerCase() } : {}),
+      title: suffix.filter((part) => !['forced','default'].includes(part.toLowerCase()) && part !== language).join(' ').slice(0, 200) || undefined,
+      forced,
+      default: defaultTrack,
+      origin: 'local',
+    }];
+  });
+  const sidecars = [];
+  for (const candidate of candidates.slice(0, 64)) {
+    const stats = await fs.stat(candidate.path).catch(() => null);
+    if (stats?.isFile()) sidecars.push({ ...candidate, sizeBytes: stats.size, modifiedAtMs: stats.mtimeMs });
+  }
+  return sidecars;
+}
 
 function scanCancelledError() {
   return Object.assign(new Error('The library scan was cancelled.'), { code: 'scan_cancelled' });
@@ -13,7 +47,7 @@ function throwIfAborted(signal) {
   if (signal?.aborted) throw scanCancelledError();
 }
 
-function mediaRecord(root, filePath, stats) {
+function mediaRecord(root, filePath, stats, subtitleSidecars = []) {
   const relativePath = path.relative(root.path, filePath);
   // Shared classification keeps the headless catalog structurally identical
   // to what the desktop scanner derives for the same mounted files.
@@ -39,6 +73,7 @@ function mediaRecord(root, filePath, stats) {
     modifiedAtMs: stats.mtimeMs,
     available: true,
     indexedAt: Date.now(),
+    ...(subtitleSidecars.length ? { subtitleSidecars } : {}),
   };
 }
 
@@ -83,7 +118,7 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { sign
       if (!entry.isFile() || !isVideoFilePath(entry.name)) continue;
       try {
         throwIfAborted(signal);
-        await onFile(fullPath, await fs.stat(fullPath));
+        await onFile(fullPath, await fs.stat(fullPath), await subtitleSidecarsFor(entries, fullPath));
       } catch (error) {
         if (error?.code === 'scan_cancelled') throw error;
         onError(fullPath, error);
@@ -132,9 +167,9 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
       await walkVideoFiles(
         root.path,
         rootReal,
-        async (filePath, stats) => {
+        async (filePath, stats, subtitleSidecars) => {
           throwIfAborted(signal);
-          discovered.push(mediaRecord(root, filePath, stats));
+          discovered.push(mediaRecord(root, filePath, stats, subtitleSidecars));
           scannedFiles += 1;
           if (scannedFiles % CHECKPOINT_EVERY_FILES === 0) {
             const current = await loadState();

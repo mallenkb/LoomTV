@@ -195,7 +195,7 @@ export function createTrustedProxyPolicy(value = []) {
     let selected = peer;
     for (let index = hops.length - 1; index >= 0; index -= 1) {
       const candidate = parseAddress(hops[index]);
-      if (!candidate) return selected.canonical;
+      if (!candidate) return peer.canonical;
       selected = candidate;
       if (!parsedTrusted(candidate)) break;
     }

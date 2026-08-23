@@ -1,0 +1,471 @@
+import * as SecureStore from 'expo-secure-store';
+import { StatusBar } from 'expo-status-bar';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Zeroconf from 'react-native-zeroconf';
+import {
+  ActivityIndicator,
+  BackHandler,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CanonicalTvClient, type Credential, type LibraryItem, type Profile } from './canonical-client.ts';
+import { discoveredTvServer, type DiscoveredTvServer } from './discovery.ts';
+import { backDestination, type TvScreen } from './focus-model.ts';
+import {
+  probeTvCertificate,
+  secureServerOrigin,
+  startTvSecureTransport,
+  stopTvSecureTransport,
+} from './secure-transport.ts';
+
+const CONNECTION_KEY = 'loomtv-tv-connection-v1';
+const DEVICE_ID_KEY = 'loomtv-tv-device-id-v1';
+const colors = { background: '#090a0c', panel: '#17191d', panelFocus: '#2b2f36', text: '#f7f7f8', muted: '#a8adb8', accent: '#fc9c03', danger: '#ff6b6b' };
+
+type SavedConnection = { baseUrl: string; certificateFingerprint: string; credential: Credential };
+type PendingTrust = { baseUrl: string; certificateFingerprint: string; name: string };
+type ActivePlayback = {
+  item: LibraryItem;
+  url: string;
+  action: 'direct' | 'hls';
+  sessionId?: string;
+  expiresAt?: number;
+  startSeconds: number;
+};
+type PlaybackTrack = { id: string; kind: string; language?: string; title?: string };
+
+function TvButton({ label, onPress, disabled = false, preferred = false }: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  preferred?: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      disabled={disabled}
+      hasTVPreferredFocus={preferred}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onPress={onPress}
+      style={[styles.button, focused && styles.focused, disabled && styles.disabled]}
+    >
+      <Text style={styles.buttonText}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function TvCard({ item, width, preferred, onPress }: {
+  item: LibraryItem;
+  width: `${number}%`;
+  preferred: boolean;
+  onPress: () => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <Pressable
+      accessibilityLabel={`${item.title}${item.available ? '' : ', unavailable'}`}
+      accessibilityRole="button"
+      disabled={!item.available}
+      hasTVPreferredFocus={preferred}
+      onBlur={() => setFocused(false)}
+      onFocus={() => setFocused(true)}
+      onPress={onPress}
+      style={[styles.card, { width }, focused && styles.focused, !item.available && styles.disabled]}
+    >
+      <Text numberOfLines={2} style={styles.cardTitle}>{item.title}</Text>
+      <Text style={styles.muted}>{item.year || item.kind}</Text>
+    </Pressable>
+  );
+}
+
+function Player({ playback, client, onClose, onError }: {
+  playback: ActivePlayback;
+  client: CanonicalTvClient;
+  onClose: () => void;
+  onError: (message: string) => void;
+}) {
+  const [expiresAt, setExpiresAt] = useState(playback.expiresAt || 0);
+  const player = useVideoPlayer(playback.url, (instance) => {
+    instance.currentTime = playback.startSeconds;
+    instance.timeUpdateEventInterval = 5;
+    instance.play();
+  });
+
+  useEffect(() => {
+    let lastSaved = playback.startSeconds;
+    const update = player.addListener('timeUpdate', ({ currentTime }) => {
+      if (Math.abs(currentTime - lastSaved) < 15) return;
+      lastSaved = currentTime;
+      void client.saveProgress(playback.item.id, currentTime, player.duration, false).catch(() => undefined);
+    });
+    const ended = player.addListener('playToEnd', () => {
+      void client.saveProgress(playback.item.id, player.duration, player.duration, true).catch(() => undefined);
+    });
+    return () => { update.remove(); ended.remove(); };
+  }, [client, playback.item.id, playback.startSeconds, player]);
+
+  useEffect(() => {
+    if (!expiresAt || !playback.sessionId) return undefined;
+    const delay = Math.max(1_000, expiresAt - Date.now() - 60_000);
+    const timer = setTimeout(() => {
+      const position = player.currentTime;
+      void client.renewPlayback(playback.item.id, playback.action, playback.sessionId as string).then(async (renewed) => {
+        await player.replaceAsync(renewed.url);
+        player.currentTime = position;
+        player.play();
+        setExpiresAt(renewed.expiresAt);
+      }).catch((error) => onError(error instanceof Error ? error.message : 'Playback authorization expired.'));
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [client, expiresAt, onError, playback.action, playback.item.id, playback.sessionId, player]);
+
+  return (
+    <View style={styles.playerScreen}>
+      <VideoView accessibilityLabel={`Playing ${playback.item.title}`} contentFit="contain" nativeControls player={player} style={styles.video} />
+      <View style={styles.playerClose}><TvButton label="Back to details" onPress={() => {
+        void client.saveProgress(playback.item.id, player.currentTime, player.duration, false).catch(() => undefined);
+        onClose();
+      }} preferred /></View>
+    </View>
+  );
+}
+
+function TvApp() {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const columns = width >= 1700 ? 6 : width >= 1200 ? 5 : 4;
+  const [screen, setScreen] = useState<TvScreen>('connect');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [client, setClient] = useState<CanonicalTvClient | null>(null);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [items, setItems] = useState<LibraryItem[]>([]);
+  const [detail, setDetail] = useState<LibraryItem | null>(null);
+  const [playback, setPlayback] = useState<ActivePlayback | null>(null);
+  const [playbackTracks, setPlaybackTracks] = useState<PlaybackTrack[]>([]);
+  const [audioTrackId, setAudioTrackId] = useState<string | null | undefined>(undefined);
+  const [subtitleTrackId, setSubtitleTrackId] = useState<string | null | undefined>(undefined);
+  const [query, setQuery] = useState('');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState('');
+  const [discoveredServers, setDiscoveredServers] = useState<DiscoveredTvServer[]>([]);
+  const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null);
+  const [invitationId, setInvitationId] = useState('');
+  const [invitationSecret, setInvitationSecret] = useState('');
+  const pairingGeneration = useRef(0);
+
+  const visibleItems = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return items.filter((item) => item.kind !== 'episode' && (!normalized || item.title.toLowerCase().includes(normalized)));
+  }, [items, query]);
+
+  useEffect(() => {
+    void SecureStore.getItemAsync(CONNECTION_KEY).then(async (raw) => {
+      if (!raw) return;
+      const saved = JSON.parse(raw) as SavedConnection;
+      if (!saved.certificateFingerprint) throw new Error('The saved server identity is incomplete.');
+      const proxyBaseUrl = await startTvSecureTransport(saved.baseUrl, saved.certificateFingerprint);
+      const restored = new CanonicalTvClient(saved.baseUrl, saved.credential, proxyBaseUrl);
+      await restored.discover();
+      setBaseUrl(saved.baseUrl);
+      setClient(restored);
+      setProfiles((await restored.profiles()).profiles);
+      setScreen('profiles');
+    }).catch(() => SecureStore.deleteItemAsync(CONNECTION_KEY)).finally(() => setBusy(false));
+  }, []);
+
+  useEffect(() => {
+    if (screen !== 'connect') return undefined;
+    const zeroconf = new Zeroconf();
+    const finish = setTimeout(() => { try { zeroconf.stop(); } catch { /* Discovery is optional. */ } }, 6_000);
+    zeroconf.on('resolved', (service) => {
+      const discovered = discoveredTvServer(service);
+      if (!discovered) return;
+      setDiscoveredServers((current) => [discovered, ...current.filter((entry) => entry.id !== discovered.id)]);
+    });
+    zeroconf.on('error', () => undefined);
+    try { zeroconf.scan('loomtv', 'tcp', 'local.'); } catch { /* Manual entry remains available. */ }
+    return () => {
+      clearTimeout(finish);
+      try { zeroconf.stop(); } catch { /* Already stopped. */ }
+      zeroconf.removeAllListeners();
+      zeroconf.removeDeviceListeners();
+    };
+  }, [screen]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const destination = backDestination(screen);
+      if (destination === 'exit') return false;
+      if (screen === 'approval') pairingGeneration.current += 1;
+      if (screen === 'player' && playback && client) {
+        void client.stopPlayback(playback.item.id, playback.sessionId).catch(() => undefined);
+        setPlayback(null);
+      }
+      if (screen === 'detail') { setDetail(null); setPlaybackTracks([]); }
+      if (screen === 'trust') setPendingTrust(null);
+      setScreen(destination);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [client, playback, screen]);
+
+  async function inspectManualServer() {
+    setBusy(true);
+    setError('');
+    try {
+      const origin = secureServerOrigin(baseUrl);
+      const certificateFingerprint = await probeTvCertificate(origin);
+      setBaseUrl(origin);
+      setPendingTrust({ baseUrl: origin, certificateFingerprint, name: origin });
+      setScreen('trust');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not inspect the server certificate.');
+    } finally { setBusy(false); }
+  }
+
+  async function requestApproval() {
+    if (!pendingTrust) return;
+    const generation = pairingGeneration.current + 1;
+    pairingGeneration.current = generation;
+    setBusy(true);
+    setError('');
+    try {
+      const proxyBaseUrl = await startTvSecureTransport(pendingTrust.baseUrl, pendingTrust.certificateFingerprint);
+      const next = new CanonicalTvClient(pendingTrust.baseUrl, null, proxyBaseUrl);
+      await next.discover();
+      if (invitationId.trim() || invitationSecret.trim()) {
+        if (!invitationId.trim() || !invitationSecret.trim()) throw new Error('Enter both invitation fields.');
+        let deviceId = await SecureStore.getItemAsync(DEVICE_ID_KEY);
+        if (!deviceId) {
+          deviceId = `tv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+          await SecureStore.setItemAsync(DEVICE_ID_KEY, deviceId);
+        }
+        const accepted = await next.acceptInvitation(invitationId.trim(), invitationSecret.trim(), deviceId);
+        const credential = { ...accepted.credential, scheme: 'LoomInvitation' as const };
+        next.setCredential(credential);
+        await SecureStore.setItemAsync(CONNECTION_KEY, JSON.stringify({
+          baseUrl: next.baseUrl,
+          certificateFingerprint: pendingTrust.certificateFingerprint,
+          credential,
+        } satisfies SavedConnection));
+        setProfiles((await next.profiles()).profiles);
+        setClient(next);
+        setInvitationId('');
+        setInvitationSecret('');
+        setScreen('profiles');
+        return;
+      }
+      const request = await next.requestPairing('LoomTV living-room client');
+      setClient(next);
+      setScreen('approval');
+      setBusy(false);
+      const deadline = Math.min(request.expiresAt, Date.now() + 5 * 60 * 1000);
+      while (Date.now() < deadline && pairingGeneration.current === generation) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        if (pairingGeneration.current !== generation) return;
+        const status = await next.pairingStatus(request.requestId, request.requestSecret);
+        if (status.status === 'pending') continue;
+        if (status.status !== 'approved' || !status.credential) throw new Error(status.status === 'denied' ? 'The server denied this television.' : 'Pairing expired. Try again.');
+        next.setCredential(status.credential);
+        await SecureStore.setItemAsync(CONNECTION_KEY, JSON.stringify({
+          baseUrl: next.baseUrl,
+          certificateFingerprint: pendingTrust.certificateFingerprint,
+          credential: status.credential,
+        } satisfies SavedConnection));
+        setProfiles((await next.profiles()).profiles);
+        setScreen('profiles');
+        return;
+      }
+      throw new Error('Pairing expired. Try again.');
+    } catch (nextError) {
+      setScreen('connect');
+      setError(nextError instanceof Error ? nextError.message : 'Could not connect to the server.');
+    } finally { setBusy(false); }
+  }
+
+  async function chooseProfile(profile: Profile) {
+    if (!client) return;
+    setBusy(true);
+    setError('');
+    try {
+      await client.selectProfile(profile.id, pin || undefined);
+      setPin('');
+      setItems((await client.library()).items);
+      setScreen('library');
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : 'Could not select this profile.'); }
+    finally { setBusy(false); }
+  }
+
+  async function play(item: LibraryItem) {
+    if (!client) return;
+    setBusy(true);
+    setError('');
+    try {
+      const progress = await client.progress(item.id).catch(() => ({ progress: null }));
+      const record = progress.progress;
+      const startSeconds = Math.max(0, Number(record?.positionSeconds ?? record?.position ?? 0));
+      const plan = await client.planPlayback(item.id, startSeconds, { audioTrackId, subtitleTrackId });
+      if (plan.directUrl) {
+        setPlayback({
+          item, url: client.absoluteUrl(plan.directUrl), action: 'direct',
+          sessionId: plan.directSessionId, expiresAt: plan.directExpiresAt, startSeconds,
+        });
+        setScreen('player');
+        return;
+      }
+      if (!plan.transcodeUrl) throw new Error('This video cannot be played by this television.');
+      const started = await client.startTranscode(plan.transcodeUrl);
+      setPlayback({
+        item, url: started.playlistUrl, action: 'hls', sessionId: started.sessionId,
+        expiresAt: started.expiresAt, startSeconds,
+      });
+      setScreen('player');
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : 'Playback could not start.'); }
+    finally { setBusy(false); }
+  }
+
+  async function loadPlaybackOptions(item: LibraryItem) {
+    if (!client) return;
+    setBusy(true);
+    setError('');
+    try {
+      const plan = await client.planPlayback(item.id, 0);
+      setPlaybackTracks(plan.probe.tracks || []);
+    } catch (nextError) { setError(nextError instanceof Error ? nextError.message : 'Playback options are unavailable.'); }
+    finally { setBusy(false); }
+  }
+
+  async function signOut() {
+    pairingGeneration.current += 1;
+    await client?.signOut().catch(() => undefined);
+    await SecureStore.deleteItemAsync(CONNECTION_KEY);
+    await stopTvSecureTransport();
+    setClient(null); setProfiles([]); setItems([]); setDetail(null); setPlayback(null); setError(''); setScreen('connect');
+  }
+
+  if (screen === 'player' && playback && client) return <Player
+    client={client}
+    onClose={() => {
+      void client.stopPlayback(playback.item.id, playback.sessionId).catch(() => undefined);
+      setPlayback(null);
+      setScreen('detail');
+    }}
+    onError={(message) => setError(message)}
+    playback={playback}
+  />;
+
+  return (
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerStyle={[styles.page, { paddingTop: Math.max(48, insets.top), paddingBottom: Math.max(48, insets.bottom), paddingLeft: Math.max(64, insets.left), paddingRight: Math.max(64, insets.right) }]}
+    >
+      <StatusBar style="light" hidden />
+      <View style={styles.header}>
+        <View><Text style={styles.brand}>LoomTV</Text><Text style={styles.eyebrow}>YOUR VIDEO LIBRARY</Text></View>
+        {screen !== 'connect' && screen !== 'approval' ? <TvButton label="Sign out" onPress={() => void signOut()} /> : null}
+      </View>
+      {busy ? <View style={styles.center}><ActivityIndicator color={colors.accent} size="large" /><Text style={styles.muted}>Working…</Text></View> : null}
+      {!busy && screen === 'connect' ? <View style={styles.connectPanel}>
+        <Text style={styles.title}>Connect this television</Text>
+        <Text style={styles.copy}>Choose a discovered server or enter its secure address. LoomTV will show the certificate identity before sending a pairing request.</Text>
+        {discoveredServers.length ? <View style={styles.row}>{discoveredServers.map((server, index) => <TvButton
+          key={server.id}
+          label={server.name}
+          onPress={() => {
+            setBaseUrl(server.baseUrl);
+            setPendingTrust({ baseUrl: server.baseUrl, certificateFingerprint: server.certificateFingerprint, name: server.name });
+            setScreen('trust');
+          }}
+          preferred={index === 0}
+        />)}</View> : <Text style={styles.muted}>Searching the local network…</Text>}
+        <TextInput accessibilityLabel="LoomTV server address" autoCapitalize="none" autoCorrect={false} onChangeText={setBaseUrl} placeholder="https://192.168.1.25:3848" placeholderTextColor={colors.muted} style={styles.input} value={baseUrl} />
+        <Text style={styles.muted}>Invitation, if this server was shared with you</Text>
+        <View style={styles.row}>
+          <TextInput accessibilityLabel="Invitation ID" autoCapitalize="none" autoCorrect={false} onChangeText={setInvitationId} placeholder="Invitation ID" placeholderTextColor={colors.muted} style={[styles.input, styles.halfInput]} value={invitationId} />
+          <TextInput accessibilityLabel="Invitation secret" autoCapitalize="none" autoCorrect={false} onChangeText={setInvitationSecret} placeholder="Invitation secret" placeholderTextColor={colors.muted} secureTextEntry style={[styles.input, styles.halfInput]} value={invitationSecret} />
+        </View>
+        <TvButton disabled={!baseUrl.trim()} label="Inspect server identity" onPress={() => void inspectManualServer()} preferred={!discoveredServers.length} />
+      </View> : null}
+      {!busy && screen === 'trust' && pendingTrust ? <View style={styles.connectPanel}>
+        <Text style={styles.title}>Trust this server?</Text>
+        <Text style={styles.copy}>{pendingTrust.name}{'\n'}{pendingTrust.baseUrl}</Text>
+        <Text selectable style={styles.fingerprint}>{pendingTrust.certificateFingerprint.match(/.{1,4}/g)?.join(' ')}</Text>
+        <Text style={styles.copy}>Compare this fingerprint with LoomTV administration before approving the television.</Text>
+        <View style={styles.row}><TvButton label="Trust and request approval" onPress={() => void requestApproval()} preferred /><TvButton label="Cancel" onPress={() => { setPendingTrust(null); setScreen('connect'); }} /></View>
+      </View> : null}
+      {!busy && screen === 'approval' ? <View style={styles.center}><Text style={styles.title}>Approve this television</Text><Text style={styles.copy}>Open LoomTV administration on another device and approve “LoomTV living-room client.”</Text></View> : null}
+      {!busy && screen === 'profiles' ? <View style={styles.section}>
+        <Text style={styles.title}>Who is watching?</Text>
+        <TextInput accessibilityLabel="Profile PIN, when required" keyboardType="number-pad" maxLength={12} onChangeText={setPin} placeholder="Profile PIN if required" placeholderTextColor={colors.muted} secureTextEntry style={styles.input} value={pin} />
+        <View style={styles.row}>{profiles.map((profile, index) => <TvButton key={profile.id} label={profile.name} onPress={() => void chooseProfile(profile)} preferred={index === 0} />)}</View>
+      </View> : null}
+      {!busy && screen === 'library' ? <View style={styles.section}>
+        <Text style={styles.title}>Library</Text>
+        <TextInput accessibilityLabel="Search library" onChangeText={setQuery} placeholder="Search movies and series" placeholderTextColor={colors.muted} style={styles.input} value={query} />
+        {visibleItems.length ? <View style={styles.grid}>{visibleItems.map((item, index) => <TvCard item={item} key={item.id} onPress={() => { setDetail(item); setScreen('detail'); }} preferred={index === 0} width={`${(100 / columns) - 2}%`} />)}</View> : <Text style={styles.copy}>No matching video is available.</Text>}
+      </View> : null}
+      {!busy && screen === 'detail' && detail ? <View style={styles.detail}>
+        <Text style={styles.title}>{detail.title}</Text>
+        <Text style={styles.muted}>{[detail.year, detail.kind].filter(Boolean).join(' • ')}</Text>
+        <Text selectable style={styles.copy}>{detail.summary || 'No description is available.'}</Text>
+        {detail.kind === 'series' ? <View style={styles.row}>{(detail.episodes || []).map((episode, index) => <TvButton key={episode.id} label={`${episode.seasonNumber || 1}×${episode.episodeNumber || 0} ${episode.title}`} onPress={() => { setDetail(episode); setPlaybackTracks([]); }} preferred={index === 0} />)}</View> : null}
+        {detail.kind !== 'series' && playbackTracks.length ? <View style={styles.trackPanel}>
+          <Text style={styles.muted}>Audio</Text>
+          <View style={styles.row}>{playbackTracks.filter((track) => track.kind === 'audio').map((track) => <TvButton key={track.id} label={`${audioTrackId === track.id ? 'Selected: ' : ''}${track.title || track.language || track.id}`} onPress={() => setAudioTrackId(track.id)} />)}</View>
+          <Text style={styles.muted}>Subtitles</Text>
+          <View style={styles.row}><TvButton label={`${subtitleTrackId === null ? 'Selected: ' : ''}Off`} onPress={() => setSubtitleTrackId(null)} />{playbackTracks.filter((track) => track.kind === 'subtitle').map((track) => <TvButton key={track.id} label={`${subtitleTrackId === track.id ? 'Selected: ' : ''}${track.title || track.language || track.id}`} onPress={() => setSubtitleTrackId(track.id)} />)}</View>
+        </View> : null}
+        <View style={styles.row}>
+          {detail.kind !== 'series' ? <TvButton label="Play" onPress={() => void play(detail)} preferred /> : null}
+          {detail.kind !== 'series' ? <TvButton label="Playback options" onPress={() => void loadPlaybackOptions(detail)} /> : null}
+          {detail.kind !== 'series' ? <TvButton label="Add to watchlist" onPress={() => void client?.setListEntry(detail.id, 'watchlist', true).catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not update the list.'))} /> : null}
+          <TvButton label="Back to library" onPress={() => { setDetail(null); setPlaybackTracks([]); setScreen('library'); }} preferred={detail.kind === 'series'} />
+        </View>
+      </View> : null}
+      {error ? <Text accessibilityLiveRegion="assertive" accessibilityRole="alert" selectable style={styles.error}>{error}</Text> : null}
+    </ScrollView>
+  );
+}
+
+export default function App() { return <SafeAreaProvider><TvApp /></SafeAreaProvider>; }
+
+const styles = StyleSheet.create({
+  page: { flexGrow: 1, backgroundColor: colors.background, gap: 36 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  brand: { color: colors.text, fontSize: 42, fontWeight: '800' },
+  eyebrow: { color: colors.accent, fontSize: 13, fontWeight: '800', letterSpacing: 3 },
+  title: { color: colors.text, fontSize: 40, fontWeight: '700' },
+  copy: { color: colors.muted, fontSize: 24, lineHeight: 34, maxWidth: 980 },
+  muted: { color: colors.muted, fontSize: 18 },
+  error: { color: colors.danger, fontSize: 22, lineHeight: 30 },
+  fingerprint: { color: colors.text, fontSize: 20, lineHeight: 30, fontFamily: 'monospace' },
+  center: { flex: 1, minHeight: 420, alignItems: 'center', justifyContent: 'center', gap: 22 },
+  connectPanel: { alignSelf: 'center', width: '70%', maxWidth: 1000, gap: 26, paddingTop: 70 },
+  section: { gap: 28 },
+  detail: { gap: 24, maxWidth: 1100 },
+  trackPanel: { gap: 16, paddingVertical: 12 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 22 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 20 },
+  input: { minHeight: 72, borderWidth: 3, borderColor: '#3b3f48', borderRadius: 12, color: colors.text, backgroundColor: colors.panel, fontSize: 24, paddingHorizontal: 24 },
+  halfInput: { flex: 1, minWidth: 360 },
+  button: { minHeight: 66, minWidth: 180, justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: '#3b3f48', borderRadius: 12, backgroundColor: colors.panel, paddingHorizontal: 28 },
+  buttonText: { color: colors.text, fontSize: 22, fontWeight: '700' },
+  focused: { borderColor: colors.accent, backgroundColor: colors.panelFocus, transform: [{ scale: 1.04 }] },
+  disabled: { opacity: 0.42 },
+  card: { minHeight: 190, justifyContent: 'flex-end', gap: 12, backgroundColor: colors.panel, borderWidth: 4, borderColor: 'transparent', borderRadius: 16, padding: 22 },
+  cardTitle: { color: colors.text, fontSize: 25, lineHeight: 31, fontWeight: '700' },
+  playerScreen: { flex: 1, backgroundColor: '#000' },
+  video: { flex: 1 },
+  playerClose: { position: 'absolute', top: 36, left: 48 },
+});

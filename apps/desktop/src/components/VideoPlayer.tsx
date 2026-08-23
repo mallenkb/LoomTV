@@ -7,7 +7,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type Hls from 'hls.js';
 import type { ErrorData } from 'hls.js';
-import LoomLoader from '@/components/LoomLoader';
 import { useTheme } from '@/components/ThemeProvider';
 import { useModalLayer } from '@/components/ui/dialog';
 import { useLibrary } from '@/contexts/LibraryContext';
@@ -3538,7 +3537,7 @@ export default function VideoPlayer({
   };
   return (
     <div
-      className={`loom-player-root fixed inset-0 z-[70] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''}`}
+      className={`loom-player-root fixed inset-0 z-[90] flex ${nativePlaybackActive ? 'loom-player-native bg-transparent' : 'bg-black'} ${fullscreen ? 'loom-player-is-fullscreen' : ''} ${isModern ? 'loom-player-modern' : ''}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="loom-player-title"
@@ -3639,11 +3638,9 @@ export default function VideoPlayer({
             aria-live="polite"
             className="absolute inset-0 z-20 bg-black/55 flex flex-col items-center justify-center gap-2 text-center"
           >
-            <LoomLoader
-              style={theme.loaderStyle}
-              className="grid h-16 w-16 place-items-center rounded-full bg-white/10 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur-md"
-              markClassName={theme.loaderStyle === 'horizontal-logo' ? 'h-6 w-auto' : 'h-9 w-9'}
-              color="currentColor"
+            <div
+              aria-hidden="true"
+              className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/80"
             />
             <p className="text-sm text-white/80">{statusMessage || 'Loading...'}</p>
           </div>

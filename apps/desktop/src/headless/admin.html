@@ -164,6 +164,7 @@
     .empty { padding: 35px 22px; color: var(--muted); text-align: center; }
     .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     .field { display: grid; gap: 7px; }
+    .field[hidden] { display: none; }
     .field.full { grid-column: 1 / -1; }
     .field label { color: var(--muted); font-size: 12px; font-weight: 700; }
     .field input, .field select { width: 100%; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 9px; outline: 0; background: var(--loom-bg); color: var(--text); }
@@ -344,6 +345,11 @@
             </div>
             <p class="field-hint" id="passwordHint">Use at least 8 characters.</p>
           </div>
+          <div class="field full" id="bootstrapSecretField" hidden>
+            <label for="bootstrapSecret">One-time bootstrap secret</label>
+            <input id="bootstrapSecret" type="password" autocomplete="off" maxlength="1024" spellcheck="false" placeholder="Paste the secret shown when LoomTV started">
+            <p class="field-hint">Required only while creating the first owner account.</p>
+          </div>
           <p class="auth-error" id="authError" role="alert" aria-live="polite"></p>
           <div class="form-actions">
             <button class="button subtle" id="closeAuthButton" type="button">Cancel</button>
@@ -400,7 +406,13 @@
         const response = await fetch(`${API}${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
         let payload = null;
         try { payload = await response.json(); } catch (_) { /* empty response */ }
-        if (response.status === 401) { setToken(''); openAuth(false); throw new Error('Admin authentication is required.'); }
+        if (response.status === 401) {
+          const expiredToken = Boolean(state.token);
+          setToken('');
+          if (path === '/bootstrap' && expiredToken) return request(path, options);
+          openAuth(false);
+          throw new Error('Admin authentication is required.');
+        }
         if (!response.ok) throw new Error(payload?.message || payload?.error || `Request failed (${response.status}).`);
         return payload;
       }
@@ -579,9 +591,9 @@
       }
       function closeRootPicker() { $('rootPicker').hidden = true; }
       function setAuthError(message = '') { text('authError', message); show('authError', Boolean(message)); }
-      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || Boolean($('ownerName').value.trim())); $('authSubmit').disabled = !ready; }
+      function updateAuthSubmitState() { const firstRun = $('authForm').dataset.firstRun === 'true'; const ready = $('ownerPassword').value.length >= 8 && (!firstRun || (Boolean($('ownerName').value.trim()) && Boolean($('bootstrapSecret').value.trim()))); $('authSubmit').disabled = !ready; }
       function setPasswordVisibility(visible) { const input = $('ownerPassword'); const toggle = $('toggleOwnerPassword'); input.type = visible ? 'text' : 'password'; toggle.setAttribute('aria-label', visible ? 'Hide password' : 'Show password'); toggle.title = visible ? 'Hide password' : 'Show password'; toggle.setAttribute('aria-pressed', String(visible)); $('passwordIconUse').setAttribute('href', `/admin/lucide-icons.svg#${visible ? 'eye-off' : 'eye'}`); }
-      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Create the owner account used to protect this browser control plane.' : 'Use a LoomTV account password to create a short-lived session.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
+      function openAuth(firstRun) { const name = $('ownerName'); const password = $('ownerPassword'); const bootstrapSecret = $('bootstrapSecret'); $('authModal').classList.add('show'); $('ownerNameField').style.display = 'grid'; $('bootstrapSecretField').hidden = !firstRun; bootstrapSecret.required = firstRun; name.required = firstRun; name.placeholder = firstRun ? 'Your name' : 'Optional for owner · required for user accounts'; text('ownerNameLabel', firstRun ? 'Owner name' : 'Account name (optional)'); password.autocomplete = firstRun ? 'new-password' : 'current-password'; password.placeholder = firstRun ? 'Choose a password' : 'Enter your password'; text('passwordHint', firstRun ? 'Use at least 8 characters.' : 'Use your account name to sign in as a non-owner user.'); text('authTitle', firstRun ? 'Set up your LoomTV owner' : 'Unlock server control'); text('authCopy', firstRun ? 'Create the owner account used to protect this browser control plane.' : 'Use a LoomTV account password to create a short-lived session.'); text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); password.value = ''; bootstrapSecret.value = ''; setAuthError(); setPasswordVisibility(false); $('authForm').dataset.firstRun = firstRun ? 'true' : 'false'; updateAuthSubmitState(); (firstRun ? name : password).focus(); }
       function closeAuth() { $('authModal').classList.remove('show'); }
       function openRoot(kind) { $('rootModal').classList.add('show'); closeRootPicker(); if (kind) $('rootKind').value = kind; $('rootPath').focus(); }
       function closeRoot() { closeRootPicker(); $('rootModal').classList.remove('show'); }
@@ -594,6 +606,7 @@
       $('toggleOwnerPassword').addEventListener('click', () => setPasswordVisibility($('ownerPassword').type === 'password'));
       $('ownerName').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('ownerPassword').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
+      $('bootstrapSecret').addEventListener('input', () => { setAuthError(); updateAuthSubmitState(); });
       $('closeAuthButton').addEventListener('click', closeAuth);
       $('closeRootButton').addEventListener('click', closeRoot);
       $('browseRootButton').addEventListener('click', openRootPicker);
@@ -651,7 +664,7 @@
       $('logFilterButton').addEventListener('click', () => { void loadLogs(true); });
       $('logsNextButton').addEventListener('click', () => { if (state.logPage?.nextOffset !== null) { state.logOffset = state.logPage.nextOffset; void loadLogs(false); } });
       $('rootForm').addEventListener('submit', async (event) => { event.preventDefault(); try { await request('/library/roots', { method: 'POST', body: { path: $('rootPath').value.trim(), kind: $('rootKind').value } }); closeRoot(); $('rootPath').value = ''; toast('Library root added.'); await loadRoots(); await loadBootstrap(); } catch (err) { error(err.message); } });
-      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
+      $('authForm').addEventListener('submit', async (event) => { event.preventDefault(); const firstRun = event.currentTarget.dataset.firstRun === 'true'; const password = $('ownerPassword').value; const name = $('ownerName').value.trim(); const submit = $('authSubmit'); setAuthError(); submit.disabled = true; text('authSubmit', firstRun ? 'Creating…' : 'Unlocking…'); try { const result = firstRun ? await request('/onboarding/owner', { method: 'POST', body: { name, password, bootstrapSecret: $('bootstrapSecret').value.trim() } }) : await request('/session', { method: 'POST', body: { ...(name ? { username: name } : {}), password } }); if (result?.adminToken) setToken(result.adminToken); closeAuth(); toast(firstRun ? 'Owner created. Server control is unlocked.' : 'Admin session unlocked.'); await loadBootstrap(); } catch (err) { setAuthError(err.message); } finally { text('authSubmit', firstRun ? 'Create owner' : 'Unlock'); updateAuthSubmitState(); } });
       updateAuthButton();
       loadBootstrap();
     })();

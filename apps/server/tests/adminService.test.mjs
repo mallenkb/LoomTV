@@ -31,7 +31,7 @@ async function makeService(overrides = {}) {
 }
 
 function bearer(token) {
-  return { headers: { authorization: `Bearer ${token}` } };
+  return { headers: { authorization: `Bearer ${token}` }, socket: { remoteAddress: '127.0.0.1' } };
 }
 
 async function onboardedService(overrides = {}) {
@@ -430,11 +430,11 @@ test('credential resets enforce privilege scope, verify self-service, revoke ses
     rootIds: null,
   }, owner);
 
-  const managerSession = await service.createSession({ username: manager.name, password: managerPassword });
+  const managerSession = await service.createSession({ username: manager.name, password: managerPassword, address: '127.0.0.1' });
   const managerPrincipal = await service.authenticateRequest(bearer(managerSession.adminToken));
-  const limitedAdminSession = await service.createSession({ username: limitedAdmin.name, password: limitedAdminPassword });
+  const limitedAdminSession = await service.createSession({ username: limitedAdmin.name, password: limitedAdminPassword, address: '127.0.0.1' });
   const limitedAdminPrincipal = await service.authenticateRequest(bearer(limitedAdminSession.adminToken));
-  const viewerSession = await service.createSession({ username: viewer.name, password: viewerPassword });
+  const viewerSession = await service.createSession({ username: viewer.name, password: viewerPassword, address: '127.0.0.1' });
 
   await assert.rejects(
     () => service.changePassword({ userId: broadAdmin.id, newPassword: 'stolen-admin-password-1' }, managerPrincipal),
@@ -466,7 +466,7 @@ test('credential resets enforce privilege scope, verify self-service, revoke ses
 
   assert.deepEqual(await service.changePassword({ userId: viewer.id, newPassword: 'viewer-password-2' }, owner), { changed: true });
   assert.equal(await service.authenticateRequest(bearer(viewerSession.adminToken)), null, 'an owner reset revokes target sessions');
-  const viewerAfterReset = await service.createSession({ username: viewer.name, password: 'viewer-password-2' });
+  const viewerAfterReset = await service.createSession({ username: viewer.name, password: 'viewer-password-2', address: '127.0.0.1' });
   assert.equal((await service.authenticateRequest(bearer(viewerAfterReset.adminToken))).id, viewer.id);
 
   const state = JSON.parse(await fs.readFile(path.join(dataDir, headlessAdminStateFilename), 'utf8'));

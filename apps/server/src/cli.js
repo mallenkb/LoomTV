@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { createHeadlessServer, readServerVersion } from './server.js';
+import { createCanonicalVideoServer, readServerVersion } from './server.js';
 import { resolveRuntimePaths } from '@loom-media-server/runtime-paths';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,6 +20,7 @@ Options:
   --cache-dir <path>     Cache directory
   --media-dir <path>     Optional media root (may be offline at startup)
   --ffmpeg-path <path>   FFmpeg executable used for transcoding probes
+  --ffprobe-path <path>  FFprobe executable used for media inspection
   --require-secure-transport  Reject admin and credential requests over HTTP
   --trusted-proxies <list>  Comma-separated trusted proxy IPs/CIDRs
   --help                 Show this help
@@ -28,6 +29,7 @@ Environment aliases:
   HOST / LOOMTV_HOST, PORT / LOOMTV_PORT,
   DATA_DIR / LOOMTV_DATA_DIR, CACHE_DIR / LOOMTV_CACHE_DIR,
   MEDIA_DIR / LOOMTV_MEDIA_DIR, FFMPEG_PATH / LOOMTV_FFMPEG_PATH,
+  FFPROBE_PATH / LOOMTV_FFPROBE_PATH,
   REQUIRE_SECURE_TRANSPORT / LOOMTV_REQUIRE_SECURE_TRANSPORT,
   TRUSTED_PROXIES / LOOMTV_TRUSTED_PROXIES
 `;
@@ -76,7 +78,7 @@ function parseArgs(args) {
     const equalsIndex = argument.indexOf('=');
     const name = equalsIndex >= 0 ? argument.slice(0, equalsIndex) : argument;
     const inlineValue = equalsIndex >= 0 ? argument.slice(equalsIndex + 1) : undefined;
-    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', '--trusted-proxies', ...booleanOptions ].includes(name)) {
+    if (![ '--host', '--port', '--data-dir', '--cache-dir', '--media-dir', '--ffmpeg-path', '--ffprobe-path', '--trusted-proxies', ...booleanOptions ].includes(name)) {
       throw usageError(`Unknown option: ${argument}`);
     }
     if (booleanOptions.has(name)) {
@@ -110,6 +112,8 @@ function buildConfig(cliValues) {
   });
   const ffmpegPath = cliValues.ffmpegpath
     || readEnvironmentValue('FFMPEG_PATH', 'LOOMTV_FFMPEG_PATH');
+  const ffprobePath = cliValues.ffprobepath
+    || readEnvironmentValue('FFPROBE_PATH', 'LOOMTV_FFPROBE_PATH');
   const requireSecureTransport = cliValues.requiresecuretransport !== undefined
     ? cliValues.requiresecuretransport
     : ['1', 'true', 'yes'].includes((readEnvironmentValue('REQUIRE_SECURE_TRANSPORT', 'LOOMTV_REQUIRE_SECURE_TRANSPORT') || '').toLowerCase());
@@ -120,7 +124,7 @@ function buildConfig(cliValues) {
   const trustedProxies = cliValues.trustedproxies
     || readEnvironmentValue('TRUSTED_PROXIES', 'LOOMTV_TRUSTED_PROXIES')
     || '';
-  return { host, port, paths, ffmpegPath, requireSecureTransport, trustedProxies };
+  return { host, port, paths, ffmpegPath, ffprobePath, requireSecureTransport, trustedProxies };
 }
 
 async function run() {
@@ -132,7 +136,7 @@ async function run() {
   const config = buildConfig(cliValues);
   await ensureRuntimeDirectories(config.paths);
   const version = await readServerVersion(PACKAGE_ROOT);
-  const service = createHeadlessServer({ ...config, version });
+  const service = createCanonicalVideoServer({ ...config, version, deploymentMode: 'standalone' });
   let stopping = false;
 
   const stop = async (signal) => {

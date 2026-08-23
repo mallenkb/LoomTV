@@ -88,6 +88,8 @@
     "@loom-media-server/media-core": "workspace:*",
     "@loom-media-server/plugin-protocol": "workspace:*",
     "@loom-media-server/transcode-capabilities": "workspace:*",
+    "@loom-media-server/video-contracts": "workspace:*",
+    "@loom-media-server/video-migration": "workspace:*",
     "@phosphor-icons/react": "2.1.10",
     "better-sqlite3": "12.11.1",
     "bonjour-service": "1.3.0",
@@ -98,6 +100,7 @@
     "koffi": "3.1.4",
     "lucide-react": "1.14.0",
     "motion": "12.38.0",
+    "loom-media-server-headless": "workspace:*",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-router": "8.3.0",
@@ -140,6 +143,18 @@
       {
         "from": "resources/trayIcon@2x.png",
         "to": "trayIcon@2x.png"
+      },
+      {
+        "from": "../server/src/web-app.html",
+        "to": "web-app.html"
+      },
+      {
+        "from": "src/headless/admin.html",
+        "to": "admin.html"
+      },
+      {
+        "from": "src/headless/lucide-icons.svg",
+        "to": "lucide-icons.svg"
       },
       {
         "from": "resources/libvlc/NOTICE.md",

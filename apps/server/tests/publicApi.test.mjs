@@ -172,16 +172,12 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     assert.equal(show.title, 'My Show');
     assert.equal(show.episodeCount, 2);
     assert.equal(show.seasons[0].season, 1);
-    assert.deepEqual(show.seasons[0].episodes.map((episode) => episode.series.episode), [1, 2]);
+    assert.deepEqual(show.seasons[0].episodes.map((episode) => episode.episodeNumber), [1, 2]);
 
     const media = await authed('GET', `/api/v1/media/${encodeURIComponent(mediaId)}`);
     assert.equal(media.status, 200);
-    assert.match(media.payload.data.directUrl, /^\/api\/v1\/media\/.+\/direct\?token=/);
-
-    // The issued playback token must satisfy the direct route without a
-    // bearer header, the way an HTMLMediaElement uses it.
-    const direct = await fetch(`${baseUrl}${media.payload.data.directUrl}`, { method: 'HEAD' });
-    assert.equal(direct.status, 200);
+    assert.match(media.payload.data.playbackPlanUrl, /^\/api\/v1\/media\/.+\/playback-plan$/);
+    assert.equal(media.payload.data.directUrl, null, 'media details must not mint a playback capability');
 
     // A stale or forged query token must not.
     const forged = await fetch(`${baseUrl}/api/v1/media/${encodeURIComponent(mediaId)}/direct?token=forged-token`, { method: 'HEAD' });

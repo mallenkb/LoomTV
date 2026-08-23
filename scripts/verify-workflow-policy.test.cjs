@@ -7,6 +7,9 @@ const {
   desktopPackagingViolations,
   findPolicyViolations,
   releaseWorkflowViolations,
+  verifyWorkflowDirectory,
+  workspacePackageIndex,
+  workspaceSelectorViolations,
 } = require('./verify-workflow-policy.cjs');
 
 const CHECKOUT_SHA = '3d3c42e5aac5ba805825da76410c181273ba90b1';
@@ -227,4 +230,84 @@ test('accepts the checked-in release-specific workflow contract', () => {
   const workflowPath = path.join(__dirname, '..', '.github', 'workflows', 'release.yml');
   const source = fs.readFileSync(workflowPath, 'utf8');
   assert.deepEqual(releaseWorkflowViolations(YAML.parse(source), source), []);
+});
+
+const workspacePackagesFixture = new Map([
+  ['@loom-media-server/mobile', { directory: 'apps/mobile', scripts: { test: 'node --test', typecheck: 'tsc' } }],
+  ['loom-media-server-desktop', { directory: 'apps/desktop', scripts: { dist: 'electron-builder --publish=never' } }],
+]);
+
+test('rejects a workspace filter that names no current package', () => {
+  const violations = workspaceSelectorViolations(
+    'fixture.yml',
+    '      - run: pnpm --filter @loomtv/mobile test\n',
+    workspacePackagesFixture,
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /fixture\.yml:1: --filter @loomtv\/mobile does not resolve to a workspace package/);
+});
+
+test('accepts a workspace filter that names a current package and script', () => {
+  assert.deepEqual(workspaceSelectorViolations(
+    'fixture.yml',
+    '      - run: pnpm --filter @loom-media-server/mobile test\n'
+    + '      - run: corepack pnpm --filter loom-media-server-desktop run dist\n',
+    workspacePackagesFixture,
+  ), []);
+});
+
+test('rejects a workspace filter that runs a script the package does not declare', () => {
+  const violations = workspaceSelectorViolations(
+    'fixture.yml',
+    '      - run: pnpm --filter @loom-media-server/mobile run verify:tv-release\n',
+    workspacePackagesFixture,
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /runs "verify:tv-release", which is not a script in that package/);
+});
+
+test('ignores pnpm built-in commands and quoted selectors after a filter', () => {
+  assert.deepEqual(workspaceSelectorViolations(
+    'fixture.yml',
+    "      - run: pnpm --filter '@loom-media-server/mobile' exec expo prebuild --clean --no-install\n"
+    + '      - run: pnpm --filter=@loom-media-server/mobile install --frozen-lockfile\n',
+    workspacePackagesFixture,
+  ), []);
+});
+
+test('rejects a run-time computed workspace filter', () => {
+  const violations = workspaceSelectorViolations(
+    'fixture.yml',
+    '      - run: pnpm --filter "$PACKAGE" test\n',
+    workspacePackagesFixture,
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /computed at run time/);
+});
+
+test('rejects a workflow that runs a repository script which does not exist', () => {
+  const violations = workspaceSelectorViolations(
+    'fixture.yml',
+    '      - run: node scripts/verify-television-release.cjs\n',
+    workspacePackagesFixture,
+  );
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /node scripts\/verify-television-release\.cjs does not exist/);
+});
+
+test('indexes every current workspace package from pnpm-workspace.yaml', () => {
+  const packages = workspacePackageIndex();
+  for (const name of [
+    '@loom-media-server/mobile',
+    '@loom-media-server/video-contracts',
+    '@loom-media-server/video-migration',
+    'loom-media-server-desktop',
+    'loom-media-server-headless',
+  ]) {
+    assert.ok(packages.has(name), `${name} must be indexed as a workspace package`);
+  }
+});
+
+test('every checked-in workflow selector resolves against the current manifests', () => {
+  assert.ok(verifyWorkflowDirectory().length > 0);
 });

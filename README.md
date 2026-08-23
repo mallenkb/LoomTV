@@ -1,8 +1,17 @@
 # LoomTV
 
-LoomTV is a desktop media library app for browsing and playing a local collection of movies, TV shows, and anime. It is built with Electron Forge, Vite, React, TypeScript, Tailwind CSS, and a local SQLite-backed library.
+LoomTV is a private, self-hosted video library for browsing and playing movies, TV shows, anime, and other video files. One canonical server, API, account system, and SQLite store power desktop-hosted, headless/NAS, browser, mobile, and Android TV/Fire TV clients.
 
 This project is for organizing and playing media files that you own, have created, or are otherwise authorized to use. LoomTV does not provide movies, TV shows, anime, streaming subscriptions, or copyrighted media.
+
+> **On naming.** The shipped product is **LoomTV**: that is
+> `productName` in `apps/desktop/package.json`, the installer and application
+> name, and the name `scripts/release-identity.cjs` enforces on every release.
+> "Loom Media Server" appears throughout this document and in the workspace
+> package names (`loom-media-server-desktop`, `loom-media-server-headless`) as
+> the older internal name. The two refer to the same product. The package
+> identifiers remain unchanged for now to keep this release-truth cleanup
+> separate from a repository-wide naming migration.
 
 ![LoomTV empty library home screen](docs/screenshots/loomtv-home-empty-library.png)
 
@@ -30,6 +39,10 @@ This project is for organizing and playing media files that you own, have create
 - Fetch posters, backdrops, cast data, ratings, and summaries from metadata providers.
 - Continue watching with saved playback progress.
 - Play local media with direct stream and HLS/transcode fallback support.
+- Run the same canonical server inside the desktop app or independently on a NAS.
+- Use scoped household accounts, multiple administrators, profiles, PINs, device pairing, and private invitations.
+- Download video for offline mobile or browser use and hand browser playback to supported AirPlay or Remote Playback receivers.
+- Browse and play from the hosted web, iOS/Android mobile, and Android TV/Fire TV clients.
 
 ## Headless and NAS deployment
 
@@ -37,15 +50,16 @@ The repository now includes a GUI-independent headless server for NAS and
 always-on hosts. It provides runtime health, mounted-root status, a persistent
 catalog scanner that preserves records when a share is offline, authenticated
 direct media delivery, on-demand HLS transcoding, a browser control surface,
-and Docker/systemd deployment scaffolding. Profiles and watch-state storage
-remain desktop-only.
+and Docker/systemd deployment scaffolding. Accounts, profiles, selections,
+lists, progress, devices, invitations, downloads, and playback sessions all use
+the canonical server state.
 
 - Start the health/admin boundary with `pnpm server:start`.
 - Open `/healthz` or `/admin/` on the configured server address.
 - Follow the [NAS deployment guide](docs/nas-deployment.md) for Docker Compose,
   systemd, mounted SMB/NFS shares, backups, permissions, and hardware access.
-- See the [feature status matrix](docs/loomtv-vs-jellyfin-feature-status.md) for
-  current completion percentages, remaining gaps, and recommended priorities.
+- See the [video feature status](docs/loomtv-vs-jellyfin-feature-status.md) for
+  implemented behavior, verification evidence, and remaining platform checks.
 - Generate thumbnails and inspect local media details with bundled FFmpeg/FFprobe resources.
 - Customize artwork, theme color, loader style, and sidebar ordering.
 - Back up the local database from Settings.
@@ -158,8 +172,10 @@ Download the installer or archive for your operating system, then run it like an
 
 ## Playback Architecture
 
-- Local desktop files preserve the classic Loom player composition. On macOS they play through the LibVLC in-window native surface, then packaged or user/system-installed mpv, then the browser/HLS path; other platforms start at mpv. Set `LOOMTV_LIBVLC_COMPOSITED_SURFACE=0` to force the mpv/browser fallback for a launch.
-- LAN, remote, and mobile playback continue through LoomTV's authenticated direct-play/transcode and browser/HLS paths.
+- The desktop application starts the canonical server and opens its hosted `/app/` client in a sandboxed Electron window. It does not run a second desktop catalog or account authority.
+- Every client requests a canonical playback plan. Compatible files receive a short-lived, media/profile-bound direct capability. Other files use an authenticated HLS session backed by FFmpeg.
+- Mobile and TV clients pin the server certificate and route requests through the native streaming transport. Browser, casting, and external subtitle capabilities remain bounded and revocable.
+- Legacy LibVLC, mpv, renderer, and v2 compatibility code remains in the repository for migration and rollback work, but it is not the canonical packaged desktop entry point.
 
 ## Getting Started
 
@@ -195,47 +211,70 @@ The app opens as an Electron desktop application. Add media folders from Setting
 
 Local development is powered by Electron Forge. Release builds are generated by Electron Builder so GitHub releases include the update metadata files that `electron-updater` expects.
 
+Both commands live in the `loom-media-server-desktop` workspace, not at the
+repository root. Run them through the workspace filter.
+
 ### Package Locally
 
 ```sh
-corepack pnpm run package
+corepack pnpm --filter loom-media-server-desktop run package
 ```
 
-This creates an unpacked local app build under `out/`.
+This creates an unpacked local app build under `apps/desktop/out/`.
 
 ### Create Installers or Archives
 
 ```sh
-corepack pnpm run dist
+corepack pnpm --filter loom-media-server-desktop run dist
 ```
 
-This creates platform-specific distributables under `out/builder/`.
+This runs `electron-builder --publish=never` and writes platform-specific
+distributables under `apps/desktop/out/builder/`.
 
-Configured makers include:
+Electron Builder targets (`apps/desktop/package.json` `build`):
 
-- macOS: DMG and ZIP archive, including `latest-mac.yml` update metadata.
-- Windows: NSIS installer, including `latest.yml` update metadata.
+- macOS: DMG and ZIP for `arm64` and `x64`, including `latest-mac.yml` update metadata.
+- Windows: NSIS installer for `x64`, including `latest.yml` update metadata.
 - Linux: AppImage, DEB, and RPM packages. AppImage builds can participate in the updater flow.
+
+Electron Forge makers (`apps/desktop/forge.config.ts`) are a separate local-only
+set and do not produce release artifacts: ZIP on all three platforms, DMG on
+macOS, plus Squirrel, RPM, and DEB when their platform toolchains are present.
 
 ### Publish
 
-```sh
-corepack pnpm run publish
-```
-
-Publishes distributables through Electron Builder's GitHub publisher. Publishing requires `GH_TOKEN` or `GITHUB_TOKEN` with release permissions.
+There is no `publish` script in this repository, and no local command publishes a
+release. `dist` always passes `--publish=never`, so Electron Builder's GitHub
+publisher is never invoked. Releases are published only by
+`.github/workflows/release.yml`, which uploads artifacts with the `gh` CLI after
+verifying tag identity, checksums, and build attestations.
 
 For release automation:
 
-1. Bump version with `pnpm version 1.0.12` (or the next patch/minor version).
-2. Push commit and create/push a tag that matches `v*`:
+1. Bump the desktop version, which is the version the release gate checks.
+   `X.Y.Z` below is a placeholder for the version you are releasing:
 
    ```sh
-   git push origin main
-   git push origin v1.0.12
+   corepack pnpm --filter loom-media-server-desktop version X.Y.Z --no-git-tag-version
    ```
 
-3. The release workflow in `.github/workflows/release.yml` runs on version-tag pushes or a manual dispatch gated by the protected `production-release` environment. It creates macOS/Windows/Linux installers with Electron Builder and uploads them with updater metadata (`latest*.yml`, `.blockmap`) to the GitHub release. Pull-request events and `main`-branch pushes run only `.github/workflows/validate.yml`, which has a read-only token and no signing or publishing secrets.
+   `scripts/release-identity.cjs` requires `apps/desktop/package.json` to match
+   the tag exactly. The root manifest is private and carries no version, so
+   `pnpm version` at the root does not set the release version.
+2. Write the release notes the gate requires at `docs/releases/vX.Y.Z.md`.
+   `scripts/release-identity.cjs` fails a release whose notes file is missing,
+   empty, or a symlink.
+3. Commit the version, lockfile, and release notes. Push that commit to `main`.
+4. Create and push an annotated tag matching
+   `vMAJOR.MINOR.PATCH`. Prerelease and build-metadata tags are rejected,
+   because there is only one updater channel:
+
+   ```sh
+   git tag -a vX.Y.Z -m 'LoomTV X.Y.Z'
+   git push origin vX.Y.Z
+   ```
+
+5. The release workflow in `.github/workflows/release.yml` runs on version-tag pushes or a manual dispatch gated by the protected `production-release` environment. It creates macOS/Windows/Linux installers with Electron Builder and uploads them with updater metadata (`latest*.yml`, `.blockmap`) to the GitHub release. Pull-request events and `main`-branch pushes run only `.github/workflows/validate.yml`, which has a read-only token and no signing or publishing secrets.
 
 ### Auto-update behavior
 
@@ -245,11 +284,24 @@ For release automation:
 - After a package is downloaded, Loom Media Server prompts to restart now. If you skip, the update remains ready in-app until installed later.
 
 - Requirements:
-  - GitHub releases must be published with version tags like `v1.0.12`.
+  - GitHub releases must be published with stable `vX.Y.Z` tags.
   - Release assets must include install artifacts and Electron Builder update metadata files (workflow is configured for this).
-  - macOS/Windows release builds should be signed in CI for reliable install/update trust.
-  - mac signing: configure Electron Builder signing secrets such as `CSC_LINK` and `CSC_KEY_PASSWORD`; notarization also needs Apple credentials such as `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`.
-  - Windows signing: configure Electron Builder signing secrets such as `CSC_LINK` and `CSC_KEY_PASSWORD`.
+  - Signing is credential-gated, not mandatory. The release workflow reads
+    platform-specific secrets and maps them onto `CSC_LINK` and
+    `CSC_KEY_PASSWORD` itself; do not set the generic names as repository
+    secrets.
+  - macOS signing: `MACOS_CSC_LINK`, `MACOS_CSC_KEY_PASSWORD`, `APPLE_ID`,
+    `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID`. Supplying
+    `MACOS_CSC_LINK` without all four companions fails the build rather than
+    producing a partly signed artifact.
+  - Windows signing: `WINDOWS_CSC_LINK`, `WINDOWS_CSC_KEY_PASSWORD`, and
+    `WINDOWS_SIGNER_THUMBPRINT`, with the same all-or-nothing rule.
+  - When the platform certificate secret is absent the workflow still produces a
+    release: macOS falls back to the existing ad-hoc signer and Windows produces
+    an unsigned installer. The post-build signature and notarization checks are
+    skipped in that case, so an unsigned release is possible and will show OS
+    trust prompts on install and update.
+  - Linux builds never sign; `CSC_IDENTITY_AUTO_DISCOVERY` is forced off.
 
 ### macOS external distribution
 
@@ -294,11 +346,33 @@ Loom Media Server can enrich local files with artwork and metadata. Open Setting
 ```text
 apps/
   desktop/
-    src/         Electron main process, renderer UI, database, playback, probing, and transcode code.
-    resources/   Bundled FFmpeg and FFprobe resources and notices.
+    src/main.ts  Electron main-process entrypoint (app lifecycle, windows, IPC wiring).
+    src/main/    Main-process modules: database, playback, probing, transcode, LAN.
+    src/         Renderer UI (React) and shared renderer libraries.
+    resources/   Bundled FFmpeg, FFprobe, and staged native playback resources and notices.
     tests/       Desktop unit tests.
-  mobile/        Expo React Native iOS/Android companion for paired-LAN browsing and playback.
+  server/        Headless server runtime: /api/v1, admin service, library scanner,
+                 transcoder, and the browser client at /app/.
+  mobile/        Expo React Native iOS/Android client.
+packages/
+  video-contracts/        Canonical API, identity, account, profile, and playback contracts.
+  media-core/             Shared media identity, classification, and playback-plan helpers.
+  runtime-paths/          Data, cache, and media directory resolution shared by both runtimes.
+  transcode-capabilities/ Client capability and transcode-decision helpers.
+  lan-protocol/           Desktop/mobile LAN pairing and transport types.
+  plugin-protocol/        Stremio-style plugin protocol and sandbox types.
+deploy/
+  docker/        Dockerfile, compose file, and entrypoint for the headless server.
+  systemd/       Unit and environment example for a Linux service install.
+scripts/         Release-identity, evidence, workflow-policy, and audit tooling.
+docs/            Product, deployment, release, and status documentation.
 ```
+
+The desktop and NAS/container deployments use the same canonical server in
+`apps/server`. The packaged desktop entry performs the one-time legacy migration
+before startup and does not open a second catalog or account authority. See the
+[canonical migration guide](docs/canonical-migration.md) and
+[video feature status](docs/loomtv-vs-jellyfin-feature-status.md).
 
 ## Building and Packaging
 

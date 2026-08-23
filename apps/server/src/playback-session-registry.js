@@ -127,6 +127,10 @@ export function createPlaybackSessionRegistry(options = {}) {
     const expectedPrincipal = expected.principalId ?? expected.userId;
     if (expectedPrincipal !== undefined && entry.principalId !== expectedPrincipal) return false;
     if (expected.itemId !== undefined && entry.itemId !== expected.itemId) return false;
+    if (expected.profileId !== undefined && entry.profile?.profileId !== expected.profileId) return false;
+    if (expected.deviceId !== undefined && entry.profile?.deviceId !== expected.deviceId) return false;
+    if (expected.selectionRevision !== undefined && entry.profile?.selectionRevision !== expected.selectionRevision) return false;
+    if (expected.sourceId !== undefined && entry.profile?.sourceId !== expected.sourceId) return false;
     if (expected.action !== undefined) {
       const actions = Array.isArray(expected.action) ? expected.action : [expected.action];
       if (!actions.includes(entry.action)) return false;
@@ -319,6 +323,24 @@ export function createPlaybackSessionRegistry(options = {}) {
     return count;
   }
 
+  function revokeByDevice(deviceId, reason = 'device_revoked', currentTime = now()) {
+    let count = 0;
+    for (const entry of [...sessions.values()]) {
+      if (entry.profile?.deviceId === deviceId) count += revokeEntry(entry, reason, currentTime) ? 1 : 0;
+    }
+    return count;
+  }
+
+  function revokeByAuthenticationSession(authenticationSessionId, reason = 'auth_session_revoked', currentTime = now()) {
+    let count = 0;
+    for (const entry of [...sessions.values()]) {
+      if (entry.profile?.authenticationSessionId === authenticationSessionId) {
+        count += revokeEntry(entry, reason, currentTime) ? 1 : 0;
+      }
+    }
+    return count;
+  }
+
   function revokeByItem(itemId, reason = 'item_revoked', currentTime = now()) {
     let count = 0;
     for (const entry of [...sessions.values()]) {
@@ -376,6 +398,8 @@ export function createPlaybackSessionRegistry(options = {}) {
     retry: create,
     revoke,
     revokeByPrincipal,
+    revokeByDevice,
+    revokeByAuthenticationSession,
     revokeByItem,
     revokeAll,
     remove,

@@ -6,90 +6,972 @@
   <meta name="theme-color" content="#090909">
   <title>LoomTV</title>
   <style>
-    :root{color-scheme:dark;--bg:#090909;--panel:#151515;--line:#2b2b2b;--text:#f7f7f7;--muted:#a3a3a3;--accent:#fc9c03;--ok:#64d99b}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:10px;background:#202020;color:var(--text);padding:10px 14px}button.primary{background:var(--accent);border-color:var(--accent);color:#111;font-weight:700}button:disabled{opacity:.5;cursor:not-allowed}input,select{width:100%;border:1px solid var(--line);border-radius:9px;background:#0d0d0d;color:var(--text);padding:11px 12px}label{display:grid;gap:6px;color:var(--muted);font-size:13px}header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px max(20px,calc((100vw - 1180px)/2));border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(9,9,9,.9);backdrop-filter:blur(14px);z-index:2}.brand{font-size:23px;font-weight:800;letter-spacing:-.04em}.brand b{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:32px 20px 64px}.eyebrow{color:var(--accent);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.12em}h1{margin:4px 0 8px;font-size:clamp(32px,5vw,56px);letter-spacing:-.06em;line-height:1}h2{margin:0 0 14px;font-size:22px}.muted{color:var(--muted)}.status{min-height:24px;margin:12px 0;color:var(--muted)}.card{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:20px;box-shadow:0 12px 35px #0004}.auth{max-width:460px;margin:8vh auto}.form{display:grid;gap:14px}.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.hidden{display:none!important}.shell{display:grid;grid-template-columns:260px 1fr;gap:22px}.side{display:grid;gap:16px;align-content:start;position:sticky;top:92px;height:max-content}.side .card{padding:16px}.profile-list{display:grid;gap:8px}.profile-list button{text-align:left}.profile-list button.active{border-color:var(--accent);color:var(--accent)}.library{display:grid;gap:20px}.toolbar{display:flex;justify-content:space-between;gap:12px;align-items:end;flex-wrap:wrap}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}.media{overflow:hidden;padding:0}.poster{aspect-ratio:2/3;background:linear-gradient(145deg,#292929,#0b0b0b);display:grid;place-items:center;color:#777;font-size:38px}.media-body{padding:14px}.media-title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.media-meta{color:var(--muted);font-size:13px;margin:3px 0 12px}.media-actions{display:flex;gap:8px}.media-actions button{padding:8px 10px;font-size:13px}.player{display:grid;gap:12px}.player video{width:100%;max-height:68vh;background:#000;border-radius:12px}.progress{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}.progress input{max-width:120px}.empty{padding:30px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px}@media(max-width:800px){.shell{grid-template-columns:1fr}.side{position:static;grid-template-columns:1fr 1fr}.side .card:last-child{grid-column:1/-1}}@media(max-width:520px){.side{grid-template-columns:1fr}}
+    /* Sizes are in rem so the browser's own text-size setting scales the whole
+       interface, and no container uses a fixed height that would clip enlarged text. */
+    :root{color-scheme:dark;--bg:#090909;--panel:#151515;--line:#3a3a3a;--text:#f7f7f7;--muted:#b6b6b6;--accent:#ffab2e;--accent-ink:#100c04;--danger:#ff8f7a;--focus:#8fd0ff}
+    *{box-sizing:border-box}
+    html{font-size:100%}
+    body{margin:0;background:var(--bg);color:var(--text);font:1rem/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input,select{font:inherit;color:inherit}
+    /* A visible, high-contrast focus ring on every interactive element. Focus is never
+       removed, only restyled, so keyboard users can always see where they are. */
+    :focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:6px}
+    button{cursor:pointer;border:1px solid var(--line);border-radius:.625rem;background:#222;color:var(--text);padding:.625rem .875rem;min-height:2.75rem}
+    button:hover:not(:disabled){border-color:var(--muted)}
+    button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+    button.ghost{background:transparent}
+    button[aria-pressed=true],button.active{border-color:var(--accent);color:var(--accent)}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    input,select{width:100%;border:1px solid var(--line);border-radius:.5625rem;background:#0d0d0d;padding:.6875rem .75rem;min-height:2.75rem}
+    label{display:grid;gap:.375rem;color:var(--muted);font-size:.8125rem}
+    a{color:var(--accent)}
+    .skip{position:absolute;left:-9999px;top:0;z-index:9}
+    .skip:focus{left:.5rem;top:.5rem;padding:.625rem .875rem;background:var(--accent);color:var(--accent-ink);border-radius:.5rem}
+    header{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:1.125rem max(1.25rem,calc((100vw - 74rem)/2));border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(9,9,9,.94);backdrop-filter:blur(14px);z-index:2}
+    .brand{font-size:1.4375rem;font-weight:800;letter-spacing:-.04em}.brand b{color:var(--accent)}
+    main{max-width:74rem;margin:0 auto;padding:2rem 1.25rem 4rem}
+    .eyebrow{color:var(--accent);font-weight:800;font-size:.75rem;text-transform:uppercase;letter-spacing:.12em}
+    h1{margin:.25rem 0 .5rem;font-size:clamp(1.75rem,5vw,3rem);letter-spacing:-.05em;line-height:1.1}
+    h2{margin:0 0 .75rem;font-size:1.3125rem}
+    h3{margin:0 0 .5rem;font-size:1.0625rem}
+    .muted{color:var(--muted)}
+    .status{min-height:1.5rem;margin:.75rem 0;color:var(--muted)}
+    .status[data-tone=error]{color:var(--danger)}
+    .card{border:1px solid var(--line);border-radius:1rem;background:var(--panel);padding:1.25rem}
+    .auth{max-width:29rem;margin:6vh auto}
+    .form{display:grid;gap:.875rem}
+    .actions{display:flex;gap:.625rem;flex-wrap:wrap;align-items:center}
+    .hidden{display:none!important}
+    .shell{display:grid;grid-template-columns:16.25rem 1fr;gap:1.375rem;align-items:start}
+    .side{display:grid;gap:1rem;align-content:start;position:sticky;top:5.75rem}
+    nav.tabs{display:flex;gap:.5rem;flex-wrap:wrap}
+    .profile-list{display:grid;gap:.5rem}
+    .profile-list button{text-align:left;width:100%}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11.5rem,1fr));gap:.875rem;list-style:none;padding:0;margin:0}
+    .media{overflow:hidden;padding:0;display:flex;flex-direction:column}
+    .poster{aspect-ratio:2/3;background:linear-gradient(145deg,#2b2b2b,#0b0b0b);display:grid;place-items:center;color:#8b8b8b;font-size:2rem}
+    .media-body{padding:.875rem;display:flex;flex-direction:column;gap:.375rem;flex:1}
+    .media-title{font-weight:700}
+    .media-meta{color:var(--muted);font-size:.8125rem}
+    .media-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:auto;padding-top:.5rem}
+    .media-actions button{padding:.5rem .625rem;font-size:.8125rem;min-height:2.25rem}
+    .rail{display:grid;gap:.75rem;margin-bottom:2rem}
+    .bar{height:.375rem;border-radius:999px;background:#333;overflow:hidden}
+    .bar span{display:block;height:100%;background:var(--accent)}
+    .player{display:grid;gap:.75rem}
+    .player video{width:100%;max-height:68vh;background:#000;border-radius:.75rem}
+    .tracks{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.75rem}
+    .empty{padding:1.875rem;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:.75rem}
+    .seasons{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+    .episodes{list-style:none;padding:0;margin:0;display:grid;gap:.5rem}
+    .episode{display:flex;gap:.75rem;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--line);border-radius:.75rem;padding:.75rem}
+    .spinner{width:1.25rem;height:1.25rem;border-radius:50%;border:2px solid #444;border-top-color:var(--accent);display:inline-block;vertical-align:-.2rem;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    /* Every animated affordance has a still equivalent, so a reduced-motion visitor
+       still sees the loading state rather than nothing at all. */
+    @media(prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}.spinner{border-top-color:var(--accent);border-right-color:var(--accent)}}
+    @media(prefers-contrast:more){:root{--muted:#dcdcdc;--line:#6a6a6a}}
+    @media(max-width:52rem){.shell{grid-template-columns:1fr}.side{position:static}}
   </style>
 </head>
 <body>
-  <div id="authView" class="auth card">
-    <div class="eyebrow">LoomTV hosted client</div><h1 id="authTitle">Sign in</h1>
+  <a class="skip" href="#mainContent">Skip to main content</a>
+
+  <!-- Every asynchronous outcome is announced here. Polite for progress and counts,
+       assertive for anything that stops the visitor from continuing. -->
+  <div id="livePolite" role="status" aria-live="polite" class="skip"></div>
+  <div id="liveAlert" role="alert" aria-live="assertive" class="skip"></div>
+
+  <div id="bootView" class="auth card">
+    <div class="eyebrow">LoomTV</div>
+    <h1>Connecting</h1>
+    <p class="muted"><span class="spinner" aria-hidden="true"></span> Reading server capabilities…</p>
+    <div id="bootStatus" class="status"></div>
+    <div class="actions"><button id="bootRetry" class="primary hidden">Try again</button></div>
+  </div>
+
+  <div id="authView" class="auth card hidden">
+    <div class="eyebrow">LoomTV hosted client</div>
+    <h1 id="authTitle">Sign in</h1>
     <p id="authCopy" class="muted">Connect to your always-on LoomTV server.</p>
     <form id="authForm" class="form">
       <label id="nameField" class="hidden">Owner name<input id="name" autocomplete="name"></label>
-      <label>Username<input id="username" autocomplete="username"></label>
+      <label id="usernameField">Username<input id="username" autocomplete="username"></label>
       <label id="bootstrapSecretField" class="hidden">One-time bootstrap secret<input id="bootstrapSecret" type="password" autocomplete="off" spellcheck="false" placeholder="From the LoomTV startup log"></label>
       <label>Password<input id="password" type="password" autocomplete="current-password" required minlength="8"></label>
-      <button class="primary" id="authSubmit">Sign in</button>
-    </form><div id="authStatus" class="status"></div>
+      <button class="primary" id="authSubmit" type="submit">Sign in</button>
+    </form>
+    <details id="invitationAccess">
+      <summary>Use a private invitation</summary>
+      <form id="invitationForm" class="form">
+        <label>Invitation ID<input id="invitationId" autocomplete="off" spellcheck="false" required></label>
+        <label>Invitation secret<input id="invitationSecret" type="password" autocomplete="off" spellcheck="false" required></label>
+        <button class="ghost" type="submit">Open shared library</button>
+      </form>
+    </details>
+    <div id="authStatus" class="status"></div>
+    <p id="cleartextNotice" class="muted hidden">This connection is not HTTPS, so this sign-in lasts for this tab only and is forgotten when the page reloads.</p>
   </div>
+
+  <div id="profileView" class="auth card hidden">
+    <div class="eyebrow">Profiles</div>
+    <h1>Who is watching?</h1>
+    <div id="profileChoices" class="profile-list" role="group" aria-label="Choose a viewing profile"></div>
+    <form id="pinForm" class="form hidden">
+      <label>PIN for <span id="pinProfileName"></span><input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12"></label>
+      <div class="actions"><button class="primary" type="submit">Unlock</button><button id="pinCancel" class="ghost" type="button">Cancel</button></div>
+    </form>
+    <form id="profileForm" class="form">
+      <label>New profile<input id="profileName" placeholder="Name" maxlength="80" required></label>
+      <button class="primary" type="submit">Add profile</button>
+    </form>
+    <div id="profileStatus" class="status"></div>
+    <div class="actions"><button id="profileSignOut" class="ghost">Sign out</button></div>
+  </div>
+
   <div id="appView" class="hidden">
-    <header><div class="brand"><b>L</b> loomtv</div><div class="actions"><span id="userName" class="muted"></span><button id="logout">Sign out</button></div></header>
-    <main><div class="shell"><aside class="side">
-      <section class="card"><div class="eyebrow">Profiles</div><h2>Who is watching?</h2><div id="profiles" class="profile-list"></div><form id="profileForm" class="form"><label>New profile<input id="profileName" placeholder="Name" maxlength="80" required></label><button class="primary">Add profile</button></form></section>
-      <section class="card"><div class="eyebrow">Server</div><div id="serverStatus" class="muted">Loading…</div><button id="scan" class="hidden">Scan library</button></section>
-    </aside><section class="library">
-      <div class="toolbar"><div><div class="eyebrow">Your library</div><h1>Watch something.</h1><div id="libraryStatus" class="muted"></div></div></div>
-      <section id="player" class="card player hidden"><video id="video" controls playsinline></video><div class="actions"><strong id="nowPlaying"></strong><button id="closePlayer">Close</button></div></section>
-      <section id="mediaGrid" class="grid"></section>
-    </section></div></main>
+    <header>
+      <div class="brand"><b>L</b> loomtv</div>
+      <nav class="tabs" aria-label="Sections">
+        <button data-view="home" aria-pressed="true">Home</button>
+        <button data-view="movies" aria-pressed="false">Movies</button>
+        <button data-view="series" aria-pressed="false">Series</button>
+        <button data-view="lists" aria-pressed="false">My lists</button>
+        <button data-view="search" aria-pressed="false">Search</button>
+      </nav>
+      <div class="actions">
+        <span id="activeProfile" class="muted"></span>
+        <button id="switchProfile" class="ghost">Switch profile</button>
+        <button id="logout" class="ghost">Sign out</button>
+      </div>
+    </header>
+    <main id="mainContent" tabindex="-1">
+      <div class="shell">
+        <aside class="side">
+          <section class="card" aria-labelledby="serverHeading">
+            <div class="eyebrow">Server</div>
+            <h2 id="serverHeading">Status</h2>
+            <div id="serverStatus" class="muted">Loading…</div>
+            <div class="actions"><button id="scan" class="hidden">Scan library</button><button id="reload" class="ghost">Refresh</button></div>
+          </section>
+          <section id="invitationPanel" class="card hidden" aria-labelledby="invitationHeading">
+            <div class="eyebrow">Shared library</div>
+            <h2 id="invitationHeading">Invitation session</h2>
+            <p class="muted" id="invitationDetail"></p>
+            <div class="actions"><button id="endInvitation" class="ghost">Leave shared library</button></div>
+          </section>
+          <section id="sharingPanel" class="card hidden" aria-labelledby="sharingHeading">
+            <div class="eyebrow">Private sharing</div>
+            <h2 id="sharingHeading">Invite someone</h2>
+            <p class="muted">Create a seven-day invitation for the active profile and every library root you can access.</p>
+            <div class="actions"><button id="createInvitation" class="ghost">Create invitation</button></div>
+            <div id="sharingStatus" class="status"></div>
+            <div id="invitationOutput" class="hidden">
+              <label>Invitation ID<input id="createdInvitationId" readonly></label>
+              <label>Secret<input id="createdInvitationSecret" readonly></label>
+              <div class="actions"><button id="copyInvitation" class="ghost">Copy invitation</button></div>
+            </div>
+            <ul id="invitationList" class="episodes"></ul>
+          </section>
+        </aside>
+        <section aria-labelledby="viewHeading">
+          <div class="eyebrow" id="viewEyebrow">Your library</div>
+          <h1 id="viewHeading">Watch something.</h1>
+
+          <form id="searchForm" class="form hidden" role="search">
+            <label for="searchInput">Search your library</label>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="Title">
+            <div class="actions"><button class="primary" type="submit">Search</button><button id="searchClear" class="ghost" type="button">Clear</button></div>
+          </form>
+
+          <div id="libraryStatus" class="status" data-tone="info"></div>
+
+          <section id="player" class="card player hidden" aria-labelledby="nowPlaying">
+            <h2 id="nowPlaying"></h2>
+            <video id="video" controls playsinline></video>
+            <div id="playbackMode" class="muted"></div>
+            <div class="tracks">
+              <label for="audioTrack">Audio<select id="audioTrack"></select></label>
+              <label for="subtitleTrack">Subtitles<select id="subtitleTrack"></select></label>
+            </div>
+            <div class="actions">
+              <button id="castPlayback" class="ghost">Cast</button>
+              <button id="markWatched" class="ghost">Mark watched</button>
+              <button id="closePlayer" class="ghost">Close player</button>
+            </div>
+            <div id="playerStatus" class="status"></div>
+          </section>
+
+          <section id="detailPanel" class="card hidden" aria-labelledby="detailTitle">
+            <h2 id="detailTitle"></h2>
+            <p id="detailSummary" class="muted"></p>
+            <div id="detailMeta" class="muted"></div>
+            <div id="seasonBar" class="seasons" role="group" aria-label="Seasons"></div>
+            <ul id="episodeList" class="episodes"></ul>
+            <div class="actions"><button id="detailClose" class="ghost">Back to library</button></div>
+          </section>
+
+          <div id="viewBody"></div>
+        </section>
+      </div>
+    </main>
   </div>
+
   <script src="/app/hls.min.js"></script>
   <script>
     (() => {
-      const tokenKey = 'loomtv.api.token';
-      let token = localStorage.getItem(tokenKey) || '';
+      'use strict';
+
+      // ── Session state ────────────────────────────────────────────────────
+      // The bearer, when there is one, lives in this closure and nowhere else. It is
+      // never written to localStorage, sessionStorage, IndexedDB, a URL the page
+      // navigates to, or a cache, so a cleartext session cannot outlive the tab.
+      let bearer = '';
+      let credentialScheme = 'Bearer';
+      let csrfToken = readCsrfCookie();
+      let sessionMode = 'cookie';
+      let discovery = null;
+      let account = null;
+      let profiles = [];
       let selectedProfile = '';
-      let currentMedia = '';
+      let selectionRevision = 0;
+      let invitationSession = null;
+      let currentView = 'home';
+      let libraryCache = null;
+      let seriesCache = null;
+      let listCache = { watchlist: [], favorite: [], watched: [] };
+      let pendingPinProfile = null;
+      let lastFocused = null;
+
+      // ── Playback state ───────────────────────────────────────────────────
+      let currentMedia = null;
       let playbackAction = '';
       let playbackToken = '';
       let playbackSession = '';
       let playbackRenewUrl = '';
       let playbackExpiresAt = 0;
       let currentPlaybackUrl = '';
+      let castSession = null;
+      let lastCastUpdateAt = 0;
+      let currentSubtitleUrl = '';
+      let currentPlan = null;
+      let currentProbe = null;
       let hlsInstance = null;
       let renewTimer = null;
       let renewingPlayback = false;
       let retryUsed = false;
-      const $ = (id) => document.getElementById(id);
-      const authView = $('authView');
-      const appView = $('appView');
-      const setStatus = (id, text) => { $(id).textContent = text || ''; };
+      const storedBrowserDeviceId = localStorage.getItem('loomtv.browserDeviceId');
+      const browserDeviceId = storedBrowserDeviceId || globalThis.crypto?.randomUUID?.() || `browser-${Math.random().toString(36).slice(2, 14)}`;
+      if (!storedBrowserDeviceId) localStorage.setItem('loomtv.browserDeviceId', browserDeviceId);
 
-      async function api(path, options = {}) {
+      const $ = (id) => document.getElementById(id);
+
+      function readCsrfCookie() {
+        const entry = document.cookie.split(';').map((part) => part.trim())
+          .find((part) => part.startsWith('__Host-loomtv_csrf='));
+        return entry ? entry.split('=').slice(1).join('=') : '';
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        }[character]));
+      }
+
+      function announce(message, assertive) {
+        const target = assertive ? $('liveAlert') : $('livePolite');
+        // Clearing first makes a repeated identical message announce again.
+        target.textContent = '';
+        window.setTimeout(() => { target.textContent = message; }, 30);
+      }
+
+      function setStatus(id, text, tone) {
+        const node = $(id);
+        node.textContent = text || '';
+        node.dataset.tone = tone || 'info';
+        if (text) announce(text, tone === 'error');
+      }
+
+      function setBusy(id, message) {
+        const node = $(id);
+        node.innerHTML = `<span class="spinner" aria-hidden="true"></span> ${escapeHtml(message)}`;
+        node.dataset.tone = 'info';
+        announce(message, false);
+      }
+
+      // ── Transport ────────────────────────────────────────────────────────
+
+      /**
+       * Every call carries the CSRF proof in cookie mode and the bearer in cleartext
+       * mode, never both. A capability URL is used exactly as the server issued it and
+       * is never rewritten or stored.
+       */
+      async function api(pathOrUrl, options = {}) {
+        const method = options.method || 'GET';
+        const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(method);
         const headers = {
           Accept: 'application/json',
           ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(bearer ? { Authorization: `${credentialScheme} ${bearer}` } : {}),
+          ...(!bearer && unsafe && csrfToken ? { 'X-Loom-CSRF': csrfToken } : {}),
+          ...(options.headers || {}),
         };
-        const response = await fetch(path, { ...options, headers });
+        let response;
+        try {
+          response = await fetch(pathOrUrl, { ...options, headers, credentials: 'same-origin' });
+        } catch (networkError) {
+          throw Object.assign(new Error('The server could not be reached.'), { code: 'server_unreachable' });
+        }
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error?.message || data.error || response.statusText);
-        return data?.ok === true && Object.prototype.hasOwnProperty.call(data, 'data') ? data.data : data;
+        if (!response.ok) {
+          const error = new Error(data.error?.message || response.statusText || 'The request failed.');
+          error.code = data.error?.code || `http_${response.status}`;
+          error.status = response.status;
+          error.retryable = data.error?.retryable === true;
+          throw error;
+        }
+        return data && data.ok === true && Object.prototype.hasOwnProperty.call(data, 'data') ? data.data : data;
+      }
+
+      /** One recovery hierarchy: inline repair, scoped retry, re-authentication, or a terminal explanation. */
+      function describeFailure(error) {
+        switch (error.code) {
+          case 'auth_required':
+          case 'session_expired':
+            return { message: 'Your session ended. Sign in again.', recover: () => showAuth(false) };
+          case 'profile_required':
+            return { message: 'Choose a profile to continue.', recover: () => showProfileChooser() };
+          case 'profile_locked':
+            return { message: 'This profile is locked. Enter its PIN to continue.', recover: () => showProfileChooser() };
+          case 'stale_profile_selection':
+            return { message: 'This profile was changed on another device. Reloading it now.', recover: () => refreshProfiles() };
+          case 'permission_denied':
+            return { message: 'This profile is not allowed to open that item.', recover: null };
+          case 'device_revoked':
+            return { message: 'This device was revoked by an administrator. Sign in again to continue.', recover: () => showAuth(false) };
+          case 'invitation_expired':
+            return { message: 'This invitation has expired or was revoked.', recover: () => showAuth(false) };
+          case 'source_unavailable':
+          case 'media_source_unavailable':
+          case 'media_source_unreadable':
+            return { message: 'The file for this title is not readable right now. It stays in your library.', recover: null };
+          case 'playback_not_supported':
+          case 'playback_transport_unsupported':
+          case 'playback_codec_unsupported':
+          case 'subtitle_mode_unsupported':
+            return { message: 'This browser cannot play this title with the tracks you selected.', recover: null };
+          case 'playback_capacity_exceeded':
+          case 'transcoder_unavailable':
+            return { message: 'The server has no spare transcoding capacity. Try again shortly.', recover: null };
+          case 'remote_access_disabled':
+            return { message: 'Remote access is disabled on this server.', recover: null };
+          case 'secure_transport_required':
+            return { message: 'This server requires HTTPS for that action.', recover: null };
+          case 'rate_limited':
+            return { message: 'Too many attempts. Wait a moment and try again.', recover: null };
+          case 'server_unreachable':
+            return { message: 'The server could not be reached. Check the connection and try again.', recover: null };
+          default:
+            return { message: error.message || 'The request failed.', recover: null };
+        }
+      }
+
+      function handleFailure(statusId, error) {
+        const described = describeFailure(error);
+        setStatus(statusId, described.message, 'error');
+        if (described.recover) described.recover();
+      }
+
+      function hasAccountPermission(permission) {
+        const permissions = Array.isArray(account?.user?.permissions) ? account.user.permissions : [];
+        return permissions.includes('*') || permissions.includes(permission);
+      }
+
+      // ── View switching ───────────────────────────────────────────────────
+
+      function showOnly(viewId) {
+        for (const id of ['bootView', 'authView', 'profileView', 'appView']) {
+          $(id).classList.toggle('hidden', id !== viewId);
+        }
       }
 
       function showAuth(onboarding) {
-        authView.classList.remove('hidden');
-        appView.classList.add('hidden');
+        showOnly('authView');
+        sessionMode = window.location.protocol === 'https:' ? 'cookie' : 'bearer';
+        $('cleartextNotice').classList.toggle('hidden', sessionMode !== 'bearer');
         $('authTitle').textContent = onboarding ? 'Create your LoomTV owner' : 'Sign in';
-        $('authCopy').textContent = onboarding ? 'Paste the one-time secret from the server startup log, then choose the first owner password.' : 'Connect to your always-on LoomTV server.';
+        $('authCopy').textContent = onboarding
+          ? 'Paste the one-time secret from the server startup log, then choose the first owner password.'
+          : 'Connect to your always-on LoomTV server.';
         $('nameField').classList.toggle('hidden', !onboarding);
         $('bootstrapSecretField').classList.toggle('hidden', !onboarding);
         $('bootstrapSecret').required = onboarding;
-        $('username').classList.toggle('hidden', onboarding);
+        $('usernameField').classList.toggle('hidden', onboarding);
         $('authSubmit').textContent = onboarding ? 'Create owner' : 'Sign in';
         $('authForm').dataset.onboarding = onboarding ? '1' : '';
+        window.setTimeout(() => $(onboarding ? 'name' : 'username').focus(), 0);
       }
 
-      function showApp() { authView.classList.add('hidden'); appView.classList.remove('hidden'); }
-      function tokenFromUrl(url) { return new URL(url, window.location.href).searchParams.get('token') || ''; }
-      function normalizePlaybackUrl(url) { const normalized = new URL(url, window.location.href); normalized.searchParams.delete('token'); return normalized.href; }
-      function clearRenewal() { if (renewTimer) window.clearTimeout(renewTimer); renewTimer = null; }
+      function showProfileChooser() {
+        showOnly('profileView');
+        renderProfileChoices();
+        window.setTimeout(() => {
+          const first = $('profileChoices').querySelector('button');
+          if (first) first.focus();
+          else $('profileName').focus();
+        }, 0);
+      }
+
+      function showApp() {
+        showOnly('appView');
+        $('activeProfile').textContent = activeProfileName();
+      }
+
+      function activeProfileName() {
+        const profile = profiles.find((entry) => entry.id === selectedProfile);
+        return profile ? `Watching as ${profile.name}` : '';
+      }
+
+      // ── Boot ─────────────────────────────────────────────────────────────
+
+      async function boot() {
+        showOnly('bootView');
+        $('bootRetry').classList.add('hidden');
+        setStatus('bootStatus', '');
+        try {
+          discovery = await api('/api/v1/discovery');
+          if (Number(discovery.apiVersion) !== 1) {
+            setStatus('bootStatus', `This client speaks API version 1 and the server speaks version ${discovery.apiVersion}. Update this page or the server.`, 'error');
+            $('bootRetry').classList.remove('hidden');
+            return;
+          }
+          const onboarding = await api('/api/v1/auth/onboarding');
+          if (!onboarding.ownerConfigured) { showAuth(true); return; }
+          await loadAccount();
+        } catch (error) {
+          if (error.code === 'auth_required' || error.code === 'session_expired') { showAuth(false); return; }
+          setStatus('bootStatus', describeFailure(error).message, 'error');
+          $('bootRetry').classList.remove('hidden');
+          $('bootRetry').focus();
+        }
+      }
+
+      async function loadAccount() {
+        account = await api('/api/v1/auth/me');
+        renderServerStatus();
+        await refreshProfiles();
+        if (!selectedProfile) { showProfileChooser(); return; }
+        showApp();
+        await renderView('home');
+        if (hasAccountPermission('sharing.manage')) await loadInvitations().catch(() => {});
+      }
+
+      function renderServerStatus() {
+        const health = discovery?.health || {};
+        const parts = [
+          `API v${discovery?.apiVersion || '1'}`,
+          `library ${health.media?.state || 'unknown'}`,
+          health.transcoder?.available ? 'transcoding available' : 'direct play only',
+        ];
+        $('serverStatus').textContent = parts.join(' · ');
+        const canManage = hasAccountPermission('library.manage');
+        $('scan').classList.toggle('hidden', !canManage);
+        $('sharingPanel').classList.toggle('hidden', !hasAccountPermission('sharing.manage'));
+        const invitation = account?.user?.authentication === 'invitation-session' || Boolean(account?.invitation);
+        $('invitationPanel').classList.toggle('hidden', !invitation);
+        if (invitation) {
+          invitationSession = account.invitation || { scope: 'shared library' };
+          $('invitationDetail').textContent = 'You are viewing a library shared with you. Its owner can revoke this at any time.';
+        }
+      }
+
+      // ── Profiles ─────────────────────────────────────────────────────────
+
+      async function refreshProfiles() {
+        const [list, selection] = await Promise.all([
+          api('/api/v1/profiles'),
+          api('/api/v1/profiles/selection').catch(() => ({ selection: null })),
+        ]);
+        profiles = Array.isArray(list.profiles) ? list.profiles : [];
+        selectedProfile = selection.selection?.profileId || '';
+        selectionRevision = Number(selection.selection?.revision) || 0;
+        if (selection.selection?.locked) selectedProfile = '';
+        $('activeProfile').textContent = activeProfileName();
+      }
+
+      function renderProfileChoices() {
+        const container = $('profileChoices');
+        if (!profiles.length) {
+          container.innerHTML = '<p class="muted">No profiles yet. Create one to save progress and lists.</p>';
+          return;
+        }
+        container.innerHTML = profiles.map((profile) => `
+          <button type="button" data-profile="${escapeHtml(profile.id)}" data-pin="${profile.hasPin ? '1' : ''}"
+            class="${profile.id === selectedProfile ? 'active' : ''}"
+            aria-describedby="profileKind-${escapeHtml(profile.id)}">
+            ${escapeHtml(profile.name)}
+            <span class="muted" id="profileKind-${escapeHtml(profile.id)}">${escapeHtml(profile.kind || 'adult')}${profile.hasPin ? ', PIN required' : ''}</span>
+          </button>`).join('');
+        for (const button of container.querySelectorAll('[data-profile]')) {
+          button.onclick = () => selectProfile(button.dataset.profile, button.dataset.pin === '1');
+        }
+      }
+
+      async function selectProfile(profileId, requiresPin) {
+        if (requiresPin) {
+          pendingPinProfile = profileId;
+          const profile = profiles.find((entry) => entry.id === profileId);
+          $('pinProfileName').textContent = profile ? profile.name : 'this profile';
+          $('pinForm').classList.remove('hidden');
+          $('pin').value = '';
+          $('pin').focus();
+          return;
+        }
+        await commitProfileSelection(profileId, undefined);
+      }
+
+      async function commitProfileSelection(profileId, pin) {
+        setBusy('profileStatus', 'Selecting profile…');
+        try {
+          await api(`/api/v1/profiles/${encodeURIComponent(profileId)}/select`, {
+            method: 'POST',
+            body: JSON.stringify(pin === undefined ? {} : { pin }),
+          });
+          $('pinForm').classList.add('hidden');
+          pendingPinProfile = null;
+          await refreshProfiles();
+          setStatus('profileStatus', '');
+          showApp();
+          announce(activeProfileName(), false);
+          await renderView('home');
+        } catch (error) {
+          handleFailure('profileStatus', error);
+        }
+      }
+
+      // ── Data loading ─────────────────────────────────────────────────────
+
+      async function loadLibrary(force) {
+        if (libraryCache && !force) return libraryCache;
+        const data = await api('/api/v1/library');
+        libraryCache = Array.isArray(data.items) ? data.items : [];
+        return libraryCache;
+      }
+
+      async function loadSeries(force) {
+        if (seriesCache && !force) return seriesCache;
+        const data = await api('/api/v1/library/series');
+        seriesCache = Array.isArray(data.series) ? data.series : [];
+        return seriesCache;
+      }
+
+      async function loadLists() {
+        if (!selectedProfile) return listCache;
+        const data = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/lists`);
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+        listCache = { watchlist: [], favorite: [], watched: [] };
+        for (const entry of entries) {
+          if (listCache[entry.kind]) listCache[entry.kind].push(entry.mediaId);
+        }
+        return listCache;
+      }
+
+      async function loadProgress() {
+        if (!selectedProfile) return [];
+        const data = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress`).catch(() => ({ progress: [] }));
+        return Array.isArray(data.progress) ? data.progress : [];
+      }
+
+      async function loadInvitations() {
+        if (!hasAccountPermission('sharing.manage')) return;
+        const data = await api('/api/v1/invitations');
+        const invitations = Array.isArray(data.invitations) ? data.invitations : [];
+        $('invitationList').innerHTML = invitations.length ? invitations.map((invitation) => `
+          <li class="episode"><div><strong>${escapeHtml(invitation.id)}</strong><div class="muted">Expires ${escapeHtml(new Date(invitation.expiresAt).toLocaleString())}</div></div>
+          <button data-revoke-invitation="${escapeHtml(invitation.id)}">Revoke</button></li>`).join('') : '<li class="muted">No active invitations.</li>';
+        for (const button of $('invitationList').querySelectorAll('[data-revoke-invitation]')) {
+          button.onclick = async () => {
+            try {
+              await api(`/api/v1/invitations/${encodeURIComponent(button.dataset.revokeInvitation)}`, { method: 'DELETE' });
+              setStatus('sharingStatus', 'Invitation revoked.');
+              await loadInvitations();
+            } catch (error) { handleFailure('sharingStatus', error); }
+          };
+        }
+      }
+
+      async function createInvitation() {
+        if (!selectedProfile) throw Object.assign(new Error('Choose a profile before creating an invitation.'), { code: 'profile_required' });
+        const roots = await api('/api/v1/library/roots');
+        const rootIds = (Array.isArray(roots.roots) ? roots.roots : []).filter((root) => root.state === 'online').map((root) => root.id);
+        if (!rootIds.length) throw new Error('No available library roots can be shared.');
+        const invitation = await api('/api/v1/invitations', {
+          method: 'POST',
+          body: JSON.stringify({
+            profileId: selectedProfile,
+            rootIds,
+            permissions: ['library.read', 'stream'],
+            ttlMs: 7 * 24 * 60 * 60 * 1000,
+          }),
+        });
+        $('createdInvitationId').value = invitation.id;
+        $('createdInvitationSecret').value = invitation.secret;
+        $('invitationOutput').classList.remove('hidden');
+        setStatus('sharingStatus', 'Invitation created. Its secret is shown only now.');
+        await loadInvitations();
+      }
+
+      // ── Rendering ────────────────────────────────────────────────────────
+
+      const VIEW_TITLES = {
+        home: ['Your library', 'Watch something.'],
+        movies: ['Movies', 'Every movie.'],
+        series: ['Series', 'Shows and seasons.'],
+        lists: ['My lists', 'Saved and watched.'],
+        search: ['Search', 'Find a title.'],
+      };
+
+      function mediaCard(item, progressById) {
+        const progress = progressById?.get(item.id);
+        const percent = progress && progress.duration > 0
+          ? Math.min(100, Math.round((progress.position / progress.duration) * 100))
+          : 0;
+        const unavailable = item.available === false;
+        const inWatchlist = listCache.watchlist.includes(item.id);
+        const label = `${item.title}${item.year ? `, ${item.year}` : ''}`;
+        return `<li><article class="card media">
+          <div class="poster" aria-hidden="true">${item.kind === 'episode' || item.kind === 'series' ? '▤' : '▶'}</div>
+          <div class="media-body">
+            <h3 class="media-title">${escapeHtml(item.title)}</h3>
+            <p class="media-meta">${escapeHtml(item.kind || 'video')}${item.year ? ` · ${item.year}` : ''}${unavailable ? ' · source unavailable' : ''}</p>
+            ${percent ? `<div class="bar" role="img" aria-label="${percent} percent watched"><span style="width:${percent}%"></span></div>` : ''}
+            <div class="media-actions">
+              <button data-play="${escapeHtml(item.id)}" ${unavailable ? 'disabled' : ''} aria-label="Play ${escapeHtml(label)}">Play</button>
+              <button data-detail="${escapeHtml(item.id)}" aria-label="Details for ${escapeHtml(label)}">Details</button>
+              <button data-list="${escapeHtml(item.id)}" aria-pressed="${inWatchlist}" aria-label="${inWatchlist ? 'Remove' : 'Add'} ${escapeHtml(label)} ${inWatchlist ? 'from' : 'to'} watchlist">${inWatchlist ? 'In list' : 'Add to list'}</button>
+              ${hasAccountPermission('downloads') ? `<button data-download="${escapeHtml(item.id)}" data-download-title="${escapeHtml(item.title)}" ${unavailable ? 'disabled' : ''} aria-label="Download ${escapeHtml(label)}">Download</button>` : ''}
+            </div>
+          </div>
+        </article></li>`;
+      }
+
+      function bindCards(container) {
+        for (const button of container.querySelectorAll('[data-play]')) {
+          button.onclick = () => { lastFocused = button; play(button.dataset.play); };
+        }
+        for (const button of container.querySelectorAll('[data-detail]')) {
+          button.onclick = () => { lastFocused = button; openDetail(button.dataset.detail); };
+        }
+        for (const button of container.querySelectorAll('[data-list]')) {
+          button.onclick = () => toggleWatchlist(button);
+        }
+        for (const button of container.querySelectorAll('[data-download]')) {
+          button.onclick = () => downloadMedia(button.dataset.download, button.dataset.downloadTitle, button);
+        }
+      }
+
+      function renderGrid(items, progressById, emptyMessage) {
+        const body = $('viewBody');
+        if (!items.length) {
+          body.innerHTML = `<div class="empty">${escapeHtml(emptyMessage)}</div>`;
+          return;
+        }
+        body.innerHTML = `<ul class="grid">${items.map((item) => mediaCard(item, progressById)).join('')}</ul>`;
+        bindCards(body);
+      }
+
+      async function renderView(view, options = {}) {
+        currentView = view;
+        for (const button of document.querySelectorAll('[data-view]')) {
+          button.setAttribute('aria-pressed', String(button.dataset.view === view));
+        }
+        const [eyebrow, heading] = VIEW_TITLES[view] || VIEW_TITLES.home;
+        $('viewEyebrow').textContent = eyebrow;
+        $('viewHeading').textContent = heading;
+        $('searchForm').classList.toggle('hidden', view !== 'search');
+        $('detailPanel').classList.add('hidden');
+        setBusy('libraryStatus', 'Loading your library…');
+
+        try {
+          const [items, progress] = await Promise.all([loadLibrary(options.force), loadProgress()]);
+          await loadLists().catch(() => listCache);
+          const progressById = new Map(progress.map((entry) => [entry.mediaId, entry]));
+
+          if (view === 'home') {
+            const continueItems = progress
+              .filter((entry) => entry.position > 30 && (!entry.duration || entry.position < entry.duration * 0.95))
+              .sort((left, right) => right.updatedAt - left.updatedAt)
+              .map((entry) => items.find((item) => item.id === entry.mediaId))
+              .filter(Boolean);
+            const recent = [...items].sort((left, right) => (right.createdAt || 0) - (left.createdAt || 0)).slice(0, 12);
+            $('viewBody').innerHTML = `
+              ${continueItems.length ? `<section class="rail" aria-labelledby="continueHeading"><h2 id="continueHeading">Continue watching</h2><ul class="grid">${continueItems.map((item) => mediaCard(item, progressById)).join('')}</ul></section>` : ''}
+              <section class="rail" aria-labelledby="recentHeading"><h2 id="recentHeading">Recently added</h2>${recent.length ? `<ul class="grid">${recent.map((item) => mediaCard(item, progressById)).join('')}</ul>` : '<div class="empty">No media indexed yet. Add a library root, then scan.</div>'}</section>`;
+            bindCards($('viewBody'));
+            setStatus('libraryStatus', `${items.length} item${items.length === 1 ? '' : 's'} in your library.`);
+            return;
+          }
+
+          if (view === 'movies') {
+            const movies = items.filter((item) => item.kind === 'movie' || item.kind === 'video');
+            renderGrid(movies, progressById, 'No movies in this profile’s library.');
+            setStatus('libraryStatus', `${movies.length} movie${movies.length === 1 ? '' : 's'}.`);
+            return;
+          }
+
+          if (view === 'series') {
+            const series = await loadSeries(options.force);
+            if (!series.length) {
+              $('viewBody').innerHTML = '<div class="empty">No series in this profile’s library.</div>';
+            } else {
+              $('viewBody').innerHTML = `<ul class="grid">${series.map((entry) => `<li><article class="card media">
+                <div class="poster" aria-hidden="true">▤</div>
+                <div class="media-body">
+                  <h3 class="media-title">${escapeHtml(entry.title)}</h3>
+                  <p class="media-meta">${(entry.seasons || []).length} season${(entry.seasons || []).length === 1 ? '' : 's'}</p>
+                  <div class="media-actions"><button data-series="${escapeHtml(entry.id)}" aria-label="Open ${escapeHtml(entry.title)}">Open</button></div>
+                </div></article></li>`).join('')}</ul>`;
+              for (const button of $('viewBody').querySelectorAll('[data-series]')) {
+                button.onclick = () => { lastFocused = button; openSeries(button.dataset.series); };
+              }
+            }
+            setStatus('libraryStatus', `${series.length} series.`);
+            return;
+          }
+
+          if (view === 'lists') {
+            const saved = items.filter((item) => listCache.watchlist.includes(item.id) || listCache.favorite.includes(item.id));
+            renderGrid(saved, progressById, 'Nothing saved yet. Use "Add to list" on any title.');
+            setStatus('libraryStatus', `${saved.length} saved title${saved.length === 1 ? '' : 's'}.`);
+            return;
+          }
+
+          if (view === 'search') {
+            const query = String(options.query || '').trim().toLowerCase();
+            if (!query) {
+              $('viewBody').innerHTML = '<div class="empty">Type a title and choose Search.</div>';
+              setStatus('libraryStatus', '');
+              return;
+            }
+            const matches = items.filter((item) => String(item.title || '').toLowerCase().includes(query));
+            renderGrid(matches, progressById, `Nothing in your library matches “${query}”.`);
+            setStatus('libraryStatus', `${matches.length} result${matches.length === 1 ? '' : 's'} for “${query}”.`);
+          }
+        } catch (error) {
+          handleFailure('libraryStatus', error);
+          if (error.code === 'server_unreachable' || error.retryable) {
+            $('viewBody').innerHTML = '<div class="empty">The library could not be loaded. <button id="retryView" class="primary">Try again</button></div>';
+            $('retryView').onclick = () => renderView(currentView, { force: true, query: options.query });
+            $('retryView').focus();
+          }
+        }
+      }
+
+      // ── Details, series, episodes ────────────────────────────────────────
+
+      async function openDetail(mediaId) {
+        setBusy('libraryStatus', 'Loading details…');
+        try {
+          const data = await api(`/api/v1/library/${encodeURIComponent(mediaId)}`);
+          const item = data.item || data;
+          $('detailTitle').textContent = item.title || 'Details';
+          $('detailSummary').textContent = item.summary || 'No description is stored for this title.';
+          $('detailMeta').textContent = [
+            item.kind,
+            item.year,
+            Array.isArray(item.genres) && item.genres.length ? item.genres.join(', ') : null,
+            item.available === false ? 'source unavailable' : null,
+          ].filter(Boolean).join(' · ');
+          $('seasonBar').innerHTML = '';
+          $('episodeList').innerHTML = '';
+          $('detailPanel').classList.remove('hidden');
+          $('detailTitle').setAttribute('tabindex', '-1');
+          $('detailTitle').focus();
+          setStatus('libraryStatus', '');
+        } catch (error) {
+          handleFailure('libraryStatus', error);
+        }
+      }
+
+      async function openSeries(seriesId) {
+        setBusy('libraryStatus', 'Loading seasons…');
+        try {
+          const series = (await loadSeries(false)).find((entry) => entry.id === seriesId);
+          if (!series) throw Object.assign(new Error('That series is no longer in your library.'), { code: 'not_found' });
+          $('detailTitle').textContent = series.title;
+          $('detailSummary').textContent = series.summary || '';
+          $('detailMeta').textContent = `${(series.seasons || []).length} season${(series.seasons || []).length === 1 ? '' : 's'}`;
+          $('detailPanel').classList.remove('hidden');
+          const seasons = series.seasons || [];
+          $('seasonBar').innerHTML = seasons.map((season, index) => `
+            <button type="button" data-season="${index}" aria-pressed="${index === 0}">Season ${escapeHtml(season.seasonNumber ?? index + 1)}</button>`).join('');
+          const renderSeason = (index) => {
+            const season = seasons[index];
+            const episodes = season?.episodes || [];
+            $('episodeList').innerHTML = episodes.length ? episodes.map((episode) => `
+              <li class="episode">
+                <div><strong>${escapeHtml(episode.episodeNumber ?? '?')}. ${escapeHtml(episode.title || 'Episode')}</strong>
+                <div class="muted">${episode.available === false ? 'Source unavailable' : 'Ready to play'}</div></div>
+                <div class="actions"><button data-play="${escapeHtml(episode.id)}" ${episode.available === false ? 'disabled' : ''}
+                  aria-label="Play ${escapeHtml(episode.title || 'episode')} of ${escapeHtml(series.title)}">Play</button>
+                ${hasAccountPermission('downloads') ? `<button data-download="${escapeHtml(episode.id)}" data-download-title="${escapeHtml(`${series.title} - ${episode.title || 'Episode'}`)}" ${episode.available === false ? 'disabled' : ''}>Download</button>` : ''}</div>
+              </li>`).join('') : '<li class="empty">This season has no readable episodes.</li>';
+            bindCards($('episodeList'));
+            for (const button of $('seasonBar').querySelectorAll('[data-season]')) {
+              button.setAttribute('aria-pressed', String(Number(button.dataset.season) === index));
+            }
+            announce(`Season ${seasons[index]?.seasonNumber ?? index + 1}, ${episodes.length} episodes`, false);
+          };
+          for (const button of $('seasonBar').querySelectorAll('[data-season]')) {
+            button.onclick = () => renderSeason(Number(button.dataset.season));
+          }
+          if (seasons.length) renderSeason(0);
+          $('detailTitle').setAttribute('tabindex', '-1');
+          $('detailTitle').focus();
+          setStatus('libraryStatus', '');
+        } catch (error) {
+          handleFailure('libraryStatus', error);
+        }
+      }
+
+      async function toggleWatchlist(button) {
+        if (!selectedProfile) { setStatus('libraryStatus', 'Choose a profile first.', 'error'); return; }
+        const mediaId = button.dataset.list;
+        const active = button.getAttribute('aria-pressed') === 'true';
+        const target = `/api/v1/profiles/${encodeURIComponent(selectedProfile)}/lists/watchlist/${encodeURIComponent(mediaId)}`;
+        try {
+          await api(target, { method: active ? 'DELETE' : 'PUT', body: '{}' });
+          button.setAttribute('aria-pressed', String(!active));
+          button.textContent = active ? 'Add to list' : 'In list';
+          listCache.watchlist = active
+            ? listCache.watchlist.filter((entry) => entry !== mediaId)
+            : [...listCache.watchlist, mediaId];
+          announce(active ? 'Removed from your watchlist.' : 'Added to your watchlist.', false);
+        } catch (error) {
+          handleFailure('libraryStatus', error);
+        }
+      }
+
+      function safeDownloadName(title) {
+        const normalized = String(title || 'LoomTV video').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim();
+        return `${normalized || 'LoomTV video'}.media`;
+      }
+
+      function filenameFromDisposition(disposition, fallback) {
+        const extended = /filename\*=UTF-8''([^;]+)/i.exec(disposition || '');
+        if (extended) {
+          try { return decodeURIComponent(extended[1]); } catch { /* use the ASCII name */ }
+        }
+        const ascii = /filename="([^"]+)"/i.exec(disposition || '');
+        return ascii?.[1] || fallback;
+      }
+
+      async function downloadMedia(mediaId, title, button) {
+        button.disabled = true;
+        const originalText = button.textContent;
+        button.textContent = 'Preparing…';
+        let lease = null;
+        let fileHandle = null;
+        try {
+          if (typeof window.showSaveFilePicker === 'function') {
+            fileHandle = await window.showSaveFilePicker({ suggestedName: safeDownloadName(title) });
+          }
+          lease = await api('/api/v1/downloads', {
+            method: 'POST',
+            body: JSON.stringify({ mediaId, allowRanges: true }),
+          });
+          const response = await fetch(lease.contentUrl, {
+            headers: { Authorization: `LoomDownload ${lease.credential.id}.${lease.credential.secret}` },
+            credentials: 'omit',
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw Object.assign(new Error(payload.error?.message || `Download failed (${response.status}).`), {
+              code: payload.error?.code || `http_${response.status}`,
+            });
+          }
+          button.textContent = 'Downloading…';
+          if (fileHandle && response.body) {
+            const writable = await fileHandle.createWritable();
+            await response.body.pipeTo(writable);
+          } else {
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = filenameFromDisposition(response.headers.get('Content-Disposition'), safeDownloadName(title));
+            document.body.appendChild(anchor);
+            anchor.click();
+            anchor.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+          }
+          setStatus('libraryStatus', `${title} was downloaded.`);
+        } catch (error) {
+          if (error?.name !== 'AbortError') handleFailure('libraryStatus', error);
+        } finally {
+          if (lease?.id) await api(`/api/v1/downloads/${encodeURIComponent(lease.id)}`, { method: 'DELETE' }).catch(() => {});
+          button.textContent = originalText;
+          button.disabled = false;
+        }
+      }
+
+      // ── Playback ─────────────────────────────────────────────────────────
+
+      function browserCapabilities() {
+        const video = document.createElement('video');
+        const canPlay = (type) => video.canPlayType(type) !== '';
+        const videoCodecs = ['h264'];
+        if (canPlay('video/webm; codecs="vp9"')) videoCodecs.push('vp9');
+        if (canPlay('video/mp4; codecs="av01.0.05M.08"')) videoCodecs.push('av1');
+        if (canPlay('video/mp4; codecs="hvc1.1.6.L93.B0"')) videoCodecs.push('hevc');
+        const audioCodecs = ['aac'];
+        if (canPlay('audio/ogg; codecs="opus"')) audioCodecs.push('opus');
+        if (canPlay('audio/mp4; codecs="ac-3"')) audioCodecs.push('ac3');
+        const supportsHls = Boolean(window.Hls && window.Hls.isSupported())
+          || canPlay('application/vnd.apple.mpegurl');
+        return {
+          contractVersion: 1,
+          containers: ['mp4', 'webm', 'mpegts'],
+          videoCodecs,
+          audioCodecs,
+          streamingProtocols: supportsHls ? ['http', 'hls'] : ['http'],
+          supportsHls,
+          supportsHdr: false,
+          hdrFormats: [],
+          // A browser renders text subtitles from a separate track, and cannot
+          // render a bitmap subtitle without a burn-in pass on the server.
+          subtitleModes: ['text', 'external', 'burn-in'],
+          supportsTextSubtitles: true,
+          maxWidth: 3840,
+          maxHeight: 2160,
+          maxVideoBitrateKbps: 50_000,
+        };
+      }
+
+      function tokenFromUrl(url) {
+        try { return new URL(url, window.location.href).searchParams.get('token') || ''; } catch { return ''; }
+      }
+
+      function normalizePlaybackUrl(url) {
+        const normalized = new URL(url, window.location.href);
+        normalized.searchParams.delete('token');
+        return normalized.href;
+      }
+
+      function clearRenewal() {
+        if (renewTimer) window.clearTimeout(renewTimer);
+        renewTimer = null;
+      }
+
       function scheduleRenewal() {
         clearRenewal();
         if (!playbackRenewUrl || !playbackExpiresAt) return;
         const delay = Math.max(5_000, playbackExpiresAt - Date.now() - 60_000);
-        renewTimer = window.setTimeout(() => renewPlayback(false).catch(() => setStatus('libraryStatus', 'Playback renewal failed.')), delay);
+        renewTimer = window.setTimeout(() => {
+          renewPlayback(false).catch((error) => handleFailure('playerStatus', error));
+        }, delay);
       }
+
       function restorePosition(position) {
         if (!Number.isFinite(position) || position <= 0) return;
         const video = $('video');
@@ -100,32 +982,53 @@
         if (video.readyState >= 1) restore();
         else video.addEventListener('loadedmetadata', restore, { once: true });
       }
+
       function attachSource(url, position) {
         if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
         const video = $('video');
+        video.querySelectorAll('track[data-loomtv-sidecar]').forEach((track) => track.remove());
+        if (currentSubtitleUrl) {
+          const track = document.createElement('track');
+          track.kind = 'subtitles';
+          track.label = 'Selected subtitle';
+          track.src = currentSubtitleUrl;
+          track.default = true;
+          track.dataset.loomtvSidecar = 'true';
+          video.appendChild(track);
+        }
         currentPlaybackUrl = normalizePlaybackUrl(url);
         video.removeAttribute('src');
-        if (url.includes('.m3u8') && window.Hls && window.Hls.isSupported()) {
-          hlsInstance = new window.Hls({ enableWorker: true, xhrSetup: (xhr) => { if (playbackToken) xhr.setRequestHeader('Authorization', `Bearer ${playbackToken}`); } });
+        const isHls = url.includes('.m3u8');
+        if (isHls && window.Hls && window.Hls.isSupported()) {
+          hlsInstance = new window.Hls({
+            enableWorker: true,
+            xhrSetup: (xhr) => { if (playbackToken) xhr.setRequestHeader('Authorization', `Bearer ${playbackToken}`); },
+          });
           hlsInstance.on(window.Hls.Events.ERROR, (_event, data) => {
             if (data.fatal && [401, 403, 404, 409].includes(data.response?.code)) retryPlaybackOnce();
           });
           hlsInstance.loadSource(url);
           hlsInstance.attachMedia(video);
-        } else if (url.includes('.m3u8') && video.canPlayType('application/vnd.apple.mpegurl')) {
+        } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = url;
-        } else if (url.includes('.m3u8')) {
-          throw new Error('This browser cannot play HLS and the bundled playback runtime is unavailable.');
+        } else if (isHls) {
+          throw Object.assign(new Error('This browser cannot play HLS and the bundled playback runtime is unavailable.'), {
+            code: 'playback_transport_unsupported',
+          });
         } else {
           video.src = url;
         }
         restorePosition(position);
       }
+
       async function retryPlaybackOnce() {
         if (retryUsed || renewingPlayback || !playbackRenewUrl) return;
         retryUsed = true;
-        try { await renewPlayback(true); } catch (error) { setStatus('libraryStatus', error.message); }
+        setStatus('playerStatus', 'Reconnecting playback…');
+        try { await renewPlayback(true); setStatus('playerStatus', ''); }
+        catch (error) { handleFailure('playerStatus', error); }
       }
+
       async function renewPlayback(reloadSource) {
         if (renewingPlayback || !currentMedia || !playbackRenewUrl) return false;
         renewingPlayback = true;
@@ -138,11 +1041,12 @@
           playbackToken = data.token || playbackToken;
           playbackSession = data.sessionId || playbackSession;
           playbackExpiresAt = Number(data.expiresAt) || 0;
+          currentSubtitleUrl = data.subtitleUrl || '';
           const nextUrl = playbackAction === 'hls' ? data.playlistUrl : data.directUrl;
-          if (!nextUrl) throw new Error('The server did not return a renewed playback URL.');
-          const normalizedChanged = normalizePlaybackUrl(nextUrl) !== currentPlaybackUrl;
+          if (!nextUrl) throw Object.assign(new Error('The server did not return a renewed playback URL.'), { code: 'playback_session_invalid' });
+          const changed = normalizePlaybackUrl(nextUrl) !== currentPlaybackUrl;
           const nativeHls = playbackAction === 'hls' && !hlsInstance;
-          if (reloadSource || normalizedChanged || playbackAction !== 'hls' || nativeHls) attachSource(nextUrl, position);
+          if (reloadSource || changed || playbackAction !== 'hls' || nativeHls) attachSource(nextUrl, position);
           scheduleRenewal();
           retryUsed = false;
           return true;
@@ -150,21 +1054,436 @@
           renewingPlayback = false;
         }
       }
-      async function boot() { try { const d = await api('/api/v1/discovery'); setStatus('serverStatus', `${d.health?.media?.state || 'server'} · API v${d.apiVersion}`); const onboard = await api('/api/v1/auth/onboarding'); if (!token) { showAuth(!onboard.ownerConfigured); return; } await loadApp(); } catch (error) { setStatus('authStatus', error.message); showAuth(false); } }
-      async function loadApp() { const me = await api('/api/v1/auth/me'); $('userName').textContent = me.user?.name || 'Signed in'; showApp(); await Promise.all([loadProfiles(), loadLibrary()]); }
-      async function loadProfiles() { const data = await api('/api/v1/profiles'); const list = data.profiles || []; if (!selectedProfile) selectedProfile = list[0]?.id || ''; $('profiles').innerHTML = list.length ? list.map((p) => `<button data-profile="${p.id}" class="${p.id === selectedProfile ? 'active' : ''}">${escapeHtml(p.name)} <span class="muted">${escapeHtml(p.type)}</span></button>`).join('') : '<div class="muted">Create a profile to save progress.</div>'; document.querySelectorAll('[data-profile]').forEach((button) => { button.onclick = async () => { selectedProfile = button.dataset.profile; await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/select`, { method: 'POST' }); await loadProfiles(); }; }); }
-      async function loadLibrary() { const data = await api('/api/v1/library'); const items = data.items || []; setStatus('libraryStatus', `${items.length} item${items.length === 1 ? '' : 's'}`); $('mediaGrid').innerHTML = items.length ? items.map((item) => `<article class="card media"><div class="poster">${item.type === 'tv' ? '▤' : '▶'}</div><div class="media-body"><div class="media-title" title="${escapeAttr(item.title)}">${escapeHtml(item.title)}</div><div class="media-meta">${escapeHtml(item.extension || item.type || 'media')}${item.available === false ? ' · offline' : ''}</div><div class="media-actions"><button data-play="${item.id}" ${item.available === false ? 'disabled' : ''}>Play</button><button data-progress="${item.id}">Progress</button></div></div></article>`).join('') : '<div class="empty">No media indexed yet. Add a library root in the admin console, then scan.</div>'; document.querySelectorAll('[data-play]').forEach((button) => { button.onclick = () => play(button.dataset.play); }); document.querySelectorAll('[data-progress]').forEach((button) => { button.onclick = () => editProgress(button.dataset.progress); }); }
-      async function play(id) { try { const data = await api(`/api/v1/media/${encodeURIComponent(id)}`); const directUrl = data.directUrl; let url = directUrl; const probe = await fetch(directUrl, { method: 'HEAD' }); currentMedia = id; playbackAction = 'direct'; playbackToken = tokenFromUrl(directUrl); playbackSession = data.directSessionId || data.sessionId || ''; playbackRenewUrl = data.directRenewUrl || ''; playbackExpiresAt = Number(data.directExpiresAt) || 0; retryUsed = false; if (!probe.ok) { const payload = await api(`${data.transcodeUrl}?codec=h264`, { method: 'POST' }); url = payload.playlistUrl; if (!url) throw new Error('The server could not start browser playback.'); playbackAction = 'hls'; playbackToken = payload.token || tokenFromUrl(url); playbackSession = payload.sessionId || ''; playbackRenewUrl = payload.renewUrl || `${data.transcodeUrl}/renew`; playbackExpiresAt = Number(payload.expiresAt) || 0; } const saved = selectedProfile ? await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(id)}`).catch(() => null) : null; $('nowPlaying').textContent = data.item.title; $('player').classList.remove('hidden'); attachSource(url, saved?.progress?.position > 5 ? saved.progress.position : 0); scheduleRenewal(); $('video').play().catch(() => {}); $('video').onpause = saveCurrentProgress; } catch (error) { setStatus('libraryStatus', error.message); } }
-      async function saveCurrentProgress() { if (!selectedProfile || !currentMedia) return; const video = $('video'); await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(currentMedia)}`, { method: 'PUT', body: JSON.stringify({ position: video.currentTime, duration: video.duration || 0 }) }).catch(() => {}); }
-      async function editProgress(id) { if (!selectedProfile) { setStatus('libraryStatus', 'Choose a profile first.'); return; } const data = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(id)}`); const value = data.progress?.position || 0; const next = prompt('Resume position in seconds', String(Math.round(value))); if (next === null) return; await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ position: Number(next), duration: data.progress?.duration || 0 }) }); setStatus('libraryStatus', 'Progress saved.'); }
+
+      function renderTrackPickers(probe, plan) {
+        const audio = $('audioTrack');
+        const subtitle = $('subtitleTrack');
+        const tracks = Array.isArray(probe?.tracks) ? probe.tracks : [];
+        const audioTracks = tracks.filter((track) => track.kind === 'audio');
+        const subtitleTracks = tracks.filter((track) => track.kind === 'subtitle');
+        const describe = (track) => {
+          const parts = [track.language || 'Unknown language'];
+          if (track.title) parts.push(track.title);
+          if (track.codec) parts.push(track.codec);
+          if (track.forced) parts.push('forced');
+          if (track.external) parts.push('external file');
+          return parts.join(' · ');
+        };
+        audio.innerHTML = audioTracks.length
+          ? audioTracks.map((track) => `<option value="${escapeHtml(track.id)}"${track.id === plan?.selectedAudioTrackId ? ' selected' : ''}>${escapeHtml(describe(track))}</option>`).join('')
+          : '<option value="">No audio track</option>';
+        audio.disabled = audioTracks.length < 2;
+        subtitle.innerHTML = `<option value="">Off</option>${subtitleTracks.map((track) => `<option value="${escapeHtml(track.id)}"${track.id === plan?.selectedSubtitleTrackId ? ' selected' : ''}>${escapeHtml(describe(track))}</option>`).join('')}`;
+        subtitle.disabled = subtitleTracks.length === 0;
+      }
+
+      async function play(mediaId, trackSelection = {}) {
+        if (!selectedProfile) { setStatus('libraryStatus', 'Choose a profile first.', 'error'); return; }
+        setBusy('libraryStatus', 'Planning playback…');
+        try {
+          const links = await api(`/api/v1/media/${encodeURIComponent(mediaId)}`);
+          // The canonical contract never returns a ready-to-use direct URL here. The
+          // playback plan is the only place a delivery capability is issued.
+          const planned = await api(links.playbackPlanUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              capabilities: browserCapabilities(),
+              ...(trackSelection.audioTrackId !== undefined ? { audioTrackId: trackSelection.audioTrackId } : {}),
+              ...(trackSelection.subtitleTrackId !== undefined ? { subtitleTrackId: trackSelection.subtitleTrackId } : {}),
+            }),
+          });
+
+          currentMedia = mediaId;
+          currentPlan = planned.plan || null;
+          currentProbe = planned.probe || null;
+          retryUsed = false;
+
+          let url = planned.directUrl;
+          playbackAction = 'direct';
+          playbackToken = tokenFromUrl(url);
+          playbackSession = planned.directSessionId || '';
+          playbackRenewUrl = planned.directRenewUrl || '';
+          playbackExpiresAt = Number(planned.directExpiresAt) || 0;
+          currentSubtitleUrl = planned.subtitleUrl || '';
+
+          if (!url && planned.transcodeUrl) {
+            const payload = await api(planned.transcodeUrl, { method: 'POST' });
+            url = payload.playlistUrl;
+            if (!url) throw Object.assign(new Error('The server could not start browser playback.'), { code: 'playback_not_supported' });
+            playbackAction = 'hls';
+            playbackToken = payload.token || tokenFromUrl(url);
+            playbackSession = payload.sessionId || '';
+            playbackRenewUrl = payload.renewUrl || `/api/v1/media/${encodeURIComponent(mediaId)}/transcode/renew`;
+            playbackExpiresAt = Number(payload.expiresAt) || 0;
+          }
+          if (!url) throw Object.assign(new Error('The server could not plan browser playback.'), { code: 'playback_not_supported' });
+
+          const saved = await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(mediaId)}`)
+            .catch(() => null);
+
+          $('nowPlaying').textContent = planned.item?.title || links.item?.title || 'Now playing';
+          $('playbackMode').textContent = currentPlan
+            ? `${currentPlan.mode} over ${currentPlan.transport}${currentPlan.burnSubtitles ? ', subtitles burned in' : ''}`
+            : '';
+          renderTrackPickers(currentProbe, currentPlan);
+          $('player').classList.remove('hidden');
+          attachSource(url, saved?.progress?.position > 5 ? saved.progress.position : 0);
+          scheduleRenewal();
+          setStatus('libraryStatus', '');
+          setStatus('playerStatus', '');
+          announce(`Playing ${$('nowPlaying').textContent}`, false);
+          $('nowPlaying').setAttribute('tabindex', '-1');
+          $('nowPlaying').focus();
+          $('video').play().catch(() => { setStatus('playerStatus', 'Press play to start.'); });
+          $('video').onpause = saveCurrentProgress;
+        } catch (error) {
+          handleFailure('libraryStatus', error);
+        }
+      }
+
+      async function saveCurrentProgress() {
+        if (!selectedProfile || !currentMedia) return;
+        const video = $('video');
+        if (!Number.isFinite(video.currentTime)) return;
+        await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/progress/${encodeURIComponent(currentMedia)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ position: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : 0 }),
+        }).catch(() => {});
+      }
+
+      function browserCastTransport() {
+        const video = $('video');
+        if (video.remote && typeof video.remote.prompt === 'function') return 'chromecast';
+        if (typeof video.webkitShowPlaybackTargetPicker === 'function') return 'airplay';
+        return null;
+      }
+
+      async function updateCastSession(force = false) {
+        if (!castSession) return;
+        const now = Date.now();
+        if (!force && now - lastCastUpdateAt < 15_000) return;
+        lastCastUpdateAt = now;
+        const video = $('video');
+        try {
+          const data = await api(`/api/v1/cast/sessions/${encodeURIComponent(castSession.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              state: video.paused ? 'paused' : 'playing',
+              positionSeconds: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+            }),
+          });
+          if (data.mediaUrl && normalizePlaybackUrl(data.mediaUrl) !== currentPlaybackUrl) {
+            attachSource(data.mediaUrl, video.currentTime);
+            video.play().catch(() => {});
+          }
+        } catch (error) {
+          castSession = null;
+          handleFailure('playerStatus', error);
+        }
+      }
+
+      async function stopCasting() {
+        if (!castSession) return;
+        const id = castSession.id;
+        castSession = null;
+        await api(`/api/v1/cast/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+        $('castPlayback').textContent = 'Cast';
+      }
+
+      async function startCasting() {
+        if (!currentMedia) return;
+        const transport = browserCastTransport();
+        if (!transport) {
+          throw Object.assign(new Error('This browser does not expose AirPlay or Chromecast controls.'), {
+            code: 'cast_transport_unsupported',
+          });
+        }
+        const video = $('video');
+        // Receiver selection must begin inside the button activation. Browsers reject a
+        // delayed picker after an awaited network request.
+        if (transport === 'chromecast') await video.remote.prompt();
+        else video.webkitShowPlaybackTargetPicker();
+        const data = await api('/api/v1/cast/sessions', {
+          method: 'POST',
+          body: JSON.stringify({
+            mediaId: currentMedia,
+            transport,
+            receiverName: transport === 'airplay' ? 'AirPlay receiver' : 'Chromecast receiver',
+            positionSeconds: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+            capabilities: {
+              containers: ['mp4'],
+              videoCodecs: ['h264'],
+              audioCodecs: ['aac'],
+              streamingProtocols: ['http'],
+              subtitleModes: ['external'],
+              maxWidth: 3840,
+              maxHeight: 2160,
+            },
+          }),
+        });
+        castSession = data.session;
+        lastCastUpdateAt = Date.now();
+        $('castPlayback').textContent = 'Stop casting';
+        if (data.mediaUrl) {
+          attachSource(data.mediaUrl, video.currentTime);
+          await video.play().catch(() => {});
+        }
+        setStatus('playerStatus', `Connected to ${data.session?.receiverName || 'receiver'}.`);
+      }
+
+      async function stopPlayback() {
+        clearRenewal();
+        await stopCasting();
+        $('video').pause();
+        await saveCurrentProgress();
+        if (playbackSession && currentMedia) {
+          await api(`/api/v1/media/${encodeURIComponent(currentMedia)}/playback-session`, {
+            method: 'DELETE',
+            body: JSON.stringify({ sessionId: playbackSession, action: playbackAction }),
+          }).catch(() => {});
+        }
+        currentMedia = null;
+        playbackAction = '';
+        playbackToken = '';
+        playbackSession = '';
+        playbackRenewUrl = '';
+        playbackExpiresAt = 0;
+        currentPlaybackUrl = '';
+        currentSubtitleUrl = '';
+        currentPlan = null;
+        currentProbe = null;
+        if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+        $('video').removeAttribute('src');
+        $('player').classList.add('hidden');
+        // Focus must return to whatever opened the player, never to the document body.
+        if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
+        else $('mainContent').focus();
+      }
+
+      /** Re-planning is how a track change is applied: the server owns the decision. */
+      async function reselectTracks() {
+        if (!currentMedia) return;
+        const mediaId = currentMedia;
+        const audioTrackId = $('audioTrack').value || undefined;
+        const subtitleTrackId = $('subtitleTrack').value || null;
+        const position = $('video').currentTime;
+        await stopPlayback();
+        await play(mediaId, { audioTrackId, subtitleTrackId });
+        restorePosition(position);
+      }
+
+      // ── Events ───────────────────────────────────────────────────────────
+
+      $('bootRetry').onclick = boot;
+      $('reload').onclick = () => renderView(currentView, { force: true });
+
+      for (const button of document.querySelectorAll('[data-view]')) {
+        button.onclick = () => renderView(button.dataset.view);
+      }
+
+      $('searchForm').onsubmit = (event) => {
+        event.preventDefault();
+        renderView('search', { query: $('searchInput').value });
+      };
+      $('searchClear').onclick = () => { $('searchInput').value = ''; renderView('search', { query: '' }); $('searchInput').focus(); };
+
+      $('detailClose').onclick = () => {
+        $('detailPanel').classList.add('hidden');
+        if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
+        else $('mainContent').focus();
+      };
+
+      $('authForm').onsubmit = async (event) => {
+        event.preventDefault();
+        const onboarding = event.currentTarget.dataset.onboarding === '1';
+        setBusy('authStatus', onboarding ? 'Creating the owner account…' : 'Signing in…');
+        try {
+          const data = await api(onboarding ? '/api/v1/auth/owner' : '/api/v1/auth/session', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: $('name').value,
+              username: $('username').value,
+              password: $('password').value,
+              sessionMode,
+              ...(onboarding ? { bootstrapSecret: $('bootstrapSecret').value.trim() } : {}),
+            }),
+          });
+          credentialScheme = 'Bearer';
+          bearer = sessionMode === 'bearer' ? (data.adminToken || data.accessToken || '') : '';
+          csrfToken = data.csrfToken || readCsrfCookie();
+          if (sessionMode === 'bearer' && !bearer) {
+            throw Object.assign(new Error('The server did not return a session token.'), { code: 'request_failed' });
+          }
+          $('password').value = '';
+          $('bootstrapSecret').value = '';
+          setStatus('authStatus', '');
+          await loadAccount();
+        } catch (error) {
+          handleFailure('authStatus', error);
+        }
+      };
+
+      $('invitationForm').onsubmit = async (event) => {
+        event.preventDefault();
+        setBusy('authStatus', 'Opening the shared library…');
+        try {
+          const invitationId = $('invitationId').value.trim();
+          const invitationSecret = $('invitationSecret').value.trim();
+          const data = await api(`/api/v1/invitations/${encodeURIComponent(invitationId)}/accept`, {
+            method: 'POST',
+            headers: { Authorization: `LoomInvite ${invitationSecret}` },
+            body: JSON.stringify({ deviceId: browserDeviceId }),
+          });
+          const credential = data.credential || {};
+          if (!credential.id || !credential.secret || credential.scheme !== 'LoomInvitation') {
+            throw new Error('The server did not return a valid invitation session.');
+          }
+          bearer = `${credential.id}.${credential.secret}`;
+          credentialScheme = 'LoomInvitation';
+          sessionMode = 'bearer';
+          csrfToken = '';
+          $('invitationSecret').value = '';
+          await loadAccount();
+        } catch (error) { handleFailure('authStatus', error); }
+      };
+
+      $('pinForm').onsubmit = async (event) => {
+        event.preventDefault();
+        if (!pendingPinProfile) return;
+        await commitProfileSelection(pendingPinProfile, $('pin').value);
+        $('pin').value = '';
+      };
+      $('pinCancel').onclick = () => {
+        $('pinForm').classList.add('hidden');
+        pendingPinProfile = null;
+        const first = $('profileChoices').querySelector('button');
+        if (first) first.focus();
+      };
+
+      $('profileForm').onsubmit = async (event) => {
+        event.preventDefault();
+        setBusy('profileStatus', 'Creating profile…');
+        try {
+          await api('/api/v1/profiles', { method: 'POST', body: JSON.stringify({ name: $('profileName').value, kind: 'adult' }) });
+          $('profileName').value = '';
+          await refreshProfiles();
+          renderProfileChoices();
+          setStatus('profileStatus', 'Profile created.');
+        } catch (error) {
+          handleFailure('profileStatus', error);
+        }
+      };
+
+      $('switchProfile').onclick = async () => {
+        if (currentMedia) await stopPlayback();
+        await api('/api/v1/profiles/selection', { method: 'DELETE' }).catch(() => {});
+        selectedProfile = '';
+        libraryCache = null;
+        seriesCache = null;
+        await refreshProfiles().catch(() => {});
+        showProfileChooser();
+      };
+
+      $('profileSignOut').onclick = () => $('logout').click();
+
+      $('endInvitation').onclick = async () => {
+        await api('/api/v1/invitations/session', { method: 'DELETE' }).catch(() => {});
+        invitationSession = null;
+        $('logout').click();
+      };
+
+      $('createInvitation').onclick = () => createInvitation().catch((error) => handleFailure('sharingStatus', error));
+      $('copyInvitation').onclick = async () => {
+        const text = `LoomTV invitation\nID: ${$('createdInvitationId').value}\nSecret: ${$('createdInvitationSecret').value}`;
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus('sharingStatus', 'Invitation copied. Send it through a private channel.');
+        } catch {
+          $('createdInvitationSecret').select();
+          setStatus('sharingStatus', 'Copy the selected secret manually.', 'error');
+        }
+      };
+
+      $('scan').onclick = async () => {
+        setBusy('libraryStatus', 'Starting a library scan…');
+        try {
+          await api('/api/v1/library/scan', { method: 'POST', body: '{}' });
+          setStatus('libraryStatus', 'Scan started. Results appear as files are indexed.');
+          window.setTimeout(() => renderView(currentView, { force: true }), 1500);
+        } catch (error) {
+          handleFailure('libraryStatus', error);
+        }
+      };
+
+      $('logout').onclick = async () => {
+        if (currentMedia) await stopPlayback();
+        await api('/api/v1/auth/session', { method: 'DELETE' }).catch(() => {});
+        clearRenewal();
+        bearer = '';
+        credentialScheme = 'Bearer';
+        csrfToken = '';
+        account = null;
+        profiles = [];
+        selectedProfile = '';
+        libraryCache = null;
+        seriesCache = null;
+        showAuth(false);
+        announce('Signed out.', false);
+      };
+
+      $('closePlayer').onclick = stopPlayback;
+      $('castPlayback').onclick = () => (castSession ? stopCasting() : startCasting())
+        .catch((error) => handleFailure('playerStatus', error));
+      $('markWatched').onclick = async () => {
+        if (!selectedProfile || !currentMedia) return;
+        try {
+          await api(`/api/v1/profiles/${encodeURIComponent(selectedProfile)}/lists/watched/${encodeURIComponent(currentMedia)}`, { method: 'PUT', body: '{}' });
+          setStatus('playerStatus', 'Marked as watched.');
+        } catch (error) {
+          handleFailure('playerStatus', error);
+        }
+      };
+      $('audioTrack').onchange = () => reselectTracks().catch((error) => handleFailure('playerStatus', error));
+      $('subtitleTrack').onchange = () => reselectTracks().catch((error) => handleFailure('playerStatus', error));
       $('video').addEventListener('error', retryPlaybackOnce);
-      $('authForm').onsubmit = async (event) => { event.preventDefault(); const onboarding = event.currentTarget.dataset.onboarding === '1'; setStatus('authStatus', 'Working…'); try { const data = await api(onboarding ? '/api/v1/auth/owner' : '/api/v1/auth/session', { method: 'POST', body: JSON.stringify({ name: $('name').value, username: $('username').value, password: $('password').value, ...(onboarding ? { bootstrapSecret: $('bootstrapSecret').value.trim() } : {}) }) }); token = data.adminToken || data.accessToken || ''; if (!token) throw new Error('The server did not return a session token.'); if (onboarding) $('bootstrapSecret').value = ''; localStorage.setItem(tokenKey, token); await loadApp(); } catch (error) { setStatus('authStatus', error.message); } };
-      $('profileForm').onsubmit = async (event) => { event.preventDefault(); try { await api('/api/v1/profiles', { method: 'POST', body: JSON.stringify({ name: $('profileName').value, type: 'standard' }) }); $('profileName').value = ''; await loadProfiles(); } catch (error) { setStatus('libraryStatus', error.message); } };
-      $('scan').onclick = async () => { try { await api('/api/v1/library/scan', { method: 'POST', body: '{}' }); setStatus('libraryStatus', 'Scan started.'); window.setTimeout(loadLibrary, 1200); } catch (error) { setStatus('libraryStatus', error.message); } };
-      $('logout').onclick = async () => { await api('/api/v1/auth/session', { method: 'DELETE' }).catch(() => {}); clearRenewal(); token = ''; localStorage.removeItem(tokenKey); showAuth(false); };
-      $('closePlayer').onclick = async () => { clearRenewal(); $('video').pause(); await saveCurrentProgress(); if (playbackSession && currentMedia) { const stopUrl = `/api/v1/media/${encodeURIComponent(currentMedia)}/playback-session`; await fetch(stopUrl, { method: 'DELETE', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: playbackSession, action: playbackAction }) }).catch(() => {}); } currentMedia = ''; playbackAction = ''; playbackToken = ''; playbackSession = ''; playbackRenewUrl = ''; playbackExpiresAt = 0; currentPlaybackUrl = ''; if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; } $('video').removeAttribute('src'); $('player').classList.add('hidden'); };
-      function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character])); }
-      function escapeAttr(value) { return escapeHtml(value); }
+      $('video').addEventListener('timeupdate', () => { void updateCastSession(false); });
+
+      // Keyboard operation for playback without a pointer. Space and the arrow keys are
+      // left to the native video element when it holds focus.
+      document.addEventListener('keydown', (event) => {
+        if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+        const target = event.target;
+        const typing = target instanceof HTMLElement
+          && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA');
+        if (event.key === 'Escape') {
+          if (currentMedia) { event.preventDefault(); stopPlayback(); return; }
+          if (!$('detailPanel').classList.contains('hidden')) { event.preventDefault(); $('detailClose').click(); }
+          return;
+        }
+        if (typing || !currentMedia) return;
+        const video = $('video');
+        if (event.key === 'k' || (event.key === ' ' && target !== video)) {
+          event.preventDefault();
+          if (video.paused) video.play().catch(() => {}); else video.pause();
+          announce(video.paused ? 'Paused' : 'Playing', false);
+        } else if (event.key === 'j' || event.key === 'ArrowLeft') {
+          if (target === video) return;
+          event.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - 10);
+        } else if (event.key === 'l' || event.key === 'ArrowRight') {
+          if (target === video) return;
+          event.preventDefault();
+          video.currentTime = video.currentTime + 10;
+        }
+      });
+
+      window.addEventListener('online', () => {
+        announce('Connection restored.', false);
+        if (currentView) renderView(currentView, { force: true });
+      });
+      window.addEventListener('offline', () => setStatus('libraryStatus', 'This device is offline. Playback and library updates will resume when the connection returns.', 'error'));
+      window.addEventListener('pagehide', () => { void saveCurrentProgress(); });
+
       boot();
     })();
   </script>

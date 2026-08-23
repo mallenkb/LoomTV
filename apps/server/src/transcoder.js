@@ -1,7 +1,12 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import process from 'node:process';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
+import { ffprobeMediaArguments, parseFfprobeMediaProbe } from '@loom-media-server/media-core';
 import { probeTranscodeCapabilities } from '@loom-media-server/transcode-capabilities';
+
+const execFileAsync = promisify(execFile);
 
 function existingExecutable(candidate) {
   if (!candidate) return null;
@@ -27,13 +32,54 @@ function resolveFfmpeg(configuredPath) {
   }
 }
 
+function resolveFfprobe(configuredPath, ffmpegPath) {
+  const explicit = existingExecutable(configuredPath || process.env.LOOMTV_FFPROBE_PATH || process.env.FFPROBE_PATH);
+  if (explicit) return explicit;
+  if (ffmpegPath) {
+    const sibling = path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    const bundled = existingExecutable(sibling);
+    if (bundled) return bundled;
+  }
+  const command = process.platform === 'win32' ? 'where.exe' : 'which';
+  try {
+    const output = execFileSync(command, ['ffprobe'], { encoding: 'utf8', timeout: 1000 })
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .find(Boolean);
+    return existingExecutable(output);
+  } catch {
+    return null;
+  }
+}
+
 export function createHeadlessTranscoder(options = {}) {
   const ffmpegPath = resolveFfmpeg(options.ffmpegPath);
+  const ffprobePath = resolveFfprobe(options.ffprobePath, ffmpegPath);
   let lastProbe;
   let lastProbeAt = 0;
 
   return {
     path: ffmpegPath,
+    probePath: ffprobePath,
+    async probeMedia(filePath, { sourceId = 'primary', signal } = {}) {
+      if (!ffprobePath) throw Object.assign(new Error('FFprobe is not available on this host.'), {
+        code: 'media_probe_unavailable', status: 503, retryable: true,
+      });
+      try {
+        const { stdout } = await execFileAsync(ffprobePath, ffprobeMediaArguments(filePath), {
+          encoding: 'utf8', timeout: 15_000, maxBuffer: 8 * 1024 * 1024, signal,
+        });
+        return parseFfprobeMediaProbe(stdout, { sourceId });
+      } catch (error) {
+        if (error?.code === 'media_probe_invalid') throw error;
+        if (error?.name === 'AbortError') throw Object.assign(new Error('The media probe was cancelled.'), {
+          code: 'operation_cancelled', status: 503, retryable: true,
+        });
+        throw Object.assign(new Error('The selected media source could not be probed.'), {
+          code: 'media_probe_failed', status: 422, retryable: false,
+        });
+      }
+    },
     getCapabilities({ force = false } = {}) {
       const now = Date.now();
       if (!force && lastProbe && now - lastProbeAt < 30_000) return lastProbe;
@@ -47,6 +93,7 @@ export function createHeadlessTranscoder(options = {}) {
         startedAt: capabilities.probedAt,
         completedAt: Date.now(),
         ffmpegPath,
+        ffprobePath,
         state: capabilities.state,
         recommendedBackend: capabilities.recommendedBackend,
         softwareFallback: capabilities.softwareFallback,
@@ -72,6 +119,8 @@ export function createHeadlessTranscoder(options = {}) {
         state: capabilities.state,
         available: capabilities.state !== 'unavailable',
         ffmpegPath,
+        ffprobePath,
+        probing: Boolean(ffprobePath),
         recommendedBackend: capabilities.recommendedBackend,
         hardwareAcceleration: capabilities.hardwareAcceleration,
         codecs: capabilities.codecs,

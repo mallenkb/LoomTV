@@ -60,6 +60,27 @@ test('a scan indexes nested video files and skips non-video files', async () => 
   assert.equal(state.catalog.find((item) => item.kind === 'movie')?.type, 'movie');
 });
 
+test('a scan binds supported subtitle sidecars to the adjacent video only', async () => {
+  const rootPath = await makeLibrary([
+    'Films/Arrival.2016.mkv',
+    'Films/Arrival.2016.en.forced.srt',
+    'Films/Arrival.2016.fr.vtt',
+    'Films/Other.en.srt',
+  ]);
+  const { scanner, state } = makeHarness({ roots: [{ id: 'root-1', path: rootPath }] });
+  await scanner.start({ mode: 'full' });
+  await waitForScan(state);
+
+  assert.equal(state.catalog.length, 1);
+  assert.deepEqual(state.catalog[0].subtitleSidecars.map((sidecar) => ({
+    language: sidecar.language, format: sidecar.format, forced: sidecar.forced,
+  })), [
+    { language: 'en', format: 'srt', forced: true },
+    { language: 'fr', format: 'vtt', forced: false },
+  ]);
+  assert.ok(state.catalog[0].subtitleSidecars.every((sidecar) => path.dirname(sidecar.path) === path.dirname(state.catalog[0].path)));
+});
+
 test('an offline root preserves existing records as unavailable instead of deleting them', async () => {
   const rootPath = await makeLibrary(['keeper.mkv']);
   const { scanner, state } = makeHarness({ roots: [{ id: 'root-1', path: rootPath }] });

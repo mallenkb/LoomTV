@@ -249,7 +249,7 @@ export function createAdminApiHandler(options = {}) {
 
     let configured;
     try { configured = await ownerConfigured(); } catch (error) { log('owner state lookup failed', error); configured = true; }
-    const publicRoute = (pathname === `${prefix}/bootstrap` && method === 'GET' && !configured)
+    const publicRoute = isPublicBootstrapRequest
       || (pathname === `${prefix}/onboarding/owner` && method === 'POST')
       || (pathname === `${prefix}/session` && method === 'POST');
     const requiredPermission = permissionForRoute(pathname, method, prefix);
@@ -295,6 +295,8 @@ export function createAdminApiHandler(options = {}) {
         writeJson(res, 201, await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
+          bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
+          address: proxyPolicy.clientAddress(req),
         }));
         return true;
       }

@@ -401,6 +401,9 @@ const config: ForgeConfig = {
       'resources/libvlc',
       'resources/mpv',
       'resources/DICEBEAR_GLYPHS_LICENSE.md',
+      '../server/src/web-app.html',
+      'src/headless/admin.html',
+      'src/headless/lucide-icons.svg',
     ],
     afterPrune: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {

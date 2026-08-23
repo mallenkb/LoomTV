@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
-import { createHeadlessClientState, legacyHeadlessClientStateFilename } from '../src/client-state.js';
+import { createHeadlessClientState, normalizeHeadlessClientState } from '../src/client-state.js';
 
 async function makeStore() {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-client-state-'));
-  return { store: createHeadlessClientState({ dataDir }), dataDir };
+  let state = normalizeHeadlessClientState({});
+  const canonicalStore = {
+    readClientState: () => state,
+    replaceClientState: (next) => { state = normalizeHeadlessClientState(next); },
+    mutateClientState: (mutation) => mutation(state),
+  };
+  return { store: createHeadlessClientState({ store: canonicalStore }), canonicalStore };
 }
 
 test('profiles are scoped to their owning account', async () => {
@@ -41,47 +43,21 @@ test('progress round-trips and derives watched state near the end of playback', 
   assert.equal(read.watched, true);
 });
 
-test('a malformed legacy JSON store is normalized during migration instead of crashing', async () => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-client-state-'));
+test('a malformed legacy client snapshot stops canonical import', async () => {
   const junkProfiles = [
     { id: 'ok', ownerId: 'user-a', name: 'x'.repeat(500), type: 'not-a-type', createdAt: 'yesterday' },
     { ownerId: 'missing-id' },
     'not-an-object',
     null,
   ];
-  await fs.writeFile(
-    path.join(dataDir, legacyHeadlessClientStateFilename),
-    JSON.stringify({ profiles: junkProfiles, progress: { p: { m: { position: -5, duration: 'NaN' } } }, selections: 42 }),
+  assert.throws(
+    () => normalizeHeadlessClientState({ profiles: junkProfiles, progress: { p: { m: { position: -5, duration: 'NaN' } } }, selections: 42 }),
+    (error) => error.code === 'unknown_profile_kind',
   );
-  const store = createHeadlessClientState({ dataDir });
-  const profiles = await store.listProfiles('user-a');
-  assert.equal(profiles.length, 1);
-  assert.equal(profiles[0].name.length <= 80, true);
-  assert.equal(['owner', 'standard', 'kid', 'guest'].includes(profiles[0].type), true);
 });
 
-test('legacy JSON state migrates into SQLite once and survives a store reopen', async () => {
-  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-client-state-'));
-  const legacy = {
-    profiles: [{ id: 'legacy-1', ownerId: 'user-a', name: 'From JSON', type: 'kid', createdAt: 5, updatedAt: 6 }],
-    progress: { 'legacy-1': { 'media-1': { position: 10, duration: 100, watched: false, updatedAt: 7 } } },
-    selections: { 'user-a': 'legacy-1' },
-  };
-  await fs.writeFile(path.join(dataDir, legacyHeadlessClientStateFilename), JSON.stringify(legacy));
-
-  const store = createHeadlessClientState({ dataDir });
-  const profiles = await store.listProfiles('user-a');
-  assert.equal(profiles.length, 1);
-  assert.equal(profiles[0].name, 'From JSON');
-  assert.equal((await store.getProgress('legacy-1', 'media-1', 'user-a')).position, 10);
-
-  // The JSON file is renamed so the migration cannot run twice.
-  await assert.rejects(() => fs.access(path.join(dataDir, legacyHeadlessClientStateFilename)));
-  await fs.access(path.join(dataDir, `${legacyHeadlessClientStateFilename}.migrated`));
-
-  // A fresh store instance over the same dataDir reads the SQLite data.
-  const reopened = createHeadlessClientState({ dataDir });
-  assert.equal((await reopened.listProfiles('user-a'))[0].name, 'From JSON');
+test('client state refuses to create a second legacy persistence authority', () => {
+  assert.throws(() => createHeadlessClientState({}), /canonical state store/i);
 });
 
 test('exportState/importState round-trips profiles and progress for backups', async () => {
@@ -96,7 +72,7 @@ test('exportState/importState round-trips profiles and progress for backups', as
   const profiles = await restored.listProfiles('user-a');
   assert.equal(profiles.length, 1);
   assert.equal(profiles[0].name, 'Backup me');
-  assert.equal(profiles[0].type, 'kid');
+  assert.equal(profiles[0].kind, 'child');
   const progress = await restored.getProgress(profiles[0].id, 'media-9', 'user-a');
   assert.equal(progress.position, 42);
 });

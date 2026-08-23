@@ -1,0 +1,37 @@
+{
+  "name": "@loom-media-server/tv",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "../mobile/modules"
+    }
+  },
+  "scripts": {
+    "start": "expo start --dev-client",
+    "preandroid": "expo prebuild --platform android --no-install",
+    "android": "expo run:android",
+    "build:development": "eas build --platform android --profile development",
+    "build:preview": "eas build --platform android --profile preview",
+    "build:production": "eas build --platform android --profile production",
+    "submit:production": "eas submit --platform android --profile production",
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs",
+    "verify:config": "node scripts/verify-tv-config.cjs"
+  },
+  "dependencies": {
+    "expo": "~54.0.35",
+    "expo-secure-store": "~15.0.8",
+    "expo-status-bar": "~3.0.9",
+    "expo-video": "~3.0.16",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-zeroconf": "^0.14.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
+  }
+}

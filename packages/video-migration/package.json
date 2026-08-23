@@ -1,0 +1,30 @@
+{
+  "name": "@loom-media-server/video-migration",
+  "version": "1.0.0",
+  "description": "Migration bridge from legacy desktop and headless LoomTV state to canonical persistence",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    }
+  },
+  "bin": {
+    "loomtv-migrate": "bin/loomtv-migrate.mjs"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "dependencies": {
+    "@loom-media-server/media-core": "workspace:*",
+    "@loom-media-server/video-contracts": "workspace:*",
+    "loom-media-server-headless": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs"
+  }
+}

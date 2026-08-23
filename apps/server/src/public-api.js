@@ -1,17 +1,25 @@
-import path from 'node:path';
-import { isOwnerPrincipal } from './auth-policy.js';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { hasPermission } from './auth-policy.js';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import {
   MEDIA_CORE_CONTRACT_VERSION,
   normalizeClientPlaybackCapabilities,
-  playbackPlanForMedia,
 } from '@loom-media-server/media-core';
+import {
+  CANONICAL_API_PREFIX,
+  CANONICAL_API_VERSION,
+  CANONICAL_API_VERSION_HEADER,
+} from '@loom-media-server/video-contracts';
+import { canonicalPublicError } from './public-error.js';
+import { createCastSessionRegistry } from './cast-session-registry.js';
 
-export const PUBLIC_API_PREFIX = '/api/v1';
-export const PUBLIC_API_VERSION = '1';
-export const PUBLIC_API_HEADER = 'X-LoomTV-API-Version';
+export const PUBLIC_API_PREFIX = CANONICAL_API_PREFIX;
+export const PUBLIC_API_VERSION = CANONICAL_API_VERSION;
+export const PUBLIC_API_HEADER = CANONICAL_API_VERSION_HEADER;
 
 const MAX_BODY_BYTES = 128 * 1024;
+const SESSION_COOKIE = '__Host-loomtv_session';
+const CSRF_COOKIE = '__Host-loomtv_csrf';
 
 function requestError(status, code, message) {
   return Object.assign(new Error(message), { status, code });
@@ -53,6 +61,46 @@ function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function requestCookie(req, name) {
+  const raw = Array.isArray(req.headers.cookie) ? req.headers.cookie.join(';') : String(req.headers.cookie || '');
+  if (!raw || raw.length > 8_192) return null;
+  for (const part of raw.split(';')) {
+    const index = part.indexOf('=');
+    if (index > 0 && part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
+  }
+  return null;
+}
+
+function safeStringEqual(left, right) {
+  const actual = Buffer.from(String(left || ''), 'utf8');
+  const expected = Buffer.from(String(right || ''), 'utf8');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function sameOriginRequest(req) {
+  const origin = Array.isArray(req.headers.origin) ? '' : String(req.headers.origin || '');
+  const host = Array.isArray(req.headers.host) ? '' : String(req.headers.host || '');
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === 'https:' && parsed.host.toLowerCase() === host.toLowerCase();
+  } catch { return false; }
+}
+
+function cookieSessionHeaders(token, csrfToken, expiresAt) {
+  const maxAge = Math.max(1, Math.floor((Number(expiresAt) - Date.now()) / 1_000));
+  return { 'Set-Cookie': [
+    `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Strict`,
+    `${CSRF_COOKIE}=${csrfToken}; Path=/; Max-Age=${maxAge}; Secure; SameSite=Strict`,
+  ] };
+}
+
+function clearCookieSessionHeaders() {
+  return { 'Set-Cookie': [
+    `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`,
+    `${CSRF_COOKIE}=; Path=/; Max-Age=0; Secure; SameSite=Strict`,
+  ] };
+}
+
 async function readJsonBody(req) {
   const declaredLength = Number(req.headers['content-length'] || 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
@@ -86,13 +134,12 @@ function decodeSegment(value, field = 'id') {
     }
     return decoded;
   } catch {
-    throw requestError(400, `${field}_invalid`, `${field} is invalid.`);
+    throw requestError(400, 'invalid_request', `${field} is invalid.`);
   }
 }
 
 function pathForMedia(url, mediaId, action) {
   const query = new URLSearchParams(url.searchParams);
-  query.delete('profileId');
   query.set('itemId', mediaId);
   const path = action === 'download'
     ? `/api/media/items/${encodeURIComponent(mediaId)}/download`
@@ -102,8 +149,25 @@ function pathForMedia(url, mediaId, action) {
   return new URL(`${path}?${query.toString()}`, 'http://loomtv.local');
 }
 
-function authTokenPresent(req, url) {
-  return Boolean(req.headers.authorization || req.headers['x-loom-admin-token'] || url.searchParams.get('token'));
+function deviceIdForRequest(req, principal) {
+  const raw = Array.isArray(req.headers['x-loom-device-id'])
+    ? req.headers['x-loom-device-id'][0]
+    : req.headers['x-loom-device-id'];
+  const supplied = typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 128) : null;
+  const authenticated = principal.deviceId || `account:${principal.id}`;
+  if (supplied && supplied !== authenticated) {
+    throw requestError(403, 'device_identity_mismatch', 'The requested device does not match the authenticated credential.');
+  }
+  return authenticated;
+}
+
+function bindAuthenticationSession(profileContext, principal) {
+  return {
+    ...profileContext,
+    remoteAccess: principal?.authentication === 'invitation-session' || hasPermission(principal, 'remote.access'),
+    ...(principal?.sessionId ? { authenticationSessionId: principal.sessionId } : {}),
+    ...(principal?.invitationSessionId ? { invitationSessionId: principal.invitationSessionId } : {}),
+  };
 }
 
 export function publicHealthSummary(health) {
@@ -133,23 +197,32 @@ export function publicHealthSummary(health) {
 function publicLibraryItem(item) {
   if (!item || typeof item !== 'object') return item;
   const safeItem = {};
-  for (const field of ['id', 'rootId', 'type', 'title', 'kind', 'extension']) {
-    if (typeof item[field] === 'string' && item[field].length <= 4_096 && !item[field].includes('\u0000')) safeItem[field] = item[field];
+  for (const field of ['id', 'title', 'kind', 'seriesId']) {
+    if (typeof item[field] === 'string' && item[field].length <= 500 && !item[field].includes('\u0000')) safeItem[field] = item[field];
   }
-  for (const field of ['year', 'sizeBytes', 'modifiedAtMs', 'indexedAt']) {
+  for (const field of ['year', 'seasonNumber', 'episodeNumber', 'rating', 'createdAt', 'updatedAt']) {
     if (Number.isFinite(item[field])) safeItem[field] = Number(item[field]);
   }
-  if (typeof item.available === 'boolean') safeItem.available = item.available;
-  if (typeof item.relativePath === 'string' && item.relativePath.length <= 4_096
-    && !path.isAbsolute(item.relativePath) && !path.win32.isAbsolute(item.relativePath)
-    && !item.relativePath.includes('\u0000')) safeItem.relativePath = item.relativePath;
+  if (safeItem.seasonNumber === undefined && Number.isFinite(item.series?.season)) safeItem.seasonNumber = Number(item.series.season);
+  if (safeItem.episodeNumber === undefined && Number.isFinite(item.series?.episode)) safeItem.episodeNumber = Number(item.series.episode);
+  safeItem.available = item.available === true;
+  if (Array.isArray(item.sourceIds)) safeItem.sourceIds = item.sourceIds
+    .filter((sourceId) => typeof sourceId === 'string' && sourceId.length <= 256 && !sourceId.includes('\u0000'))
+    .slice(0, 256);
+  else safeItem.sourceIds = [];
+  if (Array.isArray(item.legacyIds)) safeItem.legacyIds = item.legacyIds
+    .filter((legacyId) => typeof legacyId === 'string' && legacyId.length <= 512 && !legacyId.includes('\u0000'))
+    .slice(0, 512);
+  else safeItem.legacyIds = [];
   if (item.animeLikely === true) safeItem.animeLikely = true;
-  if (item.series && typeof item.series === 'object' && typeof item.series.title === 'string') {
-    safeItem.series = {
-      title: item.series.title.slice(0, 500),
-      ...(Number.isSafeInteger(item.series.season) ? { season: item.series.season } : {}),
-      ...(Number.isSafeInteger(item.series.episode) ? { episode: item.series.episode } : {}),
-    };
+  if (typeof item.summary === 'string') safeItem.summary = item.summary.slice(0, 20_000);
+  if (Array.isArray(item.genres)) safeItem.genres = item.genres
+    .filter((genre) => typeof genre === 'string' && genre.length <= 128 && !genre.includes('\u0000')).slice(0, 128);
+  if (item.providerIds && typeof item.providerIds === 'object' && !Array.isArray(item.providerIds)) {
+    safeItem.providerIds = Object.fromEntries(Object.entries(item.providerIds).slice(0, 64).flatMap(([key, value]) => (
+      typeof value === 'string' && key.length <= 64 && value.length <= 256 && !key.includes('\u0000') && !value.includes('\u0000')
+        ? [[key, value]] : []
+    )));
   }
   return safeItem;
 }
@@ -157,32 +230,64 @@ function publicLibraryItem(item) {
 function publicLibraryRoot(root) {
   if (!root || typeof root !== 'object') return root;
   const safeRoot = {};
-  for (const field of ['id', 'kind', 'state']) {
+  for (const field of ['id']) {
     if (typeof root[field] === 'string' && root[field].length <= 128 && !root[field].includes('\u0000')) safeRoot[field] = root[field];
   }
+  safeRoot.kind = root.kind === 'tvShows' ? 'tv' : ['movies','tv','anime','others'].includes(root.kind) ? root.kind : 'others';
+  safeRoot.state = root.state === 'degraded' ? 'unreadable'
+    : ['online','offline','unreadable','missing'].includes(root.state) ? root.state : 'missing';
   for (const field of ['createdAt', 'lastScanAt']) {
     if (Number.isFinite(root[field])) safeRoot[field] = Number(root[field]);
   }
-  if (typeof root.isNetworkLike === 'boolean') safeRoot.isNetworkLike = root.isNetworkLike;
-  if (typeof root.message === 'string') safeRoot.message = root.message.slice(0, 500);
   return safeRoot;
 }
 
-function mediaPlaybackFacts(item) {
-  const metadata = item?.localMetadata || item?.metadata || {};
-  const filePath = item?.path || item?.filePath || '';
-  return {
-    container: metadata.container || item?.container || path.extname(filePath).replace(/^\./, ''),
-    videoCodec: metadata.videoCodec || item?.videoCodec,
-    audioCodec: metadata.audioCodec || item?.audioCodec,
-    width: metadata.width || item?.width,
-    height: metadata.height || item?.height,
-    bitrateKbps: metadata.bitrateKbps || item?.bitrateKbps,
-    colorTransfer: metadata.colorTransfer || item?.colorTransfer,
-    colorPrimaries: metadata.colorPrimaries || item?.colorPrimaries,
-    pixelFormat: metadata.pixelFormat || item?.pixelFormat,
-    audioTracks: metadata.audioTracks ?? item?.audioTracks,
-  };
+function publicPlaybackPlan(plan) {
+  const result = {};
+  for (const field of [
+    'contractVersion', 'mode', 'transport', 'reasonCode', 'sourceId',
+    'selectedVideoTrackId', 'selectedAudioTrackId', 'selectedSubtitleTrackId',
+    'outputContainer', 'outputVideoCodec', 'outputAudioCodec', 'burnSubtitles',
+    'toneMap', 'maxWidth', 'maxHeight', 'videoBitrateKbps', 'audioBitrateKbps',
+  ]) {
+    if (plan?.[field] !== undefined) result[field] = plan[field];
+  }
+  return result;
+}
+
+function publicMediaProbe(probe) {
+  if (!probe || typeof probe !== 'object') return null;
+  const result = {};
+  for (const field of ['sourceId','container','videoCodec','audioCodec','hdrFormat']) {
+    if (typeof probe[field] === 'string' && probe[field].length <= 256 && !probe[field].includes('\u0000')) result[field] = probe[field];
+  }
+  for (const field of ['durationSeconds','bitrateKbps','width','height','probedAt']) {
+    if (Number.isFinite(probe[field]) && Number(probe[field]) >= 0) result[field] = Number(probe[field]);
+  }
+  result.hdr = probe.hdr === true;
+  result.tracks = (Array.isArray(probe.tracks) ? probe.tracks : []).slice(0, 256).flatMap((track) => {
+    if (!track || typeof track !== 'object' || typeof track.id !== 'string'
+      || !Number.isSafeInteger(track.index) || !['video','audio','subtitle','data','unknown'].includes(track.kind)) return [];
+    const safe = { id: track.id.slice(0, 128), index: track.index, kind: track.kind,
+      default: track.default === true, forced: track.forced === true };
+    for (const field of ['codec','language','title','profile','pixelFormat','colorTransfer','colorPrimaries','colorSpace']) {
+      if (typeof track[field] === 'string' && track[field].length <= 200 && !track[field].includes('\u0000')) safe[field] = track[field];
+    }
+    for (const field of ['channels','width','height','frameRate']) {
+      if (Number.isFinite(track[field]) && Number(track[field]) >= 0) safe[field] = Number(track[field]);
+    }
+    if (track.external === true) safe.external = true;
+    return [safe];
+  });
+  result.chapters = (Array.isArray(probe.chapters) ? probe.chapters : []).slice(0, 10_000).flatMap((chapter) => (
+    chapter && Number.isFinite(chapter.startMs) && Number.isFinite(chapter.endMs)
+      && chapter.endMs > chapter.startMs && typeof chapter.title === 'string'
+      ? [{ startMs: Number(chapter.startMs), endMs: Number(chapter.endMs), title: chapter.title.slice(0, 500) }]
+      : []
+  ));
+  if (Array.isArray(probe.adapterGaps)) result.adapterGaps = probe.adapterGaps
+    .filter((gap) => typeof gap === 'string' && gap.length <= 128 && !gap.includes('\u0000')).slice(0, 16);
+  return result;
 }
 
 function discoveryDocument(version, health) {
@@ -200,10 +305,25 @@ function discoveryDocument(version, health) {
       directStreaming: true,
       hlsTranscoding: Boolean(health.capabilities?.transcoding),
       playbackPlan: true,
+      playbackModes: ['direct', 'remux', 'transcode'],
+      trackSelection: true,
+      mediaProbe: true,
+      externalSidecarSubtitles: true,
       hardwareAcceleration: Boolean(health.capabilities?.hardwareAcceleration),
-      profilePins: false,
+      profilePins: true,
+      pairing: true,
+      deviceCredentials: true,
       downloads: true,
+      casting: { airplay: true, chromecast: true, dlna: true, receiverLaunch: 'client-native' },
     },
+    authentication: {
+      accountSession: 'Bearer',
+      browserSession: { mode: 'same-origin-cookie', sessionMode: 'cookie', csrfHeader: 'X-Loom-CSRF',
+        secure: true, sameSite: 'Strict', cleartextPolicy: 'memory-only-bearer' },
+      deviceCredential: 'LoomDevice',
+      pairingCapability: 'LoomPairing',
+    },
+    ...(health.server?.certificateFingerprint ? { certificateFingerprint: health.server.certificateFingerprint } : {}),
     health: {
       ...publicHealthSummary(health),
     },
@@ -245,6 +365,7 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
   servers: [{ url: '/' }],
   security: [{ bearerAuth: [] }],
   paths: {
+    '/api/v1/openapi.json': { get: { summary: 'Read this API description' } },
     '/api/v1/discovery': { get: { summary: 'Discover capabilities and client URLs' } },
     '/api/v1/health': { get: { summary: 'Read a safe unauthenticated health summary' } },
     '/api/v1/auth/onboarding': { get: { summary: 'Check whether owner onboarding is required' } },
@@ -258,15 +379,24 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/library/{mediaId}': { get: { summary: 'Read one catalog item' } },
     '/api/v1/library/scan': { get: { summary: 'Read scan status' }, post: { summary: 'Start a library scan' } },
     '/api/v1/profiles': { get: { summary: 'List profiles' }, post: { summary: 'Create a profile' } },
-    '/api/v1/profiles/{profileId}': { patch: { summary: 'Update a profile' } },
+    '/api/v1/profiles/{profileId}': { patch: { summary: 'Update a profile' }, delete: { summary: 'Remove a profile' } },
     '/api/v1/profiles/{profileId}/select': { post: { summary: 'Select the active profile' } },
+    '/api/v1/profiles/selection': { get: { summary: 'Read the active profile selection' }, patch: { summary: 'Update automatic profile sign-in' }, delete: { summary: 'Clear the active profile selection' } },
+    '/api/v1/profiles/selection/lock': { post: { summary: 'Lock the active profile selection' } },
+    '/api/v1/profiles/{profileId}/pin': { put: { summary: 'Set or remove a profile PIN' } },
+    '/api/v1/profiles/{profileId}/preferences': { get: { summary: 'Read profile preferences' }, patch: { summary: 'Replace profile preferences' } },
+    '/api/v1/profiles/{profileId}/lists': { get: { summary: 'List profile list entries' } },
+    '/api/v1/profiles/{profileId}/lists/{kind}/{mediaId}': { put: { summary: 'Add a profile list entry' }, delete: { summary: 'Remove a profile list entry' } },
+    '/api/v1/profiles/{profileId}/track-preferences/{scope}': { get: { summary: 'Read playback track preferences' }, put: { summary: 'Replace playback track preferences' } },
     '/api/v1/profiles/{profileId}/progress': { get: { summary: 'List watch progress' } },
     '/api/v1/profiles/{profileId}/progress/{mediaId}': { get: { summary: 'Read progress' }, put: { summary: 'Save progress' } },
     '/api/v1/media/{mediaId}': { get: { summary: 'Read media playback links' } },
     '/api/v1/media/{mediaId}/direct': { get: { summary: 'Stream a browser-compatible file' } },
     '/api/v1/media/{mediaId}/direct/renew': { post: { summary: 'Renew a direct playback lease before idle expiry' } },
-    '/api/v1/media/{mediaId}/download': { get: { summary: 'Download the original media file' } },
     '/api/v1/media/{mediaId}/playback-plan': { post: { summary: 'Choose direct playback or an HLS transcode for a client profile' } },
+    '/api/v1/media/{mediaId}/subtitles/{trackId}': { get: { summary: 'Read an external subtitle through a playback capability' } },
+    '/api/v1/cast/sessions': { post: { summary: 'Create a bounded cast capability' } },
+    '/api/v1/cast/sessions/{castSessionId}': { patch: { summary: 'Renew or update a cast session' }, delete: { summary: 'Stop a cast session' } },
     '/api/v1/media/{mediaId}/transcode': { post: { summary: 'Start an HLS transcode' } },
     '/api/v1/media/{mediaId}/transcode/renew': { post: { summary: 'Renew an HLS playback lease before idle expiry' } },
     '/api/v1/media/{mediaId}/playback-session/renew': { post: { summary: 'Renew a direct or HLS playback lease' } },
@@ -274,14 +404,32 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
     '/api/v1/users': { get: { summary: 'List scoped user accounts' }, post: { summary: 'Create a user account' } },
     '/api/v1/users/{userId}': { patch: { summary: 'Update a user account' }, delete: { summary: 'Remove a user account' } },
     '/api/v1/account/password': { post: { summary: 'Change or reset an account password' } },
+    '/api/v1/devices': { get: { summary: 'List paired devices' } },
+    '/api/v1/devices/{deviceId}': { delete: { summary: 'Revoke a paired device' } },
+    '/api/v1/remote-policy': { get: { summary: 'Read remote access policy' }, patch: { summary: 'Update remote access policy' } },
+    '/api/v1/audit-events': { get: { summary: 'Read redacted security audit events' } },
+    '/api/v1/invitations': { get: { summary: 'List invitations' }, post: { summary: 'Create a scoped invitation' } },
+    '/api/v1/invitations/{invitationId}/accept': { post: { summary: 'Accept a scoped invitation once' } },
+    '/api/v1/invitations/{invitationId}': { delete: { summary: 'Revoke an invitation and its sessions' } },
+    '/api/v1/invitations/session': { delete: { summary: 'Revoke the current invitation session' } },
+    '/api/v1/downloads': { get: { summary: 'List offline download leases' }, post: { summary: 'Reserve an offline download lease' } },
+    '/api/v1/downloads/{downloadId}': { delete: { summary: 'Revoke an offline download lease' } },
+    '/api/v1/downloads/{downloadId}/content': { get: { summary: 'Read content using an offline download capability' } },
+    '/api/v1/pairing/requests': { post: { summary: 'Request device pairing approval' } },
+    '/api/v1/pairing/requests/{requestId}': { get: { summary: 'Claim an approved device credential once' } },
+    '/api/v1/pairing/requests/{requestId}/approve': { post: { summary: 'Approve or deny a device pairing request' } },
     '/api/v1/diagnostics': { get: { summary: 'Read administrator diagnostics' } },
     '/api/v1/sessions': { get: { summary: 'List active playback sessions' } },
     '/api/v1/logs': { get: { summary: 'Read operational logs' } },
     '/api/v1/backups': { get: { summary: 'Read backup status' }, post: { summary: 'Create a backup' } },
-    '/api/v1/backups/restore': { post: { summary: 'Validate and restore a backup' } },
+    '/api/v1/backups/restore': { post: { summary: 'Validate and restore a backup as the configured owner' } },
   },
   components: {
-    securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer' },
+      browserCookie: { type: 'apiKey', in: 'cookie', name: SESSION_COOKIE },
+      csrf: { type: 'apiKey', in: 'header', name: 'X-Loom-CSRF' },
+    },
   },
 }));
 
@@ -289,20 +437,47 @@ const OPENAPI_DOCUMENT = Object.freeze(completeOpenApi({
  * Versioned viewer/client API. Existing `/api/admin` and `/api/media` routes
  * remain intact; this handler is a stable adapter around those services.
  */
-export function createPublicApiHandler({ service, clientState, mediaService, getRuntimeHealth, version, requireSecureTransport = false, proxyPolicy = createTrustedProxyPolicy() }) {
-  if (!service || !clientState || !mediaService) throw new Error('createPublicApiHandler requires server services.');
+export function createPublicApiHandler({ service, clientState, mediaService, pairingService, remotePolicy, getRuntimeHealth, version, requireSecureTransport = false, proxyPolicy = createTrustedProxyPolicy(), castSessions = createCastSessionRegistry() }) {
+  if (!service || !clientState || !mediaService || !pairingService || !remotePolicy) throw new Error('createPublicApiHandler requires server services.');
 
   function isSecureRequest(req) {
     return proxyPolicy.isSecureRequest(req);
   }
 
   async function principalForRequest(req) {
-    return service.authenticateRequest(req);
+    const invitation = await remotePolicy.authenticateInvitation(req);
+    if (invitation) return invitation;
+    if (req.headers.authorization || req.headers['x-loom-admin-token']) return service.authenticateRequest(req);
+    const sessionToken = requestCookie(req, SESSION_COOKIE);
+    if (!sessionToken) return service.authenticateRequest(req);
+    if (!isSecureRequest(req)) {
+      throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require HTTPS.');
+    }
+    if (!['GET','HEAD','OPTIONS'].includes(req.method)) {
+      const csrfCookie = requestCookie(req, CSRF_COOKIE);
+      const csrfHeader = Array.isArray(req.headers['x-loom-csrf']) ? '' : String(req.headers['x-loom-csrf'] || '');
+      if (!sameOriginRequest(req) || !csrfCookie || !safeStringEqual(csrfCookie, csrfHeader)) {
+        throw requestError(403, 'permission_denied', 'The browser session CSRF proof is missing or invalid.');
+      }
+    }
+    req.__loomCookieSessionToken = sessionToken;
+    return service.authenticateRequest({ ...req, headers: { ...req.headers, authorization: `Bearer ${sessionToken}` } });
   }
 
   async function requirePrincipal(req, permission) {
     const principal = await principalForRequest(req);
     if (!principal) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
+    if (principal.authentication === 'invitation-session') {
+      const pathname = new URL(req.url || '/', 'https://loomtv.local').pathname;
+      const invitationRoute = pathname.startsWith(`${PUBLIC_API_PREFIX}/library`)
+        || pathname.startsWith(`${PUBLIC_API_PREFIX}/media/`)
+        || pathname.startsWith(`${PUBLIC_API_PREFIX}/cast/`)
+        || pathname.startsWith(`${PUBLIC_API_PREFIX}/downloads`)
+        || pathname === `${PUBLIC_API_PREFIX}/invitations/session`
+        || pathname === `${PUBLIC_API_PREFIX}/auth/me`;
+      if (!invitationRoute) throw requestError(403, 'permission_denied', 'Invitation sessions cannot access this route.');
+    }
+    remotePolicy.assertPrincipal(req, principal, 'public');
     if (permission && !await service.authorizePrincipal(principal, permission)) {
       throw requestError(403, 'permission_denied', 'This account is not allowed to perform that action.');
     }
@@ -310,7 +485,59 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
   }
 
   function canSeeAllProfiles(principal) {
-    return isOwnerPrincipal(principal) || principal.permissions?.includes('users.manage') === true;
+    return hasPermission(principal, 'users.manage');
+  }
+
+  async function playbackProfileContext(principal, req, media = undefined) {
+    if (principal.authentication === 'invitation-session') {
+      return remotePolicy.invitationProfileContext(principal, media);
+    }
+    return clientState.requireActivePlaybackProfile(principal.id, deviceIdForRequest(req, principal), media);
+  }
+
+  async function requireSelectedProfile(principal, req, profileId, media = undefined) {
+    const active = await playbackProfileContext(principal, req, media);
+    if (active.profileId !== profileId) throw requestError(403, 'permission_denied', 'The requested profile is not the active unlocked profile.');
+    return active;
+  }
+
+  async function profileVisibleItems(principal, req) {
+    await playbackProfileContext(principal, req);
+    const visible = [];
+    for (const item of await service.listLibraryItems(principal)) {
+      try {
+        await playbackProfileContext(principal, req, item);
+        visible.push(item);
+      } catch (error) {
+        if (error?.code === 'permission_denied') continue;
+        throw error;
+      }
+    }
+    return visible;
+  }
+
+  async function requireLiveCastBinding(req, principal, record) {
+    if (!record || record.principalId !== principal.id) {
+      throw requestError(404, 'not_found', 'Cast session was not found.');
+    }
+    if (record.authenticationSessionId && record.authenticationSessionId !== principal.sessionId) {
+      throw requestError(401, 'session_expired', 'The account session that created this cast is no longer active.');
+    }
+    if (record.invitationSessionId && record.invitationSessionId !== principal.invitationSessionId) {
+      throw requestError(401, 'session_expired', 'The invitation session that created this cast is no longer active.');
+    }
+    const item = await service.getLibraryItem(record.mediaId, principal);
+    if (!item) throw requestError(404, 'media_not_found', 'The cast media is no longer available.');
+    const profile = await playbackProfileContext(principal, req, item);
+    if (profile.profileId !== record.profileId || profile.deviceId !== record.deviceId
+      || profile.selectionRevision !== record.selectionRevision) {
+      throw requestError(409, 'stale_profile_selection', 'The profile selected for this cast has changed.');
+    }
+    const source = await mediaService.describeDirectCapability(record.mediaId, principal, profile, record.sourceId);
+    if (source.sourceId !== record.sourceId || source.fileVersion !== record.fileVersion) {
+      throw requestError(409, 'source_unavailable', 'The cast media source changed.');
+    }
+    return { item, profile };
   }
 
   async function handleMedia(req, res, url, mediaId, action) {
@@ -342,7 +569,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
     if (pathname === PUBLIC_API_PREFIX && req.method === 'OPTIONS') {
       res.writeHead(204, {
         [PUBLIC_API_HEADER]: PUBLIC_API_VERSION,
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token, X-Loom-Device-Id',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token, X-Loom-Device-Id, X-Loom-CSRF',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Max-Age': '600',
       });
@@ -353,7 +580,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
         [PUBLIC_API_HEADER]: PUBLIC_API_VERSION,
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token, X-Loom-Device-Id',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Loom-Admin-Token, X-Loom-Device-Id, X-Loom-CSRF',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Max-Age': '600',
       });
@@ -363,11 +590,12 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
 
     const segments = pathname.slice(`${PUBLIC_API_PREFIX}/`.length).split('/').filter(Boolean);
     const resource = segments[0] || '';
+    const pairingRoute = resource === 'pairing';
     const publicDiscovery = (resource === 'discovery' && req.method === 'GET')
       || (resource === 'health' && req.method === 'GET')
       || (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET')
       || (pathname === `${PUBLIC_API_PREFIX}/openapi.json` && (req.method === 'GET' || req.method === 'HEAD'));
-    if (requireSecureTransport && !publicDiscovery && !isSecureRequest(req)) {
+    if ((pairingRoute || (requireSecureTransport && !publicDiscovery)) && !isSecureRequest(req)) {
       writeError(res, 426, 'secure_transport_required', 'Use HTTPS for credential, API, and media requests.');
       return true;
     }
@@ -381,6 +609,187 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeJson(res, 200, { ok: true, data: await service.getHealth(null, { summary: true }) });
         return true;
       }
+      if (resource === 'pairing' && segments[1] === 'requests' && segments.length === 2 && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await pairingService.request({
+          name: optionalString(body.name ?? body.deviceName, 'name', 80),
+          kind: optionalString(body.kind ?? body.platform, 'kind', 32),
+          permissions: body.permissions,
+          certificateFingerprint: optionalString(body.certificateFingerprint, 'certificateFingerprint', 128),
+          address: proxyPolicy.clientAddress(req),
+        });
+        remotePolicy.audit('pairing.request', 'created', req.__loomRemoteContext, null, { requestId: result.requestId });
+        writeData(res, 202, result);
+        return true;
+      }
+      if (resource === 'pairing' && segments[1] === 'requests' && segments.length === 3 && req.method === 'GET') {
+        const authorization = String(req.headers.authorization || '');
+        const match = /^LoomPairing\s+([A-Za-z0-9_-]{32,256})$/.exec(authorization.trim());
+        if (!match) throw requestError(401, 'auth_required', 'A pairing request capability is required.');
+        const result = await pairingService.status(decodeSegment(segments[2], 'requestId'), match[1], proxyPolicy.clientAddress(req));
+        writeData(res, result.status === 'pending' ? 202 : 200, result);
+        return true;
+      }
+      if (resource === 'pairing' && segments[1] === 'requests' && segments.length === 4
+        && segments[3] === 'approve' && req.method === 'POST') {
+        const principal = await requirePrincipal(req, 'devices.manage');
+        const body = await readJsonBody(req);
+        const requestId = decodeSegment(segments[2], 'requestId');
+        const result = await pairingService.approve(requestId, {
+          approved: body.approved !== false,
+          accountId: optionalString(body.accountId, 'accountId', 128),
+          permissions: body.permissions,
+        }, principal);
+        remotePolicy.audit('pairing.approve', result.status === 'denied' ? 'denied' : 'created', req.__loomRemoteContext, principal, { requestId });
+        writeData(res, 200, result);
+        return true;
+      }
+      if (resource === 'remote-policy' && segments.length === 1 && req.method === 'GET') {
+        await requirePrincipal(req, 'admin.read');
+        writeData(res, 200, remotePolicy.policy());
+        return true;
+      }
+      if (resource === 'remote-policy' && segments.length === 1 && req.method === 'PATCH') {
+        const principal = await requirePrincipal(req, 'remote.manage');
+        writeData(res, 200, remotePolicy.updatePolicy(await readJsonBody(req), principal, req));
+        return true;
+      }
+      if (resource === 'audit-events' && segments.length === 1 && req.method === 'GET') {
+        await requirePrincipal(req, 'audit.read');
+        const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 100));
+        const before = Number(url.searchParams.get('before')) || Number.MAX_SAFE_INTEGER;
+        writeData(res, 200, { events: remotePolicy.listAuditEvents({ limit, before }) });
+        return true;
+      }
+      if (resource === 'invitations' && segments.length === 1 && req.method === 'POST') {
+        const principal = await requirePrincipal(req, 'sharing.manage');
+        writeData(res, 201, await remotePolicy.createInvitation(await readJsonBody(req), principal, req));
+        return true;
+      }
+      if (resource === 'invitations' && segments.length === 1 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'sharing.manage');
+        writeData(res, 200, { invitations: remotePolicy.listInvitations(principal) });
+        return true;
+      }
+      if (resource === 'invitations' && segments[1] === 'session' && segments.length === 2 && req.method === 'DELETE') {
+        const principal = await requirePrincipal(req);
+        remotePolicy.revokeInvitationSession(principal, req);
+        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+        res.end();
+        return true;
+      }
+      if (resource === 'invitations' && segments.length === 3 && segments[2] === 'accept' && req.method === 'POST') {
+        const match = /^LoomInvite\s+([A-Za-z0-9_-]{32,256})$/.exec(String(req.headers.authorization || '').trim());
+        if (!match) throw requestError(401, 'auth_required', 'An invitation capability is required.');
+        const body = await readJsonBody(req);
+        writeData(res, 201, await remotePolicy.acceptInvitation(decodeSegment(segments[1], 'invitationId'), match[1],
+          requiredString(body.deviceId, 'deviceId', 128), req));
+        return true;
+      }
+      if (resource === 'invitations' && segments.length === 2 && req.method === 'DELETE') {
+        const principal = await requirePrincipal(req, 'sharing.manage');
+        remotePolicy.revokeInvitation(decodeSegment(segments[1], 'invitationId'), principal, req);
+        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+        res.end();
+        return true;
+      }
+      if (resource === 'downloads' && segments.length === 1 && req.method === 'POST') {
+        const principal = await requirePrincipal(req, 'downloads');
+        writeData(res, 201, await remotePolicy.createDownload(await readJsonBody(req), principal, req));
+        return true;
+      }
+      if (resource === 'downloads' && segments.length === 1 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'downloads');
+        writeData(res, 200, { downloads: remotePolicy.listDownloads(principal) });
+        return true;
+      }
+      if (resource === 'downloads' && segments.length === 3 && segments[2] === 'content'
+        && (req.method === 'GET' || req.method === 'HEAD')) {
+        const downloadId = decodeSegment(segments[1], 'downloadId');
+        const authorization = await remotePolicy.authorizeDownload(req, downloadId);
+        res.__loomtvPublicApi = true;
+        return mediaService.serveOfflineDownload(req, res, authorization);
+      }
+      if (resource === 'downloads' && segments.length === 2 && req.method === 'DELETE') {
+        const principal = await requirePrincipal(req, 'downloads');
+        remotePolicy.revokeDownload(decodeSegment(segments[1], 'downloadId'), principal, req);
+        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+        res.end();
+        return true;
+      }
+      if (resource === 'cast' && segments[1] === 'sessions' && segments.length === 2 && req.method === 'POST') {
+        const principal = await requirePrincipal(req, 'stream');
+        const body = await readJsonBody(req);
+        const mediaId = requiredString(body.mediaId, 'mediaId', 128);
+        const transport = requiredString(body.transport, 'transport', 32).toLowerCase();
+        const item = await service.getLibraryItem(mediaId, principal);
+        if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
+        const profile = await playbackProfileContext(principal, req, item);
+        const planned = await mediaService.planPlayback(mediaId, {
+          sourceId: optionalString(body.sourceId, 'sourceId', 256),
+          capabilities: normalizeClientPlaybackCapabilities(body.capabilities || {}),
+          audioTrackId: body.audioTrackId === null ? null : optionalString(body.audioTrackId, 'audioTrackId', 128),
+          subtitleTrackId: body.subtitleTrackId === null ? null : optionalString(body.subtitleTrackId, 'subtitleTrackId', 128),
+        }, principal, profile);
+        if (planned.plan.sourceAction !== 'direct') {
+          throw requestError(422, 'playback_not_supported', 'This receiver requires a direct stream. Choose a compatible receiver or client.');
+        }
+        const source = await mediaService.describeDirectCapability(mediaId, principal, profile, planned.plan.sourceId);
+        const boundProfile = bindAuthenticationSession({ ...profile, sourceId: source.sourceId, fileId: planned.sourceIdentity.fileId }, principal);
+        const playback = mediaService.issuePlaybackToken(mediaId, principal.id, 'direct', boundProfile);
+        const created = castSessions.create({
+          transport,
+          receiverName: optionalString(body.receiverName, 'receiverName', 120) || transport,
+          principalId: principal.id,
+          authenticationSessionId: principal.sessionId,
+          invitationSessionId: principal.invitationSessionId,
+          profileId: profile.profileId,
+          deviceId: profile.deviceId,
+          selectionRevision: profile.selectionRevision,
+          mediaId,
+          sourceId: source.sourceId,
+          fileVersion: source.fileVersion,
+          playbackSessionId: playback.sessionId,
+          positionSeconds: Number.isFinite(body.positionSeconds) ? Number(body.positionSeconds) : 0,
+        });
+        remotePolicy.audit('cast.session.create', 'created', req.__loomRemoteContext, principal, { castSessionId: created.session.id, transport });
+        writeData(res, 201, {
+          session: created.session,
+          mediaUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct?token=${encodeURIComponent(playback.token)}`,
+          expiresAt: Math.min(created.session.expiresAt, playback.expiresAt),
+          receiverLaunch: 'client-native',
+        });
+        return true;
+      }
+      if (resource === 'cast' && segments[1] === 'sessions' && segments.length === 3
+        && (req.method === 'PATCH' || req.method === 'DELETE')) {
+        const principal = await requirePrincipal(req, 'stream');
+        const castSessionId = decodeSegment(segments[2], 'castSessionId');
+        const record = castSessions.read(castSessionId);
+        await requireLiveCastBinding(req, principal, record);
+        if (req.method === 'DELETE') {
+          castSessions.remove(castSessionId);
+          await mediaService.stopPlaybackSession(record.playbackSessionId, principal, record.mediaId);
+          remotePolicy.audit('cast.session.stop', 'revoked', req.__loomRemoteContext, principal, { castSessionId, transport: record.transport });
+          res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+          res.end();
+          return true;
+        }
+        const body = await readJsonBody(req);
+        const renewed = await mediaService.renewPlaybackSession(record.playbackSessionId, principal, record.mediaId, 'direct', req);
+        if (!renewed) throw requestError(401, 'playback_session_invalid', 'The cast capability expired or was revoked.');
+        const updated = castSessions.update(castSessionId, {
+          state: optionalString(body.state, 'state', 16),
+          positionSeconds: body.positionSeconds,
+        });
+        remotePolicy.audit('cast.session.update', 'updated', req.__loomRemoteContext, principal, { castSessionId, transport: record.transport });
+        writeData(res, 200, {
+          session: updated.session,
+          mediaUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(record.mediaId)}/direct?token=${encodeURIComponent(renewed.token)}`,
+          expiresAt: Math.min(updated.session.expiresAt, renewed.expiresAt),
+        });
+        return true;
+      }
       if (resource === 'auth' && segments[1] === 'onboarding' && req.method === 'GET') {
         writeData(res, 200, { ownerConfigured: await service.isOwnerConfigured(), apiVersion: PUBLIC_API_VERSION });
         return true;
@@ -388,29 +797,67 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       if (resource === 'auth' && segments[1] === 'owner' && req.method === 'POST') {
         if (await service.isOwnerConfigured()) throw requestError(409, 'owner_exists', 'The LoomTV owner has already been created.');
         const body = await readJsonBody(req);
-        writeData(res, 201, await service.createOwner({
+        const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
+        if (!['bearer','cookie'].includes(sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
+        if (sessionMode === 'cookie' && (!isSecureRequest(req) || !sameOriginRequest(req))) {
+          throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require same-origin HTTPS.');
+        }
+        const result = await service.createOwner({
           name: requiredString(body.name, 'name', 80),
           password: requiredString(body.password, 'password', 256),
           bootstrapSecret: optionalString(body.bootstrapSecret, 'bootstrapSecret', 1_024),
           address: proxyPolicy.clientAddress(req),
-        }));
+        });
+        remotePolicy.audit('auth.owner.create', 'created', req.__loomRemoteContext, result.user || null);
+        if (sessionMode === 'cookie') {
+          const csrfToken = randomBytes(32).toString('base64url');
+          const { adminToken, ...safeResult } = result;
+          writeData(res, 201, { ...safeResult, sessionMode, csrfToken }, cookieSessionHeaders(adminToken, csrfToken, result.expiresAt));
+        } else writeData(res, 201, { ...result, sessionMode });
         return true;
       }
       if (resource === 'auth' && segments[1] === 'session' && req.method === 'POST') {
         const body = await readJsonBody(req);
-        writeData(res, 200, await service.createSession({
+        const sessionMode = body.sessionMode === undefined ? 'bearer' : body.sessionMode;
+        if (!['bearer','cookie'].includes(sessionMode)) throw requestError(400, 'invalid_request', 'sessionMode must be bearer or cookie.');
+        if (sessionMode === 'cookie' && (!isSecureRequest(req) || !sameOriginRequest(req))) {
+          throw requestError(426, 'secure_transport_required', 'Browser cookie sessions require same-origin HTTPS.');
+        }
+        const result = await service.createSession({
           username: optionalString(body.username, 'username', 80),
           password: requiredString(body.password, 'password', 256),
           address: proxyPolicy.clientAddress(req),
           deviceId: optionalString(req.headers['x-loom-device-id'], 'deviceId', 128),
-        }));
+        });
+        remotePolicy.audit('auth.session.create', 'created', req.__loomRemoteContext, result.user || null);
+        if (sessionMode === 'cookie') {
+          const csrfToken = randomBytes(32).toString('base64url');
+          const { adminToken, ...safeResult } = result;
+          writeData(res, 200, { ...safeResult, sessionMode, csrfToken }, cookieSessionHeaders(adminToken, csrfToken, result.expiresAt));
+        } else writeData(res, 200, { ...result, sessionMode });
         return true;
       }
       if (resource === 'auth' && segments[1] === 'session' && req.method === 'DELETE') {
         const principal = await requirePrincipal(req);
-        await service.revokeRequest(req);
-        await mediaService.revokePrincipal?.(principal.id, 'auth_session_revoked');
-        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+        if (principal.authentication === 'device-credential') {
+          await pairingService.revokeSelf(principal.deviceId, principal, 'device_signed_out');
+          await service.revokeDeviceSessions?.(principal.deviceId, 'device_signed_out');
+          await clientState.revokeDeviceAccess?.(principal.deviceId);
+          await mediaService.revokeDevice?.(principal.deviceId, 'device_signed_out');
+        } else if (principal.authentication === 'account-session' || principal.authentication === 'device-session') {
+          const revokeRequest = req.__loomCookieSessionToken
+            ? { ...req, headers: { ...req.headers, authorization: `Bearer ${req.__loomCookieSessionToken}` } }
+            : req;
+          await service.revokeRequest(revokeRequest);
+          if (principal.sessionId) {
+            await mediaService.revokeAuthenticationSession?.(principal.sessionId, 'auth_session_revoked');
+          }
+        } else {
+          throw requestError(400, 'invalid_request', 'The authenticated credential cannot be revoked through this route.');
+        }
+        remotePolicy.audit('auth.session.revoke', 'revoked', req.__loomRemoteContext, principal);
+        res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION,
+          ...(req.__loomCookieSessionToken ? clearCookieSessionHeaders() : {}) });
         res.end();
         return true;
       }
@@ -419,28 +866,57 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeData(res, 200, { user: await service.getCurrentUser(principal) });
         return true;
       }
+      if (resource === 'devices' && segments.length === 1 && req.method === 'GET') {
+        const principal = await requirePrincipal(req, 'devices.manage');
+        writeData(res, 200, { devices: await pairingService.list(principal) });
+        return true;
+      }
+      if (resource === 'devices' && segments.length === 2 && req.method === 'DELETE') {
+        const principal = await requirePrincipal(req, 'devices.manage');
+        const deviceId = decodeSegment(segments[1], 'deviceId');
+        const revoked = await pairingService.revoke(deviceId, principal);
+        await service.revokeDeviceSessions?.(deviceId, 'device_revoked');
+        await clientState.revokeDeviceAccess?.(deviceId);
+        await mediaService.revokeDevice?.(deviceId, 'device_revoked');
+        remotePolicy.audit('device.revoke', 'revoked', req.__loomRemoteContext, principal, { deviceId });
+        writeData(res, 200, revoked);
+        return true;
+      }
       if (resource === 'library' && segments.length === 1 && req.method === 'GET') {
         const principal = await requirePrincipal(req, 'library.read');
-        writeData(res, 200, { items: (await service.listLibraryItems(principal)).map(publicLibraryItem) });
+        writeData(res, 200, { items: (await profileVisibleItems(principal, req)).map(publicLibraryItem) });
         return true;
       }
       if (resource === 'library' && segments[1] === 'series' && segments.length === 2 && req.method === 'GET') {
         const principal = await requirePrincipal(req, 'library.read');
-        const items = await service.listLibraryItems(principal);
+        const items = await profileVisibleItems(principal, req);
+        const canonicalSeries = new Map(items.filter((item) => item.kind === 'series').map((item) => [item.id, item]));
         const seriesByKey = new Map();
         for (const item of items) {
           if (item.kind !== 'episode' || !item.series?.title) continue;
-          const key = item.series.title.toLowerCase();
-          const entry = seriesByKey.get(key) || { title: item.series.title, animeLikely: false, seasons: new Map() };
+          const key = item.seriesId || `legacy-title:${item.series.title.toLowerCase()}`;
+          const seriesItem = item.seriesId ? canonicalSeries.get(item.seriesId) : null;
+          const entry = seriesByKey.get(key) || {
+            ...(seriesItem ? publicLibraryItem(seriesItem) : {}),
+            id: seriesItem?.id || null,
+            title: seriesItem?.title || item.series.title,
+            animeLikely: seriesItem?.animeLikely === true,
+            seasons: new Map(),
+          };
           if (item.animeLikely) entry.animeLikely = true;
           const seasonNumber = item.series.season ?? 1;
           const season = entry.seasons.get(seasonNumber) || { season: seasonNumber, episodes: [] };
-          season.episodes.push(publicLibraryItem(item));
+          season.episodes.push({
+            ...publicLibraryItem(item),
+            seasonNumber,
+            ...(Number.isFinite(item.series.episode) ? { episodeNumber: Number(item.series.episode) } : {}),
+          });
           entry.seasons.set(seasonNumber, season);
           seriesByKey.set(key, entry);
         }
         const series = [...seriesByKey.values()]
           .map((entry) => ({
+            ...(entry.id ? { id: entry.id } : {}),
             title: entry.title,
             animeLikely: entry.animeLikely,
             episodeCount: [...entry.seasons.values()].reduce((total, season) => total + season.episodes.length, 0),
@@ -448,7 +924,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
               .sort((left, right) => left.season - right.season)
               .map((season) => ({
                 ...season,
-                episodes: season.episodes.sort((left, right) => (left.series?.episode ?? 0) - (right.series?.episode ?? 0)),
+                episodes: season.episodes.sort((left, right) => (left.episodeNumber ?? 0) - (right.episodeNumber ?? 0)),
               })),
           }))
           .sort((left, right) => left.title.localeCompare(right.title));
@@ -460,7 +936,11 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         if (req.method === 'GET') writeData(res, 200, { roots: (await service.listLibraryRoots(principal)).map(publicLibraryRoot) });
         else {
           const body = await readJsonBody(req);
-          writeData(res, 201, { root: publicLibraryRoot(await service.addLibraryRoot({ path: requiredString(body.path, 'path', 4_096), kind: optionalString(body.kind, 'kind', 16) }, principal)) });
+          const kind = optionalString(body.kind, 'kind', 16) || 'others';
+          if (!['movies','tv','anime','others'].includes(kind)) throw requestError(400, 'invalid_request', 'Library root kind is invalid.');
+          writeData(res, 201, { root: publicLibraryRoot(await service.addLibraryRoot({
+            path: requiredString(body.path, 'path', 4_096), kind: kind === 'tv' ? 'tvShows' : kind,
+          }, principal)) });
         }
         return true;
       }
@@ -484,6 +964,10 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const principal = await requirePrincipal(req, 'library.read');
         const item = await service.getLibraryItem(decodeSegment(segments[1], 'mediaId'), principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
+        try { await playbackProfileContext(principal, req, item); } catch (error) {
+          if (error?.code === 'permission_denied') throw requestError(404, 'media_not_found', 'Media item was not found.');
+          throw error;
+        }
         writeData(res, 200, { item: publicLibraryItem(item) });
         return true;
       }
@@ -498,32 +982,122 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         writeData(res, 201, { profile: await clientState.createProfile(body, principal.id) });
         return true;
       }
-      if (resource === 'profiles' && segments.length === 2 && req.method === 'PATCH') {
+      if (resource === 'profiles' && segments[1] === 'selection' && segments.length === 2
+        && ['GET','PATCH','DELETE'].includes(req.method)) {
         const principal = await requirePrincipal(req);
-        const body = await readJsonBody(req);
-        writeData(res, 200, { profile: await clientState.updateProfile(decodeSegment(segments[1], 'profileId'), body, principal.id, canSeeAllProfiles(principal)) });
+        const deviceId = deviceIdForRequest(req, principal);
+        let selection;
+        if (req.method === 'GET') selection = await clientState.getActiveProfileState(principal.id, deviceId);
+        else if (req.method === 'DELETE') selection = await clientState.clearActiveProfile(principal.id, deviceId);
+        else {
+          const body = await readJsonBody(req);
+          if (typeof body.automaticSignIn !== 'boolean') throw requestError(400, 'invalid_request', 'automaticSignIn must be boolean.');
+          selection = await clientState.setAutomaticSignIn(principal.id, deviceId, body.automaticSignIn);
+        }
+        writeData(res, 200, { selection });
+        return true;
+      }
+      if (resource === 'profiles' && segments[1] === 'selection' && segments[2] === 'lock'
+        && segments.length === 3 && req.method === 'POST') {
+        const principal = await requirePrincipal(req);
+        writeData(res, 200, { selection: await clientState.lockActiveProfile(principal.id, deviceIdForRequest(req, principal)) });
+        return true;
+      }
+      if (resource === 'profiles' && segments.length === 2 && ['PATCH','DELETE'].includes(req.method)) {
+        const principal = await requirePrincipal(req);
+        const profileId = decodeSegment(segments[1], 'profileId');
+        if (req.method === 'DELETE') {
+          await clientState.removeProfile(profileId, principal.id, canSeeAllProfiles(principal));
+          res.writeHead(204, { 'Cache-Control': 'no-store', [PUBLIC_API_HEADER]: PUBLIC_API_VERSION });
+          res.end();
+        } else {
+          const body = await readJsonBody(req);
+          writeData(res, 200, { profile: await clientState.updateProfile(profileId, body, principal.id, canSeeAllProfiles(principal)) });
+        }
         return true;
       }
       if (resource === 'profiles' && segments.length === 3 && segments[2] === 'select' && req.method === 'POST') {
         const principal = await requirePrincipal(req);
-        writeData(res, 200, { profile: await clientState.selectProfile(decodeSegment(segments[1], 'profileId'), principal.id, canSeeAllProfiles(principal)) });
+        const body = await readJsonBody(req);
+        writeData(res, 200, { profile: await clientState.selectProfile(
+          decodeSegment(segments[1], 'profileId'), principal.id, canSeeAllProfiles(principal), deviceIdForRequest(req, principal),
+          body.pin, proxyPolicy.clientAddress(req),
+        ) });
+        return true;
+      }
+      if (resource === 'profiles' && segments.length === 3 && segments[2] === 'pin' && req.method === 'PUT') {
+        const principal = await requirePrincipal(req);
+        const body = await readJsonBody(req);
+        const pin = body.pin === null ? null : requiredString(body.pin, 'pin', 4);
+        writeData(res, 200, { profile: await clientState.updateProfilePin(
+          decodeSegment(segments[1], 'profileId'), pin, principal.id, canSeeAllProfiles(principal),
+        ) });
+        return true;
+      }
+      if (resource === 'profiles' && segments.length === 3 && segments[2] === 'preferences'
+        && ['GET','PATCH'].includes(req.method)) {
+        const principal = await requirePrincipal(req);
+        const profileId = decodeSegment(segments[1], 'profileId');
+        await requireSelectedProfile(principal, req, profileId);
+        const preferences = req.method === 'GET'
+          ? await clientState.getProfilePreferences(profileId, principal.id, false)
+          : await clientState.saveProfilePreferences(profileId, await readJsonBody(req), principal.id, false);
+        writeData(res, 200, { preferences });
+        return true;
+      }
+      if (resource === 'profiles' && segments[2] === 'lists' && (segments.length === 3 || segments.length === 5)) {
+        const principal = await requirePrincipal(req);
+        const profileId = decodeSegment(segments[1], 'profileId');
+        await requireSelectedProfile(principal, req, profileId);
+        if (segments.length === 3 && req.method === 'GET') {
+          const kind = url.searchParams.get('kind') || undefined;
+          const entries = await clientState.getProfileLists(profileId, kind, principal.id, false);
+          const visibleIds = new Set((await profileVisibleItems(principal, req)).map((item) => item.id));
+          writeData(res, 200, { entries: entries.filter((entry) => visibleIds.has(entry.mediaId)) });
+          return true;
+        }
+        if (segments.length === 5 && ['PUT','DELETE'].includes(req.method)) {
+          const kind = decodeSegment(segments[3], 'kind');
+          const mediaId = decodeSegment(segments[4], 'mediaId');
+          if (req.method === 'PUT') {
+            const media = await service.getLibraryItem(mediaId, principal);
+            if (!media) throw requestError(404, 'media_not_found', 'Media item was not found.');
+            await requireSelectedProfile(principal, req, profileId, media);
+          }
+          const entries = await clientState.setProfileListEntry(profileId, mediaId, kind, req.method === 'PUT', principal.id, false);
+          writeData(res, 200, { entries });
+          return true;
+        }
+      }
+      if (resource === 'profiles' && segments.length === 4 && segments[2] === 'track-preferences'
+        && ['GET','PUT'].includes(req.method)) {
+        const principal = await requirePrincipal(req);
+        const profileId = decodeSegment(segments[1], 'profileId');
+        const scope = decodeSegment(segments[3], 'scope');
+        await requireSelectedProfile(principal, req, profileId);
+        const preferences = req.method === 'GET'
+          ? await clientState.getTrackPreferences(profileId, scope, principal.id, false)
+          : await clientState.saveTrackPreferences(profileId, scope, await readJsonBody(req), principal.id, false);
+        writeData(res, 200, { preferences });
         return true;
       }
       if (resource === 'profiles' && segments.length >= 3 && segments[2] === 'progress') {
         const principal = await requirePrincipal(req);
         const profileId = decodeSegment(segments[1], 'profileId');
+        await requireSelectedProfile(principal, req, profileId);
         if (segments.length === 3 && req.method === 'GET') {
-          writeData(res, 200, { progress: await clientState.listProgress(profileId, principal.id, canSeeAllProfiles(principal)) });
+          const progress = await clientState.listProgress(profileId, principal.id, false);
+          const visibleIds = new Set((await profileVisibleItems(principal, req)).map((item) => item.id));
+          writeData(res, 200, { progress: Object.fromEntries(Object.entries(progress).filter(([mediaId]) => visibleIds.has(mediaId))) });
           return true;
         }
         if (segments.length === 4 && (req.method === 'GET' || req.method === 'PUT' || req.method === 'POST')) {
           const mediaId = decodeSegment(segments[3], 'mediaId');
-          if (req.method === 'GET') writeData(res, 200, { progress: await clientState.getProgress(profileId, mediaId, principal.id, canSeeAllProfiles(principal)) });
-          else {
-            const media = await service.getLibraryItem(mediaId, principal);
-            if (!media) throw requestError(404, 'media_not_found', 'Media item was not found.');
-            writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, canSeeAllProfiles(principal)) });
-          }
+          const media = await service.getLibraryItem(mediaId, principal);
+          if (!media) throw requestError(404, 'media_not_found', 'Media item was not found.');
+          await requireSelectedProfile(principal, req, profileId, media);
+          if (req.method === 'GET') writeData(res, 200, { progress: await clientState.getProgress(profileId, mediaId, principal.id, false) });
+          else writeData(res, 200, { progress: await clientState.saveProgress(profileId, mediaId, await readJsonBody(req), principal.id, false) });
           return true;
         }
       }
@@ -532,51 +1106,62 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
         const mediaId = decodeSegment(segments[1], 'mediaId');
         const item = await service.getLibraryItem(mediaId, principal);
         if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
-        const directLease = typeof mediaService.issuePlaybackToken === 'function'
-          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')
-          : null;
-        const directToken = directLease?.token || null;
-        const downloadToken = typeof mediaService.issuePlaybackToken === 'function'
-          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'download')?.token
-          : null;
-        const tokenQuery = (token) => token ? `?token=${encodeURIComponent(token)}` : '';
+        const deviceId = deviceIdForRequest(req, principal);
+        const profileContext = await playbackProfileContext(principal, req, item);
         writeData(res, 200, {
           item: publicLibraryItem(item),
-          directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`,
-          directRenewUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct/renew`,
-          ...(directLease?.sessionId ? { directSessionId: directLease.sessionId } : {}),
-          downloadUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/download${tokenQuery(downloadToken)}`,
-          transcodeUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode`,
-          ...(directLease?.expiresAt ? { directExpiresAt: directLease.expiresAt } : {}),
+          playbackPlanUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/playback-plan`,
+          directUrl: null,
+          directRenewUrl: null,
+          downloadUrl: null,
+          downloadCreateUrl: `${PUBLIC_API_PREFIX}/downloads`,
+          transcodeUrl: null,
         });
         return true;
       }
       if (resource === 'media' && segments.length === 3 && segments[2] === 'playback-plan' && req.method === 'POST') {
-        const principal = await requirePrincipal(req, 'library.read');
+        const principal = await requirePrincipal(req, 'stream');
         const mediaId = decodeSegment(segments[1], 'mediaId');
-        const item = await service.getLibraryItem(mediaId, principal);
-        if (!item) throw requestError(404, 'media_not_found', 'Media item was not found.');
         const body = await readJsonBody(req);
         const capabilities = normalizeClientPlaybackCapabilities(body.capabilities || body);
-        const facts = mediaPlaybackFacts(item);
-        const plan = playbackPlanForMedia(facts, capabilities);
+        const catalogItem = await service.getLibraryItem(mediaId, principal);
+        if (!catalogItem) throw requestError(404, 'media_not_found', 'Media item was not found.');
+        const profileContext = await playbackProfileContext(principal, req, catalogItem);
+        const { item, probe, plan, sourceIdentity, externalSubtitle } = await mediaService.planPlayback(mediaId, {
+          sourceId: optionalString(body.sourceId, 'sourceId', 256),
+          capabilities,
+          videoTrackId: optionalString(body.videoTrackId, 'videoTrackId', 128),
+          audioTrackId: body.audioTrackId === null ? null : optionalString(body.audioTrackId, 'audioTrackId', 128),
+          subtitleTrackId: body.subtitleTrackId === null ? null : optionalString(body.subtitleTrackId, 'subtitleTrackId', 128),
+          startSeconds: Number.isFinite(body.startSeconds) ? Math.max(0, Number(body.startSeconds)) : 0,
+        }, principal, profileContext);
         const tokenQuery = (token) => token ? `?token=${encodeURIComponent(token)}` : '';
+        const boundProfileContext = bindAuthenticationSession({
+          ...profileContext, sourceId: plan.sourceId, fileId: sourceIdentity.fileId,
+          ...(externalSubtitle ? {
+            externalSubtitleTrackId: externalSubtitle.trackId,
+            externalSubtitleFileId: externalSubtitle.fileId,
+          } : {}),
+        }, principal);
         const directLease = plan.sourceAction === 'direct' && typeof mediaService.issuePlaybackToken === 'function'
-          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct')
+          ? mediaService.issuePlaybackToken(mediaId, principal.id, 'direct', boundProfileContext)
           : null;
         const directToken = directLease?.token || null;
+        const transcodePlan = plan.sourceAction === 'transcode'
+          ? mediaService.issueTranscodePlan(mediaId, principal.id, plan, probe, {
+            startSeconds: body.startSeconds,
+            externalSubtitle,
+          }, boundProfileContext, sourceIdentity)
+          : null;
         const profileQuery = new URLSearchParams({
-          codec: plan.codec || 'h264',
-          backend: 'auto',
-          ...(capabilities.maxWidth ? { maxWidth: String(capabilities.maxWidth) } : {}),
-          ...(capabilities.maxHeight ? { maxHeight: String(capabilities.maxHeight) } : {}),
-          ...(capabilities.maxVideoBitrateKbps ? { videoBitrateKbps: String(capabilities.maxVideoBitrateKbps) } : {}),
-          ...(plan.facts?.hdr && !capabilities.supportsHdr ? { toneMap: '1' } : {}),
+          ...(transcodePlan ? { planToken: transcodePlan.token } : {}),
+          sourceId: plan.sourceId,
         });
         writeData(res, 200, {
           mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
           capabilities,
-          plan,
+          plan: publicPlaybackPlan(plan),
+          probe: publicMediaProbe(probe),
           item: publicLibraryItem(item),
           directUrl: plan.sourceAction === 'direct'
             ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery(directToken)}`
@@ -589,8 +1174,20 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           transcodeUrl: plan.sourceAction === 'transcode'
             ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/transcode?${profileQuery.toString()}`
             : null,
+          subtitleUrl: externalSubtitle && plan.sourceAction === 'direct'
+            ? `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/subtitles/${encodeURIComponent(externalSubtitle.trackId)}${tokenQuery(directToken)}`
+            : null,
         });
         return true;
+      }
+      if (resource === 'media' && segments.length === 4 && segments[2] === 'subtitles'
+        && (req.method === 'GET' || req.method === 'HEAD')) {
+        const mediaId = decodeSegment(segments[1], 'mediaId');
+        const trackId = decodeSegment(segments[3], 'trackId');
+        const token = url.searchParams.get('token');
+        if (!token) throw requestError(401, 'playback_session_invalid', 'A server-issued subtitle capability is required.');
+        res.__loomtvPublicApi = true;
+        return mediaService.serveExternalSubtitleCapability(req, res, { itemId: mediaId, trackId, token });
       }
       if (resource === 'media' && segments.length === 4
         && ((segments[2] === 'direct' && segments[3] === 'renew')
@@ -623,7 +1220,7 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           ? sessionIdentifier
           : capabilityToken || sessionIdentifier;
         if (!identifier) throw requestError(400, 'playback_session_required', 'A playback session token or id is required.');
-        const renewed = await mediaService.renewPlaybackSession?.(identifier, principal, mediaId, action);
+        const renewed = await mediaService.renewPlaybackSession?.(identifier, principal, mediaId, action, req);
         if (!renewed) throw requestError(401, 'playback_session_invalid', 'The playback session is expired, revoked, or not bound to this media item.');
         const tokenQuery = `?token=${encodeURIComponent(renewed.token)}`;
         writeData(res, 200, {
@@ -635,7 +1232,12 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
           absoluteExpiresAt: renewed.absoluteExpiresAt,
           ...(action === 'hls'
             ? { playlistUrl: `/api/media/transcode/${encodeURIComponent(renewed.id)}/index.m3u8${tokenQuery}` }
-            : { directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery}` }),
+            : {
+              directUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/direct${tokenQuery}`,
+              ...(renewed.profile?.externalSubtitleTrackId ? {
+                subtitleUrl: `${PUBLIC_API_PREFIX}/media/${encodeURIComponent(mediaId)}/subtitles/${encodeURIComponent(renewed.profile.externalSubtitleTrackId)}${tokenQuery}`,
+              } : {}),
+            }),
         });
         return true;
       }
@@ -668,16 +1270,11 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       }
       if (resource === 'media' && segments.length === 3 && (segments[2] === 'direct' || segments[2] === 'download' || segments[2] === 'transcode')) {
         const mediaId = decodeSegment(segments[1], 'mediaId');
-        if (segments[2] === 'transcode') await requirePrincipal(req, 'transcode');
-        else if (segments[2] === 'download' && !req.headers.authorization && !req.headers['x-loom-admin-token']) {
-          if (!url.searchParams.get('token')) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
-        }
-        else if (!authTokenPresent(req, url)) throw requestError(401, 'auth_required', 'A valid LoomTV session is required.');
         if (segments[2] === 'download') {
-          res.__loomtvPublicApi = true;
-          const queryUrl = pathForMedia(url, mediaId, 'download');
-          return mediaService.handle(req, res, queryUrl);
+          throw requestError(410, 'download_not_allowed', 'Create an offline download lease through POST /api/v1/downloads.');
         }
+        if (segments[2] === 'transcode') await requirePrincipal(req, 'transcode');
+        else if (!url.searchParams.get('token')) throw requestError(401, 'playback_session_invalid', 'A server-issued media capability is required.');
         return handleMedia(req, res, url, mediaId, segments[2]);
       }
       if (resource === 'sessions' && segments.length === 1 && req.method === 'GET') {
@@ -772,16 +1369,24 @@ export function createPublicApiHandler({ service, clientState, mediaService, get
       writeError(res, 404, 'not_found', 'The requested API resource does not exist.');
       return true;
     } catch (error) {
-      const status = Number.isInteger(error?.status) ? error.status : 500;
-      const code = error?.code || 'request_failed';
+      const { status, code } = canonicalPublicError(error);
+      if (resource === 'auth' || resource === 'pairing' || resource === 'devices') {
+        remotePolicy.audit(`api.${resource}`, 'failed', req.__loomRemoteContext, null, { code, status });
+      }
       const message = status >= 500 ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.';
+      const retryAfterSeconds = Number.isFinite(error?.retryAfter)
+        ? Math.max(1, Math.ceil(error.retryAfter))
+        : undefined;
       writeError(
         res,
         status,
         code,
         message,
-        error?.retryAfter ? { retryAfter: error.retryAfter } : {},
-        error?.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {},
+        {
+          ...(error?.retryable !== undefined ? { retryable: error.retryable === true } : {}),
+          ...(retryAfterSeconds ? { retryAfterMs: retryAfterSeconds * 1_000 } : {}),
+        },
+        retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {},
       );
       return true;
     }

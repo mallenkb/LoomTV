@@ -28,7 +28,8 @@
           "NSAllowsLocalNetworking": true
         },
         "NSFileProtectionKey": "NSFileProtectionComplete"
-      }
+      },
+      "appleTeamId": "L6RXP3NP62"
     },
     "android": {
       "versionCode": 1,
