@@ -13,6 +13,7 @@ import ProfileAvatar from '@/components/profiles/ProfileAvatar';
 import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import { useToast } from '@/components/ToastProvider';
+import { isCategoryVisible } from '@/components/sidebarNavigation';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | 'my-list' | 'discover' | SidebarNavItemId | 'settings';
@@ -89,8 +90,12 @@ function normalizeSidebarNavOrder(order?: string[]): SidebarNavItemId[] {
 
 function ModernCategoryPill({ pathname }: { pathname: string }) {
   const { state } = useLibrary();
-  const visibleCategories = modernCategoryItems.filter((category) => !category.folderKey
-    || hasLinkedLibraryFolder(state.libraryFolderGroups[category.folderKey]));
+  const isRemoteLibrary = desktopApi.isRemoteLibraryMode();
+  const visibleCategories = modernCategoryItems.filter((category) => isCategoryVisible(
+    category.folderKey,
+    isRemoteLibrary,
+    category.folderKey ? state.libraryFolderGroups[category.folderKey] : undefined,
+  ));
   const activeCategory = visibleCategories.find((category) => category.path === '/'
     ? pathname === '/'
     : pathname === category.path || pathname.startsWith(`${category.routePrefix}/`));
@@ -517,7 +522,7 @@ export default function Sidebar() {
           const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
           return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
         }),
-      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
+      ...[discoverNavItem],
       myListNavItem,
       ];
     },
@@ -532,7 +537,7 @@ export default function Sidebar() {
         const folderKey = item.id === 'tv' ? 'tvShows' : item.id;
         return hasLinkedLibraryFolder(libraryFolderGroups[folderKey as keyof typeof libraryFolderGroups]);
       }),
-      ...(desktopApi.isRemoteLibraryMode() ? [] : [discoverNavItem]),
+      ...[discoverNavItem],
       myListNavItem,
       ];
     },

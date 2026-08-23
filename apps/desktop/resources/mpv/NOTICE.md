@@ -34,7 +34,7 @@ the build configuration, source, notices, and relinking/source-offer materials
 that establish that variant's terms.
 
 The native executable is used as LoomTV's local desktop playback fallback
-while the experimental LibVLC surface remains behind its composition gate. If
+after the LibVLC native surface (NSView on macOS or HWND on Windows). If
 the staged or system MPV runtime is unavailable or fails, LoomTV falls back to
 Chromium/HLS. Existing profile/path validation, device and stream
 authorization, and server-side direct-play/transcode decisions remain in force;

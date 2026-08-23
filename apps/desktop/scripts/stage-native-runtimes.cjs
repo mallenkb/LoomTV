@@ -17,14 +17,14 @@ Native runtime staging is explicit and offline.
 
 Required source-root layout:
   <source-root>/<platform>-<arch>/mpv/
-  <source-root>/darwin-<arch>/libvlc/   # LibVLC is currently macOS-only
+  <source-root>/<platform>-<arch>/libvlc/   # darwin and win32 support local LibVLC
 
 Set LOOMTV_NATIVE_RUNTIME_SOURCE_ROOT to an absolute source-root and select
 targets with LOOMTV_NATIVE_RUNTIME_TARGETS (comma-separated), or use the
 single-target overrides LOOMTV_LIBVLC_SOURCE_DIR and
-LOOMTV_MPV_SOURCE_DIR. The MPV override is required; the LibVLC override is
-also required for a darwin target. These overrides must be absolute and must
-be used with exactly one target.
+LOOMTV_MPV_SOURCE_DIR. The override required depends on the selected target:
+LibVLC is required for darwin and win32, while MPV is required for darwin.
+These overrides must be absolute and must be used with exactly one target.
 
 The output layout is resources/<engine>/<platform>/<arch>, which matches the
 existing desktop runtime discovery code. No source is downloaded, executed,
@@ -227,9 +227,9 @@ function copyPayloadDeref(source, destination, sourceRoot) {
 }
 
 function enginesForTarget(target) {
-  // LoomTV's LibVLC surface is currently wired only for macOS. MPV remains
-  // the native engine available on the other desktop targets.
-  return target.platform === 'darwin' ? ENGINES : ['mpv'];
+  if (target.platform === 'darwin') return ENGINES;
+  if (target.platform === 'win32') return ['libvlc'];
+  return [];
 }
 
 function bundledTargetsByEngine() {
@@ -256,11 +256,12 @@ function directSources(targets) {
   const libvlc = valueFromEnvironment('LOOMTV_LIBVLC_SOURCE_DIR');
   const mpv = valueFromEnvironment('LOOMTV_MPV_SOURCE_DIR');
   if (!libvlc && !mpv) return undefined;
-  if (!mpv) {
-    throw new Error('LOOMTV_MPV_SOURCE_DIR is required when using per-engine source overrides.');
+  const requiredEngines = new Set(targets.flatMap(enginesForTarget));
+  if (requiredEngines.has('libvlc') && !libvlc) {
+    throw new Error('LOOMTV_LIBVLC_SOURCE_DIR is required for a darwin or win32 target when using per-engine source overrides.');
   }
-  if (targets.some((target) => target.platform === 'darwin') && !libvlc) {
-    throw new Error('LOOMTV_LIBVLC_SOURCE_DIR is required for a darwin target when using per-engine source overrides.');
+  if (requiredEngines.has('mpv') && !mpv) {
+    throw new Error('LOOMTV_MPV_SOURCE_DIR is required for a darwin target when using per-engine source overrides.');
   }
   if (targets.length !== 1) {
     throw new Error('The per-engine source overrides support exactly one native runtime target.');
@@ -317,7 +318,7 @@ function stagePayload(source, destination, engine, target, sourceMode) {
       'utf8',
     );
     const files = filesUnder(temporaryPayload)
-      .filter((candidate) => path.basename(candidate) !== 'runtime-manifest.json')
+      .filter((candidate) => ![MARKER_NAME, 'runtime-manifest.json'].includes(path.basename(candidate)))
       .map((candidate) => ({
         path: path.relative(temporaryPayload, candidate).split(path.sep).join('/'),
         sha256: sha256File(candidate),

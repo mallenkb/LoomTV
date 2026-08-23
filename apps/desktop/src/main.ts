@@ -51,6 +51,8 @@ import { browserPlaybackPlan, needsBrowserTranscoding } from './main/transcodeDe
 import { createLanSecurity, type LanPairingApprovalPrompt } from './main/lanSecurity';
 import { isIpcOnlyHttpRoute } from './main/lanRoutePolicy';
 import { isTrustedRendererHttpOrigin } from './main/rendererHttpAccess';
+import { rendererConnectSources } from './main/rendererSecurityPolicy.ts';
+import { MEDIA_PROTOCOL_SCHEMES, mediaSchemePrivileges } from './main/loomtvProtocol.ts';
 import { getMetadataApiKey, loadSettings, saveSettings } from './main/settings';
 import { refreshNativePlaybackDisplaySleepTimeout } from './main/nativePlaybackPower';
 import { createArtworkUrls } from './main/artworkUrls';
@@ -329,7 +331,7 @@ if (disableZeroCopy) app.commandLine.appendSwitch('disable-zero-copy');
 
 // Register privileged scheme BEFORE app ready — required for video streaming
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'plexserver', privileges: { secure: true, standard: true, supportFetchAPI: true, stream: true } },
+  ...MEDIA_PROTOCOL_SCHEMES.map((scheme) => ({ scheme, privileges: mediaSchemePrivileges })),
 ]);
 
 app.setName('LoomTV');
@@ -1512,24 +1514,14 @@ function configureRendererSecurityPolicy(): void {
     scriptSrc.push("'unsafe-inline'", "'unsafe-eval'");
   }
 
-  const connectSrc = [
-    "'self'",
-    'file:',
-    'http://127.0.0.1:*',
-    'http://localhost:*',
-    'http://[::1]:*',
-    'https:',
-  ];
-  if (MAIN_WINDOW_DEV_SERVER_URL) {
-    connectSrc.push('ws://localhost:*', 'ws://127.0.0.1:*', 'ws://[::1]:*');
-  }
+  const connectSrc = rendererConnectSources(Boolean(MAIN_WINDOW_DEV_SERVER_URL));
 
   const csp = [
     "default-src 'self' file: data: blob:",
     `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' file: 'unsafe-inline'",
-    "img-src 'self' file: data: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:",
-    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* http://[::1]:* https: plexserver:",
+    "img-src 'self' file: data: blob: http://127.0.0.1:* http://localhost:* https: loomtv: plexserver:",
+    "media-src 'self' file: blob: http://127.0.0.1:* http://localhost:* https: loomtv: plexserver:",
     `connect-src ${connectSrc.join(' ')}`,
     "font-src 'self' file: data:",
     "object-src 'none'",
@@ -2147,11 +2139,11 @@ app.whenReady().then(async () => {
   applyAppIcon();
   prepareDesktopProfileStartup();
 
-  // ── plexserver:// protocol handler ──────────────────────────────────────────
-  // Translates plexserver://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>
+  // ── loomtv:// media protocol handlers ───────────────────────────────────────
+  // Translates loomtv://localhost/<path>?<query> → http://127.0.0.1:<port>/<path>?<query>
   // This bypasses Electron's URL safety check that blocks http:// sources in
   // <video> / <audio> elements while still streaming from our local HTTP server.
-  protocol.handle('plexserver', async (request: Request) => {
+  const handleMediaProtocol = async (request: Request) => {
     try {
       const parsed = new URL(request.url);
       // Forward Range header so video seeking works correctly
@@ -2167,10 +2159,13 @@ app.whenReady().then(async () => {
     } catch (err) {
       // The forwarded URL carries the local access token as a query parameter,
       // and fetch failures embed that URL in their message.
-      console.error('[plexserver protocol] fetch error:', describeErrorForLog(err));
+      console.error('[loomtv protocol] fetch error:', describeErrorForLog(err));
       return new Response('Internal Server Error', { status: 500 });
     }
-  });
+  };
+  protocol.handle('loomtv', handleMediaProtocol);
+  // Keep the old scheme readable for cached URLs created by older releases.
+  protocol.handle('plexserver', handleMediaProtocol);
 
   configureRendererSecurityPolicy();
   // Only the media server has to be listening before the window opens: the

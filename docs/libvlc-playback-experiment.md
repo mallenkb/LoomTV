@@ -13,9 +13,11 @@ it, and no second OS-visible window is created.
 
 ## Gate and fallback behavior
 
-On macOS the surface is enabled by default. Other platforms have no in-window
-host yet and return unavailable before Koffi or a native library is loaded, so
-local playback there keeps the fallback order: MPV, then Chromium/HLS.
+On macOS and Windows the surface is enabled by default. macOS uses an NSView
+child host; Windows uses a child HWND with the Direct3D11 vout. Linux remains
+fallback-only and returns unavailable before Koffi or a native library is
+loaded, so local playback there keeps the fallback order: MPV, then
+Chromium/HLS.
 
 `LOOMTV_LIBVLC_COMPOSITED_SURFACE=0` forces the old fallback-only behavior for
 a launch; `=1` forces the surface on. The emergency kill switch is
@@ -23,14 +25,15 @@ a launch; `=1` forces the surface on. The emergency kill switch is
 legacy alias. `LOOMTV_EXPERIMENTAL_LIBVLC=0` and
 `LOOMTV_ENABLE_LIBVLC=0` still opt out for a single launch. A specific library
 and plugin directory can be supplied with `LOOMTV_LIBVLC_PATH` and
-`LOOMTV_LIBVLC_PLUGIN_PATH` when the validation gate is explicitly enabled.
+`LOOMTV_LIBVLC_PLUGIN_PATH` for a diagnostic or replacement runtime.
 
 Packaged macOS arm64 releases stage the LibVLC payload under
-`resources/libvlc/darwin/arm64`, including the library, VLC plugin modules, and
-plugin index. Development launches can still discover a user/system-installed
-macOS `libvlc.dylib` (for example, from VLC.app or Homebrew), and other target
-platforms remain fallback-only until their LibVLC surface is wired. LoomTV
-does not download native runtimes at application runtime. MPV is tried for
+`resources/libvlc/darwin/arm64`, and Windows x64 releases stage it under
+`resources/libvlc/win32/x64`; both include the library, VLC plugin modules, and
+plugin index outside `app.asar`. Development launches can still discover a
+user/system-installed macOS `libvlc.dylib` (for example, from VLC.app or
+Homebrew) or Windows `libvlc.dll` from standard VideoLAN installation
+locations. LoomTV does not download native runtimes at application runtime. MPV is tried for
 local playback before Chromium/HLS; network, LAN, and remote playback remain
 on their existing browser/HLS paths.
 
@@ -42,7 +45,6 @@ source. The renderer can send only the existing allow-listed playback
 commands. Remote, LAN-shared, and mobile media continue using their existing
 authenticated browser/HLS paths.
 
-The experimental native surface is currently macOS-only. Other desktop
-platforms fall back without attempting a LibVLC surface. Advanced LibVLC subtitle styling,
+Linux falls back without attempting a LibVLC surface. Advanced LibVLC subtitle styling,
 secondary subtitles, and video aspect/crop/rotation commands are not yet
 implemented by the bridge and safely no-op or fall back.

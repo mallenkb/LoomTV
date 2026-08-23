@@ -36,6 +36,7 @@ import {
   purgeRemoteDesktopSecrets,
   type DesktopLibraryMode,
 } from './lib/remoteDesktop';
+import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
 
 interface NowPlaying {
   playbackRequestId: string;
@@ -60,6 +61,9 @@ interface NowPlaying {
   startPosition?: number;
 }
 
+function isRemotePlaybackSource(filePath: string): boolean {
+  return /^(?:https?|plexserver):\/\//i.test(filePath) || isMediaProtocolUrl(filePath);
+}
 const StartupReadyContext = createContext<() => void>(() => undefined);
 const StartupVisibilityContext = createContext(false);
 
@@ -400,7 +404,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 
 function AppShell() {
   const { state: libraryState } = useLibrary();
-  const { gateOpen } = useProfiles();
+  const { activeProfile, gateOpen, openGate } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
   const appStartupReady = useContext(StartupVisibilityContext);
   const [homeReady, setHomeReady] = useState(false);
@@ -438,32 +442,44 @@ function AppShell() {
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
   ) => {
-    const playbackRequestId = crypto.randomUUID();
-    const playRequestedAtMs = performance.now();
-    console.info('[playback-timing]', JSON.stringify({
-      event: 'play_requested',
-      requestId: playbackRequestId,
-      source: /^(?:https?|plexserver):/i.test(filePath) ? 'remote' : 'local',
-    }));
-    // Every playback surface already passes the selected file, episode list,
-    // subtitles, artwork, and resume point. Opening that prepared snapshot
-    // immediately keeps catalog hydration and file inspection out of the
-    // click-to-first-frame path.
-    setNowPlaying({
-      playbackRequestId,
-      playRequestedAtMs,
-      mediaId,
-      filePath,
-      title,
-      artwork,
-      subtitles,
-      episodes,
-      episodeFiles,
-      currentSeason,
-      currentEpisode,
-      startPosition,
-    });
-  }, []);
+    const openPlayer = async () => {
+      // The profile gate and the media IPC handler read the same persisted
+      // selection, but a profile can be locked or revoked while a catalog
+      // card is still on screen. Recheck at the playback boundary so the
+      // player never opens into a request that the main process must reject.
+      const activeProfileState = await desktopApi.getActiveProfileState();
+      if (!activeProfileState.profileId || !activeProfile) {
+        openGate();
+        return;
+      }
+      const playbackRequestId = crypto.randomUUID();
+      const playRequestedAtMs = performance.now();
+      console.info('[playback-timing]', JSON.stringify({
+        event: 'play_requested',
+        requestId: playbackRequestId,
+        source: isRemotePlaybackSource(filePath) ? 'remote' : 'local',
+      }));
+      // Every playback surface already passes the selected file, episode list,
+      // subtitles, artwork, and resume point. Opening that prepared snapshot
+      // immediately keeps catalog hydration and file inspection out of the
+      // click-to-first-frame path.
+      setNowPlaying({
+        playbackRequestId,
+        playRequestedAtMs,
+        mediaId,
+        filePath,
+        title,
+        artwork,
+        subtitles,
+        episodes,
+        episodeFiles,
+        currentSeason,
+        currentEpisode,
+        startPosition,
+      });
+    };
+    void openPlayer();
+  }, [activeProfile, openGate]);
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {

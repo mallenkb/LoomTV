@@ -29,8 +29,8 @@ the application resources. Do not download, build, or execute a native
 runtime from the LoomTV application at runtime.
 
 For local desktop files LoomTV uses bundled or otherwise available MPV for the
-classic integrated player composition. The experimental LibVLC surface remains
-behind `LOOMTV_LIBVLC_COMPOSITED_SURFACE=1` until its in-window composition is
-verified. If MPV is unavailable, LoomTV uses its Chromium/HLS fallback. Remote and LAN
+classic integrated player composition after LibVLC. LibVLC uses an in-window
+NSView host on macOS and an HWND child host on Windows. If MPV is unavailable,
+LoomTV uses its Chromium/HLS fallback. Remote and LAN
 playback remain under the authenticated LoomTV server/direct-play/transcode
 path; bundling MPV does not change that authority.
