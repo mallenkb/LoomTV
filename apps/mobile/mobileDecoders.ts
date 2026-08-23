@@ -68,7 +68,7 @@ const officialArtworkSchema = z.object({
   providerRatings: lanProviderRatingsSchema.optional(),
   genres: z.array(z.string()).optional(),
   episodes: z.array(z.unknown()).optional(),
-  episodeSource: z.enum(['TMDB', 'OMDb', 'TVmaze', 'Jikan']).optional(),
+  episodeSource: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan']).optional(),
   posterCandidates: z.array(z.string()).optional(),
   backdropCandidates: z.array(z.string()).optional(),
   logo: z.string().optional(),
@@ -79,7 +79,7 @@ const officialArtworkSchema = z.object({
 export const officialArtworkResponseSchema = officialArtworkSchema;
 export const officialMetadataCandidateSchema = officialArtworkSchema.extend({
   id: z.string().optional(),
-  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'Jikan']).optional(),
+  source: z.enum(['TMDB', 'OMDb', 'TVmaze', 'TVDB', 'Jikan']).optional(),
   title: z.string().optional(),
   year: z.number().finite().optional(),
   episodeCount: z.number().finite().nonnegative().optional(),

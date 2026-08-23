@@ -75,6 +75,26 @@ async function testOpenSubtitlesKey(value: string): Promise<MetadataKeyTestResul
   };
 }
 
+async function testTVDBKey(value: string): Promise<MetadataKeyTestResult> {
+  const key = value.trim();
+  if (!key) return { provider: 'tvdb', ok: false, message: 'Missing key.' };
+  const response = await safeFetch('https://api4.thetvdb.com/v4/login', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apikey: key }),
+  }, { allowedHosts: ['api4.thetvdb.com'] });
+  const payload = await response.json().catch(() => ({}));
+  const token = payload?.data?.token || payload?.token;
+  const ok = response.ok && typeof token === 'string' && token.length > 0;
+  return {
+    provider: 'tvdb',
+    ok,
+    message: ok ? 'TheTVDB key works.' : response.status === 401 || response.status === 403
+      ? 'TheTVDB rejected that key.'
+      : `TheTVDB returned ${response.status}.`,
+  };
+}
+
 export async function testMetadataKeys(keys: Record<string, string>): Promise<MetadataKeyTestResult[]> {
   const cleaned = Object.fromEntries(
     Object.entries(keys || {})
@@ -88,6 +108,7 @@ export async function testMetadataKeys(keys: Record<string, string>): Promise<Me
       if (provider === 'omdb') return await testOMDbKey(value);
       if (provider === 'fanart') return await testFanartKey(value);
       if (provider === 'opensubtitles') return await testOpenSubtitlesKey(value);
+      if (provider === 'tvdb') return await testTVDBKey(value);
       return { provider, ok: false, message: 'No built-in test for this provider.' };
     } catch (error) {
       return {

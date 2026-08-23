@@ -55,7 +55,7 @@ function normalizeRecord(raw) {
   const metadata = raw.metadata && typeof raw.metadata === 'object' ? raw.metadata : {};
   const rawApiKeys = metadata.apiKeys && typeof metadata.apiKeys === 'object' ? metadata.apiKeys : {};
   const apiKeys = Object.fromEntries(
-    ['tmdb', 'fanart', 'omdb', 'opensubtitles'].flatMap((provider) => {
+    ['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].flatMap((provider) => {
       const value = provider === 'tmdb' && !rawApiKeys[provider] ? metadata.apiKey : rawApiKeys[provider];
       return typeof value === 'string' && value.trim() ? [[provider, value.trim().slice(0, 512)]] : [];
     }),
@@ -180,7 +180,7 @@ export function createSetupService({ store, isOwnerConfigured }) {
     saveMetadata({ provider, apiKey, keys, skipped }) {
       const record = readRecord() || freshRecord();
       const nextKeys = keys && typeof keys === 'object'
-        ? Object.fromEntries(['tmdb', 'fanart', 'omdb', 'opensubtitles'].flatMap((providerId) => {
+        ? Object.fromEntries(['tmdb', 'fanart', 'omdb', 'opensubtitles', 'tvdb'].flatMap((providerId) => {
           const value = keys[providerId];
           return typeof value === 'string' && value.trim() ? [[providerId, value.trim().slice(0, 512)]] : [];
         }))

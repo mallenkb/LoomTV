@@ -110,6 +110,25 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
       ),
     },
     {
+      id: 'tvdb',
+      label: 'TheTVDB API Key',
+      badge: 'TV metadata',
+      placeholder: 'TheTVDB project API key',
+      description: (
+        <>
+          TV series, seasons, episodes, and artwork. Get a key at{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://thetvdb.com/api-information/signup')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            thetvdb.com <ExternalLink className="w-3 h-3" />
+          </button>
+          .
+        </>
+      ),
+    },
+    {
       id: 'fanart',
       label: 'Fanart.tv API Key',
       badge: 'Clearlogos',
@@ -362,6 +381,7 @@ export default function Settings() {
         omdb: s.metadataApiKeys?.omdb || s.omdbApiKey || '',
         fanart: s.metadataApiKeys?.fanart || '',
         opensubtitles: s.metadataApiKeys?.opensubtitles || '',
+        tvdb: s.metadataApiKeys?.tvdb || '',
       };
       setMetadataKeys(loadedKeys);
       setMetadataOfflineMode(Boolean(s.metadataOfflineMode));

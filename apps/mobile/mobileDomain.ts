@@ -183,7 +183,7 @@ export type OfficialArtworkResponse = {
   providerRatings?: LanProviderRatings;
   genres?: string[];
   episodes?: unknown[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan';
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logo?: string;
@@ -193,7 +193,7 @@ export type OfficialArtworkResponse = {
 
 export type OfficialMetadataCandidate = OfficialArtworkResponse & {
   id?: string;
-  source?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan';
+  source?: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan';
   title?: string;
   year?: number;
   episodeCount?: number;

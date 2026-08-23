@@ -32,6 +32,7 @@ export type ScanFolderKind = 'movies' | 'tv' | 'anime';
 export interface ScanContext {
   omdbApiKey?: string;
   tmdbApiKey?: string;
+  tvdbApiKey?: string;
   fanartApiKey?: string;
   openSubtitles?: OpenSubtitlesScanOptions;
   folderKind?: ScanFolderKind;
@@ -49,6 +50,7 @@ export type BuildTVItemRequest = {
   omdbApiKey?: string;
   itemType?: 'tv' | 'anime';
   tmdbApiKey?: string;
+  tvdbApiKey?: string;
   fanartApiKey?: string;
   openSubtitles?: OpenSubtitlesScanOptions;
 };
@@ -61,6 +63,7 @@ export type BuildMovieItemRequest = {
   year: number;
   omdbApiKey?: string;
   tmdbApiKey?: string;
+  tvdbApiKey?: string;
   fanartApiKey?: string;
   forcedType?: 'movie' | 'tv' | 'anime';
 };
@@ -165,6 +168,7 @@ export function createLibraryScanner(deps: LibraryScannerDependencies) {
           year: parsedVideo.year,
           omdbApiKey: ctx.omdbApiKey,
           tmdbApiKey: ctx.tmdbApiKey,
+          tvdbApiKey: ctx.tvdbApiKey,
           fanartApiKey: ctx.fanartApiKey,
           forcedType,
         });
@@ -234,6 +238,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
       year: parsedFolder.year,
       omdbApiKey: ctx.omdbApiKey,
       tmdbApiKey: ctx.tmdbApiKey,
+      tvdbApiKey: ctx.tvdbApiKey,
       fanartApiKey: ctx.fanartApiKey,
       forcedType: ctx.folderKind === 'anime' ? 'anime' : 'tv',
     });
@@ -250,6 +255,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
       omdbApiKey: ctx.omdbApiKey,
       itemType: ctx.folderKind === 'anime' || isLikelyAnimePath(folderPath, parsedFolder.title) ? 'anime' : 'tv',
       tmdbApiKey: ctx.tmdbApiKey,
+      tvdbApiKey: ctx.tvdbApiKey,
       fanartApiKey: ctx.fanartApiKey,
       openSubtitles: ctx.openSubtitles,
     });
@@ -263,6 +269,7 @@ async function scanDirectoryAsItem(folderPath: string, ctx: ScanContext): Promis
     year: parsedFolder.year,
     omdbApiKey: ctx.omdbApiKey,
     tmdbApiKey: ctx.tmdbApiKey,
+    tvdbApiKey: ctx.tvdbApiKey,
     fanartApiKey: ctx.fanartApiKey,
     forcedType: ctx.folderKind === 'anime' ? 'anime' : undefined,
   });
@@ -325,6 +332,7 @@ async function scanFolder(
             year: parsedVideo.year,
             omdbApiKey: ctx.omdbApiKey,
             tmdbApiKey: ctx.tmdbApiKey,
+            tvdbApiKey: ctx.tvdbApiKey,
             fanartApiKey: ctx.fanartApiKey,
             forcedType: forcedMovieType,
           });
@@ -378,6 +386,7 @@ async function scanFolder(
                   omdbApiKey: ctx.omdbApiKey,
                   itemType: ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
                   tmdbApiKey: ctx.tmdbApiKey,
+                  tvdbApiKey: ctx.tvdbApiKey,
                   fanartApiKey: ctx.fanartApiKey,
                   openSubtitles: ctx.openSubtitles,
                 });
@@ -417,6 +426,7 @@ async function scanFolder(
               omdbApiKey: ctx.omdbApiKey,
               itemType: ctx.folderKind === 'anime' || isLikelyAnimePath(fullPath, parsedFolder.title) ? 'anime' : 'tv',
               tmdbApiKey: ctx.tmdbApiKey,
+              tvdbApiKey: ctx.tvdbApiKey,
               fanartApiKey: ctx.fanartApiKey,
               openSubtitles: ctx.openSubtitles,
             });

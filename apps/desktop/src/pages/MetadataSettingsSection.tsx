@@ -80,7 +80,7 @@ export default function MetadataSettingsSection({
             Metadata API Keys
           </CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Add the services you use. TVmaze and Jikan need no keys.
+            Add the services you use. TVmaze and Jikan need no keys; TheTVDB is optional for TV metadata and artwork.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">

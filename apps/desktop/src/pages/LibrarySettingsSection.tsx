@@ -162,7 +162,7 @@ export default function LibrarySettingsSection({
         <CardHeader>
           <CardTitle className="text-white">Scan Library</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Scans local files and fetches metadata from TMDB, TVmaze, Jikan (MAL), and OMDb.
+            Scans local files and fetches metadata from TMDB, TVmaze, TheTVDB, Jikan (MAL), and OMDb.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -42,6 +42,7 @@ const ARTWORK_PROVIDER_PRIORITY: Record<OfficialMetadataCandidate['source'], num
   Jikan: 2,
   TVmaze: 3,
   OMDb: 4,
+  TVDB: 5,
 };
 
 export type OfficialArtworkResult = {

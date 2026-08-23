@@ -23,7 +23,9 @@ type KoffiTypeSpec = string | KoffiType;
  * address (or `null` for NULL), primitives as themselves, and a struct as a
  * plain object matching its descriptor.
  */
-type NativeValue = string | number | bigint | boolean | null | undefined | Record<string, unknown>;
+type NativeValue = string | number | bigint | boolean | null | undefined
+  | Record<string, unknown>
+  | readonly (string | null)[];
 type DynamicFunction = (...args: NativeValue[]) => NativeValue;
 
 type KoffiLibrary = {
@@ -90,7 +92,10 @@ type LibVlcRuntime = {
   libraryPath: string;
   version?: string;
   source: 'environment' | 'bundled' | 'system';
+  instance: NativeDrawable;
 };
+
+type LibVlcRuntimeBindings = Omit<LibVlcRuntime, 'instance'>;
 
 type RuntimeCache = {
   key: string;
@@ -334,7 +339,7 @@ function pluginPathForLibrary(libraryPath: string): string | undefined {
   });
 }
 
-function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
+function createLibVlcInstance(runtime: LibVlcRuntimeBindings): NativeHandle {
   // VLC's module discovery is relative to its plugin directory. Keep the
   // process environment unchanged after construction so a user-selected
   // runtime cannot affect unrelated child processes or later launches.
@@ -342,7 +347,12 @@ function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
   const pluginPath = pluginPathForLibrary(runtime.libraryPath);
   if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;
   try {
-    return nativeHandle(runtime.api.newInstance(0, null));
+    // Git checkouts and macOS signing do not preserve the mtimes embedded in
+    // VLC's plugins.dat. Let the one process-wide instance scan its plugins
+    // once during LoomTV's startup splash instead of validating a stale cache
+    // every time the user presses Play.
+    const args = ['--no-plugins-cache'];
+    return nativeHandle(runtime.api.newInstance(args.length, args));
   } finally {
     if (previousPluginPath === undefined) delete process.env.VLC_PLUGIN_PATH;
     else process.env.VLC_PLUGIN_PATH = previousPluginPath;
@@ -385,7 +395,7 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
       const library = koffi.load(candidate.path);
       loadedLibraries.push(library);
       const api: LibVlcApi = {
-        newInstance: bind(library, 'libvlc_new', 'void *', ['int', 'void *']),
+        newInstance: bind(library, 'libvlc_new', 'void *', ['int', 'const char **']),
         releaseInstance: bind(library, 'libvlc_release', 'void', ['void *']),
         getVersion: bind(library, 'libvlc_get_version', 'str', []),
         mediaNewPath: bind(library, 'libvlc_media_new_path', 'void *', ['void *', 'str']),
@@ -414,7 +424,16 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         audioSetDelay: optionalBind(library, 'libvlc_audio_set_delay', 'int', ['void *', 'int64']),
       };
       const version = String(api.getVersion() || '').trim() || undefined;
-      return { runtime: { api, loadedLibraries, libraryPath: candidate.path, version, source: candidate.source } };
+      const bindings: LibVlcRuntimeBindings = {
+        api,
+        loadedLibraries,
+        libraryPath: candidate.path,
+        version,
+        source: candidate.source,
+      };
+      const instance = createLibVlcInstance(bindings);
+      if (!instance) throw new Error('LibVLC could not create a shared media instance.');
+      return { runtime: { ...bindings, instance } };
     } catch (error) {
       rejected.push(`${candidate.path}: ${error instanceof Error ? error.message : 'could not load'}`);
     }
@@ -433,7 +452,15 @@ function cachedRuntime(): RuntimeCache {
 }
 
 export function invalidateLibVlcRuntimeCache(): void {
+  // A session owns players and media created from this instance. Keep the
+  // instance alive until that session ends instead of invalidating pointers
+  // underneath active playback.
+  if (currentSession) return;
+  const runtime = runtimeCache?.runtime;
   runtimeCache = null;
+  if (runtime) {
+    try { runtime.api.releaseInstance(runtime.instance); } catch { /* best effort */ }
+  }
 }
 
 export function libVlcAvailability(): LibVlcAvailability {
@@ -973,7 +1000,6 @@ function nativeStateStatus(state: number): LibVlcPlaybackState['status'] {
 
 class LibVlcPlaybackSession {
   readonly id = crypto.randomUUID();
-  private readonly instance: NativeHandle;
   private readonly media: NativeHandle;
   private player: NativeHandle;
   private timer: NodeJS.Timeout | null = null;
@@ -996,6 +1022,7 @@ class LibVlcPlaybackSession {
   private startSeconds: number;
   private startApplied = false;
   private requestedPaused = false;
+  private lastPauseCommand: boolean | null = null;
   private preferredAudioTrackId: number | null;
   private initialAudioSelectionApplied = false;
   private initialAudioSelectionAttempts = 0;
@@ -1025,17 +1052,8 @@ class LibVlcPlaybackSession {
     };
 
     const api = runtime.api;
-    this.instance = createLibVlcInstance(runtime);
-    if (!this.instance) throw new Error('LibVLC could not create a media instance.');
-    let media: NativeHandle;
-    try {
-      media = nativeHandle(api.mediaNewPath(this.instance, filePath));
-    } catch (error) {
-      try { api.releaseInstance(this.instance); } catch { /* best effort */ }
-      throw error;
-    }
+    const media = nativeHandle(api.mediaNewPath(runtime.instance, filePath));
     if (!media) {
-      api.releaseInstance(this.instance);
       throw new Error('LibVLC could not open the authorized local media path.');
     }
     try {
@@ -1055,12 +1073,10 @@ class LibVlcPlaybackSession {
       this.player = nativeHandle(api.playerNewFromMedia(media));
     } catch (error) {
       try { api.mediaRelease(media); } catch { /* best effort */ }
-      try { api.releaseInstance(this.instance); } catch { /* best effort */ }
       throw error;
     }
     if (!this.player) {
       try { api.mediaRelease(this.media); } catch { /* best effort */ }
-      api.releaseInstance(this.instance);
       throw new Error('LibVLC could not create a media player.');
     }
 
@@ -1274,6 +1290,7 @@ class LibVlcPlaybackSession {
     const nextPlayer = nativeHandle(api.playerNewFromMedia(this.media));
     if (!nextPlayer) throw new Error('LibVLC could not recreate the native video output.');
     this.player = nextPlayer;
+    this.lastPauseCommand = null;
     this.configureNativePlayer(nextPlayer);
     this.initialAudioSelectionApplied = this.preferredAudioTrackId === null;
     this.initialAudioSelectionAttempts = 0;
@@ -1289,6 +1306,7 @@ class LibVlcPlaybackSession {
         if (this.stopped || this.player !== nextPlayer) return;
         try {
           api.playerSetPause(nextPlayer, 1);
+          this.lastPauseCommand = true;
           this.state = { ...this.state, paused: true };
         } catch { /* best effort */ }
       }, 360);
@@ -1536,6 +1554,8 @@ class LibVlcPlaybackSession {
       const api = this.runtime.api;
       switch (command.type) {
         case 'set-paused':
+          if (this.lastPauseCommand === command.paused) return true;
+          this.lastPauseCommand = command.paused;
           this.requestedPaused = command.paused;
           api.playerSetPause(this.player, command.paused ? 1 : 0);
           this.emit({ paused: command.paused });
@@ -1587,7 +1607,6 @@ class LibVlcPlaybackSession {
       this.player = null;
     }
     try { this.runtime.api.mediaRelease(this.media); } catch { /* best effort */ }
-    try { this.runtime.api.releaseInstance(this.instance); } catch { /* best effort */ }
   }
 
   private destroyNativeView(): void {
@@ -1681,4 +1700,5 @@ export function stopLibVlcPlayback(sessionId?: string): boolean {
 
 export function stopAllLibVlcPlayback(): void {
   stopLibVlcPlayback();
+  invalidateLibVlcRuntimeCache();
 }

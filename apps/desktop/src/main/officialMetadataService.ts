@@ -47,7 +47,7 @@ export type OfficialArtworkRefreshResult = {
   genres?: string[];
   seasons?: { number: number; title: string; episodeCount: number }[];
   episodes?: EpisodeMeta[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList';
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logo?: string;
@@ -64,7 +64,7 @@ export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episod
 
 export type OfficialMetadataCandidate = OfficialArtworkRefreshResult & {
   id: string;
-  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
+  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList';
   title: string;
   year?: number;
   genres?: string[];
@@ -105,6 +105,9 @@ export type OfficialMetadataServiceDependencies = {
   fetchTMDBTVMetadata: typeof import('./metadata/tmdb.ts').fetchTMDBTVMetadata;
   fetchTMDBTVMetadataById: typeof import('./metadata/tmdb.ts').fetchTMDBTVMetadataById;
   fetchTMDBTVMetadataCandidates: typeof import('./metadata/tmdb.ts').fetchTMDBTVMetadataCandidates;
+  fetchTVDBMetadata: typeof import('./metadata/tvdb.ts').fetchTVDBMetadata;
+  fetchTVDBMetadataById: typeof import('./metadata/tvdb.ts').fetchTVDBMetadataById;
+  fetchTVDBMetadataCandidates: typeof import('./metadata/tvdb.ts').fetchTVDBMetadataCandidates;
   fetchTVMetadata: typeof import('./metadata/tvmaze.ts').fetchTVMetadata;
   fetchTVMetadataCandidates: typeof import('./metadata/tvmaze.ts').fetchTVMetadataCandidates;
   artworkDeliveryUrl: (source?: string | null) => string;
@@ -281,6 +284,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     fetchTMDBTVMetadata,
     fetchTMDBTVMetadataById,
     fetchTMDBTVMetadataCandidates,
+    fetchTVDBMetadata,
+    fetchTVDBMetadataById,
+    fetchTVDBMetadataCandidates,
     fetchTVMetadata,
     fetchTVMetadataCandidates,
     getMetadataApiKey,
@@ -367,7 +373,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
           || host.includes('m.media-amazon.com')
           || host.includes('cdn.myanimelist.net')
           || host.includes('myanimelist.net')
-          || host.includes('static.tvmaze.com');
+          || host.includes('static.tvmaze.com')
+          || host === 'thetvdb.com'
+          || host.endsWith('.thetvdb.com');
       } catch {
         return false;
       }
@@ -675,6 +683,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const settings = loadSettings();
     const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
+    const tvdbApiKey = getMetadataApiKey(settings, 'tvdb');
     const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
 
     if (item.type === 'movie') {
@@ -699,7 +708,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
 
     const likelyAnime = item.type === 'anime';
-    const [omdbById, omdbBySearch, anilistMeta, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvMeta, tvCandidates] = await Promise.all([
+    const [omdbById, omdbBySearch, anilistMeta, jikanCandidates, tmdbById, tmdbBySearch, tmdbCandidates, tvdbById, tvdbBySearch, tvdbCandidates, tvMeta, tvCandidates] = await Promise.all([
       safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
       safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
       safeMetadataProvider(likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null), null),
@@ -707,6 +716,9 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       safeMetadataProvider(providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null), null),
       safeMetadataProvider(fetchTMDBTVMetadata(title, year, tmdbApiKey), null),
       safeMetadataProvider(fetchTMDBTVMetadataCandidates(title, year, tmdbApiKey), []),
+      safeMetadataProvider(providerIds.tvdbId ? fetchTVDBMetadataById(providerIds.tvdbId, tvdbApiKey) : Promise.resolve(null), null),
+      safeMetadataProvider(fetchTVDBMetadata(title, year, tvdbApiKey), null),
+      safeMetadataProvider(fetchTVDBMetadataCandidates(title, year, tvdbApiKey), []),
       safeMetadataProvider(fetchTVMetadata(title, year), null),
       safeMetadataProvider(fetchTVMetadataCandidates(title, year), []),
     ]);
@@ -727,9 +739,16 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       metadataCandidate('TVmaze', remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null, title),
       ...matchingMetadataResults(tvCandidates, localTitles).map((candidate) => metadataCandidate('TVmaze', candidate, title)),
     ];
+    const tvdbCandidatesInOrder = [
+      metadataCandidate('TVDB', remoteMatchesAnyLocalTitle(localTitles, tvdbById?.title) ? tvdbById : null, title),
+      metadataCandidate('TVDB', remoteMatchesAnyLocalTitle(localTitles, tvdbBySearch?.title) ? tvdbBySearch : null, title),
+      ...matchingMetadataResults(tvdbCandidates, localTitles).map((candidate) => metadataCandidate('TVDB', candidate, title)),
+    ];
     const providerCandidates = tmdbApiKey?.trim()
-      ? [...tmdbCandidatesInOrder, ...omdbCandidates, ...tvmazeCandidates]
-      : [...tvmazeCandidates, ...omdbCandidates];
+      ? [...tmdbCandidatesInOrder, ...omdbCandidates, ...tvmazeCandidates, ...(tvdbApiKey?.trim() ? tvdbCandidatesInOrder : [])]
+      : tvdbApiKey?.trim()
+        ? [...tvmazeCandidates, ...omdbCandidates, ...tvdbCandidatesInOrder]
+        : [...tvmazeCandidates, ...omdbCandidates];
     return sortMetadataCandidates(uniqueMetadataCandidates([
       ...animeCandidates,
       ...providerCandidates,
@@ -742,6 +761,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     const tmdbApiKey = getMetadataApiKey(settings, 'tmdb');
     const omdbApiKey = getMetadataApiKey(settings, 'omdb');
     const fanartApiKey = getMetadataApiKey(settings, 'fanart');
+    const tvdbApiKey = getMetadataApiKey(settings, 'tvdb');
     const { title, year, localTitles, providerIds } = itemArtworkLookupData(item);
 
     if (item.type === 'movie') {
@@ -790,29 +810,33 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
     }
 
     const likelyAnime = item.type === 'anime';
-    const [omdbById, omdbBySearch, anilistMeta, jikanMeta, tmdbById, tmdbBySearch, tvMeta] = await Promise.all([
+    const [omdbById, omdbBySearch, anilistMeta, jikanMeta, tmdbById, tmdbBySearch, tvdbById, tvdbBySearch, tvMeta] = await Promise.all([
       safeMetadataProvider(providerIds.imdbId ? fetchOMDbMetadataById(providerIds.imdbId, omdbApiKey) : Promise.resolve(null), null),
       safeMetadataProvider(fetchOMDbMetadata(title, year, omdbApiKey), null),
       safeMetadataProvider(likelyAnime ? fetchAniListAnimeMetadata(Number(providerIds.malId) || undefined, title) : Promise.resolve(null), null),
       safeMetadataProvider(likelyAnime ? fetchJikanMetadata(title) : Promise.resolve(null), null),
       safeMetadataProvider(providerIds.tmdbId ? fetchTMDBTVMetadataById(providerIds.tmdbId, tmdbApiKey) : Promise.resolve(null), null),
       safeMetadataProvider(fetchTMDBTVMetadata(title, year, tmdbApiKey), null),
+      safeMetadataProvider(providerIds.tvdbId ? fetchTVDBMetadataById(providerIds.tvdbId, tvdbApiKey) : Promise.resolve(null), null),
+      safeMetadataProvider(fetchTVDBMetadata(title, year, tvdbApiKey), null),
       safeMetadataProvider(fetchTVMetadata(title, year), null),
     ]);
     const omdbMeta = omdbById || (remoteMatchesAnyLocalTitle(localTitles, omdbBySearch?.Title) ? omdbBySearch : null);
     const matchedAniList = metadataResultMatchesLocalTitle(anilistMeta, localTitles) ? anilistMeta : null;
     const matchedJikan = metadataResultMatchesLocalTitle(jikanMeta, localTitles) ? jikanMeta : null;
     const tmdbMeta = tmdbById || (remoteMatchesAnyLocalTitle(localTitles, tmdbBySearch?.title) ? tmdbBySearch : null);
+    const matchedTVDB = [tvdbById, tvdbBySearch]
+      .find((data) => remoteMatchesAnyLocalTitle(localTitles, data?.title)) || null;
     const matchedTV = remoteMatchesAnyLocalTitle(localTitles, tvMeta?.title) ? tvMeta : null;
     const omdbPoster = omdbMeta?.Poster && omdbMeta.Poster !== 'N/A' ? omdbMeta.Poster : '';
     const preferOmdbFallback = Boolean(tmdbApiKey?.trim());
     const fallbackPosters = preferOmdbFallback
-      ? [omdbPoster, matchedTV?.poster]
-      : [matchedTV?.poster, omdbPoster];
+      ? [omdbPoster, matchedTV?.poster, matchedTVDB?.poster]
+      : [matchedTV?.poster, omdbPoster, matchedTVDB?.poster];
     const posterCandidates = officialArtworkOnly([
       likelyAnime ? matchedAniList?.poster : '',
       tmdbMeta?.poster,
-      ...(likelyAnime ? [omdbPoster, matchedTV?.poster] : fallbackPosters),
+      ...(likelyAnime ? [omdbPoster, matchedTV?.poster, matchedJikan?.poster, matchedTVDB?.poster] : fallbackPosters),
       likelyAnime ? matchedJikan?.poster : '',
     ]);
     const backdropCandidates = officialArtworkOnly([
@@ -820,41 +844,46 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       tmdbMeta?.backdrop,
       likelyAnime ? matchedJikan?.backdrop : '',
       matchedTV?.backdrop,
+      matchedTVDB?.backdrop,
     ]);
     const fanartLogoCandidates = await fetchFanartTVLogos(
-      tmdbMeta?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
+      tmdbMeta?.providerIds?.tvdbId || matchedTVDB?.providerIds?.tvdbId || matchedTV?.providerIds?.tvdbId || providerIds.tvdbId,
       fanartApiKey,
     );
     const logoCandidates = orderedArtworkCandidates(
       ...officialArtworkOnly([tmdbMeta?.logo, ...(tmdbMeta?.logoCandidates || [])]),
       ...fanartLogoCandidates,
+      matchedTVDB?.logo,
+      ...officialArtworkOnly(matchedTVDB?.logoCandidates || []),
     );
     const hasLocalSpecials = item.episodeFiles?.some((file) => file.season === 0) === true;
     const hasTMDBSpecials = tmdbMeta?.episodes?.some((episode) => episode.season === 0) === true;
     const episodes = hasLocalSpecials && hasTMDBSpecials
       ? tmdbMeta?.episodes
-      : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes;
+      : matchedTV?.episodes || (likelyAnime ? matchedJikan?.episodes : undefined) || tmdbMeta?.episodes || matchedTVDB?.episodes;
     const episodeSource = hasLocalSpecials && hasTMDBSpecials
       ? 'TMDB'
       : matchedTV?.episodes?.length
-      ? 'TVmaze'
-      : likelyAnime && matchedJikan?.episodes?.length
-        ? 'Jikan'
-        : tmdbMeta?.episodes?.length
-          ? 'TMDB'
-          : undefined;
+        ? 'TVmaze'
+        : likelyAnime && matchedJikan?.episodes?.length
+          ? 'Jikan'
+          : tmdbMeta?.episodes?.length
+            ? 'TMDB'
+            : matchedTVDB?.episodes?.length
+              ? 'TVDB'
+              : undefined;
     const fallbackTitle = preferOmdbFallback
-      ? omdbMeta?.Title || matchedTV?.title
-      : matchedTV?.title || omdbMeta?.Title;
+      ? omdbMeta?.Title || matchedTV?.title || matchedTVDB?.title
+      : matchedTV?.title || omdbMeta?.Title || matchedTVDB?.title;
     const fallbackYear = preferOmdbFallback
-      ? Number.parseInt(omdbMeta?.Year || '', 10) || matchedTV?.year
-      : matchedTV?.year || Number.parseInt(omdbMeta?.Year || '', 10);
+      ? Number.parseInt(omdbMeta?.Year || '', 10) || matchedTV?.year || matchedTVDB?.year
+      : matchedTV?.year || Number.parseInt(omdbMeta?.Year || '', 10) || matchedTVDB?.year;
     const fallbackSummary = preferOmdbFallback
-      ? omdbMeta?.Plot || matchedTV?.summary
-      : matchedTV?.summary || omdbMeta?.Plot;
+      ? omdbMeta?.Plot || matchedTV?.summary || matchedTVDB?.summary
+      : matchedTV?.summary || omdbMeta?.Plot || matchedTVDB?.summary;
     const fallbackGenres = preferOmdbFallback
-      ? (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : matchedTV?.genres)
-      : (matchedTV?.genres || (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : undefined));
+      ? (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : matchedTV?.genres || matchedTVDB?.genres)
+      : (matchedTV?.genres || (omdbMeta?.Genre ? omdbMeta.Genre.split(', ') : matchedTVDB?.genres));
 
     return {
       title: likelyAnime ? matchedAniList?.title || title : tmdbMeta?.title || fallbackTitle || title,
@@ -865,6 +894,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         matchedAniList?.providerIds || {},
         matchedJikan?.providerIds || {},
         matchedTV?.providerIds || {},
+        matchedTVDB?.providerIds || {},
       ),
       format: likelyAnime ? (matchedAniList?.format || matchedJikan?.format || 'TV') : 'TV',
       thumbnail: posterCandidates[0] || '',
@@ -875,13 +905,14 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
         || showMetadataRating(likelyAnime ? 'anime' : 'tv', matchedJikan, tmdbMeta, matchedTV, omdbMeta, preferOmdbFallback),
       trailerUrl: tmdbMeta?.trailerUrl || matchedAniList?.trailerUrl || matchedJikan?.trailerUrl,
       runtime: tmdbMeta?.runtime || matchedAniList?.runtime || matchedJikan?.runtime,
-      seasonCount: tmdbMeta?.seasonCount || matchedTV?.seasonCount || matchedJikan?.seasonCount,
-      episodeCount: tmdbMeta?.episodeCount || matchedTV?.episodeCount || matchedJikan?.episodeCount,
+      seasonCount: tmdbMeta?.seasonCount || matchedTV?.seasonCount || matchedJikan?.seasonCount || matchedTVDB?.seasonCount,
+      episodeCount: tmdbMeta?.episodeCount || matchedTV?.episodeCount || matchedJikan?.episodeCount || matchedTVDB?.episodeCount,
       providerRatings: omdbProviderRatings(omdbMeta),
       genres: (likelyAnime ? matchedAniList?.genres || matchedJikan?.genres : undefined) || tmdbMeta?.genres || fallbackGenres || [],
       seasons: mergeOfficialSeasonMetadata(
         tmdbMeta?.tmdbSeasons,
         matchedTV?.seasons,
+        matchedTVDB?.seasons,
       ),
       contentRatings: mergeContentRatings(
         tmdbMeta?.contentRatings,
@@ -896,7 +927,7 @@ export function createOfficialMetadataService(deps: OfficialMetadataServiceDepen
       logoCandidates,
       cast: likelyAnime
         ? normalizeAnimeCast(matchedAniList?.cast?.length ? matchedAniList.cast : matchedJikan?.cast?.length ? matchedJikan.cast : item.cast)
-        : tmdbMeta?.cast || matchedTV?.cast || [],
+        : tmdbMeta?.cast || matchedTV?.cast || matchedTVDB?.cast || [],
       streamingProviders: tmdbMeta?.streamingProviders,
       originPlatform: matchedTV?.originPlatform,
     };

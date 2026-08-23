@@ -644,7 +644,7 @@ export interface OfficialArtworkResult {
   providerRatings?: LanProviderRatings;
   contentRatings?: Record<string, LanContentRating>;
   episodes?: WireEpisodeMeta[];
-  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
+  episodeSource?: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList';
   posterCandidates?: string[];
   backdropCandidates?: string[];
   logoCandidates?: string[];
@@ -667,7 +667,7 @@ export type OfficialMetadataApplyTarget = OfficialArtworkRefreshTarget | 'episod
 
 export type OfficialMetadataCandidate = OfficialArtworkResult & {
   id: string;
-  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'Jikan' | 'AniList';
+  source: 'TMDB' | 'OMDb' | 'TVmaze' | 'TVDB' | 'Jikan' | 'AniList';
   title: string;
   year?: number;
   genres?: string[];

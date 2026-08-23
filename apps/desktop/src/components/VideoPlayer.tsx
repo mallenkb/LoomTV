@@ -259,6 +259,7 @@ export default function VideoPlayer({
   const loadTokenRef = useRef(0);
   const sourceLoadTokenRef = useRef(0);
   const playerActiveRef = useRef(true);
+  const nativeAutoplayIssuedRef = useRef(false);
   const playbackTimingAttemptRef = useRef<PlaybackTimingAttempt | null>(null);
   const lastPlaybackRequestIdRef = useRef('');
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
@@ -963,7 +964,7 @@ export default function VideoPlayer({
 
   const applyResolvedNativePreferences = useCallback((preferences: PlaybackTrackPreferences) => {
     const engine = playbackEngineRef.current;
-    if (!engine || !nativeInitialTracksAppliedRef.current) return;
+    if (!engine || (!nativeInitialTracksAppliedRef.current && probeTracksRef.current.length === 0)) return;
 
     const tracks = probeTracksRef.current;
     const preferredAudio = preferredTrackIndex(tracks, 'audio', preferences.audio);
@@ -1473,7 +1474,12 @@ export default function VideoPlayer({
       // A transient pause property while the native engine opens is engine state, not user
       // intent. Every explicit Play/Resume action enters with this ref false,
       // so reaffirm autoplay once the native file is actually ready.
-      if (!userPausedRef.current) void playbackEngineRef.current?.play();
+      if (!nativeAutoplayIssuedRef.current) {
+        nativeAutoplayIssuedRef.current = true;
+        if (!userPausedRef.current && state.paused === true) {
+          void playbackEngineRef.current?.play();
+        }
+      }
     } else if (!suppressSeekSnapshot && state.status === 'ended') {
       const totalDuration = state.duration || playbackDurationRef.current || probedDurationRef.current;
       if (totalDuration > 0) {
@@ -1507,6 +1513,7 @@ export default function VideoPlayer({
       document.documentElement.classList.remove('loom-native-active');
       void (async () => {
         if (failedEngineKind === 'libvlc' && await MpvPlaybackEngine.available().catch(() => false)) {
+          nativeAutoplayIssuedRef.current = false;
           const fallbackEngine = new MpvPlaybackEngine(handleNativePlaybackState);
           if (!playbackEngineRef.current && playerActiveRef.current) {
             playbackEngineRef.current = fallbackEngine;
@@ -1566,6 +1573,7 @@ export default function VideoPlayer({
     setStreamIsTranscoded(false);
     setNativePlaybackActive(false);
     setNativeEngineKind(null);
+    nativeAutoplayIssuedRef.current = false;
     document.documentElement.classList.remove('loom-native-active');
     setSelectedSecondarySubtitleTrackIndex(-1);
     nativeInitialTracksAppliedRef.current = false;
@@ -1648,6 +1656,7 @@ export default function VideoPlayer({
     setStreamIsTranscoded(false);
     setNativePlaybackActive(false);
     setNativeEngineKind(null);
+    nativeAutoplayIssuedRef.current = false;
     nativeInitialTracksAppliedRef.current = false;
     audioReapplyAttemptsRef.current = 0;
     document.documentElement.classList.remove('loom-native-active');
@@ -1737,6 +1746,19 @@ export default function VideoPlayer({
             return;
           }
           if (loaded) {
+            // Native playback should not wait for ffprobe, but the track list
+            // still powers Loom's audio and subtitle controls. Resolve it in
+            // the background and apply saved preferences once it arrives.
+            if (isLocalFile) {
+              void (async () => {
+                const preferences = await preferencesPromise;
+                if (!playerActiveRef.current || loadToken !== loadTokenRef.current) return;
+                const probeResult = await desktopApi.media.probe(filePath);
+                if (!playerActiveRef.current || loadToken !== loadTokenRef.current || !probeResult.ok) return;
+                applyProbeData(probeResult.data, preferences);
+                applyResolvedNativePreferencesRef.current(preferences);
+              })();
+            }
             const openedAttempt = playbackTimingAttemptRef.current;
             if (openedAttempt && !openedAttempt.sourceOpenedReported) {
               openedAttempt.sourceOpenedReported = true;
@@ -2758,6 +2780,19 @@ export default function VideoPlayer({
     setReloadToken((value) => value + 1);
   }, []);
 
+  const switchNativePlaybackToBrowser = useCallback(() => {
+    const engine = playbackEngineRef.current;
+    if (!engine) return;
+    playbackEngineRef.current = null;
+    void engine.destroy();
+    setNativePlaybackActive(false);
+    setNativeEngineKind(null);
+    document.documentElement.classList.remove('loom-native-active');
+    didTryTranscodeRef.current = false;
+    hlsTranscodeRestartAttemptsRef.current = 0;
+    void startBrowserStreamAt(playbackPositionRef.current, { showSeekingStatus: true });
+  }, [startBrowserStreamAt]);
+
   const selectedSubtitleIsBurnedIn = useCallback(() => {
     const selected = selectedEmbeddedSubtitle(probeTracksRef.current, selectedSubtitleTrackIndexRef.current);
     return streamIsTranscoded && Boolean(selected && isBitmapSubtitleCodec(selected.track.codec));
@@ -2874,12 +2909,20 @@ export default function VideoPlayer({
     sharedTrackPreferencesRef.current = nextPreferences;
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
+    if (playbackEngineRef.current?.kind === 'libvlc') {
+      // LibVLC track IDs are not guaranteed to match ffprobe stream indexes.
+      // Loom's browser pipeline uses the probe indexes directly, so move to
+      // it for an explicit audio change instead of silently selecting the
+      // wrong native stream.
+      switchNativePlaybackToBrowser();
+      return;
+    }
     if (playbackEngineRef.current) {
       void playbackEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
       return;
     }
     restartForTrackChange();
-  }, [restartForTrackChange, trackPreferenceScopeKey]);
+  }, [restartForTrackChange, switchNativePlaybackToBrowser, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
     if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
@@ -2908,7 +2951,10 @@ export default function VideoPlayer({
         libVlcSubtitleFallbackRef.current = true;
         restartLibVlcForSubtitleFallback();
       } else {
-        void playbackEngineRef.current.selectSubtitle(null);
+        // LibVLC owns the native surface, so the browser video element has no
+        // text-track DOM to toggle. Switch to Loom's browser pipeline for
+        // parseable subtitles, where the selected cue track can render.
+        switchNativePlaybackToBrowser();
       }
       return;
     }
@@ -2935,6 +2981,7 @@ export default function VideoPlayer({
     restartLibVlcForSubtitleFallback,
     selectedSubtitleIsBurnedIn,
     trackPreferenceScopeKey,
+    switchNativePlaybackToBrowser,
   ]);
 
   const selectSecondarySubtitleTrack = useCallback((trackIndex: number) => {

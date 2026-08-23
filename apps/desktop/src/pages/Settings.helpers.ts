@@ -64,6 +64,7 @@ export const THIRD_PARTY_DEPENDENCIES = [
 
 export const METADATA_ATTRIBUTIONS = [
   { name: 'TMDB', details: 'Movie and TV posters, backdrops, cast data, ratings, and metadata.', url: 'https://www.themoviedb.org/' },
+  { name: 'TheTVDB', details: 'TV series, season, episode, and artwork metadata.', url: 'https://thetvdb.com/' },
   { name: 'TVmaze', details: 'TV show and episode metadata.', url: 'https://www.tvmaze.com/' },
   { name: 'Jikan / MyAnimeList', details: 'Anime posters, ratings, and anime metadata.', url: 'https://jikan.moe/' },
   { name: 'OMDb API', details: 'Fallback movie and TV metadata.', url: 'https://www.omdbapi.com/' },

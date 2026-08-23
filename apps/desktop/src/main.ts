@@ -250,6 +250,7 @@ import type {
 } from './main/metadata/types';
 import { fetchOMDbMetadata, fetchOMDbMetadataById } from './main/metadata/omdb';
 import { fetchTVMetadata, fetchTVMetadataCandidates } from './main/metadata/tvmaze';
+import { fetchTVDBMetadata, fetchTVDBMetadataById, fetchTVDBMetadataCandidates } from './main/metadata/tvdb';
 import {
   fetchTMDBMovieMetadata,
   fetchTMDBMovieMetadataById,
@@ -600,6 +601,8 @@ const { buildMovieItemFromFile, buildTVItemFromFolder } = createMetadataItemBuil
   fetchTMDBMovieMetadataById: metadataRequestWhenOnline(fetchTMDBMovieMetadataById, () => null),
   fetchTMDBTVMetadata: metadataRequestWhenOnline(fetchTMDBTVMetadata, () => null),
   fetchTMDBTVMetadataById: metadataRequestWhenOnline(fetchTMDBTVMetadataById, () => null),
+  fetchTVDBMetadata: metadataRequestWhenOnline(fetchTVDBMetadata, () => null),
+  fetchTVDBMetadataById: metadataRequestWhenOnline(fetchTVDBMetadataById, () => null),
   fetchTVMetadata: metadataRequestWhenOnline(fetchTVMetadata, () => null),
   getEmbeddedArtworkUrl,
   getLocalFolderArtworkUrl,
@@ -635,6 +638,7 @@ async function scanLibrary(
   const ctx: ScanContext = {
     omdbApiKey: getMetadataApiKey(settings, 'omdb'),
     tmdbApiKey: getMetadataApiKey(settings, 'tmdb'),
+    tvdbApiKey: getMetadataApiKey(settings, 'tvdb'),
     fanartApiKey: getMetadataApiKey(settings, 'fanart'),
     openSubtitles: {
       apiKey: getMetadataApiKey(settings, 'opensubtitles'),
@@ -652,6 +656,7 @@ async function scanLibrary(
   const metadataProviderProfile = createHash('sha256')
     .update(JSON.stringify({
       tmdb: ctx.tmdbApiKey || '',
+      tvdb: ctx.tvdbApiKey || '',
       omdb: ctx.omdbApiKey || '',
       fanart: ctx.fanartApiKey || '',
       opensubtitles: openSubtitlesCacheKey(ctx.openSubtitles),
@@ -1376,6 +1381,9 @@ const {
   fetchTMDBTVMetadata,
   fetchTMDBTVMetadataById,
   fetchTMDBTVMetadataCandidates,
+  fetchTVDBMetadata,
+  fetchTVDBMetadataById,
+  fetchTVDBMetadataCandidates,
   fetchTVMetadata,
   fetchTVMetadataCandidates,
   getMetadataApiKey,
@@ -2098,9 +2106,15 @@ async function startBackgroundServices(): Promise<void> {
           console.warn('[tray] Could not open LoomTV in the default browser:', error);
         });
       },
-      ...(getUnifiedDesktopServerState().ready ? {
-        onOpenAdmin: () => { void openUnifiedDesktopAdmin(); },
-      } : {}),
+      // Keep server administration visible even if the canonical server is
+      // still starting or failed to initialize. The previous conditional
+      // removed the menu item permanently when the tray was created before
+      // the server became ready, leaving users with no discoverable route to
+      // server control.
+      onOpenAdmin: () => {
+        if (isUpdateInstalling() || isAppShuttingDown) return;
+        void openUnifiedDesktopAdmin();
+      },
       onQuit: () => app.quit(),
       port: getMediaServerPort(),
     });
