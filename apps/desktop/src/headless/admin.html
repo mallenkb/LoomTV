@@ -82,7 +82,7 @@
     .main { min-width: 0; min-height: 0; height: 100vh; overflow-x: hidden; overflow-y: auto; padding: 28px clamp(20px, 3vw, 48px) 56px; }
     .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 18px; max-width: 1280px; margin: 0 auto 22px; }
     .topbar-actions { display: flex; align-items: center; gap: 10px; }
-    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-raised); color: var(--text); font-weight: 700; cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 14px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-raised); color: var(--text); font-weight: 700; cursor: pointer; text-decoration: none; transition: background .18s ease, border-color .18s ease, transform .18s ease; }
     .button:hover { border-color: var(--loom-active-border); background: var(--loom-active-bg); transform: translateY(-1px); }
     .button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
     .button.primary:hover { border-color: var(--loom-accent-hover); background: var(--loom-accent-hover); color: var(--accent-ink); }
@@ -122,6 +122,9 @@
     .callout { display: grid; gap: 13px; padding: 18px; border: 1px solid var(--loom-active-border); border-radius: 13px; background: var(--loom-active-bg); }
     .callout h3 { margin: 0; font-size: 15px; }
     .callout p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .trust-help { margin: 0; color: var(--faint); font-size: 11px; line-height: 1.5; }
+    .trust-help summary { color: var(--muted); cursor: pointer; }
+    .trust-help p { margin-top: 8px; font-size: 11px; }
     .page-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 16px; }
     .page-toolbar h2 { margin: 0; font-size: 23px; letter-spacing: -.04em; }
     .page-toolbar p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
@@ -292,6 +295,18 @@
           <article class="panel pad">
             <p class="eyebrow">Next useful action</p>
             <div class="callout" style="margin-top:12px" id="nextAction"><h3>Connect a library root</h3><p>Add the mounted folder where your films, shows, or anime live. Existing records stay safe when a NAS share is unavailable.</p><button type="button" class="button primary" data-go="library">Open library setup</button></div>
+          </article>
+          <article class="panel pad">
+            <p class="eyebrow">Browser security</p>
+            <div class="callout" style="margin-top:12px" id="certificateAction">
+              <h3>Remove the browser warning</h3>
+              <p>Download LoomTV's certificate, then trust it on this device.</p>
+              <a class="button" href="/api/admin/certificate" download="loomtv-local.crt">Download certificate</a>
+              <details class="trust-help">
+                <summary>How to trust it</summary>
+                <p>macOS: open the file in Keychain Access and choose "Always Trust". Windows: install it for your current user in Trusted Root Certification Authorities. Linux and Firefox: import it into the browser or system trust store.</p>
+              </details>
+            </div>
           </article>
         </div>
       </section>

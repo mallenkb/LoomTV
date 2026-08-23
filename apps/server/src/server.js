@@ -242,6 +242,7 @@ export function createCanonicalVideoServer(options) {
     ownerConfigured: adminService.isOwnerConfigured,
     requireSecureTransport: options.requireSecureTransport === true,
     proxyPolicy,
+    certificatePem: options.tls?.cert,
   });
   const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath });
   const publicApi = createPublicApiHandler({
