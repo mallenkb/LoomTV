@@ -1055,12 +1055,39 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
           .then(async ({ mediaId, candidate, target }) => {
             requireOwner();
             const candidates = await getOfficialMetadataCandidates(mediaId);
-            const selected = candidates.find((entry) => entry.id === candidate.id);
+            // Poster and cover choices in the renderer carry a short-lived UI
+            // suffix (for example `candidate:poster:2`) so each image can be
+            // shown as its own choice. Resolve that suffix back to the stable
+            // metadata candidate, then apply only the selected image.
+            const baseCandidateId = candidate.id.replace(/:(?:poster|cover):\d+$/, '');
+            const selected = candidates.find((entry) => entry.id === candidate.id || entry.id === baseCandidateId);
             if (!selected) {
               writeJson(res, 400, { error: 'The selected metadata match is no longer available.' });
               return;
             }
-            writeJson(res, 200, await applyOfficialMetadataCandidate(mediaId, selected, target));
+
+            const isPosterChoice = target === 'poster' && candidate.id !== selected.id;
+            const isCoverChoice = target === 'cover' && candidate.id !== selected.id;
+            const requestedArtwork = isPosterChoice ? candidate.thumbnail : isCoverChoice ? candidate.cover : undefined;
+            if (requestedArtwork) {
+              const allowedArtwork = new Set(isPosterChoice
+                ? [selected.thumbnail, ...(selected.posterCandidates || [])]
+                : [selected.cover, ...(selected.backdropCandidates || [])]);
+              if (!allowedArtwork.has(requestedArtwork)) {
+                writeJson(res, 400, { error: 'The selected artwork is not part of this metadata match.' });
+                return;
+              }
+            }
+
+            const selectedForApply = requestedArtwork
+              ? {
+                  ...selected,
+                  ...(isPosterChoice
+                    ? { thumbnail: requestedArtwork, posterCandidates: [requestedArtwork] }
+                    : { cover: requestedArtwork, backdropCandidates: [requestedArtwork] }),
+                }
+              : selected;
+            writeJson(res, 200, await applyOfficialMetadataCandidate(mediaId, selectedForApply, target));
           })
           .catch((error) => error instanceof ProfileError
             ? writeProfileError(error)
@@ -2036,7 +2063,19 @@ export async function startMediaServer(deps: MediaServerDependencies): Promise<n
   mediaServer = localServer;
   trackServerConnections(localServer, mediaServerSockets);
   try {
-    mediaServerPort = await listenWithPortRetries(localServer, mediaServerPort, '127.0.0.1', 'Loopback media server');
+    // Each LoomTV host owns a port pair: loopback HTTP followed by LAN HTTPS.
+    // Retrying the loopback listener one port at a time can select another
+    // instance's wildcard LAN port on macOS. The bind may appear successful,
+    // but requests can reach the other process and its unrelated artwork
+    // registry. Keep loopback listeners on every other port so pairs remain
+    // disjoint across concurrent or stale LoomTV processes.
+    mediaServerPort = await listenWithPortRetries(
+      localServer,
+      mediaServerPort,
+      '127.0.0.1',
+      'Loopback media server',
+      2,
+    );
   } catch (error) {
     if (mediaServer === localServer) mediaServer = null;
     throw error;

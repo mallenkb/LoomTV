@@ -1,21 +1,21 @@
 # LoomTV Mobile
 
-LoomTV Mobile is the Expo React Native companion for browsing and playing a paired LoomTV desktop library from an iPhone, iPad, Android phone, or Android tablet.
+LoomTV Mobile is the Expo React Native client for browsing and playing a canonical LoomTV server from an iPhone, iPad, Android phone, or Android tablet.
 
-The supported target is same-LAN remote playback: the desktop app remains the local media host, and the mobile app connects to the desktop address shown in LoomTV desktop settings. Internet remote streaming is not supported and should not be exposed until authentication, network exposure, rate limiting, and transport security are reviewed.
+The default target is same-LAN playback. The canonical server may run inside the desktop app or independently on a NAS. An operator may also provide remote HTTPS through LoomTV's trusted-proxy and remote-access policy; the project does not ship a relay or automatic router exposure.
 
 ## Supported Capabilities
 
-- Pair with a LoomTV desktop host using a desktop base URL and 6-digit pairing code.
+- Discover or enter a LoomTV server, confirm its certificate, and complete device pairing.
 - Browse Home, Movies, TV Shows, Anime, Settings, detail pages, and episode lists.
-- Load the paired desktop library over the local network.
+- Load the canonical server library over the local network or operator-provided HTTPS endpoint.
 - Play direct mobile-compatible streams with `expo-video`.
-- Request HLS/transcode sessions from the desktop app when a file format needs a mobile-compatible stream.
-- Save playback progress back to the paired desktop host.
+- Request HLS/transcode sessions when a file format needs a mobile-compatible stream.
+- Save playback progress to canonical profile state.
 - Show continue-watching and watched/progress states from synced progress.
 - Switch and lock profiles, honor automatic sign-in, and keep favorites/My List profile-scoped.
-- Reconnect automatically after an address change or temporary desktop/Wi-Fi outage.
-- Browse the last saved metadata catalog during a cold-start outage for an automatic-sign-in profile; playback and mutations remain disabled until the desktop reconnects.
+- Reconnect automatically after an address change or temporary server/Wi-Fi outage.
+- Browse the last saved metadata catalog during a cold-start outage for an automatic-sign-in profile and play media previously downloaded into app storage.
 
 ## Development
 
@@ -93,26 +93,26 @@ Before submission, complete every platform and scenario in [`RELEASE_CHECKLIST.m
 
 ## Pairing Flow
 
-1. Start LoomTV desktop.
-2. Enable local network sharing in desktop Settings.
+1. Start LoomTV desktop hosting or the standalone NAS server.
+2. Confirm the server advertises its HTTPS address and certificate fingerprint.
 3. Open LoomTV Mobile on a device connected to the same network.
-4. Tap **Connect** beside the discovered desktop.
-5. Approve the named device in the desktop prompt.
-6. If discovery or desktop approval is unavailable, use **Connect manually** with the HTTPS address and 6-digit PIN shown in desktop Settings.
+4. Tap **Connect** beside the discovered server.
+5. Approve the named device as an administrator.
+6. If discovery is unavailable, use **Connect manually** with the HTTPS server address and confirm the certificate fingerprint.
 7. Browse the synced library and start playback. Future connections use the saved, scoped device credential automatically.
 
 ## Security Notes
 
-- Same-LAN playback should remain opt-in from the desktop app.
+- Pairing and remote access remain owner-controlled server policies.
 - Desktop approval requests expire after one minute. Pairing PINs and device tokens should be treated as credentials.
-- LAN API, artwork, and media traffic is sent to the desktop TLS listener through a native certificate-pinned loopback proxy. The proxy streams bytes natively and reuses TLS connections; it does not copy media through the JavaScript bridge.
+- API, artwork, download, and media traffic is sent to the server TLS listener through a native certificate-pinned loopback proxy. The proxy streams bytes natively and reuses TLS connections; it does not copy media through the JavaScript bridge.
 - Saved connections without a certificate fingerprint are intentionally incompatible and must be paired again once.
-- Do not expose the desktop LAN server directly to the public Internet.
-- Remote Internet streaming requires a separate design for authentication, authorization, transport security, rate limiting, and abuse prevention.
+- Do not expose a LoomTV server over cleartext HTTP to the public Internet. Remote deployments require HTTPS, an explicit trusted-proxy allowlist, and enabled remote policy.
 
 ## Known Limits
 
-- Same-LAN streaming is the supported target.
+- Same-LAN streaming is the default target. An operator may provide remote HTTPS through the server's trusted-proxy policy; LoomTV does not ship a relay or automatic router configuration.
 - Mobile playback support depends on platform codec support or successful HLS/transcode fallback.
-- The offline catalog contains metadata only; downloaded media is a separate future feature.
-- Internet remote streaming, casting, TV clients, and multiple saved servers are separate feature tracks.
+- The app can create a scoped server download lease, stream the file into app document storage through the pinned transport, play it offline, and remove it. Complete the release checklist on physical devices before treating large or interrupted downloads as production-verified.
+- Android TV and Fire TV use the separate `apps/tv` client. Multiple saved-server switching and an Android Chromecast sender remain future client work.
+- iOS external playback is supplied by the native video stack; browser casting has an explicit canonical cast session. Receiver compatibility still requires physical AirPlay/Chromecast testing.

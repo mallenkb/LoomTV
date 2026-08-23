@@ -16,13 +16,14 @@ const DIRECT_AUDIO_CODECS = ['aac', 'mp3', 'opus', 'vorbis', 'flac', 'pcm'];
 // chars, see apps/desktop/src/main/resourceRegistry.ts). A stream path reaches
 // us either as a full URL carrying ?resourceId=, or as that bare opaque id.
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const CANONICAL_MEDIA_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
 export function filePathFromUrl(value: string): string {
   try {
     const parsed = new URL(value);
     return parsed.searchParams.get('resourceId') || '';
   } catch {
-    return RESOURCE_ID_PATTERN.test(value) ? value : '';
+    return RESOURCE_ID_PATTERN.test(value) || CANONICAL_MEDIA_ID_PATTERN.test(value) ? value : '';
   }
 }
 
@@ -120,7 +121,7 @@ export function episodePlayTarget(
     localMetadata: episodeFile.localMetadata,
     subtitles: episodeFile.subtitles || item.subtitles,
     startPosition: state?.inProgress ? state.position : 0,
-    mediaId: item.id,
+    mediaId: (episodeFile as EpisodeFile & { mediaId?: string }).mediaId || item.id,
     mediaType: item.type,
     season: episodeFile.season,
     episode: episodeFile.episode,

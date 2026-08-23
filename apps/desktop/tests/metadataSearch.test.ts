@@ -58,9 +58,9 @@ test('tmdb logo candidates prefer English transparent title art', () => {
       },
     }),
     [
-      'https://image.tmdb.org/t/p/w500/english-best.png',
-      'https://image.tmdb.org/t/p/w500/english-alt.png',
-      'https://image.tmdb.org/t/p/w500/no-language.png',
+      'https://image.tmdb.org/t/p/original/english-best.png',
+      'https://image.tmdb.org/t/p/original/english-alt.png',
+      'https://image.tmdb.org/t/p/original/no-language.png',
     ],
   );
 });
@@ -75,12 +75,12 @@ test('tmdb logo candidates keep only the best few fallback images', () => {
   assert.deepEqual(
     tmdbLogoCandidates({ images: { logos } }),
     [
-      'https://image.tmdb.org/t/p/w500/english-0.png',
-      'https://image.tmdb.org/t/p/w500/english-1.png',
-      'https://image.tmdb.org/t/p/w500/english-2.png',
-      'https://image.tmdb.org/t/p/w500/english-3.png',
-      'https://image.tmdb.org/t/p/w500/english-4.png',
-      'https://image.tmdb.org/t/p/w500/english-5.png',
+      'https://image.tmdb.org/t/p/original/english-0.png',
+      'https://image.tmdb.org/t/p/original/english-1.png',
+      'https://image.tmdb.org/t/p/original/english-2.png',
+      'https://image.tmdb.org/t/p/original/english-3.png',
+      'https://image.tmdb.org/t/p/original/english-4.png',
+      'https://image.tmdb.org/t/p/original/english-5.png',
     ],
   );
 });

@@ -249,7 +249,7 @@ test('a transcode output directory redirected outside the cache root is refused 
   const { res, payload, base } = await transcodeAttempt({ redirectOutput: true });
   assert.equal(res.statusCode, 403);
   assert.equal(payload.ok, false);
-  assert.equal(payload.error, 'Media path is outside its configured root.');
+  assert.equal(payload.error, 'transcode_failed');
   assert.equal(res.body.includes(base), false, 'the response must not disclose a filesystem path');
 });
 
@@ -258,7 +258,7 @@ test('a contained transcode output directory is accepted and the run fails later
   // 503 comes from profile normalization, which runs *after* the output
   // directory has been created and proven contained.
   assert.equal(res.statusCode, 503);
-  assert.match(payload.error, /FFmpeg cannot produce/i);
+  assert.equal(payload.error, 'transcoder_unavailable');
   await fs.access(path.join(cacheDir, 'headless-transcodes'));
 });
 
@@ -267,7 +267,27 @@ test('media routes contain paths end to end and reject encoded traversal at the 
   const paths = { dataDir: path.join(base, 'data'), cacheDir: path.join(base, 'cache'), mediaDir: null };
   await fs.mkdir(paths.dataDir, { recursive: true });
   await fs.mkdir(paths.cacheDir, { recursive: true });
-  const server = createHeadlessServer({ host: '127.0.0.1', port: 0, paths, version: '0.0.0-test', bootstrapSecret: BOOTSTRAP_SECRET });
+  const transcoder = {
+    path: null,
+    getHealth: () => ({ available: false, hardwareAcceleration: [], toneMapping: false }),
+    getSelfTest: () => ({ available: false }),
+    probeMedia: async (_filePath, { sourceId }) => ({
+      sourceId,
+      container: 'mkv',
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+      width: 1920,
+      height: 1080,
+      tracks: [
+        { id: 'v:0', kind: 'video', codec: 'h264', width: 1920, height: 1080 },
+        { id: 'a:0', kind: 'audio', codec: 'aac' },
+      ],
+      adapterGaps: [],
+    }),
+  };
+  const server = createHeadlessServer({
+    host: '127.0.0.1', port: 0, paths, version: '0.0.0-test', bootstrapSecret: BOOTSTRAP_SECRET, transcoder,
+  });
   const address = await server.start();
   const baseUrl = `http://127.0.0.1:${address.port}`;
   t.after(() => server.stop());
@@ -291,6 +311,9 @@ test('media routes contain paths end to end and reject encoded traversal at the 
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
 
+  const profile = await authed('POST', '/api/v1/profiles', { name: 'Containment viewer' }).then((response) => response.json());
+  await authed('POST', `/api/v1/profiles/${encodeURIComponent(profile.data.profile.id)}/select`);
+
   await authed('POST', '/api/v1/library/roots', { path: mediaDir });
   await authed('POST', '/api/v1/library/scan', {});
   for (let waited = 0; waited < 200; waited += 1) {
@@ -313,7 +336,7 @@ test('media routes contain paths end to end and reject encoded traversal at the 
       const response = await authed('GET', route);
       assert.equal(response.status, 400, `${route} must be rejected at the route boundary`);
       const payload = await response.json();
-      assert.match(payload.error.code, /_invalid$/);
+      assert.match(payload.error.code, /^(?:invalid_request|.+_invalid)$/);
       assert.equal(/etc|passwd|win\.ini/.test(payload.error.message), false, 'the boundary error must not echo the input');
     }
   });
@@ -329,40 +352,145 @@ test('media routes contain paths end to end and reject encoded traversal at the 
   });
 
   await t.test('an in-root file streams, including a range request', async () => {
-    const media = await authed('GET', `/api/v1/media/${mediaId}`).then((response) => response.json());
-    const direct = await fetch(`${baseUrl}${media.data.directUrl}`);
+    const playback = await authed('POST', `/api/v1/media/${mediaId}/playback-plan`, {
+      capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http'] },
+    }).then((response) => response.json());
+    assert.equal(playback.ok, true, JSON.stringify(playback));
+    assert.equal(typeof playback.data.directUrl, 'string');
+    const direct = await fetch(`${baseUrl}${playback.data.directUrl}`);
     assert.equal(direct.status, 200);
     assert.equal(await direct.text(), 'in-root-video-bytes');
 
-    const ranged = await fetch(`${baseUrl}${media.data.directUrl}`, { headers: { Range: 'bytes=0-6' } });
+    const ranged = await fetch(`${baseUrl}${playback.data.directUrl}`, { headers: { Range: 'bytes=0-6' } });
     assert.equal(ranged.status, 206);
     assert.equal(await ranged.text(), 'in-root');
   });
 
   await t.test('a file replaced by an escaping symlink after indexing is refused', POSIX_ONLY, async () => {
-    const media = await authed('GET', `/api/v1/media/${mediaId}`).then((response) => response.json());
+    const playback = await authed('POST', `/api/v1/media/${mediaId}/playback-plan`, {
+      capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http'] },
+    }).then((response) => response.json());
+    assert.equal(playback.ok, true, JSON.stringify(playback));
+    const download = await authed('POST', '/api/v1/downloads', { mediaId }).then((response) => response.json());
     await fs.rm(path.join(mediaDir, 'inside.mkv'));
     await fs.symlink(secret, path.join(mediaDir, 'inside.mkv'), 'file');
 
-    for (const route of [media.data.directUrl, media.data.downloadUrl]) {
-      const response = await fetch(`${baseUrl}${route}`);
+    const capabilities = [
+      { route: playback.data.directUrl, headers: {} },
+      { route: download.data.contentUrl, headers: { Authorization: `LoomDownload ${download.data.credential.id}.${download.data.credential.secret}` } },
+    ];
+    for (const capability of capabilities) {
+      const response = await fetch(`${baseUrl}${capability.route}`, { headers: capability.headers });
       const body = await response.text();
       // A single clean rejection: the download branch forwards the media
       // service's return value as "handled", so an error response that reported
       // nothing used to be followed by a second, header-clobbering 404.
-      assert.equal(response.status, 403, `${route} must reject a substituted file exactly once`);
+      assert.equal([401, 403].includes(response.status), true,
+        `${capability.route} must invalidate or reject a substituted file exactly once`);
       assert.equal(body.includes('secret-bytes'), false, 'no byte of the outside file may reach the client');
       assert.equal(body.includes(mediaBase), false, 'the response must not disclose a filesystem path');
     }
+    await fs.rm(path.join(mediaDir, 'inside.mkv'));
+    await fs.writeFile(path.join(mediaDir, 'inside.mkv'), 'in-root-video-bytes');
   });
 
   await t.test('a file replaced by a broken link is unavailable rather than contained', POSIX_ONLY, async () => {
+    const playback = await authed('POST', `/api/v1/media/${mediaId}/playback-plan`, {
+      capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http'] },
+    }).then((response) => response.json());
+    assert.equal(playback.ok, true, JSON.stringify(playback));
     await fs.rm(path.join(mediaDir, 'inside.mkv'));
     await fs.symlink(path.join(mediaDir, 'never-existed.mkv'), path.join(mediaDir, 'inside.mkv'), 'file');
-    const media = await authed('GET', `/api/v1/media/${mediaId}`).then((response) => response.json());
-    const response = await fetch(`${baseUrl}${media.data.directUrl}`);
-    assert.equal(response.status, 409);
+    const response = await fetch(`${baseUrl}${playback.data.directUrl}`);
+    assert.equal([401, 409].includes(response.status), true, 'the changed source must be invalidated or reported unavailable');
     const body = await response.text();
     assert.equal(body.includes(mediaBase), false, 'the response must not disclose a filesystem path');
   });
+});
+
+/**
+ * Playback preparation trusts the probe the scanner already recorded, so the
+ * freshness decision — not ffprobe — is what runs on the common path. The
+ * recorded size and modified time come from the source row; the live ones come
+ * from the same contained stat that playback resolves the path through.
+ */
+async function planWithRecordedProbe(recordedSizeDelta = 0) {
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-contain-probe-')));
+  const mediaDir = path.join(base, 'library');
+  await fs.mkdir(mediaDir, { recursive: true });
+  const mediaFile = path.join(mediaDir, 'clip.mkv');
+  await fs.writeFile(mediaFile, 'fake-video-bytes');
+  const verified = await statContainedFile(mediaDir, mediaFile);
+
+  const sourceId = 'item-1:primary';
+  const recordedProbe = {
+    sourceId,
+    container: 'mkv',
+    videoCodec: 'h264',
+    audioCodec: 'aac',
+    width: 1920,
+    height: 1080,
+    tracks: [
+      { id: 'v:0', kind: 'video', codec: 'h264', width: 1920, height: 1080 },
+      { id: 'a:0', kind: 'audio', codec: 'aac' },
+    ],
+    adapterGaps: [],
+  };
+  const probeCalls = [];
+  const recorded = [];
+  const mediaService = createHeadlessMediaService({
+    cacheDir: path.join(base, 'cache'),
+    transcoder: {
+      path: path.join(base, 'ffmpeg'),
+      getHealth: () => ({ available: true, hardwareAcceleration: [], toneMapping: false }),
+      probeMedia: async (filePath, { sourceId: probedSourceId }) => {
+        probeCalls.push(filePath);
+        return { ...recordedProbe, sourceId: probedSourceId, container: 'freshly-probed' };
+      },
+    },
+    authorize: async () => true,
+    adminService: {
+      getLibraryItem: async () => ({ id: 'item-1', title: 'Clip', sourceId }),
+      recordMediaProbe: async (itemId, recordedSourceId, probe) => {
+        recorded.push({ itemId, sourceId: recordedSourceId, probe });
+        return probe;
+      },
+      resolveMediaPath: async () => ({
+        id: 'item-1',
+        rootId: 'root-1',
+        sourceId,
+        path: verified.realPath,
+        rootPath: verified.rootRealPath,
+        fileId: verified.fileId,
+        sizeBytes: verified.stats.size,
+        modifiedAtMs: verified.stats.mtimeMs,
+        localMetadata: recordedProbe,
+        recordedSizeBytes: verified.stats.size + recordedSizeDelta,
+        recordedModifiedAtMs: verified.stats.mtimeMs,
+      }),
+    },
+  });
+
+  const result = await mediaService.planPlayback('item-1', {
+    capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http'] },
+  }, { id: 'owner-1', type: 'owner', role: 'owner', permissions: ['stream'], rootIds: null });
+  await mediaService.stop();
+  return { result, probeCalls, recorded };
+}
+
+test('a fresh recorded probe is reused, so playback preparation never runs ffprobe', async () => {
+  const { result, probeCalls, recorded } = await planWithRecordedProbe();
+  assert.deepEqual(probeCalls, [], 'a matching recorded probe must not be re-probed');
+  assert.deepEqual(recorded, [], 'nothing is re-recorded when the cache was already current');
+  assert.equal(result.probe.container, 'mkv');
+  assert.equal(result.probe.sourceId, 'item-1:primary');
+});
+
+test('a recorded probe from a changed file is re-probed and re-recorded', async () => {
+  const { result, probeCalls, recorded } = await planWithRecordedProbe(1);
+  assert.equal(probeCalls.length, 1, 'a size mismatch must force a fresh probe');
+  assert.equal(result.probe.container, 'freshly-probed', 'the plan must use the fresh probe, not the stale record');
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].sourceId, 'item-1:primary');
+  assert.equal(recorded[0].probe.container, 'freshly-probed');
 });

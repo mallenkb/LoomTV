@@ -258,16 +258,15 @@ function tmdbSearchResults(searchData: TMDBSearchResponse | null): TMDBMedia[] {
 }
 
 function tmdbPoster(path: string | null | undefined): string {
-  return path ? `${TMDB_IMAGE_BASE}/w500${path}` : '';
+  return path ? `${TMDB_IMAGE_BASE}/original${path}` : '';
 }
 function tmdbBackdrop(path: string | null | undefined): string {
-  return path ? `${TMDB_IMAGE_BASE}/w1280${path}` : '';
+  return path ? `${TMDB_IMAGE_BASE}/original${path}` : '';
 }
 
 function tmdbArtworkCandidates(
   primaryPath: string | null | undefined,
   images: TMDBImage[] | undefined,
-  size: 'w500' | 'w1280',
 ): string[] {
   const orderedPaths = [
     primaryPath,
@@ -283,16 +282,16 @@ function tmdbArtworkCandidates(
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   return [...new Set(orderedPaths)]
-    .map((candidate) => `${TMDB_IMAGE_BASE}/${size}${candidate}`)
+    .map((candidate) => `${TMDB_IMAGE_BASE}/original${candidate}`)
     .slice(0, 20);
 }
 
 function tmdbPosterCandidates(d: TMDBMedia): string[] {
-  return tmdbArtworkCandidates(d.poster_path, d.images?.posters, 'w500');
+  return tmdbArtworkCandidates(d.poster_path, d.images?.posters);
 }
 
 function tmdbBackdropCandidates(d: TMDBMedia): string[] {
-  return tmdbArtworkCandidates(d.backdrop_path, d.images?.backdrops, 'w1280');
+  return tmdbArtworkCandidates(d.backdrop_path, d.images?.backdrops);
 }
 
 function tmdbContentRatings(d: TMDBMedia): Record<string, ContentRating> {
@@ -444,7 +443,7 @@ function tmdbMovieResult(d: TMDBMedia | null, fallbackTitle: string): Partial<Me
   const cast = (d.credits?.cast ?? []).slice(0, 10).map((c) => ({
     name: c.name ?? '',
     character: c.character ?? '',
-    image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
+    image: c.profile_path ? `${TMDB_IMAGE_BASE}/w500${c.profile_path}` : '',
   }));
 
   return {
@@ -572,7 +571,7 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
   const cast = (d.credits?.cast ?? []).slice(0, 10).map((c) => ({
     name: c.name ?? '',
     character: c.character ?? '',
-    image: c.profile_path ? `${TMDB_IMAGE_BASE}/w185${c.profile_path}` : '',
+    image: c.profile_path ? `${TMDB_IMAGE_BASE}/w500${c.profile_path}` : '',
   }));
 
   // Season 0 is TMDB's Specials season. Keep it so local S00E## files can be
@@ -609,7 +608,7 @@ async function tmdbTVResultFromDetails(d: TMDBMedia | null, fallbackTitle: strin
     number: e.episode_number ?? 0,
     title: e.name || '',
     summary: e.overview || '',
-    still: e.still_path ? `${TMDB_IMAGE_BASE}/w300${e.still_path}` : '',
+    still: e.still_path ? `${TMDB_IMAGE_BASE}/w780${e.still_path}` : '',
     rating: e.vote_average || 0,
     airDate: e.air_date || '',
   }));

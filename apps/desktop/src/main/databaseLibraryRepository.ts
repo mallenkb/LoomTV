@@ -569,9 +569,9 @@ export function saveLibraryItem(database: BetterSqlite3.Database, item: MediaIte
     database.prepare('DELETE FROM episodes WHERE media_id = ?').run(item.id);
     database.prepare('DELETE FROM seasons WHERE media_id = ?').run(item.id);
 
-    const insertSeason = database.prepare('INSERT INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
+    const insertSeason = database.prepare('INSERT OR REPLACE INTO seasons (media_id, number, title, episode_count) VALUES (?, ?, ?, ?)');
     const insertEpisode = database.prepare(`
-      INSERT INTO episodes (media_id, season, number, title, summary, still, rating, air_date, local_metadata_json)
+      INSERT OR REPLACE INTO episodes (media_id, season, number, title, summary, still, rating, air_date, local_metadata_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertEpisodeFile = database.prepare(`

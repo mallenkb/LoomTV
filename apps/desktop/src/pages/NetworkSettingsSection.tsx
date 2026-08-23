@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { CheckCircle2, Copy, Key, RefreshCw, Wifi } from 'lucide-react';
+import { CheckCircle2, Copy, ExternalLink, Key, RefreshCw, ShieldCheck, Wifi } from 'lucide-react';
 import type React from 'react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import PinDigitInput from '@/components/profiles/PinDigitInput';
+import { desktopApi } from '@/lib/desktopApi';
+import { useUnifiedDesktopServer } from '@/lib/unifiedServer';
 import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -71,6 +73,25 @@ export default function NetworkSettingsSection({
   disconnectRemoteLibrary,
 }: NetworkSettingsSectionProps) {
   const [showAdvancedSharing, setShowAdvancedSharing] = useState(false);
+  const { server: unifiedServer, refresh: refreshUnifiedServer } = useUnifiedDesktopServer();
+  const [isOpeningAdmin, setIsOpeningAdmin] = useState(false);
+  const [adminMessage, setAdminMessage] = useState('');
+
+  const openServerAdmin = async () => {
+    setIsOpeningAdmin(true);
+    setAdminMessage('');
+    try {
+      const opened = await desktopApi.openUnifiedDesktopAdmin();
+      if (!opened) {
+        setAdminMessage('Server administration is unavailable right now.');
+        await refreshUnifiedServer();
+      }
+    } catch (error) {
+      setAdminMessage(error instanceof Error ? error.message : 'Server administration could not be opened.');
+    } finally {
+      setIsOpeningAdmin(false);
+    }
+  };
 
   return (
     <>
@@ -135,7 +156,7 @@ export default function NetworkSettingsSection({
                     onClick={() => setRequireApproval(!requireApproval)}
                     className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${requireApproval ? 'bg-[var(--loom-accent)]' : 'bg-[var(--loom-surface-3)]'}`}
                   >
-                    <span className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${requireApproval ? 'translate-x-6' : 'translate-x-1'}`} />
+                    <span className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${requireApproval ? 'translate-x-6' : 'translate-x-1'}`} />
                     <span className="sr-only">Require approval for new devices</span>
                   </button>
                 </div>
@@ -266,6 +287,56 @@ export default function NetworkSettingsSection({
           {networkStatusMessage && <p className="text-sm text-[var(--loom-muted)]">{networkStatusMessage}</p>}
         </CardContent>
       </Card>
+
+      {unifiedServer.enabled && (
+        <Card className="settings-panel">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <ShieldCheck className="h-4 w-4 text-[var(--loom-accent)]" />
+              Server Administration
+            </CardTitle>
+            <CardDescription className="text-[var(--loom-muted)]">
+              Manage accounts and libraries for the LoomTV server running on this computer. It opens as a separate page in your browser.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {unifiedServer.ready ? (
+              <div className="settings-network-card flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--loom-surface-2)] p-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white">
+                    {unifiedServer.ownerConfigured ? 'Server is running' : 'Server is running · no administrator yet'}
+                  </p>
+                  <p className="truncate text-xs text-[var(--loom-muted)]">
+                    {unifiedServer.adminUrl ? `Opens ${unifiedServer.adminUrl}` : 'Opens the admin page in your browser.'}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={() => void openServerAdmin()}
+                  disabled={isOpeningAdmin}
+                  className="gap-2"
+                >
+                  {isOpeningAdmin ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                  {isOpeningAdmin ? 'Opening...' : 'Open Admin Page'}
+                </Button>
+              </div>
+            ) : (
+              <div
+                role={unifiedServer.error ? 'alert' : 'status'}
+                className="settings-network-card rounded-lg bg-[var(--loom-surface-2)] p-4"
+              >
+                <p className={`text-sm font-semibold ${unifiedServer.error ? 'text-red-200' : 'text-white'}`}>
+                  {unifiedServer.error ? 'The LoomTV server did not start' : 'Starting the LoomTV server...'}
+                </p>
+                {unifiedServer.error && (
+                  <p className="mt-1 text-xs leading-5 text-[var(--loom-muted)]">{unifiedServer.error}</p>
+                )}
+              </div>
+            )}
+            {adminMessage && <p role="alert" className="text-sm text-red-200">{adminMessage}</p>}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="settings-panel">
         <CardHeader>

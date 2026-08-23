@@ -1,8 +1,8 @@
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { normalizePlaybackProfile } from '@loom-media-server/media-core';
+import { normalizePlaybackProfile, playbackPlanForMedia } from '@loom-media-server/media-core';
 import { backendEncoder } from '@loom-media-server/transcode-capabilities';
 import { openContainedFile, resolveContainedPath, statContainedFile } from './media-path-guard.js';
 import {
@@ -11,6 +11,7 @@ import {
 } from './playback-session-registry.js';
 import { createTranscodeAdmission } from './transcode-admission.js';
 import { createTranscodeCacheQuota } from './transcode-cache-quota.js';
+import { canonicalPublicError } from './public-error.js';
 
 const MIME_TYPES = {
   '.mp4': 'video/mp4',
@@ -20,6 +21,10 @@ const MIME_TYPES = {
   '.mkv': 'video/x-matroska',
   '.ts': 'video/mp2t',
   '.m3u8': 'application/vnd.apple.mpegurl',
+  '.srt': 'application/x-subrip',
+  '.vtt': 'text/vtt; charset=utf-8',
+  '.ass': 'text/x-ssa; charset=utf-8',
+  '.ssa': 'text/x-ssa; charset=utf-8',
 };
 const DIRECT_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.ts']);
 const SESSION_TTL_MS = 30 * 60 * 1000;
@@ -30,9 +35,20 @@ const HLS_NO_CLIENT_GRACE_MS = 30 * 1000;
 const PROCESS_TERM_GRACE_MS = 2_000;
 
 function json(res, status, payload) {
-  const publicPayload = res.__loomtvPublicApi && payload?.ok === false && typeof payload.error === 'string'
-    ? { ...payload, error: { code: payload.error, message: payload.message || payload.error } }
-    : payload;
+  const retryAfterSeconds = Number.isFinite(payload?.retryAfter)
+    ? Math.max(1, Math.ceil(payload.retryAfter))
+    : undefined;
+  let publicPayload = payload;
+  if (res.__loomtvPublicApi && payload?.ok === false && typeof payload.error === 'string') {
+    const { retryAfter: _legacyRetryAfter, message: _legacyMessage, ...safePayload } = payload;
+    publicPayload = { ...safePayload, error: {
+      code: canonicalPublicError({ status, code: payload.error }).code,
+      message: status >= 500
+        ? 'The media request could not be completed.'
+        : payload.message || 'The media request was rejected.',
+      ...(retryAfterSeconds ? { retryAfterMs: retryAfterSeconds * 1_000 } : {}),
+    } };
+  }
   const body = JSON.stringify(publicPayload);
   if (!res.headersSent) {
     res.writeHead(status, {
@@ -40,6 +56,7 @@ function json(res, status, payload) {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Length': Buffer.byteLength(body),
       ...(res.__loomtvPublicApi ? { 'X-LoomTV-API-Version': '1' } : {}),
+      ...(res.__loomtvPublicApi && retryAfterSeconds ? { 'Retry-After': String(retryAfterSeconds) } : {}),
     });
   }
   // Returning the response matters: `/api/v1/media/:id/download` forwards this
@@ -88,6 +105,21 @@ function downloadDisposition(filePath) {
   return `attachment; filename="${asciiName}"`;
 }
 
+function directCapabilityFileVersion(source) {
+  const dev = Number(source?.fileId?.dev);
+  const ino = Number(source?.fileId?.ino);
+  if (!Number.isSafeInteger(dev) || !Number.isSafeInteger(ino)) {
+    throw playbackError('source_unavailable', 'The media source identity is unavailable.', 409);
+  }
+  return createHash('sha256')
+    .update(String(source.sourceId || ''))
+    .update('\0')
+    .update(String(dev))
+    .update('\0')
+    .update(String(ino))
+    .digest('base64url');
+}
+
 function parseRange(header, size) {
   if (!header || !header.startsWith('bytes=') || header.includes(',')) return null;
   const [startText, endText] = header.slice(6).split('-', 2);
@@ -112,6 +144,59 @@ function tokenFromRequest(req, url) {
 
 function cancelledError() {
   return Object.assign(new Error('The media operation was cancelled.'), { code: 'operation_cancelled', status: 503 });
+}
+
+function playbackError(code, message, status = 503, details = {}) {
+  return Object.assign(new Error(message), { code, status, retryable: status >= 500, ...details });
+}
+
+function publicPlaybackErrorCode(error) {
+  if (['transcode_principal_limit', 'transcode_global_limit', 'transcode_cache_unavailable', 'transcode_cache_free_space_unknown', 'transcode_cache_quota', 'transcode_cache_free_space', 'playback_capacity_exceeded'].includes(error?.code)) return 'playback_capacity_exceeded';
+  if (error?.code === 'media_probe_unavailable') return 'transcoder_unavailable';
+  if (['profile_required', 'profile_locked', 'stale_profile_selection', 'source_unavailable', 'playback_not_supported', 'transcoder_unavailable', 'transcode_failed', 'playback_session_invalid', 'permission_denied', 'invalid_request'].includes(error?.code)) return error.code;
+  return 'transcode_failed';
+}
+
+function optionalStreamIndex(value, field) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const index = Number(value);
+  if (!Number.isSafeInteger(index) || index < 0 || index > 65_535) {
+    throw playbackError('invalid_request', `${field} must be a non-negative stream index.`, 400);
+  }
+  return index;
+}
+
+function subtitleKindForProbe(plan, probe) {
+  const codec = probe?.tracks?.find((track) => track.id === plan.selectedSubtitleTrackId)?.codec;
+  return ['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text'].includes(codec) ? 'text' : 'bitmap';
+}
+
+/**
+ * A scan-time probe still describes the file when it was recorded against this
+ * source identity and neither the size nor the modified time has moved since.
+ * Returning it lets playback preparation skip the ffprobe round trip; anything
+ * missing or stale returns null so the caller re-probes and re-records.
+ */
+function cachedScanProbe(source, sourceId) {
+  const cached = source?.localMetadata;
+  if (!cached || cached.sourceId !== sourceId || !Array.isArray(cached.tracks)) return null;
+  if (source.recordedSizeBytes !== source.sizeBytes) return null;
+  if (!(Math.abs(Number(source.recordedModifiedAtMs) - Number(source.modifiedAtMs)) < 1)) return null;
+  return { ...cached, sourceId };
+}
+
+function externalSubtitleTracks(source) {
+  return (Array.isArray(source?.subtitleSidecars) ? source.subtitleSidecars : []).slice(0, 64).map((sidecar, ordinal) => ({
+    id: sidecar.id,
+    index: 60_000 + ordinal,
+    kind: 'subtitle',
+    codec: sidecar.codec || sidecar.format,
+    ...(sidecar.language ? { language: sidecar.language } : {}),
+    ...(sidecar.title ? { title: sidecar.title } : {}),
+    default: sidecar.default === true,
+    forced: sidecar.forced === true,
+    external: true,
+  }));
 }
 
 function requestAbortSignal(req, res) {
@@ -193,6 +278,16 @@ export function terminateChild(child, graceMs = PROCESS_TERM_GRACE_MS) {
 
 function normalizeProfile(input = {}, health) {
   const requestedPlayback = normalizePlaybackProfile(input);
+  const mode = ['remux', 'transcode'].includes(input.mode) ? input.mode : 'transcode';
+  const copyVideo = mode === 'remux' || input.copyVideo === true || input.copyVideo === '1';
+  const copyAudio = input.copyAudio === true || input.copyAudio === '1';
+  const burnSubtitles = input.burnSubtitles === true || input.burnSubtitles === '1';
+  const selectedVideoTrackIndex = optionalStreamIndex(input.selectedVideoTrackIndex, 'selectedVideoTrackIndex');
+  const selectedAudioTrackIndex = optionalStreamIndex(input.selectedAudioTrackIndex, 'selectedAudioTrackIndex');
+  const selectedSubtitleTrackIndex = optionalStreamIndex(input.selectedSubtitleTrackIndex, 'selectedSubtitleTrackIndex');
+  const selectedSubtitleTrackOrdinal = optionalStreamIndex(input.selectedSubtitleTrackOrdinal, 'selectedSubtitleTrackOrdinal');
+  const subtitleFontSize = input.subtitleFontSize === undefined
+    ? undefined : Math.max(1, Math.min(128, Math.round(Number(input.subtitleFontSize) || 0)));
   const requestedBackend = String(input.backend || 'auto').toLowerCase();
   const { codec } = requestedPlayback;
   const softwareAvailable = health.softwareCodecs?.[codec] === true;
@@ -204,13 +299,29 @@ function normalizeProfile(input = {}, health) {
     : null;
   const preferredHardware = hardwareBackends.find((entry) => entry.id === health.recommendedBackend)
     || hardwareBackends[0];
-  const backend = requestedBackend === 'software'
+  let backend = requestedBackend === 'software'
     ? (softwareAvailable ? 'software' : null)
     : requestedHardware?.id || preferredHardware?.id || (softwareAvailable ? 'software' : null);
-  if (!backend) throw Object.assign(new Error(`FFmpeg cannot produce ${codec.toUpperCase()} on this host.`), { status: 503 });
+  if (copyVideo && !burnSubtitles) backend = 'copy';
+  if (burnSubtitles) backend = softwareAvailable ? 'software' : null;
+  if (!backend) throw playbackError('transcoder_unavailable', `FFmpeg cannot produce ${codec.toUpperCase()} on this host.`, 503);
   const toneMapRequested = requestedPlayback.toneMap;
+  if (toneMapRequested && health.toneMapping !== true) {
+    throw playbackError('playback_not_supported', 'This host cannot tone-map the selected HDR source.', 422);
+  }
   return {
-    codec,
+    mode, codec, copyVideo: copyVideo && !burnSubtitles, copyAudio,
+    burnSubtitles,
+    subtitleKind: input.subtitleKind === 'bitmap' ? 'bitmap' : 'text',
+    selectedVideoTrackIndex,
+    selectedAudioTrackIndex,
+    selectedSubtitleTrackIndex,
+    selectedSubtitleTrackOrdinal,
+    subtitleFontSize,
+    ...(typeof input.externalSubtitlePath === 'string' ? { externalSubtitlePath: input.externalSubtitlePath } : {}),
+    ...(input.externalSubtitleFileId && typeof input.externalSubtitleFileId === 'object'
+      ? { externalSubtitleFileId: { ...input.externalSubtitleFileId } } : {}),
+    startSeconds: Math.max(0, Math.min(86_400, Number(input.startSeconds) || 0)),
     backend,
     maxWidth: requestedPlayback.maxWidth,
     maxHeight: requestedPlayback.maxHeight,
@@ -218,7 +329,8 @@ function normalizeProfile(input = {}, health) {
     audioBitrateKbps: requestedPlayback.audioBitrateKbps,
     toneMap: toneMapRequested && health.toneMapping === true,
     toneMapRequested,
-    hardware: backend !== 'software',
+    softwareFallbackAvailable: softwareAvailable,
+    hardware: !['software', 'copy'].includes(backend),
   };
 }
 
@@ -233,6 +345,10 @@ function toneMapFilter() {
 
 function softwareEncoder(health, codec) {
   return health.softwareEncoders?.[codec] || 'libx264';
+}
+
+function ffmpegFilterPath(filePath) {
+  return String(filePath).replaceAll('\\', '\\\\').replaceAll(':', '\\:').replaceAll("'", "\\'");
 }
 
 function hardwareArgs(health, backend, codec, profile) {
@@ -277,15 +393,41 @@ function hardwareArgs(health, backend, codec, profile) {
 }
 
 function transcodeArgs(filePath, outputDir, health, profile) {
-  const hardware = profile.backend !== 'software' ? hardwareArgs(health, profile.backend, profile.codec, profile) : null;
-  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...(hardware?.beforeInput || []), '-i', filePath, '-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn'];
-  if (hardware) {
-    args.push(...hardware.filters, '-c:v', hardware.encoder, ...hardware.options);
-  } else {
-    const filters = [profile.toneMap ? toneMapFilter() : 'format=yuv420p'];
+  const hardware = profile.hardware ? hardwareArgs(health, profile.backend, profile.codec, profile) : null;
+  const seek = profile.startSeconds > 0 ? ['-ss', String(profile.startSeconds)] : [];
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin', ...seek, ...(hardware?.beforeInput || []), '-i', filePath];
+  const videoMap = profile.selectedVideoTrackIndex === undefined ? '0:v:0?' : `0:${profile.selectedVideoTrackIndex}`;
+  const audioMap = profile.selectedAudioTrackIndex === undefined ? null : `0:${profile.selectedAudioTrackIndex}`;
+  if (profile.burnSubtitles && profile.selectedSubtitleTrackIndex !== undefined && profile.subtitleKind === 'bitmap') {
+    const filters = [];
+    if (profile.toneMap) filters.push(toneMapFilter());
     const scale = scaleFilter(profile);
     if (scale) filters.push(scale);
-    args.push('-vf', filters.join(','), '-c:v', softwareEncoder(health, profile.codec));
+    const tail = filters.length ? `,${filters.join(',')}` : '';
+    args.push('-filter_complex', `[${videoMap}][0:${profile.selectedSubtitleTrackIndex}]overlay${tail}[loomtv_video]`, '-map', '[loomtv_video]');
+  } else {
+    args.push('-map', videoMap);
+  }
+  if (audioMap) args.push('-map', audioMap);
+  else args.push('-an');
+  args.push('-sn', '-dn');
+  if (profile.copyVideo) {
+    args.push('-c:v', 'copy');
+  } else if (hardware) {
+    args.push(...hardware.filters, '-c:v', hardware.encoder, ...hardware.options);
+  } else {
+    const filters = [];
+    if (profile.burnSubtitles && profile.selectedSubtitleTrackIndex !== undefined && profile.subtitleKind !== 'bitmap') {
+      const subtitleInput = profile.externalSubtitlePath || filePath;
+      const streamSelection = profile.externalSubtitlePath ? '' : `:si=${profile.selectedSubtitleTrackOrdinal || 0}`;
+      filters.push(`subtitles='${ffmpegFilterPath(subtitleInput)}'${streamSelection}${profile.subtitleFontSize ? `:force_style='FontSize=${profile.subtitleFontSize}'` : ''}`);
+    }
+    if (profile.toneMap) filters.push(toneMapFilter());
+    else filters.push('format=yuv420p');
+    const scale = scaleFilter(profile);
+    if (scale) filters.push(scale);
+    if (!(profile.burnSubtitles && profile.subtitleKind === 'bitmap')) args.push('-vf', filters.join(','));
+    args.push('-c:v', softwareEncoder(health, profile.codec));
     if (profile.codec === 'h264') args.push('-preset', 'veryfast', '-tune', 'zerolatency', '-crf', '23', '-pix_fmt', 'yuv420p');
     if (profile.codec === 'hevc') args.push('-preset', 'medium', '-crf', '28', '-pix_fmt', 'yuv420p');
     if (profile.codec === 'av1') args.push('-preset', '8', '-crf', '32', '-pix_fmt', 'yuv420p');
@@ -294,12 +436,17 @@ function transcodeArgs(filePath, outputDir, health, profile) {
   // LAN playback favors a short startup while retaining enough runway for
   // normal network jitter. The client keeps a smaller local buffer profile;
   // this headless service is the stable two-second LAN profile.
-  args.push('-c:a', 'aac', '-b:a', `${profile.audioBitrateKbps}k`, '-ac', '2', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '45', '-hls_flags', 'delete_segments+independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
+  if (audioMap) {
+    if (profile.copyAudio) args.push('-c:a', 'copy');
+    else args.push('-c:a', 'aac', '-b:a', `${profile.audioBitrateKbps}k`, '-ac', '2');
+  }
+  args.push('-f', 'hls', '-hls_time', '2', '-hls_list_size', '45', '-hls_flags', 'delete_segments+independent_segments', '-hls_segment_filename', path.join(outputDir, 'segment-%05d.ts'), path.join(outputDir, 'index.m3u8'));
   return args;
 }
 
 export function createHeadlessMediaService({
   adminService,
+  clientState,
   transcoder,
   cacheDir,
   authorize,
@@ -312,9 +459,26 @@ export function createHeadlessMediaService({
   transcodeQuotaOptions = {},
   cacheFileSystem,
   spawnProcess = spawn,
+  clientAddress,
+  remotePolicy,
 } = {}) {
   const sessions = new Map();
+  const transcodePlans = new Map();
   const configuredCacheDir = path.resolve(cacheDir);
+
+  async function resolveBoundPrincipal(principalId, profile) {
+    if (profile?.invitationSessionId && remotePolicy?.resolveInvitationPrincipal) {
+      return remotePolicy.resolveInvitationPrincipal(profile.invitationSessionId);
+    }
+    return adminService.getPrincipalById?.(principalId);
+  }
+
+  async function requireBoundProfile(principal, profileContext, media) {
+    if (principal?.authentication === 'invitation-session' && remotePolicy?.invitationProfileContext) {
+      return remotePolicy.invitationProfileContext(principal, media);
+    }
+    return clientState.requireActivePlaybackProfile(principal.id, profileContext?.deviceId, media);
+  }
   const root = path.join(configuredCacheDir, 'headless-transcodes');
   const now = typeof clock.now === 'function' ? clock.now : () => Date.now();
   const setTimeoutFn = typeof clock.setTimeout === 'function' ? clock.setTimeout : setTimeout;
@@ -458,12 +622,25 @@ export function createHeadlessMediaService({
   // cached value and never triggers an unbounded filesystem scan itself.
   void enforceCacheQuota();
 
-  function issuePlaybackToken(itemId, userId, action) {
+  function issuePlaybackToken(itemId, userId, action, profileContext = null) {
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
+    if (action === 'download') throw playbackError('download_not_allowed', 'Offline downloads require a persistent download lease.', 410);
     const session = playbackRegistry.create({
       itemId,
       principalId: userId,
       action,
+      profile: profileContext ? {
+        profileId: profileContext.profileId,
+        deviceId: profileContext.deviceId,
+        selectionRevision: profileContext.selectionRevision,
+        ...(profileContext.authenticationSessionId ? { authenticationSessionId: profileContext.authenticationSessionId } : {}),
+        ...(profileContext.invitationSessionId ? { invitationSessionId: profileContext.invitationSessionId } : {}),
+        remoteAccess: profileContext.remoteAccess === true,
+        ...(profileContext.sourceId ? { sourceId: profileContext.sourceId } : {}),
+        ...(profileContext.fileId ? { fileId: { ...profileContext.fileId } } : {}),
+        ...(profileContext.externalSubtitleTrackId ? { externalSubtitleTrackId: profileContext.externalSubtitleTrackId } : {}),
+        ...(profileContext.externalSubtitleFileId ? { externalSubtitleFileId: { ...profileContext.externalSubtitleFileId } } : {}),
+      } : null,
       idleTimeoutMs: MEDIA_TOKEN_TTL_MS,
       absoluteTimeoutMs: SESSION_TTL_MS,
     });
@@ -476,7 +653,7 @@ export function createHeadlessMediaService({
     };
   }
 
-  async function authorizePlaybackToken(token, url, permission) {
+  async function authorizePlaybackToken(token, url, permission, req) {
     const expectedAction = permission === 'downloads' ? 'download' : 'direct';
     const itemId = url.searchParams.get('itemId');
     const entry = playbackRegistry.authorize(token, {
@@ -484,20 +661,32 @@ export function createHeadlessMediaService({
       action: expectedAction,
     });
     if (!entry) return null;
-    if (typeof adminService.getPrincipalById !== 'function') return null;
-    const principal = await adminService.getPrincipalById(entry.principalId);
+    const principal = await resolveBoundPrincipal(entry.principalId, entry.profile);
     if (!principal) return null;
+    try { remotePolicy?.assertPrincipal?.(req, principal, 'media'); } catch { return null; }
+    if (entry.profile?.profileId && clientState?.requireActivePlaybackProfile) {
+      try {
+        const media = await adminService.resolveMediaPath(entry.itemId, principal, entry.profile.sourceId);
+        const current = await requireBoundProfile(principal, entry.profile, media);
+        if (current.profileId !== entry.profile.profileId || current.selectionRevision !== entry.profile.selectionRevision) return null;
+      } catch { return null; }
+    }
     const permitted = typeof adminService.authorizePrincipal === 'function'
       ? await adminService.authorizePrincipal(principal, permission)
       : await authorize({ headers: { authorization: `Bearer ${token}` } }, permission);
     return permitted ? { ok: true, principal, playbackSession: entry } : null;
   }
 
-  async function authorizedFor(req, url, permission) {
+  async function authorizedFor(req, url, permission, capabilityOnly = false) {
     const headerToken = req.headers.authorization || req.headers['x-loom-admin-token'] || '';
     const queryToken = url.searchParams.get('token') || '';
+    if (capabilityOnly) {
+      if (!queryToken) return { ok: false, status: 401 };
+      const playback = await authorizePlaybackToken(queryToken, url, permission, req);
+      return playback || { ok: false, status: 401 };
+    }
     if (!headerToken && queryToken) {
-      const playback = await authorizePlaybackToken(queryToken, url, permission);
+      const playback = await authorizePlaybackToken(queryToken, url, permission, req);
       if (playback) return playback;
     }
     const token = tokenFromRequest(req, url);
@@ -580,7 +769,7 @@ export function createHeadlessMediaService({
         trackCleanup(cleanupSession(session, { reason: 'transcode_failed' }));
         return;
       }
-      if (code !== 0 && !session.ready && profile.backend !== 'software' && !session.fallbackAttempted) {
+      if (code !== 0 && !session.ready && profile.hardware && profile.softwareFallbackAvailable && !session.fallbackAttempted) {
         session.fallbackAttempted = true;
         void resolveContainedPath(configuredCacheDir, session.outputDir)
           .then(({ realPath }) => fsPromises.rm(realPath, { recursive: true, force: true }))
@@ -603,7 +792,10 @@ export function createHeadlessMediaService({
             trackCleanup(cleanupSession(session, { reason: 'transcode_failed' }));
           });
       } else {
-        session.error ||= `FFmpeg exited with code ${code}.`;
+        session.failureError = profile.hardware && !profile.softwareFallbackAvailable
+          ? playbackError('playback_capacity_exceeded', 'The hardware encoder failed and no software fallback is available.', 503)
+          : playbackError('transcode_failed', 'FFmpeg could not produce the requested playback stream.', 502);
+        session.error ||= session.failureError.message;
         admission.recordFailure?.();
         trackCleanup(cleanupSession(session, { reason: 'transcode_failed' }));
       }
@@ -613,12 +805,53 @@ export function createHeadlessMediaService({
 
   async function startTranscode(itemId, requestedProfile = {}, principal, requestSignal = null) {
     if (stopping) throw Object.assign(new Error('The media service is shutting down.'), { status: 503, code: 'server_draining' });
-    const item = await adminService.resolveMediaPath(itemId, principal);
-    if (!transcoder.path) throw Object.assign(new Error('FFmpeg is not available on this host.'), { status: 503 });
+    if (requestedProfile.planToken) {
+      const stored = transcodePlans.get(requestedProfile.planToken);
+      transcodePlans.delete(requestedProfile.planToken);
+      if (!stored || stored.expiresAt <= now() || stored.itemId !== itemId || stored.principalId !== principal.id) {
+        throw playbackError('playback_session_invalid', 'The playback plan is expired or does not belong to this account.', 401);
+      }
+      requestedProfile = { ...stored.execution, profileContext: stored.profileContext };
+    } else if (requestedProfile.canonicalPlanRequired) {
+      throw playbackError('playback_session_invalid', 'A server-issued playback plan is required.', 401);
+    }
+    const item = await adminService.resolveMediaPath(itemId, principal, requestedProfile.sourceId);
+    if (requestedProfile.expectedFileId
+      && (item.fileId?.dev !== requestedProfile.expectedFileId.dev || item.fileId?.ino !== requestedProfile.expectedFileId.ino)) {
+      throw playbackError('source_unavailable', 'The media source changed after the playback plan was created.', 409);
+    }
+    if (requestedProfile.profileContext && clientState?.requireActivePlaybackProfile) {
+      const current = await requireBoundProfile(principal, requestedProfile.profileContext, item);
+      if (current.profileId !== requestedProfile.profileContext.profileId
+        || current.selectionRevision !== requestedProfile.profileContext.selectionRevision) {
+        throw playbackError('stale_profile_selection', 'The selected playback profile has changed.', 409);
+      }
+      requestedProfile.profileContext = { ...requestedProfile.profileContext, ...current };
+    } else if (requestedProfile.profileId && clientState?.requireActivePlaybackProfile) {
+      const current = await clientState.requireActivePlaybackProfile(principal.id, requestedProfile.deviceId, item);
+      if (current.profileId !== requestedProfile.profileId
+        || current.selectionRevision !== Number(requestedProfile.selectionRevision)) {
+        throw playbackError('stale_profile_selection', 'The selected playback profile has changed.', 409);
+      }
+      requestedProfile.profileContext = current;
+    } else if (clientState?.requireActivePlaybackProfile) {
+      throw playbackError('profile_required', 'An active profile is required for playback.', 409);
+    }
+    if (!transcoder.path) throw playbackError('transcoder_unavailable', 'FFmpeg is not available on this host.', 503);
     // FFmpeg reopens the input by name, so the strongest check available here
     // is to prove — immediately before the spawn — that the name still
     // resolves inside the root to the same file authorization saw.
     const verified = await statContainedFile(item.rootPath, item.path, { expectedFileId: item.fileId });
+    if (requestedProfile.externalSubtitlePath) {
+      if (path.dirname(requestedProfile.externalSubtitlePath) !== path.dirname(item.path)) {
+        throw playbackError('source_unavailable', 'The external subtitle is no longer beside this video.', 409);
+      }
+      const subtitle = await statContainedFile(item.rootPath, requestedProfile.externalSubtitlePath, {
+        expectedFileId: requestedProfile.externalSubtitleFileId,
+      });
+      requestedProfile.externalSubtitlePath = subtitle.realPath;
+      requestedProfile.externalSubtitleFileId = subtitle.fileId;
+    }
     // Establish and validate the output root before profile selection or
     // queueing. This keeps containment failures deterministic and prevents
     // queued requests from creating untracked output directories.
@@ -644,7 +877,17 @@ export function createHeadlessMediaService({
         principalType: principal.type,
         itemId,
         action: 'hls',
-        profile,
+        profile: requestedProfile.profileContext ? {
+          profileId: requestedProfile.profileContext.profileId,
+          deviceId: requestedProfile.profileContext.deviceId,
+          selectionRevision: requestedProfile.profileContext.selectionRevision,
+          ...(requestedProfile.profileContext.authenticationSessionId
+            ? { authenticationSessionId: requestedProfile.profileContext.authenticationSessionId } : {}),
+          ...(requestedProfile.profileContext.invitationSessionId
+            ? { invitationSessionId: requestedProfile.profileContext.invitationSessionId } : {}),
+          remoteAccess: requestedProfile.profileContext.remoteAccess === true,
+          sourceId: item.sourceId,
+        } : null,
         idleTimeoutMs: HLS_NO_CLIENT_GRACE_MS,
         // Segment/playlist requests already touch the lease. Once a client
         // stops making requests, reclaim the FFmpeg process after the same
@@ -657,6 +900,7 @@ export function createHeadlessMediaService({
         id,
         registryId: registrySession.id,
         itemId,
+        sourceId: item.sourceId,
         userId: principal.id,
         mediaRootPath: verified.rootRealPath,
         filePath: verified.realPath,
@@ -664,6 +908,13 @@ export function createHeadlessMediaService({
         outputDir,
         backend: profile.backend,
         profile,
+        playbackProfile: requestedProfile.profileContext ? {
+          profileId: requestedProfile.profileContext.profileId,
+          deviceId: requestedProfile.profileContext.deviceId,
+          selectionRevision: requestedProfile.profileContext.selectionRevision,
+          ...(requestedProfile.profileContext.invitationSessionId
+            ? { invitationSessionId: requestedProfile.profileContext.invitationSessionId } : {}),
+        } : null,
         token: registrySession.token,
         createdAt: registrySession.createdAt,
         lastActivityAt: registrySession.lastActivityAt,
@@ -696,12 +947,19 @@ export function createHeadlessMediaService({
       }
       await startProcess(session, profile);
       const playlistPath = path.join(session.outputDir, 'index.m3u8');
-      if (!await waitForFile(configuredCacheDir, playlistPath, PLAYLIST_WAIT_MS, {
-        now,
-        setTimeout: setTimeoutFn,
-        clearTimeout: clearTimeoutFn,
-        signal: session.abortController.signal,
-      })) throw new Error(session.error || 'FFmpeg did not produce an HLS playlist.');
+      let playlistReady;
+      try {
+        playlistReady = await waitForFile(configuredCacheDir, playlistPath, PLAYLIST_WAIT_MS, {
+          now,
+          setTimeout: setTimeoutFn,
+          clearTimeout: clearTimeoutFn,
+          signal: session.abortController.signal,
+        });
+      } catch (error) {
+        throw session.failureError || error;
+      }
+      if (!playlistReady) throw session.failureError
+        || playbackError('transcode_failed', 'FFmpeg did not produce the requested playback stream.', 502);
       session.ready = true;
       const base = `/api/media/transcode/${encodeURIComponent(id)}/index.m3u8`;
       return {
@@ -729,6 +987,163 @@ export function createHeadlessMediaService({
     } finally {
       detachRequestAbort?.();
     }
+  }
+
+  async function planPlayback(itemId, request = {}, principal, profileContext = null) {
+    const catalogItem = await adminService.getLibraryItem?.(itemId, principal);
+    if (!catalogItem) throw playbackError('media_not_found', 'Media item was not found.', 404);
+    let source;
+    try {
+      source = await adminService.resolveMediaPath(itemId, principal, request.sourceId);
+    } catch (error) {
+      if (error?.code === 'permission_denied') throw error;
+      throw playbackError(
+        error?.code === 'EACCES' ? 'media_source_unreadable' : 'source_unavailable',
+        'The selected media source is not currently readable.', 409,
+        { sourceState: error?.code === 'EACCES' ? 'unreadable' : 'offline' },
+      );
+    }
+    if (clientState?.requireActivePlaybackProfile) {
+      const current = await requireBoundProfile(principal, profileContext, source);
+      if (!profileContext || current.profileId !== profileContext.profileId
+        || current.selectionRevision !== profileContext.selectionRevision) {
+        throw playbackError('stale_profile_selection', 'The selected playback profile has changed.', 409);
+      }
+    }
+    const sourceId = String(source.sourceId || catalogItem.sourceId || `${itemId}:primary`);
+    let probe = cachedScanProbe(source, sourceId);
+    if (!probe) {
+      probe = await transcoder.probeMedia(source.path, { sourceId });
+      await adminService.recordMediaProbe?.(itemId, sourceId, probe).catch(() => undefined);
+    }
+    const sidecarTracks = externalSubtitleTracks(source);
+    if (sidecarTracks.length) {
+      const sidecarIds = new Set(sidecarTracks.map((track) => track.id));
+      probe = {
+        ...probe,
+        tracks: [...(probe.tracks || []).filter((track) => !sidecarIds.has(track.id)), ...sidecarTracks],
+        adapterGaps: (probe.adapterGaps || []).filter((gap) => gap !== 'external_sidecar_subtitles'),
+      };
+    }
+    let plan = playbackPlanForMedia({ ...probe, sourceId, sourceState: 'online' }, request.capabilities || {}, request);
+    if (plan.toneMap && transcoder.getHealth().toneMapping !== true) {
+      throw playbackError('playback_not_supported', 'This host cannot tone-map the selected HDR source.', 422);
+    }
+    const selectedSidecar = plan.selectedSubtitleTrackId
+      ? (source.subtitleSidecars || []).find((sidecar) => sidecar.id === plan.selectedSubtitleTrackId)
+      : null;
+    if (selectedSidecar && selectedSidecar.format !== 'vtt' && plan.sourceAction === 'direct') {
+      plan = playbackPlanForMedia(
+        { ...probe, sourceId, sourceState: 'online' },
+        { ...(request.capabilities || {}), subtitleModes: ['burn-in'] },
+        request,
+      );
+    }
+    let externalSubtitle = null;
+    if (selectedSidecar) {
+      if (path.dirname(selectedSidecar.path) !== path.dirname(source.path)) {
+        throw playbackError('source_unavailable', 'The external subtitle is no longer beside this video.', 409);
+      }
+      const verifiedSubtitle = await statContainedFile(source.rootPath, selectedSidecar.path);
+      externalSubtitle = {
+        trackId: selectedSidecar.id,
+        path: verifiedSubtitle.realPath,
+        fileId: verifiedSubtitle.fileId,
+        format: selectedSidecar.format,
+      };
+    }
+    return { item: catalogItem, probe, plan, sourceIdentity: { fileId: source.fileId }, externalSubtitle };
+  }
+
+  async function describeDirectCapability(itemId, principal, profileContext, sourceId = undefined) {
+    const source = await adminService.resolveMediaPath(itemId, principal, sourceId);
+    if (clientState?.requireActivePlaybackProfile) {
+      const current = await requireBoundProfile(principal, profileContext, source);
+      if (!profileContext || current.profileId !== profileContext.profileId
+        || current.selectionRevision !== profileContext.selectionRevision) {
+        throw playbackError('stale_profile_selection', 'The selected playback profile has changed.', 409);
+      }
+    }
+    return {
+      sourceId: source.sourceId,
+      fileVersion: directCapabilityFileVersion(source),
+    };
+  }
+
+  async function serveDirectCapability(req, res, {
+    itemId, principal, profileContext, sourceId, fileVersion,
+  }) {
+    const source = await adminService.resolveMediaPath(itemId, principal, sourceId);
+    if (directCapabilityFileVersion(source) !== fileVersion) {
+      return json(res, 409, { ok: false, error: 'source_unavailable', message: 'The media source changed.' });
+    }
+    if (clientState?.requireActivePlaybackProfile) {
+      const current = await requireBoundProfile(principal, profileContext, source);
+      if (!profileContext || current.profileId !== profileContext.profileId
+        || current.selectionRevision !== profileContext.selectionRevision) {
+        return json(res, 409, { ok: false, error: 'stale_profile_selection' });
+      }
+    }
+    if (!DIRECT_EXTENSIONS.has(path.extname(source.path).toLowerCase())) {
+      return json(res, 415, { ok: false, error: 'direct_stream_not_supported', message: 'Start an HLS transcode for this media type.' });
+    }
+    return serveFile(req, res, source.rootPath, source.path, mimeFor(source.path), true, {}, source.fileId);
+  }
+
+  async function serveExternalSubtitleCapability(req, res, { itemId, trackId, token }) {
+    const authorizationUrl = new URL(`http://loomtv.local/subtitle?itemId=${encodeURIComponent(itemId)}`);
+    const authorization = await authorizePlaybackToken(token, authorizationUrl, 'stream', req);
+    if (!authorization?.ok || authorization.playbackSession?.itemId !== itemId) {
+      return json(res, 401, { ok: false, error: 'playback_session_invalid' });
+    }
+    const binding = authorization.playbackSession.profile;
+    if (!binding?.externalSubtitleTrackId || binding.externalSubtitleTrackId !== trackId || !binding.externalSubtitleFileId) {
+      return json(res, 401, { ok: false, error: 'playback_session_invalid' });
+    }
+    const source = await adminService.resolveMediaPath(itemId, authorization.principal, binding.sourceId);
+    const sidecar = (source.subtitleSidecars || []).find((entry) => entry.id === trackId);
+    if (!sidecar || path.dirname(sidecar.path) !== path.dirname(source.path)) {
+      return json(res, 404, { ok: false, error: 'source_unavailable' });
+    }
+    return serveFile(req, res, source.rootPath, sidecar.path, mimeFor(sidecar.path), false, {}, binding.externalSubtitleFileId,
+      () => playbackRegistry.touch(authorization.playbackSession.id, now()));
+  }
+
+  async function serveOfflineDownload(req, res, authorization) {
+    const { lease, source } = authorization || {};
+    if (!lease || !source) return json(res, 401, { ok: false, error: 'session_expired' });
+    return serveFile(req, res, source.rootPath, source.path, 'application/octet-stream', true,
+      { 'Content-Disposition': downloadDisposition(source.path) }, source.fileId);
+  }
+
+  function issueTranscodePlan(itemId, principalId, plan, probe, request, profileContext, sourceIdentity = null) {
+    const token = randomUUID();
+    const cutoff = now() - MEDIA_TOKEN_TTL_MS;
+    for (const [id, entry] of transcodePlans) if (entry.createdAt < cutoff) transcodePlans.delete(id);
+    while (transcodePlans.size >= 4_096) transcodePlans.delete(transcodePlans.keys().next().value);
+    transcodePlans.set(token, {
+      itemId, principalId, createdAt: now(), expiresAt: now() + MEDIA_TOKEN_TTL_MS,
+      profileContext,
+      execution: {
+        sourceId: plan.sourceId, mode: plan.mode, codec: plan.codec, backend: 'auto',
+        copyVideo: plan.copyVideo, copyAudio: plan.copyAudio, burnSubtitles: plan.burnSubtitles,
+        selectedVideoTrackIndex: plan.selectedVideoTrackIndex,
+        selectedAudioTrackIndex: plan.selectedAudioTrackIndex,
+        selectedSubtitleTrackIndex: plan.selectedSubtitleTrackIndex,
+        selectedSubtitleTrackOrdinal: plan.selectedSubtitleTrackOrdinal,
+        subtitleFontSize: plan.subtitleFontSize,
+        subtitleKind: plan.selectedSubtitleTrackId ? subtitleKindForProbe(plan, probe) : undefined,
+        ...(request.externalSubtitle ? {
+          externalSubtitlePath: request.externalSubtitle.path,
+          externalSubtitleFileId: request.externalSubtitle.fileId,
+        } : {}),
+        maxWidth: plan.maxWidth, maxHeight: plan.maxHeight,
+        videoBitrateKbps: plan.videoBitrateKbps, audioBitrateKbps: plan.audioBitrateKbps,
+        toneMap: plan.toneMap, startSeconds: request.startSeconds,
+        expectedFileId: sourceIdentity?.fileId,
+      },
+    });
+    return { token, expiresAt: now() + MEDIA_TOKEN_TTL_MS };
   }
 
   /**
@@ -826,8 +1241,24 @@ export function createHeadlessMediaService({
       const itemId = url.searchParams.get('itemId');
       if (!itemId) return json(res, 400, { ok: false, error: 'itemId_required' });
       const requestedProfile = {
+        planToken: url.searchParams.get('planToken') || undefined,
+        canonicalPlanRequired: res.__loomtvPublicApi === true,
+        sourceId: url.searchParams.get('sourceId') || undefined,
+        profileId: url.searchParams.get('profileId') || undefined,
+        deviceId: url.searchParams.get('deviceId') || undefined,
+        selectionRevision: url.searchParams.get('selectionRevision') || undefined,
+        mode: url.searchParams.get('mode') || undefined,
         codec: url.searchParams.get('codec') || undefined,
         backend: url.searchParams.get('backend') || undefined,
+        copyVideo: url.searchParams.get('copyVideo') || undefined,
+        copyAudio: url.searchParams.get('copyAudio') || undefined,
+        burnSubtitles: url.searchParams.get('burnSubtitles') || undefined,
+        subtitleKind: url.searchParams.get('subtitleKind') || undefined,
+        selectedVideoTrackIndex: url.searchParams.get('selectedVideoTrackIndex') || undefined,
+        selectedAudioTrackIndex: url.searchParams.get('selectedAudioTrackIndex') || undefined,
+        selectedSubtitleTrackIndex: url.searchParams.get('selectedSubtitleTrackIndex') || undefined,
+        selectedSubtitleTrackOrdinal: url.searchParams.get('selectedSubtitleTrackOrdinal') || undefined,
+        startSeconds: url.searchParams.get('startSeconds') || undefined,
         maxWidth: url.searchParams.get('maxWidth') || undefined,
         maxHeight: url.searchParams.get('maxHeight') || undefined,
         videoBitrateKbps: url.searchParams.get('videoBitrateKbps') || undefined,
@@ -838,7 +1269,12 @@ export function createHeadlessMediaService({
       try {
         return json(res, 202, { ok: true, data: await startTranscode(itemId, requestedProfile, principal, requestLifecycle.signal) });
       } catch (error) {
-        return json(res, error?.status || 500, { ok: false, error: error instanceof Error ? error.message : 'transcode_failed' });
+        return json(res, error?.status || 500, {
+          ok: false,
+          error: publicPlaybackErrorCode(error),
+          message: error instanceof Error ? error.message : 'The transcode could not be started.',
+          ...(error?.retryAfter ? { retryAfter: error.retryAfter } : {}),
+        });
       } finally {
         requestLifecycle.cleanup();
       }
@@ -866,7 +1302,11 @@ export function createHeadlessMediaService({
       session.token = playback.token;
       let principal = null;
       if (typeof adminService.getPrincipalById === 'function') {
-        principal = await adminService.getPrincipalById(session.userId);
+        principal = await resolveBoundPrincipal(session.userId, playback.profile);
+        try { remotePolicy?.assertPrincipal?.(req, principal, 'media'); } catch {
+          trackCleanup(cleanupSession(session, { reason: 'remote_access_revoked' }));
+          return json(res, 403, { ok: false, error: 'remote_access_disabled' });
+        }
         const permitted = principal && (typeof adminService.authorizePrincipal !== 'function'
           || await adminService.authorizePrincipal(principal, 'stream'));
         if (!permitted) {
@@ -876,7 +1316,12 @@ export function createHeadlessMediaService({
       }
       if (principal && typeof adminService.resolveMediaPath === 'function') {
         try {
-          const source = await adminService.resolveMediaPath(session.itemId, principal);
+          const source = await adminService.resolveMediaPath(session.itemId, principal, session.sourceId);
+          if (session.playbackProfile && clientState?.requireActivePlaybackProfile) {
+            const current = await requireBoundProfile(principal, session.playbackProfile, source);
+            if (current.profileId !== session.playbackProfile.profileId
+              || current.selectionRevision !== session.playbackProfile.selectionRevision) throw new Error('Profile selection changed.');
+          }
           const sameFile = source.fileId?.dev === session.fileId?.dev && source.fileId?.ino === session.fileId?.ino;
           if (source.rootPath !== session.mediaRootPath || !sameFile) throw Object.assign(new Error('The media source changed.'), { status: 409 });
         } catch {
@@ -906,24 +1351,24 @@ export function createHeadlessMediaService({
       }
     }
     if (itemMatch && itemMatch[2] === 'download' && (req.method === 'GET' || req.method === 'HEAD')) {
-      const authorization = await authorizedFor(req, url, 'downloads');
-      if (!authorization.ok) return json(res, authorization.status, { ok: false, error: authorization.status === 403 ? 'permission_denied' : 'admin_auth_required' });
-      try {
-        const item = await adminService.resolveMediaPath(itemMatch[1], authorization.principal);
-        return serveFile(req, res, item.rootPath, item.path, 'application/octet-stream', true, { 'Content-Disposition': downloadDisposition(item.path) }, item.fileId, authorization.playbackSession ? () => playbackRegistry.touch(authorization.playbackSession.id, now()) : null);
-      } catch (error) {
-        return json(res, error?.status || 404, { ok: false, error: error instanceof Error ? error.message : 'media_not_found' });
-      }
+      return json(res, 410, { ok: false, error: 'download_not_allowed',
+        message: 'Create an offline download lease through POST /api/v1/downloads.' });
     }
-    const directMatch = pathname.match(/^\/api\/media\/items\/([a-f0-9]{32})$/i);
+    const directMatch = pathname.match(/^\/api\/media\/items\/([^/]+)$/i);
     if (directMatch && (req.method === 'GET' || req.method === 'HEAD')) {
-      const authorization = await authorizedFor(req, url, 'stream');
+      const authorization = await authorizedFor(req, url, 'stream', res.__loomtvPublicApi === true);
       if (!authorization.ok) return json(res, authorization.status, { ok: false, error: authorization.status === 403 ? 'permission_denied' : 'admin_auth_required' });
       const principal = authorization.principal;
       try {
-        const item = await adminService.resolveMediaPath(directMatch[1], principal);
+        const item = await adminService.resolveMediaPath(
+          decodeURIComponent(directMatch[1]), principal, authorization.playbackSession?.profile?.sourceId,
+        );
+        const expectedFileId = authorization.playbackSession?.profile?.fileId;
+        if (expectedFileId && (item.fileId?.dev !== expectedFileId.dev || item.fileId?.ino !== expectedFileId.ino)) {
+          return json(res, 409, { ok: false, error: 'source_unavailable', message: 'The media source changed.' });
+        }
         if (!DIRECT_EXTENSIONS.has(path.extname(item.path).toLowerCase())) return json(res, 415, { ok: false, error: 'direct_stream_not_supported', message: 'Start an HLS transcode for this media type.' });
-        if (authorization.playbackSession && authorization.playbackSession.itemId !== directMatch[1]) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
+        if (authorization.playbackSession && authorization.playbackSession.itemId !== decodeURIComponent(directMatch[1])) return json(res, 401, { ok: false, error: 'stream_token_invalid' });
         return serveFile(req, res, item.rootPath, item.path, mimeFor(item.path), true, {}, item.fileId, authorization.playbackSession ? () => playbackRegistry.touch(authorization.playbackSession.id, now()) : null);
       } catch (error) { return json(res, error?.status || 404, { ok: false, error: error instanceof Error ? error.message : 'media_not_found' }); }
     }
@@ -932,25 +1377,40 @@ export function createHeadlessMediaService({
 
   return {
     handle,
+    planPlayback,
+    describeDirectCapability,
+    serveDirectCapability,
+    serveExternalSubtitleCapability,
+    serveOfflineDownload,
     issuePlaybackToken,
-    async renewPlaybackSession(identifier, principal, itemId, action = undefined) {
+    issueTranscodePlan,
+    startTranscodePlan(itemId, planToken, principal, requestSignal = null) {
+      return startTranscode(itemId, { planToken, canonicalPlanRequired: true }, principal, requestSignal);
+    },
+    async renewPlaybackSession(identifier, principal, itemId, action = undefined, req = undefined) {
       const current = playbackRegistry.authorize(identifier, {
         ...(itemId ? { itemId } : {}),
         ...(action ? { action } : {}),
       }, now());
       if (!current) return null;
       if (playbackRegistry.isSessionIdentifier?.(identifier) && !principal) return null;
-      const resolvedPrincipal = principal || await adminService.getPrincipalById?.(current.principalId);
+      const resolvedPrincipal = principal || await resolveBoundPrincipal(current.principalId, current.profile);
       if (!resolvedPrincipal) return null;
-      const owner = resolvedPrincipal.type === 'owner' || resolvedPrincipal.role === 'owner';
+      try { remotePolicy?.assertPrincipal?.(req, resolvedPrincipal, 'media'); } catch { return null; }
       const permitted = typeof adminService.authorizePrincipal !== 'function'
-        || owner
         || await adminService.authorizePrincipal(resolvedPrincipal, 'stream');
-      if (!permitted || (!owner && resolvedPrincipal.id !== current.principalId)) return null;
+      if (!permitted || resolvedPrincipal.id !== current.principalId) return null;
       const targetItemId = itemId || current.itemId;
+      if (current.profile?.profileId && clientState?.requireActivePlaybackProfile) {
+        try {
+          const media = await adminService.resolveMediaPath(targetItemId, resolvedPrincipal, current.profile.sourceId);
+          const context = await requireBoundProfile(resolvedPrincipal, current.profile, media);
+          if (context.profileId !== current.profile.profileId || context.selectionRevision !== current.profile.selectionRevision) return null;
+        } catch { return null; }
+      }
       if (typeof adminService.resolveMediaPath === 'function') {
         try {
-          const source = await adminService.resolveMediaPath(targetItemId, resolvedPrincipal);
+          const source = await adminService.resolveMediaPath(targetItemId, resolvedPrincipal, current.profile?.sourceId);
           const session = sessions.get(current.id);
           const sameHlsFile = current.action !== 'hls' || (
             session && source.rootPath === session.mediaRootPath
@@ -963,7 +1423,7 @@ export function createHeadlessMediaService({
         }
       }
       const renewed = playbackRegistry.renew(identifier, {
-        ...(!owner ? { principalId: resolvedPrincipal.id } : {}),
+        principalId: resolvedPrincipal.id,
         itemId: targetItemId,
         ...(action ? { action } : {}),
       }, now());
@@ -993,12 +1453,27 @@ export function createHeadlessMediaService({
       return playbackRegistry.revoke(identifier, reason, now());
     },
     revokePrincipal(principalId, reason = 'principal_revoked') {
+      for (const [id, entry] of transcodePlans) if (entry.principalId === principalId) transcodePlans.delete(id);
       return playbackRegistry.revokeByPrincipal(principalId, reason, now());
     },
+    revokeDevice(deviceId, reason = 'device_revoked') {
+      for (const [id, entry] of transcodePlans) {
+        if (entry.profileContext?.deviceId === deviceId) transcodePlans.delete(id);
+      }
+      return playbackRegistry.revokeByDevice(deviceId, reason, now());
+    },
+    revokeAuthenticationSession(authenticationSessionId, reason = 'auth_session_revoked') {
+      for (const [id, entry] of transcodePlans) {
+        if (entry.profileContext?.authenticationSessionId === authenticationSessionId) transcodePlans.delete(id);
+      }
+      return playbackRegistry.revokeByAuthenticationSession(authenticationSessionId, reason, now());
+    },
     revokeItem(itemId, reason = 'item_revoked') {
+      for (const [id, entry] of transcodePlans) if (entry.itemId === itemId) transcodePlans.delete(id);
       return playbackRegistry.revokeByItem(itemId, reason, now());
     },
     revokeAllPlaybackSessions(reason = 'revoked') {
+      transcodePlans.clear();
       return playbackRegistry.revokeAll(reason, now());
     },
     getAdmissionHealth() {
@@ -1030,6 +1505,7 @@ export function createHeadlessMediaService({
     async stop(options = {}) {
       if (stopPromise) return stopPromise;
       stopping = true;
+      transcodePlans.clear();
       const termGraceMs = Number.isFinite(options.termGraceMs)
         ? Math.max(0, Math.min(30_000, Math.trunc(options.termGraceMs)))
         : PROCESS_TERM_GRACE_MS;

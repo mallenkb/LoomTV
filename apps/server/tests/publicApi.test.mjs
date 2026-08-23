@@ -8,7 +8,7 @@ import { createHeadlessServer } from '../src/server.js';
 const OWNER_PASSWORD = 'public-api-password';
 const BOOTSTRAP_SECRET = 'public-api-bootstrap-secret-32-bytes';
 
-async function startServer() {
+async function startServer(options = {}) {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-public-api-'));
   const paths = {
     dataDir: path.join(base, 'data'),
@@ -17,13 +17,20 @@ async function startServer() {
   };
   await fs.mkdir(paths.dataDir, { recursive: true });
   await fs.mkdir(paths.cacheDir, { recursive: true });
-  const server = createHeadlessServer({ host: '127.0.0.1', port: 0, paths, version: '0.0.0-test', bootstrapSecret: BOOTSTRAP_SECRET });
+  const server = createHeadlessServer({
+    host: '127.0.0.1',
+    port: 0,
+    paths,
+    version: '0.0.0-test',
+    bootstrapSecret: BOOTSTRAP_SECRET,
+    ...options,
+  });
   const address = await server.start();
   const baseUrl = `http://127.0.0.1:${address.port}`;
   return { server, baseUrl };
 }
 
-function api(baseUrl, token) {
+function api(baseUrl, token, extraHeaders = {}) {
   return async function call(method, route, body) {
     const response = await fetch(`${baseUrl}${route}`, {
       method,
@@ -31,6 +38,7 @@ function api(baseUrl, token) {
         Accept: 'application/json',
         ...(body ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...extraHeaders,
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -38,6 +46,70 @@ function api(baseUrl, token) {
     return { status: response.status, headers: response.headers, payload };
   };
 }
+
+test('shared setup uses the trusted desktop channel and invokes desktop persistence hooks', async (t) => {
+  const desktopSetupToken = 'desktop-setup-token-that-is-longer-than-32-bytes';
+  const calls = { owner: null, tested: null, metadata: null, complete: null };
+  const { server, baseUrl } = await startServer({
+    desktopSetupToken,
+    setupHooks: {
+      ownerCreated(input) { calls.owner = input; },
+      testMetadata(input) {
+        calls.tested = input;
+        return { ok: true, message: 'Desktop metadata test passed.' };
+      },
+      saveMetadata(input) { calls.metadata = input; },
+      complete(input) { calls.complete = input; },
+    },
+  });
+  t.after(() => server.stop());
+  const trusted = api(baseUrl, null, { 'x-loomtv-desktop-setup': desktopSetupToken });
+
+  const state = await trusted('GET', '/api/v1/setup/state');
+  assert.equal(state.status, 200);
+  assert.equal(state.payload.data.trustedDesktop, true);
+  assert.equal(state.payload.data.requiresBootstrapSecret, false);
+
+  const owner = await trusted('POST', '/api/v1/setup/owner', {
+    name: 'Desktop Owner',
+    password: OWNER_PASSWORD,
+    serverName: 'Living Room',
+    language: 'en',
+  });
+  assert.equal(owner.status, 201);
+  assert.equal(calls.owner.name, 'Desktop Owner');
+  assert.equal(calls.owner.adminToken, owner.payload.data.adminToken);
+
+  const authed = api(baseUrl, owner.payload.data.adminToken);
+  const mediaDir = await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-setup-media-'));
+  const root = await authed('POST', '/api/v1/setup/libraries', { path: mediaDir, kind: 'movies' });
+  assert.equal(root.status, 201);
+
+  const tested = await authed('POST', '/api/v1/setup/metadata/test', { apiKey: 'desktop-tmdb-key' });
+  assert.equal(tested.status, 200);
+  assert.deepEqual(calls.tested, { provider: 'tmdb', apiKey: 'desktop-tmdb-key' });
+
+  const saved = await authed('PUT', '/api/v1/setup/metadata', {
+    keys: { tmdb: 'desktop-tmdb-key', omdb: 'desktop-omdb-key' },
+    verify: false,
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(calls.metadata, {
+    keys: { tmdb: 'desktop-tmdb-key', omdb: 'desktop-omdb-key' },
+    skipped: false,
+  });
+  assert.deepEqual(saved.payload.data.configuredProviders, ['tmdb', 'omdb']);
+
+  const completed = await authed('POST', '/api/v1/setup/complete', { returnTo: 'app' });
+  assert.equal(completed.status, 200);
+  assert.equal(completed.payload.data.redirect, '/app/');
+  assert.equal(calls.complete.ownerName, 'Desktop Owner');
+  assert.equal(calls.complete.roots.length, 1);
+  assert.equal(calls.complete.roots[0].path, mediaDir);
+
+  const finalState = await trusted('GET', '/api/v1/setup/state');
+  assert.equal(finalState.payload.data.required, false);
+});
 
 test('public API end-to-end: discovery, onboarding, profiles, and progress', async (t) => {
   const { server, baseUrl } = await startServer();
@@ -172,16 +244,12 @@ test('public API end-to-end: discovery, onboarding, profiles, and progress', asy
     assert.equal(show.title, 'My Show');
     assert.equal(show.episodeCount, 2);
     assert.equal(show.seasons[0].season, 1);
-    assert.deepEqual(show.seasons[0].episodes.map((episode) => episode.series.episode), [1, 2]);
+    assert.deepEqual(show.seasons[0].episodes.map((episode) => episode.episodeNumber), [1, 2]);
 
     const media = await authed('GET', `/api/v1/media/${encodeURIComponent(mediaId)}`);
     assert.equal(media.status, 200);
-    assert.match(media.payload.data.directUrl, /^\/api\/v1\/media\/.+\/direct\?token=/);
-
-    // The issued playback token must satisfy the direct route without a
-    // bearer header, the way an HTMLMediaElement uses it.
-    const direct = await fetch(`${baseUrl}${media.payload.data.directUrl}`, { method: 'HEAD' });
-    assert.equal(direct.status, 200);
+    assert.match(media.payload.data.playbackPlanUrl, /^\/api\/v1\/media\/.+\/playback-plan$/);
+    assert.equal(media.payload.data.directUrl, null, 'media details must not mint a playback capability');
 
     // A stale or forged query token must not.
     const forged = await fetch(`${baseUrl}/api/v1/media/${encodeURIComponent(mediaId)}/direct?token=forged-token`, { method: 'HEAD' });

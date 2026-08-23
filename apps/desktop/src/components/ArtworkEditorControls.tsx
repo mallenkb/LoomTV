@@ -99,6 +99,40 @@ function artworkResolutionTag(
   return null;
 }
 
+function artworkResolutionRank(
+  dimensions: ArtworkDimensions | undefined,
+  target: 'poster' | 'cover',
+): number {
+  const tag = artworkResolutionTag(dimensions, target);
+  if (tag === 'High-res') return 0;
+  if (tag === 'HD') return 1;
+  return 2;
+}
+
+function artworkPixelArea(dimensions: ArtworkDimensions | undefined): number {
+  return dimensions ? dimensions.width * dimensions.height : -1;
+}
+
+function preferredArtworkSource(
+  urls: Array<string | null | undefined>,
+  target: 'poster' | 'cover',
+  dimensions: Record<string, ArtworkDimensions>,
+  failedUrls?: Set<string>,
+): string {
+  const candidates = [...new Set(
+    urls.filter((url): url is string => Boolean(url && !failedUrls?.has(url))),
+  )];
+
+  return candidates
+    .map((url, index) => ({
+      url,
+      index,
+      area: artworkPixelArea(dimensions[url]),
+      rank: artworkResolutionRank(dimensions[url], target),
+    }))
+    .sort((left, right) => left.rank - right.rank || right.area - left.area || left.index - right.index)[0]?.url || '';
+}
+
 function fileManagerActionLabel(): string {
   const platform = typeof navigator === 'undefined'
     ? ''
@@ -231,6 +265,7 @@ export default function ArtworkEditorControls({
     setApplyingCandidateId('');
     setMetadataError('');
     setFailedMetadataArtwork(new Set());
+    setMetadataArtworkDimensions({});
   }, [mediaId]);
 
   useEffect(() => {
@@ -267,17 +302,28 @@ export default function ArtworkEditorControls({
     target: OfficialArtworkRefreshTarget = 'all',
   ) => {
     const thumbnailSource = target !== 'cover' ? (
-      refreshedArtwork?.thumbnail
-      || refreshedArtwork?.posterCandidates?.find(Boolean)
-      || officialThumbnailSources.find(Boolean)
+      preferredArtworkSource(
+        [
+          refreshedArtwork?.thumbnail,
+          ...(refreshedArtwork?.posterCandidates || []),
+          ...officialThumbnailSources,
+        ],
+        'poster',
+        metadataArtworkDimensions,
+      )
       || fallbackFrameSource
     ) : '';
     const coverSource = target !== 'poster' ? (
-      refreshedArtwork?.cover
-      || refreshedArtwork?.backdropCandidates?.find(Boolean)
-      || refreshedArtwork?.thumbnail
-      || officialCoverSources.find(Boolean)
-      || officialThumbnailSources.find(Boolean)
+      preferredArtworkSource(
+        [refreshedArtwork?.cover, ...(refreshedArtwork?.backdropCandidates || []), ...officialCoverSources],
+        'cover',
+        metadataArtworkDimensions,
+      )
+      || preferredArtworkSource(
+        [refreshedArtwork?.thumbnail, ...(refreshedArtwork?.posterCandidates || []), ...officialThumbnailSources],
+        'cover',
+        metadataArtworkDimensions,
+      )
       || fallbackFrameSource
     ) : '';
 
@@ -349,7 +395,24 @@ export default function ArtworkEditorControls({
     setApplyingCandidateId(candidate.id);
     setMetadataError('');
     try {
-      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidate, metadataApplyTarget);
+      const candidateToApply = metadataApplyTarget === 'all'
+        ? {
+            ...candidate,
+            thumbnail: preferredArtworkSource(
+              [candidate.thumbnail, ...(candidate.posterCandidates || [])],
+              'poster',
+              metadataArtworkDimensions,
+              failedMetadataArtwork,
+            ) || candidate.thumbnail,
+            cover: preferredArtworkSource(
+              [candidate.cover, ...(candidate.backdropCandidates || [])],
+              'cover',
+              metadataArtworkDimensions,
+              failedMetadataArtwork,
+            ) || candidate.cover,
+          }
+        : candidate;
+      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidateToApply, metadataApplyTarget);
       if (metadataApplyTarget === 'episodes') {
         await onSaved?.();
       } else {
@@ -475,7 +538,8 @@ export default function ArtworkEditorControls({
     if (!isArtworkTarget) return [];
 
     const seen = new Set<string>();
-    const choices = metadataCandidates.flatMap((candidate) => {
+    const artworkTarget = metadataApplyTarget === 'cover' ? 'cover' : 'poster';
+    return metadataCandidates.flatMap((candidate) => {
       const urls = metadataApplyTarget === 'cover'
         ? [candidate.cover, ...(candidate.backdropCandidates || [])]
         : [candidate.thumbnail, ...(candidate.posterCandidates || [])];
@@ -489,15 +553,8 @@ export default function ArtworkEditorControls({
         seen.add(key);
         return [{ candidate, imageUrl }];
       });
-    }).sort((left, right) => (
-      ARTWORK_PROVIDER_PRIORITY[left.candidate.source] - ARTWORK_PROVIDER_PRIORITY[right.candidate.source]
-    ));
-    const positions = new Map<OfficialMetadataCandidate['source'], number>();
-
-    return choices.map(({ candidate, imageUrl }) => {
-      const providerIndex = (positions.get(candidate.source) || 0) + 1;
-      positions.set(candidate.source, providerIndex);
-      const id = `${candidate.id}:${metadataApplyTarget}:${providerIndex}`;
+    }).map(({ candidate, imageUrl }) => {
+      const id = `${candidate.id}:${metadataApplyTarget}:${imageUrl}`;
       const selectedArtwork = metadataApplyTarget === 'cover'
         ? { cover: imageUrl, backdropCandidates: [imageUrl] }
         : { thumbnail: imageUrl, posterCandidates: [imageUrl] };
@@ -510,8 +567,15 @@ export default function ArtworkEditorControls({
           ...selectedArtwork,
         },
       };
-    });
-  }, [failedMetadataArtwork, isArtworkTarget, metadataApplyTarget, metadataCandidates]);
+    }).sort((left, right) => (
+      artworkResolutionRank(metadataArtworkDimensions[left.imageUrl], artworkTarget)
+      - artworkResolutionRank(metadataArtworkDimensions[right.imageUrl], artworkTarget)
+      || artworkPixelArea(metadataArtworkDimensions[right.imageUrl])
+        - artworkPixelArea(metadataArtworkDimensions[left.imageUrl])
+      || ARTWORK_PROVIDER_PRIORITY[left.candidate.source] - ARTWORK_PROVIDER_PRIORITY[right.candidate.source]
+      || left.imageUrl.localeCompare(right.imageUrl)
+    ));
+  }, [failedMetadataArtwork, isArtworkTarget, metadataApplyTarget, metadataArtworkDimensions, metadataCandidates]);
   const visibleMetadataCandidates = useMemo(() => {
     if (metadataApplyTarget === 'episodes') return metadataCandidates;
 
@@ -870,10 +934,18 @@ export default function ArtworkEditorControls({
                     </div>
                   );
                 }) : visibleMetadataCandidates.map((candidate) => {
-                  const posterImage = [candidate.thumbnail, ...(candidate.posterCandidates || [])]
-                    .find((url) => Boolean(url && !failedMetadataArtwork.has(url))) || '';
-                  const candidateCoverImage = [candidate.cover, ...(candidate.backdropCandidates || [])]
-                    .find((url) => Boolean(url && !failedMetadataArtwork.has(url))) || '';
+                  const posterImage = preferredArtworkSource(
+                    [candidate.thumbnail, ...(candidate.posterCandidates || [])],
+                    'poster',
+                    metadataArtworkDimensions,
+                    failedMetadataArtwork,
+                  );
+                  const candidateCoverImage = preferredArtworkSource(
+                    [candidate.cover, ...(candidate.backdropCandidates || [])],
+                    'cover',
+                    metadataArtworkDimensions,
+                    failedMetadataArtwork,
+                  );
                   const coverImage = candidateCoverImage || posterImage;
                   const isApplying = applyingCandidateId === candidate.id;
                   const candidateSupportsTarget = metadataApplyTarget === 'all'
@@ -910,6 +982,14 @@ export default function ArtworkEditorControls({
                             <img
                               src={posterImage}
                               alt={candidate.title}
+                              onLoad={(event) => {
+                                const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+                                setMetadataArtworkDimensions((current) => {
+                                  const existing = current[posterImage];
+                                  if (existing?.width === width && existing.height === height) return current;
+                                  return { ...current, [posterImage]: { width, height } };
+                                });
+                              }}
                               onError={() => setFailedMetadataArtwork((current) => {
                                 const next = new Set(current);
                                 next.add(posterImage);
@@ -929,6 +1009,14 @@ export default function ArtworkEditorControls({
                               <img
                                 src={coverImage}
                                 alt={`${candidate.title} cover`}
+                                onLoad={(event) => {
+                                  const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+                                  setMetadataArtworkDimensions((current) => {
+                                    const existing = current[coverImage];
+                                    if (existing?.width === width && existing.height === height) return current;
+                                    return { ...current, [coverImage]: { width, height } };
+                                  });
+                                }}
                                 onError={() => setFailedMetadataArtwork((current) => {
                                   const next = new Set(current);
                                   next.add(coverImage);

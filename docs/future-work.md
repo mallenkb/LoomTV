@@ -1,44 +1,37 @@
-# Future Work
+# Video roadmap
 
-## Renderer Bundle Splitting
+LoomTV is staying video-only for the current roadmap. Music, photos, books, comics, live TV, and DVR do not block this work.
 
-The production renderer bundle is currently over Vite's default 500 kB warning threshold. This is not a release blocker, but it is worth improving later for faster app startup and less upfront JavaScript parsing.
+## Release and platform validation
 
-Safe first pass:
-- Add route-level lazy loading for Settings, detail pages, artwork/editor screens, and other rarely opened renderer views.
-- Keep shared shell/navigation/search loaded eagerly.
-- Keep the video playback path unchanged for the first pass.
+- Run packaged desktop migration, update, rollback, and playback on macOS, Windows, and Linux.
+- Complete the physical iOS/Android phone and tablet matrix, including large and interrupted offline downloads.
+- Complete Android TV and Fire TV hardware/store checks.
+- Validate Chromecast and AirPlay receivers from supported browsers and iOS.
+- Validate Docker/systemd installs on representative NAS platforms, including offline mounts, restarts, backup restore, and read-only media.
+- Validate hardware transcoding and HDR fallback on Intel, NVIDIA, AMD, Apple Silicon, and selected NAS accelerators.
 
-Avoid in the first pass:
-- Do not split or rewrite `VideoPlayer.tsx`.
-- Do not lazy-load `hls.js` separately yet.
-- Do not change subtitle rendering, buffering, transcode startup, media server behavior, or player controls.
+## Near-term product work
 
-Expected impact:
-- Faster initial renderer startup.
-- No intended change to video rendering quality, subtitle timing, buffering, HLS/transcode behavior, or playback performance.
-- A rarely opened route may show a brief loading state the first time it is opened.
+- Add an Android Chromecast sender and DLNA discovery/control without bypassing canonical cast-session authorization.
+- Add multiple saved-server switching to mobile and TV.
+- Add hosted device/session approval, naming, history, termination, invitation, download, and remote-policy management views.
+- Add clearer remote HTTPS certificate lifecycle and reverse-proxy readiness checks. LoomTV will remain private and self-hosted; no hosted relay or subscription is planned.
+- Make scan jobs cancellable, throttled, scheduled, and resumable across process restarts for large NAS libraries.
+- Improve user-facing distinctions among an offline NAS, a removed file, a revoked capability, a decoder failure, and exhausted transcode capacity.
 
-## Upcoming NAS Support
+## Library depth
 
-Mounted NAS shares can be used as library folders today when the operating system exposes them as normal readable paths. Full NAS support is planned for future releases so network-attached libraries are safer and easier to maintain.
+- Collections and richer ordered playlists.
+- Editions, alternate versions, extras, trailers, and grouped duplicates.
+- Local NFO import/export.
+- Scheduled trickplay thumbnail generation.
+- Better metadata-provider and artwork repair in canonical clients.
 
-Upcoming work:
-- Add a dedicated NAS setup flow for mounted SMB/NFS shares.
-- Add reconnect, offline, scanning, and unavailable states for NAS-backed folders.
-- Protect saved library data when a NAS mount is temporarily disconnected.
-- Add NAS-aware scan throttling or resumable scanning for large network libraries.
-- Decide and document whether Windows UNC paths are supported directly or require mapped drives.
-- Improve error messages so users can tell the difference between NAS offline, file missing, and transcode failure states.
-- Keep paired mobile playback routed through the desktop host so mobile devices do not need NAS credentials.
+## Later video features
 
-## React Native Companion Client
+- Watch-together rooms with server-authoritative clocks and permissions.
+- Webhooks and operator notifications.
+- Live TV, guide data, time shifting, and DVR only after the core playback and deployment matrix is proven.
 
-The Expo React Native client now implements the intended first-release scope: same-LAN companion browsing and playback from a paired desktop host, including profiles, favorites, progress, direct/HLS playback, reconnect recovery, and a saved metadata catalog for cold-start outages.
-
-Release work:
-- Execute `apps/mobile/RELEASE_CHECKLIST.md` on the required iOS/Android phone and tablet matrix.
-- Provision the account-owned EAS, App Store Connect, and Google Play signing/submission records.
-- Keep NAS-backed playback routed through the desktop host so the mobile app does not need NAS credentials.
-
-Internet remote streaming, offline media downloads, casting, multiple saved servers, and TV clients remain separate feature tracks rather than blockers for the same-LAN mobile companion.
+The current implementation and remaining evidence are tracked in [loomtv-vs-jellyfin-feature-status.md](loomtv-vs-jellyfin-feature-status.md).

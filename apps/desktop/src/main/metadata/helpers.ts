@@ -43,7 +43,7 @@ export function tmdbLogoCandidates(details: unknown): string[] {
       return rightLanguageScore - leftLanguageScore
         || (Number(b.vote_average) || 0) - (Number(a.vote_average) || 0);
     })
-    .map((logo) => `${TMDB_IMAGE_BASE}/w500${logo.file_path}`)))
+    .map((logo) => `${TMDB_IMAGE_BASE}/original${logo.file_path}`)))
     .slice(0, MAX_TMDB_LOGO_CANDIDATES);
 }
 

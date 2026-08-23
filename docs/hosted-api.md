@@ -1,116 +1,68 @@
 # LoomTV hosted API
 
-The headless server exposes a stable, same-origin browser client at
-`/app/` and a versioned JSON API at `/api/v1`. Every versioned response carries
-`X-LoomTV-API-Version: 1`. Discovery and machine-readable route metadata are
-available without signing in:
+The canonical server exposes the same-origin client at `/app/`, server control at `/admin/`, and the versioned JSON API at `/api/v1`. Versioned responses carry `X-LoomTV-API-Version: 1`.
+
+Public discovery resources:
 
 ```sh
-curl http://127.0.0.1:3847/api/v1/discovery
-curl http://127.0.0.1:3847/api/v1/openapi.json
+curl https://loomtv.example/api/v1/discovery
+curl https://loomtv.example/api/v1/openapi.json
 ```
 
-## First-run and sign-in
+## First owner and sign-in
 
-Check onboarding, create the first owner, or create a session:
+Server startup prints or otherwise supplies a one-time bootstrap secret. Owner creation requires that secret and invalidates it atomically:
 
 ```sh
-curl -s http://127.0.0.1:3847/api/v1/auth/onboarding
-curl -sS -X POST http://127.0.0.1:3847/api/v1/auth/owner \
+curl -sS -X POST https://loomtv.example/api/v1/auth/owner \
   -H 'content-type: application/json' \
-  -d '{"name":"Owner","password":"change-this-password"}'
-
-curl -sS -X POST http://127.0.0.1:3847/api/v1/auth/session \
-  -H 'content-type: application/json' \
-  -d '{"username":"Owner","password":"change-this-password"}'
+  -d '{"name":"Owner","password":"change-this-password","bootstrapSecret":"one-time-secret"}'
 ```
 
-The response contains an `adminToken`. Keep it in memory for a browser client
-when possible; use `Authorization: Bearer <adminToken>` for JSON requests. The
-existing `/api/admin` contract remains available for control-plane clients.
+`POST /api/v1/auth/session` creates either a bearer session or a same-origin secure cookie session. The hosted browser chooses cookies on HTTPS and holds cleartext-development bearers only in memory. Device, pairing, invitation, download, playback, and cast capabilities use separate schemes and scopes.
 
-## Library, profiles, and progress
+## Canonical resources
 
-```sh
-TOKEN='paste-token-here'
-curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:3847/api/v1/library
-curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:3847/api/v1/library/roots
-curl -H "Authorization: Bearer $TOKEN" -X POST \
-  -H 'content-type: application/json' \
-  -d '{}' http://127.0.0.1:3847/api/v1/library/scan
+The API includes:
 
-curl -H "Authorization: Bearer $TOKEN" -X POST \
-  -H 'content-type: application/json' \
-  -d '{"name":"Living room","type":"standard"}' \
-  http://127.0.0.1:3847/api/v1/profiles
+- accounts, users, passwords, devices, pairing, sessions, remote policy, and audit events;
+- library roots, scans, catalog items, series, seasons, and episodes;
+- profiles, PINs, selection, restrictions, preferences, lists, track preferences, and progress;
+- playback planning, direct capabilities, HLS start/renew/stop, and external subtitle capabilities;
+- private invitations and invitation sessions;
+- offline download leases and ranged content;
+- cast session create/update/renew/stop;
+- health, diagnostics, logs, backups, and restore.
 
-curl -H "Authorization: Bearer $TOKEN" -X PUT \
-  -H 'content-type: application/json' \
-  -d '{"position":612,"duration":3600}' \
-  http://127.0.0.1:3847/api/v1/profiles/<profileId>/progress/<mediaId>
-
-Administrators can use the same versioned surface for scoped user accounts,
-library-root management, diagnostics, password changes, sessions, logs, and
-backup/restore. These routes use the same permission names as `/api/admin`.
-```
-
-Profiles and progress are stored in the headless data directory and are scoped
-to the authenticated account. The owner can inspect all profile records; other
-accounts can only access profiles they created.
+Successful JSON resources use `{ "ok": true, "data": ... }`. Errors use `{ "ok": false, "error": { "code", "message" } }`. Discovery and OpenAPI documents are top-level documents.
 
 ## Playback
 
-`GET /api/v1/media/<mediaId>` returns the item plus tokenized `directUrl`,
-`downloadUrl`, and `transcodeUrl`. Direct browser playback uses a five-minute,
-media-and-user-bound query token because an HTML `<video>` element cannot
-attach an Authorization header:
+Clients never receive a permanent media URL from `GET /api/v1/media/<mediaId>`. They post their codec, container, resolution, HDR, HLS, and subtitle capabilities to the returned `playbackPlanUrl`.
 
-```js
-const details = await api(`/api/v1/media/${mediaId}`);
-video.src = details.directUrl;
-```
+The plan returns one of these bounded paths:
 
-For incompatible media, `POST` the returned `transcodeUrl` with the bearer
-token and requested `codec`, `maxWidth`, `maxHeight`, or bitrate query values.
-The response contains an HLS playlist URL whose session token is validated by
-the server for up to 30 minutes. Hardware selection and software fallback remain host-specific and
-are reported through `/api/v1/discovery`. `/app/` probes direct playback first
-and uses the packaged HLS runtime for browsers without native HLS support.
+- a short-lived direct capability and renewal route;
+- an HLS start route that returns an expiring playlist session and renewal route;
+- an external text-subtitle capability when the client can render it;
+- a burn-in plan when the selected subtitle cannot be rendered safely by the client.
 
-Successful JSON resources use an `{ "ok": true, "data": ... }` envelope;
-discovery and OpenAPI documents are intentionally top-level documents. Error
-responses use `{ "ok": false, "error": { "code", "message" } }`. Catalog and
-root responses omit host filesystem paths; mounted media remains server-owned.
+Capabilities bind the authenticated principal, device, selected profile and revision, media source identity, and requested action. Revocation, profile changes, source changes, session expiry, or remote-policy changes invalidate the relevant path.
 
-## Operations and compatibility
+## Downloads
 
-The same versioned surface exposes safe health and scoped operational resources:
+`POST /api/v1/downloads` reserves quota and returns a persistent `LoomDownload` capability. The secret belongs in the `Authorization` header for `/api/v1/downloads/<id>/content`, not in a URL. A client can list and revoke its leases. The server rechecks permissions, invitation scope, profile selection, root, source identity, size, expiry, and range policy before every read.
 
-```sh
-curl http://127.0.0.1:3847/api/v1/health
-curl -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:3847/api/v1/logs?level=warn&limit=50'
-curl -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:3847/api/v1/backups
-```
+## Private sharing
 
-Backup creation and restore require `backup.create`; logs require `logs.read`.
-Restore validates the checksum and writes a pre-restore rollback snapshot before
-replacing state. The media API remains read-only unless an account is granted
-the separate `media.delete` permission. Public API backup writes and restores
-are restricted to the server-owned backup directory; use the admin API for
-deployment-local backup workflows that intentionally target another mounted
-volume.
+An account with `sharing.manage` can create an expiring invitation scoped to one profile, selected roots, optional media IDs, permissions, and download quota. The creation response shows its secret once. Acceptance exchanges `LoomInvite` for a revocable `LoomInvitation` session. Revoking the invitation also invalidates its sessions and download authority.
 
-Version `1` is additive within its resource names. Clients should ignore
-unknown response fields, use the discovery document to gate optional
-capabilities, and treat a changed major path (`/api/v2`) as a new contract.
-The server sends `X-LoomTV-API-Version: 1` on every versioned response. Webhook
-subscriptions are intentionally not part of this contract yet; they remain a
-separate notifications feature so clients do not depend on an unstable event
-delivery model. The hosted client is same-origin by design; the server does
-not emit wildcard CORS headers. Cross-origin browser integrations should use a
-trusted reverse proxy that adds an explicit origin allow-list.
+## Remote access
 
-Media files stay read-only from LoomTV's perspective. The API never exposes
-host filesystem paths to normal client responses.
+Same-LAN use is the default. For remote access, terminate HTTPS at an explicitly trusted reverse proxy, configure the proxy allowlist, and enable the remote policy only for the required accounts and devices. The server derives the client address and secure-transport state only through that allowlist. LoomTV does not emit wildcard CORS headers, automate router exposure, or provide a hosted relay.
+
+## Compatibility
+
+Version 1 is additive within existing resources. Clients must ignore unknown response fields and gate optional behavior through discovery. A new major path such as `/api/v2` represents a breaking contract. Legacy v2 routes are compatibility adapters over canonical services and must not open independent persistence.
+
+Public catalog, root, playback, download, subtitle, diagnostics, and migration report payloads do not expose raw host filesystem paths or credential material.

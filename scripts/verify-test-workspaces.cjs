@@ -8,10 +8,13 @@ const EXPECTED_TEST_WORKSPACES = Object.freeze([
   'apps/desktop',
   'apps/mobile',
   'apps/server',
+  'apps/tv',
   'packages/media-core',
   'packages/plugin-protocol',
   'packages/runtime-paths',
   'packages/transcode-capabilities',
+  'packages/video-contracts',
+  'packages/video-migration',
 ]);
 
 function readJson(filePath) {

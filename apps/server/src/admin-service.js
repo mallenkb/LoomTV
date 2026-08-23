@@ -6,6 +6,10 @@ import { promisify } from 'node:util';
 import { createHeadlessLibraryScanner } from './library-scanner.js';
 import { normalizeIpAddress } from './trusted-proxy.js';
 import {
+  CANONICAL_BACKUP_ENVELOPE_FORMAT,
+  CANONICAL_BACKUP_ENVELOPE_VERSION,
+} from '@loom-media-server/video-contracts/server';
+import {
   containedRelativePath,
   isPathWithin,
   statContainedFile,
@@ -16,6 +20,7 @@ import {
   canAccessRoot,
   canResetCredentials,
   hasPermission,
+  isLocalNetworkAddress,
   isOwnerPrincipal,
   MAX_DEVICE_IDS,
   MAX_DEVICE_ID_LENGTH,
@@ -40,8 +45,10 @@ const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
 const LOGIN_DELAY_MS = 250;
 const STATE_FILENAME = 'headless-admin.json';
 const STATE_VERSION = 1;
-const BACKUP_FORMAT = 'loomtv-headless-backup';
-const BACKUP_VERSION = 1;
+const LEGACY_BACKUP_FORMAT = 'loomtv-headless-backup';
+const LEGACY_BACKUP_VERSION = 1;
+const BACKUP_FORMAT = CANONICAL_BACKUP_ENVELOPE_FORMAT;
+const BACKUP_VERSION = CANONICAL_BACKUP_ENVELOPE_VERSION;
 const MAX_BACKUP_HISTORY = 24;
 const MAX_BACKUP_BYTES = 512 * 1024 * 1024;
 const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -246,13 +253,26 @@ function backupDataFromState(state, clientState) {
   };
 }
 
-function backupEnvelopeFromState(state, sourceVersion, clientState) {
+function legacyBackupEnvelopeFromState(state, sourceVersion, clientState) {
   const data = backupDataFromState(state, clientState);
+  return {
+    format: LEGACY_BACKUP_FORMAT,
+    version: LEGACY_BACKUP_VERSION,
+    createdAt: new Date().toISOString(),
+    source: { version: sourceVersion || '0.0.0', stateVersion: STATE_VERSION },
+    checksum: stableChecksum(data),
+    data,
+  };
+}
+
+function canonicalBackupEnvelope(snapshot, sourceVersion) {
+  const data = snapshot;
   return {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     createdAt: new Date().toISOString(),
-    source: { version: sourceVersion || '0.0.0', stateVersion: STATE_VERSION },
+    source: { version: sourceVersion || '0.0.0', stateVersion: STATE_VERSION,
+      canonicalSchemaVersion: snapshot.schemaVersion },
     checksum: stableChecksum(data),
     data,
   };
@@ -292,15 +312,18 @@ function normalizeBackupStatus(value) {
   };
 }
 
-function validateBackupEnvelope(value) {
+function validateBackupEnvelope(value, { requireCanonical = false } = {}) {
+  if (requireCanonical && value?.format !== BACKUP_FORMAT) {
+    throw backupError('Legacy partial-state backups cannot replace the canonical store. Import them through the migration workflow.');
+  }
   // Backups created before the checksummed envelope were raw admin-state JSON
   // files. Accept them as a one-time migration so an upgrade cannot strand a
   // NAS owner with an otherwise valid recovery point.
   if (value && typeof value === 'object' && !value.format && value.owner && Array.isArray(value.roots)) {
     const data = backupDataFromState(value, undefined);
     return {
-      format: BACKUP_FORMAT,
-      version: BACKUP_VERSION,
+      format: LEGACY_BACKUP_FORMAT,
+      version: LEGACY_BACKUP_VERSION,
       createdAt: new Date().toISOString(),
       source: { version: 'legacy', stateVersion: STATE_VERSION },
       checksum: stableChecksum(data),
@@ -308,10 +331,12 @@ function validateBackupEnvelope(value) {
       legacy: true,
     };
   }
-  if (!value || typeof value !== 'object' || value.format !== BACKUP_FORMAT) {
+  if (!value || typeof value !== 'object'
+    || ![BACKUP_FORMAT, LEGACY_BACKUP_FORMAT].includes(value.format)) {
     throw backupError('The selected file is not a LoomTV backup.');
   }
-  if (value.version !== BACKUP_VERSION || !value.data || typeof value.data !== 'object') {
+  const expectedVersion = value.format === BACKUP_FORMAT ? BACKUP_VERSION : LEGACY_BACKUP_VERSION;
+  if (value.version !== expectedVersion || !value.data || typeof value.data !== 'object') {
     throw backupError('This LoomTV backup format is not supported by this server.');
   }
   if (typeof value.checksum !== 'string' || !/^[a-f0-9]{64}$/i.test(value.checksum)) {
@@ -323,7 +348,7 @@ function validateBackupEnvelope(value) {
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
     throw backupError('The backup checksum does not match its contents.');
   }
-  if (!value.data.owner || typeof value.data.owner !== 'object') {
+  if (value.format === LEGACY_BACKUP_FORMAT && (!value.data.owner || typeof value.data.owner !== 'object')) {
     throw backupError('The backup does not contain an owner account.');
   }
   return value;
@@ -469,13 +494,21 @@ function normalizeState(raw) {
     state.sessions = raw.sessions
       .filter((entry) => entry && typeof entry.tokenHash === 'string' && Number.isFinite(entry.expiresAt))
       .map((entry) => ({
+        id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 128) : randomUUID(),
         tokenHash: entry.tokenHash,
         userId: typeof entry.userId === 'string' ? entry.userId.slice(0, 100) : state.owner?.id,
         deviceId: typeof entry.deviceId === 'string' && entry.deviceId.trim()
           ? entry.deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH)
           : null,
         createdAt: Number(entry.createdAt) || Date.now(),
+        lastSeenAt: Number(entry.lastSeenAt) || Number(entry.createdAt) || Date.now(),
+        idleExpiresAt: Number(entry.idleExpiresAt) || Number(entry.expiresAt),
+        absoluteExpiresAt: Number(entry.absoluteExpiresAt) || Number(entry.expiresAt),
         expiresAt: Number(entry.expiresAt),
+        ...(Number.isFinite(entry.revokedAt) ? {
+          revokedAt: Number(entry.revokedAt),
+          revokedReason: String(entry.revokedReason || 'revoked').slice(0, 64),
+        } : {}),
       }))
       .slice(-MAX_SESSIONS);
   }
@@ -514,11 +547,14 @@ function normalizeState(raw) {
         rootId: entry.rootId.slice(0, 128),
         path: path.resolve(entry.path),
         relativePath: typeof entry.relativePath === 'string' ? entry.relativePath.slice(0, 4_096) : path.basename(entry.path),
-        type: entry.type === 'tv' || entry.kind === 'episode' ? 'tv' : 'movie',
+        type: entry.type === 'tv' || ['series','episode'].includes(entry.kind) ? 'tv' : 'movie',
         title: typeof entry.title === 'string' ? entry.title.slice(0, 500) : path.basename(entry.path),
-        kind: entry.kind === 'episode' ? 'episode' : 'movie',
+        kind: ['movie','series','episode','video'].includes(entry.kind) ? entry.kind : 'movie',
         ...(Number.isSafeInteger(entry.year) && entry.year > 1900 && entry.year < 2200 ? { year: entry.year } : {}),
         ...(entry.animeLikely === true ? { animeLikely: true } : {}),
+        ...(typeof entry.seriesId === 'string' && entry.seriesId.length <= 128 ? { seriesId: entry.seriesId } : {}),
+        ...(Number.isSafeInteger(entry.seasonNumber) && entry.seasonNumber >= 0 ? { seasonNumber: entry.seasonNumber } : {}),
+        ...(Number.isSafeInteger(entry.episodeNumber) && entry.episodeNumber >= 0 ? { episodeNumber: entry.episodeNumber } : {}),
         ...(entry.series && typeof entry.series === 'object' && typeof entry.series.title === 'string'
           ? {
             series: {
@@ -531,8 +567,46 @@ function normalizeState(raw) {
         extension: typeof entry.extension === 'string' ? entry.extension.slice(0, 16) : path.extname(entry.path).slice(1).toLowerCase(),
         sizeBytes: Number.isFinite(entry.sizeBytes) ? Number(entry.sizeBytes) : undefined,
         modifiedAtMs: Number.isFinite(entry.modifiedAtMs) ? Number(entry.modifiedAtMs) : undefined,
+        ...(entry.localMetadata && typeof entry.localMetadata === 'object' && !Array.isArray(entry.localMetadata)
+          ? { localMetadata: entry.localMetadata }
+          : {}),
+        ...(entry.contentRatings && typeof entry.contentRatings === 'object' && !Array.isArray(entry.contentRatings)
+          ? {
+            contentRatings: Object.fromEntries(Object.entries(entry.contentRatings).slice(0, 64).flatMap(([country, rating]) => (
+              /^[A-Za-z]{2,3}$/.test(country) && rating && Number.isFinite(rating.minimumAge)
+                ? [[country.toUpperCase(), { ...rating, minimumAge: Math.max(0, Math.min(21, Number(rating.minimumAge))) }]]
+                : []
+            ))),
+          }
+          : {}),
+        ...(typeof entry.summary === 'string' ? { summary: entry.summary.slice(0, 20_000) } : {}),
+        ...(Number.isFinite(entry.rating) ? { rating: Number(entry.rating) } : {}),
+        ...(Array.isArray(entry.genres) ? { genres: entry.genres
+          .filter((genre) => typeof genre === 'string' && genre.length <= 128).slice(0, 128) } : {}),
+        ...(entry.providerIds && typeof entry.providerIds === 'object' && !Array.isArray(entry.providerIds)
+          ? { providerIds: Object.fromEntries(Object.entries(entry.providerIds).slice(0, 64).flatMap(([provider, value]) => (
+            typeof value === 'string' && provider.length <= 64 && value.length <= 256 ? [[provider, value]] : []
+          ))) } : {}),
+        ...(Array.isArray(entry.subtitleSidecars) ? { subtitleSidecars: entry.subtitleSidecars.slice(0, 64).flatMap((sidecar) => {
+          if (!sidecar || typeof sidecar !== 'object' || typeof sidecar.id !== 'string' || !sidecar.id.startsWith('sidecar:')
+            || typeof sidecar.path !== 'string' || !['srt','vtt','ass','ssa'].includes(sidecar.format)) return [];
+          return [{
+            id: sidecar.id.slice(0, 128), path: path.resolve(sidecar.path),
+            relativeName: typeof sidecar.relativeName === 'string' ? sidecar.relativeName.slice(0, 500) : path.basename(sidecar.path),
+            format: sidecar.format, codec: typeof sidecar.codec === 'string' ? sidecar.codec.slice(0, 32) : sidecar.format,
+            ...(typeof sidecar.language === 'string' ? { language: sidecar.language.slice(0, 32) } : {}),
+            ...(typeof sidecar.title === 'string' ? { title: sidecar.title.slice(0, 200) } : {}),
+            forced: sidecar.forced === true, default: sidecar.default === true, origin: 'local',
+            ...(Number.isFinite(sidecar.sizeBytes) ? { sizeBytes: Number(sidecar.sizeBytes) } : {}),
+            ...(Number.isFinite(sidecar.modifiedAtMs) ? { modifiedAtMs: Number(sidecar.modifiedAtMs) } : {}),
+          }];
+        }) } : {}),
+        legacyIds: Array.isArray(entry.legacyIds) ? entry.legacyIds
+          .filter((legacyId) => typeof legacyId === 'string' && legacyId.length <= 512).slice(0, 512) : [],
         available: entry.available !== false,
         indexedAt: Number(entry.indexedAt) || Date.now(),
+        createdAt: Number(entry.createdAt) || Number(entry.indexedAt) || Date.now(),
+        updatedAt: Number(entry.updatedAt) || Number(entry.indexedAt) || Date.now(),
       }));
   }
   if (Array.isArray(raw.profiles)) state.profiles = raw.profiles.slice(0, 4_096);
@@ -565,6 +639,7 @@ function normalizeState(raw) {
 
 export function createHeadlessAdminService(options) {
   if (!options.bootstrapSecurity) throw new Error('createHeadlessAdminService requires bootstrapSecurity.');
+  const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   const dataDir = path.resolve(options.dataDir);
   const statePath = path.join(dataDir, STATE_FILENAME);
   const mediaDir = options.mediaDir ? path.resolve(options.mediaDir) : null;
@@ -572,11 +647,19 @@ export function createHeadlessAdminService(options) {
   const getSessions = options.getSessions || (async () => []);
   const getClientState = options.getClientState || (async () => null);
   const replaceClientState = options.replaceClientState || (async () => undefined);
+  const replaceAllState = typeof options.replaceAllState === 'function' ? options.replaceAllState : null;
+  const stateStore = options.stateStore || null;
+  const onCanonicalRestore = typeof options.onCanonicalRestore === 'function'
+    ? options.onCanonicalRestore
+    : null;
   const onPlaybackSessionsRevoked = typeof options.onPlaybackSessionsRevoked === 'function'
     ? options.onPlaybackSessionsRevoked
     : null;
   const onPlaybackSessionsRevokedForItem = typeof options.onPlaybackSessionsRevokedForItem === 'function'
     ? options.onPlaybackSessionsRevokedForItem
+    : null;
+  const onAuthenticationSessionRevoked = typeof options.onAuthenticationSessionRevoked === 'function'
+    ? options.onAuthenticationSessionRevoked
     : null;
   const onAllPlaybackSessionsRevoked = typeof options.onAllPlaybackSessionsRevoked === 'function'
     ? options.onAllPlaybackSessionsRevoked
@@ -605,13 +688,25 @@ export function createHeadlessAdminService(options) {
     try { await onPlaybackSessionsRevokedForItem(itemId, reason); } catch { /* playback cleanup is best effort */ }
   }
 
-  async function notifyAllPlaybackSessionsRevoked(reason) {
+  async function notifyAuthenticationSessionRevoked(sessionId, reason) {
+    if (!onAuthenticationSessionRevoked || !sessionId) return;
+    try { await onAuthenticationSessionRevoked(sessionId, reason); } catch { /* playback cleanup is best effort */ }
+  }
+
+  async function notifyAllPlaybackSessionsRevoked(reason, strict = false) {
     if (!onAllPlaybackSessionsRevoked) return;
-    try { await onAllPlaybackSessionsRevoked(reason); } catch { /* playback cleanup is best effort */ }
+    try { await onAllPlaybackSessionsRevoked(reason); } catch (error) {
+      if (strict) throw error;
+      // Non-restore administrative cleanup remains best effort.
+    }
   }
 
   async function saveState(state) {
     writeQueue = writeQueue.catch(() => undefined).then(async () => {
+      if (stateStore) {
+        stateStore.replaceAdminState(state);
+        return;
+      }
       await fs.mkdir(dataDir, { recursive: true });
       const temporaryPath = `${statePath}.${process.pid}.tmp`;
       await fs.writeFile(temporaryPath, JSON.stringify(state, null, 2), { encoding: 'utf8', mode: 0o600 });
@@ -620,15 +715,33 @@ export function createHeadlessAdminService(options) {
     return writeQueue;
   }
 
+  async function saveBackupStatus(status) {
+    if (stateStore?.updateBackupState) {
+      stateStore.updateBackupState(status);
+      return;
+    }
+    const state = await loadState();
+    state.backup = status;
+    await saveState(state);
+  }
+
   async function writeBackupFile(destination, envelope) {
     const serialized = JSON.stringify(envelope, null, 2);
     if (Buffer.byteLength(serialized) > MAX_BACKUP_BYTES) throw backupError('The backup is larger than the supported limit.');
     await fs.mkdir(path.dirname(destination), { recursive: true });
     const temporaryPath = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+    let handle;
     try {
-      await fs.writeFile(temporaryPath, serialized, { encoding: 'utf8', mode: 0o600 });
+      handle = await fs.open(temporaryPath, 'wx', 0o600);
+      await handle.writeFile(serialized, 'utf8');
+      await handle.sync();
+      await handle.close();
+      handle = null;
       await fs.rename(temporaryPath, destination);
+      const directory = await fs.open(path.dirname(destination), 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
     } catch (error) {
+      await handle?.close().catch(() => undefined);
       await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
       throw error;
     }
@@ -718,12 +831,12 @@ export function createHeadlessAdminService(options) {
 
   async function loadState() {
     if (!statePromise) {
-      statePromise = fs.readFile(statePath, 'utf8')
-        .then((contents) => normalizeState(JSON.parse(contents)))
+      statePromise = (stateStore
+        ? Promise.resolve(normalizeState(stateStore.readAdminState()))
+        : fs.readFile(statePath, 'utf8').then((contents) => normalizeState(JSON.parse(contents))))
         .catch(async (error) => {
           if (error?.code === 'ENOENT') {
             const state = defaultState();
-            if (mediaDir) state.roots.push({ id: rootIdFor(mediaDir), path: mediaDir, kind: 'others', createdAt: Date.now() });
             await saveState(state);
             return state;
           }
@@ -733,13 +846,7 @@ export function createHeadlessAdminService(options) {
             cause: error,
           });
         })
-        .then(async (state) => {
-          if (mediaDir && state.roots.length === 0) {
-            state.roots.push({ id: rootIdFor(mediaDir), path: mediaDir, kind: 'others', createdAt: Date.now() });
-            await saveState(state);
-          }
-          return state;
-        });
+        .then((state) => state);
     }
     return statePromise;
   }
@@ -755,7 +862,8 @@ export function createHeadlessAdminService(options) {
       ...(details ? { details } : {}),
     });
     pruneLogs(state);
-    await saveState(state);
+    if (stateStore?.appendOperationalLog) stateStore.appendOperationalLog(state.logs[0]);
+    else await saveState(state);
   }
 
   async function rootView(root) {
@@ -778,7 +886,12 @@ export function createHeadlessAdminService(options) {
     }
   }
 
-  const scanner = createHeadlessLibraryScanner({ loadState, saveState, appendLog });
+  const scanner = createHeadlessLibraryScanner({
+    loadState,
+    saveState,
+    appendLog,
+    probeMedia: typeof options.probeMedia === 'function' ? options.probeMedia : null,
+  });
 
   function tokenFromRequest(req) {
     const header = req?.headers?.authorization || '';
@@ -911,7 +1024,7 @@ export function createHeadlessAdminService(options) {
 
   function activeUserSessions(state, userId) {
     const now = Date.now();
-    return state.sessions.filter((entry) => entry.userId === userId && entry.expiresAt > now);
+    return state.sessions.filter((entry) => entry.userId === userId && !entry.revokedAt && entry.expiresAt > now);
   }
 
   function enforceSessionPolicy(state, principal, deviceId) {
@@ -937,10 +1050,14 @@ export function createHeadlessAdminService(options) {
       .filter((entry) => entry.expiresAt > Date.now())
       .slice(-(MAX_SESSIONS - 1));
     const session = {
+      id: randomUUID(),
       tokenHash: hashToken(token),
       userId: principal.id,
       deviceId: typeof deviceId === 'string' && deviceId.trim() ? deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH) : null,
       createdAt: Date.now(),
+      lastSeenAt: Date.now(),
+      idleExpiresAt: Date.now() + ADMIN_TOKEN_TTL_MS,
+      absoluteExpiresAt: Date.now() + ADMIN_TOKEN_TTL_MS,
       expiresAt: Date.now() + ADMIN_TOKEN_TTL_MS,
     };
     state.sessions.push(session);
@@ -949,17 +1066,67 @@ export function createHeadlessAdminService(options) {
   }
 
   async function authenticateRequest(req) {
+    const deviceCredential = await options.pairingService?.authenticate(req?.headers?.authorization);
+    if (deviceCredential) {
+      const state = await loadState();
+      const account = principalForUserId(state, deviceCredential.accountId);
+      if (!account) return null;
+      const principal = {
+        ...account,
+        authentication: 'device-credential',
+        deviceId: deviceCredential.deviceId,
+        deviceCredentialId: deviceCredential.id,
+        devicePermissions: [...deviceCredential.permissions],
+      };
+      const address = options.clientAddress?.(req) || req?.socket?.remoteAddress;
+      if (!isLocalNetworkAddress(address) && !hasPermission(principal, 'remote.access')) {
+        throw Object.assign(new Error('Remote access is not enabled for this device.'), {
+          status: 403, code: 'remote_access_disabled',
+        });
+      }
+      return principal;
+    }
     const token = tokenFromRequest(req);
     if (!token) return null;
     const state = await loadState();
     const now = Date.now();
-    const active = state.sessions.filter((entry) => entry.expiresAt > now && principalForUserId(state, entry.userId));
+    const active = state.sessions.filter((entry) => !entry.revokedAt && entry.expiresAt > now && principalForUserId(state, entry.userId));
     const session = active.find((entry) => timingSafeStringEqual(entry.tokenHash, hashToken(token)));
     if (active.length !== state.sessions.length) {
       state.sessions = active;
       await saveState(state);
     }
-    return session ? principalForUserId(state, session.userId) : null;
+    if (!session) return null;
+    const principal = principalForUserId(state, session.userId);
+    if (session.deviceId) {
+      const device = await options.pairingService?.resolveSessionDevice(principal.id, session.deviceId);
+      if (!device) {
+        session.revokedAt = now;
+        session.revokedReason = 'device_revoked';
+        await saveState(state);
+        return null;
+      }
+      const sessionPrincipal = {
+        ...principal, authentication: 'device-session', sessionId: session.id,
+        deviceId: device.deviceId, deviceCredentialId: device.id,
+        devicePermissions: [...device.permissions],
+      };
+      const address = options.clientAddress?.(req) || req?.socket?.remoteAddress;
+      if (!isLocalNetworkAddress(address) && !hasPermission(sessionPrincipal, 'remote.access')) {
+        throw Object.assign(new Error('Remote access is not enabled for this device.'), {
+          status: 403, code: 'remote_access_disabled',
+        });
+      }
+      return sessionPrincipal;
+    }
+    const sessionPrincipal = { ...principal, authentication: 'account-session', sessionId: session.id, deviceId: null };
+    const address = options.clientAddress?.(req) || req?.socket?.remoteAddress;
+    if (!isLocalNetworkAddress(address) && !hasPermission(sessionPrincipal, 'remote.access')) {
+      throw Object.assign(new Error('Remote access is not enabled for this account.'), {
+        status: 403, code: 'remote_access_disabled',
+      });
+    }
+    return sessionPrincipal;
   }
 
   return {
@@ -973,6 +1140,28 @@ export function createHeadlessAdminService(options) {
 
     async getPrincipalById(userId) {
       return principalForUserId(await loadState(), userId);
+    },
+
+    async getOwnerPrincipal() {
+      return publicOwnerPrincipal((await loadState()).owner);
+    },
+
+    async isSessionActive(sessionId, accountId, deviceId = null) {
+      if (!sessionId || !accountId) return false;
+      const now = Date.now();
+      return (await loadState()).sessions.some((entry) => (
+        entry.id === sessionId && entry.userId === accountId && !entry.revokedAt && entry.expiresAt > now
+        && (deviceId === null || entry.deviceId === deviceId)
+      ));
+    },
+
+    async issueDeviceSession(credential) {
+      const state = await loadState();
+      const principal = principalForUserId(state, credential?.accountId);
+      if (!principal || !credential?.deviceId) throw Object.assign(new Error('The device credential is invalid.'), {
+        status: 401, code: 'device_revoked',
+      });
+      return issueToken(state, principal, credential.deviceId);
     },
 
     async authorizeRequest(req, permission) {
@@ -989,16 +1178,30 @@ export function createHeadlessAdminService(options) {
       if (!token) return false;
       const state = await loadState();
       const tokenHash = hashToken(token);
-      const revokedPrincipalIds = [...new Set(state.sessions
+      const revokedSessionIds = state.sessions
         .filter((entry) => timingSafeStringEqual(entry.tokenHash, tokenHash))
-        .map((entry) => entry.userId)
-        .filter(Boolean))];
+        .map((entry) => entry.id)
+        .filter(Boolean);
       const before = state.sessions.length;
       state.sessions = state.sessions.filter((entry) => !timingSafeStringEqual(entry.tokenHash, tokenHash));
       if (state.sessions.length === before) return false;
       await saveState(state);
-      await Promise.all(revokedPrincipalIds.map((userId) => notifyPlaybackSessionsRevoked(userId, 'auth_session_revoked')));
+      await Promise.all(revokedSessionIds.map((sessionId) => notifyAuthenticationSessionRevoked(sessionId, 'auth_session_revoked')));
       return true;
+    },
+
+    async revokeDeviceSessions(deviceId, reason = 'device_revoked') {
+      const state = await loadState();
+      const revokedAt = Date.now();
+      let changed = false;
+      for (const session of state.sessions) {
+        if (session.deviceId !== deviceId || session.revokedAt) continue;
+        session.revokedAt = revokedAt;
+        session.revokedReason = String(reason).slice(0, 64);
+        changed = true;
+      }
+      if (changed) await saveState(state);
+      return changed;
     },
 
     async getBootstrap(principal) {
@@ -1054,7 +1257,12 @@ export function createHeadlessAdminService(options) {
       ownerCreationPromise = (async () => {
         const state = await loadState();
         if (state.owner) throw Object.assign(new Error('The LoomTV owner has already been created.'), { status: 409 });
-        options.bootstrapSecurity.authorize(input.bootstrapSecret, input.address);
+        // Trusted desktop setup and the shared web setup follow the same owner
+        // flow. Deployments that opt into a bootstrap secret still verify it
+        // here, before any account state is written.
+        if (input.trustedChannel !== true && requireBootstrapSecret) {
+          options.bootstrapSecurity.authorize(input.bootstrapSecret, input.address);
+        }
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.trim().length > 80) {
           throw invalidInput('The owner name must be between 1 and 80 characters.');
         }
@@ -1082,10 +1290,13 @@ export function createHeadlessAdminService(options) {
         throw invalidInput('The account password is invalid.');
       }
       const address = requestAddress(input.address);
-      const deviceId = typeof input.deviceId === 'string' && input.deviceId.trim()
+      const requestedDeviceId = typeof input.deviceId === 'string' && input.deviceId.trim()
         ? input.deviceId.trim().slice(0, MAX_DEVICE_ID_LENGTH)
         : null;
       const match = userByName(state, identity || 'owner');
+      const deviceId = requestedDeviceId && match?.principal
+        ? await options.pairingService?.resolveBoundDevice(match.principal.id, requestedDeviceId)
+        : null;
       const keys = loginKeys(identity || 'owner', address, match);
       const now = Date.now();
       reconcileIdentityAttempts(state, keys, now);
@@ -1115,6 +1326,11 @@ export function createHeadlessAdminService(options) {
           status: lockedRetryAfter ? 429 : 401,
           code: lockedRetryAfter ? 'login_locked' : 'invalid_credentials',
           ...(lockedRetryAfter ? { retryAfter: lockedRetryAfter } : {}),
+        });
+      }
+      if (!isLocalNetworkAddress(address) && !hasPermission(match.principal, 'remote.access')) {
+        throw Object.assign(new Error('Remote access is not enabled for this account.'), {
+          status: 403, code: 'remote_access_disabled',
         });
       }
       // A valid login clears its identity failures, but not failures shared by
@@ -1348,6 +1564,82 @@ export function createHeadlessAdminService(options) {
       };
     },
 
+    async searchLibraryDirectories(input = {}, principal) {
+      ensurePrincipalPermission(principal, 'library.manage');
+      if (!mediaDir) {
+        throw Object.assign(new Error('No media mount is configured for this server.'), { status: 409 });
+      }
+      const query = typeof input.query === 'string' ? input.query.trim().toLocaleLowerCase() : '';
+      if (!query || query.length > 120) {
+        throw Object.assign(new Error('Enter a folder name to search.'), { status: 400 });
+      }
+
+      const configuredRoot = await fs.realpath(mediaDir).catch((error) => {
+        throw Object.assign(new Error('The configured media mount is not available.'), { status: error?.code === 'EACCES' ? 403 : 409 });
+      });
+      const maxResults = 100;
+      const maxVisited = 5_000;
+      const maxDepth = 12;
+      const unavailableDirectoryErrors = new Set([
+        'EACCES',
+        'EIO',
+        'ELOOP',
+        'ENAMETOOLONG',
+        'ENOENT',
+        'ENOTCONN',
+        'ENOTDIR',
+        'ENXIO',
+        'EPERM',
+        'ESTALE',
+        'ETIMEDOUT',
+      ]);
+      const state = !isOwnerPrincipal(principal) && principal.rootIds !== null ? await loadState() : null;
+      const searchRoots = state
+        ? state.roots
+          .filter((root) => principal.rootIds.includes(root.id))
+          .map((root) => path.resolve(root.path))
+          .filter((root) => isPathWithin(configuredRoot, root))
+        : [configuredRoot];
+      const queue = [];
+      for (const root of searchRoots) {
+        const existing = await fs.realpath(root).catch(() => null);
+        if (existing && isPathWithin(configuredRoot, existing)) queue.push({ path: existing, depth: 0 });
+      }
+
+      const directories = [];
+      let visited = 0;
+      while (queue.length && directories.length < maxResults && visited < maxVisited) {
+        const current = queue.shift();
+        visited += 1;
+        const entries = await fs.readdir(current.path, { withFileTypes: true }).catch((error) => {
+          // External drives, NAS shares, and cloud-storage placeholders can
+          // disappear or time out while the rest of the browse root remains
+          // healthy. Skip only that branch so one unavailable folder cannot
+          // discard matches found elsewhere.
+          if (unavailableDirectoryErrors.has(error?.code)) return [];
+          throw Object.assign(new Error('The server could not search that folder.'), { status: 500 });
+        });
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const childPath = path.join(current.path, entry.name);
+          if (!isPathWithin(configuredRoot, childPath)) continue;
+          if (entry.name.toLocaleLowerCase().includes(query)) {
+            directories.push({ name: entry.name, path: childPath });
+            if (directories.length >= maxResults) break;
+          }
+          if (current.depth < maxDepth) queue.push({ path: childPath, depth: current.depth + 1 });
+        }
+      }
+
+      directories.sort((left, right) => left.path.localeCompare(right.path, undefined, { sensitivity: 'base' }));
+      return {
+        rootPath: configuredRoot,
+        query,
+        directories,
+        truncated: queue.length > 0 || visited >= maxVisited || directories.length >= maxResults,
+      };
+    },
+
     async addLibraryRoot(input, principal) {
       ensurePrincipalPermission(principal, 'library.manage');
       if (!isOwnerPrincipal(principal) && principal.rootIds !== null) {
@@ -1407,40 +1699,116 @@ export function createHeadlessAdminService(options) {
     async listLibraryItems(principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
       const items = await scanner.listItems();
-      if (!principal || principal.rootIds === null || isOwnerPrincipal(principal)) return items;
-      return items.filter((item) => canAccessRoot(principal, item.rootId));
+      const episodeSourcesForSeries = (seriesId) => items
+        .filter((entry) => entry.kind === 'episode' && entry.seriesId === seriesId)
+        .flatMap((entry) => stateStore?.listMediaSources?.(entry.id)
+          || [{ id: entry.sourceId || `${entry.id}:primary`, rootId: entry.rootId, state: entry.available === false ? 'offline' : 'online' }]);
+      return items.flatMap((item) => {
+        const linkedEpisodes = item.kind === 'series'
+          ? items.filter((entry) => entry.kind === 'episode' && entry.seriesId === item.id)
+          : [];
+        if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(item.id)
+          && !linkedEpisodes.some((entry) => principal.invitationMediaIds.includes(entry.id))) return [];
+        const ownSources = stateStore?.listMediaSources?.(item.id);
+        const canonicalSources = item.kind === 'series'
+          ? episodeSourcesForSeries(item.id)
+          : ownSources?.length ? ownSources
+            : [{ id: item.sourceId || `${item.id}:primary`, rootId: item.rootId, state: item.available === false ? 'offline' : 'online' }];
+        const visibleSources = !principal || principal.rootIds === null || isOwnerPrincipal(principal)
+          ? canonicalSources
+          : canonicalSources.filter((source) => canAccessRoot(principal, source.rootId));
+        if (!visibleSources.length && (item.kind !== 'series' || principal && principal.rootIds !== null && !isOwnerPrincipal(principal))) return [];
+        return [{ ...item, sourceIds: visibleSources.map((source) => source.id), available: visibleSources.some((source) => source.state === 'online') }];
+      });
     },
 
     async getLibraryItem(itemId, principal) {
       if (principal) ensurePrincipalPermission(principal, 'library.read');
+      if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(itemId)) return null;
       const item = await scanner.getItem(itemId);
-      if (!item || (principal && !canAccessRoot(principal, item.rootId))) return null;
-      return item;
+      if (!item) return null;
+      const items = item.kind === 'series' ? await scanner.listItems() : [];
+      const linkedEpisodes = items.filter((entry) => entry.kind === 'episode' && entry.seriesId === item.id);
+      if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(itemId)
+        && !linkedEpisodes.some((entry) => principal.invitationMediaIds.includes(entry.id))) return null;
+      const ownSources = stateStore?.listMediaSources?.(item.id);
+      const canonicalSources = item.kind === 'series'
+        ? linkedEpisodes.flatMap((entry) => stateStore?.listMediaSources?.(entry.id)
+          || [{ id: entry.sourceId || `${entry.id}:primary`, rootId: entry.rootId, state: entry.available === false ? 'offline' : 'online' }])
+        : ownSources?.length ? ownSources
+          : [{ id: item.sourceId || `${item.id}:primary`, rootId: item.rootId, state: item.available === false ? 'offline' : 'online' }];
+      const visibleSources = !principal || principal.rootIds === null || isOwnerPrincipal(principal)
+        ? canonicalSources
+        : canonicalSources.filter((source) => canAccessRoot(principal, source.rootId));
+      if (!visibleSources.length && (item.kind !== 'series' || principal && principal.rootIds !== null && !isOwnerPrincipal(principal))) return null;
+      return { ...item, sourceIds: visibleSources.map((source) => source.id), available: visibleSources.some((source) => source.state === 'online') };
     },
 
-    async resolveMediaPath(itemId, principal) {
+    async recordMediaProbe(itemId, sourceId, probe) {
+      if (!probe || typeof probe !== 'object' || !Array.isArray(probe.tracks)) return null;
+      if (stateStore?.recordMediaProbe) return stateStore.recordMediaProbe(itemId, sourceId, probe) ? probe : null;
+      const state = await loadState();
+      const item = state.catalog.find((entry) => entry.id === itemId);
+      if (!item) return null;
+      item.localMetadata = {
+        sourceId: typeof probe.sourceId === 'string' ? probe.sourceId.slice(0, 256) : item.sourceId,
+        container: typeof probe.container === 'string' ? probe.container.slice(0, 64) : 'unknown',
+        ...(Number.isFinite(probe.durationSeconds) ? { durationSeconds: Number(probe.durationSeconds) } : {}),
+        ...(Number.isFinite(probe.bitrateKbps) ? { bitrateKbps: Number(probe.bitrateKbps) } : {}),
+        ...(Number.isFinite(probe.width) ? { width: Number(probe.width) } : {}),
+        ...(Number.isFinite(probe.height) ? { height: Number(probe.height) } : {}),
+        ...(typeof probe.videoCodec === 'string' ? { videoCodec: probe.videoCodec.slice(0, 64) } : {}),
+        ...(typeof probe.audioCodec === 'string' ? { audioCodec: probe.audioCodec.slice(0, 64) } : {}),
+        hdr: probe.hdr === true,
+        tracks: probe.tracks.slice(0, 256),
+        chapters: Array.isArray(probe.chapters) ? probe.chapters.slice(0, 10_000) : [],
+        probedAt: Number(probe.probedAt) || Date.now(),
+      };
+      await saveState(state);
+      return item.localMetadata;
+    },
+
+    async resolveMediaPath(itemId, principal, sourceId = undefined) {
       if (principal && !isOwnerPrincipal(principal)
         && !hasPermission(principal, 'library.read')
         && !hasPermission(principal, 'stream')
         && !hasPermission(principal, 'transcode')
         && !hasPermission(principal, 'downloads')
         && !hasPermission(principal, 'media.delete')) throw permissionDenied();
+      if (principal?.invitationMediaIds && !principal.invitationMediaIds.includes(itemId)) throw permissionDenied('Media is outside the invitation scope.');
       const item = await scanner.getItem(itemId);
       if (!item) throw Object.assign(new Error('Media item was not found.'), { status: 404 });
-      if (principal && !canAccessRoot(principal, item.rootId)) throw permissionDenied('This account cannot access that library.');
-      const root = (await loadState()).roots.find((entry) => entry.id === item.rootId);
+      const visibleCanonicalSources = (stateStore?.listMediaSources?.(itemId) || []).filter((source) => (
+        !principal || canAccessRoot(principal, source.rootId)
+      ));
+      const selectedSourceId = sourceId || visibleCanonicalSources[0]?.id;
+      const canonicalSource = stateStore?.readMediaSource?.(itemId, selectedSourceId);
+      if (sourceId && !canonicalSource) throw Object.assign(new Error('Media source was not found.'), { status: 404, code: 'source_unavailable' });
+      const selected = canonicalSource || item;
+      if (selected.state && selected.state !== 'online') throw Object.assign(new Error('Media source is unavailable.'), { status: 409, code: 'source_unavailable' });
+      if (principal && selected.rootId && !canAccessRoot(principal, selected.rootId)) throw permissionDenied('This account cannot access that library.');
+      const root = canonicalSource?.rootPath
+        ? { id: canonicalSource.rootId, path: canonicalSource.rootPath }
+        : (await loadState()).roots.find((entry) => entry.id === selected.rootId);
       if (!root) throw Object.assign(new Error('Media root was removed.'), { status: 404 });
       // Containment is decided on canonical real paths, not on the recorded
       // strings: a catalog entry can point at a symlink, a dangling link, or a
       // path whose type changed since it was indexed. `fileId` lets the caller
       // that finally opens the file prove it is still the same file.
-      const verified = await statContainedFile(root.path, item.path);
+      const verified = await statContainedFile(root.path, selected.path);
       return {
         ...item,
+        rootId: selected.rootId || item.rootId,
+        sourceId: selected.id || item.sourceId || `${itemId}:primary`,
+        sourceState: selected.state || (item.available === false ? 'offline' : 'online'),
+        ...(selected.probe ? { localMetadata: selected.probe } : {}),
+        ...(Number.isFinite(selected.modifiedAtMs) ? { recordedModifiedAtMs: Number(selected.modifiedAtMs) } : {}),
+        ...(Number.isFinite(selected.sizeBytes) ? { recordedSizeBytes: Number(selected.sizeBytes) } : {}),
         path: verified.realPath,
         rootPath: verified.rootRealPath,
         fileId: verified.fileId,
         sizeBytes: verified.stats.size,
+        modifiedAtMs: verified.stats.mtimeMs,
       };
     },
 
@@ -1600,19 +1968,21 @@ export function createHeadlessAdminService(options) {
         const state = await loadState();
         const destination = path.resolve(input.destination || path.join(dataDir, 'backups'));
         state.backup = { ...normalizeBackupStatus(state.backup), state: 'running', destination };
-        await saveState(state);
+        await saveBackupStatus(state.backup);
         try {
-          const envelope = backupEnvelopeFromState(state, options.version, await getClientState());
+          const envelope = stateStore?.exportCanonicalSnapshot
+            ? canonicalBackupEnvelope(stateStore.exportCanonicalSnapshot(), options.version)
+            : legacyBackupEnvelopeFromState(state, options.version, await getClientState());
           const outputPath = path.join(destination, `loomtv-backup-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID().slice(0, 8)}.json`);
           const artifact = await writeBackupFile(outputPath, envelope);
           const createdAt = Date.now();
           const history = [{ kind: 'backup', status: 'completed', createdAt, destination: outputPath, checksum: artifact.checksum, formatVersion: BACKUP_VERSION, sizeBytes: artifact.sizeBytes }, ...normalizeBackupHistory(state.backup.history)].slice(0, MAX_BACKUP_HISTORY);
           state.backup = { ...normalizeBackupStatus(state.backup), state: 'completed', lastBackupAt: createdAt, destination: outputPath, sizeBytes: artifact.sizeBytes, checksum: artifact.checksum, formatVersion: BACKUP_VERSION, history };
-          await saveState(state);
+          await saveBackupStatus(state.backup);
           await appendLog('info', 'Headless admin state backup completed.', { destination: outputPath, checksum: artifact.checksum, sizeBytes: artifact.sizeBytes });
         } catch (error) {
           state.backup = { ...normalizeBackupStatus(state.backup), state: 'failed', error: error instanceof Error ? error.message : String(error) };
-          await saveState(state);
+          await saveBackupStatus(state.backup);
           await appendLog('error', 'Headless admin state backup failed.');
         }
         return state.backup;
@@ -1625,7 +1995,12 @@ export function createHeadlessAdminService(options) {
     },
 
     async restoreBackup(input = {}, principal) {
-      ensurePrincipalPermission(principal, 'backup.create');
+      const current = await loadState();
+      if (!isOwnerPrincipal(principal) || !principal?.id || principal.id !== current.owner?.id) {
+        throw Object.assign(new Error('Only the configured owner can restore canonical state.'), {
+          status: 403, code: 'permission_denied',
+        });
+      }
       const source = typeof input.path === 'string' ? input.path.trim() : '';
       if (!source || source.length > 4_096) throw invalidInput('A backup path is required.');
       const sourcePath = path.resolve(source);
@@ -1641,35 +2016,54 @@ export function createHeadlessAdminService(options) {
       } catch {
         throw backupError('The selected backup is not valid JSON.');
       }
-      envelope = validateBackupEnvelope(envelope);
-      const current = await loadState();
+      envelope = validateBackupEnvelope(envelope, { requireCanonical: Boolean(stateStore?.restoreCanonicalSnapshot) });
       const rollbackDir = path.join(dataDir, 'backups', 'pre-restore');
       const rollbackPath = path.join(rollbackDir, `loomtv-pre-restore-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID().slice(0, 8)}.json`);
-      const previousClientState = await getClientState();
-      const rollbackEnvelope = backupEnvelopeFromState(current, options.version, previousClientState);
+      const previousClientState = stateStore?.exportCanonicalSnapshot ? null : await getClientState();
+      const rollbackEnvelope = stateStore?.exportCanonicalSnapshot
+        ? canonicalBackupEnvelope(stateStore.exportCanonicalSnapshot(), options.version)
+        : legacyBackupEnvelopeFromState(current, options.version, previousClientState);
       const rollbackArtifact = await writeBackupFile(rollbackPath, rollbackEnvelope);
-      const replacement = normalizeState({ ...envelope.data, sessions: [], loginAttempts: [] });
-      if (!replacement.owner) throw backupError('The backup does not contain a usable owner account.');
       const restoredAt = Date.now();
       const history = [{ kind: 'restore', status: 'completed', createdAt: restoredAt, source: sourcePath, destination: rollbackPath, checksum: envelope.checksum, formatVersion: envelope.version, sizeBytes: stats.size }, ...normalizeBackupHistory(current.backup.history)].slice(0, MAX_BACKUP_HISTORY);
-      replacement.backup = { ...normalizeBackupStatus(current.backup), state: 'restored', lastRestoreAt: restoredAt, restoredFrom: sourcePath, rollbackDestination: rollbackPath, destination: sourcePath, sizeBytes: stats.size, checksum: envelope.checksum, formatVersion: envelope.version, history };
-      await saveState(replacement);
+      let replacement;
+      let canonicalRestored = false;
       try {
-        if (envelope.data.clientState !== undefined) await replaceClientState(envelope.data.clientState);
+        if (stateStore?.restoreCanonicalSnapshot) {
+          await stateStore.restoreCanonicalSnapshot(envelope.data, restoredAt);
+          canonicalRestored = true;
+          replacement = normalizeState(stateStore.readAdminState());
+        } else {
+          replacement = normalizeState({ ...envelope.data, sessions: [], loginAttempts: [] });
+        }
+        if (!replacement.owner) throw backupError('The backup does not contain a usable owner account.');
+        replacement.backup = { ...normalizeBackupStatus(current.backup), state: 'restored', lastRestoreAt: restoredAt, restoredFrom: sourcePath, rollbackDestination: rollbackPath, destination: sourcePath, sizeBytes: stats.size, checksum: envelope.checksum, formatVersion: envelope.version, history };
+        if (canonicalRestored) {
+          await saveBackupStatus(replacement.backup);
+          await onCanonicalRestore?.();
+          await notifyAllPlaybackSessionsRevoked('backup_restored', true);
+        } else if (envelope.data.clientState !== undefined && replaceAllState) {
+          await replaceAllState({ adminState: replacement, clientState: envelope.data.clientState });
+        } else {
+          await saveState(replacement);
+          if (envelope.data.clientState !== undefined) await replaceClientState(envelope.data.clientState);
+        }
       } catch (error) {
-        // Keep the restore all-or-nothing across the admin and hosted-client
-        // stores. The rollback artifact remains available if this recovery
-        // write itself fails.
-        await saveState(current);
-        throw Object.assign(new Error('The hosted client profile state could not be restored.'), {
-          status: 500,
-          code: 'client_state_restore_failed',
-          cause: error,
+        let rollbackError;
+        if (canonicalRestored) {
+          try { await stateStore.restoreCanonicalSnapshot(rollbackEnvelope.data, Date.now()); } catch (failure) { rollbackError = failure; }
+        } else if (!replaceAllState) await saveState(current);
+        const invalidSnapshot = ['canonical_backup_incompatible','canonical_backup_invalid','canonical_owner_mismatch','canonical_state_invalid']
+          .includes(error?.code);
+        throw Object.assign(new Error('The canonical state could not be restored.'), {
+          status: invalidSnapshot && !rollbackError ? 422 : 500,
+          code: invalidSnapshot && !rollbackError ? 'invalid_backup' : 'canonical_state_restore_failed',
+          cause: rollbackError ? new AggregateError([error, rollbackError], 'Canonical restore and rollback both failed.') : error,
         });
       }
       Object.keys(current).forEach((key) => { delete current[key]; });
       Object.assign(current, replacement);
-      await notifyAllPlaybackSessionsRevoked('backup_restored');
+      if (!canonicalRestored) await notifyAllPlaybackSessionsRevoked('backup_restored');
       await appendLog('warn', 'Headless admin state restored from backup.', { source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, rollbackSizeBytes: rollbackArtifact.sizeBytes });
       return { restored: true, source: sourcePath, checksum: envelope.checksum, rollbackDestination: rollbackPath, backup: current.backup };
     },
@@ -1677,3 +2071,4 @@ export function createHeadlessAdminService(options) {
 }
 
 export const headlessAdminStateFilename = STATE_FILENAME;
+export { normalizeState as normalizeHeadlessAdminState };

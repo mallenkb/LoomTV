@@ -35,6 +35,7 @@ export async function loadCustomArtwork(mediaId: string, legacyKey: string): Pro
 
 export async function saveCustomArtwork(mediaId: string, target: string, dataUrl: string, legacyKey: string): Promise<Record<string, string>> {
   const legacy = readLegacy(legacyKey);
+  const previousLegacy = legacy[mediaId] ? { ...legacy[mediaId] } : undefined;
   const targets = target === 'thumbnail'
     ? ['thumbnail', 'poster']
     : target === 'poster'
@@ -56,7 +57,17 @@ export async function saveCustomArtwork(mediaId: string, target: string, dataUrl
       saved = await desktopApi.saveCustomArtwork(mediaId, targetName, dataUrl);
     }
     return saved;
-  } catch {
-    return legacy[mediaId];
+  } catch (error) {
+    // localStorage is only a migration fallback. Returning it here made the
+    // UI report a successful save even when the durable database write failed.
+    // Surface the failure so the editor can show the user what went wrong.
+    try {
+      if (previousLegacy) legacy[mediaId] = previousLegacy;
+      else delete legacy[mediaId];
+      localStorage.setItem(legacyKey, JSON.stringify(legacy));
+    } catch {
+      // Keep the original persistence error as the user-facing failure.
+    }
+    throw error instanceof Error ? error : new Error('Unable to save artwork.');
   }
 }

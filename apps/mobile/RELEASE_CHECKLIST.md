@@ -43,18 +43,18 @@ Record the device, OS version, build URL, tester, date, and result for each row.
 
 ## Required scenarios on every platform
 
-- Fresh install: local-network permission, automatic discovery, desktop Allow/Deny approval, approval expiry/denial, manual HTTPS address fallback, and 6-digit PIN pairing.
+- Fresh install: local-network permission, automatic discovery, server Allow/Deny approval, approval expiry/denial, manual HTTPS address fallback, and certificate confirmation.
 - Relaunch: saved credential restore, token refresh, profile picker, automatic sign-in, PIN rejection, lockout copy, profile lock, and device disconnect.
 - Library: Home rails, Movies, TV Shows, Anime, Others, search, filters, favorites/My List, detail pages, seasons, and empty-library states.
 - Playback: direct play, HLS fallback, resume, seek, pause, audio/subtitle selection, subtitle sizing, skip markers, next-episode autoplay, background/foreground, orientation changes, failure retry, and return to portrait.
 - Progress: continue-watching order, watched state, per-profile isolation, and progress recovery after an interrupted request.
-- Network recovery: desktop stopped at launch, desktop stopped while browsing, Wi-Fi removed/restored, host address changed with the same pinned identity, revoked device, and certificate mismatch.
-- Offline metadata: an automatic-sign-in profile can browse its last saved catalog while the desktop is unavailable; playback and mutations stay blocked; reconnect replaces stale metadata. PIN/manual profiles must not restore cached content while locked.
+- Network recovery: server stopped at launch, server stopped while browsing, Wi-Fi removed/restored, host address changed with the same pinned identity, revoked device, and certificate mismatch.
+- Offline use: an automatic-sign-in profile can browse its last saved catalog while the server is unavailable; non-downloaded playback and mutations stay blocked; downloaded movies and episodes play from app document storage; removal deletes the local file; reconnect replaces stale metadata. PIN/manual profiles must not restore cached content while locked.
 - Accessibility: screen-reader labels for primary controls, Dynamic Type/font scaling, reduced motion, contrast in light/dark themes, keyboard avoidance, and touch target sizing.
 - Release surfaces: icons, splash, app name/version, privacy/local-network prompts, open-source notices, crash-free launch, and no cleartext remote traffic.
 
 ## Scope boundary
 
-The mobile release is a paired same-LAN companion. Internet remote streaming, offline media downloads, casting, TV clients, and multiple saved servers are separate feature tracks and are not release blockers for this client.
+The mobile release connects directly to the canonical server over pinned HTTPS. Same-LAN use is the default. Turnkey Internet relay access, Android Chromecast sender controls, and multiple saved-server switching remain outside this release gate. Android TV and Fire TV have their own client and checklist under `apps/tv`.
 
 The current product decisions for background playback, lock-screen controls, picture-in-picture, localization, and deep links are recorded in `MOBILE_PRODUCT_SCOPE.md`.

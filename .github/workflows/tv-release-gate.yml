@@ -1,0 +1,37 @@
+name: TV release gate
+
+on:
+  pull_request:
+    paths:
+      - 'apps/tv/**'
+      - 'apps/mobile/modules/loomtv-secure-transport/**'
+      - '.github/workflows/tv-release-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-tv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify TV source and configuration
+        run: |
+          pnpm tv:typecheck
+          pnpm tv:test
+          pnpm --filter @loom-media-server/tv verify:config
+      - name: Generate Android TV project
+        run: pnpm --filter @loom-media-server/tv exec expo prebuild --platform android --clean --no-install
+      - name: Compile unsigned Android TV release
+        working-directory: apps/tv/android
+        run: ./gradlew assembleRelease

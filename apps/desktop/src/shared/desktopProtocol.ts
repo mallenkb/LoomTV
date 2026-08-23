@@ -533,6 +533,15 @@ export interface ProfileCreateInput {
 
 export type ProfileUpdateInput = Partial<ProfileCreateInput>;
 
+export interface UnifiedDesktopServerState {
+  enabled: boolean;
+  ready: boolean;
+  ownerConfigured: boolean;
+  adminUrl?: string;
+  appUrl?: string;
+  error?: string;
+}
+
 export interface ProfileExportV1 {
   format: 'loomtv.profile.v1';
   exportedAt: number;

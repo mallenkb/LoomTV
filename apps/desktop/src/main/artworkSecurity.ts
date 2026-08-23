@@ -19,7 +19,7 @@ export type ArtworkInspection = {
 
 export type SanitizedArtwork = {
   bytes: Buffer;
-  mimeType: 'image/png';
+  mimeType: 'image/png' | 'image/jpeg';
   byteLength: number;
   contentHash: string;
   width: number;
@@ -32,6 +32,7 @@ export type ArtworkDecoder = {
     isEmpty: () => boolean;
     getSize: () => { width: number; height: number };
     toPNG: () => Buffer;
+    toJPEG: (quality: number) => Buffer;
   };
 };
 
@@ -216,12 +217,23 @@ export function sanitizeArtworkBytesWithDecoder(bytes: Buffer, contentType: stri
   const size = decoded.getSize();
   checkDimensions(size.width, size.height);
   if (inspection.width !== size.width || inspection.height !== size.height) rejectArtwork('encoded and decoded dimensions differ');
-  const normalized = decoded.toPNG();
+  let normalized = decoded.toPNG();
+  let normalizedMimeType: SanitizedArtwork['mimeType'] = 'image/png';
+  if (inspection.format === 'jpeg' && Buffer.isBuffer(normalized) && normalized.length > MAX_ARTWORK_OUTPUT_BYTES) {
+    for (const quality of [90, 82, 72]) {
+      const jpeg = decoded.toJPEG(quality);
+      if (Buffer.isBuffer(jpeg) && jpeg.length > 0 && jpeg.length <= MAX_ARTWORK_OUTPUT_BYTES) {
+        normalized = jpeg;
+        normalizedMimeType = 'image/jpeg';
+        break;
+      }
+    }
+  }
   if (!Buffer.isBuffer(normalized) || normalized.length === 0 || normalized.length > MAX_ARTWORK_OUTPUT_BYTES) rejectArtwork('normalized image size is invalid');
   const hash = createHash('sha256').update(normalized).digest('hex');
   return {
     bytes: normalized,
-    mimeType: 'image/png',
+    mimeType: normalizedMimeType,
     byteLength: normalized.byteLength,
     contentHash: hash,
     width: size.width,
@@ -249,12 +261,23 @@ const ARTWORK_WORKER_SOURCE = String.raw`
     if (size.width !== workerData.expectedWidth || size.height !== workerData.expectedHeight) {
       throw new Error('encoded and decoded dimensions differ');
     }
-    const normalized = decoded.toPNG();
+    let normalized = decoded.toPNG();
+    let mimeType = 'image/png';
+    if (workerData.inputFormat === 'jpeg' && Buffer.isBuffer(normalized) && normalized.length > workerData.maxOutputBytes) {
+      for (const quality of [90, 82, 72]) {
+        const jpeg = decoded.toJPEG(quality);
+        if (Buffer.isBuffer(jpeg) && jpeg.length > 0 && jpeg.length <= workerData.maxOutputBytes) {
+          normalized = jpeg;
+          mimeType = 'image/jpeg';
+          break;
+        }
+      }
+    }
     if (!Buffer.isBuffer(normalized) || normalized.length === 0 || normalized.length > workerData.maxOutputBytes) {
       throw new Error('normalized image size is invalid');
     }
     const output = Uint8Array.from(normalized);
-    parentPort.postMessage({ ok: true, bytes: output, width: size.width, height: size.height }, [output.buffer]);
+    parentPort.postMessage({ ok: true, bytes: output, mimeType, width: size.width, height: size.height }, [output.buffer]);
   } catch (error) {
     fail('worker decoder: ' + (error instanceof Error ? error.message : 'image decoder failed'));
   }
@@ -276,6 +299,7 @@ export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Pro
         bytes: input,
         expectedWidth: inspection.width,
         expectedHeight: inspection.height,
+        inputFormat: inspection.format,
         maxDimension: MAX_ARTWORK_DIMENSION,
         maxPixels: MAX_ARTWORK_PIXELS,
         maxOutputBytes: MAX_ARTWORK_OUTPUT_BYTES,
@@ -312,7 +336,7 @@ export async function sanitizeArtworkBytes(bytes: Buffer, contentType = ''): Pro
       const hash = createHash('sha256').update(normalized).digest('hex');
       finish(() => resolve({
         bytes: normalized,
-        mimeType: 'image/png',
+        mimeType: result.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png',
         byteLength: normalized.byteLength,
         contentHash: hash,
         width: Number(result.width),

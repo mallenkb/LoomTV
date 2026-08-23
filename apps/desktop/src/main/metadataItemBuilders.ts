@@ -113,8 +113,8 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     tmdbMeta?: Partial<MediaItem> | null,
     omdbMeta?: OMDbResponse | null,
     tvMeta?: { rating?: number } | null,
-  ): number => numericRating(omdbMeta?.imdbRating)
-    || numericRating(tmdbMeta?.rating)
+  ): number => numericRating(tmdbMeta?.rating)
+    || numericRating(omdbMeta?.imdbRating)
     || numericRating(tvMeta?.rating);
 
   const showMetadataRating = (
@@ -123,10 +123,12 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     tmdbMeta?: Partial<MediaItem> | null,
     tvMeta?: { rating?: number } | null,
     omdbMeta?: OMDbResponse | null,
-  ): number => numericRating(omdbMeta?.imdbRating)
+    preferOmdbFallback = true,
+  ): number => numericRating(tmdbMeta?.rating)
     || (type === 'anime' ? numericRating(jikanMeta?.rating) : 0)
-    || numericRating(tmdbMeta?.rating)
-    || numericRating(tvMeta?.rating);
+    || (preferOmdbFallback
+      ? numericRating(omdbMeta?.imdbRating) || numericRating(tvMeta?.rating)
+      : numericRating(tvMeta?.rating) || numericRating(omdbMeta?.imdbRating));
 
   const officialArtworkOnly = (urls: Array<string | null | undefined>): string[] => {
     const seen = new Set<string>();
@@ -250,11 +252,14 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const localBackdrop = getLocalFolderArtworkUrl(fullPath, 'backdrop');
     const generatedThumbnail = episodeFiles[0] ? getLocalThumbnailUrl(episodeFiles[0].filePath) : '';
     const omdbPoster = matchedOmdbData?.Poster && matchedOmdbData.Poster !== 'N/A' ? matchedOmdbData.Poster : '';
+    const preferOmdbFallback = Boolean(tmdbApiKey?.trim());
+    const defaultTVPoster = preferOmdbFallback
+      ? omdbPoster || matchedTVMeta?.poster
+      : matchedTVMeta?.poster || omdbPoster;
     const officialPoster =
       (finalType === 'anime' ? (matchedAniListMeta?.poster || matchedJikanMeta?.poster || '') : '')
       || matchedTmdbTVMeta?.poster
-      || matchedTVMeta?.poster
-      || omdbPoster;
+      || defaultTVPoster;
     const poster =
       localPoster
       || officialPoster
@@ -292,23 +297,28 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const logo = logoCandidates[0] || '';
 
     // ── Summary / rating / genres / cast ──────────────────────────────────────
+    const defaultTVSummary = preferOmdbFallback
+      ? matchedOmdbData?.Plot || matchedTVMeta?.summary
+      : matchedTVMeta?.summary || matchedOmdbData?.Plot;
     const summary =
-      (finalType === 'anime' ? (matchedAniListMeta?.summary || matchedJikanMeta?.summary || '') : matchedTmdbTVMeta?.summary)
+      (finalType === 'anime' ? (matchedAniListMeta?.summary || matchedJikanMeta?.summary || '') : matchedTmdbTVMeta?.summary || defaultTVSummary)
       || episodeProbes.find((probe) => probe.summary)?.summary
       || matchedTmdbTVMeta?.summary
-      || matchedTVMeta?.summary
-      || matchedOmdbData?.Plot
+      || defaultTVSummary
       || '';
 
-    const rating = numericRating(matchedOmdbData?.imdbRating)
+    const rating = numericRating(matchedTmdbTVMeta?.rating)
       || (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
-      || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
+      || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData, preferOmdbFallback);
 
+    const defaultTVGenres = preferOmdbFallback
+      ? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : matchedTVMeta?.genres)
+      : (matchedTVMeta?.genres ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : undefined));
     const genres: string[] =
       (finalType === 'anime' ? matchedAniListMeta?.genres || matchedJikanMeta?.genres : null)
       ?? matchedTmdbTVMeta?.genres
-      ?? matchedTVMeta?.genres
-      ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : []);
+      ?? defaultTVGenres
+      ?? [];
 
     const rawCast = [
       finalType === 'anime' ? matchedAniListMeta?.cast || matchedJikanMeta?.cast : null,
@@ -509,14 +519,17 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     const embeddedPoster = getEmbeddedArtworkUrl(fullPath, probe);
     const localBackdrop = getLocalMovieArtworkUrl(fullPath, 'backdrop');
     const omdbPoster = matchedOmdbData?.Poster && matchedOmdbData.Poster !== 'N/A' ? matchedOmdbData.Poster : '';
+    const preferOmdbFallback = Boolean(tmdbApiKey?.trim());
+    const defaultTVPoster = preferOmdbFallback
+      ? omdbPoster || matchedTVMeta?.poster
+      : matchedTVMeta?.poster || omdbPoster;
     const officialMoviePoster = matchedTmdbData?.poster
       || (isAnimeMovie ? matchedAniListMeta?.poster || matchedJikanMeta?.poster : '')
       || omdbPoster;
     const officialShowPoster =
       (finalType === 'anime' ? (matchedAniListMeta?.poster || matchedJikanMeta?.poster || '') : '')
       || matchedTmdbTVMeta?.poster
-      || matchedTVMeta?.poster
-      || omdbPoster;
+      || defaultTVPoster;
     const officialPoster = useMovieMetadata ? officialMoviePoster : officialShowPoster;
     const officialMovieBackdrop = matchedTmdbData?.backdrop || '';
     const officialShowBackdrop =
@@ -554,27 +567,32 @@ export function createMetadataItemBuilders(deps: MetadataItemBuilderDependencies
     );
     const logo = logoCandidates[0] || '';
 
+    const defaultTVSummary = preferOmdbFallback
+      ? matchedOmdbData?.Plot || matchedTVMeta?.summary
+      : matchedTVMeta?.summary || matchedOmdbData?.Plot;
     const summary =
       (finalType === 'anime'
         ? (matchedAniListMeta?.summary || matchedJikanMeta?.summary || '')
-        : useMovieMetadata ? matchedTmdbData?.summary : matchedTmdbTVMeta?.summary)
+        : useMovieMetadata ? matchedTmdbData?.summary : matchedTmdbTVMeta?.summary || defaultTVSummary)
       || probe.summary
       || matchedTmdbTVMeta?.summary
-      || matchedTVMeta?.summary
+      || defaultTVSummary
       || matchedTmdbData?.summary
-      || matchedOmdbData?.Plot
       || '';
     const rating = finalType === 'movie'
       ? movieMetadataRating(matchedTmdbData, matchedOmdbData, matchedTVMeta)
-      : numericRating(matchedOmdbData?.imdbRating)
+      : numericRating(matchedTmdbTVMeta?.rating)
         || (finalType === 'anime' ? numericRating(matchedAniListMeta?.rating) : 0)
-        || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData);
+        || showMetadataRating(finalType, matchedJikanMeta, matchedTmdbTVMeta, matchedTVMeta, matchedOmdbData, preferOmdbFallback);
+    const defaultTVGenres = preferOmdbFallback
+      ? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : matchedTVMeta?.genres)
+      : (matchedTVMeta?.genres ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : undefined));
     const genres: string[] =
       (finalType === 'anime' ? matchedAniListMeta?.genres || matchedJikanMeta?.genres : null)
       ?? matchedTmdbTVMeta?.genres
-      ?? matchedTVMeta?.genres
+      ?? defaultTVGenres
       ?? matchedTmdbData?.genres
-      ?? (matchedOmdbData?.Genre ? matchedOmdbData.Genre.split(', ') : []);
+      ?? [];
     const rawCast = [
       finalType === 'anime' ? matchedAniListMeta?.cast || matchedJikanMeta?.cast : null,
       matchedTmdbTVMeta?.cast,

@@ -68,6 +68,7 @@ export interface LanSecurityDeps {
   loadSettings: () => AppSettings;
   saveSettings: (settings: AppSettings) => void;
   localAccessToken: string;
+  getLanAdvertisementOverride?: () => { port: number; certFingerprint: string } | null;
   /**
    * Authorizes the same-origin browser view on the loopback media server.
    * This is deliberately separate from LAN pairing and is scoped by the
@@ -621,8 +622,9 @@ export function createLanSecurity(deps: LanSecurityDeps) {
 
   function syncLanAdvertisement(): void {
     const settings = loadSettings();
-    const port = getLanMediaServerPort();
-    const certFingerprint = getLanCertificateFingerprint();
+    const override = deps.getLanAdvertisementOverride?.();
+    const port = override?.port || getLanMediaServerPort();
+    const certFingerprint = override?.certFingerprint || getLanCertificateFingerprint();
     if (!settings.localNetworkSharingEnabled || !port || !certFingerprint) {
       unadvertiseLanService();
       return;

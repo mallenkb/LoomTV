@@ -73,6 +73,8 @@ export interface EpisodeFile {
 }
 
 export interface VideoPlayerProps {
+  playbackRequestId?: string;
+  playRequestedAtMs?: number;
   mediaId?: string;
   filePath: string;
   title: string;

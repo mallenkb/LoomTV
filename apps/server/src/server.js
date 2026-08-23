@@ -5,19 +5,24 @@ import https from 'node:https';
 import os from 'node:os';
 import process from 'node:process';
 import { MEDIA_CORE_CONTRACT_VERSION } from '@loom-media-server/media-core';
+import { VIDEO_CONTRACT_VERSION } from '@loom-media-server/video-contracts';
 import { createAdminApiHandler, createAdminPage } from './admin-page.js';
-import { createHeadlessAdminService } from './admin-service.js';
-import { createHeadlessClientState } from './client-state.js';
+import { createCanonicalPersistence } from './canonical-persistence.js';
 import { createHeadlessMediaService } from './media-service.js';
 import { createPublicApiHandler, publicHealthSummary } from './public-api.js';
+import { createLegacyV2CompatibilityHandler } from './legacy-v2-adapter.js';
 import { createBootstrapSecurity } from './secure-bootstrap.js';
+import { createDesktopSetupChannel } from './desktop-setup-channel.js';
+import { createSetupPage } from './setup-page.js';
+import { createSetupService } from './setup-service.js';
 import { createHeadlessTranscoder } from './transcoder.js';
 import { createTrustedProxyPolicy } from './trusted-proxy.js';
 import { assertTransportConfiguration } from './transport-security.js';
+import { canonicalPublicError } from './public-error.js';
 import { createWebAppPage } from './web-app.js';
 
 const SERVICE_NAME = 'loomtv-headless-server';
-const CONTRACT_VERSION = 1;
+const CONTRACT_VERSION = VIDEO_CONTRACT_VERSION;
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 const DEFAULT_TERM_GRACE_MS = 2_000;
 
@@ -38,13 +43,24 @@ function verifyDirectTls(tls) {
     if (!Number.isFinite(validFrom) || !Number.isFinite(validTo) || currentTime < validFrom || currentTime > validTo) {
       throw new Error('The TLS certificate is not currently valid.');
     }
-    return true;
+    return certificate.fingerprint256.replaceAll(':', '').toLowerCase();
   } catch (error) {
     throw Object.assign(new Error(`Direct TLS configuration is invalid: ${error.message}`), {
       code: 'TLS_CONFIGURATION_INVALID',
       cause: error,
     });
   }
+}
+
+function configuredCertificateFingerprint(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  const normalized = String(value).replaceAll(':', '').trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw Object.assign(new Error('The advertised certificate fingerprint must be a SHA-256 hex digest.'), {
+      code: 'TLS_CONFIGURATION_INVALID',
+    });
+  }
+  return normalized;
 }
 
 function jsonResponse(res, status, payload, method = 'GET') {
@@ -96,22 +112,34 @@ async function inspectMediaPath(mediaDir) {
 }
 
 /** @param {{ host: string, port: number, paths: import('@loom-media-server/runtime-paths').RuntimePaths, version: string, trustedProxies?: string | string[] }} options */
-export function createHeadlessServer(options) {
+export function createCanonicalVideoServer(options) {
   // Parse before constructing services so malformed trust configuration fails
   // startup without opening a listener or silently falling back to broad trust.
   const proxyPolicy = createTrustedProxyPolicy(options.trustedProxies);
   const startedAt = new Date().toISOString();
   const startedAtMs = Date.now();
-  const directTls = verifyDirectTls(options.tls);
+  const directCertificateFingerprint = verifyDirectTls(options.tls);
+  const advertisedCertificateFingerprint = configuredCertificateFingerprint(options.certificateFingerprint);
+  if (directCertificateFingerprint && advertisedCertificateFingerprint
+    && directCertificateFingerprint !== advertisedCertificateFingerprint) {
+    throw Object.assign(new Error('The advertised certificate fingerprint does not match the direct TLS certificate.'), {
+      code: 'TLS_CONFIGURATION_INVALID',
+    });
+  }
+  const certificateFingerprint = advertisedCertificateFingerprint || directCertificateFingerprint || undefined;
+  const directTls = Boolean(directCertificateFingerprint);
   const transport = directTls ? 'https' : 'http';
+  const deploymentMode = options.deploymentMode === 'desktop-hosted' ? 'desktop-hosted' : 'standalone';
+  const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   let server;
   let stopPromise;
   let draining = false;
-  const transcoder = createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath });
+  const transcoder = options.transcoder
+    || createHeadlessTranscoder({ ffmpegPath: options.ffmpegPath, ffprobePath: options.ffprobePath });
   let mediaService;
-  const clientState = createHeadlessClientState({ dataDir: options.paths.dataDir });
   const bootstrapSecurity = options.bootstrapSecurity || createBootstrapSecurity({
     dataDir: options.paths.dataDir,
+    required: requireBootstrapSecret,
     secret: options.bootstrapSecret,
     secretFile: options.bootstrapSecretFile,
     onGenerated: options.onBootstrapSecretGenerated,
@@ -135,7 +163,8 @@ export function createHeadlessServer(options) {
       contractVersion: CONTRACT_VERSION,
       mediaCoreContractVersion: MEDIA_CORE_CONTRACT_VERSION,
       version: options.version,
-      headless: true,
+      deploymentMode,
+      headless: deploymentMode === 'standalone',
       port,
       transport,
       pid: process.pid,
@@ -147,6 +176,7 @@ export function createHeadlessServer(options) {
         port,
         address: `${transport}://${address.host}:${port}`,
         transport,
+        ...(certificateFingerprint ? { certificateFingerprint } : {}),
       },
       paths: {
         data: options.paths.dataDir,
@@ -155,7 +185,7 @@ export function createHeadlessServer(options) {
       },
       media: await inspectMediaPath(options.paths.mediaDir),
       capabilities: {
-        headless: true,
+        headless: deploymentMode === 'standalone',
         adminUi: true,
         webApp: true,
         publicApi: true,
@@ -171,25 +201,40 @@ export function createHeadlessServer(options) {
     };
   };
 
-  const adminService = createHeadlessAdminService({
+  const persistence = createCanonicalPersistence({
     dataDir: options.paths.dataDir,
     mediaDir: options.paths.mediaDir,
     version: options.version,
     baseUrl: options.host === '0.0.0.0' ? undefined : `${transport}://${options.host}:${options.port}`,
     getRuntimeHealth: healthPayload,
     getSessions: () => mediaService?.listSessions() || [],
-    getClientState: () => clientState.exportState(),
-    replaceClientState: (snapshot) => clientState.importState(snapshot),
     onPlaybackSessionsRevoked: (principalId, reason) => mediaService?.revokePrincipal?.(principalId, reason),
     onPlaybackSessionsRevokedForItem: (itemId, reason) => mediaService?.revokeItem?.(itemId, reason),
+    onAuthenticationSessionRevoked: (sessionId, reason) => mediaService?.revokeAuthenticationSession?.(sessionId, reason),
     onAllPlaybackSessionsRevoked: (reason) => mediaService?.revokeAllPlaybackSessions?.(reason),
+    getCertificateFingerprint: () => certificateFingerprint || undefined,
+    clientAddress: (req) => proxyPolicy.clientAddress(req),
+    proxyPolicy,
+    clock: options.clock,
+    probeMedia: async (filePath, probeOptions) => {
+      if (!transcoder.getHealth().available) return null;
+      return transcoder.probeMedia(filePath, probeOptions);
+    },
     bootstrapSecurity,
+    requireBootstrapSecret,
   });
+  const adminService = persistence.accounts;
+  const clientState = persistence.profiles;
+  const pairingService = persistence.pairing;
+  const remotePolicy = persistence.remote;
   mediaService = createHeadlessMediaService({
     adminService,
+    clientState,
     transcoder,
     cacheDir: options.paths.cacheDir,
     authorize: adminService.authorizeRequest,
+    clientAddress: (req) => proxyPolicy.clientAddress(req),
+    remotePolicy,
     clock: options.clock,
     playbackSessionRegistry: options.playbackSessionRegistry,
     playbackSessionOptions: options.playbackSessionOptions,
@@ -200,23 +245,53 @@ export function createHeadlessServer(options) {
     cacheFileSystem: options.cacheFileSystem,
     spawnProcess: options.spawnProcess,
   });
-  const adminPage = createAdminPage({ htmlPath: options.adminHtmlPath });
+  const setupService = createSetupService({
+    store: persistence.store,
+    isOwnerConfigured: () => adminService.isOwnerConfigured(),
+  });
+  const desktopSetupChannel = createDesktopSetupChannel({
+    token: options.desktopSetupToken,
+    clientAddress: (req) => proxyPolicy.clientAddress(req),
+  });
+  // Every surface reads the same status, so `/app`, `/admin`, and `/setup`
+  // agree on whether this installation still needs setup.
+  const setupStatus = async () => setupService.status();
+  const setupPage = createSetupPage({ htmlPath: options.setupHtmlPath, getSetupStatus: setupStatus });
+  const adminPage = createAdminPage({
+    htmlPath: options.adminHtmlPath,
+    iconsPath: options.adminIconsPath,
+    getSetupStatus: setupStatus,
+  });
   const adminApi = createAdminApiHandler({
     service: adminService,
     authorize: adminService.authorizeRequest,
     ownerConfigured: adminService.isOwnerConfigured,
     requireSecureTransport: options.requireSecureTransport === true,
+    requireBootstrapSecret,
     proxyPolicy,
   });
-  const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath });
+  const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath, getSetupStatus: setupStatus });
   const publicApi = createPublicApiHandler({
     service: adminService,
     clientState,
     mediaService,
+    pairingService,
+    remotePolicy,
+    setupService,
+    setupHooks: options.setupHooks,
     getRuntimeHealth: healthPayload,
     version: options.version,
     requireSecureTransport: options.requireSecureTransport === true,
+    requireBootstrapSecret,
     proxyPolicy,
+    desktopSetupChannel,
+    pickFolder: options.pickFolder,
+    deploymentMode,
+  });
+  const legacyV2 = createLegacyV2CompatibilityHandler({
+    authorizeLegacyPairing: options.authorizeLegacyPairing,
+    getCertificateFingerprint: () => certificateFingerprint,
+    clientAddress: (req) => proxyPolicy.clientAddress(req),
   });
 
   const sockets = new Set();
@@ -260,6 +335,26 @@ export function createHeadlessServer(options) {
         return;
       }
       const requestUrl = new URL(req.url || '/', `${transport}://${req.headers.host || 'localhost'}`);
+      // Setup shares the credential class: claiming a server is as sensitive as
+      // signing in to one, and must obey the same remote-access policy.
+      const routeClass = requestUrl.pathname.startsWith('/api/v1/auth') || requestUrl.pathname.startsWith('/api/v1/setup') ? 'credential'
+        : requestUrl.pathname.startsWith('/api/v1/pairing') ? 'pairing'
+          : requestUrl.pathname.startsWith('/api/v1/downloads') ? 'download'
+            : requestUrl.pathname.startsWith('/api/media') || requestUrl.pathname.startsWith('/hls/') || requestUrl.pathname === '/stream' ? 'media'
+              : requestUrl.pathname.startsWith('/api/admin') || requestUrl.pathname.startsWith('/admin') ? 'admin'
+                : requestUrl.pathname.startsWith('/api/v2') ? 'compatibility' : 'public';
+      req.__loomRemoteContext = remotePolicy.preflight(req, routeClass);
+      const usesDeviceCredential = /^LoomDevice\s+/i.test(String(req.headers.authorization || ''));
+      const usesLegacyV2Credential = requestUrl.pathname.startsWith('/api/v2/');
+      const usesLegacyStreamCapability = requestUrl.pathname === '/stream' || requestUrl.pathname.startsWith('/hls/');
+      if ((usesDeviceCredential || usesLegacyV2Credential || usesLegacyStreamCapability) && !proxyPolicy.isSecureRequest(req)) {
+        jsonResponse(res, 426, {
+          ok: false,
+          error: 'secure_transport_required',
+          message: 'Device and compatibility credentials are accepted only over HTTPS or a trusted secure proxy.',
+        }, req.method);
+        return;
+      }
       const isPublicCleartextRoute = (req.method === 'GET' || req.method === 'HEAD') && (
         requestUrl.pathname === '/'
         || requestUrl.pathname === '/healthz'
@@ -269,6 +364,9 @@ export function createHeadlessServer(options) {
         || requestUrl.pathname === '/api/v1/discovery'
         || requestUrl.pathname === '/api/v1/health'
         || requestUrl.pathname === '/api/v1/auth/onboarding'
+        || requestUrl.pathname === '/api/v1/setup/state'
+        || requestUrl.pathname === '/setup'
+        || requestUrl.pathname === '/setup/'
         || requestUrl.pathname === '/api/v1/openapi.json'
         || requestUrl.pathname === '/api/admin/bootstrap'
       );
@@ -280,6 +378,7 @@ export function createHeadlessServer(options) {
         }, req.method);
         return;
       }
+      if (await setupPage(req, res)) return;
       if (await webApp(req, res)) return;
       if (await adminPage(req, res)) return;
       if (await adminApi(req, res)) return;
@@ -287,6 +386,25 @@ export function createHeadlessServer(options) {
       // Media handlers return false only when the pathname is not theirs;
       // a successful response may itself resolve to undefined after piping.
       if ((await mediaService.handle(req, res, requestUrl)) !== false) return;
+      if (await legacyV2(req, res, {
+        adminService,
+        clientState,
+        mediaService,
+        pairingService,
+        remotePolicy,
+        persistence,
+        deploymentMode,
+      })) return;
+      if (typeof options.compatibilityHandler === 'function'
+        && await options.compatibilityHandler(req, res, {
+          adminService,
+          clientState,
+          mediaService,
+          pairingService,
+          remotePolicy,
+          persistence,
+          deploymentMode,
+        })) return;
       const isHealth = requestUrl.pathname === '/healthz'
         || requestUrl.pathname === '/api/health'
         || requestUrl.pathname === '/api/ping';
@@ -338,8 +456,16 @@ export function createHeadlessServer(options) {
       }
       jsonResponse(res, 404, { ok: false, error: 'not_found' });
     } catch (error) {
-      console.error('[loomtv-server] request failed:', error);
-      if (!res.headersSent) jsonResponse(res, 500, { ok: false, error: 'internal_error' });
+      const normalized = canonicalPublicError(error);
+      if (normalized.status >= 500) console.error('[loomtv-server] request failed:', error);
+      if (!res.headersSent) {
+        const isCanonical = String(req.url || '').startsWith('/api/v1');
+        jsonResponse(res, normalized.status, isCanonical
+          ? { ok: false, error: { code: normalized.code, message: normalized.status >= 500
+            ? 'The hosted API request could not be completed.' : error?.message || 'The request was rejected.' } }
+          : { ok: false, error: normalized.code, message: normalized.status >= 500
+            ? 'The server request could not be completed.' : error?.message || 'The request was rejected.' }, req.method);
+      }
       else res.destroy();
     }
   };
@@ -366,48 +492,78 @@ export function createHeadlessServer(options) {
         requireSecureTransport: options.requireSecureTransport === true,
         developmentAllowInsecureNonLoopback: options.developmentAllowInsecureNonLoopback === true,
       });
-      await bootstrapSecurity.initialize({ ownerConfigured: await adminService.isOwnerConfigured() });
-      await new Promise((resolve, reject) => {
-        const onError = (error) => {
-          server.off('listening', onListening);
-          reject(error);
-        };
-        const onListening = () => {
-          server.off('error', onError);
-          resolve();
-        };
-        server.once('error', onError);
-        server.once('listening', onListening);
-        server.listen(options.port, options.host);
-      });
-      return this.address();
+      try {
+        await persistence.start();
+        await bootstrapSecurity.initialize({ ownerConfigured: await adminService.isOwnerConfigured() });
+        await new Promise((resolve, reject) => {
+          const onError = (error) => {
+            server.off('listening', onListening);
+            reject(error);
+          };
+          const onListening = () => {
+            server.off('error', onError);
+            resolve();
+          };
+          server.once('error', onError);
+          server.once('listening', onListening);
+          server.listen(options.port, options.host);
+        });
+        return this.address();
+      } catch (error) {
+        draining = true;
+        const cleanup = await Promise.allSettled([
+          closeListener(),
+          persistence.stop(),
+          mediaService.stop({ termGraceMs }),
+        ]);
+        for (const socket of sockets) socket.destroy();
+        const cleanupErrors = cleanup.filter((result) => result.status === 'rejected').map((result) => result.reason);
+        if (cleanupErrors.length) {
+          throw new AggregateError([error, ...cleanupErrors], 'Canonical server startup failed and cleanup was incomplete.');
+        }
+        throw error;
+      }
     },
     async stop() {
       if (stopPromise) return stopPromise;
       draining = true;
       stopPromise = (async () => {
+        const shutdownErrors = [];
         // Mark the service draining before closing the listener so requests
         // already queued by a keep-alive connection cannot start new work.
         server.closeIdleConnections?.();
         const listenerClosed = closeListener();
         const servicesStopped = Promise.allSettled([
-          adminService.stop?.(),
+          persistence.stop(),
           mediaService.stop({ termGraceMs }),
         ]);
-        await Promise.race([
-          Promise.all([listenerClosed, servicesStopped]),
-          delay(shutdownTimeoutMs),
+        const completed = await Promise.race([
+          Promise.all([listenerClosed, servicesStopped]).then(([, results]) => ({ completed: true, results })),
+          delay(shutdownTimeoutMs).then(() => ({ completed: false, results: null })),
         ]);
         if (sockets.size) {
           for (const socket of sockets) socket.destroy();
           server.closeAllConnections?.();
         }
         await Promise.race([listenerClosed, delay(250)]);
+        if (!completed.completed) {
+          shutdownErrors.push(Object.assign(new Error('Canonical server shutdown exceeded its deadline.'), {
+            code: 'server_shutdown_timeout',
+          }));
+        } else {
+          for (const result of completed.results) {
+            if (result.status === 'rejected') shutdownErrors.push(result.reason);
+          }
+        }
+        if (shutdownErrors.length) throw new AggregateError(shutdownErrors, 'Canonical server did not shut down cleanly.');
       })();
       return stopPromise;
     },
   };
 }
+
+/** Compatibility name for integrations that have not adopted the canonical runtime name. */
+export const createHeadlessServer = createCanonicalVideoServer;
 
 export async function readServerVersion(packageRoot) {
   try {

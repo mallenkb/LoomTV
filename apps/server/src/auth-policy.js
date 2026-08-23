@@ -4,6 +4,8 @@
  * incompatible permission names.
  */
 
+import { isIP } from 'node:net';
+
 export const AUTH_PERMISSIONS = Object.freeze([
   'admin.read',
   'library.read',
@@ -12,12 +14,16 @@ export const AUTH_PERMISSIONS = Object.freeze([
   'transcode',
   'downloads',
   'remote.access',
+  'remote.manage',
+  'audit.read',
   'sessions.read',
   'logs.read',
   'backup.read',
   'backup.create',
   'users.read',
   'users.manage',
+  'devices.manage',
+  'sharing.manage',
   'account.password',
   'media.delete',
 ]);
@@ -46,9 +52,27 @@ export function permissionsForRole(role, override) {
 export function hasPermission(principal, permission) {
   if (!principal) return false;
   if (!permission) return true;
+  if (Array.isArray(principal.devicePermissions) && !principal.devicePermissions.includes(permission)) return false;
   return principal.type === 'owner'
     || principal.permissions?.includes('*')
     || principal.permissions?.includes(permission) === true;
+}
+
+export function isLocalNetworkAddress(value) {
+  const address = String(value || '').trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  if (address === 'localhost' || address === '::1') return true;
+  if (isIP(address) === 4) {
+    const octets = address.split('.').map(Number);
+    return octets[0] === 127 || octets[0] === 10
+      || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+      || (octets[0] === 192 && octets[1] === 168)
+      || (octets[0] === 169 && octets[1] === 254);
+  }
+  if (isIP(address) === 6) {
+    const first = Number.parseInt(address.split(':')[0] || '0', 16);
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  }
+  return false;
 }
 
 export function isOwnerPrincipal(principal) {

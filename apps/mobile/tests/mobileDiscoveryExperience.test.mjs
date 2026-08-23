@@ -57,7 +57,7 @@ test('reconnect cadence is fast but bounded for changing LAN conditions', () => 
 test('LAN timeouts are treated as recoverable instead of user-facing failures', () => {
   assert.deepEqual(connectionErrorFor(new Error('The desktop did not respond within 4000ms.'), 'Failed'), {
     isOffline: true,
-    message: 'Desktop unavailable. Reconnecting automatically.',
+    message: 'Server unavailable. Reconnecting automatically.',
   });
   assert.deepEqual(connectionErrorFor(Object.assign(new Error('aborted'), { name: 'AbortError' }), 'Failed'), {
     isOffline: true,

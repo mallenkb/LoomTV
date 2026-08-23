@@ -1,7 +1,7 @@
 export type TranscodeCodec = 'h264' | 'hevc' | 'av1';
 export type ProfileType = 'owner' | 'standard' | 'kid' | 'guest';
 
-export const MEDIA_CORE_CONTRACT_VERSION: 2;
+export const MEDIA_CORE_CONTRACT_VERSION: 3;
 export const VIDEO_EXTENSIONS: readonly string[];
 export const TRANSCODE_CODECS: readonly TranscodeCodec[];
 export const PROFILE_TYPES: readonly ProfileType[];
@@ -32,9 +32,13 @@ export interface NormalizedPlaybackProfile {
 export function normalizePlaybackProfile(input?: PlaybackProfileInput): NormalizedPlaybackProfile;
 
 export interface ClientPlaybackCapabilitiesInput {
+  contractVersion?: unknown;
   containers?: unknown;
   videoCodecs?: unknown;
   audioCodecs?: unknown;
+  streamingProtocols?: unknown;
+  subtitleModes?: unknown;
+  hdrFormats?: unknown;
   supportsHls?: unknown;
   supportsHdr?: unknown;
   supportsTextSubtitles?: unknown;
@@ -44,9 +48,13 @@ export interface ClientPlaybackCapabilitiesInput {
 }
 
 export interface NormalizedClientPlaybackCapabilities {
+  contractVersion: 1;
   containers: string[];
   videoCodecs: string[];
   audioCodecs: string[];
+  streamingProtocols: Array<'http' | 'hls'>;
+  subtitleModes: Array<'text' | 'bitmap' | 'burn-in' | 'external'>;
+  hdrFormats: Array<'hdr10' | 'hdr10-plus' | 'hlg' | 'dolby-vision'>;
   supportsHls: boolean;
   supportsHdr: boolean;
   supportsTextSubtitles: boolean;
@@ -55,15 +63,85 @@ export interface NormalizedClientPlaybackCapabilities {
   maxVideoBitrateKbps: number;
 }
 
-export type PlaybackPlanMode = 'direct' | 'remux' | 'direct-stream' | 'transcode';
+export type PlaybackPlanMode = 'direct' | 'remux' | 'transcode';
+
+export interface MediaTrackProbe {
+  id: string;
+  index: number;
+  kind: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
+  codec: string;
+  language?: string;
+  title?: string;
+  channels?: number;
+  width?: number;
+  height?: number;
+  profile?: string;
+  pixelFormat?: string;
+  colorTransfer?: string;
+  colorPrimaries?: string;
+  colorSpace?: string;
+  frameRate?: number;
+  default: boolean;
+  forced: boolean;
+  external?: boolean;
+}
+
+export interface MediaProbe {
+  sourceId: string;
+  container: string;
+  durationSeconds?: number;
+  bitrateKbps?: number;
+  width?: number;
+  height?: number;
+  videoCodec?: string;
+  audioCodec?: string;
+  hdr: boolean;
+  hdrFormat?: 'hdr10' | 'hdr10-plus' | 'hlg' | 'dolby-vision';
+  tracks: MediaTrackProbe[];
+  chapters: Array<{ startMs: number; endMs: number; title: string }>;
+  probedAt: number;
+  adapterGaps: Array<'external_sidecar_subtitles'>;
+}
+
+export interface PlaybackSelectionRequest {
+  videoTrackId?: string;
+  audioTrackId?: string | null;
+  subtitleTrackId?: string | null;
+  startSeconds?: number;
+}
 
 export interface PlaybackPlan {
+  contractVersion: 1;
   mode: PlaybackPlanMode;
+  transport: 'http' | 'hls';
+  reasonCode: string;
   reason: string;
+  sourceId: string;
   sourceAction: 'direct' | 'transcode';
-  codec?: string;
-  backend?: string;
-  facts?: {
+  selectedVideoTrackId: string;
+  selectedAudioTrackId?: string;
+  selectedSubtitleTrackId?: string;
+  outputContainer: string;
+  outputVideoCodec: string;
+  outputAudioCodec?: string;
+  burnSubtitles: boolean;
+  toneMap: boolean;
+  maxWidth?: number;
+  maxHeight?: number;
+  videoBitrateKbps?: number;
+  audioBitrateKbps: number;
+  codec: string;
+  backend: string;
+  copyVideo: boolean;
+  copyAudio: boolean;
+  requiresFfmpeg: boolean;
+  selectedVideoTrackIndex: number;
+  selectedAudioTrackIndex?: number;
+  selectedSubtitleTrackIndex?: number;
+  selectedSubtitleTrackOrdinal?: number;
+  facts: {
+    sourceId: string;
+    sourceState: string;
     container: string;
     videoCodec: string;
     audioCodec: string;
@@ -71,11 +149,22 @@ export interface PlaybackPlan {
     height: number;
     bitrate: number;
     hdr: boolean;
+    hdrFormat: string | null;
+    tracks: MediaTrackProbe[];
   };
 }
 
 export function normalizeClientPlaybackCapabilities(input?: ClientPlaybackCapabilitiesInput): NormalizedClientPlaybackCapabilities;
-export function playbackPlanForMedia(media?: Record<string, unknown>, input?: ClientPlaybackCapabilitiesInput): PlaybackPlan;
+export function playbackPlanForMedia(
+  media?: Record<string, unknown>,
+  input?: ClientPlaybackCapabilitiesInput | { capabilities?: ClientPlaybackCapabilitiesInput },
+  request?: PlaybackSelectionRequest,
+): PlaybackPlan;
+export function ffprobeMediaArguments(filePath: string): string[];
+export function parseFfprobeMediaProbe(
+  raw: string | Buffer | Record<string, unknown>,
+  options?: { sourceId?: string; probedAt?: number },
+): MediaProbe;
 export function normalizeProfileType(value: unknown, fallback?: ProfileType): ProfileType;
 
 export interface PortableProfile {

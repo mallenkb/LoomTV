@@ -154,6 +154,15 @@ test('both login API surfaces use the same trusted client identity and secure-tr
     isOwnerConfigured: async () => true,
   };
   const proxyPolicy = createTrustedProxyPolicy('10.0.0.0/8');
+  const publicDependencies = {
+    clientState: {}, mediaService: {}, pairingService: {},
+    remotePolicy: {
+      authenticateInvitation: async () => null,
+      assertPrincipal: () => undefined,
+      audit: () => undefined,
+    },
+    getRuntimeHealth: async () => ({}), version: '0.0.0-test',
+  };
   const adminHandler = createAdminApiHandler({
     service,
     proxyPolicy,
@@ -164,10 +173,7 @@ test('both login API surfaces use the same trusted client identity and secure-tr
     service,
     proxyPolicy,
     requireSecureTransport: true,
-    clientState: {},
-    mediaService: {},
-    getRuntimeHealth: async () => ({}),
-    version: '0.0.0-test',
+    ...publicDependencies,
   });
 
   for (const [handler, url] of [
@@ -204,10 +210,7 @@ test('both login API surfaces use the same trusted client identity and secure-tr
   const directHandler = createPublicApiHandler({
     service,
     proxyPolicy,
-    clientState: {},
-    mediaService: {},
-    getRuntimeHealth: async () => ({}),
-    version: '0.0.0-test',
+    ...publicDependencies,
   });
   const direct = jsonRequest({
     url: '/api/v1/auth/session',
@@ -220,4 +223,37 @@ test('both login API surfaces use the same trusted client identity and secure-tr
   await directResponse.finished;
   assert.equal(directResponse.status, 200, 'direct LAN login remains available when secure transport is not required');
   assert.equal(addresses.at(-1), '192.0.2.44', 'an untrusted peer cannot choose its authentication bucket');
+});
+
+test('admin first-run owner creation forwards the bootstrap capability and trusted client address', async () => {
+  let ownerInput;
+  const handler = createAdminApiHandler({
+    service: {
+      createOwner: async (input) => {
+        ownerInput = input;
+        return { adminToken: 'owner-token' };
+      },
+      isOwnerConfigured: async () => false,
+    },
+    ownerConfigured: async () => false,
+    proxyPolicy: createTrustedProxyPolicy('10.0.0.0/8'),
+    requireSecureTransport: true,
+  });
+  const req = jsonRequest({
+    url: '/api/admin/onboarding/owner',
+    remoteAddress: '10.0.0.3',
+    forwardedFor: '203.0.113.12',
+    forwardedProto: 'https',
+    body: { name: 'Owner', password: 'password-value', bootstrapSecret: 'bootstrap-value' },
+  });
+  const res = responseRecorder();
+  assert.equal(await handler(req, res), true);
+  await res.finished;
+  assert.equal(res.status, 201);
+  assert.deepEqual(ownerInput, {
+    name: 'Owner',
+    password: 'password-value',
+    bootstrapSecret: 'bootstrap-value',
+    address: '203.0.113.12',
+  });
 });

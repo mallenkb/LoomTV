@@ -5,6 +5,16 @@
   "description": "Headless LoomTV server for NAS and always-on hosts",
   "private": true,
   "type": "module",
+  "exports": {
+    "./runtime": {
+      "types": "./src/server.d.ts",
+      "import": "./src/server.js"
+    },
+    "./migration": {
+      "types": "./src/legacy-state-import.d.ts",
+      "import": "./src/legacy-state-import.js"
+    }
+  },
   "packageManager": "pnpm@11.20.0",
   "bin": {
     "loomtv-server": "src/cli.js"
@@ -19,6 +29,7 @@
     "@loom-media-server/media-core": "workspace:*",
     "@loom-media-server/runtime-paths": "workspace:*",
     "@loom-media-server/transcode-capabilities": "workspace:*",
+    "@loom-media-server/video-contracts": "workspace:*",
     "hls.js": "1.6.16"
   },
   "devDependencies": {

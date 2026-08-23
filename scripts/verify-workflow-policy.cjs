@@ -221,6 +221,131 @@ function releaseWorkflowViolations(workflow, source, fileName = 'release.yml') {
   return violations;
 }
 
+// pnpm treats an unrecognized command as a script name, so only the built-in
+// commands below may follow a workspace filter without naming a script.
+const PNPM_BUILTIN_COMMANDS = new Set([
+  'add', 'audit', 'bin', 'config', 'dedupe', 'deploy', 'dlx', 'env', 'exec',
+  'fetch', 'import', 'init', 'install', 'licenses', 'link', 'list', 'ls',
+  'outdated', 'pack', 'patch', 'patch-commit', 'patch-remove', 'prune',
+  'publish', 'rebuild', 'remove', 'root', 'server', 'setup', 'store', 'unlink',
+  'update', 'why',
+]);
+const WORKSPACE_FILTER = /--filter(?:=|\s+)(?:'([^']+)'|"([^"]+)"|([^\s'"]+))/g;
+const NODE_SCRIPT_REFERENCE = /\bnode\s+(?:--[^\s]+\s+)*((?:\.\/)?(?:[\w.@-]+\/)+[\w.-]+\.[cm]?js)\b/g;
+
+function workspacePackageIndex(root = workspaceRoot) {
+  const manifestPath = path.join(root, 'pnpm-workspace.yaml');
+  const document = fs.existsSync(manifestPath)
+    ? YAML.parse(fs.readFileSync(manifestPath, 'utf8')) || {}
+    : {};
+  const patterns = Array.isArray(document.packages) && document.packages.length > 0
+    ? document.packages
+    : ['.'];
+  const directories = new Set();
+  for (const pattern of patterns) {
+    const normalized = String(pattern).replace(/\/+$/, '');
+    if (!normalized.includes('*')) {
+      directories.add(path.resolve(root, normalized || '.'));
+      continue;
+    }
+    const segments = normalized.split('*');
+    if (segments.length !== 2 || segments[1] !== '') continue;
+    const parent = path.resolve(root, segments[0]);
+    if (!fs.existsSync(parent)) continue;
+    for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+      if (entry.isDirectory()) directories.add(path.join(parent, entry.name));
+    }
+  }
+  const packages = new Map();
+  for (const directory of directories) {
+    const packagePath = path.join(directory, 'package.json');
+    if (!fs.existsSync(packagePath)) continue;
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (typeof manifest?.name !== 'string' || !manifest.name) continue;
+    packages.set(manifest.name, {
+      directory,
+      scripts: manifest.scripts && typeof manifest.scripts === 'object' ? manifest.scripts : {},
+    });
+  }
+  return packages;
+}
+
+function filterSelector(raw) {
+  let selector = String(raw).trim();
+  if (selector.startsWith('^')) selector = selector.slice(1);
+  selector = selector.replace(/\{[^}]*\}$/, '');
+  selector = selector.replace(/^\.\.\./, '').replace(/\.\.\.$/, '');
+  if (selector.endsWith('^')) selector = selector.slice(0, -1);
+  const bracket = selector.indexOf('[');
+  if (bracket > 0) selector = selector.slice(0, bracket);
+  return selector.trim();
+}
+
+function filteredScriptName(remainder) {
+  const tokens = String(remainder).trim().split(/\s+/).filter(Boolean);
+  while (tokens.length > 0 && tokens[0].startsWith('-')) {
+    if (tokens[0] === '--') { tokens.shift(); break; }
+    tokens.shift();
+  }
+  const command = tokens.shift();
+  if (!command) return null;
+  if (command === 'run') return tokens[0] || null;
+  if (PNPM_BUILTIN_COMMANDS.has(command)) return null;
+  if (command.startsWith('$') || command.includes('/') || command.includes('{')) return null;
+  return command;
+}
+
+function workspaceSelectorViolations(fileName, source, packages = workspacePackageIndex(), root = workspaceRoot) {
+  const violations = [];
+  for (const [lineIndex, line] of String(source).split(/\r?\n/).entries()) {
+    const location = `${fileName}:${lineIndex + 1}`;
+    WORKSPACE_FILTER.lastIndex = 0;
+    let match;
+    while ((match = WORKSPACE_FILTER.exec(line)) !== null) {
+      const raw = match[1] || match[2] || match[3] || '';
+      const selector = filterSelector(raw);
+      if (!selector) {
+        violations.push(`${location}: --filter ${raw} does not name a workspace package.`);
+        continue;
+      }
+      if (selector.includes('$')) {
+        violations.push(`${location}: --filter ${raw} is computed at run time and cannot be verified against a manifest.`);
+        continue;
+      }
+      if (selector.startsWith('./') || selector.startsWith('../') || selector.startsWith('/')) {
+        if (!fs.existsSync(path.join(path.resolve(root, selector), 'package.json'))) {
+          violations.push(`${location}: --filter ${raw} points at a directory with no package.json.`);
+        }
+        continue;
+      }
+      const workspacePackage = packages.get(selector);
+      if (!workspacePackage) {
+        violations.push(`${location}: --filter ${raw} does not resolve to a workspace package; known packages are ${[...packages.keys()].sort().join(', ')}.`);
+        continue;
+      }
+      const script = filteredScriptName(line.slice(match.index + match[0].length));
+      if (script && typeof workspacePackage.scripts[script] !== 'string') {
+        violations.push(`${location}: --filter ${selector} runs "${script}", which is not a script in that package.`);
+      }
+    }
+    NODE_SCRIPT_REFERENCE.lastIndex = 0;
+    let scriptMatch;
+    while ((scriptMatch = NODE_SCRIPT_REFERENCE.exec(line)) !== null) {
+      const reference = scriptMatch[1];
+      if (reference.includes('$') || reference.startsWith('node_modules/')) continue;
+      if (!fs.existsSync(path.resolve(root, reference))) {
+        violations.push(`${location}: node ${reference} does not exist in the repository.`);
+      }
+    }
+  }
+  return violations;
+}
+
 function containsSecretsExpression(value) {
   if (typeof value === 'string') {
     return /\$\{\{[\s\S]*?\bsecrets\b[\s\S]*?\}\}/i.test(value);
@@ -230,7 +355,7 @@ function containsSecretsExpression(value) {
   return false;
 }
 
-function findPolicyViolations(fileName, source) {
+function findPolicyViolations(fileName, source, packages = workspacePackageIndex()) {
   let workflow;
   try {
     workflow = YAML.parse(source);
@@ -240,6 +365,7 @@ function findPolicyViolations(fileName, source) {
   if (!workflow || typeof workflow !== 'object') return [`${fileName}: workflow must be a YAML object.`];
 
   const violations = actionPinViolations(workflow, fileName);
+  violations.push(...workspaceSelectorViolations(fileName, source, packages));
   if (fileName === 'release.yml') violations.push(...releaseWorkflowViolations(workflow, source, fileName));
   if (workflow.permissions === undefined) {
     violations.push(`${fileName}: workflow must declare explicit permissions.`);
@@ -323,9 +449,11 @@ function verifyWorkflowDirectory(directory = workflowsDirectory) {
   const files = fs.readdirSync(directory)
     .filter((fileName) => /\.ya?ml$/i.test(fileName))
     .sort();
+  const packages = workspacePackageIndex();
   const violations = files.flatMap((fileName) => findPolicyViolations(
     fileName,
     fs.readFileSync(path.join(directory, fileName), 'utf8'),
+    packages,
   ));
   const desktopPackagePath = path.join(workspaceRoot, 'apps', 'desktop', 'package.json');
   violations.push(...desktopPackagingViolations(
@@ -352,4 +480,6 @@ module.exports = {
   findPolicyViolations,
   releaseWorkflowViolations,
   verifyWorkflowDirectory,
+  workspacePackageIndex,
+  workspaceSelectorViolations,
 };

@@ -345,6 +345,12 @@ function hasConfiguredFolders(data: {
 }
 
 const DETAIL_CACHE_LIMIT = 32;
+type LibraryScanMode = 'quick' | 'metadata' | 'full';
+
+function strongerScanMode(current: LibraryScanMode | null, requested: LibraryScanMode): LibraryScanMode {
+  const rank: Record<LibraryScanMode, number> = { quick: 0, metadata: 1, full: 2 };
+  return !current || rank[requested] > rank[current] ? requested : current;
+}
 
 function mediaItemFromCatalogCard(
   card: LibraryIndexPayload['movies'][number],
@@ -442,6 +448,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
   const libraryCatalogRevisionRef = useRef<number | null>(null);
   const stateRef = useRef(state);
   const isScanningRef = useRef(false);
+  const pendingScanModeRef = useRef<LibraryScanMode | null>(null);
   const hasConfiguredFoldersRef = useRef(false);
   const detailCacheRef = useRef(new Map<string, MediaItem>());
   const detailRequestsRef = useRef(new Map<string, Promise<MediaItem | null>>());
@@ -629,8 +636,11 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return request;
   }, [activeProfileId, clearDetailStateIfScopeChanged]);
 
-  const runLibraryScan = async (mode: 'quick' | 'metadata' | 'full') => {
-    if (isScanningRef.current) return;
+  const runLibraryScan = async (mode: LibraryScanMode) => {
+    if (isScanningRef.current) {
+      pendingScanModeRef.current = strongerScanMode(pendingScanModeRef.current, mode);
+      return;
+    }
     const mutationToken = beginLibraryMutation('catalog');
     isScanningRef.current = true;
     dispatch({ type: 'SET_SCANNING', payload: true });
@@ -647,6 +657,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       isScanningRef.current = false;
       dispatch({ type: 'SET_SCANNING', payload: false });
       dispatch({ type: 'SET_LOADING', payload: false });
+      const pendingMode = pendingScanModeRef.current;
+      pendingScanModeRef.current = null;
+      if (pendingMode) void runLibraryScan(pendingMode);
     }
   };
 
@@ -813,6 +826,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           isScanningRef.current = false;
           dispatch({ type: 'SET_SCANNING', payload: false });
+          const pendingMode = pendingScanModeRef.current;
+          pendingScanModeRef.current = null;
+          if (pendingMode) void runLibraryScan(pendingMode);
         }
       }
     };
@@ -825,6 +841,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       // spinner mounted after that request is abandoned.
       if (isScanningRef.current) {
         isScanningRef.current = false;
+        pendingScanModeRef.current = null;
         dispatch({ type: 'SET_SCANNING', payload: false });
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
       }
@@ -851,6 +868,9 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
           isScanningRef.current = false;
           dispatch({ type: 'SET_SCANNING', payload: false });
           dispatch({ type: 'SET_LOADING', payload: false });
+          const pendingMode = pendingScanModeRef.current;
+          pendingScanModeRef.current = null;
+          if (pendingMode) void runLibraryScan(pendingMode);
         }
       })();
     }, intervalMs);

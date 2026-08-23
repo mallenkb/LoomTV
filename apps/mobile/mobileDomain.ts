@@ -226,6 +226,8 @@ export type PlayTarget = {
   episode?: number;
   thumbnail?: string;
   thumbnailCandidates?: string[];
+  /** Local document URI for a completed offline download. */
+  offlineUri?: string;
 };
 
 export type MediaSegmentType = 'intro' | 'recap' | 'outro' | 'credits' | 'preview';

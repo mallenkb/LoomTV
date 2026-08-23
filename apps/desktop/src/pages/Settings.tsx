@@ -92,14 +92,13 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
   return [
     {
       id: 'tmdb',
-      label: 'TMDB Access Token or API Key',
+      label: 'TMDB API Key',
       required: true,
       badge: 'Recommended',
-      placeholder: 'Paste your TMDB read access token or v3 API key',
+      placeholder: 'TMDB key or read token',
       description: (
         <>
-          Used for high-quality movie and TV posters, backdrops, cast info, and ratings.
-          Paste either your TMDB API Read Access Token or your v3 API Key from{' '}
+          Posters, backdrops, cast, and ratings. Get a key at{' '}
           <button
             type="button"
             onClick={() => openExternal('https://www.themoviedb.org/settings/api')}
@@ -111,13 +110,32 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
       ),
     },
     {
-      id: 'omdb',
-      label: 'OMDb API Key',
-      badge: 'Optional fallback',
-      placeholder: 'Enter your OMDb API key',
+      id: 'fanart',
+      label: 'Fanart.tv API Key',
+      badge: 'Clearlogos',
+      placeholder: 'Paste your Fanart.tv personal API key',
       description: (
         <>
-          Used as a fallback when TMDB has no result. Free key at{' '}
+          Clearlogos during playback. Get a personal key at{' '}
+          <button
+            type="button"
+            onClick={() => openExternal('https://fanart.tv/get-an-api-key/#personal')}
+            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
+          >
+            Fanart.tv <ExternalLink className="w-3 h-3" />
+          </button>
+          .
+        </>
+      ),
+    },
+    {
+      id: 'omdb',
+      label: 'OMDb API Key',
+      badge: 'Fallback',
+      placeholder: 'OMDb API key',
+      description: (
+        <>
+          Fallback ratings and movie details. Get a key at{' '}
           <button
             type="button"
             onClick={() => openExternal('https://www.omdbapi.com/apikey.aspx')}
@@ -130,33 +148,13 @@ function makeMetadataProviders(openExternal: (url: string) => void): MetadataPro
       ),
     },
     {
-      id: 'fanart',
-      label: 'Fanart.tv API Key',
-      badge: 'Clearlogos',
-      placeholder: 'Paste your Fanart.tv personal API key',
-      description: (
-        <>
-          Used for playback pause/start clearlogos. Create or sign in to Fanart.tv, open the API key page,
-          and copy the <span className="font-semibold text-white">Personal API Key</span>. That is the key LoomTV needs.{' '}
-          <button
-            type="button"
-            onClick={() => openExternal('https://fanart.tv/get-an-api-key/#personal')}
-            className="text-[var(--loom-accent)] hover:underline inline-flex items-center gap-0.5"
-          >
-            Open Fanart.tv personal API key page <ExternalLink className="w-3 h-3" />
-          </button>
-          .
-        </>
-      ),
-    },
-    {
       id: 'opensubtitles',
       label: 'OpenSubtitles API Key',
       badge: 'Subtitles',
-      placeholder: 'Paste your OpenSubtitles API consumer key',
+      placeholder: 'OpenSubtitles API key',
       description: (
         <>
-          Used to download missing sidecar subtitles during library scans. Create an API consumer key from your{' '}
+          Downloads missing subtitles. Create a consumer key in your{' '}
           <button
             type="button"
             onClick={() => openExternal('https://www.opensubtitles.com/en/users/consumers')}
@@ -257,7 +255,8 @@ export default function Settings() {
 
   const persistSettings = useCallback(async (settings: Parameters<typeof desktopApi.saveSettings>[0]): Promise<boolean> => {
     try {
-      await desktopApi.saveSettings(settings);
+      const saved = await desktopApi.saveSettings(settings);
+      if (!saved) throw new Error('LoomTV did not confirm that the settings were saved.');
       setSettingsPersistenceError('');
       return true;
     } catch (error) {
@@ -521,25 +520,54 @@ export default function Settings() {
     setMetadataKeys((current) => ({ ...current, [providerId]: value }));
   };
 
+  const cleanedMetadataKeys = (keys: Record<string, string> = metadataKeys) => Object.fromEntries(
+    Object.entries(keys)
+      .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
+      .filter(([provider, value]) => provider && value),
+  ) as Record<string, string>;
+
+  const saveMetadataSettings = async (keys: Record<string, string>): Promise<boolean> => {
+    const cleanedKeys = cleanedMetadataKeys(keys);
+    if (!await persistSettings({
+      metadataApiKeys: cleanedKeys,
+      omdbApiKey: cleanedKeys.omdb || '',
+      tmdbApiKey: cleanedKeys.tmdb || '',
+      metadataOfflineMode: false,
+      openSubtitlesUsername: openSubtitlesUsername.trim(),
+      openSubtitlesPassword: openSubtitlesPassword.trim(),
+      openSubtitlesLanguages: openSubtitlesLanguages.trim() || 'en',
+      openSubtitlesAutoDownload,
+    })) return false;
+
+    setMetadataKeys(cleanedKeys);
+    setMetadataOfflineMode(false);
+    setEditingKeys(
+      Object.fromEntries(Object.keys(cleanedKeys).map((provider) => [provider, false])),
+    );
+    setSavedKey(true);
+    setTimeout(() => setSavedKey(false), 2000);
+    void refreshMetadata().catch((error) => {
+      setSettingsPersistenceError(`API keys saved, but metadata refresh failed. ${error instanceof Error ? error.message : 'Try Refresh metadata in Library settings.'}`);
+    });
+    return true;
+  };
+
   const setProviderEditing = (providerId: string, isEditing: boolean) => {
-    setEditingKeys((current) => ({ ...current, [providerId]: isEditing }));
+    if (isEditing) {
+      setEditingKeys((current) => ({ ...current, [providerId]: true }));
+      return;
+    }
+    void saveMetadataSettings(metadataKeys);
   };
 
   const toggleProviderVisibility = (providerId: string) => {
     setVisibleKeys((current) => ({ ...current, [providerId]: !current[providerId] }));
   };
 
-  const handleDeleteMetadataKey = (providerId: string) => {
-    setMetadataKeys((current) => {
-      const next = { ...current };
-      delete next[providerId];
-      return next;
-    });
-    setEditingKeys((current) => {
-      const next = { ...current };
-      delete next[providerId];
-      return next;
-    });
+  const handleDeleteMetadataKey = async (providerId: string) => {
+    const nextKeys = { ...metadataKeys };
+    delete nextKeys[providerId];
+    if (!await saveMetadataSettings(nextKeys)) return;
     setVisibleKeys((current) => {
       const next = { ...current };
       delete next[providerId];
@@ -547,39 +575,21 @@ export default function Settings() {
     });
   };
 
-  const handleAddMetadataKey = () => {
+  const handleAddMetadataKey = async () => {
     const providerId = normalizeProviderId(newProviderName);
     if (!providerId || !newProviderKey.trim()) return;
 
-    setMetadataKey(providerId, newProviderKey);
-    setProviderEditing(providerId, false);
+    if (!await saveMetadataSettings({
+      ...metadataKeys,
+      [providerId]: newProviderKey,
+    })) return;
     setVisibleKeys((current) => ({ ...current, [providerId]: false }));
     setNewProviderName('');
     setNewProviderKey('');
   };
 
   const handleSaveApiKeys = async () => {
-    const cleanedKeys = Object.fromEntries(
-      Object.entries(metadataKeys)
-        .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
-        .filter(([provider, value]) => provider && value),
-    ) as Record<string, string>;
-
-    if (!await persistSettings({
-      metadataApiKeys: cleanedKeys,
-      omdbApiKey: cleanedKeys.omdb || '',
-      tmdbApiKey: cleanedKeys.tmdb || '',
-      openSubtitlesUsername: openSubtitlesUsername.trim(),
-      openSubtitlesPassword: openSubtitlesPassword.trim(),
-      openSubtitlesLanguages: openSubtitlesLanguages.trim() || 'en',
-      openSubtitlesAutoDownload,
-    })) return;
-    setMetadataKeys(cleanedKeys);
-    setEditingKeys(
-      Object.fromEntries(Object.keys(cleanedKeys).map((provider) => [provider, false])),
-    );
-    setSavedKey(true);
-    setTimeout(() => setSavedKey(false), 2000);
+    await saveMetadataSettings(metadataKeys);
   };
 
   const handleOpenSubtitlesEnabledChange = useCallback((enabled: boolean) => {
@@ -596,14 +606,8 @@ export default function Settings() {
     });
   }, [persistSettings]);
 
-  const cleanedMetadataKeys = () => Object.fromEntries(
-    Object.entries(metadataKeys)
-      .map(([provider, value]) => [normalizeProviderId(provider), value.trim()])
-      .filter(([provider, value]) => provider && value),
-  ) as Record<string, string>;
-
   const handleTestApiKeys = async () => {
-    const cleanedKeys = cleanedMetadataKeys();
+    const cleanedKeys = cleanedMetadataKeys(metadataKeys);
     setIsTestingKeys(true);
     setMetadataKeyTestResults([]);
     try {

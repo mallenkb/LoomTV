@@ -1,0 +1,25 @@
+{
+  "name": "@loom-media-server/video-contracts",
+  "version": "1.0.0",
+  "description": "Canonical LoomTV video API, identity, account, profile, and playback contracts",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.mjs"
+    },
+    "./server": {
+      "types": "./src/server.d.ts",
+      "import": "./src/server.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mjs"
+  }
+}

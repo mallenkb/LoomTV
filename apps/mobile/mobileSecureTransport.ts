@@ -20,7 +20,7 @@ let pendingConfiguration: Promise<ActiveTransport> | null = null;
 function normalizedFingerprint(value: string): string {
   const normalized = value.replace(/[^0-9a-f]/gi, '').toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(normalized)) {
-    throw new Error('The desktop did not provide a valid TLS certificate fingerprint. Pair again from a current LoomTV desktop.');
+    throw new Error('The server did not provide a valid TLS certificate fingerprint. Pair again with a current LoomTV server.');
   }
   return normalized;
 }
@@ -28,7 +28,7 @@ function normalizedFingerprint(value: string): string {
 function secureOrigin(value: string): string {
   const parsed = new URL(value);
   if (parsed.protocol !== 'https:') {
-    throw new Error('LoomTV now requires a secure HTTPS desktop address. Select the desktop again and re-pair.');
+    throw new Error('LoomTV requires a secure HTTPS server address. Select the server again and re-pair.');
   }
   return parsed.origin;
 }

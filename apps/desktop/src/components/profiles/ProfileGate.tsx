@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { cn } from '@/lib/utils';
 import { useProfiles } from '@/contexts/ProfileContext';
 import { desktopApi, type ProfileSummary } from '@/lib/desktopApi';
+import { useUnifiedDesktopServer } from '@/lib/unifiedServer';
 import ProfileAvatar, { PROFILE_AVATAR_KEYS, PROFILE_COLOR_KEYS, PROFILE_COLOR_PRESETS } from './ProfileAvatar';
 import PinDigitInput from './PinDigitInput';
 import LoomLogo from '@/components/LoomLogo';
@@ -20,6 +21,7 @@ type EditorOrigin = 'gate' | 'source';
  */
 export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'host' | 'remote' | null }) {
   const { activeProfile, canCreateProfiles, canManageProfiles, clearGateIntent, closeGate, gateIntent, importProfile, loadError, profiles, reorderProfiles, resetOwnerProfile, selectProfile } = useProfiles();
+  const { server: unifiedGateServer, loaded: unifiedGateServerLoaded } = useUnifiedDesktopServer();
   const [mode, setMode] = useState<GateMode>('select');
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
   const [editorOrigin, setEditorOrigin] = useState<EditorOrigin>('gate');
@@ -163,15 +165,21 @@ export default function ProfileGate({ initialSetup = null }: { initialSetup?: 'h
   // profile and adding a new one.
   useEffect(() => {
     if (initialRoutedRef.current) return;
+    if (activeProfile) return;
+    const freshHostSetup = initialSetup === 'host';
+    const interruptedUnifiedSetup = unifiedGateServerLoaded
+      && unifiedGateServer.enabled
+      && !unifiedGateServer.ownerConfigured;
+    if (!freshHostSetup && !unifiedGateServerLoaded) return;
     initialRoutedRef.current = true;
-    if (initialSetup !== 'host' || activeProfile) return;
+    if (!freshHostSetup && !interruptedUnifiedSetup) return;
     const owner = profiles.find((profile) => profile.type === 'owner');
     if (owner) {
       setEditorOrigin('gate');
       setSetupMode(true);
       setEditorTarget(owner);
     }
-  }, [initialSetup, activeProfile, profiles]);
+  }, [initialSetup, activeProfile, profiles, unifiedGateServer.enabled, unifiedGateServer.ownerConfigured, unifiedGateServerLoaded]);
 
   return (
     <div
@@ -553,6 +561,19 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
   const [avatarBusy, setAvatarBusy] = useState(false);
   const isOwner = existing?.type === 'owner';
 
+  // While the unified server test is on, first-run Owner setup doubles as
+  // server setup: the same person and password become the administrator that
+  // /admin and remote clients authenticate against.
+  const { server: unifiedServer, loaded: unifiedServerLoaded, setServer: setUnifiedServer } = useUnifiedDesktopServer();
+  const needsServerOwner = setupMode && isOwner && unifiedServer.enabled && !unifiedServer.ownerConfigured;
+  const [serverPassword, setServerPassword] = useState('');
+  const [serverPasswordConfirm, setServerPasswordConfirm] = useState('');
+  const serverPasswordTooShort = serverPassword.length > 0 && serverPassword.length < 8;
+  const serverPasswordMismatch = serverPasswordConfirm.length > 0 && serverPassword !== serverPasswordConfirm;
+  const serverPasswordReady = serverPassword.length >= 8
+    && serverPassword.length <= 256
+    && serverPassword === serverPasswordConfirm;
+
   const chooseCustomAvatar = async () => {
     if (avatarBusy) return;
     setAvatarBusy(true);
@@ -568,14 +589,14 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
   };
 
   useEffect(() => {
-    if (!existing) return;
+    if (!existing || setupMode) return;
     void getRestrictions(existing.id).then((restrictions) => {
       setCountry(restrictions.country);
       setMaximumAge(restrictions.maximumAge);
       setAllowUnrated(restrictions.allowUnrated);
       setAllowedFolders(restrictions.allowedFolders);
     });
-  }, [existing, getRestrictions]);
+  }, [existing, getRestrictions, setupMode]);
 
   // Library folders are only needed by the Kids library-access picker, so this
   // (potentially large, network-backed in remote mode) library fetch is
@@ -612,6 +633,13 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
       if (savedProfile && (pin || removePin)) {
         await changeProfilePin(savedProfile.id, removePin ? null : pin);
       }
+      // Create the server administrator before entering the app, so a failed
+      // canonical setup stops here with its own error instead of leaving a
+      // half-configured server behind an app that looks ready.
+      if (needsServerOwner) {
+        if (!serverPasswordReady) throw new Error('Enter a matching administrator password of 8 to 256 characters.');
+        setUnifiedServer(await desktopApi.configureUnifiedDesktopOwner({ name: name.trim(), password: serverPassword }));
+      }
       // First-run setup: drop the user straight into the app on this profile
       // instead of returning them to the picker for a redundant tap.
       if (setupMode && savedProfile && !savedProfile.hasPin && !pin) {
@@ -643,12 +671,30 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
     }
   };
 
-  const saveDisabled = busy || !name.trim() || Boolean(pin && pin.length !== 4) || (isKid && maximumAge === null);
+  const saveDisabled = busy
+    || !name.trim()
+    || Boolean(pin && pin.length !== 4)
+    || (isKid && maximumAge === null)
+    || (setupMode && isOwner && !unifiedServerLoaded)
+    || (needsServerOwner && !serverPasswordReady);
 
   return (
     <>
       <header className="flex min-h-28 items-center justify-between px-6 pb-6 pt-14">
-        {setupMode ? <span /> : (
+        {setupMode ? (
+          <button
+            type="button"
+            onClick={() => {
+              desktopApi.returnToDesktopOnboarding();
+              window.location.reload();
+            }}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--loom-border)] px-4 py-2 text-sm font-medium text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-active-border)] hover:bg-[var(--loom-active-bg)] hover:text-[var(--loom-text)] disabled:opacity-50"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+        ) : (
           <button
             type="button"
             onClick={onClose}
@@ -742,6 +788,58 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
             </div>
           </div>
 
+          {needsServerOwner && (
+            <div className="flex flex-col gap-3 rounded-lg border border-[var(--loom-surface-3)] p-3">
+              <p id="loom-server-password-purpose" className="text-xs leading-5 text-[var(--loom-muted)]">
+                This password protects server administration and remote clients.
+              </p>
+              {!unifiedServer.ready && unifiedServer.error && (
+                <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs leading-5 text-red-200">
+                  {unifiedServer.error}
+                </p>
+              )}
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Administrator password</span>
+                <input
+                  type="password"
+                  value={serverPassword}
+                  onChange={(event) => setServerPassword(event.target.value)}
+                  autoComplete="new-password"
+                  minLength={8}
+                  maxLength={256}
+                  aria-describedby="loom-server-password-purpose loom-server-password-validation"
+                  className="rounded-lg border border-[var(--loom-surface-3)] bg-[var(--loom-surface-2)] px-3 py-2.5 text-base text-[var(--loom-text)] outline-none transition-colors focus:border-[var(--loom-accent)]"
+                />
+                <span className="text-xs text-[var(--loom-muted)]">Use 8 to 256 characters.</span>
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--loom-muted)]">Confirm administrator password</span>
+                <input
+                  type="password"
+                  value={serverPasswordConfirm}
+                  onChange={(event) => setServerPasswordConfirm(event.target.value)}
+                  autoComplete="new-password"
+                  maxLength={256}
+                  aria-describedby="loom-server-password-validation"
+                  className="rounded-lg border border-[var(--loom-surface-3)] bg-[var(--loom-surface-2)] px-3 py-2.5 text-base text-[var(--loom-text)] outline-none transition-colors focus:border-[var(--loom-accent)]"
+                />
+              </label>
+              {/* One persistent region so typing announces politely instead of
+                  firing a fresh assertive alert on every threshold crossing. */}
+              <p
+                id="loom-server-password-validation"
+                aria-live="polite"
+                className="text-xs text-red-400 empty:hidden"
+              >
+                {serverPasswordTooShort
+                  ? 'The administrator password needs at least 8 characters.'
+                  : serverPasswordMismatch
+                    ? 'Both administrator passwords must match.'
+                    : ''}
+              </p>
+            </div>
+          )}
+
           {!isOwner && !isRemoteCreate && (
             <label className="flex items-center justify-between rounded-lg border border-[var(--loom-surface-3)] px-3 py-2.5">
               <span className="flex flex-col">
@@ -829,7 +927,7 @@ function ProfileDetailEditor({ target, onClose, setupMode = false }: { target: E
             </label>
           )}
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p role="alert" aria-live="assertive" className="text-sm text-red-400">{error}</p>}
 
           {existing && !existing.isGuest && !setupMode && (
             <button
