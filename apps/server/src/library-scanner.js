@@ -127,7 +127,7 @@ async function walkVideoFiles(rootPath, containmentRoot, onFile, onError, { sign
   }
 }
 
-export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }) {
+export function createHeadlessLibraryScanner({ loadState, saveState, appendLog, probeMedia = null }) {
   let activeScan = null;
 
   async function finish(scanId, update) {
@@ -140,6 +140,8 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
 
   async function runScan(scanId, mode, roots, signal) {
     const state = await loadState();
+    const existing = Array.isArray(state.catalog) ? state.catalog : [];
+    const existingById = new Map(existing.map((item) => [item.id, item]));
     const discoveredByRoot = new Map();
     const errors = [];
     const offlineRoots = [];
@@ -169,7 +171,38 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
         rootReal,
         async (filePath, stats, subtitleSidecars) => {
           throwIfAborted(signal);
-          discovered.push(mediaRecord(root, filePath, stats, subtitleSidecars));
+          const record = mediaRecord(root, filePath, stats, subtitleSidecars);
+          record.sourceId = `${record.id}:primary`;
+          const previous = existingById.get(record.id);
+          const sameFileIdentity = previous?.sizeBytes === record.sizeBytes
+            && previous?.modifiedAtMs === record.modifiedAtMs;
+          const unchangedProbe = mode === 'quick'
+            && sameFileIdentity
+            && Array.isArray(previous?.localMetadata?.tracks);
+          if (unchangedProbe) {
+            record.localMetadata = previous.localMetadata;
+          } else if (probeMedia) {
+            try {
+              const probe = await probeMedia(filePath, { sourceId: record.sourceId, signal });
+              if (probe && Array.isArray(probe.tracks)) record.localMetadata = probe;
+              else if (sameFileIdentity && Array.isArray(previous?.localMetadata?.tracks)) {
+                record.localMetadata = previous.localMetadata;
+              }
+            } catch (error) {
+              if (error?.code === 'scan_cancelled' || signal?.aborted) throw scanCancelledError();
+              if (sameFileIdentity && Array.isArray(previous?.localMetadata?.tracks)) {
+                record.localMetadata = previous.localMetadata;
+              }
+              const relative = path.relative(root.path, filePath);
+              errors.push({
+                rootId: root.id,
+                path: !relative || relative.startsWith('..') || path.isAbsolute(relative) ? path.basename(filePath) : relative,
+                code: error?.code || 'EPROBE',
+                message: 'Media analysis failed; the file was indexed and can be analysed later.',
+              });
+            }
+          }
+          discovered.push(record);
           scannedFiles += 1;
           if (scannedFiles % CHECKPOINT_EVERY_FILES === 0) {
             const current = await loadState();
@@ -196,16 +229,14 @@ export function createHeadlessLibraryScanner({ loadState, saveState, appendLog }
       discoveredByRoot.set(root.id, { records: discovered, preserveExisting: rootHadTraversalErrors });
     }
 
-    const existing = Array.isArray(state.catalog) ? state.catalog : [];
     // Scan modes share one traversal but differ in how records merge:
     // - quick: an unchanged file (same id, size, mtime) keeps its existing
     //   catalog record, so classification and enriched fields survive
     //   routine rescans.
     // - metadata/full: every discovered file gets a freshly rebuilt record
     //   with re-derived classification.
-    const existingById = mode === 'quick' ? new Map(existing.map((item) => [item.id, item])) : null;
     const mergeRecord = (record) => {
-      const previous = existingById?.get(record.id);
+      const previous = mode === 'quick' ? existingById.get(record.id) : null;
       return previous && previous.sizeBytes === record.sizeBytes && previous.modifiedAtMs === record.modifiedAtMs
         ? { ...previous, available: true, indexedAt: record.indexedAt }
         : record;

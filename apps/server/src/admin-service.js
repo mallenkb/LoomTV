@@ -886,7 +886,12 @@ export function createHeadlessAdminService(options) {
     }
   }
 
-  const scanner = createHeadlessLibraryScanner({ loadState, saveState, appendLog });
+  const scanner = createHeadlessLibraryScanner({
+    loadState,
+    saveState,
+    appendLog,
+    probeMedia: typeof options.probeMedia === 'function' ? options.probeMedia : null,
+  });
 
   function tokenFromRequest(req) {
     const header = req?.headers?.authorization || '';

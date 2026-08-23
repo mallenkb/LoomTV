@@ -79,7 +79,7 @@ import {
   getTrayIconPath,
   getWindowIconPath,
 } from './main/windowManager';
-import { stopAllMpvPlayback } from './main/mpvPlayback';
+import { mpvRuntimeSummary, stopAllMpvPlayback } from './main/mpvPlayback';
 import { libVlcRuntimeSummary, stopAllLibVlcPlayback } from './main/libvlcPlayback';
 import { createServerTray, destroyServerTray } from './main/serverTray';
 import {
@@ -2114,6 +2114,7 @@ async function startBackgroundServices(): Promise<void> {
     });
   }
   console.log(libVlcRuntimeSummary());
+  console.log(mpvRuntimeSummary());
   initAutoUpdater({
     getMainWindow,
     stopNativePlayback: () => {

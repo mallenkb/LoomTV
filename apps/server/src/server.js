@@ -216,6 +216,10 @@ export function createCanonicalVideoServer(options) {
     clientAddress: (req) => proxyPolicy.clientAddress(req),
     proxyPolicy,
     clock: options.clock,
+    probeMedia: async (filePath, probeOptions) => {
+      if (!transcoder.getHealth().available) return null;
+      return transcoder.probeMedia(filePath, probeOptions);
+    },
     bootstrapSecurity,
     requireBootstrapSecret,
   });

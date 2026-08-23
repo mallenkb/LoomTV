@@ -38,6 +38,8 @@ import {
 } from './lib/remoteDesktop';
 
 interface NowPlaying {
+  playbackRequestId: string;
+  playRequestedAtMs: number;
   mediaId?: string;
   filePath: string;
   title: string;
@@ -56,41 +58,6 @@ interface NowPlaying {
   currentSeason?: number;
   currentEpisode?: number;
   startPosition?: number;
-}
-
-type PlaybackCandidate = {
-  filePath: string;
-  subtitles?: MediaItem['subtitles'];
-};
-
-function isRemotePlaybackSource(filePath: string): boolean {
-  return /^(?:https?|plexserver):\/\//i.test(filePath);
-}
-
-async function choosePlaybackCandidate(candidates: PlaybackCandidate[]): Promise<PlaybackCandidate | null> {
-  const uniqueCandidates = candidates.filter((candidate, index, all) => (
-    candidate.filePath
-      && all.findIndex((other) => other.filePath === candidate.filePath) === index
-  ));
-  if (uniqueCandidates.length === 0) return null;
-
-  // Remote sources are already opaque playback capabilities. The paired host
-  // owns their existence check, so do not send them through the local probe.
-  if (isRemotePlaybackSource(uniqueCandidates[0].filePath) || !window.desktopApi?.getFileInfo) {
-    return uniqueCandidates[0];
-  }
-
-  for (const candidate of uniqueCandidates) {
-    try {
-      if ((await desktopApi.getFileInfo(candidate.filePath)).exists) return candidate;
-    } catch {
-      // A stale candidate is expected while a library refresh is settling.
-    }
-  }
-
-  // Keep the original candidate so the player can show its normal error state
-  // if every local path is unavailable.
-  return uniqueCandidates[0];
 }
 
 const StartupReadyContext = createContext<() => void>(() => undefined);
@@ -432,7 +399,7 @@ function ProfileGateOrShell({ initialSetup }: { initialSetup: DesktopLibraryMode
 }
 
 function AppShell() {
-  const { state: libraryState, hydrateLibraryItem } = useLibrary();
+  const { state: libraryState } = useLibrary();
   const { gateOpen } = useProfiles();
   const markAppReady = useContext(StartupReadyContext);
   const appStartupReady = useContext(StartupVisibilityContext);
@@ -471,56 +438,32 @@ function AppShell() {
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
   ) => {
-    const openPlayer = async (details?: MediaItem | null) => {
-      const resolvedEpisode = details && typeof currentSeason === 'number' && typeof currentEpisode === 'number'
-        ? details.episodeFiles?.find((candidate) => (
-            candidate.season === currentSeason && candidate.episode === currentEpisode
-          ))
-        : undefined;
-      const candidate = await choosePlaybackCandidate([
-        { filePath, subtitles },
-        ...(resolvedEpisode?.filePath
-          ? [{ filePath: resolvedEpisode.filePath, subtitles: resolvedEpisode.subtitles }]
-          : []),
-        ...(details?.filePath
-          ? [{ filePath: details.filePath, subtitles: details.subtitles }]
-          : []),
-      ]);
-      setNowPlaying({
-        mediaId,
-        filePath: candidate?.filePath || filePath,
-        title,
-        artwork,
-        subtitles: candidate?.subtitles || resolvedEpisode?.subtitles || details?.subtitles || subtitles,
-        episodes: details?.episodes || episodes,
-        episodeFiles: details?.episodeFiles || episodeFiles,
-        currentSeason,
-        currentEpisode,
-        startPosition,
-      });
-    };
-    if (!mediaId) {
-      void openPlayer();
-      return;
-    }
-    void hydrateLibraryItem(mediaId)
-      .then(async (details) => {
-        if (details) return details;
-        // A catalog revision can make the cached hydration return null while
-        // the clicked item is still present. Ask the desktop bridge once more
-        // so playback does not fall back to an opaque catalog reference.
-        try {
-          return (await desktopApi.getLibraryItem(mediaId))?.item || null;
-        } catch {
-          return null;
-        }
-      })
-      .then(openPlayer)
-      .catch((error) => {
-        console.warn('Could not hydrate playback details:', error);
-        void openPlayer();
-      });
-  }, [hydrateLibraryItem]);
+    const playbackRequestId = crypto.randomUUID();
+    const playRequestedAtMs = performance.now();
+    console.info('[playback-timing]', JSON.stringify({
+      event: 'play_requested',
+      requestId: playbackRequestId,
+      source: /^(?:https?|plexserver):/i.test(filePath) ? 'remote' : 'local',
+    }));
+    // Every playback surface already passes the selected file, episode list,
+    // subtitles, artwork, and resume point. Opening that prepared snapshot
+    // immediately keeps catalog hydration and file inspection out of the
+    // click-to-first-frame path.
+    setNowPlaying({
+      playbackRequestId,
+      playRequestedAtMs,
+      mediaId,
+      filePath,
+      title,
+      artwork,
+      subtitles,
+      episodes,
+      episodeFiles,
+      currentSeason,
+      currentEpisode,
+      startPosition,
+    });
+  }, []);
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {
@@ -535,6 +478,8 @@ function AppShell() {
       )?.subtitles;
       return {
         ...prev,
+        playbackRequestId: crypto.randomUUID(),
+        playRequestedAtMs: performance.now(),
         filePath,
         subtitles: episodeSubtitles || [],
         currentSeason: season,
@@ -601,6 +546,8 @@ function AppShell() {
           <VideoPlayer
             key={nowPlaying.mediaId ? `media:${nowPlaying.mediaId}` : `file:${nowPlaying.filePath}`}
             mediaId={nowPlaying.mediaId}
+            playbackRequestId={nowPlaying.playbackRequestId}
+            playRequestedAtMs={nowPlaying.playRequestedAtMs}
             filePath={nowPlaying.filePath}
             title={nowPlaying.title}
             artwork={nowPlaying.artwork}

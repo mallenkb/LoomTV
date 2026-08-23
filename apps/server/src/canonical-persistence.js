@@ -42,6 +42,7 @@ export function createCanonicalPersistence(options) {
     stateStore: store,
     pairingService: pairing,
     clientAddress: options.clientAddress,
+    probeMedia: options.probeMedia,
     onPlaybackSessionsRevoked: options.onPlaybackSessionsRevoked,
     onPlaybackSessionsRevokedForItem: options.onPlaybackSessionsRevokedForItem,
     onAuthenticationSessionRevoked: options.onAuthenticationSessionRevoked,

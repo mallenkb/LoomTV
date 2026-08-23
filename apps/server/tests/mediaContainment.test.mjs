@@ -407,3 +407,90 @@ test('media routes contain paths end to end and reject encoded traversal at the 
     assert.equal(body.includes(mediaBase), false, 'the response must not disclose a filesystem path');
   });
 });
+
+/**
+ * Playback preparation trusts the probe the scanner already recorded, so the
+ * freshness decision — not ffprobe — is what runs on the common path. The
+ * recorded size and modified time come from the source row; the live ones come
+ * from the same contained stat that playback resolves the path through.
+ */
+async function planWithRecordedProbe(recordedSizeDelta = 0) {
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'loomtv-contain-probe-')));
+  const mediaDir = path.join(base, 'library');
+  await fs.mkdir(mediaDir, { recursive: true });
+  const mediaFile = path.join(mediaDir, 'clip.mkv');
+  await fs.writeFile(mediaFile, 'fake-video-bytes');
+  const verified = await statContainedFile(mediaDir, mediaFile);
+
+  const sourceId = 'item-1:primary';
+  const recordedProbe = {
+    sourceId,
+    container: 'mkv',
+    videoCodec: 'h264',
+    audioCodec: 'aac',
+    width: 1920,
+    height: 1080,
+    tracks: [
+      { id: 'v:0', kind: 'video', codec: 'h264', width: 1920, height: 1080 },
+      { id: 'a:0', kind: 'audio', codec: 'aac' },
+    ],
+    adapterGaps: [],
+  };
+  const probeCalls = [];
+  const recorded = [];
+  const mediaService = createHeadlessMediaService({
+    cacheDir: path.join(base, 'cache'),
+    transcoder: {
+      path: path.join(base, 'ffmpeg'),
+      getHealth: () => ({ available: true, hardwareAcceleration: [], toneMapping: false }),
+      probeMedia: async (filePath, { sourceId: probedSourceId }) => {
+        probeCalls.push(filePath);
+        return { ...recordedProbe, sourceId: probedSourceId, container: 'freshly-probed' };
+      },
+    },
+    authorize: async () => true,
+    adminService: {
+      getLibraryItem: async () => ({ id: 'item-1', title: 'Clip', sourceId }),
+      recordMediaProbe: async (itemId, recordedSourceId, probe) => {
+        recorded.push({ itemId, sourceId: recordedSourceId, probe });
+        return probe;
+      },
+      resolveMediaPath: async () => ({
+        id: 'item-1',
+        rootId: 'root-1',
+        sourceId,
+        path: verified.realPath,
+        rootPath: verified.rootRealPath,
+        fileId: verified.fileId,
+        sizeBytes: verified.stats.size,
+        modifiedAtMs: verified.stats.mtimeMs,
+        localMetadata: recordedProbe,
+        recordedSizeBytes: verified.stats.size + recordedSizeDelta,
+        recordedModifiedAtMs: verified.stats.mtimeMs,
+      }),
+    },
+  });
+
+  const result = await mediaService.planPlayback('item-1', {
+    capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http'] },
+  }, { id: 'owner-1', type: 'owner', role: 'owner', permissions: ['stream'], rootIds: null });
+  await mediaService.stop();
+  return { result, probeCalls, recorded };
+}
+
+test('a fresh recorded probe is reused, so playback preparation never runs ffprobe', async () => {
+  const { result, probeCalls, recorded } = await planWithRecordedProbe();
+  assert.deepEqual(probeCalls, [], 'a matching recorded probe must not be re-probed');
+  assert.deepEqual(recorded, [], 'nothing is re-recorded when the cache was already current');
+  assert.equal(result.probe.container, 'mkv');
+  assert.equal(result.probe.sourceId, 'item-1:primary');
+});
+
+test('a recorded probe from a changed file is re-probed and re-recorded', async () => {
+  const { result, probeCalls, recorded } = await planWithRecordedProbe(1);
+  assert.equal(probeCalls.length, 1, 'a size mismatch must force a fresh probe');
+  assert.equal(result.probe.container, 'freshly-probed', 'the plan must use the fresh probe, not the stale record');
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].sourceId, 'item-1:primary');
+  assert.equal(recorded[0].probe.container, 'freshly-probed');
+});

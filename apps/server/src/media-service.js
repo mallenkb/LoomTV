@@ -171,6 +171,20 @@ function subtitleKindForProbe(plan, probe) {
   return ['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text'].includes(codec) ? 'text' : 'bitmap';
 }
 
+/**
+ * A scan-time probe still describes the file when it was recorded against this
+ * source identity and neither the size nor the modified time has moved since.
+ * Returning it lets playback preparation skip the ffprobe round trip; anything
+ * missing or stale returns null so the caller re-probes and re-records.
+ */
+function cachedScanProbe(source, sourceId) {
+  const cached = source?.localMetadata;
+  if (!cached || cached.sourceId !== sourceId || !Array.isArray(cached.tracks)) return null;
+  if (source.recordedSizeBytes !== source.sizeBytes) return null;
+  if (!(Math.abs(Number(source.recordedModifiedAtMs) - Number(source.modifiedAtMs)) < 1)) return null;
+  return { ...cached, sourceId };
+}
+
 function externalSubtitleTracks(source) {
   return (Array.isArray(source?.subtitleSidecars) ? source.subtitleSidecars : []).slice(0, 64).map((sidecar, ordinal) => ({
     id: sidecar.id,
@@ -997,17 +1011,10 @@ export function createHeadlessMediaService({
       }
     }
     const sourceId = String(source.sourceId || catalogItem.sourceId || `${itemId}:primary`);
-    let probe;
-    try {
+    let probe = cachedScanProbe(source, sourceId);
+    if (!probe) {
       probe = await transcoder.probeMedia(source.path, { sourceId });
       await adminService.recordMediaProbe?.(itemId, sourceId, probe).catch(() => undefined);
-    } catch (error) {
-      const cacheMatches = source.localMetadata?.sourceId === sourceId
-        && Array.isArray(source.localMetadata?.tracks)
-        && source.recordedSizeBytes === source.sizeBytes
-        && Math.abs(Number(source.recordedModifiedAtMs) - Number(source.modifiedAtMs)) < 1;
-      if (!cacheMatches) throw error;
-      probe = { ...source.localMetadata, sourceId };
     }
     const sidecarTracks = externalSubtitleTracks(source);
     if (sidecarTracks.length) {
