@@ -121,7 +121,6 @@
     .button.subtle.danger:hover { background: rgba(239,127,127,.14); color: var(--negative); }
     .button.danger:hover { background: rgba(239,127,127,.20); color: var(--negative); }
     .button:disabled { opacity: .45; cursor: not-allowed; }
-    .page { display: none; max-width: 1180px; margin: 0 auto; }
     .page.active { display: block; }
 
     /* Panels are the desktop Card: flat surface, hairline border, 12px radius. */
@@ -167,6 +166,9 @@
     .callout p { margin: 0; color: var(--muted); font-size: var(--fs-small); line-height: 1.55; }
     .callout .button { justify-self: start; }
     .toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .trust-help { margin: 0; color: var(--faint); font-size: 11px; line-height: 1.5; }
+    .trust-help summary { color: var(--muted); cursor: pointer; }
+    .trust-help p { margin-top: 8px; font-size: 11px; }
     .library-folder-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .library-folder-grid > :only-child { grid-column: 1 / -1; }
     .users-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
@@ -392,6 +394,18 @@
           <article class="panel pad">
             <p class="eyebrow">Next useful action</p>
             <div class="callout" id="nextAction"><h3>Connect a library root</h3><p>Add the mounted folder where your films, shows, or anime live. Existing records stay safe when a NAS share is unavailable.</p><button type="button" class="button primary" data-go="library">Open library setup</button></div>
+          </article>
+          <article class="panel pad">
+            <p class="eyebrow">Browser security</p>
+            <div class="callout" style="margin-top:12px" id="certificateAction">
+              <h3>Remove the browser warning</h3>
+              <p>Download LoomTV's certificate, then trust it on this device.</p>
+              <a class="button" href="/api/admin/certificate" download="loomtv-local.crt">Download certificate</a>
+              <details class="trust-help">
+                <summary>How to trust it</summary>
+                <p>macOS: open the file in Keychain Access and choose "Always Trust". Windows: install it for your current user in Trusted Root Certification Authorities. Linux and Firefox: import it into the browser or system trust store.</p>
+              </details>
+            </div>
           </article>
         </div>
       </section>

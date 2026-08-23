@@ -269,6 +269,7 @@ export function createCanonicalVideoServer(options) {
     requireSecureTransport: options.requireSecureTransport === true,
     requireBootstrapSecret,
     proxyPolicy,
+    certificatePem: options.tls?.cert,
   });
   const webApp = createWebAppPage({ htmlPath: options.webAppHtmlPath, getSetupStatus: setupStatus });
   const publicApi = createPublicApiHandler({

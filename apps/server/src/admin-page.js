@@ -132,12 +132,26 @@ function writeJson(res, status, payload, headers = {}) {
   res.end(body);
 }
 
+function writeCertificate(res, certificatePem) {
+  const body = Buffer.isBuffer(certificatePem)
+    ? certificatePem
+    : Buffer.from(String(certificatePem), 'utf8');
+  res.writeHead(200, {
+    'Cache-Control': 'no-store',
+    'Content-Type': 'application/x-pem-file',
+    'Content-Disposition': 'attachment; filename="loomtv-local.crt"',
+    'Content-Length': body.byteLength,
+  });
+  res.end(body);
+}
+
 function permissionForRoute(pathname, method, prefix) {
   // Bootstrap is the authenticated capability snapshot. The service redacts
   // health, roots, users, and backup details for principals that lack the
   // corresponding read permission, so every signed-in account can unlock the
   // web client without receiving administrator-only data.
   if (pathname === `${prefix}/bootstrap`) return undefined;
+  if (pathname === `${prefix}/certificate`) return undefined;
   if (pathname === `${prefix}/library/roots`) return method === 'GET' ? 'library.read' : 'library.manage';
   if (pathname === `${prefix}/library/browse`) return 'library.manage';
   if (pathname === `${prefix}/library/items`) return 'library.read';
@@ -222,6 +236,7 @@ export function createAdminApiHandler(options = {}) {
   const requireSecureTransport = options.requireSecureTransport === true;
   const requireBootstrapSecret = options.requireBootstrapSecret !== false;
   const proxyPolicy = options.proxyPolicy || createTrustedProxyPolicy();
+  const certificatePem = options.certificatePem;
 
   function isSecureRequest(req) {
     return proxyPolicy.isSecureRequest(req);
@@ -255,6 +270,7 @@ export function createAdminApiHandler(options = {}) {
     let configured;
     try { configured = await ownerConfigured(); } catch (error) { log('owner state lookup failed', error); configured = true; }
     const publicRoute = isPublicBootstrapRequest
+      || (pathname === `${prefix}/certificate` && method === 'GET')
       || (pathname === `${prefix}/onboarding/owner` && method === 'POST')
       || (pathname === `${prefix}/session` && method === 'POST');
     const requiredPermission = permissionForRoute(pathname, method, prefix);
@@ -290,6 +306,11 @@ export function createAdminApiHandler(options = {}) {
     }
 
     try {
+      if (pathname === `${prefix}/certificate` && method === 'GET') {
+        if (!certificatePem) throw requestError(404, 'A direct TLS certificate is not available from this server.');
+        writeCertificate(res, certificatePem);
+        return true;
+      }
       if (pathname === `${prefix}/bootstrap` && method === 'GET') {
         writeJson(res, 200, await service.getBootstrap(principal));
         return true;
