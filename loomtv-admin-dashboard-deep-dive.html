@@ -7,27 +7,27 @@
   <title>Admin dashboard deep dive · Jellyfin, Plex, and LoomTV</title>
   <style>
     :root {
-      color-scheme: dark;
+      color-scheme: light dark;
 
-      /* Report-library theme measured from the hosted LoomTV progress report. */
-      --report-bg: #171717;
-      --report-card: #0a0a0a;
-      --report-card-soft: #111111;
-      --report-text: #ffffff;
-      --report-secondary: #d4d4d4;
-      --report-subtle: #a3a3a3;
-      --report-faint: #737373;
-      --report-accent: #a3e635;
+      /* These aliases follow the injected DesignOS theme in the report library. */
+      --report-bg: var(--color-bg-secondary, #171717);
+      --report-card: var(--color-bg-primary, #0a0a0a);
+      --report-card-soft: var(--color-bg-tertiary, #111111);
+      --report-text: var(--color-text-primary, #ffffff);
+      --report-secondary: var(--color-text-secondary, #d4d4d4);
+      --report-subtle: var(--color-text-tertiary, #a3a3a3);
+      --report-faint: var(--color-text-quarternary, #737373);
+      --report-accent: var(--color-chart-lime, #a3e635);
       --report-accent-hover: #bef264;
-      --report-border: #242424;
-      --report-success: #86efac;
-      --report-success-bg: #12351f;
-      --report-warning: #fbbf24;
-      --report-warning-bg: #392b0c;
-      --report-error: #f87171;
-      --report-error-bg: #3a1717;
-      --report-info: #93c5fd;
-      --report-info-bg: #172554;
+      --report-border: var(--color-border-primary, #242424);
+      --report-success: var(--color-text-success-secondary, #86efac);
+      --report-success-bg: var(--color-bg-success, #12351f);
+      --report-warning: var(--color-text-warning-secondary, #fbbf24);
+      --report-warning-bg: var(--color-bg-warning, #392b0c);
+      --report-error: var(--color-text-error-secondary, #f87171);
+      --report-error-bg: var(--color-bg-error, #3a1717);
+      --report-info: var(--color-text-info-secondary, #93c5fd);
+      --report-info-bg: var(--color-bg-info, #172554);
       --content: 1180px;
       --page-pad: 24px;
       --radius-card: 14px;
@@ -102,7 +102,7 @@
     .compare-card p { margin: 7px 0 0; color: var(--muted); font-size: 16px; }
     .plan { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; counter-reset: plan; }
     .plan-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-content: start; gap: 14px; padding: 20px; background: var(--panel); border-radius: var(--radius-card); }
-    .plan-no { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--report-card); font-weight: 750; }
+    .plan-no { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--color-text-dark, #0a0a0a); font-weight: 750; }
     .plan-row p { margin: 4px 0 0; color: var(--muted); }
     .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .split-box { padding: 20px; background: var(--panel); border-radius: var(--radius-card); }
