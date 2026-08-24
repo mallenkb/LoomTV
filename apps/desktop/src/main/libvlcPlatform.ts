@@ -1,5 +1,3 @@
-import './libvlcWarmup.ts';
-
 export type LibVlcPlatformHost = 'macos-child' | 'windows-child';
 
 export type LibVlcPlatformBinding = {
