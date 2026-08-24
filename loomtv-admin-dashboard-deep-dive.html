@@ -30,7 +30,6 @@
       --report-info-bg: #172554;
       --content: 1180px;
       --page-pad: 24px;
-      --report-header-height: 58px;
       --radius-card: 14px;
       --radius-control: 8px;
 
@@ -53,15 +52,7 @@
     a:hover { color: var(--accent); }
     a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
     .page { width: min(calc(100% - (var(--page-pad) * 2)), var(--content)); margin-inline: auto; }
-    .report-library-header { position: fixed; inset: 0 0 auto; z-index: 10; background: var(--report-bg); }
-    .report-library-header__inner { display: flex; align-items: center; gap: 8px; min-height: 58px; }
-    .report-library-header__home { color: var(--text); font-size: 17px; font-weight: 650; text-decoration: none; }
-    .report-library-header__separator { color: var(--report-faint); }
-    .report-library-header__title { color: var(--report-subtle); font-size: 15px; }
-    .report-library-header__nav { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-    .report-library-header__nav a { padding: 5px 8px; color: var(--report-subtle); border-radius: var(--radius-control); font-size: 13px; text-decoration: none; }
-    .report-library-header__nav a:hover { background: var(--report-card); color: var(--text); }
-    .document-header { padding: calc(var(--report-header-height) + 64px) 0 28px; }
+    .document-header { padding: 64px 0 28px; }
     .kicker { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
     h1, h2, h3, h4 { margin: 0; color: var(--text); letter-spacing: -.02em; }
     h1 { font-size: clamp(42px, 5vw, 64px); line-height: 1.08; font-weight: 500; }
@@ -72,7 +63,7 @@
     .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; color: var(--faint); font-size: 13px; }
     .contents { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 18px; font-size: 13px; }
     main { padding: 64px 0; }
-    section { scroll-margin-top: calc(var(--report-header-height) + 16px); margin-top: 52px; padding: 0; }
+    section { scroll-margin-top: 72px; margin-top: 52px; padding: 0; }
     section:first-child { margin-top: 0; }
     .section-head { margin-bottom: 16px; }
     .section-head p { margin: 0; color: var(--muted); }
@@ -130,9 +121,7 @@
     footer p { margin: 0; }
     @media (max-width: 800px) {
       :root { --page-pad: 16px; }
-      .report-library-header__inner { align-items: flex-start; flex-wrap: wrap; padding-block: 12px; }
-      .report-library-header__nav { width: 100%; margin-left: 0; }
-      .document-header { padding-top: calc(var(--report-header-height) + 40px); }
+      .document-header { padding-top: 40px; }
       h1 { font-size: 44px; }
       h2 { font-size: 30px; }
       .stats, .compare-grid, .plan, .split { grid-template-columns: 1fr; }
@@ -145,15 +134,6 @@
   </style>
 </head>
 <body>
-  <header class="report-library-header">
-    <div class="page report-library-header__inner">
-      <a class="report-library-header__home" href="#answer">LoomTV</a>
-      <span class="report-library-header__separator">/</span>
-      <span class="report-library-header__title">Admin dashboard research</span>
-      <nav class="report-library-header__nav" aria-label="Report sections"><a href="#answer">Answer</a><a href="#jellyfin">Jellyfin</a><a href="#plex">Plex</a><a href="#loomtv">LoomTV</a><a href="#plan">Plan</a><a href="#sources">Sources</a></nav>
-    </div>
-  </header>
-
   <header class="document-header">
     <div class="page">
       <p class="kicker">LoomTV / admin dashboard research</p>
@@ -262,29 +242,6 @@
       <p style="margin-top:22px"><a href="https://github.com/mallenkb/LoomTV/blob/codex/libvlc-instant-playback/jellyfin-plex-loomtv-findings.html">Open the concise findings brief</a> · <a href="https://github.com/mallenkb/LoomTV/blob/codex/libvlc-instant-playback/jellyfin-plex-loomtv-admin-audit.html">Open the full scored evidence audit</a></p>
     </section>
   </main>
-  <script>
-    (() => {
-      const links = document.querySelectorAll('.report-library-header__nav a, .report-library-header__home');
-      const scrollToHash = (hash, behavior = 'auto') => {
-        if (!hash || hash === '#') return;
-        const target = document.getElementById(hash.slice(1));
-        if (!target) return;
-        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        target.scrollIntoView({ behavior: reducedMotion ? 'auto' : behavior, block: 'start' });
-      };
-      links.forEach((link) => {
-        link.addEventListener('click', (event) => {
-          const hash = link.getAttribute('href');
-          if (!hash || !document.getElementById(hash.slice(1))) return;
-          event.preventDefault();
-          history.pushState(null, '', hash);
-          scrollToHash(hash, 'smooth');
-        });
-      });
-      window.addEventListener('hashchange', () => scrollToHash(window.location.hash));
-      if (window.location.hash) window.requestAnimationFrame(() => scrollToHash(window.location.hash));
-    })();
-  </script>
   <footer><div class="page"><p>Admin dashboard research deep dive · LoomTV · Generated Aug 24, 2026 · Evidence confidence: Medium</p></div></footer>
 </body>
 </html>
