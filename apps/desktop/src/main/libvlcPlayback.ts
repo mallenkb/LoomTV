@@ -9,6 +9,7 @@ import {
   syncNativePlaybackDisplaySleep,
 } from './nativePlaybackPower';
 import { libVlcPlatformBinding, libVlcPlatformVariants } from './libvlcPlatform.ts';
+import { getWarmLibVlcInstance } from './libvlcWarmup.ts';
 
 /**
  * A koffi type descriptor. `koffi.struct(...)` returns one of these opaque
@@ -335,9 +336,8 @@ function pluginPathForLibrary(libraryPath: string): string | undefined {
 }
 
 function createLibVlcInstance(runtime: LibVlcRuntime): NativeHandle {
-  // VLC's module discovery is relative to its plugin directory. Keep the
-  // process environment unchanged after construction so a user-selected
-  // runtime cannot affect unrelated child processes or later launches.
+  // This is the fallback path when the process-lifetime instance could not be
+  // warmed or the active runtime resolves a different libvlc image.
   const previousPluginPath = process.env.VLC_PLUGIN_PATH;
   const pluginPath = pluginPathForLibrary(runtime.libraryPath);
   if (pluginPath) process.env.VLC_PLUGIN_PATH = pluginPath;
@@ -458,10 +458,10 @@ export function libVlcRuntimeSummary(): string {
 
   const candidate = configuredLibraryCandidate();
   if (candidate) {
-    return `[playback] LibVLC configured — ${candidate.source} runtime detected at ${candidate.path}; the startup loader will validate it before the app is released`;
+    return `[playback] LibVLC default — ${candidate.source} runtime detected at ${candidate.path}; one process-lifetime instance is warmed at app startup`;
   }
 
-  return '[playback] LibVLC configured — no bundled or installed runtime file detected; the startup loader will report the load failure before compatibility playback is used';
+  return '[playback] LibVLC default — no bundled or installed runtime file detected; compatibility playback will be used if startup warmup cannot create the native runtime';
 }
 
 function finite(value: unknown, fallback: number): number {
@@ -974,6 +974,7 @@ function nativeStateStatus(state: number): LibVlcPlaybackState['status'] {
 class LibVlcPlaybackSession {
   readonly id = crypto.randomUUID();
   private readonly instance: NativeHandle;
+  private readonly ownsInstance: boolean;
   private readonly media: NativeHandle;
   private player: NativeHandle;
   private timer: NodeJS.Timeout | null = null;
@@ -1025,17 +1026,19 @@ class LibVlcPlaybackSession {
     };
 
     const api = runtime.api;
-    this.instance = createLibVlcInstance(runtime);
+    const sharedInstance = getWarmLibVlcInstance(runtime.libraryPath);
+    this.instance = sharedInstance ?? createLibVlcInstance(runtime);
+    this.ownsInstance = sharedInstance === null;
     if (!this.instance) throw new Error('LibVLC could not create a media instance.');
     let media: NativeHandle;
     try {
       media = nativeHandle(api.mediaNewPath(this.instance, filePath));
     } catch (error) {
-      try { api.releaseInstance(this.instance); } catch { /* best effort */ }
+      this.releaseOwnedInstance();
       throw error;
     }
     if (!media) {
-      api.releaseInstance(this.instance);
+      this.releaseOwnedInstance();
       throw new Error('LibVLC could not open the authorized local media path.');
     }
     try {
@@ -1055,12 +1058,12 @@ class LibVlcPlaybackSession {
       this.player = nativeHandle(api.playerNewFromMedia(media));
     } catch (error) {
       try { api.mediaRelease(media); } catch { /* best effort */ }
-      try { api.releaseInstance(this.instance); } catch { /* best effort */ }
+      this.releaseOwnedInstance();
       throw error;
     }
     if (!this.player) {
       try { api.mediaRelease(this.media); } catch { /* best effort */ }
-      api.releaseInstance(this.instance);
+      this.releaseOwnedInstance();
       throw new Error('LibVLC could not create a media player.');
     }
 
@@ -1581,13 +1584,18 @@ class LibVlcPlaybackSession {
     return true;
   }
 
+  private releaseOwnedInstance(): void {
+    if (!this.ownsInstance || !this.instance) return;
+    try { this.runtime.api.releaseInstance(this.instance); } catch { /* best effort */ }
+  }
+
   private release(): void {
     if (this.player) {
       try { this.runtime.api.playerRelease(this.player); } catch { /* best effort */ }
       this.player = null;
     }
     try { this.runtime.api.mediaRelease(this.media); } catch { /* best effort */ }
-    try { this.runtime.api.releaseInstance(this.instance); } catch { /* best effort */ }
+    this.releaseOwnedInstance();
   }
 
   private destroyNativeView(): void {
