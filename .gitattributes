@@ -1,0 +1,2 @@
+# Bundled native runtimes are verified byte-for-byte against their manifests.
+apps/desktop/resources/libvlc/** -text
