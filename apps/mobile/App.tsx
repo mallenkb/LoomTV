@@ -367,7 +367,9 @@ const MOBILE_OPEN_SOURCE_NOTICES = [
   { name: 'expo-blur', license: 'MIT' },
   { name: 'expo-brightness', license: 'MIT' },
   { name: 'expo-build-properties', license: 'MIT' },
+  { name: 'expo-dev-client', license: 'MIT' },
   { name: 'expo-device', license: 'MIT' },
+  { name: 'expo-file-system', license: 'MIT' },
   { name: 'expo-image', license: 'MIT' },
   { name: 'expo-screen-orientation', license: 'MIT' },
   { name: 'expo-secure-store', license: 'MIT' },
@@ -379,6 +381,7 @@ const MOBILE_OPEN_SOURCE_NOTICES = [
   { name: 'react-native-safe-area-context', license: 'MIT' },
   { name: 'react-native-svg', license: 'MIT' },
   { name: 'react-native-zeroconf', license: 'MIT' },
+  { name: 'Zod', license: 'MIT' },
 ] as const;
 
 function formatDuration(seconds?: number): string {

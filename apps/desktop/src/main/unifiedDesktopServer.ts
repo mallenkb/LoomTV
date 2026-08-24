@@ -241,7 +241,10 @@ export async function startUnifiedDesktopServer(setupHooks: UnifiedDesktopSetupH
     host = createCanonicalServerHost({
       migrationReady: true,
       host: '0.0.0.0',
-      port: Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 3848,
+      // The desktop LAN media server already owns 3848. Keep the unified
+      // administration server on its own default port so enabling the test
+      // cannot silently hide the admin entry after an EADDRINUSE failure.
+      port: Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 3948,
       paths: {
         dataDir,
         cacheDir: path.join(dataDir, 'canonical-cache'),

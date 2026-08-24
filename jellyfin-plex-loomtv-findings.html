@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en" data-color-mode="dark" data-surface="website">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Findings from a comparative admin review of Jellyfin, Plex, and LoomTV.">
+  <title>Jellyfin, Plex, and LoomTV: findings</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0c0f;
+      --panel: #14161b;
+      --panel-2: #1b1e25;
+      --line: #2b2f38;
+      --text: #f3f4f6;
+      --muted: #a7adb8;
+      --faint: #777e8b;
+      --accent: #8db7ff;
+      --accent-soft: #182942;
+      --warn: #f2c477;
+      --warn-soft: #332715;
+      --ok: #8fd1a5;
+      --ok-soft: #183024;
+      --info: #b5c9ff;
+      --content: 1120px;
+      --pad: 28px;
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    img, svg, video, canvas { max-width: 100%; height: auto; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.6 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    a:hover { color: #c8dcff; }
+    a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .page { width: min(calc(100% - (var(--pad) * 2)), var(--content)); margin: 0 auto; }
+    header { padding: 44px 0 24px; border-bottom: 1px solid var(--line); }
+    .kicker { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3 { margin: 0; color: var(--text); letter-spacing: -.02em; }
+    h1 { max-width: 820px; font-size: clamp(32px, 5vw, 56px); line-height: 1.06; font-weight: 650; }
+    h2 { font-size: clamp(23px, 3vw, 32px); line-height: 1.15; font-weight: 620; }
+    h3 { font-size: 19px; line-height: 1.3; font-weight: 620; }
+    .lede { max-width: 790px; margin: 18px 0 0; color: var(--muted); font-size: 18px; line-height: 1.55; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 20px; color: var(--faint); font-size: 13px; }
+    .contents { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 16px 0 4px; font-size: 13px; }
+    main { padding: 28px 0 64px; }
+    section { padding: 34px 0; border-bottom: 1px solid var(--line); }
+    .section-head { margin-bottom: 22px; }
+    .section-head p { max-width: 780px; margin: 10px 0 0; color: var(--muted); }
+    .decision { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, .8fr); gap: 20px; align-items: stretch; }
+    .callout { padding: 22px 24px; background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: var(--radius); }
+    .callout h2 { font-size: 26px; }
+    .callout p { margin: 12px 0 0; color: #d6e3ff; }
+    .signal-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .signal-list li { padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+    .signal-list strong { display: block; font-size: 22px; line-height: 1.1; }
+    .signal-list span { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
+    .group { margin-top: 26px; }
+    .group:first-of-type { margin-top: 0; }
+    .group-label { display: inline-block; margin-bottom: 10px; color: var(--warn); font-size: 12px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+    .finding { padding: 18px 0 20px; border-top: 1px solid var(--line); }
+    .finding:first-child { border-top: 0; padding-top: 0; }
+    .finding-head { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: baseline; justify-content: space-between; }
+    .status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--warn); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+    .status.keep { color: var(--ok); }
+    .status.keep::before { background: var(--ok); }
+    .finding p { margin: 9px 0 0; color: var(--muted); }
+    .finding p strong { color: var(--text); font-weight: 650; }
+    .action { margin-top: 12px !important; padding: 12px 14px; background: var(--panel-2); border-radius: 9px; color: var(--text) !important; }
+    .action strong { color: var(--accent) !important; }
+    .comparison-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    th, td { padding: 14px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: var(--panel-2); color: var(--text); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    td { color: var(--muted); }
+    tbody tr:last-child td { border-bottom: 0; }
+    td:first-child { width: 145px; color: var(--text); font-weight: 650; }
+    .actions { display: grid; gap: 12px; counter-reset: item; }
+    .action-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 14px; align-items: start; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+    .action-no { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 750; }
+    .action-row p { margin: 4px 0 0; color: var(--muted); }
+    .keep-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .keep { padding: 16px; background: var(--ok-soft); border-radius: 10px; }
+    .keep h3 { font-size: 17px; }
+    .keep p { margin: 6px 0 0; color: #cbe8d3; }
+    .limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .limits ul { margin: 0; padding-left: 20px; color: var(--muted); }
+    .limits li + li { margin-top: 7px; }
+    details { margin-top: 18px; padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+    summary { cursor: pointer; color: var(--text); font-weight: 650; }
+    footer { padding: 24px 0 44px; color: var(--faint); font-size: 13px; }
+    footer p { margin: 0; }
+    @media (max-width: 760px) {
+      :root { --pad: 16px; }
+      header { padding-top: 28px; }
+      .decision, .keep-grid, .limits { grid-template-columns: 1fr; }
+      .lede { font-size: 16px; }
+      section { padding: 26px 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="page">
+      <p class="kicker">Findings brief · LoomTV admin experience</p>
+      <h1>What Jellyfin and Plex make obvious, and what LoomTV should do next</h1>
+      <p class="lede">This is the short version of the comparative audit. Jellyfin has the clearest server dashboard. Plex has the broadest documented operations model, but it also brings a hosted-account dependency. LoomTV already has the right private, video-first building blocks. The main gap is where they are presented.</p>
+      <div class="meta"><span>Sources: live Jellyfin dashboard, local Plex sign-in gate, official Plex documentation, LoomTV source and isolated runtime</span><span>Confidence: medium</span></div>
+      <nav class="contents" aria-label="Contents"><a href="#decision">Decision</a><a href="#findings">Findings</a><a href="#comparison">Comparison</a><a href="#actions">Actions</a><a href="#limits">Limits and sources</a></nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="decision">
+      <div class="decision">
+        <div class="callout">
+          <h2>Build one LoomTV server overview before adding more admin sections.</h2>
+          <p>Show health, server name and version, library counts, scan state, active sessions, recent activity, and the next action. Link to the existing Library, Network, Metadata, Sessions, Logs, Users, and Backups pages. Do not create a second source of truth.</p>
+        </div>
+        <ul class="signal-list" aria-label="Audit signals">
+          <li><strong>9</strong><span>consolidated findings</span></li>
+          <li><strong>4</strong><span>actions worth doing first</span></li>
+          <li><strong>2</strong><span>patterns to preserve</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="findings">
+      <div class="section-head"><h2>Findings</h2><p>The findings are grouped by what should change, what should remain deliberate, and what still needs a real interaction check.</p></div>
+
+      <div class="group">
+        <span class="group-label">Act on</span>
+        <article class="finding"><div class="finding-head"><h3>1. LoomTV's admin state is split across surfaces.</h3><span class="status">Medium</span></div><p><strong>Observed.</strong> Jellyfin puts server details, scan controls, library counts, devices, activity, and paths on one dashboard. LoomTV has equivalent pieces in desktop Settings and the headless admin page.</p><p><strong>Why it matters.</strong> An owner has to remember where each answer lives, especially when something is broken.</p><p class="action"><strong>Do.</strong> Add a read-only owner overview that links to the existing pages and APIs.</p></article>
+        <article class="finding"><div class="finding-head"><h3>2. LoomTV has useful operational data, but it is not gathered at the first stop.</h3><span class="status">Medium</span></div><p><strong>Observed.</strong> Jellyfin shows devices and recent activity. Plex documents Dashboard, Alerts, Conversions, bandwidth, logs, and scheduled maintenance. LoomTV already has sessions, logs, backups, scans, and server status in its headless admin.</p><p><strong>Why it matters.</strong> Recent events are what owners need when playback, scanning, or access fails.</p><p class="action"><strong>Do.</strong> Add Recent activity and Server work cards to the overview. Link each item to the existing detail page.</p></article>
+        <article class="finding"><div class="finding-head"><h3>3. LoomTV should explain optional metadata without making keys feel required.</h3><span class="status">Medium</span></div><p><strong>Observed.</strong> LoomTV names TMDB, OMDb, Fanart, TVDB, TVmaze, and Jikan in its Metadata API Keys settings. TVmaze and Jikan work without keys. Jellyfin and Plex place most provider configuration inside their provider or agent model.</p><p><strong>Why it matters.</strong> A new owner may stop at an optional step or assume metadata will not work without credentials.</p><p class="action"><strong>Do.</strong> Say “Optional. TVmaze is the default when no key is available.” Show the fallback order and provider result inline.</p></article>
+        <article class="finding"><div class="finding-head"><h3>4. Scope is a product choice, not a checklist.</h3><span class="status">Medium</span></div><p><strong>Observed.</strong> Jellyfin and Plex expose more categories, including networking, live TV and DVR, scheduled tasks, and advanced operations. LoomTV is intentionally focused on video and already has a smaller set of working controls.</p><p><strong>Why it matters.</strong> Adding empty parity sections would make LoomTV harder to understand and imply unfinished support.</p><p class="action"><strong>Do.</strong> Add the overview now. Keep Live TV/DVR, a scheduler, and broader internet remote access as labelled roadmap items until their contracts are real.</p></article>
+      </div>
+
+      <div class="group">
+        <span class="group-label">Keep deliberate</span>
+        <article class="finding"><div class="finding-head"><h3>5. Jellyfin's server summary is worth borrowing.</h3><span class="status keep">Working well</span></div><p><strong>Observed.</strong> Server name and versions appear above Scan All Libraries, Restart, Shutdown, and library counts.</p><p><strong>Why it works.</strong> The owner can identify the server and take a safe next action without browsing the settings tree.</p><p class="action"><strong>Keep.</strong> LoomTV's direct scan, backup, server, and library controls. Put links to them in the new overview instead of duplicating their logic.</p></article>
+        <article class="finding"><div class="finding-head"><h3>6. LoomTV's local-first setup is the right contrast to Plex.</h3><span class="status keep">Working well</span></div><p><strong>Observed.</strong> Plex's setup starts with Plex account sign-in and offers an outside-home access choice. LoomTV's agreed flow is private, local-first, and does not require a hosted subscription.</p><p><strong>Why it works.</strong> The first LoomTV screen reinforces ownership of the server and its data.</p><p class="action"><strong>Keep.</strong> The four-step setup, trusted desktop channel, normal headless authentication, and explicit opt-in for any future internet remote access.</p></article>
+      </div>
+
+      <div class="group">
+        <span class="group-label">Verify before calling it finished</span>
+        <article class="finding"><div class="finding-head"><h3>7. Remote access needs its own security decision.</h3><span class="status">Needs verification</span></div><p><strong>Observed.</strong> Plex documents port mapping and connection status. Jellyfin has a Networking area. LoomTV has LAN sharing, pairing, and TLS-backed administration. The broader internet-facing flow was not tested in this audit.</p><p><strong>Risk.</strong> Copying a remote-access toggle without a clear revoke path could expose a private server or make port changes confusing.</p><p class="action"><strong>Verify.</strong> Test local network and TLS first. If internet access is added, make it opt-in, show connection state, and provide a clear revoke path.</p></article>
+        <article class="finding"><div class="finding-head"><h3>8. Admin accessibility and failure recovery are not proven by the screenshots.</h3><span class="status">Needs verification</span></div><p><strong>Observed.</strong> Jellyfin exposes named links and buttons in the inspected DOM. LoomTV's headless HTML includes labelled navigation, forms, dialogs, alerts, and controls. Keyboard order, zoom, screen readers, responsive reflow, and failure recovery were not exercised.</p><p><strong>Risk.</strong> A visual match can still fail on a bad folder path, expired session, failed scan, or rejected provider key.</p><p class="action"><strong>Verify.</strong> Run keyboard-only setup, folder failure, scan retry, session expiry, provider rejection, focus, and 200% zoom checks on both `/app` and `/admin`.</p></article>
+      </div>
+    </section>
+
+    <section id="comparison">
+      <div class="section-head"><h2>What each product puts in front of the owner</h2><p>This is a capability comparison, not a recommendation to copy every feature.</p></div>
+      <div class="comparison-wrap">
+        <table>
+          <thead><tr><th scope="col">Area</th><th scope="col">Jellyfin</th><th scope="col">Plex</th><th scope="col">LoomTV</th></tr></thead>
+          <tbody>
+            <tr><td>Setup</td><td>Wizard, libraries, plugins, networking.</td><td>Plex account, server name, remote access choice, libraries.</td><td>Account/server, libraries, optional metadata, ready.</td></tr>
+            <tr><td>Overview</td><td>Server details, actions, counts, devices, activity, paths.</td><td>Dashboard, alerts, conversions, bandwidth, history.</td><td>Headless Overview has health, roots, sessions, uptime, checks, and a next action. Desktop links into settings and admin.</td></tr>
+            <tr><td>Metadata</td><td>Provider and plugin configuration.</td><td>Agents and library metadata settings.</td><td>Explicit provider keys and fallback order, with TVmaze available without a key.</td></tr>
+            <tr><td>Network</td><td>Networking and devices.</td><td>Network plus Remote Access and port mapping.</td><td>LAN sharing, pairing, TLS-backed administration, and shared-library connection.</td></tr>
+            <tr><td>Operations</td><td>Logs, scheduled tasks, backups, Live TV and DVR.</td><td>Logs, scheduled maintenance, backups, Live TV and DVR.</td><td>Sessions, logs, backups, users, scans. Live TV/DVR and a scheduler remain future scope.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="actions">
+      <div class="section-head"><h2>Recommended order</h2><p>These actions use LoomTV's existing state and controls. They should land before a larger admin expansion.</p></div>
+      <div class="actions">
+        <div class="action-row"><span class="action-no">1</span><div><h3>Build the server overview</h3><p>Health, server identity, library counts, scan progress, active sessions, recent activity, and the next action.</p></div></div>
+        <div class="action-row"><span class="action-no">2</span><div><h3>Link, do not duplicate</h3><p>Open Library, Network, Metadata, Sessions, Logs, Users, and Backups from the overview.</p></div></div>
+        <div class="action-row"><span class="action-no">3</span><div><h3>Make optional choices explicit</h3><p>Explain metadata fallback and remote access in plain language. Show retry and revoke paths.</p></div></div>
+        <div class="action-row"><span class="action-no">4</span><div><h3>Run the interaction gate</h3><p>Verify setup errors, scan retry, session expiry, keyboard use, focus, responsive layout, and 200% zoom.</p></div></div>
+      </div>
+    </section>
+
+    <section id="limits">
+      <div class="section-head"><h2>Evidence and limits</h2><p>The findings are strong enough to choose the next work, but not to claim product parity or accessibility compliance.</p></div>
+      <div class="limits">
+        <div><h3>Inspected</h3><ul><li>Jellyfin 10.11.11 local dashboard, including navigation, server summary, counts, devices, activity, and paths.</li><li>Plex local web entry point, which stopped at its sign-in gate. No Plex credentials were entered.</li><li>Official Plex setup, dashboard, network, remote access, library, logs, and scheduled-task documentation.</li><li>LoomTV desktop Settings, headless `/admin`, setup state, library controls, metadata settings, network administration, sessions, logs, backups, and users.</li></ul></div>
+        <div><h3>Not proven</h3><ul><li>Plex admin screens after sign-in.</li><li>Keyboard, screen-reader, focus, zoom, responsive, or error-recovery behaviour.</li><li>Internet remote access, physical NAS behaviour, casting receivers, or playback performance.</li><li>User outcomes, support volume, or task-time improvements.</li></ul></div>
+      </div>
+      <details><summary>Source links</summary><p><a href="https://jellyfin.org/docs/general/post-install/setup-wizard/">Jellyfin setup wizard</a>. <a href="https://support.plex.tv/articles/200288896-basic-setup-wizard/">Plex Basic Setup Wizard</a>. <a href="https://support.plex.tv/articles/200871837-status-and-dashboard/">Plex Dashboard</a>. <a href="https://support.plex.tv/articles/200430283-network/">Plex Network</a>. <a href="https://support.plex.tv/articles/200289506-remote-access/">Plex Remote Access</a>. <a href="https://support.plex.tv/articles/200289506-library/">Plex Library</a>. <a href="https://support.plex.tv/articles/201553286-scheduled-tasks/">Plex Scheduled Tasks</a>. <a href="https://support.plex.tv/articles/200250417-plex-media-server-log-files/">Plex logs</a>.</p></details>
+      <p style="margin:22px 0 0"><a href="jellyfin-plex-loomtv-admin-audit.html">Open the full evidence audit and scorecard</a>.</p>
+    </section>
+  </main>
+  <footer><div class="page"><p>Findings brief for LoomTV · Generated Aug 24, 2026 · Evidence confidence: Medium</p></div></footer>
+</body>
+</html>

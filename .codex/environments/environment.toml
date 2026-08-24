@@ -14,3 +14,8 @@ command = "pnpm desktop:start"
 name = "Mobile App"
 icon = "test"
 command = "pnpm mobile:start"
+
+[[actions]]
+name = "Vite Run Desktop App"
+icon = "debug"
+command = "vp run desktop:start"

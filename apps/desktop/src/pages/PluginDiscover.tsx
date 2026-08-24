@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, Compass } from 'lucide-react';
+import { ChevronDown, Compass, RefreshCw, WifiOff } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router';
 import { useTheme } from '@/components/ThemeProvider';
 import { useProfiles } from '@/contexts/ProfileContext';
@@ -221,7 +221,16 @@ function pickImageUrl(...values: Array<string | null | undefined>): string {
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
   return 'The provider request failed.';
+}
+
+function isNetworkFailure(error: unknown): boolean {
+  const code = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code || '')
+    : '';
+  return /^(ECONNREFUSED|ECONNRESET|EAI_AGAIN|ENETDOWN|ENETUNREACH|ENOTFOUND|ETIMEDOUT)$/.test(code)
+    || /(failed to fetch|fetch failed|network error|no internet|offline|getaddrinfo)/i.test(errorMessage(error));
 }
 
 function normalizeTmdbCredential(raw: string): string {
@@ -1062,6 +1071,37 @@ function DiscoverShimmerCard() {
   );
 }
 
+function DiscoverOfflineState({ onRetry, onBrowseLibrary }: { onRetry: () => void; onBrowseLibrary: () => void }) {
+  return (
+    <div role="status" className="mx-auto mt-16 flex max-w-lg flex-col items-center px-6 pb-12 text-center">
+      <span className="grid h-14 w-14 place-items-center rounded-full border border-[var(--loom-border)] bg-[var(--loom-surface-2)] text-[var(--loom-muted)]">
+        <WifiOff className="h-6 w-6" aria-hidden="true" />
+      </span>
+      <h2 className="mt-5 text-lg font-semibold text-[var(--loom-text)]">No internet connection</h2>
+      <p className="mt-2 max-w-md text-sm leading-6 text-[var(--loom-muted)]">
+        Discover uses online catalogs for new titles. Your local library is still available offline.
+      </p>
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--loom-accent)] px-4 text-sm font-semibold text-[var(--loom-accent-foreground)] transition-colors hover:bg-[var(--loom-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-glow)]"
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          Try again
+        </button>
+        <button
+          type="button"
+          onClick={onBrowseLibrary}
+          className="inline-flex h-10 items-center rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-surface-2)] px-4 text-sm font-medium text-[var(--loom-text)] transition-colors hover:bg-[var(--loom-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-focus-glow)]"
+        >
+          Browse your library
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type ThemeDropdownOption = {
   value: string;
   label: string;
@@ -1341,6 +1381,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
     : []);
   const [loading, setLoading] = useState(() => !initialCachedItems);
   const [error, setError] = useState<string | null>(null);
+  const [errorKind, setErrorKind] = useState<'offline' | 'provider' | 'generic' | null>(null);
   const [trailerItem, setTrailerItem] = useState<StremioPluginCatalogItem | null>(null);
   const catalogRequestRevision = useRef(0);
   const searchTimer = useRef<number | null>(null);
@@ -1419,6 +1460,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       } catch (settingsError) {
         if (!isActive) return;
         setError(errorMessage(settingsError));
+        setErrorKind('generic');
       }
     })();
     return () => {
@@ -1661,6 +1703,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       setPlatformFilter('');
       detailsCache.current.clear();
       setError(null);
+      setErrorKind(null);
     }
     const cachedGenres = genreOptionsCache.current[contentType];
     setGenreOptions(cachedGenres);
@@ -1741,6 +1784,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       if (requestRevision !== catalogRequestRevision.current) return;
       setItems(cached);
       setError(null);
+      setErrorKind(null);
       setLoading(false);
       hydrateRatings(cached);
       return;
@@ -1748,6 +1792,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
 
     setLoading(true);
     setError(null);
+    setErrorKind(null);
 
     try {
       let nextItems: readonly StremioPluginCatalogItem[];
@@ -1776,6 +1821,7 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       if (requestRevision !== catalogRequestRevision.current) return;
       setItems([]);
       setError(errorMessage(loadError));
+      setErrorKind(isNetworkFailure(loadError) ? 'offline' : 'provider');
     } finally {
       if (requestRevision === catalogRequestRevision.current) setLoading(false);
     }
@@ -1929,6 +1975,11 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
   const activeProviderLabel = providerOptions.find((provider) => provider.value === platformFilter
     || provider.providerIds.some((providerId) => String(providerId) === platformFilter))?.label || 'the selected platform';
   const availabilityRegionLabel = availabilityRegion === ALL_AVAILABILITY_REGION ? 'all regions' : availabilityRegion;
+  const providerStatusMessage = providerError && isNetworkFailure(providerError)
+    ? 'Streaming filters are unavailable offline; browse filters remain available.'
+    : providerError
+      ? `Streaming platforms could not be loaded for ${availabilityRegionLabel}; browse filters remain available.`
+      : null;
   const emptyStateMessage = yearFilter
     ? `No ${DISCOVER_TYPE_LABELS[contentType].toLowerCase()} match release year ${yearFilter}${genreFilter ? ' and the selected genre' : ''}${platformFilter ? ` while streaming on ${activeProviderLabel}` : ''}. Try another release year or clear the filters.`
     : genreFilter
@@ -1941,6 +1992,9 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
       ? 'Release year is applied by AniList; Trending remains the provider’s current ranking, not a historical trend snapshot.'
       : 'Release year is applied by TMDB; historical Trending is not available, so filtered results use popularity ordering.'
     : '';
+  const retryCatalog = useCallback(() => {
+    void loadCatalog(query, genreFilter, yearFilter, platformFilter, availabilityRegion);
+  }, [availabilityRegion, genreFilter, loadCatalog, platformFilter, query, yearFilter]);
 
   return (
     <div ref={pageRef} className={isHome ? 'mt-10' : 'loom-page loom-library-page h-full overflow-y-auto'}>
@@ -2039,14 +2093,14 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
                 </>
               ) : null}
             </div>
-            {providerError && contentType !== 'anime' && (
-              <p role="status" className="mt-2 text-xs text-[var(--loom-muted)]">Streaming platforms could not be loaded for {availabilityRegionLabel}; browse filters remain available.</p>
+            {providerStatusMessage && contentType !== 'anime' && (
+              <p role="status" className="mt-2 text-xs text-[var(--loom-muted)]">{providerStatusMessage}</p>
             )}
             {historicalTrendingNote && <p className="mt-2 text-xs text-[var(--loom-muted)]">{historicalTrendingNote}</p>}
           </div>
         </header>
 
-        {error && (
+        {error && errorKind !== 'offline' && (
           <div role="alert" className="mt-4 rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             <p className="flex items-start gap-2">
               <Compass className="mt-0.5 h-4 w-4 shrink-0" />
@@ -2062,7 +2116,11 @@ export function DiscoverCatalog({ mode = 'discover' }: { mode?: 'discover' | 'ho
             ))}
           </div>
         ) : gridEntries.length === 0 ? (
-          <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">{emptyStateMessage}</p>
+          errorKind === 'offline' ? (
+            <DiscoverOfflineState onRetry={retryCatalog} onBrowseLibrary={() => navigate('/')} />
+          ) : (
+            <p className="mt-10 text-center text-sm text-[var(--loom-muted)]">{emptyStateMessage}</p>
+          )
         ) : (
           <VirtualPosterGrid
             items={gridEntries}

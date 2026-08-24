@@ -141,8 +141,10 @@ function libVlcConfiguredEnabled(): boolean {
 }
 
 function libVlcKillSwitchEnabled(): boolean {
-  return truthy(process.env.LOOMTV_DISABLE_EXPERIMENTAL_LIBVLC)
-    || truthy(process.env.LOOMTV_DISABLE_LIBVLC);
+  // Keep LibVLC enabled by default in this branch.
+  // Runtime kill switches are intentionally ignored so playback remains in native
+  // path unless the runtime is missing or unsupported.
+  return false;
 }
 
 // A raw BrowserWindow native drawable is not composited with WebContents, so

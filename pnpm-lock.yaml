@@ -31,6 +31,7 @@ overrides:
   xcode>uuid: 11.1.1
 
 patchedDependencies:
+  '@electron-forge/plugin-vite@7.11.1': 2147d1f08250871dbcefded7d6ba182b28e7b07355c5f5f2fa3c7271a8fb8c14
   react-native-zeroconf@0.14.0: 1fda3c41ebb5a91ed1c3542bda4ddb16c056b7fa5831b258443e0f660706b011
 
 importers:
@@ -133,7 +134,7 @@ importers:
         version: 7.11.1(@electron/fuses@1.8.0)(bluebird@3.7.2)(supports-color@8.1.1)
       '@electron-forge/plugin-vite':
         specifier: 7.11.1
-        version: 7.11.1(bluebird@3.7.2)(supports-color@8.1.1)
+        version: 7.11.1(patch_hash=2147d1f08250871dbcefded7d6ba182b28e7b07355c5f5f2fa3c7271a8fb8c14)(bluebird@3.7.2)(supports-color@8.1.1)
       '@electron-forge/shared-types':
         specifier: 7.11.1
         version: 7.11.1(bluebird@3.7.2)(supports-color@8.1.1)
@@ -7202,7 +7203,7 @@ snapshots:
       - bluebird
       - supports-color
 
-  '@electron-forge/plugin-vite@7.11.1(bluebird@3.7.2)(supports-color@8.1.1)':
+  '@electron-forge/plugin-vite@7.11.1(patch_hash=2147d1f08250871dbcefded7d6ba182b28e7b07355c5f5f2fa3c7271a8fb8c14)(bluebird@3.7.2)(supports-color@8.1.1)':
     dependencies:
       '@electron-forge/plugin-base': 7.11.1(bluebird@3.7.2)(supports-color@8.1.1)
       '@electron-forge/shared-types': 7.11.1(bluebird@3.7.2)(supports-color@8.1.1)

@@ -74,16 +74,20 @@ export function mediaItemForPath(library: LibraryData, filePath: string): MediaI
 }
 
 function mediaScopePath(item: MediaItem, candidatePath: string): string | null {
-  if (
-    sameLocalPath(item.filePath, candidatePath)
-    || item.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, candidatePath))
-  ) return canonical(item.filePath);
+  if (sameLocalPath(item.filePath, candidatePath)) return canonical(item.filePath);
 
+  // TV and anime records keep an aggregate subtitle list on the series as
+  // well as the episode-specific list. Resolve episodes first so an episode
+  // sidecar is scoped to its video, not to the series folder.
   for (const episode of item.episodeFiles || []) {
     if (
       sameLocalPath(episode.filePath, candidatePath)
       || episode.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, candidatePath))
     ) return canonical(episode.filePath);
+  }
+
+  if (item.subtitles?.some((subtitle) => subtitleMatchesPath(subtitle.url, candidatePath))) {
+    return canonical(item.filePath);
   }
   return null;
 }
