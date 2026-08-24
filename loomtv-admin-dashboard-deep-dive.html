@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en" data-color-mode="dark" data-surface="website">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A feature-by-feature research deep dive into Jellyfin, Plex, and LoomTV administration.">
+  <title>Admin dashboard deep dive · Jellyfin, Plex, and LoomTV</title>
+  <style>
+    :root {
+      color-scheme: dark;
+
+      /* Report-library theme measured from the hosted LoomTV progress report. */
+      --report-bg: #171717;
+      --report-card: #0a0a0a;
+      --report-card-soft: #111111;
+      --report-text: #ffffff;
+      --report-secondary: #d4d4d4;
+      --report-subtle: #a3a3a3;
+      --report-faint: #737373;
+      --report-accent: #a3e635;
+      --report-accent-hover: #bef264;
+      --report-border: #242424;
+      --report-success: #86efac;
+      --report-success-bg: #12351f;
+      --report-warning: #fbbf24;
+      --report-warning-bg: #392b0c;
+      --report-error: #f87171;
+      --report-error-bg: #3a1717;
+      --report-info: #93c5fd;
+      --report-info-bg: #172554;
+      --content: 1180px;
+      --page-pad: 24px;
+      --report-header-height: 58px;
+      --radius-card: 14px;
+      --radius-control: 8px;
+
+      --bg: var(--report-bg);
+      --panel: var(--report-card);
+      --panel-2: var(--report-card-soft);
+      --line: var(--report-border);
+      --text: var(--report-text);
+      --muted: var(--report-secondary);
+      --faint: var(--report-subtle);
+      --accent: var(--report-accent);
+      --accent-strong: var(--report-accent-hover);
+      --accent-soft: var(--report-card);
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); scroll-behavior: smooth; }
+    img, svg, video, canvas { max-width: 100%; height: auto; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: var(--text); text-underline-offset: 3px; }
+    a:hover { color: var(--accent); }
+    a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .page { width: min(calc(100% - (var(--page-pad) * 2)), var(--content)); margin-inline: auto; }
+    .report-library-header { position: fixed; inset: 0 0 auto; z-index: 10; background: var(--report-bg); }
+    .report-library-header__inner { display: flex; align-items: center; gap: 8px; min-height: 58px; }
+    .report-library-header__home { color: var(--text); font-size: 17px; font-weight: 650; text-decoration: none; }
+    .report-library-header__separator { color: var(--report-faint); }
+    .report-library-header__title { color: var(--report-subtle); font-size: 15px; }
+    .report-library-header__nav { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+    .report-library-header__nav a { padding: 5px 8px; color: var(--report-subtle); border-radius: var(--radius-control); font-size: 13px; text-decoration: none; }
+    .report-library-header__nav a:hover { background: var(--report-card); color: var(--text); }
+    .document-header { padding: calc(var(--report-header-height) + 64px) 0 28px; }
+    .kicker { margin: 0 0 10px; color: var(--accent); font-size: 12px; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+    h1, h2, h3, h4 { margin: 0; color: var(--text); letter-spacing: -.02em; }
+    h1 { font-size: clamp(42px, 5vw, 64px); line-height: 1.08; font-weight: 500; }
+    h2 { margin-bottom: 10px; font-size: clamp(30px, 3vw, 38px); line-height: 1.18; font-weight: 500; }
+    h3 { font-size: 20px; line-height: 1.3; font-weight: 650; }
+    h4 { font-size: 16px; line-height: 1.3; font-weight: 650; }
+    .lede { margin: 0 0 18px; color: var(--muted); font-size: 18px; line-height: 1.55; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0; color: var(--faint); font-size: 13px; }
+    .contents { display: flex; flex-wrap: wrap; gap: 8px 16px; padding-top: 18px; font-size: 13px; }
+    main { padding: 64px 0; }
+    section { scroll-margin-top: calc(var(--report-header-height) + 16px); margin-top: 52px; padding: 0; }
+    section:first-child { margin-top: 0; }
+    .section-head { margin-bottom: 16px; }
+    .section-head p { margin: 0; color: var(--muted); }
+    .answer { display: grid; gap: 28px; }
+    .callout { padding: 22px 24px; background: var(--panel); border-left: 4px solid var(--accent); border-radius: 0 var(--radius-card) var(--radius-card) 0; }
+    .callout h2 { margin-bottom: 10px; font-size: 28px; }
+    .callout p { margin: 0; color: var(--muted); }
+    .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .stat { padding: 20px; background: var(--panel); border-radius: var(--radius-card); }
+    .stat strong { display: block; color: var(--text); font-size: 32px; line-height: 1.05; font-weight: 500; }
+    .stat span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .inventory { overflow-x: auto; border-radius: var(--radius-card); background: var(--panel); }
+    table { width: 100%; min-width: 920px; border-collapse: collapse; }
+    th, td { padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: transparent; color: var(--report-faint); font-size: 11px; line-height: 1.55; letter-spacing: .09em; text-transform: uppercase; }
+    td { color: var(--report-text); }
+    tr:last-child td { border-bottom: 0; }
+    td:first-child { width: 164px; color: var(--text); font-weight: 650; }
+    td:nth-child(3) { width: 170px; }
+    /* DesignOS badge contract used by the hosted report library. */
+    .dos-badge { display: inline-flex; align-items: center; gap: 0; padding: 4px 6px; border: 1px solid transparent; border-radius: var(--radius-control); font-size: 12px; line-height: 1.5; font-weight: 650; }
+    .dos-badge__label { display: flex; padding: 0 4px; }
+    .dos-status--success { background: var(--report-success-bg); color: var(--report-success); }
+    .dos-status--warning { background: var(--report-warning-bg); color: var(--report-warning); }
+    .dos-status--error { background: var(--report-error-bg); color: var(--report-error); }
+    .dos-status--info { background: var(--report-info-bg); color: var(--report-info); }
+    .feature-notes { display: grid; gap: 16px; }
+    .feature-note { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 22px; padding: 18px 0; border-top: 1px solid var(--line); }
+    .feature-note:first-child { border-top: 0; padding-top: 0; }
+    .feature-note h3 { font-size: 18px; }
+    .feature-note p { margin: 5px 0 0; color: var(--muted); }
+    .feature-note .where { color: var(--faint); font-size: 13px; }
+    .compare-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .compare-card { padding: 18px 20px; background: var(--panel); border-radius: var(--radius-card); }
+    .compare-card h3 { font-size: 20px; }
+    .compare-card p { margin: 7px 0 0; color: var(--muted); font-size: 16px; }
+    .plan { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; counter-reset: plan; }
+    .plan-row { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-content: start; gap: 14px; padding: 20px; background: var(--panel); border-radius: var(--radius-card); }
+    .plan-no { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: var(--report-card); font-weight: 750; }
+    .plan-row p { margin: 4px 0 0; color: var(--muted); }
+    .split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .split-box { padding: 20px; background: var(--panel); border-radius: var(--radius-card); }
+    .split-box h3 { font-size: 20px; }
+    .split-box ul { margin: 9px 0 0; padding-left: 20px; color: var(--muted); }
+    .split-box li + li { margin-top: 6px; }
+    .evidence-key { margin: 18px 0 0; padding: 18px 20px; background: var(--panel); border-radius: var(--radius-card); color: var(--muted); font-size: 13px; }
+    .evidence-key strong { color: var(--text); }
+    .evidence-key span + span::before { content: " · "; color: var(--faint); }
+    .method-note { margin: 0 0 18px; padding: 18px 20px; border-left: 4px solid var(--accent); border-radius: 0 var(--radius-card) var(--radius-card) 0; background: var(--panel); color: var(--muted); font-size: 13px; }
+    .method-note strong { color: var(--text); }
+    details { margin-top: 18px; padding: 18px 20px; background: var(--panel); border-radius: var(--radius-card); }
+    summary { cursor: pointer; color: var(--text); font-weight: 650; }
+    details p { color: var(--muted); }
+    footer { margin-top: 60px; padding: 22px 0 34px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13px; }
+    footer p { margin: 0; }
+    @media (max-width: 800px) {
+      :root { --page-pad: 16px; }
+      .report-library-header__inner { align-items: flex-start; flex-wrap: wrap; padding-block: 12px; }
+      .report-library-header__nav { width: 100%; margin-left: 0; }
+      .document-header { padding-top: calc(var(--report-header-height) + 40px); }
+      h1 { font-size: 44px; }
+      h2 { font-size: 30px; }
+      .stats, .compare-grid, .plan, .split { grid-template-columns: 1fr; }
+      .feature-note { grid-template-columns: 1fr; gap: 5px; }
+      .lede { font-size: 16px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="report-library-header">
+    <div class="page report-library-header__inner">
+      <a class="report-library-header__home" href="#answer">LoomTV</a>
+      <span class="report-library-header__separator">/</span>
+      <span class="report-library-header__title">Admin dashboard research</span>
+      <nav class="report-library-header__nav" aria-label="Report sections"><a href="#answer">Answer</a><a href="#jellyfin">Jellyfin</a><a href="#plex">Plex</a><a href="#loomtv">LoomTV</a><a href="#plan">Plan</a><a href="#sources">Sources</a></nav>
+    </div>
+  </header>
+
+  <header class="document-header">
+    <div class="page">
+      <p class="kicker">LoomTV / admin dashboard research</p>
+      <h1>Every admin feature, explained and mapped to LoomTV</h1>
+      <p class="lede">This report inventories the live Jellyfin admin dashboard, Plex's documented server controls, and LoomTV's current desktop and headless surfaces. It separates a useful feature from a useful default. LoomTV does not need every button Jellyfin or Plex has. It needs a clear home for the controls it already owns.</p>
+      <div class="meta"><span>Research date: Aug 24, 2026</span><span>Jellyfin live instance: 10.11.11</span><span>Evidence confidence: medium</span></div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="answer">
+      <div class="answer">
+        <div class="callout"><h2>The right next step is one overview, not feature cloning.</h2><p>Jellyfin's admin dashboard has 16 top-level areas and a strong server summary. Plex documents 15 server settings categories plus dashboards, sharing, and operations tools. LoomTV already has eight desktop settings sections and six headless admin pages. The gap is organization. Add one owner overview, then make each existing feature easy to reach.</p></div>
+        <div class="stats" aria-label="Inventory counts"><div class="stat"><strong>16</strong><span>Jellyfin admin areas observed</span></div><div class="stat"><strong>15</strong><span>Plex server categories documented</span></div><div class="stat"><strong>8</strong><span>LoomTV desktop settings sections</span></div><div class="stat"><strong>6</strong><span>LoomTV headless admin pages</span></div></div>
+      </div>
+    </section>
+
+    <section id="jellyfin">
+      <div class="section-head"><h2>Jellyfin feature inventory</h2><p>Observed from the live 10.11.11 dashboard and its admin routes. The dashboard groups features as Server, Devices, Live TV, Plugins, and Advanced.</p></div>
+      <div class="inventory">
+        <table><thead><tr><th>Feature</th><th>What it does</th><th>LoomTV position</th><th>Recommendation</th></tr></thead><tbody>
+          <tr><td>Dashboard</td><td>Shows server name and versions, Scan All Libraries, Restart, Shutdown, Movies/Series/Episodes counts, device cards, activity events, and storage paths.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has a headless Overview and separate desktop settings.</td><td>Make this the model for a single read-only LoomTV overview. Link existing controls instead of duplicating them.</td></tr>
+          <tr><td>General</td><td>Controls server name, display language, server paths, Quick Connect, parallel scan tasks, and image encoding limits.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>Server name and language exist in setup. Runtime limits are not one desktop card.</td><td>Add server identity and health first. Treat Quick Connect and scan limits as later server controls.</td></tr>
+          <tr><td>Branding</td><td>Sets splash image, login disclaimer, and custom CSS for the web experience.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has Theme and About, but not the same server branding contract.</td><td>Keep Theme focused on LoomTV appearance. Add server branding only when the login and headless surfaces need it.</td></tr>
+          <tr><td>Users</td><td>Creates local users and administrators. Per-user controls include library and device access, playback/transcoding permissions, deletion, remote access, lockout, hiding, disablement, password, and parental settings.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV headless Users supports roles, permissions, roots, devices, session limits, and disablement. Desktop Profiles is more personal than administrative.</td><td>Keep multiple administrators. Add a clear owner/admin permission editor and make user scope visible in the overview.</td></tr>
+          <tr><td>Libraries</td><td>Adds media libraries with multiple paths, content type, scanner, metadata providers, image settings, collections, subtitles, and refresh or scan actions.</td><td><span class="dos-badge dos-status dos-status--success dos-badge--sm"><span class="dos-badge__label">Available</span></span><br>LoomTV supports Movies, TV Shows, Anime, Others, local/NAS folders, unavailable-root preservation, quick sync, metadata refresh, full rescan, and backup.</td><td>Preserve the focused video-first library flow. Put scan state and folder health in the overview.</td></tr>
+          <tr><td>Playback and transcoding</td><td>Controls direct play and conversion behaviour, hardware acceleration, encoder settings, streaming limits, subtitle and audio behaviour, and transcoder paths.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has LibVLC, mpv fallback, FFmpeg status, seek settings, sleep timer, intro/outro analysis, markers, and native playback controls.</td><td>Keep LibVLC default. Add diagnostics and cached capability status, not a large transcoder form before the first frame.</td></tr>
+          <tr><td>Devices</td><td>Lists active and known clients. Search, filters, column controls, density, full screen, sorting, editing, and Delete All are available.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV Sessions shows connected playback sessions. A persistent device registry is not yet equivalent.</td><td>Start with active sessions and last-seen client information. Add device approval only when the policy is defined.</td></tr>
+          <tr><td>Activity</td><td>Shows user and system events in a sortable, filterable activity table, including playback and connection history.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has session data and headless Logs with level, source, search, and pagination.</td><td>Expose a short recent activity feed in Overview, then link to the full log and session pages.</td></tr>
+          <tr><td>Live TV</td><td>Adds tuner devices and TV guide providers, refreshes guide data, maps channels, and supports M3U, HDHomeRun, XMLTV, and Schedules Direct workflows.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>Not part of LoomTV's current video-only scope.</td><td>Do not add an empty Live TV area. Add it when tuner, guide, playback, and recording contracts are ready.</td></tr>
+          <tr><td>DVR</td><td>Sets guide download days, default/movie/series recording paths, start and stop padding, post-processing commands, and NFO/EPG image storage.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>Not implemented in the current LoomTV video scope.</td><td>Keep DVR as a mid-term feature. It needs storage, scheduling, tuner conflict, retention, and recovery decisions.</td></tr>
+          <tr><td>Plugins</td><td>Installs and updates extensions from a catalog. Plugins add metadata, authentication, notifications, channels, Live TV, and scheduled tasks.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV reviews official Stremio add-ons, validates remote HTTPS manifests, stores host configuration, and gates profiles.</td><td>Keep the security review and explicit approval model. Do not turn it into an unrestricted package installer.</td></tr>
+          <tr><td>Networking</td><td>Configures HTTP/HTTPS ports, base URL, bind address, LAN networks, known proxies, TLS certificate and password, remote connections, IPv4, IPv6, and discovery.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has LAN sharing, pairing, TLS-backed admin, shared-library connection, and desktop server status.</td><td>Make local versus remote access explicit. Add port, certificate, and revoke diagnostics only when the security contract is complete.</td></tr>
+          <tr><td>API Keys</td><td>Creates and manages server API tokens, with searchable and sortable key records.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has metadata provider keys, while headless sessions handle account authentication.</td><td>Separate metadata credentials from server API tokens. Add a token page when integrations need stable scoped access.</td></tr>
+          <tr><td>Backups</td><td>Creates online backup archives containing database, metadata, subtitles, and trickplay data, then restores them with a restart.</td><td><span class="dos-badge dos-status dos-status--success dos-badge--sm"><span class="dos-badge__label">Available</span></span><br>LoomTV headless Backups supports destination, restore validation, checksum, pre-restore snapshot, history, and session revocation. Desktop Library can back up the database.</td><td>Keep the atomic restore and clear data-loss warnings. Link backup health into Overview.</td></tr>
+          <tr><td>Logs</td><td>Sets slow-response warnings and opens dated server, remux, and transcode log files. Debug logging is documented separately.</td><td><span class="dos-badge dos-status dos-status--success dos-badge--sm"><span class="dos-badge__label">Available</span></span><br>LoomTV headless Logs supports level, source, search, refresh, and paging.</td><td>Keep filters and add a recent error summary to Overview. Make log export easy before support work.</td></tr>
+          <tr><td>Scheduled Tasks</td><td>Runs and schedules library, application, maintenance, and plugin tasks such as scans, subtitles, chapter images, plugin updates, database optimization, and cleanup.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>LoomTV has background scans and analysis controls, not a general scheduler.</td><td>Start with visible background jobs and retry. Add a scheduler only when task ownership, windows, and cancellation are stable.</td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    <section id="plex">
+      <div class="section-head"><h2>Plex feature inventory</h2><p>Plex's official server overview lists these settings categories. Plex also documents Dashboard, Alerts, Conversions, sharing, remote access, and scheduled maintenance as separate operational surfaces.</p></div>
+      <div class="inventory">
+        <table><thead><tr><th>Feature</th><th>What it does</th><th>LoomTV position</th><th>Recommendation</th></tr></thead><tbody>
+          <tr><td>General</td><td>Server identity, account connection, and broad server preferences.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has server name, owner account, and setup state.</td><td>Keep LoomTV account-local. Do not require a Plex-style hosted account.</td></tr>
+          <tr><td>Remote Streaming / Remote Access</td><td>Publishes a server outside the home, checks connection status, and manages port mapping and remote bitrate behaviour.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has LAN sharing, TLS, pairing, and shared-library connection.</td><td>Make internet access a separate opt-in decision with status and revoke.</td></tr>
+          <tr><td>Agents and metadata</td><td>Chooses metadata agents and source priority for movies, shows, music, and photos. Refresh All Metadata applies changes to existing items.</td><td><span class="dos-badge dos-status dos-status--success dos-badge--sm"><span class="dos-badge__label">Available</span></span><br>LoomTV has explicit providers, keys, artwork defaults, ratings, and fallback order.</td><td>Keep provider control, but make the no-key path obvious during setup.</td></tr>
+          <tr><td>Library</td><td>Controls automatic scanning, periodic intervals, analysis, local assets, collections, and metadata refresh behaviour.</td><td><span class="dos-badge dos-status dos-status--success dos-badge--sm"><span class="dos-badge__label">Available</span></span><br>LoomTV has automatic quick sync, quick sync, refresh metadata, full rescan, and library folders.</td><td>Add visible scan history and errors to the overview before adding more advanced intervals.</td></tr>
+          <tr><td>Plugins</td><td>Extends server behaviour through plugin integrations and provider services.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has a reviewed Stremio add-on model.</td><td>Keep HTTPS manifest validation and profile permissions as the boundary.</td></tr>
+          <tr><td>Network</td><td>Controls local discovery, secure connections, interfaces, LAN networks, TLS, webhooks, and stream limits.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV supports LAN discovery/pairing and TLS-backed administration.</td><td>Expose only options LoomTV can explain and secure across desktop, NAS, and headless hosting.</td></tr>
+          <tr><td>Transcoder</td><td>Controls temporary paths, quality, background presets, simultaneous transcodes, and hardware acceleration.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV exposes LibVLC, mpv, FFmpeg, and analysis status, with native playback first.</td><td>Prioritize direct play and first-frame latency. Add transcode diagnostics behind an advanced section.</td></tr>
+          <tr><td>Languages</td><td>Sets preferred audio, subtitle, metadata, and interface language behaviour.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV setup has language and metadata provider settings; full per-profile language policy is not one admin surface.</td><td>Keep setup language simple. Add per-profile preferences later.</td></tr>
+          <tr><td>DLNA</td><td>Exposes media to DLNA devices. Plex documents a dedicated DLNA setting; Jellyfin moved DLNA to a plugin.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>Not a current LoomTV requirement.</td><td>Do not add until device discovery and playback support are defined.</td></tr>
+          <tr><td>Scheduled Tasks</td><td>Runs maintenance windows for database backup, optimization, metadata refresh, library updates, and media analysis.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>Background scan and analysis exist, but not a general task scheduler.</td><td>Use a visible job model first. Add schedules after retry and cancellation are reliable.</td></tr>
+          <tr><td>Extras</td><td>Controls extra content behaviour such as trailers, collections, and related media handling.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has metadata, artwork, saved titles, and playback controls.</td><td>Keep extras behind media detail workflows instead of expanding admin navigation now.</td></tr>
+          <tr><td>Libraries</td><td>Creates and edits libraries, chooses paths, agents, visibility, and sharing actions.</td><td><span class="dos-badge dos-status dos-status--success dos-badge--sm"><span class="dos-badge__label">Available</span></span><br>LoomTV supports content types, local/NAS folders, folder picker, grouping, sidebar order, and scan controls.</td><td>Keep this as the most complete LoomTV admin area and surface its health on Overview.</td></tr>
+          <tr><td>Optimized Versions</td><td>Pre-transcodes selected media into versions for mobile, TV, or original quality and tracks conversion status.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>Not part of current LoomTV playback scope.</td><td>Keep native local playback first. Add offline/optimized versions only with storage and cleanup rules.</td></tr>
+          <tr><td>Live TV &amp; DVR</td><td>Configures tuners, guide data, recordings, recording paths, and post-processing.</td><td><span class="dos-badge dos-status dos-status--error dos-badge--sm"><span class="dos-badge__label">Roadmap</span></span><br>Video-only focus remains the current product boundary.</td><td>Reuse the planned tuner and guide model only when LoomTV commits to it.</td></tr>
+          <tr><td>Troubleshooting</td><td>Provides logs, conversion information, diagnostic guidance, and recovery paths.</td><td><span class="dos-badge dos-status dos-status--warning dos-badge--sm"><span class="dos-badge__label">Partial</span></span><br>LoomTV has logs, backups, restore validation, and playback runtime status.</td><td>Put a small diagnostics summary on Overview and keep detailed logs separate.</td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    <section id="loomtv">
+      <div class="section-head"><h2>LoomTV feature inventory</h2><p>This is what LoomTV exposes today, separated between the desktop Settings experience and the headless `/admin` control plane.</p></div>
+      <div class="compare-grid">
+        <article class="compare-card"><h3>Profiles</h3><p>Personal profile, saved titles, My List, favorites, and profile-specific browsing. This is user experience configuration, not full server administration.</p></article>
+        <article class="compare-card"><h3>Library</h3><p>Scan Library, automatic quick sync, quick sync, refresh metadata, full rescan, Movies/TV Shows/Anime/Other folders, local and NAS paths, unavailable-folder retention, grouping, sidebar order, database backup, and clear local data.</p></article>
+        <article class="compare-card"><h3>Network</h3><p>Local network sharing, pairing and discovery, copyable addresses and share codes, Server Administration link, TLS-backed admin URL, shared-library discovery, six-digit PIN pairing, manual address, refresh, and disconnect.</p></article>
+        <article class="compare-card"><h3>Playback</h3><p>Back and forward seek distances, display sleep timer, LibVLC native playback, mpv fallback, FFmpeg status, intro/outro detection, quick/full scan, pause/cancel/cleanup/rebuild analysis actions, manual markers, and exclusion lists.</p></article>
+        <article class="compare-card"><h3>Plugins</h3><p>Official Stremio add-ons, remote HTTPS manifest review, explicit approval, installed add-on states, host configuration, profile access rules, provider failure counts, and retry/backoff status.</p></article>
+        <article class="compare-card"><h3>Metadata API Keys</h3><p>TMDB, OMDb, Fanart, TVDB, TVmaze, Jikan, custom providers, show/hide/edit/delete, provider tests, OpenSubtitles credentials, languages, auto-download, artwork defaults, ratings, and fallback behaviour.</p></article>
+        <article class="compare-card"><h3>Theme</h3><p>LoomTV visual preferences and loader options. This is the product's design surface rather than a full server branding editor.</p></article>
+        <article class="compare-card"><h3>About</h3><p>Application identity, metadata and artwork sources, bundled media tools, third-party libraries, and dependency information.</p></article>
+        <article class="compare-card"><h3>Headless Overview</h3><p>Health badge, server facts, library roots, connected clients, uptime, readiness checks, diagnostics, manage roots, and a next useful action.</p></article>
+        <article class="compare-card"><h3>Headless Library</h3><p>Root cards for Movies, TV Shows, Anime, and Other video, add-folder dialog, server-mounted folder browser, library type, scan status, progress, and retry-safe unavailable roots.</p></article>
+        <article class="compare-card"><h3>Headless Sessions</h3><p>Client, now playing, state, connection time, and bitrate in a table with refresh.</p></article>
+        <article class="compare-card"><h3>Headless Logs</h3><p>Level, source, search, apply filters, refresh, paging, timestamp, source, and message columns.</p></article>
+        <article class="compare-card"><h3>Headless Backups</h3><p>Start backup, optional destination, restore source, checksum validation, automatic pre-restore snapshot, atomic state replacement, session revocation, history, status, and location.</p></article>
+        <article class="compare-card"><h3>Headless Users</h3><p>Owner unlock, add user, viewer/user/administrator role, permissions, root scope, allowed devices, concurrent session limit, disablement, session revocation, edit, and removal.</p></article>
+      </div>
+    </section>
+
+    <section id="plan">
+      <div class="section-head"><h2>What to build from this research</h2><p>Build in this order. The first steps improve the current experience without opening new product scope.</p></div>
+      <div class="plan">
+        <div class="plan-row"><span class="plan-no">1</span><div><h3>Make Overview the owner landing page</h3><p>Reuse server health, setup state, library counts, scan progress, connected clients, recent events, and next action. Desktop and headless should read from the same state.</p></div></div>
+        <div class="plan-row"><span class="plan-no">2</span><div><h3>Explain each existing control at the point of use</h3><p>Metadata keys say optional. Library folders say server path and NAS retry. Network says local versus remote. Playback says LibVLC first and what the fallback means.</p></div></div>
+        <div class="plan-row"><span class="plan-no">3</span><div><h3>Add a small operations layer</h3><p>Recent activity, current jobs, scan errors, provider failures, backup health, and active sessions. Keep detailed Logs, Backups, and Sessions pages below it.</p></div></div>
+        <div class="plan-row"><span class="plan-no">4</span><div><h3>Separate credentials by purpose</h3><p>Metadata provider keys, server API tokens, account sessions, and pairing codes should never appear as one generic key list.</p></div></div>
+        <div class="plan-row"><span class="plan-no">5</span><div><h3>Verify the risky states</h3><p>Run keyboard-only setup, folder failure, provider rejection, scan retry, restore preview, session expiry, 200% zoom, and remote-access revoke checks before calling the admin dashboard complete.</p></div></div>
+        <div class="plan-row"><span class="plan-no">6</span><div><h3>Defer broad parity features</h3><p>Live TV, DVR, DLNA, optimized versions, a general scheduler, and internet remote access need their own product decisions. Do not add empty navigation for them.</p></div></div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="section-head"><h2>Sources, evidence, and limits</h2><p>This report explains what was actually inspected and what remains a research or implementation question.</p></div>
+      <p class="method-note"><strong>Report method:</strong> This document follows the current primary HTML Artifacts skill and the strict report-library requirements retained in the dated backup. The backup remains archived and is not registered as a second invokable skill. <strong>Theme rule:</strong> Lime is the only brand accent; green, amber, red, and blue are reserved for semantic status meanings. The external Plan Report page was checked, but Cloudflare Access exposed only its sign-in shell, so no content or skill provenance was inferred from it.</p>
+      <div class="split">
+        <div class="split-box"><h3>Evidence used</h3><ul><li>Live Jellyfin 10.11.11 dashboard DOM and admin routes: dashboard, general, branding, users, libraries, devices, activity, Live TV, DVR, plugins, networking, API keys, backups, logs, and scheduled tasks.</li><li>LoomTV desktop Settings and headless `/admin` source inspection.</li><li>Isolated LoomTV server setup state from the test data directory, without touching live media data.</li><li>Official Jellyfin and Plex administration documentation.</li></ul></div>
+        <div class="split-box"><h3>Limits</h3><ul><li>The local Plex web entry point stopped at its account sign-in gate. No credentials were entered, so Plex admin screens after sign-in are documented rather than live-observed.</li><li>The external Plan Report page was behind Cloudflare Access, so its findings were not treated as evidence.</li><li>No keyboard, screen-reader, responsive, error-recovery, physical NAS, casting, or performance test was run for this report.</li><li>Feature presence does not mean the same feature should be copied. Scope and security decisions remain LoomTV product decisions.</li></ul></div>
+      </div>
+      <p class="evidence-key"><strong>Evidence labels:</strong> <span>Observed means inspected in the live dashboard or LoomTV source.</span><span>Documented means supported by official Jellyfin or Plex documentation.</span><span>Recommendation means an interpretation for LoomTV, not a verified implementation claim.</span><span>Needs verification means it requires runtime, device, or user testing.</span></p>
+      <details><summary>Official documentation links</summary><p><a href="https://jellyfin.org/docs/general/post-install/setup-wizard/">Jellyfin setup wizard</a> · <a href="https://jellyfin.org/docs/general/server/settings/">Jellyfin settings</a> · <a href="https://jellyfin.org/docs/general/server/libraries/">Jellyfin libraries</a> · <a href="https://jellyfin.org/docs/general/server/users/">Jellyfin users</a> · <a href="https://jellyfin.org/docs/general/post-install/networking/">Jellyfin networking</a> · <a href="https://jellyfin.org/docs/general/server/tasks/">Jellyfin tasks</a> · <a href="https://jellyfin.org/docs/general/administration/backup-and-restore/">Jellyfin backup and restore</a> · <a href="https://jellyfin.org/docs/general/server/plugins/">Jellyfin plugins</a> · <a href="https://jellyfin.org/docs/general/server/live-tv/setup-guide/">Jellyfin Live TV</a> · <a href="https://support.plex.tv/articles/201154176-overview/">Plex server settings overview</a> · <a href="https://support.plex.tv/articles/200288896-basic-setup-wizard/">Plex setup wizard</a> · <a href="https://support.plex.tv/articles/200871837-status-and-dashboard/">Plex Dashboard</a> · <a href="https://support.plex.tv/articles/200430283-network/">Plex Network</a> · <a href="https://support.plex.tv/articles/200289506-remote-access/">Plex Remote Access</a> · <a href="https://support.plex.tv/articles/200241558-agents/">Plex metadata agents</a> · <a href="https://support.plex.tv/articles/202197488-scheduled-server-maintenance/">Plex scheduled maintenance</a> · <a href="https://support.plex.tv/articles/200250417-plex-media-server-log-files/">Plex logs</a> · <a href="https://support.plex.tv/articles/201105738-creating-and-managing-server-shares/">Plex library sharing</a> · <a href="https://support.plex.tv/articles/213097057-optimized-versions/">Plex optimized versions</a>.</p></details>
+      <p style="margin-top:22px"><a href="jellyfin-plex-loomtv-findings.html">Open the concise findings brief</a> · <a href="jellyfin-plex-loomtv-admin-audit.html">Open the full scored evidence audit</a></p>
+    </section>
+  </main>
+  <script>
+    (() => {
+      const links = document.querySelectorAll('.report-library-header__nav a, .report-library-header__home');
+      const scrollToHash = (hash, behavior = 'auto') => {
+        if (!hash || hash === '#') return;
+        const target = document.getElementById(hash.slice(1));
+        if (!target) return;
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        target.scrollIntoView({ behavior: reducedMotion ? 'auto' : behavior, block: 'start' });
+      };
+      links.forEach((link) => {
+        link.addEventListener('click', (event) => {
+          const hash = link.getAttribute('href');
+          if (!hash || !document.getElementById(hash.slice(1))) return;
+          event.preventDefault();
+          history.pushState(null, '', hash);
+          scrollToHash(hash, 'smooth');
+        });
+      });
+      window.addEventListener('hashchange', () => scrollToHash(window.location.hash));
+      if (window.location.hash) window.requestAnimationFrame(() => scrollToHash(window.location.hash));
+    })();
+  </script>
+  <footer><div class="page"><p>Admin dashboard research deep dive · LoomTV · Generated Aug 24, 2026 · Evidence confidence: Medium</p></div></footer>
+</body>
+</html>
