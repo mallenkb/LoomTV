@@ -3,6 +3,7 @@
   "productName": "LoomTV Server",
   "version": "1.0.105",
   "description": "Headless LoomTV server for NAS and always-on hosts",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "exports": {

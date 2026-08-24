@@ -7,7 +7,9 @@ LoomTV Mobile includes the following runtime packages, each licensed under the M
 - expo-blur
 - expo-brightness
 - expo-build-properties
+- expo-dev-client
 - expo-device
+- expo-file-system
 - expo-image
 - expo-screen-orientation
 - expo-secure-store
@@ -16,6 +18,7 @@ LoomTV Mobile includes the following runtime packages, each licensed under the M
 - expo-video
 - React
 - React Native
+- Zod
 - react-native-safe-area-context
 - react-native-svg
 - react-native-zeroconf

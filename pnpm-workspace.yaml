@@ -46,4 +46,5 @@ peerDependencyRules:
     vite: '*'
 resolutionMode: highest
 patchedDependencies:
+  '@electron-forge/plugin-vite@7.11.1': patches/@electron-forge__plugin-vite@7.11.1.patch
   react-native-zeroconf@0.14.0: patches/react-native-zeroconf@0.14.0.patch
