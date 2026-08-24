@@ -107,10 +107,6 @@ const MISSING_RUNTIME_CACHE_MS = 5_000;
 let runtimeCache: RuntimeCache | null = null;
 let currentSession: LibVlcPlaybackSession | null = null;
 
-function truthy(value: unknown): boolean {
-  return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
-}
-
 /**
  * Narrow an FFI result to a pointer. koffi returns a BigInt address for a
  * `void *` and `null` for NULL, so anything else means the binding's declared

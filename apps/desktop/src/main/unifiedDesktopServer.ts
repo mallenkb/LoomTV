@@ -173,11 +173,13 @@ function installCanonicalCertificatePin(): void {
   const expectedOrigin = new URL(origin).origin;
   const expectedFingerprint = identity.certFingerprint.replace(/[^0-9a-f]/gi, '').toLowerCase();
   app.on('certificate-error', (event, _webContents, value, _error, certificate, callback) => {
-    let matches = false;
+    let matches: boolean;
     try {
       matches = new URL(value).origin === expectedOrigin
         && new X509Certificate(certificate.data).fingerprint256.replace(/[^0-9a-f]/gi, '').toLowerCase() === expectedFingerprint;
-    } catch { matches = false; }
+    } catch {
+      matches = false;
+    }
     if (matches) event.preventDefault();
     callback(matches);
   });

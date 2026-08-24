@@ -9,7 +9,7 @@ if (typeof window !== 'undefined') {
   if ('requestIdleCallback' in window) {
     window.requestIdleCallback(() => { void loadVideoPlayer(); }, { timeout: 1_500 });
   } else {
-    window.setTimeout(() => { void loadVideoPlayer(); }, 0);
+    globalThis.setTimeout(() => { void loadVideoPlayer(); }, 0);
   }
 }
 

@@ -69,7 +69,6 @@ import {
   getStoredDuration,
   hlsErrorSummary,
   isBitmapSubtitleCodec,
-  isSignsOnlySubtitleTrack,
   loadSharedTrackPreferences,
   loadSubtitlesDefaultEnabled,
   mediaErrorMessage,
@@ -157,46 +156,6 @@ type PlaybackTimingAttempt = {
   firstFrameReported: boolean;
   metadataReported: boolean;
 };
-
-function subtitleLanguageKey(language?: string): string {
-  const normalized = (language || '').trim().toLowerCase().split(/[-_]/)[0];
-  if (!normalized || normalized === 'und') return '';
-  try {
-    const DisplayNames = (Intl as typeof Intl & {
-      DisplayNames?: new (locales: string[], options: { type: 'language' }) => { of: (code: string) => string | undefined };
-    }).DisplayNames;
-    if (!DisplayNames) return normalized;
-    return (new DisplayNames(['en'], { type: 'language' }).of(normalized) || normalized).toLowerCase();
-  } catch {
-    return normalized;
-  }
-}
-
-function compatibleTextSubtitleTrack(tracks: MediaTrack[], selectedIndex: number): MediaTrack | null {
-  const selected = tracks.find((track) => track.type === 'subtitle' && track.index === selectedIndex);
-  if (!selected || !isBitmapSubtitleCodec(selected.codec)) return null;
-
-  const textTracks = tracks.filter((track) => track.type === 'subtitle' && !isBitmapSubtitleCodec(track.codec));
-  const language = subtitleLanguageKey(selected.language);
-  const languageMatches = textTracks.filter((track) => subtitleLanguageKey(track.language) === language);
-  if (languageMatches.length === 0) return null;
-
-  const forcedMatches = languageMatches.filter((track) => Boolean(track.forced) === Boolean(selected.forced));
-  const forcedPool = forcedMatches.length > 0 ? forcedMatches : languageMatches;
-  const signsOnly = isSignsOnlySubtitleTrack(selected);
-  const intentMatches = forcedPool.filter((track) => isSignsOnlySubtitleTrack(track) === signsOnly);
-  const intentPool = intentMatches.length > 0 ? intentMatches : forcedPool;
-  const accessibilityIntent = /\b(?:sdh|cc|hearing[ -]?impaired)\b/i.test(selected.title || '');
-  const accessibilityMatches = intentPool.filter((track) =>
-    /\b(?:sdh|cc|hearing[ -]?impaired)\b/i.test(track.title || '') === accessibilityIntent,
-  );
-  const candidates = accessibilityMatches.length > 0 ? accessibilityMatches : intentPool;
-
-  return candidates.find((track) => Boolean(track.default) === Boolean(selected.default))
-    || candidates.find((track) => track.source === selected.source)
-    || candidates[0]
-    || null;
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

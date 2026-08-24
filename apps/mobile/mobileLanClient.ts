@@ -9,6 +9,34 @@ import type {
 
 export type FetchImplementation = (input: string, init?: RequestInit) => Promise<Response>;
 
+type JsonRecord = Record<string, unknown>;
+type CanonicalPayload = JsonRecord & {
+  ok?: boolean;
+  data?: unknown;
+  error?: unknown;
+};
+
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+}
+
+function asRecords(value: unknown): JsonRecord[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is JsonRecord => Boolean(item) && typeof item === 'object' && !Array.isArray(item))
+    : [];
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function finiteNumberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 export const MOBILE_LAN_TIMEOUT_MS = {
   probe: 4_000,
   standard: 12_000,
@@ -36,60 +64,78 @@ function jsonResponse(payload: unknown, status = 200, source?: Response): Respon
   return new Response(JSON.stringify(payload), { status, headers });
 }
 
-async function canonicalPayload(response: Response): Promise<{ ok: boolean; data?: any; error?: any }> {
+async function canonicalPayload(response: Response): Promise<CanonicalPayload> {
   const text = await response.text();
   if (!text.trim()) return { ok: response.ok };
   try {
-    const payload = JSON.parse(text);
-    return payload && typeof payload === 'object' ? payload : { ok: response.ok, data: payload };
+    const payload: unknown = JSON.parse(text);
+    return payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as CanonicalPayload
+      : { ok: response.ok, data: payload };
   } catch {
     return { ok: false, error: { code: 'invalid_json', message: 'The server returned invalid JSON.' } };
   }
 }
 
-async function legacyResponse(response: Response, map: (data: any) => unknown = (data) => data): Promise<Response> {
+async function legacyResponse(response: Response, map: (data: unknown) => unknown = (data) => data): Promise<Response> {
   const payload = await canonicalPayload(response);
   if (!response.ok || payload.ok === false) {
-    const error = payload.error && typeof payload.error === 'object' ? payload.error : {};
+    const error = asRecord(payload.error);
+    const retryAfterMs = finiteNumberOrUndefined(error.retryAfterMs);
     return jsonResponse({
       error: typeof error.code === 'string' ? error.code : 'request_failed',
       status: typeof error.code === 'string' ? error.code : 'request_failed',
       message: typeof error.message === 'string' ? error.message : 'The server rejected the request.',
-      ...(Number.isFinite(error.retryAfterMs) ? { retryAfterMs: error.retryAfterMs } : {}),
+      ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
     }, response.status, response);
   }
   return jsonResponse(map(payload.data), response.status, response);
 }
 
-function legacyProfile(profile: any) {
-  const kind = String(profile?.kind || 'adult');
+function legacyProfile(profile: unknown): JsonRecord {
+  const value = asRecord(profile);
+  const kind = String(value.kind || 'adult');
+  const lastUsedAt = finiteNumberOrUndefined(value.lastUsedAt);
   return {
-    id: String(profile?.id || ''), name: String(profile?.name || ''),
-    avatarKey: String(profile?.avatarKey || 'glyph-01'), colorKey: String(profile?.colorKey || 'ember'),
+    id: String(value.id || ''), name: String(value.name || ''),
+    avatarKey: String(value.avatarKey || 'glyph-01'), colorKey: String(value.colorKey || 'ember'),
     type: kind === 'child' ? 'kid' : kind === 'guest' ? 'guest' : 'standard',
-    hasPin: profile?.hasPin === true, isGuest: kind === 'guest', sortOrder: Number(profile?.sortOrder || 0),
-    ...(Number.isFinite(profile?.lastUsedAt) ? { lastUsedAt: Number(profile.lastUsedAt) } : {}),
+    hasPin: value.hasPin === true, isGuest: kind === 'guest', sortOrder: finiteNumber(value.sortOrder),
+    ...(lastUsedAt !== undefined ? { lastUsedAt } : {}),
   };
 }
 
-function legacySelection(selection: any) {
+function legacySelection(selection: unknown): JsonRecord {
+  const value = asRecord(selection);
   return {
-    profileId: typeof selection?.profileId === 'string' ? selection.profileId : null,
-    selectionRequired: typeof selection?.profileId !== 'string',
-    selectionRevision: Number(selection?.selectionRevision || 0),
-    automaticSignIn: selection?.automaticSignIn === true,
+    profileId: typeof value.profileId === 'string' ? value.profileId : null,
+    selectionRequired: typeof value.profileId !== 'string',
+    selectionRevision: finiteNumber(value.selectionRevision),
+    automaticSignIn: value.automaticSignIn === true,
   };
 }
 
-function legacyPreferences(preferences: any): LanProfilePreferences {
+function legacyPreferences(preferences: unknown): LanProfilePreferences {
+  const value = asRecord(preferences);
+  const themeMode = typeof value.themeMode === 'string'
+    ? value.themeMode as LanProfilePreferences['appThemeMode']
+    : undefined;
+  const themeColor = typeof value.themeColor === 'string'
+    ? value.themeColor as LanProfilePreferences['appThemeColor']
+    : undefined;
+  const sidebarNavOrder = Array.isArray(value.sidebarNavOrder)
+    ? value.sidebarNavOrder.filter((entry): entry is string => typeof entry === 'string')
+    : undefined;
+  const skipBackSeconds = finiteNumberOrUndefined(value.skipBackSeconds);
+  const skipForwardSeconds = finiteNumberOrUndefined(value.skipForwardSeconds);
   return {
-    ...(preferences?.themeMode ? { appThemeMode: preferences.themeMode } : {}),
-    ...(preferences?.themeColor ? { appThemeColor: preferences.themeColor } : {}),
-    ...(preferences?.showProviderRatingBadges !== undefined ? { showProviderRatingBadges: preferences.showProviderRatingBadges } : {}),
-    ...(preferences?.sidebarNavOrder ? { sidebarNavOrder: preferences.sidebarNavOrder } : {}),
-    ...(preferences?.autoplayNextEnabled !== undefined ? { autoplayNextEnabled: preferences.autoplayNextEnabled } : {}),
-    ...(preferences?.skipBackSeconds !== undefined ? { playbackSkipBackSeconds: preferences.skipBackSeconds } : {}),
-    ...(preferences?.skipForwardSeconds !== undefined ? { playbackSkipForwardSeconds: preferences.skipForwardSeconds } : {}),
+    ...(themeMode ? { appThemeMode: themeMode } : {}),
+    ...(themeColor ? { appThemeColor: themeColor } : {}),
+    ...(typeof value.showProviderRatingBadges === 'boolean' ? { showProviderRatingBadges: value.showProviderRatingBadges } : {}),
+    ...(sidebarNavOrder ? { sidebarNavOrder } : {}),
+    ...(typeof value.autoplayNextEnabled === 'boolean' ? { autoplayNextEnabled: value.autoplayNextEnabled } : {}),
+    ...(skipBackSeconds !== undefined ? { playbackSkipBackSeconds: skipBackSeconds } : {}),
+    ...(skipForwardSeconds !== undefined ? { playbackSkipForwardSeconds: skipForwardSeconds } : {}),
   };
 }
 
@@ -105,50 +151,62 @@ function canonicalPreferences(preferences: LanProfilePreferences) {
   };
 }
 
-function legacyMedia(item: any, episodes: any[] = []) {
-  const type = item?.animeLikely === true ? 'anime' : item?.kind === 'series' || item?.kind === 'episode' ? 'tv' : 'movie';
+function legacyMedia(item: unknown, episodes: unknown[] = []): JsonRecord {
+  const value = asRecord(item);
+  const artwork = asRecord(value.artwork);
+  const type = value.animeLikely === true ? 'anime' : value.kind === 'series' || value.kind === 'episode' ? 'tv' : 'movie';
+  const lastPlayed = finiteNumber(value.lastPlayedAt) || undefined;
   return {
-    id: String(item?.id || ''), type, title: String(item?.title || 'Untitled'), filePath: String(item?.id || ''),
-    year: Number.isFinite(item?.year) ? Number(item.year) : undefined,
-    poster: String(item?.artwork?.poster || ''), backdrop: String(item?.artwork?.backdrop || ''), logo: String(item?.artwork?.logo || ''),
-    summary: String(item?.summary || ''), rating: Number(item?.rating || 0), genres: Array.isArray(item?.genres) ? item.genres : [],
-    providerIds: item?.providerIds || {}, available: item?.available === true,
-    lastPlayed: Number(item?.lastPlayedAt || 0) || undefined,
-    episodeFiles: episodes.map((episode) => ({
-      mediaId: episode.id, season: Number(episode.seasonNumber || 1), episode: Number(episode.episodeNumber || 0),
-      filePath: String(episode.id), title: String(episode.title || `Episode ${episode.episodeNumber || ''}`),
-      still: String(episode?.artwork?.still || ''),
-    })),
+    id: String(value.id || ''), type, title: String(value.title || 'Untitled'), filePath: String(value.id || ''),
+    year: finiteNumberOrUndefined(value.year),
+    poster: String(artwork.poster || ''), backdrop: String(artwork.backdrop || ''), logo: String(artwork.logo || ''),
+    summary: String(value.summary || ''), rating: finiteNumber(value.rating),
+    genres: Array.isArray(value.genres) ? value.genres.filter((genre): genre is string => typeof genre === 'string') : [],
+    providerIds: asRecord(value.providerIds), available: value.available === true,
+    lastPlayed,
+    episodeFiles: episodes.map((episode) => {
+      const value = asRecord(episode);
+      const episodeArtwork = asRecord(value.artwork);
+      return {
+        mediaId: value.id, season: finiteNumber(value.seasonNumber, 1), episode: finiteNumber(value.episodeNumber),
+        filePath: String(value.id), title: String(value.title || `Episode ${value.episodeNumber || ''}`),
+        still: String(episodeArtwork.still || ''),
+      };
+    }),
   };
 }
 
-function legacyLibrary(items: any[]) {
-  const episodesBySeries = new Map<string, any[]>();
-  for (const item of items) {
-    if (item?.kind !== 'episode' || typeof item.seriesId !== 'string') continue;
+function legacyLibrary(items: unknown[]) {
+  const normalizedItems = asRecords(items);
+  const episodesBySeries = new Map<string, JsonRecord[]>();
+  for (const item of normalizedItems) {
+    if (item.kind !== 'episode' || typeof item.seriesId !== 'string') continue;
     const episodes = episodesBySeries.get(item.seriesId) || [];
     episodes.push(item);
     episodesBySeries.set(item.seriesId, episodes);
   }
-  const movies = items.filter((item) => item?.kind === 'movie' || item?.kind === 'video').map((item) => legacyMedia(item));
-  const series = items.filter((item) => item?.kind === 'series').map((item) => legacyMedia(item, episodesBySeries.get(item.id) || []));
+  const movies = normalizedItems.filter((item) => item.kind === 'movie' || item.kind === 'video').map((item) => legacyMedia(item));
+  const series = normalizedItems.filter((item) => item.kind === 'series').map((item) => legacyMedia(item, episodesBySeries.get(String(item.id)) || []));
   return { movies, tvShows: series.filter((item) => item.type === 'tv'), animeShows: series.filter((item) => item.type === 'anime'), others: [] };
 }
 
-function catalogRevision(items: any[]): number {
-  return Math.max(0, ...items.map((item) => Number(item?.updatedAt || item?.createdAt || 0)));
+function catalogRevision(items: unknown[]): number {
+  return Math.max(0, ...asRecords(items).map((item) => finiteNumber(item.updatedAt || item.createdAt)));
 }
 
-function compactIndex(items: any[]) {
+function compactIndex(items: unknown[]) {
   const revision = catalogRevision(items);
   const library = legacyLibrary(items);
-  const card = (item: any) => ({
+  const card = (item: JsonRecord): JsonRecord => {
+    const episodeFiles = asRecords(item.episodeFiles);
+    return {
     id: item.id, type: item.type, title: item.title, year: item.year, poster: item.poster || '', backdrop: item.backdrop || '',
     logo: item.logo || undefined, summary: item.summary || '', rating: item.rating || 0, genres: item.genres || [], lastPlayed: item.lastPlayed,
-    playbackReferences: item.episodeFiles?.length
-      ? item.episodeFiles.map((episode: any) => ({ progressKey: episode.mediaId || episode.filePath, season: episode.season, episode: episode.episode }))
+    playbackReferences: episodeFiles.length
+      ? episodeFiles.map((episode) => ({ progressKey: episode.mediaId || episode.filePath, season: episode.season, episode: episode.episode }))
       : [{ progressKey: item.id }],
-  });
+    };
+  };
   return {
     catalogVersion: 1, revision, movies: library.movies.map(card), tvShows: library.tvShows.map(card),
     animeShows: library.animeShows.map(card), others: [],
@@ -172,7 +230,7 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
 
   const getSelection = async (baseUrl: string, token: string) => legacyResponse(
     await request(`${baseUrl}/api/v1/profiles/selection`, { headers: deviceHeaders(token) }),
-    (data) => legacySelection(data?.selection),
+    (data) => legacySelection(asRecord(data).selection),
   );
   const selectedProfileId = async (baseUrl: string, token: string) => {
     const response = await getSelection(baseUrl, token);
@@ -187,19 +245,20 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
     const [payload, seriesPayload] = await Promise.all([canonicalPayload(response), canonicalPayload(seriesResponse)]);
     if (!response.ok || payload.ok === false) return { response, payload, items: [] };
     if (!seriesResponse.ok || seriesPayload.ok === false) return { response: seriesResponse, payload: seriesPayload, items: [] };
-    const baseItems = Array.isArray(payload.data?.items) ? payload.data.items : [];
-    const seriesItems = (Array.isArray(seriesPayload.data?.series) ? seriesPayload.data.series : []).map((series: any) => {
+    const baseItems = asRecords(asRecord(payload.data).items);
+    const seriesItems = asRecords(asRecord(seriesPayload.data).series).map((series) => {
       const id = String(series.id || `series:${encodeURIComponent(String(series.title || 'untitled').toLowerCase())}`);
+      const episodes = asRecords(series.seasons).flatMap((season) => asRecords(season.episodes).map((episode) => ({ ...episode, seriesId: id })));
       return {
         ...series, id, kind: 'series', available: true,
-        episodes: (series.seasons || []).flatMap((season: any) => (season.episodes || []).map((episode: any) => ({ ...episode, seriesId: id }))),
+        episodes,
       };
     });
-    const episodeIds = new Set(seriesItems.flatMap((series: any) => series.episodes.map((episode: any) => episode.id)));
+    const episodeIds = new Set(seriesItems.flatMap((series) => asRecords(series.episodes).map((episode) => episode.id)));
     const items = [
-      ...baseItems.filter((item: any) => item.kind !== 'episode' || !episodeIds.has(item.id)),
+      ...baseItems.filter((item) => item.kind !== 'episode' || !episodeIds.has(item.id)),
       ...seriesItems,
-      ...seriesItems.flatMap((series: any) => series.episodes),
+      ...seriesItems.flatMap((series) => asRecords(series.episodes)),
     ];
     return { response, payload, items };
   };
@@ -219,7 +278,7 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
     },
     async getProfiles(baseUrl: string, token: string) {
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles`, { headers: deviceHeaders(token) }),
-        (data) => ({ profiles: (data?.profiles || []).map(legacyProfile) }));
+        (data) => ({ profiles: asRecords(asRecord(data).profiles).map(legacyProfile) }));
     },
     getActiveProfile(baseUrl: string, token: string) { return getSelection(baseUrl, token); },
     async selectProfile(baseUrl: string, token: string, body: LanProfileSelectionRequest) {
@@ -229,40 +288,40 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       const selectedPayload = await canonicalPayload(selected);
       if (!selected.ok || selectedPayload.ok === false) return legacyResponse(jsonResponse(selectedPayload, selected.status, selected));
       const active = await getSelection(baseUrl, token);
-      return jsonResponse({ profile: legacyProfile(selectedPayload.data?.profile), active: await active.json() }, 200, selected);
+      return jsonResponse({ profile: legacyProfile(asRecord(selectedPayload.data).profile), active: await active.json() }, 200, selected);
     },
     async lockProfile(baseUrl: string, token: string) {
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/selection/lock`, { method: 'POST', headers: deviceHeaders(token) }),
-        (data) => legacySelection(data?.selection));
+        (data) => legacySelection(asRecord(data).selection));
     },
     async setAutomaticSignIn(baseUrl: string, token: string, enabled: boolean) {
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/selection`, {
         method: 'PATCH', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }), body: JSON.stringify({ automaticSignIn: enabled }),
-      }), (data) => legacySelection(data?.selection));
+      }), (data) => legacySelection(asRecord(data).selection));
     },
     async getProfilePreferences(baseUrl: string, token: string) {
       const profileId = await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/preferences`, { headers: deviceHeaders(token) }),
-        (data) => legacyPreferences(data?.preferences));
+        (data) => legacyPreferences(asRecord(data).preferences));
     },
     async saveProfilePreferences(baseUrl: string, token: string, patch: LanProfilePreferences, _selectionRevision?: number) {
       const profileId = await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/preferences`, {
         method: 'PATCH', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }), body: JSON.stringify(canonicalPreferences(patch)),
-      }), (data) => legacyPreferences(data?.preferences));
+      }), (data) => legacyPreferences(asRecord(data).preferences));
     },
     async getProfileLists(baseUrl: string, token: string, kind?: LanProfileListKind) {
       const profileId = await selectedProfileId(baseUrl, token);
       const query = kind ? `?kind=${encodeURIComponent(kind)}` : '';
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/lists${query}`, { headers: deviceHeaders(token) }),
-        (data) => data?.entries || []);
+        (data) => asRecord(data).entries || []);
     },
     async setProfileList(baseUrl: string, token: string, mediaId: string, kind: LanProfileListKind, present: boolean, _selectionRevision?: number) {
       const profileId = await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(
         `${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/lists/${encodeURIComponent(kind)}/${encodeURIComponent(mediaId)}`,
         { method: present ? 'PUT' : 'DELETE', headers: deviceHeaders(token) },
-      ), (data) => data?.entries || []);
+      ), (data) => asRecord(data).entries || []);
     },
     async startHls(baseUrl: string, token: string, mediaId: string, options: StreamOptions, _selectionRevision?: number, signal?: AbortSignal) {
       const planResponse = await request(`${baseUrl}/api/v1/media/${encodeURIComponent(mediaId)}/playback-plan`, {
@@ -281,14 +340,19 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       });
       const planPayload = await canonicalPayload(planResponse);
       if (!planResponse.ok || planPayload.ok === false) return legacyResponse(jsonResponse(planPayload, planResponse.status, planResponse));
-      const relative = planPayload.data?.directUrl || planPayload.data?.transcodeUrl;
+      const planData = asRecord(planPayload.data);
+      const relative = planData.directUrl || planData.transcodeUrl;
       if (typeof relative !== 'string' || !relative) return jsonResponse({ ok: false, error: 'playback_not_supported' }, 409, planResponse);
       const playbackUrl = new URL(relative, baseUrl).toString();
-      if (planPayload.data?.directUrl) return jsonResponse({ ok: true, data: { playlistUrl: playbackUrl } }, 200, planResponse);
+      if (planData.directUrl) return jsonResponse({ ok: true, data: { playlistUrl: playbackUrl } }, 200, planResponse);
       const started = await request(playbackUrl, { method: 'POST', headers: deviceHeaders(token), signal });
       const startedPayload = await canonicalPayload(started);
       if (!started.ok || startedPayload.ok === false) return legacyResponse(jsonResponse(startedPayload, started.status, started));
-      const playlistUrl = startedPayload.data?.playlistUrl || (startedPayload as any).playlistUrl;
+      const startedData = asRecord(startedPayload.data);
+      const playlistUrl = typeof startedData.playlistUrl === 'string'
+        ? startedData.playlistUrl
+        : typeof startedPayload.playlistUrl === 'string' ? startedPayload.playlistUrl : '';
+      if (!playlistUrl) return jsonResponse({ ok: false, error: 'playback_not_supported' }, 409, started);
       return jsonResponse({ ok: true, data: { playlistUrl: new URL(playlistUrl, baseUrl).toString() } }, 200, started);
     },
     async getPlaybackPlan(baseUrl: string, token: string, mediaId: string, capabilities: LanPlaybackCapabilities, _selectionRevision?: number) {
@@ -312,10 +376,13 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
     async getProgress(baseUrl: string, token: string) {
       const profileId = await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(`${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/progress`, { headers: deviceHeaders(token) }),
-        (data) => Object.fromEntries(Object.entries(data?.progress || {}).map(([mediaId, item]: [string, any]) => [mediaId, {
-          position: Number(item?.positionSeconds || item?.position || 0), duration: Number(item?.durationSeconds || item?.duration || 0),
-          watched: item?.watched === true, updatedAt: Number(item?.updatedAt || 0),
-        }])));
+        (data) => Object.fromEntries(Object.entries(asRecord(asRecord(data).progress)).map(([mediaId, value]) => {
+          const item = asRecord(value);
+          return [mediaId, {
+            position: finiteNumber(item.positionSeconds || item.position), duration: finiteNumber(item.durationSeconds || item.duration),
+            watched: item.watched === true, updatedAt: finiteNumber(item.updatedAt),
+          }];
+        })));
     },
     async saveProgress(baseUrl: string, token: string, body: { mediaId: string; position: number; duration: number; selectionRevision?: number }) {
       const profileId = await selectedProfileId(baseUrl, token);
@@ -323,7 +390,7 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
         method: 'PUT', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }), body: JSON.stringify({
           positionSeconds: body.position, durationSeconds: body.duration, watched: body.duration > 0 && body.position / body.duration >= 0.9,
         }),
-      }), (data) => data?.progress || {});
+      }), (data) => asRecord(data).progress || {});
     },
     async refreshCredentials(baseUrl: string, refreshToken: string, _deviceName?: string) {
       const response = await request(`${baseUrl}/api/v1/auth/me`, { headers: deviceHeaders(refreshToken) });
@@ -368,13 +435,16 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       });
       const payload = await canonicalPayload(response);
       if (!response.ok || payload.ok === false) return legacyResponse(jsonResponse(payload, response.status, response));
-      if (payload.data?.status !== 'approved') return jsonResponse(payload.data, payload.data?.status === 'pending' ? 202 : 200, response);
-      const credential = `${payload.data.credential.id}.${payload.data.credential.secret}`;
+      const pairingData = asRecord(payload.data);
+      if (pairingData.status !== 'approved') return jsonResponse(pairingData, pairingData.status === 'pending' ? 202 : 200, response);
+      const credentialData = asRecord(pairingData.credential);
+      const credential = `${credentialData.id}.${credentialData.secret}`;
       const discovery = await canonicalPayload(await request(`${baseUrl}/api/v1/discovery`));
-      const fingerprint = String(payload.data.certificateFingerprint || discovery.data?.certificateFingerprint || '').replaceAll(':', '').toLowerCase();
-      const expiresAt = Number(payload.data.credentialExpiresAt || Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const discoveryData = asRecord(discovery.data);
+      const fingerprint = String(pairingData.certificateFingerprint || discoveryData.certificateFingerprint || '').replaceAll(':', '').toLowerCase();
+      const expiresAt = finiteNumber(pairingData.credentialExpiresAt, Date.now() + 365 * 24 * 60 * 60 * 1000);
       return jsonResponse({
-        deviceId: payload.data.deviceId, accessToken: credential, accessTokenExpiresAt: expiresAt,
+        deviceId: pairingData.deviceId, accessToken: credential, accessTokenExpiresAt: expiresAt,
         refreshToken: credential, refreshTokenExpiresAt: expiresAt, certFingerprint: fingerprint,
         hostDeviceId: fingerprint, hostDeviceName: 'LoomTV server', library: {}, libraryEtag: '',
       }, 200, response);
@@ -390,14 +460,14 @@ export function createMobileLanClient(fetchImpl: FetchImplementation = fetch, ti
       return legacyResponse(await request(
         `${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/track-preferences/${encodeURIComponent(scope)}`,
         { headers: deviceHeaders(token) },
-      ), (data) => data?.preferences || {});
+      ), (data) => asRecord(data).preferences || {});
     },
     async saveTrackPreferences(baseUrl: string, token: string, scope: string, preferences: PlaybackTrackPreferences, _selectionRevision?: number) {
       const profileId = await selectedProfileId(baseUrl, token);
       return legacyResponse(await request(
         `${baseUrl}/api/v1/profiles/${encodeURIComponent(profileId)}/track-preferences/${encodeURIComponent(scope)}`,
         { method: 'PUT', headers: deviceHeaders(token, { 'Content-Type': 'application/json' }), body: JSON.stringify(preferences) },
-      ), (data) => data?.preferences || {});
+      ), (data) => asRecord(data).preferences || {});
     },
     async getPlaybackSegments(_baseUrl: string, _token: string, _params: URLSearchParams, _signal?: AbortSignal) {
       return jsonResponse({ error: 'legacy_route_retired', message: 'Playback segment metadata is not part of the canonical video API.' }, 410);

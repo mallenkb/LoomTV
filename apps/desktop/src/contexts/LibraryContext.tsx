@@ -636,7 +636,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     return request;
   }, [activeProfileId, clearDetailStateIfScopeChanged]);
 
-  const runLibraryScan = async (mode: LibraryScanMode) => {
+  const runLibraryScan = useCallback(async (mode: LibraryScanMode) => {
     if (isScanningRef.current) {
       pendingScanModeRef.current = strongerScanMode(pendingScanModeRef.current, mode);
       return;
@@ -661,7 +661,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
       pendingScanModeRef.current = null;
       if (pendingMode) void runLibraryScan(pendingMode);
     }
-  };
+  }, [applyScanCatalog, beginLibraryMutation, loadPrimaryCatalog]);
 
   const scanLibrary = () => runLibraryScan('quick');
   const refreshMetadata = () => runLibraryScan('metadata');
@@ -846,7 +846,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
         dispatch({ type: 'SET_SCAN_PROGRESS', payload: 0 });
       }
     };
-  }, [activeProfile?.id, activeProfile?.type, applyScanCatalog, beginLibraryMutation, loadPrimaryCatalog]);
+  }, [activeProfile?.id, activeProfile?.type, applyScanCatalog, beginLibraryMutation, loadPrimaryCatalog, runLibraryScan]);
 
   useEffect(() => {
     const intervalMs = state.autoSyncIntervalHours * 60 * 60 * 1000;
@@ -876,7 +876,7 @@ export function LibraryProvider({ children }: { children: ReactNode }) {
     }, intervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [activeProfile?.type, applyScanCatalog, beginLibraryMutation, state.autoSyncIntervalHours]);
+  }, [activeProfile?.type, applyScanCatalog, beginLibraryMutation, runLibraryScan, state.autoSyncIntervalHours]);
 
   useEffect(() => {
     if (!desktopApi.isRemoteLibraryMode() || !activeProfile) return undefined;

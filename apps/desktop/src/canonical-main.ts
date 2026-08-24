@@ -225,11 +225,13 @@ function normalizedFingerprint(value: string): string {
 function installCertificatePin(origin: string, expectedFingerprint: string): void {
   const expectedOrigin = new URL(origin).origin;
   app.on('certificate-error', (event, _webContents, url, _error, certificate, callback) => {
-    let matches = false;
+    let matches: boolean;
     try {
       matches = new URL(url).origin === expectedOrigin
         && normalizedFingerprint(new X509Certificate(certificate.data).fingerprint256) === expectedFingerprint;
-    } catch { matches = false; }
+    } catch {
+      matches = false;
+    }
     if (matches) event.preventDefault();
     callback(matches);
   });

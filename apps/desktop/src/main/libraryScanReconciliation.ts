@@ -117,16 +117,15 @@ const TMDB_ARTWORK_RENDITION = /^(https:\/\/image\.tmdb\.org\/t\/p\/)(?:w\d+|ori
 
 function tmdbArtworkIdentity(value?: string): string {
   if (!value) return '';
-  let source = value;
   try {
     const parsed = new URL(value);
-    source = parsed.pathname === '/api/cached-artwork'
+    const source = parsed.pathname === '/api/cached-artwork'
       ? parsed.searchParams.get('source') || value
       : value;
+    return source.match(TMDB_ARTWORK_RENDITION)?.[2] || '';
   } catch {
     return '';
   }
-  return source.match(TMDB_ARTWORK_RENDITION)?.[2] || '';
 }
 
 function preserveArtworkSelection(existing?: string, fresh?: string): string {
