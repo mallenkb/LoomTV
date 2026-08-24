@@ -472,7 +472,7 @@ async function planWithRecordedProbe(recordedSizeDelta = 0) {
   });
 
   const result = await mediaService.planPlayback('item-1', {
-    capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http'] },
+    capabilities: { containers: ['mkv'], videoCodecs: ['h264'], audioCodecs: ['aac'], streamingProtocols: ['http', 'hls'] },
   }, { id: 'owner-1', type: 'owner', role: 'owner', permissions: ['stream'], rootIds: null });
   await mediaService.stop();
   return { result, probeCalls, recorded };

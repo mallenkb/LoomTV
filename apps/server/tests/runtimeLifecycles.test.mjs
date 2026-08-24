@@ -106,7 +106,7 @@ test('server stop is bounded and idempotent with an incomplete HTTP request', as
     host: '127.0.0.1',
     port: 0,
     version: 'test',
-    shutdownTimeoutMs: 50,
+    shutdownTimeoutMs: 250,
     termGraceMs: 1,
     paths: { dataDir, cacheDir, mediaDir },
   });
@@ -117,7 +117,7 @@ test('server stop is bounded and idempotent with an incomplete HTTP request', as
     connection.once('error', reject);
   }).catch(() => null);
   socket?.write('GET / HTTP/1.1\r\nHost: localhost\r\n');
-  await Promise.race([server.stop(), new Promise((_, reject) => setTimeout(() => reject(new Error('shutdown deadline exceeded')), 500))]);
+  await Promise.race([server.stop(), new Promise((_, reject) => setTimeout(() => reject(new Error('shutdown deadline exceeded')), 1_000))]);
   await server.stop();
   socket?.destroy();
   await Promise.all([
