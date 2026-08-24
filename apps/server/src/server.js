@@ -538,7 +538,7 @@ export function createCanonicalVideoServer(options) {
           persistence.stop(),
           mediaService.stop({ termGraceMs }),
         ]);
-        const completed = await Promise.race([
+        let completed = await Promise.race([
           Promise.all([listenerClosed, servicesStopped]).then(([, results]) => ({ completed: true, results })),
           delay(shutdownTimeoutMs).then(() => ({ completed: false, results: null })),
         ]);
@@ -547,6 +547,12 @@ export function createCanonicalVideoServer(options) {
           server.closeAllConnections?.();
         }
         await Promise.race([listenerClosed, delay(250)]);
+        if (!completed.completed) {
+          completed = await Promise.race([
+            Promise.all([listenerClosed, servicesStopped]).then(([, results]) => ({ completed: true, results })),
+            delay(250).then(() => ({ completed: false, results: null })),
+          ]);
+        }
         if (!completed.completed) {
           shutdownErrors.push(Object.assign(new Error('Canonical server shutdown exceeded its deadline.'), {
             code: 'server_shutdown_timeout',
