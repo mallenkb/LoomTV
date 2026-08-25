@@ -17,7 +17,9 @@ function styleColor(value: unknown, fallback: string): string {
 function normalizeSubtitleStyle(value: unknown): SubtitleStyleSettings {
   const style = value && typeof value === 'object' ? value as Partial<SubtitleStyleSettings> : {};
   return {
-    delaySeconds: clampStyleNumber(style.delaySeconds, DEFAULT_SUBTITLE_STYLE.delaySeconds, -60, 60),
+    // Subtitle timing follows the active playback clock. Do not carry an old
+    // manual offset into a new playback session.
+    delaySeconds: DEFAULT_SUBTITLE_STYLE.delaySeconds,
     position: clampStyleNumber(style.position, DEFAULT_SUBTITLE_STYLE.position, 0, 100),
     scale: clampStyleNumber(style.scale, DEFAULT_SUBTITLE_STYLE.scale, 0.5, 2),
     fontSize: clampStyleNumber(style.fontSize, DEFAULT_SUBTITLE_STYLE.fontSize, 24, 96),

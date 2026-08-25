@@ -4,6 +4,10 @@ This page is the release index for LoomTV. Each version links to its full notes.
 
 ## Recent releases
 
+### [1.0.131](docs/releases/v1.0.131.md)
+
+Fixes LibVLC audio and subtitle track selection and keeps subtitle timing aligned with playback.
+
 ### [1.0.130](docs/releases/v1.0.130.md)
 
 Unifies the desktop and client playback paths, improves native playback startup and metadata fallbacks, and fixes release lint and typecheck failures.

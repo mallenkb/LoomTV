@@ -30,6 +30,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   private lastState: LibVlcPlaybackState | null = null;
   private nativeTracks: PlaybackTrack[] = [];
   private probedTracks: MediaTrack[] = [];
+  private externalSubtitleTracks: MediaTrack[] = [];
   private pendingMetadataFilePath: string | null = null;
   private metadataProbeTimer: ReturnType<typeof setTimeout> | null = null;
   private metadataProbeFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,6 +65,12 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     this.destroyed = false;
     this.lastPauseCommand = false;
     this.volumeController.reset(options?.volume, options?.muted);
+    this.externalSubtitleTracks = (options?.subtitleFiles || []).map((subtitle, index) => ({
+      index: -1000 - index,
+      type: 'subtitle',
+      title: subtitle.path.split(/[\\/]/).pop() || `Subtitle ${index + 1}`,
+      source: subtitle.source,
+    }));
     const result = await desktopApi.libvlc.start(filePath, options);
     if (result.ok && result.sessionId && result.surface === 'composited-window') {
       this.sessionId = result.sessionId;
@@ -104,19 +111,21 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
 
   private effectiveTracks(): PlaybackTrack[] {
     if (this.nativeTracks.length > 0) return this.mergeTrackMetadata(this.nativeTracks);
-    if (this.probedTracks.length === 0) return [];
+    const metadataTracks = [...this.probedTracks, ...this.externalSubtitleTracks];
+    if (metadataTracks.length === 0) return [];
 
     const firstSelected = {
-      video: this.probedTracks.find((track) => track.type === 'video' && track.default)
-        || this.probedTracks.find((track) => track.type === 'video'),
-      audio: this.probedTracks.find((track) => track.type === 'audio' && track.default)
-        || this.probedTracks.find((track) => track.type === 'audio'),
-      subtitle: this.probedTracks.find((track) => track.type === 'subtitle' && track.default),
+      video: metadataTracks.find((track) => track.type === 'video' && track.default)
+        || metadataTracks.find((track) => track.type === 'video'),
+      audio: metadataTracks.find((track) => track.type === 'audio' && track.default)
+        || metadataTracks.find((track) => track.type === 'audio'),
+      subtitle: metadataTracks.find((track) => track.type === 'subtitle' && track.default),
     };
-    return this.probedTracks.flatMap((track): PlaybackTrack[] => {
+    return metadataTracks.flatMap((track): PlaybackTrack[] => {
       if (track.type !== 'video' && track.type !== 'audio' && track.type !== 'subtitle') return [];
       return [{
         id: track.index,
+        streamIndex: track.index,
         type: track.type,
         codec: track.codec,
         language: track.language,
@@ -132,16 +141,17 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
   }
 
   private mergeTrackMetadata(nativeTracks: PlaybackTrack[]): PlaybackTrack[] {
-    if (nativeTracks.length === 0 || this.probedTracks.length === 0) return nativeTracks;
+    const metadataTracks = [...this.probedTracks, ...this.externalSubtitleTracks];
+    if (nativeTracks.length === 0 || metadataTracks.length === 0) return nativeTracks;
     const ordinals: Record<PlaybackTrack['type'], number> = {
       video: 0,
       audio: 0,
       subtitle: 0,
     };
     const byType = {
-      video: this.probedTracks.filter((track) => track.type === 'video'),
-      audio: this.probedTracks.filter((track) => track.type === 'audio'),
-      subtitle: this.probedTracks.filter((track) => track.type === 'subtitle'),
+      video: metadataTracks.filter((track) => track.type === 'video'),
+      audio: metadataTracks.filter((track) => track.type === 'audio'),
+      subtitle: metadataTracks.filter((track) => track.type === 'subtitle'),
     };
 
     return nativeTracks.map((track) => {
@@ -150,6 +160,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
       if (!probe) return track;
       return {
         ...track,
+        streamIndex: probe.index,
         codec: probe.codec || track.codec,
         language: probe.language || track.language,
         title: probe.title || track.title,
@@ -204,6 +215,12 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     if (this.sessionId) await desktopApi.libvlc.command(this.sessionId, command);
   }
 
+  private async requiredCommand(command: LibVlcCommand): Promise<void> {
+    if (!this.sessionId || !await desktopApi.libvlc.command(this.sessionId, command)) {
+      throw new Error('LibVLC could not apply the requested track without restarting playback.');
+    }
+  }
+
   private setPaused(paused: boolean): Promise<void> {
     if (this.lastPauseCommand === paused) return Promise.resolve();
     this.lastPauseCommand = paused;
@@ -250,11 +267,11 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     this.updateSelectedTrack('video', trackId);
   }
   async selectAudio(trackId: number | null): Promise<void> {
-    await this.command({ type: 'set-audio-track', trackId });
+    await this.requiredCommand({ type: 'set-audio-track', trackId });
     this.updateSelectedTrack('audio', trackId);
   }
   async selectSubtitle(trackId: number | null): Promise<void> {
-    await this.command({ type: 'set-subtitle-track', trackId });
+    await this.requiredCommand({ type: 'set-subtitle-track', trackId });
     this.updateSelectedTrack('subtitle', trackId);
   }
   selectSecondarySubtitle(trackId: number | null): Promise<void> {
@@ -287,6 +304,7 @@ export default class LibVlcPlaybackEngine implements PlaybackEngine {
     this.lastState = null;
     this.nativeTracks = [];
     this.probedTracks = [];
+    this.externalSubtitleTracks = [];
     const sessionId = this.sessionId;
     this.sessionId = null;
     if (sessionId) await desktopApi.libvlc.stop(sessionId);

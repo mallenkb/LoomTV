@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { PlaybackCommand, PlaybackStartOptions, PlaybackState, PlaybackViewport } from '../shared/playbackProtocol';
+import type { PlaybackCommand, PlaybackStartOptions, PlaybackState, PlaybackTrack, PlaybackViewport } from '../shared/playbackProtocol';
 import {
   releaseNativePlaybackDisplaySleep,
   syncNativePlaybackDisplaySleep,
@@ -35,6 +35,7 @@ type KoffiLibrary = {
 type KoffiRuntime = {
   load: (libraryPath: string) => KoffiLibrary;
   struct: (fields: Record<string, KoffiTypeSpec>) => KoffiType;
+  decode: (value: NativeValue, type: KoffiTypeSpec) => Record<string, NativeValue>;
 };
 type NativeDrawable = bigint | number;
 /** A native pointer result: an address, or null when the call returned NULL. */
@@ -81,8 +82,14 @@ type LibVlcApi = {
   videoSetMouseInput?: DynamicFunction;
   videoSetKeyInput?: DynamicFunction;
   videoSetTrack?: DynamicFunction;
+  videoGetTrack?: DynamicFunction;
+  videoGetTrackDescription?: DynamicFunction;
   audioSetTrack?: DynamicFunction;
+  audioGetTrackDescription?: DynamicFunction;
   subtitleSetTrack?: DynamicFunction;
+  subtitleGetTrack?: DynamicFunction;
+  subtitleGetTrackDescription?: DynamicFunction;
+  trackDescriptionListRelease?: DynamicFunction;
   subtitleSetDelay?: DynamicFunction;
   audioSetDelay?: DynamicFunction;
 };
@@ -93,6 +100,8 @@ type LibVlcRuntime = {
   libraryPath: string;
   version?: string;
   source: 'environment' | 'bundled' | 'system';
+  decode: KoffiRuntime['decode'];
+  trackDescriptionType: KoffiType;
 };
 
 type RuntimeCache = {
@@ -296,11 +305,11 @@ function loadKoffi(): KoffiRuntime {
   return require('koffi') as KoffiRuntime;
 }
 
-function bind(library: KoffiLibrary, name: string, returnType: string, argumentTypes: string[]): DynamicFunction {
+function bind(library: KoffiLibrary, name: string, returnType: KoffiTypeSpec, argumentTypes: KoffiTypeSpec[]): DynamicFunction {
   return library.func(name, returnType, argumentTypes);
 }
 
-function optionalBind(library: KoffiLibrary, name: string, returnType: string, argumentTypes: string[]): DynamicFunction | undefined {
+function optionalBind(library: KoffiLibrary, name: string, returnType: KoffiTypeSpec, argumentTypes: KoffiTypeSpec[]): DynamicFunction | undefined {
   try {
     return bind(library, name, returnType, argumentTypes);
   } catch {
@@ -389,6 +398,11 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
       }
       const library = koffi.load(candidate.path);
       loadedLibraries.push(library);
+      const trackDescriptionType = koffi.struct({
+        i_id: 'int',
+        psz_name: 'str',
+        p_next: 'void *',
+      });
       const api: LibVlcApi = {
         newInstance: bind(library, 'libvlc_new', 'void *', ['int', 'const char **']),
         releaseInstance: bind(library, 'libvlc_release', 'void', ['void *']),
@@ -413,8 +427,14 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         videoSetMouseInput: optionalBind(library, 'libvlc_video_set_mouse_input', 'void', ['void *', 'int']),
         videoSetKeyInput: optionalBind(library, 'libvlc_video_set_key_input', 'void', ['void *', 'int']),
         videoSetTrack: optionalBind(library, 'libvlc_video_set_track', 'int', ['void *', 'int']),
+        videoGetTrack: optionalBind(library, 'libvlc_video_get_track', 'int', ['void *']),
+        videoGetTrackDescription: optionalBind(library, 'libvlc_video_get_track_description', 'void *', ['void *']),
         audioSetTrack: optionalBind(library, 'libvlc_audio_set_track', 'int', ['void *', 'int']),
+        audioGetTrackDescription: optionalBind(library, 'libvlc_audio_get_track_description', 'void *', ['void *']),
         subtitleSetTrack: optionalBind(library, 'libvlc_video_set_spu', 'int', ['void *', 'int']),
+        subtitleGetTrack: optionalBind(library, 'libvlc_video_get_spu', 'int', ['void *']),
+        subtitleGetTrackDescription: optionalBind(library, 'libvlc_video_get_spu_description', 'void *', ['void *']),
+        trackDescriptionListRelease: optionalBind(library, 'libvlc_track_description_list_release', 'void', ['void *']),
         subtitleSetDelay: optionalBind(library, 'libvlc_video_set_spu_delay', 'int', ['void *', 'int64']),
         audioSetDelay: optionalBind(library, 'libvlc_audio_set_delay', 'int', ['void *', 'int64']),
       };
@@ -425,6 +445,8 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         libraryPath: candidate.path,
         version,
         source: candidate.source,
+        decode: koffi.decode,
+        trackDescriptionType,
       } };
     } catch (error) {
       rejected.push(`${candidate.path}: ${error instanceof Error ? error.message : 'could not load'}`);
@@ -1013,6 +1035,8 @@ class LibVlcPlaybackSession {
   private initialAudioSelectionApplied = false;
   private initialAudioSelectionAttempts = 0;
   private nativeRearmUntil = 0;
+  private nativeTracksSignature = '';
+  private lastNativeTrackRefreshAt = 0;
   private state: LibVlcPlaybackState;
   private readonly windowListeners: Array<() => void> = [];
 
@@ -1514,6 +1538,56 @@ class LibVlcPlaybackSession {
     }
   }
 
+  private readNativeTrackDescriptions(
+    type: PlaybackTrack['type'],
+    getDescriptions: DynamicFunction | undefined,
+    getSelected: DynamicFunction | undefined,
+  ): PlaybackTrack[] {
+    const release = this.runtime.api.trackDescriptionListRelease;
+    if (!getDescriptions || !release || !this.player) return [];
+    const head = nativeHandle(getDescriptions(this.player));
+    if (!head) return [];
+    const selectedId = getSelected ? Number(getSelected(this.player)) : Number.NaN;
+    const tracks: PlaybackTrack[] = [];
+    let cursor: NativeHandle = head;
+    try {
+      for (let count = 0; cursor && count < 256; count += 1) {
+        const description = this.runtime.decode(cursor, this.runtime.trackDescriptionType);
+        const id = Number(description.i_id);
+        if (Number.isFinite(id) && id >= 0) {
+          tracks.push({
+            id,
+            type,
+            title: typeof description.psz_name === 'string' ? description.psz_name : undefined,
+            selected: id === selectedId,
+            source: 'embedded',
+          });
+        }
+        cursor = nativeHandle(description.p_next);
+      }
+    } finally {
+      release(head);
+    }
+    return tracks;
+  }
+
+  private refreshNativeTracks(force = false): void {
+    const now = Date.now();
+    if (!force && now - this.lastNativeTrackRefreshAt < 500) return;
+    this.lastNativeTrackRefreshAt = now;
+    const api = this.runtime.api;
+    const tracks = [
+      ...this.readNativeTrackDescriptions('video', api.videoGetTrackDescription, api.videoGetTrack),
+      ...this.readNativeTrackDescriptions('audio', api.audioGetTrackDescription, api.audioGetTrack),
+      ...this.readNativeTrackDescriptions('subtitle', api.subtitleGetTrackDescription, api.subtitleGetTrack),
+    ];
+    if (tracks.length === 0) return;
+    const signature = JSON.stringify(tracks.map((track) => [track.type, track.id, track.title, track.selected]));
+    if (signature === this.nativeTracksSignature) return;
+    this.nativeTracksSignature = signature;
+    this.emit({ tracks });
+  }
+
   private poll(): void {
     if (this.stopped) return;
     try {
@@ -1523,7 +1597,10 @@ class LibVlcPlaybackSession {
       if (status === 'closed' && Date.now() < this.nativeRearmUntil) return;
       const durationMs = Number(api.playerGetLength(this.player));
       const positionMs = Number(api.playerGetTime(this.player));
-      if (status === 'ready') this.applyInitialAudioSelection();
+      if (status === 'ready') {
+        this.applyInitialAudioSelection();
+        this.refreshNativeTracks();
+      }
       if (status === 'ready' && this.startSeconds > 0 && !this.startApplied) {
         api.playerSetTime(this.player, Math.round(this.startSeconds * 1_000));
         this.startApplied = true;
@@ -1571,7 +1648,11 @@ class LibVlcPlaybackSession {
           this.emit({ muted: command.muted });
           return true;
         case 'set-speed': return Number(api.playerSetRate(this.player, clamp(finite(command.speed, 1), 0.25, 3))) >= 0;
-        case 'set-video-track': return api.videoSetTrack ? Number(api.videoSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
+        case 'set-video-track': {
+          const applied = api.videoSetTrack ? Number(api.videoSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
+          if (applied) this.refreshNativeTracks(true);
+          return applied;
+        }
         case 'set-audio-track': {
           this.preferredAudioTrackId = command.trackId;
           this.initialAudioSelectionAttempts = 0;
@@ -1581,9 +1662,14 @@ class LibVlcPlaybackSession {
           }
           const applied = Number(api.audioSetTrack(this.player, command.trackId ?? -1)) >= 0;
           this.initialAudioSelectionApplied = applied;
+          if (applied) this.refreshNativeTracks(true);
           return applied;
         }
-        case 'set-subtitle-track': return api.subtitleSetTrack ? Number(api.subtitleSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
+        case 'set-subtitle-track': {
+          const applied = api.subtitleSetTrack ? Number(api.subtitleSetTrack(this.player, command.trackId ?? -1)) >= 0 : false;
+          if (applied) this.refreshNativeTracks(true);
+          return applied;
+        }
         case 'set-subtitle-delay': return api.subtitleSetDelay ? Number(api.subtitleSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0 : false;
         case 'set-audio-delay': return api.audioSetDelay ? Number(api.audioSetDelay(this.player, Math.round(command.seconds * 1_000_000))) >= 0 : false;
         default: return false;

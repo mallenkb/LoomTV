@@ -104,7 +104,10 @@ function SubtitleOverlay({
         const offset = video && streamIsTranscoded && !streamIsSeekableRef.current
           ? transcodeStartSecondsRef.current || 0
           : 0;
-        const time = (video?.currentTime ?? nativeTime ?? 0) + offset - style.delaySeconds;
+        // Keep cue timing on the same clock as playback. Resume offsets are
+        // applied only for a non-seekable transcoded window; subtitle delay is
+        // intentionally not added here.
+        const time = (video?.currentTime ?? nativeTime ?? 0) + offset;
         const cueIndex = findActiveCueIndex(sortedCues, time, activeCueIndexRef.current);
         activeCueIndexRef.current = cueIndex;
         const next = cueIndex >= 0 ? sortedCues[cueIndex].text : '';
@@ -118,7 +121,7 @@ function SubtitleOverlay({
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [sortedCues, videoRef, transcodeStartSecondsRef, streamIsSeekableRef, streamIsTranscoded, currentTimeRef, style.delaySeconds, visible]);
+  }, [sortedCues, videoRef, transcodeStartSecondsRef, streamIsSeekableRef, streamIsTranscoded, currentTimeRef, visible]);
 
   const textShadow = useMemo(() => {
     const outlineWidth = style.borderEnabled

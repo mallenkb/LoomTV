@@ -9,6 +9,7 @@ import {
   initialStreamOffset,
   isTimeBuffered,
   playbackProgressForExit,
+  resolveEngineTrackId,
   resolveInitialPlaybackPosition,
   transcodeSeekRestartOptions,
   isEditableShortcutTarget,
@@ -318,6 +319,37 @@ test('subtitle track changes preserve direct playback unless bitmap burn-in is r
     selectedSubtitleIsBitmap: false,
     activeSubtitleIsBurnedIn: true,
   }), 'reload-source');
+});
+
+test('LibVLC track selection uses the native runtime ID without changing engines', () => {
+  const tracks = [
+    { index: 2, nativeId: 7, type: 'audio' },
+    { index: 4, nativeId: 11, type: 'subtitle' },
+  ];
+  assert.equal(resolveEngineTrackId({
+    engineKind: 'libvlc',
+    tracks,
+    type: 'audio',
+    streamIndex: 2,
+  }), 7);
+  assert.equal(resolveEngineTrackId({
+    engineKind: 'libvlc',
+    tracks,
+    type: 'subtitle',
+    streamIndex: 4,
+  }), 11);
+  assert.equal(resolveEngineTrackId({
+    engineKind: 'libvlc',
+    tracks,
+    type: 'audio',
+    streamIndex: 99,
+  }), null);
+  assert.equal(resolveEngineTrackId({
+    engineKind: 'mpv',
+    tracks,
+    type: 'audio',
+    streamIndex: 2,
+  }), 2);
 });
 
 test('native subtitle tracks remain available as an external subtitle fallback', () => {

@@ -6,7 +6,10 @@
  * an MPV implementation merely to participate in the player lifecycle.
  */
 export type PlaybackTrack = {
+  /** Track identifier used by the active native playback engine. */
   id: number;
+  /** Stable ffprobe stream index used by LoomTV's UI and browser pipeline. */
+  streamIndex?: number;
   type: 'video' | 'audio' | 'subtitle';
   codec?: string;
   language?: string;

@@ -112,6 +112,7 @@ import {
   isTimeBuffered,
   isPlayerControlTarget,
   playbackProgressForExit,
+  resolveEngineTrackId,
   resolveInitialPlaybackPosition,
   shouldRestartUnseekableDirectStream,
   shouldRestartTranscodedSubtitleStyle,
@@ -138,6 +139,20 @@ const EMPTY_EPISODE_FILES: EpisodeFile[] = [];
 const EMPTY_SUBTITLES: NonNullable<VideoPlayerProps['subtitles']> = [];
 const POSITION_UI_UPDATE_INTERVAL_MS = 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2000;
+
+function engineTrackId(
+  engine: PlaybackEngine | null,
+  tracks: MediaTrack[],
+  type: 'video' | 'audio' | 'subtitle',
+  streamIndex: number,
+): number | null {
+  return resolveEngineTrackId({
+    engineKind: engine?.kind ?? null,
+    tracks,
+    type,
+    streamIndex,
+  });
+}
 const NATIVE_SEEK_GUARD_TIMEOUT_MS = 2500;
 const NATIVE_SEEK_LANDING_TOLERANCE_SECONDS = 1.25;
 // Keep the first surface click pending long enough for the macOS double-click
@@ -725,6 +740,25 @@ export default function VideoPlayer({
     [visibleSubtitles],
   );
   const subtitleTracks = useMemo(() => mediaTracks.filter((track) => track.type === 'subtitle'), [mediaTracks]);
+  const selectedSubtitleCueDetails = useMemo(() => {
+    if (selectedSubtitleTrackIndex <= -1000) {
+      const external = visibleSubtitles[-1000 - selectedSubtitleTrackIndex];
+      return {
+        ordinal: -1,
+        codec: '',
+        externalUrl: external?.url || '',
+      };
+    }
+    const embedded = selectedEmbeddedSubtitle(mediaTracks, selectedSubtitleTrackIndex);
+    return {
+      ordinal: embedded?.ordinal ?? -1,
+      codec: embedded?.track.codec || '',
+      externalUrl: '',
+    };
+  }, [mediaTracks, selectedSubtitleTrackIndex, visibleSubtitles]);
+  const selectedSubtitleCueOrdinal = selectedSubtitleCueDetails.ordinal;
+  const selectedSubtitleCueCodec = selectedSubtitleCueDetails.codec;
+  const selectedSubtitleCueExternalUrl = selectedSubtitleCueDetails.externalUrl;
 
   const groupedEpisodes = useMemo(() => groupEpisodesBySeason(episodes), [episodes]);
 
@@ -786,17 +820,16 @@ export default function VideoPlayer({
     let cancelled = false;
     const controller = new AbortController();
     const index = selectedSubtitleTrackIndex;
+    const embeddedOrdinal = selectedSubtitleCueOrdinal;
+    const embeddedCodec = selectedSubtitleCueCodec;
+    const externalUrl = selectedSubtitleCueExternalUrl;
     const resolveSubtitleUrl = async (): Promise<string> => {
       if (index <= -1000) {
-        const external = visibleSubtitles[-1000 - index];
-        return external ? subtitleSource(external.url, serverBase) : '';
+        return externalUrl ? subtitleSource(externalUrl, serverBase) : '';
       }
-      if (index >= 0) {
-        const embedded = selectedEmbeddedSubtitle(mediaTracks, index);
-        if (embedded && !isBitmapSubtitleCodec(embedded.track.codec)) {
-          const result = await desktopApi.getSubtitleUrl(filePath, embedded.ordinal);
-          return result.url;
-        }
+      if (index >= 0 && embeddedOrdinal >= 0 && !isBitmapSubtitleCodec(embeddedCodec)) {
+        const result = await desktopApi.getSubtitleUrl(filePath, embeddedOrdinal);
+        return result.url;
       }
       return '';
     };
@@ -818,7 +851,14 @@ export default function VideoPlayer({
       cancelled = true;
       controller.abort();
     };
-  }, [filePath, mediaTracks, selectedSubtitleTrackIndex, serverBase, visibleSubtitles]);
+  }, [
+    filePath,
+    selectedSubtitleCueCodec,
+    selectedSubtitleCueExternalUrl,
+    selectedSubtitleCueOrdinal,
+    selectedSubtitleTrackIndex,
+    serverBase,
+  ]);
 
   const clearHls = useCallback(() => {
     const hls = hlsRef.current;
@@ -930,7 +970,10 @@ export default function VideoPlayer({
     if (preferredAudio !== null) {
       desiredAudioTrackIndexRef.current = preferredAudio;
       audioReapplyAttemptsRef.current = 0;
-      void engine.selectAudio(preferredAudio >= 0 ? preferredAudio : null);
+      const nativeAudioId = engineTrackId(engine, tracks, 'audio', preferredAudio);
+      if (engine.kind !== 'libvlc' || nativeAudioId !== null) {
+        void engine.selectAudio(nativeAudioId).catch(() => undefined);
+      }
     }
 
     if (preferences.subtitle === undefined) return;
@@ -949,12 +992,13 @@ export default function VideoPlayer({
       const selectedTrack = tracks.find((track) =>
         track.type === 'subtitle' && track.index === selectedSubtitle,
       );
+      const nativeSubtitleId = engineTrackId(engine, tracks, 'subtitle', selectedSubtitle);
       void engine.selectSubtitle(
-        selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? selectedSubtitle : null,
-      );
+        selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? nativeSubtitleId : null,
+      ).catch(() => undefined);
       return;
     }
-    void engine.selectSubtitle(subtitlesEnabled ? selectedSubtitle : null);
+    void engine.selectSubtitle(subtitlesEnabled ? selectedSubtitle : null).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -1309,8 +1353,10 @@ export default function VideoPlayer({
         timingAttempt.metadataReported = true;
         logPlaybackTiming('metadata_loaded', { trackCount: state.tracks.length });
       }
+      const stateEngine = playbackEngineRef.current;
       const nextTracks: MediaTrack[] = state.tracks.map((track) => ({
-        index: track.id,
+        index: stateEngine?.kind === 'libvlc' ? track.streamIndex ?? track.id : track.id,
+        ...(stateEngine?.kind === 'libvlc' ? { nativeId: track.id } : {}),
         type: track.type,
         codec: track.codec,
         language: track.language,
@@ -1320,24 +1366,43 @@ export default function VideoPlayer({
         forced: track.forced,
         source: track.source,
       }));
-      probeTracksRef.current = nextTracks;
-      setMediaTracks(nextTracks);
+      const trackSignature = (tracks: MediaTrack[]) => JSON.stringify(tracks.map((track) => [
+        track.index,
+        track.nativeId,
+        track.type,
+        track.codec,
+        track.language,
+        track.title,
+        track.channels,
+        track.default,
+        track.forced,
+        track.source,
+      ]));
+      if (trackSignature(probeTracksRef.current) !== trackSignature(nextTracks)) {
+        probeTracksRef.current = nextTracks;
+        setMediaTracks(nextTracks);
+      }
 
       if (!nativeInitialTracksAppliedRef.current) {
         nativeInitialTracksAppliedRef.current = true;
         const preferences = sharedTrackPreferencesRef.current;
-        const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id
-          ?? firstTrackIndex(nextTracks, 'video');
-        const engineSelectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id
-          ?? firstTrackIndex(nextTracks, 'audio');
+        const selectedVideoTrack = state.tracks.find((track) => track.type === 'video' && track.selected);
+        const selectedAudioTrack = state.tracks.find((track) => track.type === 'audio' && track.selected);
+        const selectedSubtitleTrack = state.tracks.find((track) => track.type === 'subtitle' && track.selected);
+        const selectedVideo = selectedVideoTrack
+          ? selectedVideoTrack.streamIndex ?? selectedVideoTrack.id
+          : firstTrackIndex(nextTracks, 'video');
+        const engineSelectedAudio = selectedAudioTrack
+          ? selectedAudioTrack.streamIndex ?? selectedAudioTrack.id
+          : firstTrackIndex(nextTracks, 'audio');
         const preferredAudio = preferredTrackIndex(nextTracks, 'audio', preferences.audio);
         const requestedAudio = preferredAudio ?? engineSelectedAudio;
         const preferredSubtitle = preferredTrackIndex(nextTracks, 'subtitle', preferences.subtitle);
+        const engineSelectedSubtitle = selectedSubtitleTrack
+          ? selectedSubtitleTrack.streamIndex ?? selectedSubtitleTrack.id
+          : firstSubtitleTrackIndex(nextTracks);
         const selectedSubtitle = preferredSubtitle
-          ?? (subtitlesDefaultEnabledRef.current
-            ? state.tracks.find((track) => track.type === 'subtitle' && track.selected)?.id
-              ?? firstSubtitleTrackIndex(nextTracks)
-            : -1);
+          ?? (subtitlesDefaultEnabledRef.current ? engineSelectedSubtitle : -1);
 
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
         // Keep the engine-confirmed selection separate from the saved request.
@@ -1352,9 +1417,16 @@ export default function VideoPlayer({
         setSelectedVideoTrackIndex(selectedVideo);
         setSelectedAudioTrackIndex(engineSelectedAudio);
         setSelectedSubtitleTrackIndex(selectedSubtitle);
-        void playbackEngineRef.current?.selectVideo(selectedVideo >= 0 ? selectedVideo : null);
+        const activeEngine = playbackEngineRef.current;
+        const nativeVideoId = engineTrackId(activeEngine, nextTracks, 'video', selectedVideo);
+        if (activeEngine?.kind !== 'libvlc' || nativeVideoId !== null) {
+          void activeEngine?.selectVideo(nativeVideoId);
+        }
         const initialAudioEngine = playbackEngineRef.current;
-        void initialAudioEngine?.selectAudio(requestedAudio >= 0 ? requestedAudio : null);
+        const requestedNativeAudio = engineTrackId(initialAudioEngine, nextTracks, 'audio', requestedAudio);
+        if (initialAudioEngine?.kind !== 'libvlc' || requestedNativeAudio !== null) {
+          void initialAudioEngine?.selectAudio(requestedNativeAudio).catch(() => undefined);
+        }
         if (initialAudioEngine && requestedAudio >= 0 && requestedAudio !== engineSelectedAudio) {
           window.setTimeout(() => {
             if (
@@ -1365,7 +1437,10 @@ export default function VideoPlayer({
               || audioReapplyAttemptsRef.current >= MAX_AUDIO_REAPPLY_ATTEMPTS
             ) return;
             audioReapplyAttemptsRef.current += 1;
-            void initialAudioEngine.selectAudio(requestedAudio);
+            const retryNativeAudio = engineTrackId(initialAudioEngine, probeTracksRef.current, 'audio', requestedAudio);
+            if (initialAudioEngine.kind !== 'libvlc' || retryNativeAudio !== null) {
+              void initialAudioEngine.selectAudio(retryNativeAudio).catch(() => undefined);
+            }
           }, 350);
         }
         const initialSubtitleEngine = playbackEngineRef.current;
@@ -1376,15 +1451,18 @@ export default function VideoPlayer({
           const selectedTrack = nextTracks.find((track) =>
             track.type === 'subtitle' && track.index === selectedSubtitle,
           );
+          const nativeSubtitleId = engineTrackId(initialSubtitleEngine, nextTracks, 'subtitle', selectedSubtitle);
           void initialSubtitleEngine.selectSubtitle(
-            selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? selectedSubtitle : null,
-          );
+            selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec) ? nativeSubtitleId : null,
+          ).catch(() => undefined);
         } else {
-          void initialSubtitleEngine?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null);
+          void initialSubtitleEngine?.selectSubtitle(selectedSubtitle >= 0 ? selectedSubtitle : null).catch(() => undefined);
         }
       } else {
-        const selectedVideo = state.tracks.find((track) => track.type === 'video' && track.selected)?.id ?? -1;
-        const selectedAudio = state.tracks.find((track) => track.type === 'audio' && track.selected)?.id ?? -1;
+        const selectedVideoTrack = state.tracks.find((track) => track.type === 'video' && track.selected);
+        const selectedAudioTrack = state.tracks.find((track) => track.type === 'audio' && track.selected);
+        const selectedVideo = selectedVideoTrack ? selectedVideoTrack.streamIndex ?? selectedVideoTrack.id : -1;
+        const selectedAudio = selectedAudioTrack ? selectedAudioTrack.streamIndex ?? selectedAudioTrack.id : -1;
         selectedVideoTrackIndexRef.current = selectedVideo >= 0 ? selectedVideo : undefined;
         setSelectedVideoTrackIndex(selectedVideo);
 
@@ -1403,7 +1481,11 @@ export default function VideoPlayer({
 
         if (audioDrifted && audioReapplyAttemptsRef.current < MAX_AUDIO_REAPPLY_ATTEMPTS) {
           audioReapplyAttemptsRef.current += 1;
-          void playbackEngineRef.current?.selectAudio(desiredAudio);
+          const activeEngine = playbackEngineRef.current;
+          const desiredNativeAudio = engineTrackId(activeEngine, probeTracksRef.current, 'audio', desiredAudio);
+          if (activeEngine?.kind !== 'libvlc' || desiredNativeAudio !== null) {
+            void activeEngine?.selectAudio(desiredNativeAudio).catch(() => undefined);
+          }
         } else {
           if (audioDrifted) desiredAudioTrackIndexRef.current = selectedAudio;
           selectedAudioTrackIndexRef.current = selectedAudio >= 0 ? selectedAudio : undefined;
@@ -1414,7 +1496,10 @@ export default function VideoPlayer({
         // state snapshots overwrite the renderer-overlay selection with the
         // native fallback track (or "off").
         if (playbackEngineRef.current?.kind !== 'libvlc') {
-          const selectedSubtitle = state.tracks.find((track) => track.type === 'subtitle' && track.selected)?.id ?? -1;
+          const selectedSubtitleTrack = state.tracks.find((track) => track.type === 'subtitle' && track.selected);
+          const selectedSubtitle = selectedSubtitleTrack
+            ? selectedSubtitleTrack.streamIndex ?? selectedSubtitleTrack.id
+            : -1;
           selectedSubtitleTrackIndexRef.current = selectedSubtitle;
           setSelectedSubtitleTrackIndex(selectedSubtitle);
         }
@@ -2739,19 +2824,6 @@ export default function VideoPlayer({
     setReloadToken((value) => value + 1);
   }, []);
 
-  const switchNativePlaybackToBrowser = useCallback(() => {
-    const engine = playbackEngineRef.current;
-    if (!engine) return;
-    playbackEngineRef.current = null;
-    void engine.destroy();
-    setNativePlaybackActive(false);
-    setNativeEngineKind(null);
-    document.documentElement.classList.remove('loom-native-active');
-    didTryTranscodeRef.current = false;
-    hlsTranscodeRestartAttemptsRef.current = 0;
-    void startBrowserStreamAt(playbackPositionRef.current, { showSeekingStatus: true });
-  }, [startBrowserStreamAt]);
-
   const selectedSubtitleIsBurnedIn = useCallback(() => {
     const selected = selectedEmbeddedSubtitle(probeTracksRef.current, selectedSubtitleTrackIndexRef.current);
     return streamIsTranscoded && Boolean(selected && isBitmapSubtitleCodec(selected.track.codec));
@@ -2810,7 +2882,13 @@ export default function VideoPlayer({
   }, [applyNativeTextTrackVisibility, applySubtitleStyleToStream, selectedSubtitleIsBurnedIn]);
 
   const setLiveSubtitleStyle = useCallback((updater: (current: SubtitleStyleSettings) => SubtitleStyleSettings) => {
-    const next = updater(subtitleStyleRef.current);
+    // Keep subtitle timing locked to the playback clock. Visual style changes
+    // are live, but an offset must not be carried into native or overlay
+    // playback.
+    const next = {
+      ...updater(subtitleStyleRef.current),
+      delaySeconds: 0,
+    };
     subtitleStyleRef.current = next;
     setSubtitleStyle(next);
     scheduleSubtitleStyleToStream();
@@ -2860,6 +2938,7 @@ export default function VideoPlayer({
      the requested track there was no way to ask for it again — picking it did
      nothing, and only selecting a different track and coming back worked. */
   const selectAudioTrack = useCallback((trackIndex: number) => {
+    const previousTrackIndex = selectedAudioTrackIndexRef.current;
     desiredAudioTrackIndexRef.current = trackIndex;
     audioReapplyAttemptsRef.current = 0;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'audio');
@@ -2868,23 +2947,32 @@ export default function VideoPlayer({
     sharedTrackPreferencesRef.current = nextPreferences;
     selectedAudioTrackIndexRef.current = trackIndex;
     setSelectedAudioTrackIndex(trackIndex);
-    if (playbackEngineRef.current?.kind === 'libvlc') {
-      // LibVLC track IDs are not guaranteed to match ffprobe stream indexes.
-      // Loom's browser pipeline uses the probe indexes directly, so move to
-      // it for an explicit audio change instead of silently selecting the
-      // wrong native stream.
-      switchNativePlaybackToBrowser();
-      return;
-    }
-    if (playbackEngineRef.current) {
-      void playbackEngineRef.current.selectAudio(trackIndex >= 0 ? trackIndex : null);
+    const engine = playbackEngineRef.current;
+    if (engine) {
+      const requestedTrackId = engineTrackId(engine, probeTracksRef.current, 'audio', trackIndex);
+      if (engine.kind === 'libvlc' && trackIndex >= 0 && requestedTrackId === null) {
+        desiredAudioTrackIndexRef.current = previousTrackIndex;
+        selectedAudioTrackIndexRef.current = previousTrackIndex;
+        setSelectedAudioTrackIndex(previousTrackIndex ?? -1);
+        setErrorMessage('LibVLC has not exposed that audio track yet. Playback was left unchanged.');
+        return;
+      }
+      void engine.selectAudio(requestedTrackId).then(() => {
+        setErrorMessage(null);
+      }).catch((error) => {
+        desiredAudioTrackIndexRef.current = previousTrackIndex;
+        selectedAudioTrackIndexRef.current = previousTrackIndex;
+        setSelectedAudioTrackIndex(previousTrackIndex ?? -1);
+        setErrorMessage(error instanceof Error ? error.message : 'LibVLC could not change the audio track.');
+      });
       return;
     }
     restartForTrackChange();
-  }, [restartForTrackChange, switchNativePlaybackToBrowser, trackPreferenceScopeKey]);
+  }, [restartForTrackChange, trackPreferenceScopeKey]);
 
   const selectSubtitleTrack = useCallback((trackIndex: number) => {
     if (selectedSubtitleTrackIndexRef.current === trackIndex) return;
+    const previousTrackIndex = selectedSubtitleTrackIndexRef.current;
     subtitleSelectionExplicitRef.current = true;
     const enabled = trackIndex >= 0 || trackIndex <= -1000;
     const selectedTrack = probeTracksRef.current.find((track) => track.index === trackIndex && track.type === 'subtitle');
@@ -2902,23 +2990,30 @@ export default function VideoPlayer({
     saveSubtitlesDefaultEnabled(enabled);
     selectedSubtitleTrackIndexRef.current = trackIndex;
     setSelectedSubtitleTrackIndex(trackIndex);
-    if (playbackEngineRef.current?.kind === 'libvlc') {
-      // Do not pass Loom/probe IDs to LibVLC's independent SPU namespace.
-      // Reopen only for a bitmap track, where native rendering is the explicit
-      // fallback; parseable text remains on the Loom overlay path.
-      if (selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec)) {
-        libVlcSubtitleFallbackRef.current = true;
-        restartLibVlcForSubtitleFallback();
-      } else {
-        // LibVLC owns the native surface, so the browser video element has no
-        // text-track DOM to toggle. Switch to Loom's browser pipeline for
-        // parseable subtitles, where the selected cue track can render.
-        switchNativePlaybackToBrowser();
+    const engine = playbackEngineRef.current;
+    if (engine?.kind === 'libvlc') {
+      const nativeSubtitleRequired = Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec));
+      const requestedTrackId = nativeSubtitleRequired
+        ? engineTrackId(engine, probeTracksRef.current, 'subtitle', trackIndex)
+        : null;
+      if (nativeSubtitleRequired && requestedTrackId === null) {
+        selectedSubtitleTrackIndexRef.current = previousTrackIndex;
+        setSelectedSubtitleTrackIndex(previousTrackIndex);
+        setErrorMessage('LibVLC has not exposed that subtitle track yet. Playback was left unchanged.');
+        return;
       }
+      libVlcSubtitleFallbackRef.current = nativeSubtitleRequired;
+      void engine.selectSubtitle(requestedTrackId).then(() => {
+        setErrorMessage(null);
+      }).catch((error) => {
+        selectedSubtitleTrackIndexRef.current = previousTrackIndex;
+        setSelectedSubtitleTrackIndex(previousTrackIndex);
+        setErrorMessage(error instanceof Error ? error.message : 'LibVLC could not change the subtitle track.');
+      });
       return;
     }
-    if (playbackEngineRef.current) {
-      void playbackEngineRef.current.selectSubtitle(enabled ? trackIndex : null);
+    if (engine) {
+      void engine.selectSubtitle(enabled ? trackIndex : null).catch(() => undefined);
       return;
     }
     if (playbackAction === 'burn-in') {
@@ -2937,10 +3032,8 @@ export default function VideoPlayer({
   }, [
     applyNativeTextTrackVisibility,
     restartForTrackChange,
-    restartLibVlcForSubtitleFallback,
     selectedSubtitleIsBurnedIn,
     trackPreferenceScopeKey,
-    switchNativePlaybackToBrowser,
   ]);
 
   const selectSecondarySubtitleTrack = useCallback((trackIndex: number) => {
@@ -3448,7 +3541,7 @@ export default function VideoPlayer({
     );
     const nativeFallbackAllowed = Boolean(selectedTrack && isBitmapSubtitleCodec(selectedTrack.codec));
     if (!subtitlesDefaultEnabled || selectedSubtitleTrackIndex === -1 || showSubtitleOverlay || !nativeFallbackAllowed) {
-      void engine.selectSubtitle(null);
+      void engine.selectSubtitle(null).catch(() => undefined);
     }
   }, [nativeEngineKind, nativePlaybackActive, selectedSubtitleTrackIndex, showSubtitleOverlay, subtitlesDefaultEnabled]);
 

@@ -2,6 +2,22 @@ import { SUBTITLE_DELAY_LIMIT_SECONDS } from './constants.ts';
 
 const BUFFERED_SEEK_TOLERANCE_SECONDS = 0.35;
 
+export function resolveEngineTrackId({
+  engineKind,
+  tracks,
+  type,
+  streamIndex,
+}: {
+  engineKind: 'libvlc' | 'mpv' | 'browser' | null;
+  tracks: Array<{ index: number; nativeId?: number; type: string }>;
+  type: 'video' | 'audio' | 'subtitle';
+  streamIndex: number;
+}): number | null {
+  if (streamIndex < 0) return null;
+  if (engineKind !== 'libvlc') return streamIndex;
+  return tracks.find((track) => track.type === type && track.index === streamIndex)?.nativeId ?? null;
+}
+
 export function resolveInitialPlaybackPosition(explicitPosition: number | undefined, savedPosition: number): number {
   const explicit = Number.isFinite(explicitPosition) ? Math.max(0, Number(explicitPosition)) : 0;
   const saved = Number.isFinite(savedPosition) ? Math.max(0, savedPosition) : 0;

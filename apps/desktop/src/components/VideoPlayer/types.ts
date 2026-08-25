@@ -20,6 +20,8 @@ export type SubtitleStyleSettings = {
 
 export interface MediaTrack {
   index: number;
+  /** Runtime track identifier for an active native engine such as LibVLC. */
+  nativeId?: number;
   type: 'video' | 'audio' | 'subtitle' | 'data' | 'unknown';
   codec?: string;
   language?: string;
