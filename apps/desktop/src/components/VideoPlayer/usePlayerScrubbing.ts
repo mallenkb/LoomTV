@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { PlaybackEngine } from './engines/PlaybackEngine';
 
 const NATIVE_SCRUB_PREVIEW_INTERVAL_MS = 80;
@@ -11,12 +11,10 @@ type PlaybackSnapshotUpdater = (
 ) => void;
 
 type PlayerScrubbingInput = {
-  clearNextEpisodeCountdown: () => void;
   duration: number;
   isScrubbingRef: React.RefObject<boolean>;
   playbackEngineRef: React.RefObject<PlaybackEngine | null>;
   playbackPositionRef: React.RefObject<number>;
-  resetNextEpisodePrompt: () => void;
   scopeKey: string;
   scrubTimeHudRef: React.RefObject<HTMLDivElement | null>;
   seekTo: (targetSeconds: number) => void;
@@ -24,17 +22,16 @@ type PlayerScrubbingInput = {
 };
 
 export function usePlayerScrubbing({
-  clearNextEpisodeCountdown,
   duration,
   isScrubbingRef,
   playbackEngineRef,
   playbackPositionRef,
-  resetNextEpisodePrompt,
   scopeKey,
   scrubTimeHudRef,
   seekTo,
   updatePlaybackSnapshot,
 }: PlayerScrubbingInput) {
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const previewRafRef = useRef<number | null>(null);
   const listenerCleanupRef = useRef<(() => void) | null>(null);
   const hudHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,6 +75,7 @@ export function usePlayerScrubbing({
 
   const resetScrubbing = useCallback(() => {
     isScrubbingRef.current = false;
+    setIsScrubbing(false);
     cancelNativePreview();
     if (previewRafRef.current !== null) {
       cancelAnimationFrame(previewRafRef.current);
@@ -105,10 +103,9 @@ export function usePlayerScrubbing({
     const rect = bar.getBoundingClientRect();
     if (rect.width <= 0) return;
     bar.setPointerCapture(pointerId);
-    resetNextEpisodePrompt();
-    clearNextEpisodeCountdown();
     let pendingPosition = playbackPositionRef.current;
     isScrubbingRef.current = true;
+    setIsScrubbing(true);
     bar.dataset.scrubbing = 'true';
     if (hudHideTimerRef.current) {
       clearTimeout(hudHideTimerRef.current);
@@ -143,6 +140,7 @@ export function usePlayerScrubbing({
       updatePlaybackSnapshot(pendingPosition, duration, { forceReact: true });
       seekTo(pendingPosition);
       isScrubbingRef.current = false;
+      setIsScrubbing(false);
       delete bar.dataset.scrubbing;
       hudHideTimerRef.current = setTimeout(() => {
         hudHideTimerRef.current = null;
@@ -166,12 +164,10 @@ export function usePlayerScrubbing({
     bar.addEventListener('pointercancel', handleCancel);
   }, [
     cancelNativePreview,
-    clearNextEpisodeCountdown,
     duration,
     isScrubbingRef,
     playbackPositionRef,
     requestNativePreview,
-    resetNextEpisodePrompt,
     scrubTimeHudRef,
     seekTo,
     updatePlaybackSnapshot,
@@ -201,5 +197,5 @@ export function usePlayerScrubbing({
     }
   }, [duration, playbackPositionRef, seekTo]);
 
-  return { handleProgressKeyDown, handleProgressPointerDown, isScrubbingRef };
+  return { handleProgressKeyDown, handleProgressPointerDown, isScrubbing };
 }

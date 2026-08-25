@@ -406,7 +406,6 @@ export default function VideoPlayer({
   const [skipBackSeconds, setSkipBackSeconds] = useState(DEFAULT_SKIP_BACK_SECONDS);
   const [skipForwardSeconds, setSkipForwardSeconds] = useState(DEFAULT_SKIP_FORWARD_SECONDS);
   const [skipPromptTypes, setSkipPromptTypes] = useState<Record<MediaSegmentType, boolean>>({ intro: true, recap: true, outro: true, credits: true, preview: true });
-  const [dismissedNextPromptKey, setDismissedNextPromptKey] = useState<string | null>(null);
   const [tick, setTick] = useState(0); // force episode list re-render
   const [playbackLogoCandidates, setPlaybackLogoCandidates] = useState<string[]>([]);
   const [mediaSegments, setMediaSegments] = useState<MediaSegment[]>([]);
@@ -639,7 +638,6 @@ export default function VideoPlayer({
   }, [subtitleStyle]);
 
   useEffect(() => {
-    setDismissedNextPromptKey(null);
     setRejectedSegments([]);
     subtitleSelectionExplicitRef.current = false;
     pendingEpisodeTransitionRef.current = null;
@@ -1010,13 +1008,11 @@ export default function VideoPlayer({
   }, [applyResolvedNativePreferences]);
 
   const {
-    clearNextEpisodeCountdown,
     goToEpisode,
     handleNextEpisode,
     handlePrevEpisode,
     latestEpisodePlaybackRef,
     markCurrentEpisodeComplete,
-    nextCountdown,
     playNextEpisodeNow,
     scheduleNextEpisode,
   } = useEpisodeNavigation({
@@ -2356,20 +2352,14 @@ export default function VideoPlayer({
     }
   }, [cancelPendingSurfaceClick]);
 
-  useEffect(() => {
-    clearNextEpisodeCountdown();
-    return clearNextEpisodeCountdown;
-  }, [clearNextEpisodeCountdown, filePath]);
-
   // Stop transcode session when component closes.
   useEffect(() => () => {
     playerActiveRef.current = false;
     userPausedRef.current = true;
     loadTokenRef.current += 1;
     sourceLoadTokenRef.current += 1;
-    clearNextEpisodeCountdown();
     void stopTranscodeSession();
-  }, [clearNextEpisodeCountdown, stopTranscodeSession]);
+  }, [stopTranscodeSession]);
 
   // ─── Controls ──────────────────────────────────────────────────────────────
 
@@ -2452,7 +2442,6 @@ export default function VideoPlayer({
       userPausedRef.current = true;
       loadTokenRef.current += 1;
       sourceLoadTokenRef.current += 1;
-      clearNextEpisodeCountdown();
 
       try {
         await persistFinalPlaybackProgress();
@@ -2486,7 +2475,7 @@ export default function VideoPlayer({
 
     shutdownPromiseRef.current = request;
     return request;
-  }, [cancelPendingSurfaceClick, clearHls, clearNextEpisodeCountdown, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
+  }, [cancelPendingSurfaceClick, clearHls, clearVideoElement, persistFinalPlaybackProgress, stopTranscodeSession]);
 
   useEffect(() => registerPlaybackShutdown(() => {
     const shutdown = shutdownPlayback();
@@ -2793,13 +2782,11 @@ export default function VideoPlayer({
     }
   }, [duration, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
 
-  const { handleProgressKeyDown, handleProgressPointerDown } = usePlayerScrubbing({
-    clearNextEpisodeCountdown,
+  const { handleProgressKeyDown, handleProgressPointerDown, isScrubbing } = usePlayerScrubbing({
     duration,
     isScrubbingRef,
     playbackEngineRef,
     playbackPositionRef,
-    resetNextEpisodePrompt: () => setDismissedNextPromptKey(null),
     scopeKey: filePath,
     scrubTimeHudRef,
     seekTo,
@@ -3660,25 +3647,17 @@ export default function VideoPlayer({
     return Number.isFinite(value) && (value || 0) > 0 ? Number(value) : 0;
   }, [artwork?.rating, currentEpisodeMeta?.rating, hasEpisodes]);
 
-  const nextEpLabel = useMemo(() => {
-    if (!nextEpisodeFile) return null;
-    const ep = episodes.find((item) =>
-      item.season === nextEpisodeFile.season && item.number === nextEpisodeFile.episode,
-    );
-    const label = displayEpisodeTitle(nextEpisodeFile.season, nextEpisodeFile.episode, ep?.title, nextEpisodeFile.filePath);
-    return label !== `Episode ${nextEpisodeFile.episode}`
-      ? `${epCode(nextEpisodeFile.season, nextEpisodeFile.episode)} - ${label}`
-      : epCode(nextEpisodeFile.season, nextEpisodeFile.episode);
-  }, [displayEpisodeTitle, episodes, nextEpisodeFile]);
+  const nextEpisodePromptProgress = duration > 0
+    ? Math.min(100, Math.max(0, (
+      (NEXT_EPISODE_PROMPT_REMAINING_SECONDS - Math.max(0, duration - position))
+      / NEXT_EPISODE_PROMPT_REMAINING_SECONDS
+    ) * 100))
+    : 0;
   const showNextEpisodePrompt = Boolean(
     nextEpisodeFile
     && duration > 0
-    && nextCountdown === null
-    && !showControls
-    && dismissedNextPromptKey !== `${currentSeason}-${currentEpisode}`
     && duration - position <= NEXT_EPISODE_PROMPT_REMAINING_SECONDS
-    && position / duration >= WATCHED_THRESHOLD
-    && !isScrubbingRef.current,
+    && !isScrubbing,
   );
   const activeMediaSegment = useMemo(
     () => activeSkipSegmentAt(mediaSegments.filter((segment) => skipPromptTypes[segment.type] !== false), position),
@@ -3871,6 +3850,7 @@ export default function VideoPlayer({
           )}
 
           <SubtitleOverlay
+            controlsVisible={showControls && playerState !== 'error'}
             cues={subtitleCues}
             videoRef={videoRef}
             transcodeStartSecondsRef={transcodeStartSecondsRef}
@@ -3963,19 +3943,15 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {(nextCountdown !== null || showNextEpisodePrompt) && nextEpisodeFile && (
+        {showNextEpisodePrompt && (
           <NextEpisodePrompt
-            nextCountdown={nextCountdown}
-            nextEpisodeFile={nextEpisodeFile}
-            nextEpLabel={nextEpLabel}
-            autoplayNextEnabled={autoplayNextEnabled}
+            controlsVisible={showControls && playerState !== 'error'}
+            progress={nextEpisodePromptProgress}
             playNextEpisodeNow={playNextEpisodeNow}
-            clearNextEpisodeCountdown={clearNextEpisodeCountdown}
-            onDismiss={() => setDismissedNextPromptKey(`${currentSeason}-${currentEpisode}`)}
           />
         )}
 
-        {nextCountdown === null && shouldShowSkipPrompt(activeMediaSegment, showMarkerEditor) && activeMediaSegment && (
+        {!showNextEpisodePrompt && shouldShowSkipPrompt(activeMediaSegment, showMarkerEditor) && activeMediaSegment && (
           <button
             type="button"
             onClick={(event) => {
@@ -3990,8 +3966,7 @@ export default function VideoPlayer({
 
               if (terminalSegment && mediaDuration > 0) {
                 // An end marker means "finish this episode". Move only
-                // forward, mark it complete, and show Loom's existing Up Next
-                // view for three seconds instead of abruptly changing files.
+                // forward, mark it complete, and continue to the next episode.
                 pendingCreditsCompletionRef.current = false;
                 seekTo(mediaDuration);
                 markCurrentEpisodeComplete();

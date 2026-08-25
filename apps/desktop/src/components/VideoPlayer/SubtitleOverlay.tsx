@@ -1,9 +1,10 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { MAX_SUBTITLE_OUTLINE_WIDTH } from './constants';
 import type { SubtitleCue } from './helpers';
 import type { SubtitleStyleSettings } from './types';
 
 interface SubtitleOverlayProps {
+  controlsVisible: boolean;
   cues: SubtitleCue[];
   videoRef: React.RefObject<HTMLVideoElement | null>;
   transcodeStartSecondsRef: React.RefObject<number>;
@@ -71,6 +72,7 @@ function findActiveCueIndex(cues: SubtitleCue[], time: number, hintIndex: number
 }
 
 function SubtitleOverlay({
+  controlsVisible,
   cues,
   videoRef,
   transcodeStartSecondsRef,
@@ -81,6 +83,8 @@ function SubtitleOverlay({
   visible,
 }: SubtitleOverlayProps) {
   const [text, setText] = useState('');
+  const [bounds, setBounds] = useState({ blockHeight: 0, viewportHeight: 0 });
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef('');
   const activeCueIndexRef = useRef(-1);
   const sortedCues = useMemo(
@@ -130,14 +134,46 @@ function SubtitleOverlay({
     return fallbackTextOutline(Math.min(outlineWidth, 4), style.borderColor);
   }, [style.borderEnabled, style.borderWidth, style.borderColor]);
 
-  if (!visible || !text) return null;
-
   const fontSize = Math.round(style.fontSize * style.scale);
   const outlineWidth = style.borderEnabled
     ? Math.max(0, Math.min(MAX_SUBTITLE_OUTLINE_WIDTH, style.borderWidth))
     : 0;
   const verticalPosition = Math.max(0, Math.min(100, style.position));
   const lineHeight = style.backgroundEnabled ? 1.42 : 1.3;
+
+  useLayoutEffect(() => {
+    const node = overlayRef.current;
+    const viewport = node?.parentElement;
+    if (!node || !viewport || !visible || !text) return undefined;
+
+    const measure = () => {
+      const nextBounds = {
+        blockHeight: node.offsetHeight,
+        viewportHeight: viewport.clientHeight,
+      };
+      setBounds((current) => (
+        current.blockHeight === nextBounds.blockHeight
+        && current.viewportHeight === nextBounds.viewportHeight
+          ? current
+          : nextBounds
+      ));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [fontSize, lineHeight, text, visible]);
+
+  if (!visible || !text) return null;
+
+  const baseBottomPx = bounds.viewportHeight * ((100 - verticalPosition) / 100);
+  const desiredBottomPx = baseBottomPx + (controlsVisible ? 128 : 0);
+  const maxBottomPx = Math.max(0, bounds.viewportHeight - bounds.blockHeight - 16);
+  const bottom = bounds.viewportHeight > 0
+    ? `${Math.min(desiredBottomPx, maxBottomPx)}px`
+    : `calc(${100 - verticalPosition}% + ${controlsVisible ? 128 : 0}px)`;
   const subtitleTextStyle = {
     color: style.fontColor,
     whiteSpace: 'pre-wrap',
@@ -155,11 +191,13 @@ function SubtitleOverlay({
 
   return (
     <div
+      ref={overlayRef}
       className="pointer-events-none absolute inset-x-0 z-[1] px-[5%] text-center"
       style={{
-        bottom: `${100 - verticalPosition}%`,
+        bottom,
         fontSize: `${fontSize}px`,
         lineHeight,
+        transition: 'bottom 300ms ease-out',
       }}
     >
       <span style={subtitleTextStyle}>{text}</span>

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useCallback, useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { saveProgress as savePlaybackProgress } from '@/lib/progress';
-import { NEXT_EPISODE_COUNTDOWN_SECONDS, WATCHED_THRESHOLD } from './constants';
+import { WATCHED_THRESHOLD } from './constants';
 import type { EpisodeFile } from './types';
 import type { PlaybackEngine } from './engines/PlaybackEngine';
 
@@ -55,22 +55,10 @@ export function useEpisodeNavigation({
   userPausedRef,
   videoRef,
 }: EpisodeNavigationOptions) {
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const clearCountdown = useCallback(() => {
-    if (countdownTimerRef.current) {
-      clearInterval(countdownTimerRef.current);
-      countdownTimerRef.current = null;
-    }
-    setCountdown(null);
-  }, []);
-
   const transitionToEpisode = useCallback((next: EpisodeFile) => {
     if (!onEpisodeChange || !next.filePath || next.filePath === filePath) return;
 
     pendingEpisodeTransitionRef.current = next.filePath;
-    clearCountdown();
     userPausedRef.current = false;
     suppressPauseIntentUntilMsRef.current = performance.now() + 2000;
     const video = videoRef.current;
@@ -82,7 +70,6 @@ export function useEpisodeNavigation({
     setPaused(true);
     onEpisodeChange(next.filePath, next.season, next.episode);
   }, [
-    clearCountdown,
     filePath,
     onEpisodeChange,
     pendingEpisodeTransitionRef,
@@ -136,20 +123,9 @@ export function useEpisodeNavigation({
   }, [duration, goToEpisode, markCurrentEpisodeComplete, nextEpisode, position]);
 
   const scheduleNextEpisode = useCallback(() => {
-    if (!nextEpisode || !onEpisodeChange || nextEpisode.filePath === filePath || countdownTimerRef.current) return;
-    clearCountdown();
-    let remainingSeconds = NEXT_EPISODE_COUNTDOWN_SECONDS;
-    setCountdown(remainingSeconds);
-    countdownTimerRef.current = setInterval(() => {
-      remainingSeconds -= 1;
-      if (remainingSeconds <= 0) {
-        clearCountdown();
-        goToEpisode(nextEpisode.season, nextEpisode.episode);
-        return;
-      }
-      setCountdown(remainingSeconds);
-    }, 1000);
-  }, [clearCountdown, filePath, goToEpisode, nextEpisode, onEpisodeChange]);
+    if (!nextEpisode || !onEpisodeChange || nextEpisode.filePath === filePath) return;
+    goToEpisode(nextEpisode.season, nextEpisode.episode);
+  }, [filePath, goToEpisode, nextEpisode, onEpisodeChange]);
 
   const latestPlaybackRef = useRef({
     autoplayNextEnabled,
@@ -167,16 +143,12 @@ export function useEpisodeNavigation({
     };
   }, [autoplayNextEnabled, markCurrentEpisodeComplete, nextEpisode, scheduleNextEpisode]);
 
-  useEffect(() => clearCountdown, [clearCountdown]);
-
   return {
-    clearNextEpisodeCountdown: clearCountdown,
     goToEpisode,
     handleNextEpisode: goToNextEpisode,
     handlePrevEpisode: goToPreviousEpisode,
     latestEpisodePlaybackRef: latestPlaybackRef,
     markCurrentEpisodeComplete,
-    nextCountdown: countdown,
     playNextEpisodeNow,
     scheduleNextEpisode,
   };

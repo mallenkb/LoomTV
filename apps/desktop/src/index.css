@@ -426,7 +426,8 @@ html.loom-native-active .loom-player-root:fullscreen::backdrop {
    styles. Modern only rounds the actual controls, so it feels related without
    turning the whole player chrome into a separate floating surface. */
 .loom-player-modern .loom-player-controls button,
-.loom-player-modern button.loom-player-top-control {
+.loom-player-modern button.loom-player-top-control,
+.loom-player-modern button.loom-player-next-episode {
   border-radius: 9999px;
 }
 
