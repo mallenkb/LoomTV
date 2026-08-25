@@ -315,6 +315,7 @@ export default function VideoPlayer({
   const [reloadToken, setReloadToken] = useState(0);
   const [nativePlaybackActive, setNativePlaybackActive] = useState(false);
   const [nativeEngineKind, setNativeEngineKind] = useState<PlaybackEngineKind | null>(null);
+  const nativePlaybackEndedRef = useRef(false);
   const libVlcSurfaceActive = nativePlaybackActive && nativeEngineKind === 'libvlc';
 
   // The renderer is transparent only while a live native surface is expected
@@ -1530,6 +1531,18 @@ export default function VideoPlayer({
         updatePlaybackSnapshot(totalDuration, totalDuration, { forceReact: true });
         latestEpisodePlaybackRef.current.markCurrentEpisodeComplete();
       }
+      nativePlaybackEndedRef.current = true;
+      const endedEngine = playbackEngineRef.current;
+      playbackEngineRef.current = null;
+      void endedEngine?.destroy();
+      // LibVLC releases its child surface at EOF. Restore the opaque renderer
+      // layer so the completed player cannot expose the transparent window.
+      setNativePlaybackActive(false);
+      setNativeEngineKind(null);
+      document.documentElement.classList.remove('loom-native-active');
+      setPlayerState('ready');
+      setStatusMessage('');
+      setErrorMessage(null);
       setPaused(true);
       if (latestEpisodePlaybackRef.current.autoplayNextEnabled && latestEpisodePlaybackRef.current.nextEpisodeFile) {
         latestEpisodePlaybackRef.current.scheduleNextEpisode();
@@ -1541,6 +1554,7 @@ export default function VideoPlayer({
       const closedEngine = playbackEngineRef.current;
       playbackEngineRef.current = null;
       void closedEngine?.destroy();
+      nativePlaybackEndedRef.current = true;
       setNativePlaybackActive(false);
       setNativeEngineKind(null);
       document.documentElement.classList.remove('loom-native-active');
@@ -1617,6 +1631,7 @@ export default function VideoPlayer({
     setStreamIsTranscoded(false);
     setNativePlaybackActive(false);
     setNativeEngineKind(null);
+    nativePlaybackEndedRef.current = false;
     nativeAutoplayIssuedRef.current = false;
     document.documentElement.classList.remove('loom-native-active');
     setSelectedSecondarySubtitleTrackIndex(-1);
@@ -2360,6 +2375,13 @@ export default function VideoPlayer({
 
   const togglePlay = useCallback(() => {
     if (playerState === 'loading') return;
+    if (nativePlaybackEndedRef.current) {
+      nativePlaybackEndedRef.current = false;
+      setPlayerState('loading');
+      setStatusMessage('Preparing stream...');
+      setReloadToken((value) => value + 1);
+      return;
+    }
     if (playbackEngineRef.current) {
       userPausedRef.current = !paused;
       void (paused ? playbackEngineRef.current.play() : playbackEngineRef.current.pause());
@@ -2448,6 +2470,7 @@ export default function VideoPlayer({
       }
       setNativePlaybackActive(false);
       setNativeEngineKind(null);
+      nativePlaybackEndedRef.current = false;
       document.documentElement.classList.remove('loom-native-active');
       const video = videoRef.current;
       if (video) {
