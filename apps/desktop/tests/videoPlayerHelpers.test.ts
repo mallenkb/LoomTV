@@ -89,7 +89,7 @@ test('subtitle delay clamps to the player sync range', () => {
   assert.equal(clampSubtitleDelay(Number.NaN), 0);
 });
 
-test('subtitle style persists between player sessions', () => {
+test('subtitle style persists visual settings and resets timing between player sessions', () => {
   storage.clear();
   const style = {
     ...DEFAULT_SUBTITLE_STYLE,
@@ -106,7 +106,10 @@ test('subtitle style persists between player sessions', () => {
 
   saveSubtitleStyle(style);
 
-  assert.deepEqual(loadSubtitleStyle(), style);
+  assert.deepEqual(loadSubtitleStyle(), {
+    ...style,
+    delaySeconds: 0,
+  });
 });
 
 test('subtitle style loading falls back safely for invalid saved values', () => {
@@ -122,7 +125,7 @@ test('subtitle style loading falls back safely for invalid saved values', () => 
 
   assert.deepEqual(loadSubtitleStyle(), {
     ...DEFAULT_SUBTITLE_STYLE,
-    delaySeconds: 60,
+    delaySeconds: 0,
     position: 0,
     scale: 2,
     fontSize: 96,
