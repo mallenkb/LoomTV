@@ -12,6 +12,7 @@ type PauseOverlayProps = {
   currentEpisode: number;
   episodeTitle: string;
   rating: number;
+  isLiveStream?: boolean;
 };
 
 function PauseOverlay({
@@ -23,6 +24,7 @@ function PauseOverlay({
   currentEpisode,
   episodeTitle,
   rating,
+  isLiveStream = false,
 }: PauseOverlayProps) {
   return (
     <AnimatePresence>
@@ -55,7 +57,7 @@ function PauseOverlay({
                 src={logoSources[0]}
                 alt={title}
                 decoding="async"
-                className="mb-4 h-40 max-h-[28vh] w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]"
+                className={`${isLiveStream ? 'mb-3 h-[6.2rem] max-h-[20vh]' : 'mb-4 h-40 max-h-[28vh]'} w-[min(48rem,84vw)] object-contain object-left-bottom drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)]`}
                 onError={(event) => {
                   event.currentTarget.style.display = 'none';
                 }}
@@ -65,6 +67,11 @@ function PauseOverlay({
                 {title}
               </h2>
             )}
+            {isLiveStream && logoSources.length > 0 ? (
+              <h2 className="mb-2 max-w-[min(46rem,84vw)] text-3xl font-black uppercase leading-none tracking-normal drop-shadow-[0_3px_18px_rgba(0,0,0,0.75)] sm:text-4xl">
+                {title}
+              </h2>
+            ) : null}
             {(hasEpisodes || episodeTitle) && (
               <div className="flex max-w-3xl min-w-0 flex-wrap items-center gap-x-3 gap-y-2 text-white">
                 {hasEpisodes && (

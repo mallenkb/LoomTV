@@ -420,6 +420,15 @@ export function setMetadataRefreshCategoryLocked(
 export function remapLibraryMediaReferences(aliases: ReadonlyMap<string, string>): void {
   remapLibraryMediaReferencesRecord(getDb(), aliases);
 }
+/**
+ * The live TV service owns its tables end to end and rewrites a source's
+ * channels and guide entries as single transactions, so it takes the
+ * connection rather than a facade wrapper for each statement.
+ */
+export function getIptvDatabase(): BetterSqlite3.Database {
+  return getDb();
+}
+
 export function loadSettingsFromDatabase(): SettingsData | null {
   return loadSettingsRecord(getDb());
 }

@@ -26,6 +26,7 @@ import LibrarySettingsSection from './LibrarySettingsSection';
 import MetadataSettingsSection from './MetadataSettingsSection';
 import NetworkSettingsSection from './NetworkSettingsSection';
 import PlaybackSettingsSection from './PlaybackSettingsSection';
+import LiveTvSettingsSection from './LiveTvSettingsSection';
 import PluginsSettingsSection from './PluginsSettingsSection';
 import ProfilesSettingsSection from './ProfilesSettingsSection';
 import SettingsTabs from './SettingsTabs';
@@ -1125,6 +1126,7 @@ export default function Settings() {
               )}
               {activeSection === 'profiles' && <ProfilesSettingsSection />}
               {activeSection === 'plugins' && <PluginsSettingsSection />}
+              {activeSection === 'live-tv' && <LiveTvSettingsSection />}
               {activeSection === 'playback' && (
                 <PlaybackSettingsSection
                   showServerControls={activeProfile?.type === 'owner' && !isRemoteLibraryMode}

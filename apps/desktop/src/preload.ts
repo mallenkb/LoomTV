@@ -16,6 +16,8 @@ import type {
   LibraryItemDetailsPayload,
   LibraryScanMode,
   LibraryScanProgress,
+  IptvChannelRequest,
+  IptvSourceInput,
   ManualMediaSegmentInput,
   MediaSegmentRequest,
   MediaSegmentType,
@@ -130,6 +132,13 @@ const desktopApi = {
     return () => ipcRenderer.removeListener('media-control:command', handler);
   },
   checkFFmpeg: () => ipcRenderer.invoke('media:ffmpeg-available'),
+  listIptvSources: () => ipcRenderer.invoke('iptv:list-sources'),
+  addIptvSource: (input: IptvSourceInput) => ipcRenderer.invoke('iptv:add-source', input),
+  updateIptvSource: (sourceId: string, patch: { name?: string; epgUrl?: string }) =>
+    ipcRenderer.invoke('iptv:update-source', sourceId, patch),
+  removeIptvSource: (sourceId: string) => ipcRenderer.invoke('iptv:remove-source', sourceId),
+  refreshIptvSource: (sourceId: string) => ipcRenderer.invoke('iptv:refresh-source', sourceId),
+  listIptvChannels: (request: IptvChannelRequest) => ipcRenderer.invoke('iptv:list-channels', request),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   listStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:list'),
   listAvailableStremioPlugins: () => ipcRenderer.invoke('plugins:stremio:available'),

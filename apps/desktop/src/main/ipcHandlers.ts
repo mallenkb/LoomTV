@@ -55,6 +55,7 @@ import { z } from 'zod';
 import { lanProviderRatingsSchema } from '@loom-media-server/lan-protocol';
 import { parseIpcArguments } from './ipcValidation.ts';
 import { metadataProviderRequestSchema } from './metadataProviderGateway.ts';
+import { parseIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 
 const finiteNumber = z.number().finite();
 const nonEmptyString = z.string().trim().min(1);
@@ -258,6 +259,26 @@ const transcodeOptionsSchema = z.object({
   }).optional(),
   forceTranscode: z.boolean().optional(),
 });
+const iptvSourceIdSchema = nonEmptyString.max(120);
+const iptvSourceInputSchema = z.object({
+  playlistUrl: nonEmptyString.max(2048),
+  epgUrl: z.string().max(2048).optional(),
+  name: z.string().max(120).optional(),
+});
+const iptvSourcePatchSchema = z.object({
+  name: z.string().max(120).optional(),
+  epgUrl: z.string().max(2048).optional(),
+});
+const iptvChannelRequestSchema = z.object({
+  sourceId: iptvSourceIdSchema,
+  query: z.string().max(200).optional(),
+  group: z.string().max(400).optional(),
+  subcategory: z.string().max(400).optional(),
+  geoFilter: z.enum(['all', 'exclude', 'only']).optional(),
+  sort: z.enum(['name-asc', 'name-desc', 'category']).optional(),
+  limit: finiteNumber.positive().max(200).optional(),
+  offset: finiteNumber.nonnegative().max(1_000_000).optional(),
+});
 const stremioExtraSchema = z.record(
   z.string(),
   z.union([z.string(), finiteNumber, z.boolean()]),
@@ -341,6 +362,13 @@ export interface IpcHandlerDependencies<
   registerSubtitleResource: (mediaFilePath: string, subtitleFilePath: string) => string;
   needsBrowserTranscoding: (filePath: string) => boolean;
   browserPlaybackPlan: (filePath: string, options?: TranscodeOptions) => BrowserPlaybackPlan;
+  listIptvSources: () => IpcResult<'iptv:list-sources'>;
+  addIptvSource: (input: IpcContract['iptv:add-source']['args'][0]) => Promise<IpcResult<'iptv:add-source'>>;
+  updateIptvSource: (sourceId: string, patch: IpcContract['iptv:update-source']['args'][1]) => IpcResult<'iptv:update-source'>;
+  removeIptvSource: (sourceId: string) => IpcResult<'iptv:remove-source'>;
+  refreshIptvSource: (sourceId: string) => Promise<IpcResult<'iptv:refresh-source'>>;
+  listIptvChannels: (request: IpcContract['iptv:list-channels']['args'][0]) => IpcResult<'iptv:list-channels'>;
+  resolveIptvStreamUrl: (sourceId: string, channelId: string) => string | null;
   loadSettings: () => TSettings;
   settingsForRenderer: () => TSettings;
   authorizeSettingsWrite: () => void;
@@ -799,6 +827,33 @@ export function registerIpcHandlers<
     }
   }, z.tuple([nonEmptyString]));
 
+  // ─── Live TV (IPTV) ────────────────────────────────────────────────────────
+  // Reading channels is open to any signed-in profile; adding, editing, and
+  // removing a provider is an owner action, like linking a library folder.
+  handleNoArgs('iptv:list-sources', () => deps.listIptvSources());
+
+  handle('iptv:add-source', (_event, input) => {
+    deps.authorizeSettingsWrite();
+    return deps.addIptvSource(input);
+  }, z.tuple([iptvSourceInputSchema]));
+
+  handle('iptv:update-source', (_event, sourceId, patch) => {
+    deps.authorizeSettingsWrite();
+    return deps.updateIptvSource(sourceId, patch);
+  }, z.tuple([iptvSourceIdSchema, iptvSourcePatchSchema]));
+
+  handle('iptv:remove-source', (_event, sourceId) => {
+    deps.authorizeSettingsWrite();
+    return deps.removeIptvSource(sourceId);
+  }, z.tuple([iptvSourceIdSchema]));
+
+  handle('iptv:refresh-source', (_event, sourceId) => {
+    deps.authorizeSettingsWrite();
+    return deps.refreshIptvSource(sourceId);
+  }, z.tuple([iptvSourceIdSchema]));
+
+  handle('iptv:list-channels', (_event, request) => deps.listIptvChannels(request), z.tuple([iptvChannelRequestSchema]));
+
   handleNoArgs('media:get-server-port', () => deps.getMediaServerPort());
 
   // The renderer's loopback credential. It is delivered here, behind the same
@@ -811,6 +866,30 @@ export function registerIpcHandlers<
   }));
 
   handle('media:get-stream-url', (_event, filePath: string, options?: TranscodeOptions) => {
+    const iptvReference = parseIptvPlaybackReference(filePath);
+    if (iptvReference) {
+      const streamUrl = deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId);
+      if (!streamUrl) throw new Error('That live TV channel is no longer available.');
+      let parsedStreamUrl: URL;
+      try {
+        parsedStreamUrl = new URL(streamUrl);
+      } catch {
+        throw new Error('That live TV channel has an invalid stream address.');
+      }
+      if (parsedStreamUrl.protocol !== 'https:') {
+        throw new Error('That live TV channel does not use a secure stream.');
+      }
+      const isHls = /\.m3u8?(?:$|\?)/i.test(streamUrl);
+      return {
+        url: streamUrl,
+        contentType: isHls ? 'application/vnd.apple.mpegurl' : 'video/mp2t',
+        fileName: 'Live TV stream',
+        isTranscoded: false,
+        isRemuxed: false,
+        playbackMode: 'direct' as const,
+        decisionReason: 'Validated IPTV stream from the selected Live TV source.',
+      };
+    }
     deps.authorizeMediaPath(filePath);
     deps.assertLocalMediaPath(filePath);
     const params = addLocalAccessToken(new URLSearchParams({ path: filePath }), deps.localAccessToken);
@@ -969,9 +1048,26 @@ export function registerIpcHandlers<
   handleExperimental('libvlc:refresh-availability', () => refreshLibVlcAvailability(), z.tuple([]));
 
   handleExperimental('libvlc:start', (event, filePath, rawOptions) => {
-    const mediaPath = String(filePath || '');
-    deps.authorizeMediaPath(mediaPath);
-    deps.assertLocalMediaPath(mediaPath);
+    const requestedPath = String(filePath || '');
+    const iptvReference = parseIptvPlaybackReference(requestedPath);
+    const mediaPath = iptvReference
+      ? deps.resolveIptvStreamUrl(iptvReference.sourceId, iptvReference.channelId)
+      : requestedPath;
+    if (!mediaPath) throw new Error('That live TV channel is no longer available.');
+    if (iptvReference) {
+      let parsedStreamUrl: URL;
+      try {
+        parsedStreamUrl = new URL(mediaPath);
+      } catch {
+        throw new Error('That live TV channel has an invalid stream address.');
+      }
+      if (parsedStreamUrl.protocol !== 'https:') {
+        throw new Error('That live TV channel does not use a secure stream.');
+      }
+    } else {
+      deps.authorizeMediaPath(mediaPath);
+      deps.assertLocalMediaPath(mediaPath);
+    }
     const options: LibVlcStartOptions = playbackStartOptionsSchema.parse(rawOptions ?? {});
     for (const subtitleFile of options.subtitleFiles || []) {
       const subtitlePath = String(subtitleFile?.path || '');
@@ -979,7 +1075,7 @@ export function registerIpcHandlers<
       deps.assertLocalMediaPath(subtitlePath);
       deps.assertSubtitleCanAccessMediaPath?.(mediaPath, subtitlePath);
     }
-    return startLibVlcPlayback(event.sender, mediaPath, options);
+    return startLibVlcPlayback(event.sender, mediaPath, options, { allowRemoteHttps: Boolean(iptvReference) });
   }, z.tuple([nonEmptyString, playbackStartOptionsSchema.optional()]));
 
   handleExperimental('libvlc:command', (_event, sessionId, command) =>

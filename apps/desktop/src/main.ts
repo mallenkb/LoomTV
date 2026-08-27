@@ -71,6 +71,7 @@ import {
   isLikelyAnimePath,
 } from './main/scanClassification';
 import { registerIpcHandlers } from './main/ipcHandlers';
+import { createIptvService } from './main/iptv/iptvService.ts';
 import {
   createWindow,
   getMainWindow,
@@ -171,6 +172,7 @@ import {
   getProfileLists,
   getProfilePreferences,
   getProfileRestrictions,
+  getIptvDatabase,
   getStremioAddonConfigurationState,
   importCustomArtwork,
   importProfileData,
@@ -1619,6 +1621,10 @@ const stremioPluginReviewForRenderer = (review: Parameters<typeof stremioPluginR
   stremioPluginReview(review, getStremioAddonConfigurationState(review.addonId))
 );
 
+// Live TV sources are provider state, not library state: they are refreshed on
+// demand from the provider's own playlist rather than by the folder scanner.
+const iptvService = createIptvService({ getDatabase: getIptvDatabase });
+
 registerIpcHandlers<LibraryData, AppSettings>({
   getMediaServerPort: () => getMediaServerPort(),
   localAccessToken: LOCAL_ACCESS_TOKEN,
@@ -1661,6 +1667,16 @@ registerIpcHandlers<LibraryData, AppSettings>({
   },
   needsBrowserTranscoding,
   browserPlaybackPlan,
+  listIptvSources: () => iptvService.listSources(),
+  addIptvSource: (input) => iptvService.addSource(input),
+  updateIptvSource: (sourceId, patch) => iptvService.updateSource(sourceId, patch),
+  removeIptvSource: (sourceId) => iptvService.removeSource(sourceId),
+  refreshIptvSource: async (sourceId) => {
+    await iptvService.refreshSource(sourceId);
+    return iptvService.listSources();
+  },
+  listIptvChannels: (request) => iptvService.listChannels(request),
+  resolveIptvStreamUrl: (sourceId, channelId) => iptvService.getChannelStreamUrl(sourceId, channelId),
   loadSettings,
   settingsForRenderer: () => {
     const settings = loadSettings();

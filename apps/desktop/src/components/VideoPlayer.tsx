@@ -19,12 +19,13 @@ import {
   type MediaSegmentType,
 } from '@/lib/desktopApi';
 import { isMediaProtocolUrl } from '../shared/mediaProtocol.ts';
+import { isIptvPlaybackReference } from '../shared/iptvPlayback.ts';
 import { cleanEpisodeTitleForDisplay } from '@/lib/episodeTitles';
 import { registerPlaybackShutdown } from '@/lib/playbackLifecycle';
 import {
   getPlayableStartPosition,
   hydrateProgressFromDatabase,
-  saveProgress as savePlaybackProgress,
+  saveProgress as saveResumeProgress,
 } from '@/lib/progress';
 import {
   DEFAULT_EPISODE_PANEL_WIDTH,
@@ -192,10 +193,26 @@ export default function VideoPlayer({
   currentSeason = 1,
   currentEpisode = 1,
   startPosition,
+  isLiveStream = false,
   onClose,
   onEpisodeChange,
 }: VideoPlayerProps) {
   const { activeProfile, openGate } = useProfiles();
+  const isLiveStreamRef = useRef(isLiveStream);
+  isLiveStreamRef.current = isLiveStream;
+  // Every progress write in this component goes through here so a live channel
+  // cannot leave a resume point behind, whichever engine reported the position.
+  const savePlaybackProgress = useCallback(
+    (path: string, position: number, duration: number): Promise<void> =>
+      isLiveStreamRef.current ? Promise.resolve() : saveResumeProgress(path, position, duration),
+    [],
+  );
+  const playableStartPosition = useCallback(
+    (path: string, probedDuration: number): number =>
+      isLiveStreamRef.current ? 0 : getPlayableStartPosition(path, probedDuration),
+    [],
+  );
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const { state: libraryState } = useLibrary();
   const playbackActivityKeyRef = useRef(`desktop-player:${crypto.randomUUID()}`);
@@ -489,7 +506,10 @@ export default function VideoPlayer({
   const syncPlaybackUi = useCallback((nextPosition: number, nextDuration: number) => {
     const safeDuration = Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0;
     const safePosition = clampSeconds(nextPosition, safeDuration || undefined);
-    const progressRatio = safeDuration > 0 ? Math.min(1, Math.max(0, safePosition / safeDuration)) : 0;
+    const livePlayback = isLiveStreamRef.current;
+    const progressRatio = livePlayback
+      ? 1
+      : safeDuration > 0 ? Math.min(1, Math.max(0, safePosition / safeDuration)) : 0;
     const progressPercent = progressRatio * 100;
 
     if (progressFillRef.current) {
@@ -512,10 +532,10 @@ export default function VideoPlayer({
       durationTimeTextRef.current.textContent = formatTime(safeDuration);
     }
     if (seekSliderRef.current) {
-      seekSliderRef.current.setAttribute('aria-disabled', safeDuration <= 0 ? 'true' : 'false');
-      seekSliderRef.current.setAttribute('aria-valuemax', String(safeDuration || 0));
-      seekSliderRef.current.setAttribute('aria-valuenow', String(Math.min(safePosition, safeDuration || 0)));
-      seekSliderRef.current.setAttribute('aria-valuetext', seekAccessibilityText(safePosition, safeDuration));
+      seekSliderRef.current.setAttribute('aria-disabled', livePlayback || safeDuration <= 0 ? 'true' : 'false');
+      seekSliderRef.current.setAttribute('aria-valuemax', livePlayback ? '100' : String(safeDuration || 0));
+      seekSliderRef.current.setAttribute('aria-valuenow', livePlayback ? '100' : String(Math.min(safePosition, safeDuration || 0)));
+      seekSliderRef.current.setAttribute('aria-valuetext', livePlayback ? 'Live' : seekAccessibilityText(safePosition, safeDuration));
     }
   }, []);
 
@@ -834,6 +854,9 @@ export default function VideoPlayer({
     const embeddedCodec = selectedSubtitleCueCodec;
     const externalUrl = selectedSubtitleCueExternalUrl;
     const resolveSubtitleUrl = async (): Promise<string> => {
+      // LibVLC reads live-stream subtitle tracks from the network manifest.
+      // The local subtitle endpoint only accepts authorized library files.
+      if (isIptvPlaybackReference(filePath)) return '';
       if (index <= -1000) {
         return externalUrl ? subtitleSource(externalUrl, serverBase) : '';
       }
@@ -1630,7 +1653,7 @@ export default function VideoPlayer({
         void startBrowserStreamAt(fallbackPosition, { showSeekingStatus: true });
       })();
     }
-  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, reportFirstFrame, startBrowserStreamAt, updatePlaybackSnapshot]);
+  }, [filePath, isScrubbingRef, latestEpisodePlaybackRef, logPlaybackTiming, reportFirstFrame, savePlaybackProgress, startBrowserStreamAt, updatePlaybackSnapshot]);
 
   const handleRetry = useCallback(() => {
     didTryTranscodeRef.current = false;
@@ -1674,7 +1697,9 @@ export default function VideoPlayer({
     cancelPendingSurfaceClick();
     const loadToken = ++loadTokenRef.current;
     const loadStartedAtMs = performance.now();
-    const source = /^(?:https?|plexserver):/i.test(filePath) ? 'remote' : 'local';
+    const source = /^(?:https?|plexserver):/i.test(filePath) || isIptvPlaybackReference(filePath)
+      ? 'remote'
+      : 'local';
     const hasNewUserRequest = Boolean(playbackRequestId) && playbackRequestId !== lastPlaybackRequestIdRef.current;
     if (playbackRequestId) lastPlaybackRequestIdRef.current = playbackRequestId;
     playbackTimingAttemptRef.current = {
@@ -1691,7 +1716,7 @@ export default function VideoPlayer({
       metadataReported: false,
     };
     if (source === 'local') logPlaybackTiming('playback_plan_ready');
-    const savedStartPosition = getPlayableStartPosition(filePath, probedDurationRef.current);
+    const savedStartPosition = playableStartPosition(filePath, probedDurationRef.current);
     const isReloadingSameFile = loadedFilePathRef.current === filePath;
     const requestedStartPosition = resolveInitialPlaybackPosition(
       isReloadingSameFile ? playbackPositionRef.current : startPosition,
@@ -1741,7 +1766,10 @@ export default function VideoPlayer({
 
     (async () => {
       try {
-        const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath) && !isMediaProtocolUrl(filePath);
+        const isIptvStream = isIptvPlaybackReference(filePath);
+        const isLocalFile = !/^(?:https?|plexserver):/i.test(filePath)
+          && !isMediaProtocolUrl(filePath)
+          && !isIptvStream;
         const preferencesPromise = trackPreferencesLoadRef.current.then((loadedPreferences) => {
           // Preserve a selection made during this player session if the saved
           // preference request finishes after playback has already started.
@@ -1769,7 +1797,9 @@ export default function VideoPlayer({
         // and delayed the first frame.
         const nativeEngineFactories: Array<new (listener: (state: PlaybackEngineState) => void) => PlaybackEngine> = isLocalFile
           ? [LibVlcPlaybackEngine, MpvPlaybackEngine]
-          : [];
+          : isIptvStream
+            ? [LibVlcPlaybackEngine]
+            : [];
         for (const NativePlaybackEngine of nativeEngineFactories) {
           const engine = new NativePlaybackEngine(handleNativePlaybackState);
           playbackEngineRef.current = engine;
@@ -1886,6 +1916,7 @@ export default function VideoPlayer({
     filePath,
     handleNativePlaybackState,
     logPlaybackTiming,
+    playableStartPosition,
     playbackRequestId,
     playRequestedAtMs,
     reloadToken,
@@ -2074,7 +2105,7 @@ export default function VideoPlayer({
 
           if (!didTryTranscodeRef.current && !streamIsTranscoded) {
             setStatusMessage('Trying local compatible stream...');
-            void startTranscodedFallback(getPlayableStartPosition(filePath, probedDurationRef.current), { force: true });
+            void startTranscodedFallback(playableStartPosition(filePath, probedDurationRef.current), { force: true });
           } else {
             setPlayerState('error');
             setErrorMessage(data.details ? `HLS playback error: ${data.details}` : 'Unable to play HLS stream.');
@@ -2278,7 +2309,7 @@ export default function VideoPlayer({
         setStatusMessage('Trying local compatible stream...');
         const fallbackStart = video.currentTime > 0
           ? video.currentTime
-          : getPlayableStartPosition(filePath, probedDurationRef.current);
+          : playableStartPosition(filePath, probedDurationRef.current);
         void startTranscodedFallback(fallbackStart, { force: true, allowNearEnd: true });
         return;
       }
@@ -2338,7 +2369,9 @@ export default function VideoPlayer({
     isScrubbingRef,
     latestEpisodePlaybackRef,
     logPlaybackTiming,
+    playableStartPosition,
     reportFirstFrame,
+    savePlaybackProgress,
     startTranscodedFallback,
     updatePlaybackSnapshot,
   ]);
@@ -2443,7 +2476,7 @@ export default function VideoPlayer({
     if (snapshot.position <= 10 || snapshot.duration <= 0) return;
     updatePlaybackSnapshot(snapshot.position, snapshot.duration, { forceReact: true });
     await savePlaybackProgress(filePath, snapshot.position, snapshot.duration);
-  }, [filePath, streamIsTranscoded, updatePlaybackSnapshot]);
+  }, [filePath, savePlaybackProgress, streamIsTranscoded, updatePlaybackSnapshot]);
 
   const shutdownPlayback = useCallback((): Promise<void> => {
     if (shutdownPromiseRef.current) return shutdownPromiseRef.current;
@@ -2631,6 +2664,7 @@ export default function VideoPlayer({
   }, [applyNativeTextTrackVisibility, subtitleStyle]);
 
   const seekTo = useCallback((targetSeconds: number, options: { restartTranscoded?: boolean; updateSnapshot?: boolean } = {}) => {
+    if (isLiveStream) return;
     const nextPosition = clampSeconds(targetSeconds, duration || undefined);
     if (options.updateSnapshot !== false) {
       updatePlaybackSnapshot(nextPosition, duration || playbackDurationRef.current, { forceReact: true });
@@ -2792,7 +2826,7 @@ export default function VideoPlayer({
     if (shouldResumeAfterSeek) {
       void video.play().catch(() => setPaused(true));
     }
-  }, [duration, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
+  }, [duration, isLiveStream, startBrowserStreamAt, startTranscodedFallback, streamIsTranscoded, updatePlaybackSnapshot]);
 
   const { handleProgressKeyDown, handleProgressPointerDown, isScrubbing } = usePlayerScrubbing({
     duration,
@@ -3494,7 +3528,7 @@ export default function VideoPlayer({
         ? 'mpv'
         : 'Chromium',
     mode: nativePlaybackActive
-      ? 'Native local playback'
+      ? isLiveStream ? 'Native live stream' : 'Native local playback'
       : streamIsTranscoded
         ? 'HLS transcode'
         : streamUrl
@@ -3857,6 +3891,7 @@ export default function VideoPlayer({
           currentEpisode={currentEpisode}
           episodeTitle={pauseEpisodeTitle}
           rating={pauseRating}
+          isLiveStream={isLiveStream}
         />
 
         {playerState === 'loading' && (
@@ -4008,6 +4043,7 @@ export default function VideoPlayer({
           playbackPositionRef={playbackPositionRef}
           duration={duration}
           position={position}
+          isLiveStream={isLiveStream}
           showRemainingTime={showRemainingTime}
           progressPct={progressPct}
           paused={paused}

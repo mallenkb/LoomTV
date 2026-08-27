@@ -14,6 +14,10 @@ import type {
   LocalNetworkPeer,
   LocalNetworkStatus,
   LocalSegmentAnalysisStatus,
+  IptvChannelPage,
+  IptvChannelRequest,
+  IptvSourceInput,
+  IptvSourceSummary,
   MpvAvailability,
   MpvCommand,
   MpvPlaybackState,
@@ -89,6 +93,12 @@ export interface IpcContract {
   'library:remove-folder': { args: [folderPath: string]; result: LibraryIndexPayload };
   'library:update-folder': { args: [folderPath: string, nextFolderPath: string, kind: LibraryFolderKind]; result: LibraryIndexPayload };
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
+  'iptv:list-sources': { args: []; result: IptvSourceSummary[] };
+  'iptv:add-source': { args: [input: IptvSourceInput]; result: IptvSourceSummary[] };
+  'iptv:update-source': { args: [sourceId: string, patch: { name?: string; epgUrl?: string }]; result: IptvSourceSummary[] };
+  'iptv:remove-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
+  'iptv:refresh-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
+  'iptv:list-channels': { args: [request: IptvChannelRequest]; result: IptvChannelPage };
   'media:can-direct-play': { args: [filePath: string, backend?: 'html5' | 'hls']; result: ApiResult<boolean> };
   'media:ffmpeg-available': { args: []; result: { available: boolean; path: string | null } };
   'media:get-file-info': { args: [filePath: string]; result: { size: number; path: string; exists: boolean } };

@@ -14,6 +14,7 @@ import MovieDetail from './pages/MovieDetail';
 import TVDetail from './pages/TVDetail';
 import Settings from './pages/Settings';
 import PluginDiscover from './pages/PluginDiscover';
+import LiveTv from './pages/LiveTv';
 import Sidebar from './components/Sidebar';
 import VideoPlayer from './components/VideoPlayer/LazyVideoPlayer';
 import ContinueWatchingBar from './components/ContinueWatchingBar';
@@ -37,6 +38,7 @@ import {
   type DesktopLibraryMode,
 } from './lib/remoteDesktop';
 import { isMediaProtocolUrl } from './shared/mediaProtocol.ts';
+import { isIptvPlaybackReference } from './shared/iptvPlayback.ts';
 
 interface NowPlaying {
   playbackRequestId: string;
@@ -59,10 +61,13 @@ interface NowPlaying {
   currentSeason?: number;
   currentEpisode?: number;
   startPosition?: number;
+  isLiveStream?: boolean;
 }
 
 function isRemotePlaybackSource(filePath: string): boolean {
-  return /^(?:https?|plexserver):\/\//i.test(filePath) || isMediaProtocolUrl(filePath);
+  return /^(?:https?|plexserver):\/\//i.test(filePath)
+    || isMediaProtocolUrl(filePath)
+    || isIptvPlaybackReference(filePath);
 }
 const StartupReadyContext = createContext<() => void>(() => undefined);
 const StartupVisibilityContext = createContext(false);
@@ -441,6 +446,7 @@ function AppShell() {
     mediaId?: string,
     artwork?: NowPlaying['artwork'],
     startPosition?: number,
+    options?: { isLiveStream?: boolean },
   ) => {
     const openPlayer = async () => {
       // The profile gate and the media IPC handler read the same persisted
@@ -476,10 +482,31 @@ function AppShell() {
         currentSeason,
         currentEpisode,
         startPosition,
+        isLiveStream: options?.isLiveStream === true,
       });
     };
     void openPlayer();
   }, [activeProfile, openGate]);
+
+  /**
+   * A live channel has no episode list or resume point. Its name and logo are
+   * carried into the pause surface, and the player avoids recording progress.
+   */
+  const handlePlayLiveChannel = useCallback((streamUrl: string, channelName: string, channelLogoUrl?: string) => {
+    handlePlayMedia(
+      streamUrl,
+      channelName,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      channelLogoUrl ? { logo: channelLogoUrl } : undefined,
+      undefined,
+      { isLiveStream: true },
+    );
+  }, [handlePlayMedia]);
 
   /** Called when the user picks a different episode from the panel. */
   const handleEpisodeSelect = useCallback((filePath: string, season: number, episode: number) => {
@@ -542,6 +569,7 @@ function AppShell() {
             <Route path="/tv" element={<TVShows kind="series" />} />
             <Route path="/anime" element={<TVShows kind="anime" />} />
             <Route path="/discover" element={<PluginDiscover />} />
+            <Route path="/live/:sourceId" element={<LiveTv onPlay={handlePlayLiveChannel} />} />
             <Route path="/movie/:id" element={<MovieDetail onPlay={handlePlayMedia} />} />
             <Route path="/tv/:id" element={<TVDetail kind="series" onPlay={handlePlayMedia} />} />
             <Route path="/anime/:id" element={<TVDetail kind="anime" onPlay={handlePlayMedia} />} />
@@ -573,6 +601,7 @@ function AppShell() {
             currentSeason={nowPlaying.currentSeason}
             currentEpisode={nowPlaying.currentEpisode}
             startPosition={nowPlaying.startPosition}
+            isLiveStream={nowPlaying.isLiveStream}
             onEpisodeChange={handleEpisodeSelect}
             onClose={handleClose}
           />

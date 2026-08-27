@@ -17,6 +17,10 @@ export const PLUGIN_SECRET_STORE_MIGRATION_VERSION = 9;
 export const LAN_PROFILE_SELECTION_RESET_MIGRATION_VERSION = 10;
 /** v11 binds lifecycle state, integrity metadata, and its audit ledger. */
 export const STREMIO_TRUST_STATE_V2_MIGRATION_VERSION = 11;
+/** v12 adds IPTV sources, their channels, and their guide entries. */
+export const IPTV_SOURCES_MIGRATION_VERSION = 12;
+/** v13 records provider-declared geo restrictions for IPTV filtering. */
+export const IPTV_GEO_BLOCKED_MIGRATION_VERSION = 13;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -356,6 +360,89 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migratePluginSecretStore(database);
   migrateStremioTrustStateV2(database);
   migrateLanProfileSelections(database);
+  migrateIptvSources(database);
+  migrateIptvGeoBlocked(database);
+}
+
+/**
+ * IPTV state is a cache of what a provider's playlist and guide said at the
+ * last refresh, keyed by source. Channels and programmes cascade from their
+ * source so removing a source in the UI cannot leave orphaned rows behind.
+ */
+function migrateIptvSources(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(IPTV_SOURCES_MIGRATION_VERSION)) return;
+
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS iptv_sources (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        playlist_url TEXT NOT NULL,
+        epg_url TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        channel_count INTEGER NOT NULL DEFAULT 0,
+        programme_count INTEGER NOT NULL DEFAULT 0,
+        skipped_insecure INTEGER NOT NULL DEFAULT 0,
+        skipped_malformed INTEGER NOT NULL DEFAULT 0,
+        refreshed_at INTEGER NOT NULL DEFAULT 0,
+        refresh_error TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS iptv_channels (
+        source_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        tvg_id TEXT NOT NULL DEFAULT '',
+        tvg_name TEXT NOT NULL DEFAULT '',
+        logo_url TEXT NOT NULL DEFAULT '',
+        group_title TEXT NOT NULL DEFAULT '',
+        is_geo_blocked INTEGER NOT NULL DEFAULT 0,
+        stream_url TEXT NOT NULL,
+        search_text TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (source_id, channel_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_iptv_channels_position
+        ON iptv_channels(source_id, position);
+      CREATE INDEX IF NOT EXISTS idx_iptv_channels_group
+        ON iptv_channels(source_id, group_title, position);
+      CREATE INDEX IF NOT EXISTS idx_iptv_channels_tvg
+        ON iptv_channels(source_id, tvg_id);
+
+      CREATE TABLE IF NOT EXISTS iptv_programmes (
+        source_id TEXT NOT NULL,
+        tvg_id TEXT NOT NULL,
+        start_ms INTEGER NOT NULL,
+        end_ms INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (source_id, tvg_id, start_ms)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_iptv_programmes_window
+        ON iptv_programmes(source_id, tvg_id, end_ms);
+    `);
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(IPTV_SOURCES_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+function migrateIptvGeoBlocked(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(IPTV_GEO_BLOCKED_MIGRATION_VERSION)) return;
+
+  database.transaction(() => {
+    ensureColumn(database, 'iptv_channels', 'is_geo_blocked', 'INTEGER NOT NULL DEFAULT 0');
+    database.prepare(`
+      UPDATE iptv_channels
+      SET is_geo_blocked = 1
+      WHERE lower(name) LIKE '%[geo-blocked]%'
+    `).run();
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(IPTV_GEO_BLOCKED_MIGRATION_VERSION, Date.now());
+  })();
 }
 
 function migrateMetadataRefreshCategories(database: BetterSqlite3.Database): void {

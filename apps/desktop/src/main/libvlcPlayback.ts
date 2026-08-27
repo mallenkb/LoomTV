@@ -63,6 +63,7 @@ type LibVlcApi = {
   releaseInstance: DynamicFunction;
   getVersion: DynamicFunction;
   mediaNewPath: DynamicFunction;
+  mediaNewLocation: DynamicFunction;
   mediaAddOption: DynamicFunction;
   mediaRelease: DynamicFunction;
   playerNewFromMedia: DynamicFunction;
@@ -408,6 +409,7 @@ function loadRuntime(): { runtime: LibVlcRuntime | null; warning?: string } {
         releaseInstance: bind(library, 'libvlc_release', 'void', ['void *']),
         getVersion: bind(library, 'libvlc_get_version', 'str', []),
         mediaNewPath: bind(library, 'libvlc_media_new_path', 'void *', ['void *', 'str']),
+        mediaNewLocation: bind(library, 'libvlc_media_new_location', 'void *', ['void *', 'str']),
         mediaAddOption: bind(library, 'libvlc_media_add_option', 'void', ['void *', 'str']),
         mediaRelease: bind(library, 'libvlc_media_release', 'void', ['void *']),
         playerNewFromMedia: bind(library, 'libvlc_media_player_new_from_media', 'void *', ['void *']),
@@ -1066,16 +1068,21 @@ class LibVlcPlaybackSession {
     this.instance = sharedInstance ?? createLibVlcInstance(runtime);
     this.ownsInstance = sharedInstance === null;
     if (!this.instance) throw new Error('LibVLC could not create a media instance.');
+    const isRemoteLocation = /^https:\/\//i.test(filePath);
     let media: NativeHandle;
     try {
-      media = nativeHandle(api.mediaNewPath(this.instance, filePath));
+      media = nativeHandle(isRemoteLocation
+        ? api.mediaNewLocation(this.instance, filePath)
+        : api.mediaNewPath(this.instance, filePath));
     } catch (error) {
       this.releaseOwnedInstance();
       throw error;
     }
     if (!media) {
       this.releaseOwnedInstance();
-      throw new Error('LibVLC could not open the authorized local media path.');
+      throw new Error(isRemoteLocation
+        ? 'LibVLC could not open the live TV stream.'
+        : 'LibVLC could not open the authorized local media path.');
     }
     try {
       const platformBinding = libVlcPlatformBinding(process.platform);
@@ -1740,9 +1747,11 @@ export function startLibVlcPlayback(
   owner: WebContents,
   filePath: string,
   options: LibVlcStartOptions = {},
+  sourcePolicy: { allowRemoteHttps?: boolean } = {},
 ): { ok: boolean; sessionId?: string; surface?: LibVlcSurface; error?: string } {
   if (!libVlcConfiguredEnabled() || libVlcKillSwitchEnabled() || !libVlcCompositionGateEnabled()) return { ok: false, surface: 'unavailable', error: disabledReason() };
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) || /^\\\\/.test(filePath)) {
+  const isRemoteHttps = /^https:\/\//i.test(filePath);
+  if ((/^[a-z][a-z0-9+.-]*:\/\//i.test(filePath) && !(isRemoteHttps && sourcePolicy.allowRemoteHttps)) || /^\\\\/.test(filePath)) {
     return { ok: false, surface: 'unavailable', error: 'LibVLC only accepts an authorized local file.' };
   }
   const cached = cachedRuntime();

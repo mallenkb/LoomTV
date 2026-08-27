@@ -101,6 +101,11 @@ export interface VideoPlayerProps {
   currentSeason?: number;
   currentEpisode?: number;
   startPosition?: number;
+  /**
+   * A live channel has no meaningful resume point: its timeline is a sliding
+   * window, so recording a position would only pollute Continue Watching.
+   */
+  isLiveStream?: boolean;
   onClose: () => void;
   onEpisodeChange?: (filePath: string, season: number, episode: number) => void;
 }

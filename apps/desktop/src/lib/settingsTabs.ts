@@ -1,4 +1,4 @@
-export type SettingsSectionId = 'profiles' | 'library' | 'playback' | 'plugins' | 'network' | 'metadata' | 'theme' | 'about';
+export type SettingsSectionId = 'profiles' | 'library' | 'playback' | 'plugins' | 'live-tv' | 'network' | 'metadata' | 'theme' | 'about';
 
 export function nextSettingsSection(current: SettingsSectionId, requested: SettingsSectionId): SettingsSectionId {
   return current === requested ? current : requested;

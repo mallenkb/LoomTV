@@ -23,6 +23,10 @@ import type {
   LibraryPayload,
   LibraryScanMode,
   LibraryScanProgress,
+  IptvChannelPage,
+  IptvChannelRequest,
+  IptvSourceInput,
+  IptvSourceSummary,
   LocalNetworkPairedDevice,
   LocalNetworkPeer,
   LocalNetworkStatus,
@@ -252,6 +256,12 @@ export type DesktopBridgeApi = {
         callback: (command: MediaSessionCommand, handledInMain: boolean) => void,
       ) => () => void;
       checkFFmpeg: () => Promise<FFmpegStatus>;
+      listIptvSources?: () => Promise<IptvSourceSummary[]>;
+      addIptvSource?: (input: IptvSourceInput) => Promise<IptvSourceSummary[]>;
+      updateIptvSource?: (sourceId: string, patch: { name?: string; epgUrl?: string }) => Promise<IptvSourceSummary[]>;
+      removeIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
+      refreshIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
+      listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
       getSettings: () => Promise<SettingsPayload>;
       saveSettings: (settings: SettingsPayload) => Promise<boolean>;
       listStremioPlugins?: () => Promise<StremioPluginIpcResult<StremioPluginSummary[]>>;
@@ -1291,6 +1301,41 @@ export const desktopApi = {
   async checkFFmpeg(): Promise<FFmpegStatus> {
     if (window.desktopApi) return window.desktopApi.checkFFmpeg();
     return fetchJson('/api/renderer/ffmpeg', ffmpegStatusSchema);
+  },
+
+  /**
+   * Live TV is served by the desktop main process, which owns the provider
+   * fetch and the channel store. A remote or browser client reports no
+   * sources rather than failing, so the sidebar simply shows no live tabs.
+   */
+  async listIptvSources(): Promise<IptvSourceSummary[]> {
+    if (window.desktopApi?.listIptvSources) return window.desktopApi.listIptvSources();
+    return [];
+  },
+
+  async addIptvSource(input: IptvSourceInput): Promise<IptvSourceSummary[]> {
+    if (window.desktopApi?.addIptvSource) return window.desktopApi.addIptvSource(input);
+    throw new Error('Live TV sources can only be added from the LoomTV desktop app.');
+  },
+
+  async updateIptvSource(sourceId: string, patch: { name?: string; epgUrl?: string }): Promise<IptvSourceSummary[]> {
+    if (window.desktopApi?.updateIptvSource) return window.desktopApi.updateIptvSource(sourceId, patch);
+    throw new Error('Live TV sources can only be edited from the LoomTV desktop app.');
+  },
+
+  async removeIptvSource(sourceId: string): Promise<IptvSourceSummary[]> {
+    if (window.desktopApi?.removeIptvSource) return window.desktopApi.removeIptvSource(sourceId);
+    throw new Error('Live TV sources can only be removed from the LoomTV desktop app.');
+  },
+
+  async refreshIptvSource(sourceId: string): Promise<IptvSourceSummary[]> {
+    if (window.desktopApi?.refreshIptvSource) return window.desktopApi.refreshIptvSource(sourceId);
+    throw new Error('Live TV sources can only be refreshed from the LoomTV desktop app.');
+  },
+
+  async listIptvChannels(request: IptvChannelRequest): Promise<IptvChannelPage> {
+    if (window.desktopApi?.listIptvChannels) return window.desktopApi.listIptvChannels(request);
+    throw new Error('Live TV is currently available only in the LoomTV desktop app.');
   },
 
   async getSettings(): Promise<SettingsPayload> {

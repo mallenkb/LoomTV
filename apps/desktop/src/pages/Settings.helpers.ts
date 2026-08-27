@@ -1,7 +1,7 @@
 import type { AppLoaderStyle } from '@/lib/theme';
 import type { UpdateState } from '@/lib/desktopApi';
 
-export type SettingsSection = 'profiles' | 'library' | 'playback' | 'plugins' | 'network' | 'metadata' | 'theme' | 'about';
+export type SettingsSection = 'profiles' | 'library' | 'playback' | 'plugins' | 'live-tv' | 'network' | 'metadata' | 'theme' | 'about';
 export type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: 'network', label: 'Network' },
   { id: 'playback', label: 'Playback' },
   { id: 'plugins', label: 'Plugins' },
+  { id: 'live-tv', label: 'Live TV' },
   { id: 'metadata', label: 'Metadata API Keys' },
   { id: 'theme', label: 'Theme' },
   { id: 'about', label: 'About' },

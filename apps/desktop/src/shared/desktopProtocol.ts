@@ -853,3 +853,69 @@ export interface StremioPluginIpcError {
 export type StremioPluginIpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: StremioPluginIpcError };
+
+// ─── Live TV (IPTV) ──────────────────────────────────────────────────────────
+
+/** One added provider: an M3U playlist plus the XMLTV guide that annotates it. */
+export interface IptvSourceSummary {
+  id: string;
+  name: string;
+  playlistUrl: string;
+  epgUrl: string;
+  channelCount: number;
+  programmeCount: number;
+  /** Channels dropped because they stream over plain HTTP. */
+  skippedInsecure: number;
+  /** Channels dropped as malformed or duplicated. */
+  skippedMalformed: number;
+  refreshedAt: number;
+  refreshError: string;
+}
+
+export interface IptvSourceInput {
+  playlistUrl: string;
+  epgUrl?: string;
+  name?: string;
+}
+
+export interface IptvChannelSummary {
+  channelId: string;
+  name: string;
+  logoUrl: string;
+  groupTitle: string;
+  streamUrl: string;
+  /** Empty when the source has no guide coverage for this channel. */
+  nowTitle: string;
+  nowStartMs: number;
+  nowEndMs: number;
+  nextTitle: string;
+  nextStartMs: number;
+}
+
+export type IptvChannelSort = 'name-asc' | 'name-desc' | 'category';
+export type IptvGeoFilter = 'all' | 'exclude' | 'only';
+
+export interface IptvChannelRequest {
+  sourceId: string;
+  query?: string;
+  group?: string;
+  subcategory?: string;
+  geoFilter?: IptvGeoFilter;
+  sort?: IptvChannelSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface IptvChannelPage {
+  sourceId: string;
+  sourceName: string;
+  channels: readonly IptvChannelSummary[];
+  /** Matches for the current query, which can exceed the returned page. */
+  total: number;
+  offset: number;
+  groups: readonly { name: string; channelCount: number }[];
+  /** Tags that co-occur with the selected group. Empty until a group is selected. */
+  subcategories: readonly { name: string; channelCount: number }[];
+  refreshedAt: number;
+  refreshError: string;
+}

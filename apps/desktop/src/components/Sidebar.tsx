@@ -14,6 +14,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import SharedListHighlight from '@/components/SharedListHighlight';
 import { useToast } from '@/components/ToastProvider';
 import { isCategoryVisible } from '@/components/sidebarNavigation';
+import { iptvSourceDisplayName, liveTvRoute, useIptvSources } from '@/lib/liveTvSources';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | 'my-list' | 'discover' | SidebarNavItemId | 'settings';
@@ -28,6 +29,9 @@ type ModernCategoryItem = {
   activeIcon?: SidebarIcon;
   iconOnly?: boolean;
 };
+
+const liveTvOutlineIconUrl = new URL('../assets/live-tv-outline.svg', import.meta.url).href;
+const liveTvActiveIconUrl = new URL('../assets/live-tv-active.svg', import.meta.url).href;
 
 const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 const modernCategoryItems: readonly ModernCategoryItem[] = [
@@ -142,6 +146,14 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
       </nav>
     </header>
   );
+}
+
+function LiveTvOutlineIcon({ className }: { className?: string }) {
+  return <img src={liveTvOutlineIconUrl} alt="" className={className} aria-hidden="true" />;
+}
+
+function LiveTvActiveIcon({ className }: { className?: string }) {
+  return <img src={liveTvActiveIconUrl} alt="" className={className} aria-hidden="true" />;
 }
 
 function BookmarkSolidIcon({ className }: { className?: string }) {
@@ -570,6 +582,20 @@ export default function Sidebar() {
     });
     return [...groupItems, ...folderItems];
   }, [customFolderNames, libraryFolderGroups.others, otherFolderGroups, otherFolderIcon]);
+  const { sources: iptvSources } = useIptvSources();
+  // Each added playlist is its own destination, the way Discover is: a tab in
+  // the sidebar pointing at a page that belongs to that source alone.
+  const liveTvNavItems = useMemo(
+    () => iptvSources.map((source) => ({
+      id: `live:${source.id}`,
+      label: iptvSourceDisplayName(source.name),
+      path: liveTvRoute(source.id),
+    })),
+    [iptvSources],
+  );
+  const selectedLiveTvItem = location.pathname.startsWith('/live/')
+    ? `live:${decodeURIComponent(location.pathname.slice('/live/'.length))}`
+    : '';
   const selectedOtherItem = location.pathname === '/others'
     ? (() => {
       const params = new URLSearchParams(location.search);
@@ -652,6 +678,28 @@ export default function Sidebar() {
                     )}
                   >
                     <Icon className={item.id === 'discover' ? 'h-7 w-7' : 'h-6 w-6'} />
+                  </Link>
+                );
+              })}
+              {liveTvNavItems.length > 0 ? <div className="my-1 h-px w-8 bg-[var(--loom-text)] opacity-[0.22]" aria-hidden="true" /> : null}
+              {liveTvNavItems.map((item) => {
+                const isActive = selectedLiveTvItem === item.id;
+                const Icon = isActive ? LiveTvActiveIcon : LiveTvOutlineIcon;
+                return (
+                  <Link
+                    key={`modern-${item.id}`}
+                    to={item.path}
+                    title={item.label}
+                    aria-label={item.label}
+                    aria-current={isActive ? 'page' : undefined}
+                    data-shared-highlight-item
+                    data-shared-highlight-id={item.id}
+                    className={cn(
+                      'loom-modern-sidebar-action relative z-10 grid h-12 w-12 place-items-center rounded-full transition-colors hover:bg-[var(--loom-sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                      isActive && 'loom-modern-sidebar-action-active',
+                    )}
+                  >
+                    <Icon className="h-6 w-6 text-red-500" />
                   </Link>
                 );
               })}
@@ -773,7 +821,9 @@ export default function Sidebar() {
             </SharedListHighlight>
           </nav>
         </aside>
-        {!location.pathname.startsWith('/settings') && !isExploreContext && (
+        {!location.pathname.startsWith('/settings')
+          && !location.pathname.startsWith('/live/')
+          && !isExploreContext && (
           <ModernCategoryPill pathname={location.pathname} />
         )}
       </>
@@ -811,6 +861,27 @@ export default function Sidebar() {
               >
                 <Icon className="w-5 h-5" />
                 <span className="text-sm font-medium">{item.label}</span>
+              </Link>
+            );
+          })}
+          {liveTvNavItems.length > 0 ? <div className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" /> : null}
+          {liveTvNavItems.map((item) => {
+            const isActive = selectedLiveTvItem === item.id;
+            const Icon = isActive ? LiveTvActiveIcon : LiveTvOutlineIcon;
+            return (
+              <Link
+                key={item.id}
+                to={item.path}
+                aria-current={isActive ? 'page' : undefined}
+                data-shared-highlight-item
+                data-shared-highlight-id={item.id}
+                className={cn(
+                  'relative z-10 mb-1 flex h-10 items-center gap-3 rounded-lg px-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]',
+                  isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
+                )}
+              >
+                <Icon className="h-5 w-5 text-red-500" />
+                <span className="truncate text-sm font-medium">{item.label}</span>
               </Link>
             );
           })}

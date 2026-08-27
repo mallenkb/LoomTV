@@ -32,6 +32,7 @@ interface PlayerControlBarProps {
   playbackPositionRef: React.RefObject<number>;
   duration: number;
   position: number;
+  isLiveStream: boolean;
   showRemainingTime: boolean;
   progressPct: number;
   paused: boolean;
@@ -70,6 +71,7 @@ export default function PlayerControlBar({
   playbackPositionRef,
   duration,
   position,
+  isLiveStream,
   showRemainingTime,
   progressPct,
   paused,
@@ -185,56 +187,68 @@ export default function PlayerControlBar({
       onDoubleClick={(e) => e.stopPropagation()}
     >
       <div className="mb-3 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={toggleTimeDisplay}
-          className="min-w-[6.75rem] shrink-0 select-none rounded px-1 text-left text-sm font-medium tabular-nums text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] sm:text-base"
-          title={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
-          aria-label={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
-          aria-pressed={showRemainingTime}
-          aria-live="off"
-        >
-          <span ref={currentTimeTextRef} className="text-white">{showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)}</span>
-          <span className="mx-1.5 text-white/45">/</span>
-          <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
-        </button>
+        {isLiveStream ? (
+          <div
+            className="flex min-w-[6.75rem] shrink-0 items-center gap-2 px-1 text-sm font-semibold tracking-wide text-white sm:text-base"
+            aria-label="Live playback"
+          >
+            <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_10px_rgb(239_68_68_/_0.8)]" aria-hidden="true" />
+            LIVE
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={toggleTimeDisplay}
+            className="min-w-[6.75rem] shrink-0 select-none rounded px-1 text-left text-sm font-medium tabular-nums text-white/90 outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] sm:text-base"
+            title={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
+            aria-label={showRemainingTime ? 'Show elapsed time' : 'Show remaining time'}
+            aria-pressed={showRemainingTime}
+            aria-live="off"
+          >
+            <span ref={currentTimeTextRef} className="text-white">{showRemainingTime ? `-${formatTime(Math.max(0, duration - position))}` : formatTime(position)}</span>
+            <span className="mx-1.5 text-white/45">/</span>
+            <span ref={durationTimeTextRef} className="text-white/60">{formatTime(duration)}</span>
+          </button>
+        )}
 
         {/* Progress bar */}
         <div
           ref={seekSliderRef}
-          role="slider"
-          tabIndex={0}
-          aria-label="Seek"
+          role={isLiveStream ? 'progressbar' : 'slider'}
+          tabIndex={isLiveStream ? -1 : 0}
+          aria-label={isLiveStream ? 'Live playback at live edge' : 'Seek'}
           aria-orientation="horizontal"
-          aria-disabled={duration <= 0}
+          aria-disabled={isLiveStream || duration <= 0}
           aria-valuemin={0}
-          aria-valuemax={duration || 0}
-          aria-valuenow={Math.min(position, duration || 0)}
-          aria-valuetext={seekAccessibilityText(position, duration)}
-          aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End"
-          onPointerDown={handleProgressPointerDown}
-          onKeyDown={handleProgressKeyDown}
-          className="group relative h-6 min-w-0 flex-1 cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+          aria-valuemax={isLiveStream ? 100 : duration || 0}
+          aria-valuenow={isLiveStream ? 100 : Math.min(position, duration || 0)}
+          aria-valuetext={isLiveStream ? 'Live' : seekAccessibilityText(position, duration)}
+          aria-keyshortcuts={isLiveStream ? undefined : 'ArrowLeft ArrowRight ArrowUp ArrowDown PageUp PageDown Home End'}
+          onPointerDown={isLiveStream ? undefined : handleProgressPointerDown}
+          onKeyDown={isLiveStream ? undefined : handleProgressKeyDown}
+          className={`group relative h-6 min-w-0 flex-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] ${isLiveStream ? 'cursor-default' : 'cursor-pointer'}`}
         >
-          <div
-            ref={scrubTimeHudRef}
-            aria-hidden="true"
-            className="pointer-events-none absolute bottom-full z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-black/85 px-2.5 py-1 text-xs font-semibold tabular-nums text-white opacity-0 shadow-lg backdrop-blur-md transition-opacity duration-150"
-            style={{ left: `${progressPct}%` }}
-          >
-            {formatTime(position)} / {formatTime(duration)}
-          </div>
+          {!isLiveStream && (
+            <div
+              ref={scrubTimeHudRef}
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-full z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-black/85 px-2.5 py-1 text-xs font-semibold tabular-nums text-white opacity-0 shadow-lg backdrop-blur-md transition-opacity duration-150"
+              style={{ left: `${progressPct}%` }}
+            >
+              {formatTime(position)} / {formatTime(duration)}
+            </div>
+          )}
           <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/25 shadow-[0_1px_2px_rgba(0,0,0,0.6)] ring-1 ring-black/30 transition-[height] duration-150 group-hover:h-2.5 group-focus-visible:h-2.5">
             <div
               ref={progressFillRef}
               className="h-full rounded-full bg-[var(--loom-accent)] shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
-              style={{ transform: `scaleX(${progressPct / 100})`, transformOrigin: 'left center' }}
+              style={{ transform: `scaleX(${isLiveStream ? 1 : progressPct / 100})`, transformOrigin: 'left center' }}
             />
           </div>
           <div
             ref={progressThumbRef}
-            className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-            style={{ left: `${progressPct}%` }}
+            className={`pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.55)] ring-2 ring-[var(--loom-accent)] transition-opacity duration-150 ${isLiveStream ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100'}`}
+            style={{ left: `${isLiveStream ? 100 : progressPct}%` }}
           />
         </div>
       </div>
@@ -251,25 +265,29 @@ export default function PlayerControlBar({
           {paused ? <Play className="h-8 w-8 fill-current" /> : <Pause className="h-8 w-8 fill-current" />}
         </button>
 
-        <button
-          type="button"
-          onClick={() => seekTo(playbackPositionRef.current - skipBackSeconds)}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-          title={`Back ${skipBackSeconds}s`}
-          aria-label={`Back ${skipBackSeconds} seconds`}
-        >
-          <RotateCcw className="h-5 w-5" strokeWidth={2.25} />
-        </button>
+        {!isLiveStream && (
+          <>
+            <button
+              type="button"
+              onClick={() => seekTo(playbackPositionRef.current - skipBackSeconds)}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              title={`Back ${skipBackSeconds}s`}
+              aria-label={`Back ${skipBackSeconds} seconds`}
+            >
+              <RotateCcw className="h-5 w-5" strokeWidth={2.25} />
+            </button>
 
-        <button
-          type="button"
-          onClick={() => seekTo(playbackPositionRef.current + skipForwardSeconds)}
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
-          title={`Forward ${skipForwardSeconds}s`}
-          aria-label={`Forward ${skipForwardSeconds} seconds`}
-        >
-          <RotateCw className="h-5 w-5" strokeWidth={2.25} />
-        </button>
+            <button
+              type="button"
+              onClick={() => seekTo(playbackPositionRef.current + skipForwardSeconds)}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-white/85 outline-none transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)]"
+              title={`Forward ${skipForwardSeconds}s`}
+              aria-label={`Forward ${skipForwardSeconds} seconds`}
+            >
+              <RotateCw className="h-5 w-5" strokeWidth={2.25} />
+            </button>
+          </>
+        )}
 
         <div className="flex items-center gap-2">
           <button
