@@ -124,6 +124,11 @@ import {
 import { usePlayerChrome } from './VideoPlayer/usePlayerChrome';
 import { useSidePanelResize } from './VideoPlayer/useSidePanelResize';
 import { useEpisodeNavigation } from './VideoPlayer/useEpisodeNavigation';
+import { useMediaControlSession } from './VideoPlayer/useMediaControlSession';
+import type {
+  MediaSessionCommand,
+  MediaSessionCommandType,
+} from '../shared/mediaControlProtocol.ts';
 import { usePlayerScrubbing } from './VideoPlayer/usePlayerScrubbing';
 import LibVlcPlaybackEngine from './VideoPlayer/engines/LibVlcPlaybackEngine';
 import MpvPlaybackEngine from './VideoPlayer/engines/MpvPlaybackEngine';
@@ -192,7 +197,6 @@ export default function VideoPlayer({
 }: VideoPlayerProps) {
   const { activeProfile, openGate } = useProfiles();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const systemMediaAudioRef = useRef<HTMLAudioElement>(null);
   const { state: libraryState } = useLibrary();
   const playbackActivityKeyRef = useRef(`desktop-player:${crypto.randomUUID()}`);
   const { theme } = useTheme();
@@ -315,6 +319,13 @@ export default function VideoPlayer({
   const [reloadToken, setReloadToken] = useState(0);
   const [nativePlaybackActive, setNativePlaybackActive] = useState(false);
   const [nativeEngineKind, setNativeEngineKind] = useState<PlaybackEngineKind | null>(null);
+  // Native engine session id. The main process needs it to run a media command
+  // against the running LibVLC or mpv player without a renderer round trip.
+  const [nativeSessionId, setNativeSessionId] = useState<string | null>(null);
+  // Set by a system stop command. It releases the media session without closing
+  // the player, and clears again the moment playback resumes, which is how
+  // LoomTV takes the session back after another app has held it.
+  const [mediaSessionStopped, setMediaSessionStopped] = useState(false);
   const nativePlaybackEndedRef = useRef(false);
   const libVlcSurfaceActive = nativePlaybackActive && nativeEngineKind === 'libvlc';
 
@@ -1291,6 +1302,7 @@ export default function VideoPlayer({
 
   const handleNativePlaybackState = useCallback((state: PlaybackEngineState) => {
     if (!playerActiveRef.current) return;
+    if (state.sessionId) setNativeSessionId(state.sessionId);
 
     const now = performance.now();
     const seekGuard = nativeSeekGuardRef.current;
@@ -3163,32 +3175,124 @@ export default function VideoPlayer({
 
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
 
-  const lastSystemMediaActionRef = useRef<{
-    action: 'play-pause' | 'previous-track' | 'next-track';
-    at: number;
-  } | null>(null);
-  const runSystemMediaAction = useCallback((
-    action: 'play-pause' | 'previous-track' | 'next-track',
+  const lastMediaCommandRef = useRef<{ type: MediaSessionCommandType; at: number } | null>(null);
+
+  /**
+   * Apply one system media command to the session that is already open.
+   *
+   * Every branch calls the player's own operations, so the active engine keeps
+   * playing the file it already has: nothing here reopens the media, switches
+   * engine, starts a transcode, or fetches metadata.
+   *
+   * `handledInMain` means the main process already ran the transport against
+   * LibVLC or mpv, which is the normal path for a native engine. In that case
+   * this only syncs the player's own pause intent so autoplay and the pause
+   * overlay agree with what the engine is about to report. Repeats of a
+   * transport command inside a quarter second are dropped, so a key that
+   * reaches both the media session and the focused window acts once.
+   */
+  const runMediaSessionCommand = useCallback((
+    command: MediaSessionCommand,
+    handledInMain = false,
   ) => {
-    const now = performance.now();
-    const previous = lastSystemMediaActionRef.current;
-    if (previous?.action === action && now - previous.at < 250) return;
-    lastSystemMediaActionRef.current = { action, at: now };
-
-    if (action === 'play-pause') {
-      void togglePlay();
-    } else if (action === 'previous-track') {
-      handlePrevEpisode();
-    } else {
-      handleNextEpisode();
+    if (command.type !== 'seekAbsolute') {
+      const now = performance.now();
+      const previous = lastMediaCommandRef.current;
+      if (previous?.type === command.type && now - previous.at < 250) return;
+      lastMediaCommandRef.current = { type: command.type, at: now };
     }
-  }, [handleNextEpisode, handlePrevEpisode, togglePlay]);
 
-  useEffect(
-    () =>
-      desktopApi.onSystemMediaKey(runSystemMediaAction),
-    [runSystemMediaAction],
-  );
+    if (handledInMain) {
+      // The engine already moved. Record the user's intent so the player does
+      // not treat the resulting state change as an unexpected pause.
+      if (command.type === 'play') userPausedRef.current = false;
+      else if (command.type === 'pause') userPausedRef.current = true;
+      else if (command.type === 'toggle') userPausedRef.current = !paused;
+      return;
+    }
+
+    switch (command.type) {
+      case 'play':
+        if (paused) togglePlay();
+        break;
+      case 'pause':
+        if (!paused) togglePlay();
+        break;
+      case 'toggle':
+        togglePlay();
+        break;
+      case 'stop':
+        // Stop ends playback and releases the session. It does not close the
+        // player window: macOS sends stopCommand in more situations than users
+        // expect, and tearing the UI down on it would be a bug.
+        if (!paused) togglePlay();
+        setMediaSessionStopped(true);
+        break;
+      case 'previousItem':
+        handlePrevEpisode();
+        break;
+      case 'nextItem':
+        handleNextEpisode();
+        break;
+      case 'seekRelative':
+        seekTo(playbackPositionRef.current + command.offsetSeconds);
+        break;
+      case 'seekAbsolute':
+        seekTo(command.positionSeconds);
+        break;
+      case 'setRate':
+        setPlaybackRate(Math.min(3, Math.max(0.25, command.rate)));
+        break;
+    }
+  }, [
+    handleNextEpisode,
+    handlePrevEpisode,
+    paused,
+    seekTo,
+    setPlaybackRate,
+    togglePlay,
+    userPausedRef,
+  ]);
+
+  useEffect(() => {
+    if (!paused) setMediaSessionStopped(false);
+  }, [paused]);
+
+  const currentEpisodeIndex = useMemo(() => playableEpisodeFiles.findIndex((item) => (
+    item.season === currentSeason && item.episode === currentEpisode
+  )), [currentEpisode, currentSeason, playableEpisodeFiles]);
+
+  // Artwork comes from LoomTV's own cache. System integration never calls a
+  // metadata provider.
+  const mediaSessionArtworkUrl = artwork?.poster
+    || artwork?.backdrop
+    || artwork?.posterCandidates?.[0]
+    || artwork?.backdropCandidates?.[0];
+
+  useMediaControlSession({
+    sessionId: filePath,
+    state: playerState === 'error' || mediaSessionStopped
+      ? 'stopped'
+      : paused ? 'paused' : 'playing',
+    positionSeconds: position,
+    durationSeconds: duration,
+    rate: playbackRate,
+    title: title || 'LoomTV playback',
+    ...(hasEpisodes ? { seriesTitle: title } : {}),
+    ...(currentSeason > 0 ? { season: currentSeason } : {}),
+    ...(currentEpisode > 0 ? { episode: currentEpisode } : {}),
+    queueIndex: currentEpisodeIndex >= 0 ? currentEpisodeIndex + 1 : 0,
+    queueCount: playableEpisodeFiles.length,
+    canPreviousItem: currentEpisodeIndex > 0,
+    canNextItem: Boolean(nextEpisodeFile),
+    skipForwardSeconds,
+    skipBackSeconds,
+    engine: nativePlaybackActive && (nativeEngineKind === 'libvlc' || nativeEngineKind === 'mpv')
+      ? nativeEngineKind
+      : 'chromium',
+    ...(nativeSessionId ? { engineSessionId: nativeSessionId } : {}),
+    ...(mediaSessionArtworkUrl ? { artworkUrl: mediaSessionArtworkUrl } : {}),
+  }, runMediaSessionCommand);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -3221,11 +3325,10 @@ export default function VideoPlayer({
         case 'k':
         case 'K':
         case 'MediaPlayPause':
-        case 'F8':
           if (hasCommandModifier) break;
           cancelPendingSurfaceClick();
           e.preventDefault();
-          runSystemMediaAction('play-pause');
+          runMediaSessionCommand({ type: 'toggle' });
           break;
         case 'ArrowLeft':
         case 'j':
@@ -3255,17 +3358,15 @@ export default function VideoPlayer({
           break;
         case 'MediaTrackPrevious':
         case 'MediaPreviousTrack':
-        case 'F7':
           cancelPendingSurfaceClick();
           e.preventDefault();
-          runSystemMediaAction('previous-track');
+          runMediaSessionCommand({ type: 'previousItem' });
           break;
         case 'MediaTrackNext':
         case 'MediaNextTrack':
-        case 'F9':
           cancelPendingSurfaceClick();
           e.preventDefault();
-          runSystemMediaAction('next-track');
+          runMediaSessionCommand({ type: 'nextItem' });
           break;
         case 'ArrowUp':
           cancelPendingSurfaceClick();
@@ -3368,7 +3469,7 @@ export default function VideoPlayer({
     resetPlaybackRate,
     adjustSubtitleDelay,
     resetSubtitleDelay,
-    runSystemMediaAction,
+    runMediaSessionCommand,
     skipBackSeconds,
     skipForwardSeconds,
     seekTo,
@@ -3377,125 +3478,11 @@ export default function VideoPlayer({
     togglePlay,
   ]);
 
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return undefined;
-    const mediaSession = navigator.mediaSession;
-    const register = <TAction extends MediaSessionAction>(
-      action: TAction,
-      handler: MediaSessionActionHandler,
-    ) => {
-      try {
-        mediaSession.setActionHandler(action, handler);
-      } catch {
-        // Older Electron/Chromium builds expose Media Session but not every
-        // action. Keyboard capture above remains the fallback.
-      }
-    };
+  // There is no `navigator.mediaSession` path inside the desktop app. The main
+  // process owns the system media session for LibVLC, mpv, and Chromium alike,
+  // so one owner publishes state and one owner receives commands. The browser
+  // client keeps the Web Media Session API because it has no other option.
 
-    try {
-      const artworkSource = artwork?.poster
-        || artwork?.backdrop
-        || artwork?.posterCandidates?.[0]
-        || artwork?.backdropCandidates?.[0];
-      mediaSession.metadata = new MediaMetadata({
-        title: title || 'LoomTV playback',
-        artist: currentSeason > 0 && currentEpisode > 0
-          ? `Season ${currentSeason}, Episode ${currentEpisode}`
-          : 'LoomTV',
-        album: 'LoomTV',
-        ...(artworkSource ? { artwork: [{ src: artworkSource }] } : {}),
-      });
-    } catch {
-      mediaSession.metadata = new MediaMetadata({
-        title: title || 'LoomTV playback',
-        artist: 'LoomTV',
-        album: 'LoomTV',
-      });
-    }
-
-    register('play', () => {
-      if (paused) runSystemMediaAction('play-pause');
-    });
-    register('pause', () => {
-      if (!paused) runSystemMediaAction('play-pause');
-    });
-    register('seekbackward', (details) => {
-      seekTo(playbackPositionRef.current - (details.seekOffset || skipBackSeconds));
-    });
-    register('seekforward', (details) => {
-      seekTo(playbackPositionRef.current + (details.seekOffset || skipForwardSeconds));
-    });
-    register('seekto', (details) => {
-      if (typeof details.seekTime === 'number') seekTo(details.seekTime);
-    });
-    register('previoustrack', () => runSystemMediaAction('previous-track'));
-    register('nexttrack', () => runSystemMediaAction('next-track'));
-    mediaSession.playbackState = paused ? 'paused' : 'playing';
-
-    return () => {
-      (['play', 'pause', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack'] as MediaSessionAction[])
-        .forEach((action) => {
-          try { mediaSession.setActionHandler(action, null); } catch { /* Unsupported action. */ }
-        });
-      mediaSession.playbackState = 'none';
-      mediaSession.metadata = null;
-    };
-  }, [artwork, currentEpisode, currentSeason, paused, runSystemMediaAction, seekTo, skipBackSeconds, skipForwardSeconds, title]);
-
-  useEffect(() => {
-    if (!nativePlaybackActive || !('mediaSession' in navigator)) return undefined;
-    const audio = systemMediaAudioRef.current;
-    if (!audio) return undefined;
-
-    // Native LibVLC/mpv playback bypasses Chromium's media pipeline. Keep an
-    // inaudible PCM stream active beside it so the operating system can route
-    // media controls to LoomTV's Media Session handlers without window focus.
-    const sampleRate = 8_000;
-    const wav = new Uint8Array(44 + sampleRate);
-    const view = new DataView(wav.buffer);
-    const writeAscii = (offset: number, value: string) => {
-      for (let index = 0; index < value.length; index += 1) wav[offset + index] = value.charCodeAt(index);
-    };
-    writeAscii(0, 'RIFF');
-    view.setUint32(4, 36 + sampleRate, true);
-    writeAscii(8, 'WAVE');
-    writeAscii(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate, true);
-    view.setUint16(32, 1, true);
-    view.setUint16(34, 8, true);
-    writeAscii(36, 'data');
-    view.setUint32(40, sampleRate, true);
-    wav.fill(128, 44);
-
-    const source = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
-    audio.src = source;
-    audio.loop = true;
-    void audio.play().catch(() => undefined);
-
-    return () => {
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-      URL.revokeObjectURL(source);
-    };
-  }, [nativePlaybackActive]);
-
-  useEffect(() => {
-    if (!('mediaSession' in navigator) || duration <= 0) return;
-    try {
-      navigator.mediaSession.setPositionState({
-        duration,
-        playbackRate,
-        position: Math.min(duration, Math.max(0, position)),
-      });
-    } catch {
-      // Position state is optional on older Chromium builds.
-    }
-  }, [duration, playbackRate, position]);
 
   // ─── Derived ───────────────────────────────────────────────────────────────
 
@@ -3795,7 +3782,6 @@ export default function VideoPlayer({
       onPointerMove={handlePointerMove}
       ref={containerRef}
       >
-      <audio ref={systemMediaAudioRef} className="hidden" aria-hidden="true" />
       <h1 id="loom-player-title" className="sr-only">Playing {title}</h1>
       <p id="loom-player-description" className="sr-only">Playback controls, episode selection, subtitle settings, and close controls.</p>
       <style>

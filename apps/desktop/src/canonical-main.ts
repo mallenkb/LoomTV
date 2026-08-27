@@ -38,7 +38,6 @@ import {
   openCanonicalWindow,
 } from './main/canonicalWindow';
 
-if (process.platform === 'linux') app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
 if (squirrelStartup) app.quit();
 
 app.setName('LoomTV');

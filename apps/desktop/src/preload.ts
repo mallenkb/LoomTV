@@ -7,6 +7,11 @@ import type {
 } from './lib/desktopApi';
 import type { PlaybackCommand, PlaybackStartOptions, PlaybackViewport } from './shared/playbackProtocol';
 import type {
+  MediaSessionCommand,
+  MediaSessionDiagnostics,
+  MediaSessionSnapshot,
+} from './shared/mediaControlProtocol';
+import type {
   LibraryIndexPayload,
   LibraryItemDetailsPayload,
   LibraryScanMode,
@@ -110,15 +115,19 @@ const desktopApi = {
     electronIpcRenderer.on('window:fullscreen-changed', handler);
     return () => electronIpcRenderer.removeListener('window:fullscreen-changed', handler);
   },
-  onSystemMediaKey: (
-    callback: (action: 'play-pause' | 'previous-track' | 'next-track') => void,
+  publishMediaSession: (snapshot: MediaSessionSnapshot): Promise<MediaSessionDiagnostics> =>
+    ipcRenderer.invoke('media-control:publish', snapshot),
+  releaseMediaSession: () => ipcRenderer.invoke('media-control:release'),
+  onMediaSessionCommand: (
+    callback: (command: MediaSessionCommand, handledInMain: boolean) => void,
   ) => {
     const handler = (
       _: Electron.IpcRendererEvent,
-      action: 'play-pause' | 'previous-track' | 'next-track',
-    ) => callback(action);
-    electronIpcRenderer.on('playback:system-media-key', handler);
-    return () => electronIpcRenderer.removeListener('playback:system-media-key', handler);
+      command: MediaSessionCommand,
+      handledInMain: boolean,
+    ) => callback(command, handledInMain);
+    ipcRenderer.on('media-control:command', handler);
+    return () => ipcRenderer.removeListener('media-control:command', handler);
   },
   checkFFmpeg: () => ipcRenderer.invoke('media:ffmpeg-available'),
   getSettings: () => ipcRenderer.invoke('settings:get'),

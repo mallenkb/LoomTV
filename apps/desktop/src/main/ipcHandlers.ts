@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { addLocalAccessToken } from './serverSecurity';
-import { setSystemMediaKeyActivity } from './systemMediaKeys.ts';
+import { publishMediaSessionSnapshot, releaseMediaSession } from './systemMediaKeys.ts';
 import { appendStreamOptionParams } from './transcodeFilters.ts';
 import { getMimeType } from './mimeTypes';
 import type { ApiResult, ProbeResult, TranscodeOptions, TranscodeSession } from './mediaTypes';
@@ -99,6 +99,35 @@ const playbackCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('set-video-crop'), crop: z.string().nullable() }),
   z.object({ type: z.literal('set-video-rotation'), degrees: finiteNumber }),
 ]);
+const mediaSessionSnapshotSchema = z.object({
+  sessionId: z.string().max(200),
+  state: z.enum(['playing', 'paused', 'stopped']),
+  positionSeconds: finiteNumber.nonnegative(),
+  durationSeconds: finiteNumber.nonnegative(),
+  rate: finiteNumber.positive(),
+  supportedCommands: z.array(z.enum([
+    'play',
+    'pause',
+    'toggle',
+    'stop',
+    'seekRelative',
+    'seekAbsolute',
+    'previousItem',
+    'nextItem',
+    'setRate',
+  ])).max(16),
+  skipForwardSeconds: finiteNumber.positive(),
+  skipBackSeconds: finiteNumber.positive(),
+  title: z.string().max(400),
+  seriesTitle: z.string().max(400).optional(),
+  season: finiteNumber.nonnegative().optional(),
+  episode: finiteNumber.nonnegative().optional(),
+  queueIndex: finiteNumber.nonnegative(),
+  queueCount: finiteNumber.nonnegative(),
+  engine: z.enum(['libvlc', 'mpv', 'chromium']),
+  engineSessionId: z.string().max(200).optional(),
+  artworkUrl: z.string().max(2048).optional(),
+});
 const playbackViewportSchema = z.object({
   x: finiteNumber,
   y: finiteNumber,
@@ -1197,11 +1226,18 @@ export function registerIpcHandlers<
       episode: request?.episode === undefined ? undefined : Math.max(0, Math.floor(Number(request.episode) || 0)),
     });
   }, z.tuple([mediaSegmentRequestSchema]));
-  handle('playback:activity', (event, key: string, active: boolean, label?: string) => {
+  // The FFmpeg activity lease governs transcoder scheduling only. System media
+  // ownership is published separately on `media-control:publish` so neither can
+  // silently move the other.
+  handle('playback:activity', (_event, key: string, active: boolean, label?: string) => {
     deps.setPlaybackActivityLease(key, Boolean(active), label);
-    setSystemMediaKeyActivity(event.sender, key, Boolean(active));
     return true;
   }, z.tuple([nonEmptyString, z.boolean(), z.string().optional()]));
+
+  handle('media-control:publish', (event, snapshot) =>
+    publishMediaSessionSnapshot(event.sender, snapshot), z.tuple([mediaSessionSnapshotSchema]));
+
+  handleNoArgs('media-control:release', (event) => releaseMediaSession(event.sender));
   handleNoArgs('playback:analysis:status', () => {
     deps.authorizeSettingsWrite();
     return deps.getLocalSegmentAnalysisStatus();

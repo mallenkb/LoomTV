@@ -179,7 +179,7 @@ const PlayerEpisodeRow = memo(function PlayerEpisodeRow({
             <WatchedSolidIcon
               role="img"
               aria-label="Watched"
-              className="h-12 w-12 text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
+              className="h-[29px] w-[29px] text-emerald-500 drop-shadow-[0_2px_8px_rgba(0,0,0,0.75)]"
             />
           </span>
         )}

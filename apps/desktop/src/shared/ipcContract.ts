@@ -1,4 +1,9 @@
 import type {
+  MediaSessionCommand,
+  MediaSessionDiagnostics,
+  MediaSessionSnapshot,
+} from './mediaControlProtocol.ts';
+import type {
   ApiResult,
   LibraryFolderKind,
   LibraryIndexPayload,
@@ -116,6 +121,8 @@ export interface IpcContract {
   'network:status': { args: []; result: LocalNetworkStatus };
   'playback-track-preferences:get': { args: [scope?: string]; result: PlaybackTrackPreferences | Record<string, PlaybackTrackPreferences> };
   'playback-track-preferences:save': { args: [scope: string, preferences: PlaybackTrackPreferences, expectedProfileId?: string]; result: PlaybackTrackPreferences };
+  'media-control:publish': { args: [snapshot: MediaSessionSnapshot]; result: MediaSessionDiagnostics };
+  'media-control:release': { args: []; result: boolean };
   'playback:activity': { args: [key: string, active: boolean, label?: string]; result: boolean };
   'playback:analysis:season': { args: [mediaId: string, season: number]; result: MediaSegmentResponse };
   'playback:analysis:status': { args: []; result: LocalSegmentAnalysisStatus };
@@ -189,7 +196,7 @@ export interface IpcContract {
 export type IpcInvokeChannel = keyof IpcContract;
 
 export interface IpcEventContract {
-  'playback:system-media-key': { args: [action: 'play-pause' | 'previous-track' | 'next-track'] };
+  'media-control:command': { args: [command: MediaSessionCommand, handledInMain: boolean] };
   'library:scan-progress': { args: [progress: import('./desktopProtocol.ts').LibraryScanProgress] };
   'profile:active-changed': { args: [state: ActiveProfileState] };
   'profiles:changed': { args: [event: import('./desktopProtocol.ts').ProfilesChangedEvent] };

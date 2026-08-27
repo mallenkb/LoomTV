@@ -1,5 +1,10 @@
 import packageJson from '../../package.json';
 import type {
+  MediaSessionCommand,
+  MediaSessionDiagnostics,
+  MediaSessionSnapshot,
+} from '@/shared/mediaControlProtocol';
+import type {
   ActiveProfileState,
   ApiResult,
   ProfileCreateInput,
@@ -241,8 +246,10 @@ export type DesktopBridgeApi = {
       setFullscreen?: (enabled: boolean) => Promise<boolean>;
       setWindowChromeVisible?: (visible: boolean) => Promise<boolean>;
       onFullscreenChanged?: (callback: (fullscreen: boolean) => void) => () => void;
-      onSystemMediaKey?: (
-        callback: (action: 'play-pause' | 'previous-track' | 'next-track') => void,
+      publishMediaSession?: (snapshot: MediaSessionSnapshot) => Promise<MediaSessionDiagnostics>;
+      releaseMediaSession?: () => Promise<boolean>;
+      onMediaSessionCommand?: (
+        callback: (command: MediaSessionCommand, handledInMain: boolean) => void,
       ) => () => void;
       checkFFmpeg: () => Promise<FFmpegStatus>;
       getSettings: () => Promise<SettingsPayload>;
@@ -803,6 +810,21 @@ async function refreshRemoteActiveProfileState(): Promise<ActiveProfileState> {
   return state;
 }
 
+/**
+ * What a browser build reports when it asks for the system media session.
+ *
+ * There is no desktop bridge outside Electron, so the browser client keeps
+ * using the Web Media Session API. It has no other option.
+ */
+function browserMediaSessionDiagnostics(): MediaSessionDiagnostics {
+  return {
+    platform: 'browser',
+    adapter: 'unsupported',
+    active: false,
+    reason: 'The browser client uses the Web Media Session API.',
+  };
+}
+
 export const desktopApi = {
   async getLibraryIndex(): Promise<LibraryIndexPayload | null> {
     if (isRemoteDesktopMode()) {
@@ -982,10 +1004,26 @@ export const desktopApi = {
     return window.desktopApi?.onFullscreenChanged?.(callback) || (() => undefined);
   },
 
-  onSystemMediaKey(
-    callback: (action: 'play-pause' | 'previous-track' | 'next-track') => void,
+  /**
+   * Publish the open player's snapshot to the main process media session.
+   *
+   * The main process owns the session; the returned diagnostic reports which
+   * platform adapter is running, or why none is.
+   */
+  async publishMediaSession(snapshot: MediaSessionSnapshot): Promise<MediaSessionDiagnostics> {
+    if (!window.desktopApi?.publishMediaSession) return browserMediaSessionDiagnostics();
+    return window.desktopApi.publishMediaSession(snapshot);
+  },
+
+  async releaseMediaSession(): Promise<boolean> {
+    if (!window.desktopApi?.releaseMediaSession) return false;
+    return window.desktopApi.releaseMediaSession();
+  },
+
+  onMediaSessionCommand(
+    callback: (command: MediaSessionCommand, handledInMain: boolean) => void,
   ): () => void {
-    return window.desktopApi?.onSystemMediaKey?.(callback) || (() => undefined);
+    return window.desktopApi?.onMediaSessionCommand?.(callback) || (() => undefined);
   },
 
   async getLocalNetworkStatus(): Promise<LocalNetworkStatus> {

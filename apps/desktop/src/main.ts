@@ -14,9 +14,6 @@ import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import squirrelStartup from 'electron-squirrel-startup';
 
-if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
-}
 import {
   LOCAL_ACCESS_HEADER,
   LOCAL_ACCESS_QUERY_PARAM,
@@ -25,7 +22,7 @@ import {
   describeErrorForLog,
 } from './main/serverSecurity';
 import { isTrustedIpcSender } from './main/trustedIpcSender.ts';
-import { unregisterSystemMediaKeys } from './main/systemMediaKeys.ts';
+import { releaseAllMediaSessions } from './main/systemMediaKeys.ts';
 import {
   destroyLanDiscovery,
   discoverLanPeers,
@@ -320,7 +317,11 @@ if (squirrelStartup) app.quit();
 
 // Enable hardware HEVC (H.265) decoding — allows MKV/HEVC files to be
 // remuxed instead of re-encoded, giving near-instant local playback.
-app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,HardwareMediaKeyHandling,MediaFoundationH264Encoding');
+// HardwareMediaKeyHandling is deliberately absent: LoomTV's own media session
+// lives in the main process, and letting Chromium claim the media keys as well
+// would give one app two owners, with the winner decided by whichever
+// registered last.
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport,MediaFoundationH264Encoding');
 
 // Keep Chromium's zero-copy path enabled for normal playback. It avoids an
 // unnecessary GPU-to-CPU round trip in the browser fallback. Affected drivers
@@ -2226,7 +2227,7 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  unregisterSystemMediaKeys();
+  releaseAllMediaSessions();
   isAppShuttingDown = true;
   flushPairedDeviceTouches();
   clearAllGuestProfiles();

@@ -352,6 +352,17 @@ function runtimeModuleSourcePath(moduleName: string): string {
   return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
 }
 
+/**
+ * The koffi package that carries the prebuilt binding for a target.
+ *
+ * koffi lists every platform build as an optional dependency and loads the one
+ * matching `process.platform`/`process.arch` at runtime, so the packaged app
+ * needs exactly that one alongside `koffi` itself.
+ */
+function koffiNativePackage(platform: string, arch: string): string {
+  return `@koromix/koffi-${platform}-${arch}`;
+}
+
 function copyDirectRuntimeModule(moduleName: string, targetNodeModules: string): void {
   const sourcePath = runtimeModuleSourcePath(moduleName);
   if (!fs.existsSync(sourcePath)) {
@@ -409,9 +420,18 @@ const config: ForgeConfig = {
       'src/headless/lucide-icons.svg',
     ],
     afterPrune: [
-      (buildPath, _electronVersion, _platform, _arch, callback) => {
+      (buildPath, _electronVersion, platform, arch, callback) => {
         try {
-          const directRuntimeModules = ['better-sqlite3', 'bindings', 'file-uri-to-path', 'koffi'];
+          const directRuntimeModules = [
+            'better-sqlite3',
+            'bindings',
+            'file-uri-to-path',
+            'koffi',
+            // koffi 3 resolves its native binding from a per-platform package.
+            // Without it the FFI layer cannot load, which would take LibVLC's
+            // native window host and all three system media sessions with it.
+            koffiNativePackage(platform, arch),
+          ];
           const targetNodeModules = path.join(buildPath, 'node_modules');
           fs.mkdirSync(targetNodeModules, { recursive: true });
 

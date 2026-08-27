@@ -429,6 +429,7 @@ const requiredAsarEntries = [
   '/node_modules/electron-updater/out/main.js',
   '/node_modules/file-uri-to-path/index.js',
   '/node_modules/koffi/index.cjs',
+  `/node_modules/@koromix/koffi-${platform}-${arch}/index.js`,
   '/node_modules/fs-extra/lib/index.js',
   '/node_modules/js-yaml/index.js',
   '/node_modules/lazy-val/out/main.js',
@@ -444,6 +445,16 @@ for (const entry of requiredAsarEntries) {
 
 const requiredUnpacked = [
   path.join(unpacked, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'),
+  // koffi's prebuilt binding. LibVLC's native window host and all three system
+  // media sessions (macOS MediaPlayer, Windows SMTC, Linux MPRIS) go through it.
+  path.join(
+    unpacked,
+    'node_modules',
+    '@koromix',
+    `koffi-${platform}-${arch}`,
+    `${platform}_${arch}`,
+    'koffi.node',
+  ),
 ];
 
 for (const candidate of requiredUnpacked) {
