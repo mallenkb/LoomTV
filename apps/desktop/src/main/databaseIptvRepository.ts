@@ -322,7 +322,7 @@ export function listIptvChannels(
     ? 'c.name COLLATE NOCASE DESC, c.position ASC'
     : request.sort === 'category'
       ? "CASE WHEN c.group_title = '' THEN 1 ELSE 0 END, c.group_title COLLATE NOCASE ASC, c.name COLLATE NOCASE ASC, c.position ASC"
-      : 'c.name COLLATE NOCASE ASC, c.position ASC';
+      : 'c.position ASC';
 
   // The now/next lookups are correlated subqueries rather than joins so a
   // channel with no guide coverage still returns exactly one row.
