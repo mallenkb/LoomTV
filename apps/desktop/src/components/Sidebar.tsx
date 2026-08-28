@@ -15,6 +15,7 @@ import SharedListHighlight from '@/components/SharedListHighlight';
 import { useToast } from '@/components/ToastProvider';
 import { isCategoryVisible } from '@/components/sidebarNavigation';
 import { iptvSourceDisplayName, liveTvRoute, useIptvSources } from '@/lib/liveTvSources';
+import { liveTvSourceIconPair } from '@/components/LiveTvSourceIcons';
 
 type SidebarNavItemId = 'anime' | 'tv' | 'movies' | 'others';
 type NavItemId = 'home' | 'my-list' | 'discover' | SidebarNavItemId | 'settings';
@@ -29,9 +30,6 @@ type ModernCategoryItem = {
   activeIcon?: SidebarIcon;
   iconOnly?: boolean;
 };
-
-const liveTvOutlineIconUrl = new URL('../assets/live-tv-outline.svg', import.meta.url).href;
-const liveTvActiveIconUrl = new URL('../assets/live-tv-active.svg', import.meta.url).href;
 
 const defaultSidebarNavOrder: SidebarNavItemId[] = ['anime', 'tv', 'movies', 'others'];
 const modernCategoryItems: readonly ModernCategoryItem[] = [
@@ -146,14 +144,6 @@ function ModernCategoryPill({ pathname }: { pathname: string }) {
       </nav>
     </header>
   );
-}
-
-function LiveTvOutlineIcon({ className }: { className?: string }) {
-  return <img src={liveTvOutlineIconUrl} alt="" className={className} aria-hidden="true" />;
-}
-
-function LiveTvActiveIcon({ className }: { className?: string }) {
-  return <img src={liveTvActiveIconUrl} alt="" className={className} aria-hidden="true" />;
 }
 
 function BookmarkSolidIcon({ className }: { className?: string }) {
@@ -586,11 +576,16 @@ export default function Sidebar() {
   // Each added playlist is its own destination, the way Discover is: a tab in
   // the sidebar pointing at a page that belongs to that source alone.
   const liveTvNavItems = useMemo(
-    () => iptvSources.map((source) => ({
-      id: `live:${source.id}`,
-      label: iptvSourceDisplayName(source.name),
-      path: liveTvRoute(source.id),
-    })),
+    () => iptvSources.map((source) => {
+      const icons = liveTvSourceIconPair(source.iconId);
+      return {
+        id: `live:${source.id}`,
+        label: iptvSourceDisplayName(source.name),
+        path: liveTvRoute(source.id),
+        icon: icons.outline,
+        activeIcon: icons.solid,
+      };
+    }),
     [iptvSources],
   );
   const selectedLiveTvItem = location.pathname.startsWith('/live/')
@@ -684,7 +679,7 @@ export default function Sidebar() {
               {liveTvNavItems.length > 0 ? <div className="my-1 h-px w-8 bg-[var(--loom-text)] opacity-[0.22]" aria-hidden="true" /> : null}
               {liveTvNavItems.map((item) => {
                 const isActive = selectedLiveTvItem === item.id;
-                const Icon = isActive ? LiveTvActiveIcon : LiveTvOutlineIcon;
+                const Icon = isActive ? item.activeIcon : item.icon;
                 return (
                   <Link
                     key={`modern-${item.id}`}
@@ -867,7 +862,7 @@ export default function Sidebar() {
           {liveTvNavItems.length > 0 ? <div className="my-2 h-px bg-[var(--loom-panel-border)]" aria-hidden="true" /> : null}
           {liveTvNavItems.map((item) => {
             const isActive = selectedLiveTvItem === item.id;
-            const Icon = isActive ? LiveTvActiveIcon : LiveTvOutlineIcon;
+            const Icon = isActive ? item.activeIcon : item.icon;
             return (
               <Link
                 key={item.id}

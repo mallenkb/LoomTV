@@ -856,10 +856,29 @@ export type StremioPluginIpcResult<T> =
 
 // ─── Live TV (IPTV) ──────────────────────────────────────────────────────────
 
+export type IptvSourceIconId =
+  | 'general'
+  | 'entertainment'
+  | 'news'
+  | 'sports'
+  | 'movies'
+  | 'series'
+  | 'music'
+  | 'kids'
+  | 'documentary'
+  | 'education'
+  | 'lifestyle'
+  | 'travel'
+  | 'cooking'
+  | 'science'
+  | 'religious'
+  | 'weather';
+
 /** One added provider: an M3U playlist plus the XMLTV guide that annotates it. */
 export interface IptvSourceSummary {
   id: string;
   name: string;
+  iconId: IptvSourceIconId;
   playlistUrl: string;
   epgUrl: string;
   channelCount: number;
@@ -876,6 +895,13 @@ export interface IptvSourceInput {
   playlistUrl: string;
   epgUrl?: string;
   name?: string;
+  iconId?: IptvSourceIconId;
+}
+
+export interface IptvSourcePatch {
+  name?: string;
+  epgUrl?: string;
+  iconId?: IptvSourceIconId;
 }
 
 export interface IptvChannelSummary {

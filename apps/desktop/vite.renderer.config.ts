@@ -9,6 +9,10 @@ const packageJson = z.object({ version: z.string().optional() }).parse(packageJs
 const srcPath = fileURLToPath(new URL('./src', import.meta.url));
 const reactPath = (entry: string) => fileURLToPath(new URL(`../../node_modules/react-dom/node_modules/react/${entry}`, import.meta.url));
 const reactDomPath = (entry: string) => fileURLToPath(new URL(`../../node_modules/react-dom/${entry}`, import.meta.url));
+const requestedRendererPort = Number.parseInt(process.env.LOOMTV_RENDERER_PORT || '', 10);
+const rendererPort = Number.isInteger(requestedRendererPort) && requestedRendererPort > 0 && requestedRendererPort <= 65_535
+  ? requestedRendererPort
+  : 5187;
 
 const devRendererCsp = [
   "default-src 'self' file: data: blob:",
@@ -76,9 +80,16 @@ export default defineConfig({
     entries: ['index.html'],
   },
   server: {
-    host: '0.0.0.0',
-    port: 5174,
-    strictPort: false,
+    // Use the same explicit loopback family for both the listener and the URL
+    // Forge injects into Electron. On macOS, `localhost` can resolve to ::1
+    // while Vite is listening on IPv4, allowing an unrelated IPv6 dev server
+    // on the same port to appear inside LoomTV.
+    host: '127.0.0.1',
+    port: rendererPort,
+    // Forge injects this exact address into the Electron main process. Never
+    // move to another port silently, because another app may own the original
+    // address and would then appear inside LoomTV.
+    strictPort: true,
     watch: {
       ignored: ['**/dist/**', '**/out/**', '**/.vite/**'],
     },

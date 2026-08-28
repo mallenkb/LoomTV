@@ -26,6 +26,7 @@ import type {
   IptvChannelPage,
   IptvChannelRequest,
   IptvSourceInput,
+  IptvSourcePatch,
   IptvSourceSummary,
   LocalNetworkPairedDevice,
   LocalNetworkPeer,
@@ -258,7 +259,7 @@ export type DesktopBridgeApi = {
       checkFFmpeg: () => Promise<FFmpegStatus>;
       listIptvSources?: () => Promise<IptvSourceSummary[]>;
       addIptvSource?: (input: IptvSourceInput) => Promise<IptvSourceSummary[]>;
-      updateIptvSource?: (sourceId: string, patch: { name?: string; epgUrl?: string }) => Promise<IptvSourceSummary[]>;
+      updateIptvSource?: (sourceId: string, patch: IptvSourcePatch) => Promise<IptvSourceSummary[]>;
       removeIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
       refreshIptvSource?: (sourceId: string) => Promise<IptvSourceSummary[]>;
       listIptvChannels?: (request: IptvChannelRequest) => Promise<IptvChannelPage>;
@@ -1318,7 +1319,7 @@ export const desktopApi = {
     throw new Error('Live TV sources can only be added from the LoomTV desktop app.');
   },
 
-  async updateIptvSource(sourceId: string, patch: { name?: string; epgUrl?: string }): Promise<IptvSourceSummary[]> {
+  async updateIptvSource(sourceId: string, patch: IptvSourcePatch): Promise<IptvSourceSummary[]> {
     if (window.desktopApi?.updateIptvSource) return window.desktopApi.updateIptvSource(sourceId, patch);
     throw new Error('Live TV sources can only be edited from the LoomTV desktop app.');
   },

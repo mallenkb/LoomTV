@@ -18,6 +18,7 @@ import type {
   LibraryScanProgress,
   IptvChannelRequest,
   IptvSourceInput,
+  IptvSourcePatch,
   ManualMediaSegmentInput,
   MediaSegmentRequest,
   MediaSegmentType,
@@ -134,7 +135,7 @@ const desktopApi = {
   checkFFmpeg: () => ipcRenderer.invoke('media:ffmpeg-available'),
   listIptvSources: () => ipcRenderer.invoke('iptv:list-sources'),
   addIptvSource: (input: IptvSourceInput) => ipcRenderer.invoke('iptv:add-source', input),
-  updateIptvSource: (sourceId: string, patch: { name?: string; epgUrl?: string }) =>
+  updateIptvSource: (sourceId: string, patch: IptvSourcePatch) =>
     ipcRenderer.invoke('iptv:update-source', sourceId, patch),
   removeIptvSource: (sourceId: string) => ipcRenderer.invoke('iptv:remove-source', sourceId),
   refreshIptvSource: (sourceId: string) => ipcRenderer.invoke('iptv:refresh-source', sourceId),

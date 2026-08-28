@@ -76,6 +76,7 @@ import {
   createWindow,
   getMainWindow,
   getMainWindowIpcIdentity,
+  getRendererDevServerUrl,
   getTrayIconPath,
   getWindowIconPath,
 } from './main/windowManager';
@@ -408,8 +409,7 @@ function advanceLibraryMutationVersion(): void {
 }
 
 const LOCAL_ACCESS_TOKEN = createLocalAccessToken();
-const MAIN_WINDOW_DEV_SERVER_URL =
-  typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
+const MAIN_WINDOW_DEV_SERVER_URL = getRendererDevServerUrl();
 
 function getLanRendererUrl(): string | null {
   const address = getPrimaryLocalNetworkAddress();

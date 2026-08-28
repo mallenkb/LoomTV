@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw, Trash2, Tv } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  LIVE_TV_SOURCE_ICON_OPTIONS,
+  liveTvSourceIconPair,
+  normalizeLiveTvSourceIcon,
+} from '@/components/LiveTvSourceIcons';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { desktopApi } from '@/lib/desktopApi';
 import { notifyIptvSourcesChanged } from '@/lib/liveTvSources';
-import type { IptvSourceSummary } from '@/shared/desktopProtocol';
+import type { IptvSourceIconId, IptvSourceSummary } from '@/shared/desktopProtocol';
 
 const INPUT_CLASS = 'h-10 min-w-0 flex-1 rounded-lg border border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] px-3 text-sm text-white outline-none placeholder:text-[var(--loom-faint)] focus:border-[var(--loom-accent)]';
 
@@ -20,6 +25,45 @@ function describeSource(source: IptvSourceSummary): string {
   return parts.join(' · ');
 }
 
+function SourceIconPicker({
+  value,
+  onChange,
+  disabled = false,
+}: {
+  value: IptvSourceIconId;
+  onChange: (iconId: IptvSourceIconId) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Live TV source icon">
+      {LIVE_TV_SOURCE_ICON_OPTIONS.map((option) => {
+        const selected = option.id === value;
+        const Icon = selected ? option.solid : option.outline;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={option.label}
+            title={option.label}
+            disabled={disabled}
+            onClick={() => onChange(option.id)}
+            className={`inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:opacity-50 ${
+              selected
+                ? 'border-[var(--loom-accent)] bg-[color-mix(in_srgb,var(--loom-accent)_18%,transparent)] text-[var(--loom-accent)]'
+                : 'border-[var(--loom-control-border)] bg-[var(--loom-control-bg)] text-[var(--loom-muted)] hover:text-white'
+            }`}
+          >
+            <Icon className="h-5 w-5" />
+            <span>{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Where a provider gets added. Saving a playlist here creates the source, pulls
  * its channels, and puts a tab for it in the sidebar — the page itself lives at
@@ -31,6 +75,8 @@ export default function LiveTvSettingsSection() {
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [epgUrl, setEpgUrl] = useState('');
   const [name, setName] = useState('');
+  const [iconId, setIconId] = useState<IptvSourceIconId>('general');
+  const [editingIconSourceId, setEditingIconSourceId] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>('load');
   const [error, setError] = useState('');
 
@@ -64,17 +110,32 @@ export default function LiveTvSettingsSection() {
         playlistUrl: url,
         epgUrl: epgUrl.trim() || undefined,
         name: name.trim() || undefined,
+        iconId,
       });
       applySources(next);
       setPlaylistUrl('');
       setEpgUrl('');
       setName('');
+      setIconId('general');
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
       setBusyKey(null);
     }
-  }, [applySources, epgUrl, name, playlistUrl]);
+  }, [applySources, epgUrl, iconId, name, playlistUrl]);
+
+  const handleIconChange = useCallback(async (source: IptvSourceSummary, nextIconId: IptvSourceIconId) => {
+    setBusyKey(`icon:${source.id}`);
+    setError('');
+    try {
+      applySources(await desktopApi.updateIptvSource(source.id, { iconId: nextIconId }));
+      setEditingIconSourceId(null);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setBusyKey(null);
+    }
+  }, [applySources]);
 
   const handleRefresh = useCallback(async (sourceId: string) => {
     setBusyKey(`refresh:${sourceId}`);
@@ -168,6 +229,10 @@ export default function LiveTvSettingsSection() {
                 {busyKey === 'add' ? 'Adding…' : 'Add source'}
               </Button>
             </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[var(--loom-muted)]">Sidebar icon</p>
+              <SourceIconPicker value={iconId} onChange={setIconId} disabled={busyKey !== null} />
+            </div>
           </form>
           {error ? (
             <p role="alert" className="mt-3 text-sm text-red-300">{error}</p>
@@ -179,7 +244,7 @@ export default function LiveTvSettingsSection() {
         <CardHeader>
           <CardTitle className="text-white">Your live TV sources</CardTitle>
           <CardDescription className="text-[var(--loom-muted)]">
-            Each source has its own tab in the sidebar.
+            Each source has its own sidebar tab. Select its icon to change it.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -189,14 +254,26 @@ export default function LiveTvSettingsSection() {
             </p>
           ) : (
             <ul className="space-y-3">
-              {sources.map((source) => (
+              {sources.map((source) => {
+                const icons = liveTvSourceIconPair(source.iconId);
+                const SourceIcon = icons.outline;
+                const normalizedIconId = normalizeLiveTvSourceIcon(source.iconId);
+                const isEditingIcon = editingIconSourceId === source.id;
+                return (
                 <li
                   key={source.id}
                   className="flex flex-wrap items-start gap-3 rounded-xl border border-[var(--loom-border)] bg-[var(--loom-surface-2)] p-3"
                 >
-                  <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--loom-surface-3)]">
-                    <Tv className="h-4 w-4 text-[var(--loom-muted)]" aria-hidden="true" />
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setEditingIconSourceId(isEditingIcon ? null : source.id)}
+                    disabled={busyKey !== null}
+                    aria-label={`Choose icon for ${source.name}`}
+                    aria-expanded={isEditingIcon}
+                    className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-transparent bg-[var(--loom-surface-3)] text-[var(--loom-muted)] transition-colors hover:border-[var(--loom-control-border)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--loom-accent)] disabled:opacity-50"
+                  >
+                    <SourceIcon className="h-5 w-5" />
+                  </button>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-white">{source.name}</p>
                     <p className="truncate text-xs text-[var(--loom-faint)]">{source.playlistUrl}</p>
@@ -236,8 +313,19 @@ export default function LiveTvSettingsSection() {
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
+                  {isEditingIcon ? (
+                    <div className="w-full border-t border-[var(--loom-border)] pt-3">
+                      <p className="mb-2 text-xs font-medium text-[var(--loom-muted)]">Choose sidebar icon</p>
+                      <SourceIconPicker
+                        value={normalizedIconId}
+                        onChange={(nextIconId) => void handleIconChange(source, nextIconId)}
+                        disabled={busyKey !== null}
+                      />
+                    </div>
+                  ) : null}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </CardContent>

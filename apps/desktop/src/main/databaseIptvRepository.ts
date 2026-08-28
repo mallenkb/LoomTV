@@ -4,6 +4,7 @@ import { parseDatabaseRow, parseDatabaseRows } from './databaseRows.ts';
 import { iptvSearchTerms } from '../shared/iptvSearch.ts';
 import type { ParsedIptvChannel } from './iptv/m3uPlaylist.ts';
 import type { ParsedIptvProgramme } from './iptv/xmltvGuide.ts';
+import type { IptvSourceIconId } from '../shared/desktopProtocol.ts';
 
 export const MAX_IPTV_SOURCES = 12;
 export const MAX_IPTV_CHANNEL_PAGE = 200;
@@ -11,6 +12,7 @@ export const MAX_IPTV_CHANNEL_PAGE = 200;
 export type IptvSourceRecord = {
   id: string;
   name: string;
+  iconId: IptvSourceIconId;
   playlistUrl: string;
   epgUrl: string;
   sortOrder: number;
@@ -57,6 +59,7 @@ export type IptvChannelQuery = {
 const sourceRowSchema = z.object({
   id: z.string(),
   name: z.string(),
+  icon_id: z.string(),
   playlist_url: z.string(),
   epg_url: z.string(),
   sort_order: z.number().int(),
@@ -94,6 +97,7 @@ function toSourceRecord(row: z.output<typeof sourceRowSchema>): IptvSourceRecord
   return {
     id: row.id,
     name: row.name,
+    iconId: row.icon_id as IptvSourceIconId,
     playlistUrl: row.playlist_url,
     epgUrl: row.epg_url,
     sortOrder: row.sort_order,
@@ -135,15 +139,15 @@ export function findIptvSourceByPlaylistUrl(
 
 export function insertIptvSource(
   database: BetterSqlite3.Database,
-  input: { id: string; name: string; playlistUrl: string; epgUrl: string },
+  input: { id: string; name: string; playlistUrl: string; epgUrl: string; iconId: IptvSourceIconId },
 ): IptvSourceRecord {
   const now = Date.now();
   const nextOrderRow = database.prepare('SELECT COUNT(*) AS total FROM iptv_sources').get();
   const sortOrder = parseDatabaseRow(nextOrderRow, countRowSchema, 'IPTV source count').total;
   database
     .prepare(`
-      INSERT INTO iptv_sources (id, name, playlist_url, epg_url, sort_order, created_at, updated_at)
-      VALUES (@id, @name, @playlistUrl, @epgUrl, @sortOrder, @now, @now)
+      INSERT INTO iptv_sources (id, name, icon_id, playlist_url, epg_url, sort_order, created_at, updated_at)
+      VALUES (@id, @name, @iconId, @playlistUrl, @epgUrl, @sortOrder, @now, @now)
     `)
     .run({ ...input, sortOrder, now });
   const created = getIptvSource(database, input.id);
@@ -154,13 +158,19 @@ export function insertIptvSource(
 export function renameIptvSource(
   database: BetterSqlite3.Database,
   sourceId: string,
-  patch: { name?: string; epgUrl?: string },
+  patch: { name?: string; epgUrl?: string; iconId?: IptvSourceIconId },
 ): IptvSourceRecord | null {
   const existing = getIptvSource(database, sourceId);
   if (!existing) return null;
   database
-    .prepare('UPDATE iptv_sources SET name = ?, epg_url = ?, updated_at = ? WHERE id = ?')
-    .run(patch.name ?? existing.name, patch.epgUrl ?? existing.epgUrl, Date.now(), sourceId);
+    .prepare('UPDATE iptv_sources SET name = ?, epg_url = ?, icon_id = ?, updated_at = ? WHERE id = ?')
+    .run(
+      patch.name ?? existing.name,
+      patch.epgUrl ?? existing.epgUrl,
+      patch.iconId ?? existing.iconId,
+      Date.now(),
+      sourceId,
+    );
   return getIptvSource(database, sourceId);
 }
 

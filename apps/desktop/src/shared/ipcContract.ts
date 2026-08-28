@@ -17,6 +17,7 @@ import type {
   IptvChannelPage,
   IptvChannelRequest,
   IptvSourceInput,
+  IptvSourcePatch,
   IptvSourceSummary,
   MpvAvailability,
   MpvCommand,
@@ -95,7 +96,7 @@ export interface IpcContract {
   'library:scan': { args: [options?: { force?: boolean; mode?: LibraryScanMode }]; result: LibraryIndexPayload };
   'iptv:list-sources': { args: []; result: IptvSourceSummary[] };
   'iptv:add-source': { args: [input: IptvSourceInput]; result: IptvSourceSummary[] };
-  'iptv:update-source': { args: [sourceId: string, patch: { name?: string; epgUrl?: string }]; result: IptvSourceSummary[] };
+  'iptv:update-source': { args: [sourceId: string, patch: IptvSourcePatch]; result: IptvSourceSummary[] };
   'iptv:remove-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:refresh-source': { args: [sourceId: string]; result: IptvSourceSummary[] };
   'iptv:list-channels': { args: [request: IptvChannelRequest]; result: IptvChannelPage };

@@ -5,8 +5,15 @@ import { windowChromeOptions } from './windowChrome';
 import { pathToFileURL } from 'node:url';
 import { isExpectedAppUrl } from './trustedIpcSender';
 
-const MAIN_WINDOW_DEV_SERVER_URL =
-  typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined;
+const MAIN_WINDOW_DEV_SERVER_URL = (() => {
+  if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'string') return undefined;
+  const rendererUrl = new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  // Forge currently injects `localhost` even when Vite is bound explicitly to
+  // IPv4. Normalize the address before Electron loads it so another process
+  // listening on ::1 cannot impersonate the LoomTV renderer.
+  if (rendererUrl.hostname === 'localhost') rendererUrl.hostname = '127.0.0.1';
+  return rendererUrl.toString();
+})();
 const MAIN_WINDOW_NAME =
   typeof MAIN_WINDOW_VITE_NAME === 'string' && MAIN_WINDOW_VITE_NAME ? MAIN_WINDOW_VITE_NAME : 'main_window';
 
@@ -54,6 +61,10 @@ function presentMainWindow(window: BrowserWindow): void {
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
+}
+
+export function getRendererDevServerUrl(): string | undefined {
+  return MAIN_WINDOW_DEV_SERVER_URL;
 }
 
 export function getMainWindowIpcIdentity(): MainWindowIpcIdentity | null {

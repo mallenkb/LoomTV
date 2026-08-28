@@ -25,6 +25,7 @@ import { parseXmltvGuide } from './xmltvGuide.ts';
 import type {
   IptvChannelPage,
   IptvSourceInput,
+  IptvSourcePatch,
   IptvSourceSummary,
 } from '../../shared/desktopProtocol.ts';
 
@@ -94,6 +95,7 @@ function toSummary(record: ReturnType<typeof getIptvSource>): IptvSourceSummary 
   return {
     id: record.id,
     name: record.name,
+    iconId: record.iconId,
     playlistUrl: record.playlistUrl,
     epgUrl: record.epgUrl,
     channelCount: record.channelCount,
@@ -191,7 +193,13 @@ export function createIptvService(deps: IptvServiceDependencies) {
         throw new IptvSourceError('That playlist has already been added.');
       }
       const name = input.name?.trim().slice(0, MAX_SOURCE_NAME_LENGTH) || defaultSourceName(playlistUrl);
-      const created = insertIptvSource(database, { id: randomUUID(), name, playlistUrl, epgUrl });
+      const created = insertIptvSource(database, {
+        id: randomUUID(),
+        name,
+        playlistUrl,
+        epgUrl,
+        iconId: input.iconId || 'general',
+      });
 
       try {
         await refreshSource(created.id);
@@ -203,7 +211,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
       return listSources();
     },
 
-    updateSource(sourceId: string, patch: { name?: string; epgUrl?: string }): IptvSourceSummary[] {
+    updateSource(sourceId: string, patch: IptvSourcePatch): IptvSourceSummary[] {
       const database = deps.getDatabase();
       const epgUrl = patch.epgUrl === undefined
         ? undefined
@@ -213,6 +221,7 @@ export function createIptvService(deps: IptvServiceDependencies) {
       const updated = renameIptvSource(database, sourceId, {
         name: patch.name?.trim().slice(0, MAX_SOURCE_NAME_LENGTH) || undefined,
         epgUrl,
+        iconId: patch.iconId,
       });
       if (!updated) throw new IptvSourceError('That live TV source no longer exists.');
       return listSources();

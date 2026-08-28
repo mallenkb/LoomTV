@@ -260,14 +260,34 @@ const transcodeOptionsSchema = z.object({
   forceTranscode: z.boolean().optional(),
 });
 const iptvSourceIdSchema = nonEmptyString.max(120);
+const iptvSourceIconSchema = z.enum([
+  'general',
+  'entertainment',
+  'news',
+  'sports',
+  'movies',
+  'series',
+  'music',
+  'kids',
+  'documentary',
+  'education',
+  'lifestyle',
+  'travel',
+  'cooking',
+  'science',
+  'religious',
+  'weather',
+]);
 const iptvSourceInputSchema = z.object({
   playlistUrl: nonEmptyString.max(2048),
   epgUrl: z.string().max(2048).optional(),
   name: z.string().max(120).optional(),
+  iconId: iptvSourceIconSchema.optional(),
 });
 const iptvSourcePatchSchema = z.object({
   name: z.string().max(120).optional(),
   epgUrl: z.string().max(2048).optional(),
+  iconId: iptvSourceIconSchema.optional(),
 });
 const iptvChannelRequestSchema = z.object({
   sourceId: iptvSourceIdSchema,

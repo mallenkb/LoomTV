@@ -21,6 +21,8 @@ export const STREMIO_TRUST_STATE_V2_MIGRATION_VERSION = 11;
 export const IPTV_SOURCES_MIGRATION_VERSION = 12;
 /** v13 records provider-declared geo restrictions for IPTV filtering. */
 export const IPTV_GEO_BLOCKED_MIGRATION_VERSION = 13;
+/** v14 stores the Phosphor icon selected for each IPTV sidebar tab. */
+export const IPTV_SOURCE_ICONS_MIGRATION_VERSION = 14;
 
 const DESKTOP_DEVICE_ID = 'desktop-primary';
 
@@ -362,6 +364,7 @@ export function migrateDatabase(database: BetterSqlite3.Database): void {
   migrateLanProfileSelections(database);
   migrateIptvSources(database);
   migrateIptvGeoBlocked(database);
+  migrateIptvSourceIcons(database);
 }
 
 /**
@@ -377,6 +380,7 @@ function migrateIptvSources(database: BetterSqlite3.Database): void {
       CREATE TABLE IF NOT EXISTS iptv_sources (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        icon_id TEXT NOT NULL DEFAULT 'general',
         playlist_url TEXT NOT NULL,
         epg_url TEXT NOT NULL DEFAULT '',
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -427,6 +431,16 @@ function migrateIptvSources(database: BetterSqlite3.Database): void {
     `);
     database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
       .run(IPTV_SOURCES_MIGRATION_VERSION, Date.now());
+  })();
+}
+
+function migrateIptvSourceIcons(database: BetterSqlite3.Database): void {
+  if (database.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(IPTV_SOURCE_ICONS_MIGRATION_VERSION)) return;
+
+  database.transaction(() => {
+    ensureColumn(database, 'iptv_sources', 'icon_id', "TEXT NOT NULL DEFAULT 'general'");
+    database.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)')
+      .run(IPTV_SOURCE_ICONS_MIGRATION_VERSION, Date.now());
   })();
 }
 
