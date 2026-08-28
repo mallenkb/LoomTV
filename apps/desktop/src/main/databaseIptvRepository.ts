@@ -139,9 +139,10 @@ export function findIptvSourceByPlaylistUrl(
 
 export function insertIptvSource(
   database: BetterSqlite3.Database,
-  input: { id: string; name: string; playlistUrl: string; epgUrl: string; iconId: IptvSourceIconId },
+  input: { id: string; name: string; playlistUrl: string; epgUrl: string; iconId?: IptvSourceIconId },
 ): IptvSourceRecord {
   const now = Date.now();
+  const iconId = input.iconId ?? 'general';
   const nextOrderRow = database.prepare('SELECT COUNT(*) AS total FROM iptv_sources').get();
   const sortOrder = parseDatabaseRow(nextOrderRow, countRowSchema, 'IPTV source count').total;
   database
@@ -149,7 +150,7 @@ export function insertIptvSource(
       INSERT INTO iptv_sources (id, name, icon_id, playlist_url, epg_url, sort_order, created_at, updated_at)
       VALUES (@id, @name, @iconId, @playlistUrl, @epgUrl, @sortOrder, @now, @now)
     `)
-    .run({ ...input, sortOrder, now });
+    .run({ ...input, iconId, sortOrder, now });
   const created = getIptvSource(database, input.id);
   if (!created) throw new Error('The IPTV source could not be saved.');
   return created;
