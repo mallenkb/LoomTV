@@ -694,7 +694,7 @@ export default function Sidebar() {
                       isActive && 'loom-modern-sidebar-action-active',
                     )}
                   >
-                    <Icon className="h-6 w-6 text-red-500" />
+                    <Icon className={cn('h-6 w-6', isActive ? 'text-red-500' : 'text-white')} />
                   </Link>
                 );
               })}
@@ -875,7 +875,7 @@ export default function Sidebar() {
                   isActive ? 'text-[var(--loom-active-text)]' : 'text-[var(--loom-muted)] hover:text-[var(--loom-active-text)]',
                 )}
               >
-                <Icon className="h-5 w-5 text-red-500" />
+                <Icon className={cn('h-5 w-5', isActive ? 'text-red-500' : 'text-white')} />
                 <span className="truncate text-sm font-medium">{item.label}</span>
               </Link>
             );
