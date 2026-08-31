@@ -462,6 +462,7 @@ export default function ArtworkEditorControls({
         });
         return;
       }
+      if (!onApplyOfficialArtworkCandidate) return;
       const candidateToApply = metadataApplyTarget === 'all'
         ? {
             ...candidate,
@@ -485,7 +486,7 @@ export default function ArtworkEditorControls({
             ) || candidate.logo,
           }
         : candidate;
-      const refreshedArtwork = await onApplyOfficialArtworkCandidate!(candidateToApply, metadataApplyTarget);
+      const refreshedArtwork = await onApplyOfficialArtworkCandidate(candidateToApply, metadataApplyTarget);
       if (metadataApplyTarget === 'episodes') {
         await onSaved?.();
       } else {
